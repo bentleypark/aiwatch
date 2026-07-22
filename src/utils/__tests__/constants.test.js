@@ -3,7 +3,7 @@
 // because the worker can't import frontend code at runtime.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK, isSpecializedSubTier } from '../constants'
+import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK, isSpecializedSubTier, CAPABILITY_TIER, COMPONENT_CAPABILITY, CAPABILITY_PROVIDERS } from '../constants'
 
 // #646 — the Overview renders one section per SERVICE_CATEGORIES bucket (llm/agents/voice/inference/
 // video/apps, #658). Its render has a defensive "other" catch-all for any service no bucket claims,
@@ -588,5 +588,188 @@ describe('#859 specialized sub-tier same-tier cap (SPA mirror of worker isSpecia
     ]
     const result = getFallbacks(services[0], services)
     expect(result.map(r => r.name)).toEqual(['Claude API', 'OpenRouter'])
+  })
+})
+
+
+describe('#1119 — frontend mirror: a ROUTED outage crosses the category boundary, a non-routed one never does', () => {
+  // Dashboard parity for the worker rule (worker/src/__tests__/fallback.test.ts). The live case:
+  // ChatGPT (app) degraded ONLY on "Image Generation" → the image tier lives in `api`, so the
+  // unconditional category filter emptied the pool and the Analyze modal / ActionBanner showed nothing.
+  const op = (id, category, name, score) => ({ id, category, name, status: 'operational', aiwatchScore: score, incidents: [] })
+  const pool = [
+    op('claudeai', 'app', 'claude.ai', 69),
+    op('stability', 'api', 'Stability AI', 70),
+    op('bfl', 'api', 'Black Forest Labs (FLUX)', 65),
+    op('claude', 'api', 'Claude API', 95),
+    op('gemini', 'api', 'Gemini API', 90),
+    op('cursor', 'agent', 'Cursor', 88),
+  ]
+  // ChatGPT's component names as its status page published them on 2026-07-22 (8 of the 12 ids
+  // services.ts configures were present in the live payload).
+  const CHATGPT_COMPONENTS = ['Conversations', 'Connectors/Apps', 'Search', 'GPTs', 'Image Generation', 'Login', 'Agent', 'Codex in ChatGPT Desktop']
+  const chatgpt = (degradedNames) => ({
+    id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'degraded', aiwatchScore: 57, incidents: [],
+    components: CHATGPT_COMPONENTS.map(name => ({ name, status: degradedNames.includes(name) ? 'degraded' : 'operational' })),
+  })
+
+  it('Image-Generation-only outage reaches the api Image tier, and only that tier', () => {
+    const src = chatgpt(['Image Generation'])
+    const ids = getFallbacks(src, [src, ...pool]).map(f => f.id)
+    expect(ids).toEqual(['stability', 'bfl'])
+    expect(ids).not.toContain('claude')   // higher Score, wrong capability
+    expect(ids).not.toContain('cursor')
+    expect(ids).not.toContain('claudeai')
+  })
+
+  it('the routed pool does NOT admit the capability PROVIDER (no "ChatGPT image is down → try OpenAI API")', () => {
+    const src = chatgpt(['Image Generation'])
+    const withOpenai = [src, ...pool.filter(s => s.id !== 'bfl'), op('openai', 'api', 'OpenAI API', 99)]
+    expect(getFallbacks(src, withOpenai).map(f => f.id)).toEqual(['stability'])
+  })
+
+  it('facet C still widens for a DEDICATED image source (Stability down → FLUX, then OpenAI)', () => {
+    const src = { id: 'stability', category: 'api', name: 'Stability AI', status: 'down', aiwatchScore: 70, incidents: [] }
+    const services = [src, op('bfl', 'api', 'Black Forest Labs (FLUX)', 65), op('openai', 'api', 'OpenAI API', 99)]
+    expect(getFallbacks(src, services).map(f => f.id)).toEqual(['bfl', 'openai'])
+  })
+
+  it('the routed group is labelled by capability (modal + ActionBanner render this)', () => {
+    const src = chatgpt(['Image Generation'])
+    const groups = getGroupedFallbacks([src], [src, ...pool])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].label).toBe('Image generation')
+    expect(groups[0].capability).toBe('image')
+    expect(groups[0].items.map(i => i.id)).toEqual(['stability', 'bfl'])
+    // The group still carries the SOURCE's category — it is only a React key component, never displayed.
+    expect(groups[0].category).toBe('app')
+  })
+
+  it('two sources in DIFFERENT categories routing to the same capability yield ONE group, not two', () => {
+    // openai (api) and chatgpt (app) share a status page and route together on one image incident.
+    // Keying by `category:tierLabel` produced two groups of identical content — rendered twice in the
+    // banner and the modal, and perGroup collapsed 2→1 so FLUX silently disappeared.
+    const cg = chatgpt(['Image Generation'])
+    const oa = {
+      id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 99, incidents: [],
+      components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'degraded' }],
+    }
+    const groups = getGroupedFallbacks([oa, cg], [cg, oa, ...pool])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].label).toBe('Image generation')
+    expect(groups[0].items.map(i => i.id)).toEqual(['stability', 'bfl'])
+  })
+
+  it('a routed anchor and a PLAIN outage of the same tier stay SEPARATE — their pools differ', () => {
+    // This surface is the one that reaches the shape: Overview passes the WHOLE affected board. Merging
+    // them by capability or by specialized tier looks tidier and saves a perGroup slot, but the pools
+    // are not the same — facet C admits `openai` for a plain Stability outage while the routed branch
+    // excludes it — so a merged group would answer the routed anchor with OpenAI, decided by array
+    // order. Both orders asserted so a future "let's merge these" edit fails loudly.
+    const cg = chatgpt(['Image Generation'])
+    const stabilityDown = { id: 'stability', category: 'api', name: 'Stability AI', status: 'down', aiwatchScore: 70, incidents: [] }
+    const services = [cg, stabilityDown, op('bfl', 'api', 'Black Forest Labs (FLUX)', 65), op('openai', 'api', 'OpenAI API', 99), ...pool.filter(s => s.id !== 'stability' && s.id !== 'bfl')]
+    for (const order of [[cg, stabilityDown], [stabilityDown, cg]]) {
+      const groups = getGroupedFallbacks(order, services)
+      expect(groups).toHaveLength(2)
+      expect(groups.find(g => g.capability === 'image').items.map(i => i.id)).toEqual(['bfl'])
+      expect(groups.find(g => g.capability === undefined).items.map(i => i.id)).toEqual(['bfl'])
+    }
+    expect(getFallbacks(stabilityDown, services).map(f => f.id)).toContain('openai')
+    expect(getFallbacks(cg, services).map(f => f.id)).not.toContain('openai')
+  })
+
+  it('an AGENT-category source routes too — documented as intended, not an oversight', () => {
+    // Mirror of the worker test: unreachable today (no agent publishes a non-llm component name), but
+    // the rule permits it and the code comment says so — pin the stated intent.
+    const cursor = {
+      id: 'cursor', category: 'agent', name: 'Cursor', status: 'degraded', aiwatchScore: 88, incidents: [],
+      components: [{ name: 'Cursor IDE', status: 'operational' }, { name: 'Audio', status: 'degraded' }],
+    }
+    const voice = [op('elevenlabs', 'api', 'ElevenLabs', 80), op('deepgram', 'api', 'Deepgram', 75)]
+    expect(getFallbacks(cursor, [cursor, ...voice, ...pool]).map(f => f.id)).toEqual(['elevenlabs', 'deepgram'])
+  })
+
+  it('an EXCLUDE_FALLBACK service is never a candidate, and a routed pool does not fire tierFor\'s warn for one', () => {
+    // Two things in one shape, both tied to the guard ORDERING: the id-only guards must run before any
+    // tier lookup. Six EXCLUDE_FALLBACK members are deliberately absent from API_TIER, so a tier lookup
+    // that sees them turns `tierFor`'s warn-once — the #402/#403 "someone forgot a tier entry"
+    // breadcrumb — into standing false alarms. The membership half is behavioural; the warn half is
+    // log-only, so only a spy can pin it.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const src = chatgpt(['Image Generation'])
+      const untiered = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'twelvelabs']
+        .map((id, i) => op(id, 'api', `Untiered ${id}`, 90 + i))
+      const ids = getFallbacks(src, [src, ...untiered, ...pool]).map(f => f.id)
+      for (const id of untiered) expect(ids).not.toContain(id)
+      expect(warn.mock.calls.filter(c => String(c[0]).includes('no API_TIER'))).toEqual([])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('a PRIMARY-surface outage stays in-category (claude.ai), no api leakage', () => {
+    const src = chatgpt(['Conversations'])
+    expect(getFallbacks(src, [src, ...pool]).map(f => f.id)).toEqual(['claudeai'])
+  })
+
+  it('a non-routed LLM source keeps CROSS-TIER fill (separates "relax when routed" from "relax always")', () => {
+    // API_TIER maps category↔tier ~1:1 today, so a non-routed APP source can't tell the tier pin apart
+    // from the category filter. This case can: mistral is tier 2, its peers are tier 1.
+    const src = { id: 'mistral', category: 'api', name: 'Mistral API', status: 'degraded', aiwatchScore: 76, incidents: [] }
+    expect(getFallbacks(src, [src, ...pool]).map(f => f.id)).toEqual(['claude', 'gemini'])
+  })
+
+  it('a SUPPRESSED route emits nothing', () => {
+    // NB unlike the worker mirror, this file cannot pin WHICH mechanism suppresses: the SPA copy has no
+    // routed-empty warn, so `routed > 0` vs `routed !== null` is behaviourally indistinguishable here.
+    // That spelling is pinned worker-side (its suppress test asserts no warn fires); keep the two
+    // spellings in lockstep by hand.
+    const src = {
+      ...chatgpt([]),
+      components: [{ name: 'Conversations', status: 'operational' }, { name: 'Realtime', status: 'degraded' }],
+    }
+    expect(getFallbacks(src, [src, ...pool])).toEqual([])
+  })
+
+  it('DEFENSE — even with the invariant VIOLATED, the routed branch still pins candidates to one tier', () => {
+    // Mirror of the worker DEFENSE test: the SPA getFallbacks is a full independent copy feeding the
+    // ActionBanner and the Analyze modal, so it needs its own coverage here. This is the only test that
+    // exercises the pin with a CAPABILITY_TIER value outside [4,10] — the shape where `sameTierOnly` is
+    // false and the branch pin is the only thing left. Restore relies on a SYNCHRONOUS body.
+    const src = {
+      id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'degraded', aiwatchScore: 57, incidents: [],
+      components: [{ name: 'Conversations', status: 'operational' }, { name: 'Widget', status: 'degraded' }],
+    }
+    const capCount = COMPONENT_CAPABILITY.length
+    COMPONENT_CAPABILITY.push([/widget/i, 'widget'])
+    CAPABILITY_TIER.widget = API_TIER.cursor // 11 — agent tier, outside the specialized range
+    try {
+      expect(getFallbacks(src, [src, ...pool]).map(f => f.id)).toEqual(['cursor'])
+    } finally {
+      delete CAPABILITY_TIER.widget
+      COMPONENT_CAPABILITY.splice(capCount)
+    }
+  })
+
+  it('INVARIANT — no app/agent service can be a routing destination, by all three legs', () => {
+    for (const [cap, tier] of Object.entries(CAPABILITY_TIER)) {
+      expect(isSpecializedSubTier(tier), `CAPABILITY_TIER.${cap} = ${tier} is outside the specialized sub-tier range`).toBe(true)
+    }
+    const routable = new Set(Object.values(CAPABILITY_TIER))
+    // Leg 2 identifies app/agent services by their sidebar BUCKET, not by `tier === 11 || 21` — the
+    // tier-proxy form can only fail when leg 1 already has, so it could never catch the thing it names.
+    const appAgentIds = [...SERVICE_CATEGORIES.apps.ids, ...SERVICE_CATEGORIES.agents.ids]
+    for (const id of appAgentIds) {
+      expect(routable.has(API_TIER[id]), `${id} is an app/agent service in routable tier ${API_TIER[id]}`).toBe(false)
+    }
+    // Leg 3 by identity too: an id missing from API_TIER yields undefined and would slip a tier check.
+    const appAgentSet = new Set(appAgentIds)
+    for (const [cap, ids] of Object.entries(CAPABILITY_PROVIDERS)) {
+      for (const id of ids) {
+        expect(appAgentSet.has(id), `CAPABILITY_PROVIDERS.${cap} lists app/agent service "${id}"`).toBe(false)
+      }
+    }
   })
 })
