@@ -139,3 +139,59 @@ reads the same durations — so the report's Score/ranking is corrected too, not
 **Request body** (POST, JSON): `action` (`'add' | 'remove'`), `id`, `durationMin` (add only, finite ≥ 0),
 optional `reason`. **Response**: `{ ok, changed, overrides }` on 200. Failure modes mirror suppress
 (401/400/502/503). No isolate cache (the apply sites read fresh).
+
+# Operator Tools — `GET /api/admin/withdrawals` (#1106 Part 5)
+
+**Read-only, unlike its siblings above.** Suppress and duration-override are controls; this is a
+*record*. It answers the one question #1106 left open after Parts 1–4 shipped: **did the ⚪ withdrawal
+path ever actually fire in production, and did every announced thread get closed?**
+
+That question was unanswerable before, and not for want of logging. A withdrawal leaves
+`incidents:withdrawn` (48h), `alerted:wd:{incId}` (7d), `alert:feed:recent` (2h) and Workers Logs
+(~3d) — and the accumulator row is gone by definition, since its prune is what starts the sequence.
+Past a week there was nothing left to read, while the event itself is **unschedulable** (it needs a
+provider to delete an announced incident), so a `verify-after` date would have fired on an absence.
+
+```bash
+# This month
+curl -s "https://<worker>/api/admin/withdrawals" -H "X-Admin-Key: $ADMIN_API_KEY"
+
+# A specific month
+curl -s "https://<worker>/api/admin/withdrawals?month=2026-07" -H "X-Admin-Key: $ADMIN_API_KEY"
+
+# "Did this EVER fire?" — walk back N months (1-24) in one call
+curl -s "https://<worker>/api/admin/withdrawals?months=12" -H "X-Admin-Key: $ADMIN_API_KEY"
+```
+
+**Reading the answer.** Every row is one provider-deleted incident:
+
+| Field | Means |
+|---|---|
+| `announced` | The ⚪ notice was accepted by Discord — the thread was closed. Working as designed |
+| `pending` | Not announced YET, and still inside the tombstone's 48h. Normally a `withdrawalHold` (the provider re-published the id, an incident is still running, or the status source was unreadable) — benign, re-evaluated every 5 min |
+| `neverClosed` | **#1106 recurring.** No operator ⚪ notice went out, and `prunedAt` is older than 48h, so the tombstone it would render from is gone and nothing can send it now. Scoped to the OPERATOR webhook (see below) — subscribers may still have received it |
+| `malformedTimestamp` | An un-announced row whose `prunedAt` is unparseable, so it cannot be aged — counted apart rather than sitting in `pending` forever |
+| `partial` / `ok` | `partial: true` (and `ok: false`) means the counts are computed over LESS than the requested range — some month could not be opened, or some rows failed the shape check. Branch on `ok`; the rows are still returned |
+| `unreadableMonths` | Months whose KV value could not be read at all |
+| `malformedByMonth` | Rows excluded by the shape check, per month — that month's key is the one to repair |
+
+These four buckets partition `count`: `announced + pending + neverClosed + malformedTimestamp === count`.
+
+A `neverClosed > 0` is the signal to investigate — pair it with the cron's own
+`[cron] #1106 withdrawal notice held — <reason>` lines if they are still inside the Workers Logs window.
+
+`announced` means Discord accepted the **operator** ⚪ message: the stamp is written after that send
+and gated on its result, so a rejected send leaves the row un-announced and logs `⚪ withdrawal notice
+FAILED to send to the OPERATOR webhook and will never retry`. That is the only dispatch whose result
+is known at the stamp point — the #486 per-user relay and the `alert:feed` projection fan out after
+the send loop, so a `neverClosed` row can coexist with subscribers who *did* get the notice. The
+error direction is the safe one (it over-reports a failure, loudly), but read the bucket as "no
+operator notice went out", not "nobody was told".
+
+**Failure modes:** 401 `unauthorized` (no/incorrect `X-Admin-Key`), 400 (`month` not `YYYY-MM` with a
+real 01-12 month, or `months` outside 1-24), 503 (`STATUS_CACHE` unavailable), 502 when **every** month
+in the range is unreadable. That 502 is deliberate and is **not transient**: both writers refuse to
+start from `[]` (an empty start would republish the month and erase its history), so a corrupt value
+freezes that month permanently — no further withdrawal is recorded in it until the KV value is
+repaired or deleted by hand. There is no POST: nothing an operator could edit here would be anything
+but a falsified history.
