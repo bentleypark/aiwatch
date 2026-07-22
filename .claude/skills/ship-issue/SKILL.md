@@ -69,22 +69,40 @@ is the *procedure* — follow it top to bottom.
    - New worker logic → extract to an exported fn + unit-test it. New `src/utils/` → Vitest test.
    - **Every bug fix ships a test that would have caught the bug.**
 5. **PR review** — gate #2: `/pr-review-toolkit:review-pr`.
-   - **Track the round, and carry the prior round's finding categories into the next review prompt (#1097).**
-     The review agents are spawned fresh each round and cannot see how many rounds have run or what the
-     last round found — *you* are the only place that count lives, so make it explicit: when you re-spawn
-     a reviewer after a fix, tell it "this is round N; round N-1 flagged {categories}; check whether the
-     fix reseeded any of them." Without this the step-6 stop rule below has nothing to fire on.
+   - **Carry the round number, the RUNNING Critical total, and the prior round's findings into the next
+     review prompt (#1097/#1124).** The review agents are spawned fresh each round and cannot see how many
+     rounds have run or what the last one found — *you* are the only place that history lives, so state it:
+     "this is round N; round N-1 flagged {findings}, which I fixed by {changes}; {C} Criticals so far across
+     all rounds; for each finding, say whether the text it lands on was added by my last round's fix." The
+     `{changes}` slot and that last clause are what step 6's trigger runs on — every round of the loop sits
+     in one cumulative uncommitted diff, so unless you say what the last fix changed the reviewer cannot
+     attribute anything, and on #1110 the causality was volunteered only from round 5 on. The cumulative
+     total is what makes *not converging* visible while each individual round still looks healthy.
 6. **Fix review findings — auto-loop** to 0 Critical/Important (Suggestions-only = converged).
-   - **A NEW finding category each round is the auto-loop working — keep going (#1052/#1049 ran several rounds each, a *different* category per round, and were legitimate). But same-category recurrence is a STOP signal (#1097).** If the same finding
-     *category* recurs for **3 rounds** — each fix reseeding the next round's finding, often a milder
-     version of the same overreach — the defect is structural, not in the sentence. STOP editing the
-     sentence and ask: **(a)** is this claim load-bearing for the point being made? If not, **delete it**
-     — an unneeded enumeration / classification / causal claim is verification debt, not content
-     (deleting a never-needed parser list ended the last-4-of-12 sub-loop in #1091 instantly). **(b)** Am I
-     holding a conclusion fixed and swapping in weaker support each round? Then weaken the *conclusion*
-     to what the evidence carries, not the wording — *milder-each-round is the tell*. This applies to
-     prose review (docs, comments, issue bodies) as much as code; a #1091 rationale rewrite took 12
-     rounds and a `/methodology` copy edit took 8, which this rule is meant to cut short.
+   - **Keep going while each round finds a defect that was already there — never cap the rounds.** Several
+     rounds is normal and legitimate (#1052/#1049), and rounds deep into a loop have caught real defects:
+     on #1110 round 3 found an unescaped apostrophe that broke `/methodology`'s inline i18n script, and
+     round 5's chain surfaced #1123.
+   - **STOP when the previous round's fix INTRODUCED this round's finding, twice in a row (#1124).** This
+     trigger is causal, not a label — it needs no self-classification. It replaces the old "same finding *category* 3 rounds
+     running" trigger, which was self-assigned and therefore evadable: on #1110 rounds were labelled by
+     surface topic ("apostrophe", "hollow guard", "roster omission"), so "new category → keep going"
+     read as healthy for 8 rounds and 17 Criticals.
+   - **When it fires, change the CLASS of fix — do not take another pass at the sentence.** Ask:
+     **(a)** is this claim load-bearing for the point being made? If not, **delete it** — an unneeded
+     enumeration / classification / causal claim is verification debt, not content. **(b)** Am I holding a
+     conclusion fixed and swapping in weaker support each round? Then weaken the *conclusion* to what the
+     evidence carries, not the wording — *milder-each-round is the tell*.
+   - **Delete the CONSTRUCT, not the sentence.** Copy that restates code branch logic — service
+     enumerations, render conditions, per-source parser matrices — is unbounded verification debt: no test
+     pins it and it drifts with every parser change (memory `feedback_no_prose_mirror_of_code_branches`).
+     When a finding lands on such a construct twice, remove the construct. "Delete it" was satisfied
+     cosmetically three times on #1110 by dropping individual clauses while the enumeration that kept
+     generating them stayed; deleting a never-needed parser list ended the last-4-of-12 sub-loop on #1091
+     instantly.
+   - **Prose: from round 4 of the loop onward, a fix to the FLAGGED TEXT may only REMOVE text (#1124)** — a purely mechanical
+     correction (escaping, a typo, a renamed identifier) is not an addition. A qualifier added to be "more
+     precise" is itself a new unverified claim. Applies to docs, comments and issue bodies as much as to UI copy.
 7. **Docs update** — update whatever the change affects: CLAUDE.md (architecture/service count/layout —
    keep it **lean, ~40k-char guideline** — check `python3 -c "print(len(open('CLAUDE.md').read()))"`,
    move detail to `docs/reference/` if near), the relevant **`docs/reference/`** file (see the
