@@ -13,8 +13,15 @@ const CACHED_URL = cachedUrlFor(API_URL)
 
 // ── Mock data fallback (used when Worker is unavailable) ──
 
-const REF = new Date('2026-03-19T10:00:00Z')
+// Exported for `mock-fixture-consistency.test.js`, which needs to know the two clocks apart.
+export const REF = new Date('2026-03-19T10:00:00Z')
 const ago = (ms) => new Date(REF - ms).toISOString()
+// The fixture runs on TWO clocks. `ago` is anchored to the frozen REF, which keeps the bulk of it
+// deterministic; `agoNow` is anchored to the run. The MOCK_AI_ANALYSIS timestamps are on the live
+// clock, and the app's analysis surfaces compare the two fixtures directly — so an incident named by
+// an analysis must use `agoNow` as well, or the card renders a duration in the thousands of hours
+// that grows by a day per day. `mock-fixture-consistency.test.js` pins it.
+const agoNow = (ms) => new Date(Date.now() - ms).toISOString()
 const M = 60_000
 const H = 3_600_000
 const D = 86_400_000
@@ -79,11 +86,12 @@ export const MOCK_SERVICES = [
         ],
       },
       {
-        id: 'oi-2', title: 'Increased Latency on Chat Endpoint', startedAt: ago(4 * H), duration: null, status: 'monitoring',
+        // analysed — live clock (see `agoNow`)
+        id: 'oi-2', title: 'Increased Latency on Chat Endpoint', startedAt: agoNow(4 * H), duration: null, status: 'monitoring',
         timeline: [
-          { stage: 'investigating', text: 'P99 레이턴시가 정상 수준의 2배 이상으로 증가했습니다.', at: ago(4 * H) },
-          { stage: 'identified',    text: '추론 서버 과부하로 원인이 파악되었습니다.', at: ago(3 * H) },
-          { stage: 'monitoring',    text: '부분적인 완화 조치를 적용했습니다.', at: ago(2 * H) },
+          { stage: 'investigating', text: 'P99 레이턴시가 정상 수준의 2배 이상으로 증가했습니다.', at: agoNow(4 * H) },
+          { stage: 'identified',    text: '추론 서버 과부하로 원인이 파악되었습니다.', at: agoNow(3 * H) },
+          { stage: 'monitoring',    text: '부분적인 완화 조치를 적용했습니다.', at: agoNow(2 * H) },
         ],
       },
       {
@@ -188,6 +196,13 @@ export const MOCK_SERVICES = [
     history30d: hist([19]),
     history3m: [{ month: '2026-01', uptime: 99.85 }, { month: '2026-02', uptime: 99.78 }, { month: '2026-03', uptime: 99.72 }],
     incidents: [
+      // The resolved incident behind the recovered card — `MOCK_AI_ANALYSIS.together` grades it and
+      // `MOCK_RECENTLY_RECOVERED` marks it. Live clock (see `agoNow`).
+      { id: 'together-mock-1', title: 'Kimi K2.5 Inference Outage', startedAt: agoNow(100 * M), duration: '1h 30m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'Kimi K2.5 추론 엔드포인트가 응답하지 않습니다.', at: agoNow(100 * M) },
+          { stage: 'resolved', text: '모델 서버 재배치 후 정상화.', at: agoNow(10 * M) },
+        ] },
       { id: 'tg-1', title: 'API Gateway Errors', startedAt: ago(1 * D + 8 * H), duration: '42m', status: 'resolved',
         timeline: [
           { stage: 'investigating', text: 'API 게이트웨이에서 502 오류가 다수 발생 중입니다.', at: ago(1 * D + 8 * H) },
@@ -370,14 +385,15 @@ export const MOCK_SERVICES = [
     history30d: hist([0]),
     history3m: [{ month: '2026-01', uptime: 99.90 }, { month: '2026-02', uptime: 99.85 }, { month: '2026-03', uptime: 99.80 }],
     incidents: [
-      { id: 'el-1', title: 'TTS API Latency Spike', startedAt: ago(2 * H), status: 'investigating',
+      // analysed — live clock (see `agoNow`)
+      { id: 'el-1', title: 'TTS API Latency Spike', startedAt: agoNow(2 * H), status: 'investigating',
         timeline: [
-          { stage: 'investigating', text: 'TTS API 응답 시간이 평소보다 3배 이상 증가하고 있습니다.', at: ago(2 * H) },
-          { stage: 'identified', text: 'GPU 클러스터 과부하로 원인 파악.', at: ago(1 * H) },
+          { stage: 'investigating', text: 'TTS API 응답 시간이 평소보다 3배 이상 증가하고 있습니다.', at: agoNow(2 * H) },
+          { stage: 'identified', text: 'GPU 클러스터 과부하로 원인 파악.', at: agoNow(1 * H) },
         ] },
-      { id: 'el-2', title: 'Voice Cloning Service Errors', startedAt: ago(1 * H + 30 * M), status: 'investigating',
+      { id: 'el-2', title: 'Voice Cloning Service Errors', startedAt: agoNow(1 * H + 30 * M), status: 'investigating',
         timeline: [
-          { stage: 'investigating', text: '보이스 클로닝 요청 시 500 에러가 발생하고 있습니다.', at: ago(1 * H + 30 * M) },
+          { stage: 'investigating', text: '보이스 클로닝 요청 시 500 에러가 발생하고 있습니다.', at: agoNow(1 * H + 30 * M) },
         ] },
       { id: 'el-3', title: 'Voice Cloning Failures', startedAt: ago(3 * D + 9 * H), duration: '48m', status: 'resolved',
         timeline: [
@@ -642,17 +658,24 @@ export const MOCK_SERVICES = [
   },
 ]
 
-// Mock AI analysis — must reference an incidentId matching an unresolved incident in MOCK_SERVICES
-// API returns Record<svcId, AIAnalysisResult[]> — each service may have multiple analyses
-const MOCK_AI_ANALYSIS = {
+// Mock AI analysis. API returns Record<svcId, AIAnalysisResult[]> — each service may have multiple
+// analyses. Every `incidentId` must name an incident that service actually carries in MOCK_SERVICES;
+// an entry with `resolvedAt` must name a FINISHED one (`resolved` or `monitoring`). Timestamps here
+// are on the LIVE clock, so every incident named below is written with `agoNow`.
+// Enforced by `src/hooks/__tests__/mock-fixture-consistency.test.js`.
+export const MOCK_AI_ANALYSIS = {
   openai: [{ summary: 'Chat endpoint latency elevated due to increased traffic.', estimatedRecovery: '~1h', affectedScope: ['Chat API'], needsFallback: true, analyzedAt: new Date().toISOString(), incidentId: 'oi-2' }],
   elevenlabs: [
     { summary: 'TTS API response times are 3x higher than normal due to GPU cluster overload. The team has identified the bottleneck and is scaling resources.', estimatedRecovery: '30m–1h', affectedScope: ['TTS API', 'Real-time synthesis'], needsFallback: true, analyzedAt: new Date().toISOString(), incidentId: 'el-1' },
     { summary: 'Voice cloning endpoint returning 500 errors. Likely related to the GPU cluster overload affecting TTS, but impacting a separate service pipeline.', estimatedRecovery: '1–2h', affectedScope: ['Voice Cloning API', 'Custom voice creation'], needsFallback: false, analyzedAt: new Date(Date.now() - 15 * 60000).toISOString(), incidentId: 'el-2' },
   ],
-  together: [{ summary: 'Moonshot Kimi K2.5 model experienced a brief outage affecting inference endpoints. Service has been restored.', estimatedRecovery: 'Resolved', affectedScope: ['Kimi K2.5 inference', 'Model endpoints'], needsFallback: false, analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(), incidentId: 'together-mock-1', resolvedAt: new Date(Date.now() - 10 * 60000).toISOString() }],
+  // The one RESOLVED analysis — what makes the recovered card and its "predicted vs actual" line
+  // reachable locally. Grades to 'accurate' today (90m actual, 2h baseline); `accuracyVerdict`
+  // returns 'over' below 0.5× the baseline and 'under' above 1×, so moving either offset can flip
+  // the demo state.
+  together: [{ summary: 'Moonshot Kimi K2.5 model experienced a brief outage affecting inference endpoints. Service has been restored.', estimatedRecovery: '1–2h', affectedScope: ['Kimi K2.5 inference', 'Model endpoints'], needsFallback: false, analyzedAt: agoNow(30 * M), incidentId: 'together-mock-1', estimatedRecoveryHours: 2, firstEstimatedRecoveryHours: 2, resolvedAt: agoNow(10 * M) }],
 }
-const MOCK_RECENTLY_RECOVERED = { together: ['together-mock-1'] }
+export const MOCK_RECENTLY_RECOVERED = { together: ['together-mock-1'] }
 
 // ── Merge live Worker data with mock fallback ──
 // Worker provides: id, name, provider, category, status, latency, incidents
