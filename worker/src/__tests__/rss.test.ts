@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildRssFeed, buildFeedWithMeta, weakFeedEtag, isFeedNotModified, feedHttpResponse, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, isActiveItemHeld, type RssAiAnalysisMap } from '../rss'
+import { buildRssFeed, buildFeedWithMeta, weakFeedEtag, isFeedNotModified, feedHttpResponse, reportArchiveResponse, ARCHIVE_MAX_AGE_S, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, isActiveItemHeld, type RssAiAnalysisMap } from '../rss'
 import { getFallbacks } from '../fallback'
 import type { ServiceStatus, Incident } from '../types'
 
@@ -1210,5 +1210,55 @@ describe('feedHttpResponse (#860)', () => {
     const res = feedHttpResponse({ xml: '<rss></rss>', lastModified: null }, null)
     expect(res.headers.get('Last-Modified')).toBeNull()
     expect(res.headers.get('ETag')).toBe(weakFeedEtag('<rss></rss>'))
+  })
+})
+
+// #908 — the /api/report monthly-archive conditional-GET response. A rebuilt past-month
+// archive (post #904 suppression / #1019 override) must un-expose promptly: the SHORT
+// max-age caps the stale window (the old 24h let a browser serve the pre-rebuild body
+// stale) and the weak ETag makes the unchanged common case a cheap 304.
+describe('reportArchiveResponse (#908)', () => {
+  const BODY = '{"month":"2026-06","incidents":[]}'
+  const CORS = { 'Access-Control-Allow-Origin': '*' }
+
+  it('200 with ETag + short max-age + passes through CORS/Content-Type when no INM sent', async () => {
+    const res = reportArchiveResponse(BODY, null, CORS)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('ETag')).toBe(weakFeedEtag(BODY))
+    expect(res.headers.get('Cache-Control')).toBe(`public, max-age=${ARCHIVE_MAX_AGE_S}`)
+    expect(res.headers.get('Content-Type')).toContain('application/json')
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    expect(await res.text()).toBe(BODY)
+  })
+
+  it('caps the window well under the old 24h max-age (regression guard)', () => {
+    expect(ARCHIVE_MAX_AGE_S).toBeLessThanOrEqual(300)
+    expect(ARCHIVE_MAX_AGE_S).toBeLessThan(86400)
+    // Floor: max-age=0 would disable the "cheap 304 common case" the docstring promises
+    // (every request revalidates) — the guard must pin the value as faithful to the 5-min intent.
+    expect(ARCHIVE_MAX_AGE_S).toBeGreaterThan(0)
+    // Pin the exact "5 min" the docstring + docs advertise, so a silent retune (e.g. to 250) can't
+    // pass while the prose still says 5 min — a value change must be an intentional test edit.
+    expect(ARCHIVE_MAX_AGE_S).toBe(300)
+  })
+
+  it('304 (empty body) when If-None-Match matches, with the ETag + CORS + Cache-Control re-sent', async () => {
+    const etag = weakFeedEtag(BODY)
+    const res = reportArchiveResponse(BODY, etag, CORS)
+    expect(res.status).toBe(304)
+    expect(res.headers.get('ETag')).toBe(etag) // validator on the 304 too → next revalidation
+    // A cross-origin browser revalidation whose 304 lacks Access-Control-Allow-Origin is blocked
+    // by the browser — it can neither read the 304 nor learn the archive changed, defeating #908.
+    // So CORS + Cache-Control must survive onto the 304, not just the 200.
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    expect(res.headers.get('Cache-Control')).toBe(`public, max-age=${ARCHIVE_MAX_AGE_S}`)
+    expect(await res.text()).toBe('')
+  })
+
+  it('200 (full body) when the archive was rebuilt — a stale INM no longer matches', async () => {
+    const staleEtag = weakFeedEtag('{"month":"2026-06","incidents":[{"id":"suppressed"}]}')
+    const res = reportArchiveResponse(BODY, staleEtag, CORS)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe(BODY)
   })
 })

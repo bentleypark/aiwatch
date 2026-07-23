@@ -83,6 +83,12 @@ raw accumulator live — no rebuild needed there.)
 - **Effect latency**: the live `/api/status` reflects a new suppression within ≤60s (isolate cache); the
   cached `/api/status/cached` and OG/SEO readers reflect it only after the next `services:latest` write
   (≤~5 min, next cron cycle). Don't re-issue the command expecting instant effect on cached surfaces.
+- **Rebuilt-archive browser cache (#908)**: after `rebuild-archive`, the dashboard's archived-incident
+  view (`/api/report`) served a client's PRE-rebuild copy stale for up to 24h (the old `max-age=86400`).
+  Now the archive emits a weak ETag + `max-age=300`, so a client that had cached the month revalidates
+  and re-fetches within ~5 min of the rebuild. It does NOT retroactively refresh a browser that cached
+  the response under the OLD 24h `max-age` (pre-#908 entries clear on their own expiry / a hard reload);
+  the fix bounds the window for FUTURE rebuilds. Live `/api/status` is real-time and unaffected either way.
 - **Status pill vs list (general mechanism)**: suppression removes the incident from the LIST + Score but
   does NOT change the service's `status`. For FedRAMP this is fine (the `openai` badge is already scoped by
   #741 → operational). But suppressing an incident that DROVE a `degraded`/`down` status would leave the
