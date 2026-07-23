@@ -1,4 +1,10 @@
-// #1089 — a durable, per-service tally of Instatus status-source read failures.
+// #1089 — a durable, per-service tally of status-source read failures.
+//
+// #1123 — no longer Instatus-only: the OnlineOrNot path books here too. The KV key is still literally
+// `instatus-parse-fail:` (renaming it would strand 30 days of in-flight counters for no diagnostic
+// gain), so the name is now HISTORICAL — read it as "source parse failures". `SourceParseFailure`
+// below is the full persisted vocabulary; `docs/reference/kv-schema.md` carries the operator-facing
+// copy of the same list.
 //
 // WHY THIS EXISTS SEPARATELY FROM `fetch-fail:daily:*`.
 //
@@ -28,10 +34,22 @@
 // so a future correction has to touch both — not one, despite what an earlier draft of this comment
 // claimed.)
 // Reason is kept alongside the count because it selects the fix: `scrape-unreadable` points at URL
-// drift (a config change), while the payload reasons point at Instatus changing its SSR shape (a
+// drift (a config change), while the payload reasons point at the provider changing its SSR shape (a
 // parser change).
 
 import { kvPut, type KVLike } from './utils'
+import type { InstatusParseFailure } from './parsers/instatus'
+import type { OnlineOrNotParseFailure } from './parsers/onlineornot'
+
+/**
+ * #1123 — the persisted reason vocabulary, joined in ONE place: the module that writes it. Typing
+ * `recordParseFailure` with this (rather than a bare `string`) keeps the set of buckets that can
+ * appear in KV enumerable and greppable, and forces a third source added later to join the union
+ * instead of silently inventing a bucket nobody can interpret. Member names are unique ACROSS the
+ * two unions on purpose, so an operator aggregating one reason over several services is never
+ * summing two different parsers' failures — they take different fixes.
+ */
+export type SourceParseFailure = InstatusParseFailure | OnlineOrNotParseFailure
 
 /** 30d — long enough that a weekly check sees the whole window, unlike `fetch-fail:daily`'s 48h. */
 export const PARSE_FAIL_TTL_S = 30 * 86400
@@ -139,9 +157,11 @@ export function totalFor(day: ParseFailDay, svcId: string): number {
  * fetch. Near-exact, not exact, and the error runs BOTH ways.
  *
  * UNDER-counts: the read-modify-write can lose a bump, and `fetchAllServices` runs services in
- * concurrent batches, so two Instatus services that ever land in the same batch race on this one key.
- * Today they do not (mistral/perplexity/fal sit in different batches) but that is incidental, not
- * guaranteed — reordering `SERVICES` could change it.
+ * concurrent batches, so two writers that land in the same batch race on this one key. As of #1123
+ * they DO: with `BATCH_SIZE = 10`, perplexity (index 11) and openrouter (index 15) both sit in batch
+ * 1 — mistral is in batch 0 and fal in batch 2. This was the "incidental, not guaranteed" case the
+ * earlier version of this note warned about, and adding a second source made it real. It costs a lost
+ * bump on a counter that is explicitly an order of magnitude, so it is accepted, not fixed.
  *
  * OVER-counts: the slot dedup depends on READING the write made seconds earlier in the same slot, and
  * KV is eventually consistent with a ~60s per-colo read cache (`KVLike.get` exposes no `cacheTtl`).
@@ -155,7 +175,7 @@ export async function recordParseFailure(
   kv: KVLike | undefined,
   now: number,
   svcId: string,
-  reason: string,
+  reason: SourceParseFailure,
 ): Promise<void> {
   if (!kv) return
   try {
