@@ -267,7 +267,8 @@ to connect each candidate to its rationale, then output BOTH:
 
   **Every do-next line must be executable on reading.** Before you write one, resolve its inputs —
   open the issue and list which boxes are actually unticked; look in `discovery/` before claiming a
-  draft is missing; grep the code before calling a checkbox done. Then:
+  draft is missing; grep the code before calling a checkbox done; **and check for an in-flight PR on
+  that slice (the open-PR rule below)**. Then:
   - If an input is **missing**, the line is not that action — it is the missing input. Rank *that*.
   - If inputs are present, **show them** (the five leads, the three unticked boxes) rather than naming
     the work abstractly. "Sync the bodies" is an instruction; the eight adjudicated boxes are a plan.
@@ -276,6 +277,15 @@ to connect each candidate to its rationale, then output BOTH:
     and rank on the deadline instead. (Do NOT emit a bare `cost: unknown` field: that fragment is a field of
     the retracted template, and it appears in the worked example in "Write for the operator, not
     for the graph", above the procedure, as evidence of failure.)
+  - **Check open PRs, not just merged code.** A grep of the *main-branch* file cannot see work that is
+    written but not yet merged — it lives on a branch. When a slice's work looks undone,
+    `gh pr list --state open` (grep its branch/title for the issue number) **before** ranking "do the
+    work": an open PR means the do-next is *land the PR*, a smaller, different action. This is the
+    review-time face of the start-of-work rule `feedback_check_existing_pr` (#406) — a main-branch read
+    misses in-flight PRs in both directions (start-of-work risks *duplicating* one; here it risks
+    mis-ranking finished work as *undone*). (2026-07-23: a brief ranked "add `?utm_source=reddit` to
+    the playbook" first after that grep on main came back empty — PR #1135 had already made exactly
+    that edit and was open for review.)
   A brief that says "choose" or "sync" without its inputs has moved the work from the page to the
   reader, which is precisely the reconstruction cost this skill exists to remove.
 - **Per-initiative detail** — for each: what shipped since the last review (`delivered::`, with the
