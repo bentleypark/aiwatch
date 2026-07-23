@@ -42,7 +42,29 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
 2. **Fill the hand-authored sections** — everything the generator leaves as a placeholder/AUTO-DRAFT:
    - **Summary** (EN bullets: Most reliable / Riskiest / High incident count / Watch out) **AND the KO
      `<details>` mirror** — keep both in lockstep.
-   - **Recommendations** table (per use-case).
+   - **Recommendations** table (per use-case). **Category coverage is data-driven per month
+     (aiwatch-reports#62)** — do NOT ship the frozen 5-row template blindly:
+     - **Always-present buyer-intent rows** (any category can win): Production-critical, Low latency /
+       cost, General purpose.
+     - **One specialized row per SPECIALIZED bucket that has ≥1 *ranked* service THIS month.** Take the
+       bucket SET — which specialized buckets exist this month — straight from THIS report's
+       `Services monitored: N — …` category-breakdown header (aiwatch-reports#98), using every bucket
+       EXCEPT the generic `LLM APIs` (feeds the buyer-intent rows) and `AI apps` (consumer end-user apps,
+       not a build-on pick). Do NOT hardcode a bucket list here — the header is the source, so the row set
+       tracks the fleet as buckets change. The header label (e.g. `voice & transcription`, `inference &
+       infra`) identifies WHICH bucket earns a row; keep the row's reader-facing Use-Case cell in the
+       established polished form (`Voice / audio`, `Inference`, `Vector / embeddings`), NOT the raw header
+       string.
+     - **"Ranked" = appears in this month's Score Rankings table** (it passed the full-month-coverage gate
+       — aiwatch#802 / aiwatch-reports#45); a mid-month-added or otherwise unranked service does **not**
+       qualify. The Rankings table has no category column, so map a ranked service to its bucket via the
+       **same service→category grouping the breakdown header is generated from** (the `group` taxonomy,
+       aiwatch#1068 / aiwatch-reports#98) — read it at authoring time; never copy a service roster into
+       this skill.
+     - **A specialized bucket with no ranked service this month is OMITTED** (or explicitly marked
+       "insufficient data this month") — **never fake a pick** from an unranked / partial-coverage service.
+     - **Roll forward only.** Apply the expanded set from the first month it ships onward; do not retrofit
+       a single past month — that creates month-to-month divergence in the immutable archive.
    - **Key Insight** — opening sentence + **3 patterns**, EN, **AND** the KO mirror.
    - **Notable Incidents** — top incidents, each with `**Affected**` + `**Duration**`.
    - **Observations**.
