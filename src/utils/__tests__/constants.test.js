@@ -348,6 +348,27 @@ describe('#1062 facet B — frontend capability routing on a secondary-component
     expect(groups.map(g => g.label).sort()).toEqual(['Image generation', 'LLM'])
     expect(groups.every(g => g.items.length === 1)).toBe(true)
   })
+
+  it('#1129 — a tagged + untagged routed Voice anchor split into two groups, order-independent', () => {
+    // Frontend mirror of worker fallback.test.ts #1129: the group key encodes the anchor's own
+    // SERVICE_CAPABILITY tag, so a TAGGED ElevenLabs (tts) anchor and an UNTAGGED OpenAI-'Audio' anchor
+    // render two honest groups instead of one whose contents array order decided — the tagged anchor can
+    // no longer be answered with AssemblyAI (stt). Overview passes the WHOLE affected board, so this
+    // co-anchoring is reachable with no shared incident.
+    const oa = { id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 99, incidents: [], components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }] }
+    const el = { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'degraded', aiwatchScore: 80, incidents: [], components: [{ name: 'Text to Speech', status: 'degraded' }, { name: 'ElevenCreative', status: 'operational' }] }
+    const services = [oa, el, op2('assemblyai', 'AssemblyAI', 80), op2('deepgram', 'Deepgram', 75)]
+    for (const order of [[oa, el], [el, oa]]) {
+      const groups = getGroupedFallbacks(order, services)
+      expect(groups).toHaveLength(2)
+      // Keyed by label (order-independent): the untagged OpenAI group keeps the general 'Audio / speech'
+      // label, the tagged ElevenLabs group is labelled by its sub-tag 'Text to speech' (#1129) so the two
+      // split groups don't render as duplicate labels — and ElevenLabs is answered only with Deepgram.
+      const byLabel = Object.fromEntries(groups.map(g => [g.label, g.items.map(i => i.id)]))
+      expect(byLabel['Audio / speech']).toEqual(['assemblyai'])
+      expect(byLabel['Text to speech']).toEqual(['deepgram'])
+    }
+  })
 })
 
 describe('#1062 facet C — frontend: a dedicated capability service also recommends the multimodal provider', () => {

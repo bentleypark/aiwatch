@@ -287,6 +287,20 @@ export const CAPABILITY_LABEL = {
   audio: 'Audio / speech',
 }
 
+// #1129 — MIRROR of worker CAPABILITY_TAG_LABEL. A finer label for a ROUTED audio group, keyed by the
+// anchor's SERVICE_CAPABILITY sub-tag. The routed label is otherwise the capability ('Audio / speech'),
+// identical for a TTS and an STT anchor — but #1129 splits those into two pools, so two concurrent Voice
+// outages would render two same-labelled groups. Naming the sub-tag ('Text to speech') removes that
+// duplication and self-describes which half is down. Audio-only, applied ONLY when the routed cap is
+// 'audio'. Synced worker↔frontend (api-tier-sync.test.ts); is-down doesn't group, so it has no copy.
+// Scope: only a SINGLE-sub-capability anchor is distinguished — two GENERAL-audio anchors (untagged
+// openai, or both-tagged deepgram) still share 'Audio / speech' when concurrent, by design (general
+// audio has no finer name), a rarer pairing than the tts-vs-general case this fixes.
+export const CAPABILITY_TAG_LABEL = {
+  tts: 'Text to speech',
+  stt: 'Speech to text',
+}
+
 // #1062 facet C — MIRROR of worker CAPABILITY_PROVIDERS. Multimodal LLM services that also provide a
 // specialized capability via a MONITORED component, so a dedicated capability service's outage (Stability
 // image / Runway video / ElevenLabs voice) also recommends them. Only OpenAI qualifies (Images/Sora/Audio
@@ -475,22 +489,21 @@ export function getGroupedFallbacks(affected, allServices) {
   const resolved = []
   for (const svc of affected) {
     if (EXCLUDE_FALLBACK.includes(svc.id)) continue
-    // #1119 — MIRROR of worker groupKeyOf (see there for the full rule + its known limitation): the
-    // key groups anchors that draw from the same pool, on the category and self-exclusion axes but NOT
-    // on the anchor's own SERVICE_CAPABILITY tag (a pre-existing tier-4 merge, tracked in #1129).
-    // A ROUTED anchor's pool depends on its routed tier, so routed anchors at one tier share a key
-    // across categories (`openai` + `chatgpt` route together off one status page and otherwise produce
-    // two identical groups, collapsing perGroup 2→1). A routed and a NON-routed anchor at the same tier
-    // stay separate on purpose: their pools differ (facet C admits openai for a plain Stability outage,
-    // the routed branch does not), so merging them would answer one anchor with the other's candidates,
-    // decided by array order. This surface reaches that shape — Overview passes the WHOLE affected
-    // board, not one incident's surfaces.
+    // #1119 — MIRROR of worker groupKeyOf (see there for the full rule): the key groups anchors that
+    // draw from the same pool. A ROUTED anchor's pool depends on its routed tier AND on its own
+    // SERVICE_CAPABILITY tag (#1129, facet A), so the key encodes both: routed anchors at one tier share
+    // a key across categories (`openai` + `chatgpt` route together off one status page and otherwise
+    // produce two identical groups, collapsing perGroup 2→1) ONLY when their tags also match. A routed
+    // and a NON-routed anchor at the same tier stay separate on purpose: their pools differ (facet C
+    // admits openai for a plain Stability outage, the routed branch does not), so merging them would
+    // answer one anchor with the other's candidates, decided by array order. This surface reaches that
+    // shape — Overview passes the WHOLE affected board, not one incident's surfaces.
     // `tierLabelFor` is called only on the non-routed branch, matching the worker's early return — it
     // warns once per unlabelled tier, and a one-sided warn is the kind of drift #402/#403 guards against.
     const routed = routingTier(svc)
     const isRouted = routed !== null && routed > 0
     const tierLabel = isRouted ? null : tierLabelFor(effectiveTierFor(svc))
-    const groupKey = isRouted ? `routed:${routed}` : (tierLabel ? `${svc.category}:${tierLabel}` : svc.category)
+    const groupKey = isRouted ? `routed:${routed}:${(SERVICE_CAPABILITY[svc.id] ?? []).join('|')}` : (tierLabel ? `${svc.category}:${tierLabel}` : svc.category)
     if (seenGroups.has(groupKey)) continue
     // #554 — selection parity with the worker: keep only the live-clean guard (getFallbacks
     // already enforces it; nonOperationalIds is a defensive backstop). No same-provider exclusion.
@@ -500,7 +513,13 @@ export function getGroupedFallbacks(affected, allServices) {
     // #1062 facet B — a routed group is labelled by the affected CAPABILITY ("Image generation") so the
     // recommendation self-describes WHY it switched; a non-routed group keeps its tier/category label.
     const cap = routedCapability(svc)
-    const label = cap ? CAPABILITY_LABEL[cap] : (tierLabel || CATEGORY_LABEL[svc.category] || svc.category)
+    // #1129 — a routed AUDIO group is labelled by the anchor's single SERVICE_CAPABILITY sub-tag
+    // ('Text to speech' / 'Speech to text') instead of the shared 'Audio / speech', so two split Voice
+    // groups don't render as duplicate labels. Untagged / both-tagged anchors fall through to the
+    // capability label. Guarded on cap === 'audio' — see CAPABILITY_TAG_LABEL. MIRROR of the worker.
+    const tags = SERVICE_CAPABILITY[svc.id] ?? []
+    const subLabel = cap === 'audio' && tags.length === 1 ? CAPABILITY_TAG_LABEL[tags[0]] : undefined
+    const label = cap ? (subLabel ?? CAPABILITY_LABEL[cap]) : (tierLabel || CATEGORY_LABEL[svc.category] || svc.category)
     resolved.push({ category: svc.category, label, capability: cap || undefined, candidates })
   }
   const perGroup = resolved.length === 1 ? 2 : 1
