@@ -28,6 +28,10 @@ export type OnlineOrNotPageResult =
   | { ok: true; incidents: Incident[]; uptime30d: number }
   | { ok: false; reason: OnlineOrNotParseFailure }
 
+export type OnlineOrNotHistoryResult =
+  | { ok: true; incidents: Incident[] }
+  | { ok: false; reason: OnlineOrNotParseFailure }
+
 /** `extractData` can only fail on the envelope, never on the three content reasons. */
 type ExtractFailure = Extract<OnlineOrNotParseFailure, 'no-payload' | 'payload-truncated' | 'onot-bad-json'>
 type ExtractResult = { ok: true; data: unknown[] } | { ok: false; reason: ExtractFailure }
@@ -365,7 +369,7 @@ const rank = (i: Incident['impact']) => (i && i in SEVERITY ? SEVERITY[i as keyo
  *   - resolution (`status`/`resolvedAt`/`duration`/`timeline`): the RESOLVED copy wins, because a
  *     stale bucket snapshot claiming an incident is still open is what produces a missed recovery.
  */
-function mergeCopies(a: Incident, b: Incident): Incident {
+export function mergeCopies(a: Incident, b: Incident): Incident {
   const severe = rank(b.impact) > rank(a.impact) ? b : a
   // The resolved copy wins; if BOTH resolved, the earlier `resolvedAt` — recovery happens once, and
   // the earliest stamp is the true recovery time (emission order is the payload's, not ours).
@@ -379,6 +383,31 @@ function mergeCopies(a: Incident, b: Incident): Incident {
     duration: resolved.duration,
     timeline: resolved.timeline,
   }
+}
+
+/** Merge supplemental /incidents pages into the home-page list without changing the existing
+ * null-impact policy. A root-map-only copy contributes display history, while the home payload's
+ * component copy retains its measurable impact when both copies are present (#1134).
+ *
+ * The `HISTORY_WINDOW_DAYS` cutoff is applied to the SUPPLEMENTAL rows only — the home payload's own
+ * incidents (`primary`) are never filtered, since the source already bounds them. The window matches
+ * the widest display consumer of `svc.incidents` (the Incidents page's 90-day period filter); beyond
+ * it nothing surfaces these rows, so a wider window would only add inert payload weight. */
+export function mergeOnlineOrNotIncidents(
+  primary: Incident[],
+  supplemental: Incident[],
+  nowMs: number = Date.now(),
+): Incident[] {
+  const byId = new Map(primary.map((incident) => [incident.id, incident]))
+  const cutoff = new Date(nowMs - HISTORY_WINDOW_DAYS * 86_400_000).toISOString()
+  for (const incident of supplemental) {
+    if (incident.startedAt < cutoff) continue
+    const existing = byId.get(incident.id)
+    byId.set(incident.id, existing ? mergeCopies(existing, incident) : incident)
+  }
+  return [...byId.values()]
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .slice(0, DISPLAY_LIMIT)
 }
 
 /**
@@ -422,6 +451,9 @@ function computeUptime(incidents: Incident[], nowMs: number): number {
 
 /** Incidents returned for DISPLAY. Uptime is computed before this cap is applied. */
 const DISPLAY_LIMIT = 25
+/** Supplemental /incidents rows older than this are dropped — matches the widest display consumer
+ * of `svc.incidents` (the Incidents page's 90-day period filter). See {@link mergeOnlineOrNotIncidents}. */
+const HISTORY_WINDOW_DAYS = 90
 
 /**
  * Read an OnlineOrNot status page: its incidents AND its computed uptime, from ONE parse of the
@@ -478,4 +510,15 @@ export function parseOnlineOrNotPage(
     incidents: incidents.slice(0, DISPLAY_LIMIT),
     uptime30d: computeUptime(incidents, nowMs),
   }
+}
+
+/** Parse the paginated /incidents route. Unlike the home payload, this route is supplemental: its
+ * root incident records have no impact field, so it deliberately does not require the home-page
+ * containers or compute uptime from this list. */
+export function parseOnlineOrNotIncidentHistory(html: string): OnlineOrNotHistoryResult {
+  const extracted = extractData(html)
+  if (!extracted.ok) return extracted
+  const collected = collectIncidents(extracted.data)
+  if (collected.unreadableRows > 0) return { ok: false, reason: 'incidents-unreadable' }
+  return { ok: true, incidents: collected.incidents }
 }

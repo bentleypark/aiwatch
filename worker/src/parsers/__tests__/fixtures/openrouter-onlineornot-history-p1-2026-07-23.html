@@ -1,0 +1,126 @@
+<!DOCTYPE html><html lang="en" class=""><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="preload" as="image" href="/assets/powered-by-logo-COJk90XZ.png"/><link rel="stylesheet" href="/assets/tailwind-COuEO1YV.css" data-precedence="high"/><title>OpenRouter Status</title><meta description="OpenRouter Incident History"/><meta canonical="https://status.openrouter.ai"/><meta property="twitter:card" content="summary"/><meta property="og:title" content="OpenRouter Status"/><meta property="og:description" content="OpenRouter Incident History"/><meta property="og:url" content="https://status.openrouter.ai"/><meta property="og:type" content="website"/><meta property="og:image" content="https://dashboard.onlineornot.com/assets/og-default.png"/><meta property="og:image:height" content="1200"/><meta property="og:image:width" content="1200"/><meta property="og:site_name" content="OpenRouter"/><link rel="icon" href="https://img.onlineornot.com/sp-assets/untrusted/bLYZeyaq-27a9dda74495d562a119c2cc14225558179fb316f110eaedd1eebc6a7fc148bc.ico"/><link rel="alternate" type="application/rss+xml" title="OpenRouter - Incidents" href="https://status.openrouter.ai/incidents.rss"/><meta name="robots" content="noindex"/><meta name="color-scheme" content="dark light"/><link rel="preconnect" href="https://img.onlineornot.com"/><link rel="dns-prefetch" href="https://metadata.onlineornot.com"/><link rel="modulepreload" href="/assets/entry.client-CJwPBFWd.js"/><link rel="modulepreload" href="/assets/chunk-JZWAC4HX-C3e5cPcA.js"/><link rel="modulepreload" href="/assets/index-CEdt86jM.js"/><link rel="modulepreload" href="/assets/root-BOWdcJmo.js"/><link rel="modulepreload" href="/assets/Button-D9DkK8n4.js"/><link rel="modulepreload" href="/assets/incidents._index-CrugJIGI.js"/><link rel="modulepreload" href="/assets/IncidentCard-DnoTskVu.js"/><link rel="modulepreload" href="/assets/titleCase-DB8NYSPG.js"/><script>
+(() => {
+  const theme = window.matchMedia("(prefers-color-scheme: light)").matches
+    ? 'light'
+    : 'dark';
+  
+  const cl = document.documentElement.classList;
+  const dataAttr = document.documentElement.dataset.theme;
+
+  if (dataAttr != null) {
+    const themeAlreadyApplied = dataAttr === 'light' || dataAttr === 'dark';
+    if (!themeAlreadyApplied) {
+      document.documentElement.dataset.theme = theme;
+    }
+  } else {
+    const themeAlreadyApplied = cl.contains('light') || cl.contains('dark');
+    if (!themeAlreadyApplied) {
+      cl.add(theme);
+    }
+  }
+  
+  const meta = document.querySelector('meta[name=color-scheme]');
+  if (meta) {
+    if (theme === 'dark') {
+      meta.content = 'dark light';
+    } else if (theme === 'light') {
+      meta.content = 'light dark';
+    }
+  }
+})();
+</script><link rel="stylesheet" href="/assets/tippy-BHH8rdGj.css"/><link rel="stylesheet" href="/assets/DateTooltip-CvF1zI2Q.css"/></head><body class="h-full bg-white dark:bg-zinc-900"><div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"><div class="max-w-3xl mx-auto"><header class="flex justify-between items-center py-2 sm:py-6 md:justify-start md:space-x-10"><div class="container w-full mx-auto md:flex md:justify-between md:items-center"><div class="w-full py-3 md:p-0 grid grid-cols-12 gap-4"><div class="col-span-6 sm:col-span-4"><a class="hover:underline hover:text-gray-600 dark:hover:text-zinc-400 flex w-full h-full text-2xl leading-9 tracking-tight font-bold text-gray-900 dark:text-white" href="/" data-discover="true"><span class="dark:hidden">OpenRouter</span><span class="hidden dark:inline">OpenRouter</span></a></div><div class="col-span-6 sm:col-span-8 flex items-center justify-end gap-3"><button class="text-xs sm:text-normal relative isolate inline-flex items-baseline justify-center gap-x-2 rounded-lg border text-base/6 font-semibold px-[calc(--spacing(3.5)-1px)] py-[calc(--spacing(2.5)-1px)] sm:px-[calc(--spacing(3)-1px)] sm:py-[calc(--spacing(1.5)-1px)] sm:text-sm/6 focus:not-data-focus:outline-hidden data-focus:outline-2 data-focus:outline-offset-2 data-focus:outline-blue-500 data-disabled:opacity-50 *:data-[slot=icon]:-mx-0.5 *:data-[slot=icon]:my-0.5 *:data-[slot=icon]:size-5 *:data-[slot=icon]:shrink-0 *:data-[slot=icon]:self-center *:data-[slot=icon]:text-(--btn-icon) sm:*:data-[slot=icon]:my-1 sm:*:data-[slot=icon]:size-4 forced-colors:[--btn-icon:ButtonText] forced-colors:data-hover:[--btn-icon:ButtonText] border-zinc-950/10 text-zinc-950 data-active:bg-zinc-950/2.5 data-hover:bg-zinc-950/2.5 dark:border-white/15 dark:text-white dark:[--btn-bg:transparent] dark:data-active:bg-white/5 dark:data-hover:bg-white/5 [--btn-icon:var(--color-zinc-500)] data-active:[--btn-icon:var(--color-zinc-700)] data-hover:[--btn-icon:var(--color-zinc-700)] dark:data-active:[--btn-icon:var(--color-zinc-400)] dark:data-hover:[--btn-icon:var(--color-zinc-400)] cursor-default" type="button" data-headlessui-state=""><span class="absolute top-1/2 left-1/2 size-[max(100%,2.75rem)] -translate-x-1/2 -translate-y-1/2 pointer-fine:hidden" aria-hidden="true"></span>Subscribe to updates</button></div></div></div></header><div class="max-w-3xl mx-auto"><div class="flex flex-row justify-between items-center"><a class="h-8 w-8 p-1 relative flex justify-center items-center rounded-md text-sm font-semibold text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-zinc-600 hover:bg-gray-50 dark:hover:bg-zinc-800 focus-visible:outline-offset-0" href="/incidents?page=2" data-discover="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-slot="icon" class="h-6 w-6"><path fill-rule="evenodd" d="M7.72 12.53a.75.75 0 0 1 0-1.06l7.5-7.5a.75.75 0 1 1 1.06 1.06L9.31 12l6.97 6.97a.75.75 0 1 1-1.06 1.06l-7.5-7.5Z" clip-rule="evenodd"></path></svg><div class="sr-only">previous page</div></a><div class="flex flex-col justify-center items-center"><a href="#past-incidents" id="past-incidents" class="text-2xl text-gray-900 dark:text-white"><h1>Past Incidents</h1></a><div class="mt-2"><span class="text-lg font-semibold text-gray-900 dark:text-white">May 2026<!-- --> to<!-- --> <!-- -->July 2026</span></div></div><div class="cursor-not-allowed bg-gray-200 dark:bg-zinc-700 h-8 w-8 p-1 relative ml-3 inline-flex items-center rounded-md text-sm font-semibold text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-zinc-600 focus-visible:outline-offset-0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-slot="icon" class="h-6 w-6"><path fill-rule="evenodd" d="M16.28 11.47a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 0 1 1.06-1.06l7.5 7.5Z" clip-rule="evenodd"></path></svg><div class="sr-only">next page</div></div></div><div><div class="flow-root"><ul><li class="mt-4"><div class="divide-y divide-gray-200 "><h3 class="text-lg font-semibold text-gray-800 dark:text-white">July 2026</h3><div class="pt-4 prose prose-indigo dark:prose-invert max-w-full"><div class="mb-4 last:mb-0"><div class="flex items-start justify-between gap-3"><a href="/incidents/0DVmalJZ9ozn" data-discover="true">Scheduled Database Maintenance</a><span class="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">Completed</span></div><div class="mt-2 wrap-break-word text-gray-700 dark:text-gray-300 prose prose-sm dark:prose-invert max-w-none"><p>Scheduled maintenance has been completed.</p>
+</div><p class="mt-2 text-sm text-gray-500 dark:text-gray-400 m-0"><span class="cursor-help underline decoration-gray-300 dark:decoration-zinc-700 decoration-2 underline-offset-4 decoration-dashed ">06:30 AM on July 5, 2026</span></p></div></div></div></li></ul></div></div><div class="mt-4 -mb-8 flex flex-row justify-between items-center"><a class="h-8 w-8 p-1 relative flex justify-center items-center rounded-md text-sm font-semibold text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-zinc-600 hover:bg-gray-50 dark:hover:bg-zinc-800 focus-visible:outline-offset-0" href="/incidents?page=2" data-discover="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-slot="icon" class="h-6 w-6"><path fill-rule="evenodd" d="M7.72 12.53a.75.75 0 0 1 0-1.06l7.5-7.5a.75.75 0 1 1 1.06 1.06L9.31 12l6.97 6.97a.75.75 0 1 1-1.06 1.06l-7.5-7.5Z" clip-rule="evenodd"></path></svg><div class="sr-only">previous page</div></a><div class="flex flex-col justify-center items-center"><div class="mt-2"><span class="text-lg font-semibold text-gray-900 dark:text-white">May 2026<!-- --> to<!-- --> <!-- -->July 2026</span></div></div><div class="cursor-not-allowed bg-gray-200 dark:bg-zinc-700 h-8 w-8 p-1 relative ml-3 inline-flex items-center rounded-md text-sm font-semibold text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-zinc-600 focus-visible:outline-offset-0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-slot="icon" class="h-6 w-6"><path fill-rule="evenodd" d="M16.28 11.47a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 0 1 1.06-1.06l7.5 7.5Z" clip-rule="evenodd"></path></svg><div class="sr-only">next page</div></div></div></div><footer class="" aria-labelledby="footer-heading"><div id="footer-heading" class="sr-only">Footer</div><div class="mt-12 mb-12 pt-4 border-t border-gray-300 dark:border-zinc-700 flex flex-row justify-between"><a class="flex-1 text-sm underline text-gray-500 dark:text-zinc-400 hover:text-gray-600 dark:hover:text-zinc-300" href="/" data-discover="true">←<!-- --> See current status</a><div class="flex-1 flex justify-center"><button class="dark:hidden"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-slot="icon" class="w-6 h-6 fill-indigo-500"><path d="M12 2.25a.75.75 0 0 1 .75.75v2.25a.75.75 0 0 1-1.5 0V3a.75.75 0 0 1 .75-.75ZM7.5 12a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM18.894 6.166a.75.75 0 0 0-1.06-1.06l-1.591 1.59a.75.75 0 1 0 1.06 1.061l1.591-1.59ZM21.75 12a.75.75 0 0 1-.75.75h-2.25a.75.75 0 0 1 0-1.5H21a.75.75 0 0 1 .75.75ZM17.834 18.894a.75.75 0 0 0 1.06-1.06l-1.59-1.591a.75.75 0 1 0-1.061 1.06l1.59 1.591ZM12 18a.75.75 0 0 1 .75.75V21a.75.75 0 0 1-1.5 0v-2.25A.75.75 0 0 1 12 18ZM7.758 17.303a.75.75 0 0 0-1.061-1.06l-1.591 1.59a.75.75 0 0 0 1.06 1.061l1.591-1.59ZM6 12a.75.75 0 0 1-.75.75H3a.75.75 0 0 1 0-1.5h2.25A.75.75 0 0 1 6 12ZM6.697 7.757a.75.75 0 0 0 1.06-1.06l-1.59-1.591a.75.75 0 0 0-1.061 1.06l1.59 1.591Z"></path></svg></button><button class="hidden dark:inline"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-slot="icon" class="w-6 h-6 fill-indigo-500"><path fill-rule="evenodd" d="M9.528 1.718a.75.75 0 0 1 .162.819A8.97 8.97 0 0 0 9 6a9 9 0 0 0 9 9 8.97 8.97 0 0 0 3.463-.69.75.75 0 0 1 .981.98 10.503 10.503 0 0 1-9.694 6.46c-5.799 0-10.5-4.7-10.5-10.5 0-4.368 2.667-8.112 6.46-9.694a.75.75 0 0 1 .818.162Z" clip-rule="evenodd"></path></svg></button></div><div class="flex-1 flex justify-end"><p class="flex sm:hidden flex-col items-end justify-center gap-1 text-sm text-gray-500 dark:text-zinc-400">Powered by<a class="sm:ml-2 underline hover:text-gray-600 dark:hover:text-zinc-300 flex justify-center items-center gap-1" href="https://onlineornot.com/status-pages?utm_campaign=openrouter&amp;utm_medium=powered-by&amp;utm_source=onlineornot-status" target="_blank" rel="noopener noreferrer nofollow"><img src="/assets/powered-by-logo-COJk90XZ.png" alt="Powered by OnlineOrNot" class="w-4 h-4"/>OnlineOrNot</a></p><div class="hidden sm:w-full sm:flex sm:items-center sm:justify-end text-sm text-gray-500 dark:text-zinc-400">Powered by <a class="sm:ml-2 underline hover:text-gray-600 dark:hover:text-zinc-300 flex justify-center items-center gap-1" href="https://onlineornot.com/status-pages?utm_campaign=openrouter&amp;utm_medium=powered-by&amp;utm_source=onlineornot-status" target="_blank" rel="noopener noreferrer nofollow"><img src="/assets/powered-by-logo-COJk90XZ.png" alt="Powered by OnlineOrNot" class="w-4 h-4"/>OnlineOrNot</a></div></div></div></footer></div></div><span hidden="" style="position:fixed;top:1px;left:1px;width:1px;height:0;padding:0;margin:-1px;overflow:hidden;clip:rect(0, 0, 0, 0);white-space:nowrap;border-width:0;display:none"></span><script>window.__reactRouterContext = {"basename":"/","future":{"unstable_optimizeDeps":false,"unstable_subResourceIntegrity":false,"unstable_trailingSlashAwareDataRequests":false,"v8_middleware":false,"v8_splitRouteModules":false,"v8_viteEnvironmentApi":true},"routeDiscovery":{"mode":"lazy","manifestPath":"/__manifest"},"ssr":true,"isSpaMode":false};window.__reactRouterContext.stream = new ReadableStream({start(controller){window.__reactRouterContext.streamController = controller;}}).pipeThrough(new TextEncoderStream());</script><script type="module" async="">;
+import * as route0 from "/assets/root-BOWdcJmo.js";
+import * as route1 from "/assets/incidents._index-CrugJIGI.js";
+  window.__reactRouterManifest = {
+  "entry": {
+    "module": "/assets/entry.client-CJwPBFWd.js",
+    "imports": [
+      "/assets/chunk-JZWAC4HX-C3e5cPcA.js",
+      "/assets/index-CEdt86jM.js"
+    ],
+    "css": []
+  },
+  "routes": {
+    "root": {
+      "id": "root",
+      "path": "",
+      "hasAction": false,
+      "hasLoader": true,
+      "hasClientAction": false,
+      "hasClientLoader": false,
+      "hasClientMiddleware": false,
+      "hasErrorBoundary": true,
+      "module": "/assets/root-BOWdcJmo.js",
+      "imports": [
+        "/assets/chunk-JZWAC4HX-C3e5cPcA.js",
+        "/assets/index-CEdt86jM.js",
+        "/assets/Button-D9DkK8n4.js"
+      ],
+      "css": []
+    },
+    "routes/incidents._index": {
+      "id": "routes/incidents._index",
+      "parentId": "root",
+      "path": "incidents",
+      "index": true,
+      "hasAction": false,
+      "hasLoader": true,
+      "hasClientAction": false,
+      "hasClientLoader": false,
+      "hasClientMiddleware": false,
+      "hasErrorBoundary": false,
+      "module": "/assets/incidents._index-CrugJIGI.js",
+      "imports": [
+        "/assets/chunk-JZWAC4HX-C3e5cPcA.js",
+        "/assets/IncidentCard-DnoTskVu.js",
+        "/assets/titleCase-DB8NYSPG.js",
+        "/assets/index-CEdt86jM.js"
+      ],
+      "css": []
+    },
+    "routes/_index": {
+      "id": "routes/_index",
+      "parentId": "root",
+      "index": true,
+      "hasAction": false,
+      "hasLoader": true,
+      "hasClientAction": false,
+      "hasClientLoader": false,
+      "hasClientMiddleware": false,
+      "hasErrorBoundary": false,
+      "module": "/assets/_index-88OUMsUt.js",
+      "imports": [
+        "/assets/chunk-JZWAC4HX-C3e5cPcA.js",
+        "/assets/IncidentTimeline-06LWCExs.js",
+        "/assets/IncidentCard-DnoTskVu.js",
+        "/assets/Button-D9DkK8n4.js",
+        "/assets/titleCase-DB8NYSPG.js",
+        "/assets/index-CEdt86jM.js"
+      ],
+      "css": [
+        "/assets/_index-B1yMdkV2.css"
+      ]
+    }
+  },
+  "url": "/assets/manifest-3b314b14.js",
+  "version": "3b314b14"
+};
+  window.__reactRouterRouteModules = {"root":route0,"routes/incidents._index":route1};
+
+import("/assets/entry.client-CJwPBFWd.js");</script><script>((storageKey2, restoreKey) => {
+    if (!window.history.state || !window.history.state.key) {
+      let key = Math.random().toString(32).slice(2);
+      window.history.replaceState({ key }, "");
+    }
+    try {
+      let positions = JSON.parse(sessionStorage.getItem(storageKey2) || "{}");
+      let storedY = positions[restoreKey || window.history.state.key];
+      if (typeof storedY === "number") {
+        window.scrollTo(0, storedY);
+      }
+    } catch (error2) {
+      console.error(error2);
+      sessionStorage.removeItem(storageKey2);
+    }
+  })("react-router-scroll-positions", null)</script><script defer="" data-domain="dashboard.onlineornot.com" data-api="https://metadata.onlineornot.com/test/evt" src="https://metadata.onlineornot.com/js/index.js"></script><!--$--><script>window.__reactRouterContext.streamController.enqueue("[{\"_1\":2,\"_111\":-5,\"_69\":-5},\"loaderData\",{\"_3\":4,\"_84\":85},\"root\",{\"_5\":6,\"_7\":8,\"_69\":70,\"_71\":72,\"_73\":19,\"_74\":75,\"_76\":-5,\"_77\":78},\"success\",true,\"result\",{\"_9\":10,\"_31\":32},\"statusPage\",{\"_11\":12,\"_13\":14,\"_15\":16,\"_17\":-5,\"_18\":19,\"_20\":21,\"_22\":19,\"_23\":24,\"_25\":-5,\"_26\":-5,\"_27\":28,\"_29\":6,\"_30\":6},\"id\",\"bLYZeyaq\",\"name\",\"OpenRouter\",\"subdomain\",\"openrouter\",\"description\",\"hideFromSearchEngines\",false,\"customDomain\",\"status.openrouter.ai\",\"password\",\"faviconUrl\",\"https://img.onlineornot.com/sp-assets/untrusted/bLYZeyaq-27a9dda74495d562a119c2cc14225558179fb316f110eaedd1eebc6a7fc148bc.ico\",\"logoUrl\",\"darkLogoUrl\",\"createdAt\",\"2024-06-28T04:22:31.623Z\",\"customDomainEntitled\",\"privateStatusPageEntitled\",\"components\",[33,40,43,47,50,54,57,60,63,66],{\"_11\":34,\"_13\":35,\"_36\":37,\"_38\":39},\"mE7zymQB93NM\",\"Homepage (us east)\",\"status\",\"OPERATIONAL\",\"groupId\",\"lA-mX738Y2WR\",{\"_11\":41,\"_13\":42,\"_36\":37,\"_38\":-5},\"oRWryVpo1B24\",\"Chat (/api/v1/chat/completions)\",{\"_11\":44,\"_13\":45,\"_36\":37,\"_38\":46},\"mKBx18Le1QAP\",\"Clerk Auth Backend API\",\"4wZj9EomJvYL\",{\"_11\":48,\"_13\":49,\"_36\":37,\"_38\":39},\"4mwR9W2xya5G\",\"Homepage (us west)\",{\"_11\":51,\"_13\":52,\"_36\":37,\"_38\":53},\"j3NVyxQg1Bxv\",\"Models (/api/v1/models)\",\"Dgjx8Kn84bPk\",{\"_11\":55,\"_13\":56,\"_36\":37,\"_38\":46},\"4mwRyWkwya5G\",\"Clerk Auth Frontend API\",{\"_11\":58,\"_13\":59,\"_36\":37,\"_38\":39},\"RENA9j2L1DM4\",\"Homepage (europe)\",{\"_11\":61,\"_13\":62,\"_36\":37,\"_38\":53},\"QVG5ypo5JbnZ\",\"Generation (/api/v1/generation)\",{\"_11\":64,\"_13\":65,\"_36\":37,\"_38\":46},\"8mk4Jq6ByQqn\",\"Clerk Auth Webhooks\",{\"_11\":67,\"_13\":68,\"_36\":37,\"_38\":39},\"oL7r1O2z9AgZ\",\"Homepage (japan)\",\"errors\",[],\"messages\",[],\"loggedIn\",\"tz\",\"UTC\",\"theme\",\"honeypotInputProps\",{\"_79\":80,\"_81\":-5,\"_82\":83},\"nameFieldName\",\"name__confirm_pe1Z69hT_JA4Zal3M8AnNm8NHqp7aI32IJyywAiX9dc\",\"validFromFieldName\",\"encryptedValidFrom\",\"kaSWk6l0My4vr5uIMX_tzhpXDbr2hwQV1dBrVvyKuNS_ub6hIhyT5D7bfkYCqWeZieHDNEqzwjZE\",\"routes/incidents._index\",{\"_5\":6,\"_7\":86,\"_69\":109,\"_71\":110,\"_74\":75},{\"_87\":88,\"_106\":107,\"_108\":89},\"incidents\",{\"_89\":90},\"2026-07-01T00:00:00.000Z\",[91],{\"_11\":92,\"_93\":94,\"_95\":96,\"_97\":98,\"_99\":100},\"0DVmalJZ9ozn\",\"title\",\"Scheduled Database Maintenance\",\"started\",\"2026-07-05T06:00:39.333Z\",\"ended\",\"2026-07-05T06:30:32.830Z\",\"updates\",[101],{\"_36\":102,\"_17\":103,\"_27\":98,\"_104\":98,\"_105\":98},\"COMPLETED\",\"\u003cp\u003eScheduled maintenance has been completed.\u003c/p\u003e\\n\",\"updatedAt\",\"dateHappened\",\"startDate\",\"2026-05-01T00:00:00.000Z\",\"endDate\",[],[],\"actionData\"]\n");</script><!--$--><script>window.__reactRouterContext.streamController.close();</script><!--/$--><!--/$--><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1f9f9f4c8ddfa65',t:'MTc4NDgwMjI3Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body></html>

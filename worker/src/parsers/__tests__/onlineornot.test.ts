@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { parseOnlineOrNotPage } from '../onlineornot'
+import type { Incident } from '../../types'
+import { mergeOnlineOrNotIncidents, parseOnlineOrNotIncidentHistory, parseOnlineOrNotPage } from '../onlineornot'
 
 type Inc = { id: string; title: string; started: string; ended: string | null; impact: string }
 
@@ -178,6 +179,112 @@ describe('parseOnlineOrNotPage — incidents', () => {
     expect(incidents).toHaveLength(25)
     expect(incidents[0].id).toBe('i29')                       // newest kept
     expect(incidents.some(i => i.id === 'i0')).toBe(false)    // oldest dropped
+  })
+})
+
+describe('parseOnlineOrNotIncidentHistory (#1134)', () => {
+  it('parses the same SSR envelope without requiring home-page containers', () => {
+    const result = parseOnlineOrNotIncidentHistory(makeHtml([
+      { id: 'history-1', title: 'Older outage', started: '2026-06-01T00:00:00.000Z', ended: '2026-06-01T01:00:00.000Z', impact: 'MAJOR_OUTAGE' },
+    ], { containers: false }))
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.incidents[0].id).toBe('history-1')
+  })
+
+  it('rejects an unreadable supplemental page instead of treating it as an empty history', () => {
+    expect(parseOnlineOrNotIncidentHistory('<html>redesigned</html>')).toEqual({ ok: false, reason: 'no-payload' })
+  })
+
+  it('keeps a measurable home copy when the history copy has null impact', () => {
+    const incident = (id: string, impact: Incident['impact']): Incident => ({
+      id, title: id, status: 'resolved', impact,
+      startedAt: '2026-06-01T00:00:00.000Z', resolvedAt: '2026-06-01T01:00:00.000Z',
+      duration: '1h', timeline: [],
+    })
+    const merged = mergeOnlineOrNotIncidents(
+      [incident('shared', 'major')],
+      [incident('shared', null), incident('history-only', null)],
+    )
+    expect(merged.find((i) => i.id === 'shared')?.impact).toBe('major')
+    expect(merged.some((i) => i.id === 'history-only')).toBe(true)
+  })
+
+  it('applies the 90-day cutoff to supplemental rows only (home payload is never filtered)', () => {
+    const makeIncident = (id: string, startedAt: string, impact: Incident['impact'] = null): Incident => ({
+      id, title: id, status: 'resolved', impact,
+      startedAt, resolvedAt: startedAt, duration: '1m', timeline: [],
+    })
+    const merged = mergeOnlineOrNotIncidents(
+      // A home-payload incident far older than the cutoff — must survive (source already bounds it).
+      [makeIncident('home-old', '2026-01-01T00:00:00.000Z', 'major')],
+      [makeIncident('inside', '2026-04-24T00:00:00.000Z'), makeIncident('old', '2026-04-23T23:59:59.000Z')],
+      Date.parse('2026-07-23T00:00:00.000Z'),
+    )
+    expect(merged.map((i) => i.id).sort()).toEqual(['home-old', 'inside'])
+  })
+
+  it('caps the MERGED home+supplemental set at DISPLAY_LIMIT, keeping the newest', () => {
+    const now = Date.parse('2026-07-23T00:00:00.000Z')
+    const at = (daysAgo: number) => new Date(now - daysAgo * 86_400_000).toISOString()
+    const row = (id: string, daysAgo: number, impact: Incident['impact']): Incident => ({
+      id, title: id, status: 'resolved', impact, startedAt: at(daysAgo), resolvedAt: at(daysAgo), duration: '1m', timeline: [],
+    })
+    // 20 home rows (1–20 days old, newest) + 20 in-window supplemental rows (31–50 days old). `sK` ages
+    // 30+K days, so s1 (31d) is the newest supplemental. After the desc sort + slice(25) the 20 home rows
+    // plus the 5 NEWEST supplemental (s1..s5, 31–35d) survive; the 15 oldest drop.
+    const home = Array.from({ length: 20 }, (_, n) => row(`h${n + 1}`, n + 1, 'major'))
+    // Insert supplemental OLDEST-first (s20@50d … s1@31d) so Map-insertion order deliberately DIFFERS
+    // from the date-sorted order — this is what makes the test bite if `.sort()` were removed or the
+    // cap ran before the sort (either would keep s20..s16, the oldest, not s1..s5).
+    const supplemental = Array.from({ length: 20 }, (_, n) => row(`s${20 - n}`, 50 - n, null))
+    const merged = mergeOnlineOrNotIncidents(home, supplemental, now)
+    expect(merged).toHaveLength(25)
+    expect(home.every((h) => merged.some((m) => m.id === h.id))).toBe(true) // no home row dropped
+    expect(merged.some((m) => m.id === 's5')).toBe(true)   // 35d — inside the surviving 5 newest supplemental
+    expect(merged.some((m) => m.id === 's6')).toBe(false)  // 36d — first supplemental dropped by the cap
+    expect(merged.some((m) => m.id === 's20')).toBe(false) // 50d — oldest; a removed/late sort would wrongly keep it
+  })
+
+  // Real captures of status.openrouter.ai/incidents?page=1..2, taken 2026-07-23. This is the route
+  // the fix newly reads; the fixtures pin that its parse recovers exactly the non-component incidents
+  // #1134 identified as missing from the home payload (Clerk login, Bedrock upstream).
+  const historyFixture = (name: string) =>
+    readFileSync(resolve(__dirname, 'fixtures', name), 'utf8')
+
+  const realHistory = (): Incident[] => {
+    const rows: Incident[] = []
+    for (const page of ['openrouter-onlineornot-history-p1-2026-07-23.html', 'openrouter-onlineornot-history-p2-2026-07-23.html']) {
+      const r = parseOnlineOrNotIncidentHistory(historyFixture(page))
+      expect(r.ok).toBe(true)
+      if (r.ok) rows.push(...r.incidents)
+    }
+    return rows
+  }
+
+  it('parses the real /incidents route and recovers the non-component history #1134 named', () => {
+    const rows = realHistory()
+    // The /incidents route carries no impact field — every row is severity-less (the #1134 policy
+    // reason these stay excluded from uptime/Score/MTTR).
+    expect(rows.every((i) => i.impact === null)).toBe(true)
+    const byId = new Map(rows.map((i) => [i.id, i]))
+    expect(byId.get('lrkj1G0wmMoe')?.title).toBe('Degraded website login') // Clerk auth (non-component)
+    expect(byId.get('opJAdRNJ-dlR')?.title).toBe('Amazon Bedrock Outage')  // upstream (non-component)
+  })
+
+  it('merges the real history that falls inside the 90-day window into a clean home payload', () => {
+    const history = realHistory()
+    // Anchor "now" to just after the newest real row (2026-04-14) so the window is exercised on real
+    // data rather than voided by wall-clock drift: the two named non-component incidents (2026-02-19)
+    // sit ~55 days back, inside the 90-day window, and must be recovered into the empty home payload.
+    const nowMs = Date.parse('2026-04-15T00:00:00.000Z')
+    const merged = mergeOnlineOrNotIncidents([], history, nowMs)
+    expect(merged.some((i) => i.id === 'lrkj1G0wmMoe')).toBe(true)
+    expect(merged.some((i) => i.id === 'opJAdRNJ-dlR')).toBe(true)
+    // Prove the cutoff bites: anchored at 2026-06-01 the window opens at 2026-03-03, so the
+    // 2026-02-19 non-component rows fall out while the 2026-04-14 row stays.
+    const tight = mergeOnlineOrNotIncidents([], history, Date.parse('2026-06-01T00:00:00.000Z'))
+    expect(tight.some((i) => i.id === 'lrkj1G0wmMoe')).toBe(false)
+    expect(tight.some((i) => i.id === 'QV1jJxwp-Le8')).toBe(true)
   })
 })
 
