@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { filterIncidents, canIdBypass, fetchService, SERVICES } from '../services'
+import { filterIncidents, canIdBypass, incidentTagsOwnBadge, fetchService, SERVICES } from '../services'
 import { attachIncidentIoComponentIds } from '../parsers/incident-io'
 import { buildIncidentAlerts } from '../alerts'
 import type { Incident, ServiceConfig } from '../types'
@@ -123,6 +123,115 @@ describe('filterIncidents — id-keyed exclude-bypass (#1032)', () => {
     expect(cfg('elevenlabs').statusComponentIds).toBeUndefined()
     const webpage = apiIncident('EL1', 'Webpage outage', [API_LOGIN])
     expect(filterIncidents([webpage], cfg('elevenlabs'))).toHaveLength(0)
+  })
+})
+
+// A real openai API-group component, in openai.statusComponentIds — the "main" API component. Used to
+// tag a model-named incident onto openai's badge group, the way OpenAI tagged `gpt-4o-mini high error
+// rate` onto every API-group component on 2026-07-16.
+const OPENAI_API_MAIN = '01JMXBRMFE6N2NNT7DG6XZQ6PW' // openai.statusComponentId + statusComponentIds[0]
+
+describe('incidentTagsOwnBadge — the shared id-axis primitive (#1032/#1038)', () => {
+  it('true only when componentIds intersect the badge group of a canIdBypass service', () => {
+    expect(incidentTagsOwnBadge(apiIncident('X', 't', [OPENAI_API_MAIN]), cfg('openai'))).toBe(true)
+    expect(incidentTagsOwnBadge(apiIncident('X', 't', [SORA]), cfg('openai'))).toBe(true)
+  })
+
+  it('false when the tags name only a SIBLING product group (the #1032 collision)', () => {
+    expect(incidentTagsOwnBadge(apiIncident('X', 't', [CHATGPT_LOGIN]), cfg('openai'))).toBe(false)
+    // API-group Login belongs to openai, NOT chatgpt — the whole reason names cannot decide this.
+    expect(incidentTagsOwnBadge(apiIncident('X', 't', [API_LOGIN]), cfg('chatgpt'))).toBe(false)
+  })
+
+  it('false for a service outside canIdBypass even if the id would intersect', () => {
+    // elevenlabs has an exclude but no badge group → not canIdBypass → the primitive can never fire.
+    expect(canIdBypass(cfg('elevenlabs'))).toBe(false)
+    expect(incidentTagsOwnBadge(apiIncident('X', 't', [OPENAI_API_MAIN]), cfg('elevenlabs'))).toBe(false)
+  })
+
+  it('false when the incident carries no componentIds (fail-closed, no invention)', () => {
+    expect(incidentTagsOwnBadge(apiIncident('X', 't'), cfg('openai'))).toBe(false)
+  })
+})
+
+// Part A — the LIVE defect: a genuine OpenAI API incident dropped by an `incidentKeywords` title-token
+// miss. `gpt-4o-mini high error rate` carries no `'api'`/region token and (incident.io #1004) no
+// componentNames, yet OpenAI tagged it onto every API-group component. Pre-fix it was dropped here while
+// `uptime30d` (read from the same `component_impacts`) fell — the internal contradiction #1038 names.
+describe('filterIncidents — id-positive keyword-augment (#1038 Part A)', () => {
+  const gpt4oMini = (componentIds?: string[]) =>
+    apiIncident('01KMODEL4OMINI0000000000', 'gpt-4o-mini high error rate', componentIds)
+
+  it('premise: the title carries NONE of openai\'s incidentKeywords, so only the id path can keep it', () => {
+    const title = 'gpt-4o-mini high error rate'
+    expect(cfg('openai').incidentKeywords?.some((kw) => title.includes(kw.toLowerCase()))).toBe(false)
+    // …and it matches no incidentExclude token either, so it reaches the keyword branch (not the bypass).
+    expect(cfg('openai').incidentExclude?.some((kw) => title.includes(kw.toLowerCase()))).toBe(false)
+  })
+
+  it('openai KEEPS it once OpenAI tags it onto an API-group component it badges', () => {
+    expect(filterIncidents([gpt4oMini([OPENAI_API_MAIN])], cfg('openai')).map((i) => i.id))
+      .toEqual(['01KMODEL4OMINI0000000000'])
+  })
+
+  it('openai DROPS it untagged — no id evidence ⇒ the title-token miss stands (fail-closed)', () => {
+    // This is the exact before-state: the incident the keyword filter drops while uptime30d falls.
+    expect(filterIncidents([gpt4oMini()], cfg('openai'))).toHaveLength(0)
+  })
+
+  it('openai DROPS it when tagged only onto a SIBLING (ChatGPT) component — no over-include', () => {
+    // The provider tagging a ChatGPT-group component is NOT the provider claiming it affects the API.
+    expect(filterIncidents([gpt4oMini([CHATGPT_LOGIN])], cfg('openai'))).toHaveLength(0)
+  })
+
+  it('chatgpt + codex: the same augment keeps a model-named incident tagged onto THEIR badge group', () => {
+    // The fix is gated on canIdBypass, so it applies uniformly to all three — a model-named incident
+    // with no service-specific keyword still surfaces once the provider tags it onto that service.
+    const chatBadge = cfg('chatgpt').statusComponentIds![0]
+    const codexBadge = cfg('codex').statusComponentIds![0]
+    expect(filterIncidents([gpt4oMini([chatBadge])], cfg('chatgpt'))).toHaveLength(1)
+    expect(filterIncidents([apiIncident('CDX1', 'gpt-4o-mini high error rate', [codexBadge])], cfg('codex'))).toHaveLength(1)
+  })
+
+  it('a keyword-matching incident is unaffected — the augment only ADDS, never removes', () => {
+    // Title carries 'api' → kept by the keyword branch as before, with or without tags.
+    const apiTitled = apiIncident('API1', 'Elevated API errors', [])
+    expect(filterIncidents([apiTitled], cfg('openai')).map((i) => i.id)).toEqual(['API1'])
+  })
+})
+
+// The blast-radius replay the #1038 checklist requires: classify the keyword-miss incidents the live
+// page exposed on 2026-07-16 by drop reason, before/after. Of the 4 keyword-misses the issue tallied,
+// exactly ONE is a real miss — `gpt-4o-mini high error rate`, tagged onto every API-group component.
+// This pins that the id-augment admits EXACTLY that one and leaves the other three dropped, so the fix
+// does not over-include (the concern the issue's Scope/risk note flags for Score movement).
+describe('#1038 Part A blast-radius replay — the 2026-07-16 keyword-misses, classified', () => {
+  // The four incidents the issue's table lists, with the drop reason each SHOULD keep after the fix.
+  // FIDELITY NOTES — the tags are PROXIES chosen to preserve the tested property, not literal copies:
+  //   • SUBS: the real incident tags 'GPTs, Agent, ChatGPT Atlas, Conversations, …' (no 'Login'). We use
+  //     [CHATGPT_LOGIN] as a stand-in ChatGPT-group id — what matters is ∩ openai badge = ∅, which it is.
+  //   • GPT4OMINI: the real tag set is all 12 API components; [OPENAI_API_MAIN, SORA] is a faithful subset
+  //     (non-empty intersection is the property, so 2 openai-badge ids suffice).
+  //   • `apiIncident` hardcodes impact:'minor' for all four (the issue lists WEBSITE/MODELSEL as none).
+  //     IMMATERIAL here — `filterIncidents` never reads `impact` — but do NOT extend this replay to
+  //     `filterByComponentStatus` (which DOES branch on impact) without fixing the impact values first.
+  const cases = [
+    // [id, title, componentIds, shouldKeep, why]
+    ['WEBSITE', 'OpenAI website and Help Center content may be unavailable', undefined, false, 'website content, not the API — untagged'],
+    ['MODELSEL', 'Users are experiencing elevated errors when selecting models', undefined, false, 'untagged ⇒ unattributable, fail-closed'],
+    ['SUBS', 'Small Number of Users Have Incorrectly Cancelled Subscription', [CHATGPT_LOGIN], false, 'all ChatGPT-group — a billing issue, ∩ openai badge empty'],
+    ['GPT4OMINI', 'gpt-4o-mini high error rate', [OPENAI_API_MAIN, SORA], true, 'tagged onto openai API-group components — the real miss'],
+  ] as const
+
+  it.each(cases)('%s → keep=%s (via %s)', (id, title, componentIds, shouldKeep) => {
+    const kept = filterIncidents([apiIncident(id, title, componentIds as string[] | undefined)], cfg('openai'))
+    expect(kept.map((i) => i.id)).toEqual(shouldKeep ? [id] : [])
+  })
+
+  it('net effect: exactly ONE of the four is newly admitted — no over-include', () => {
+    const incidents = cases.map(([id, title, componentIds]) => apiIncident(id, title, componentIds as string[] | undefined))
+    const kept = filterIncidents(incidents, cfg('openai')).map((i) => i.id)
+    expect(kept).toEqual(['GPT4OMINI'])
   })
 })
 
