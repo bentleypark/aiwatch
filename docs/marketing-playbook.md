@@ -194,19 +194,26 @@ Reddit and large-sub AutoMod configurations filter links from new/low-karma acco
 
 ### Monitoring setup
 
-To catch outage windows in time:
+To catch outage windows in time, use a **keyword-alert service that pushes** — not a feed reader you
+have to pull.
 
-- **Reddit search RSS**: `https://www.reddit.com/search.rss?q=claude+down&sort=new&t=hour`
-  - Repeat for `openai down`, `gemini down`, `chatgpt down`, `copilot down`.
-  - Subscribe in Feedly or similar.
-- **Subreddit-specific RSS**: append `/new/.rss` to each sub URL.
-- Cross-reference against AIWatch's own Discord alert feed — if AIWatch detected the outage, a Reddit thread is often spinning up shortly after.
+- **[F5Bot](https://f5bot.com) — the live method.** Free, native keyword email alerts across Reddit,
+  Hacker News, and Lobsters. Register the outage keywords (`claude down`, `openai down`, `gemini down`,
+  `chatgpt down`, `copilot down`, and `aiwatch` for mentions); it emails you when a matching post or
+  comment appears. This is what's actually in use.
+- Cross-reference against AIWatch's own Discord alert feed — if AIWatch detected the outage, a Reddit
+  thread is often spinning up shortly after.
+
+> **Why not Reddit search RSS / Feedly** (the previously documented method, now retired): Reddit's
+> public search endpoint (`search.rss` / `search.json`) now returns **403** to unauthenticated clients,
+> so a `search.rss?q=claude+down` feed no longer delivers. And Feedly's own keyword tracking is a **paid
+> Pro+** feature — its free tier has no search/keyword filtering and pushes no email — so it was never a
+> free keyword alert either. F5Bot sidesteps both: it has its own Reddit access and alerts natively.
 
 **Verify before first outage window** (owner action, one-time):
 
-- [ ] All 5 Reddit search RSS feeds subscribed and receiving entries
-- [ ] r/ClaudeAI, r/ChatGPT, r/OpenAI, r/LocalLLaMA, r/AINews `/new/.rss` feeds subscribed
-- [ ] AIWatch Discord webhook active on the same reader surface as the Reddit feeds — so both signals converge in one place
+- [ ] F5Bot account created with all outage keywords registered and a test alert received
+- [ ] AIWatch Discord alert feed monitored alongside F5Bot — an outage AIWatch already flagged corroborates an incoming Reddit thread
 - [ ] Posting account meets the account-prep bar (see previous section)
 
 ---
