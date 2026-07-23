@@ -159,7 +159,7 @@ Adapt to the specific thread — never copy-paste verbatim across subreddits.
 
 ```
 It's down for everyone — just pulled this from AIWatch
-(ai-watch.dev/is-claude-down):
+(ai-watch.dev/is-claude-down?utm_source=reddit):
 
 - Status: Down (confirmed [HH:MM UTC — pull from dashboard])
 - Early RTT signal: [X minutes — ONLY if the dashboard shows one] — our probe
@@ -172,6 +172,8 @@ Source is open — happy to explain how the detection works if anyone's curious.
 ```
 
 Link to the **specific service page** (`/is-claude-down`, `/is-openai-down`, etc.), **never** the homepage. The homepage link looks like spam; the service page is the contextually useful answer.
+
+**Always append `?utm_source=reddit`** to the link — it is what reliably attributes the visit to the Reddit channel in AIWatch's audience classifier (`worker/src/outage-audience.ts`); without the tag the visit may not be counted as Reddit at all. One clean `?utm_source=reddit` is all the link needs — no other UTM params are required.
 
 A genuine early-RTT signal is **rare** (most incidents are component/connector degradations that don't spike the probed endpoint's RTT, and status-page detection is structurally bounded by polling lag — #464). If the dashboard does not show one, **drop the line entirely** rather than guess or claim "ahead of official." The rest of the template still stands — confirmed outage + AI analysis + fallback recs are useful on their own. Never frame AIWatch as "faster than the official status page" as a blanket claim; the verifiable pillars are independent detection (MTTD) + RTT degradation that status pages don't report.
 
@@ -224,6 +226,7 @@ Every post, every channel, no exceptions. Run through this in order before hitti
 - [ ] All `[bracket placeholders]` in the template replaced with live values pulled from the dashboard at posting time
 - [ ] Numbers (timestamps, early-RTT signal minutes if shown, uptime %) match what ai-watch.dev shows right now — not a cached tab from 30 minutes ago
 - [ ] Link points to the specific service page (`/is-<service>-down`), not the homepage
+- [ ] **Reddit posts:** the link carries `?utm_source=reddit` — otherwise the visit may be unattributable (see Reddit § "Response template")
 - [ ] Authorship disclosed in the first line ("Author here" / "I built this")
 - [ ] Only one AIWatch URL in the body
 - [ ] No competitor named in the title
