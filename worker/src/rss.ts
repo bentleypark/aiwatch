@@ -811,3 +811,43 @@ export function feedHttpResponse(
   }
   return new Response(result.xml, { status: 200, headers })
 }
+
+/**
+ * #908 — conditional-GET response for the `/api/report` monthly ARCHIVE (JSON): the
+ * cross-cutting analog of `feedHttpResponse`, reusing the SAME weak-ETag primitives
+ * (`weakFeedEtag`/`isFeedNotModified`) so no third FNV copy is introduced. Purpose:
+ * when an operator rebuilds a past-month archive (a #904 suppression / #1019 duration
+ * override), the body changes → the weak ETag changes → a browser that cached the old
+ * archive revalidates and re-fetches instead of serving it.
+ *
+ * The short `max-age` is load-bearing, NOT redundant with the ETag: a weak ETag layered
+ * on the previous 24h `max-age` would leave the stale window UNCHANGED, because a browser
+ * whose cache entry is still fresh serves it directly WITHOUT ever sending `If-None-Match`
+ * (the conditional GET only fires once the entry goes stale). So the fix is BOTH — the
+ * `max-age` caps the window to 5 min, and the ETag makes each post-expiry revalidation a
+ * cheap 304 for the common case (a past month whose archive did not change).
+ *
+ * Note it does NOT retroactively refresh a browser that ALREADY cached the response under
+ * the OLD 24h `max-age`; that entry only clears on its own expiry / cache-bypass. This
+ * bounds the window for FUTURE rebuilds. Extracted + exported so the header contract
+ * (ETag on both 200 and 304, the max-age value, 304 gated only on a byte-exact INM) is
+ * unit-testable without a full request/KV mock.
+ */
+export const ARCHIVE_MAX_AGE_S = 300
+export function reportArchiveResponse(
+  body: string,
+  ifNoneMatch: string | null,
+  extraHeaders: Record<string, string>,
+): Response {
+  const etag = weakFeedEtag(body)
+  const headers: Record<string, string> = {
+    ...extraHeaders,
+    'Content-Type': 'application/json',
+    'Cache-Control': `public, max-age=${ARCHIVE_MAX_AGE_S}`,
+    ETag: etag,
+  }
+  if (isFeedNotModified(ifNoneMatch, etag)) {
+    return new Response(null, { status: 304, headers })
+  }
+  return new Response(body, { status: 200, headers })
+}

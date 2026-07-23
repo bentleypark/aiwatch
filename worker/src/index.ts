@@ -1638,7 +1638,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg } from './badge'
-import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, feedHttpResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
+import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -4583,10 +4583,12 @@ export default {
           headers: { ...cors, 'Content-Type': 'application/json' },
         })
       }
-      return new Response(raw, {
-        status: 200,
-        headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400' },
-      })
+      // #908 — a rebuilt past-month archive (post #904 suppression / #1019 override) must
+      // un-expose promptly. The old 24h max-age let a browser that had cached the pre-rebuild
+      // archive serve it stale for up to 24h. A weak ETag alone would NOT fix that (a still-fresh
+      // cache entry never revalidates); the short max-age + ETag together bound the window to 5min
+      // and keep the unchanged common case a cheap 304. See reportArchiveResponse.
+      return reportArchiveResponse(raw, request.headers.get('If-None-Match'), cors)
     }
 
     // GET /api/uptime — return daily uptime history
