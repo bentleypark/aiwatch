@@ -476,3 +476,11 @@ Found a vulnerability? Please report it responsibly — see [SECURITY.md](SECURI
 ## License
 
 [AGPL-3.0](LICENSE)
+
+## Setup
+
+Copy the example environment file and adjust values:
+
+```bash
+cp .env.example .env
+```
