@@ -22,7 +22,7 @@ import {
 } from './parsers/aistudio'
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
-import { parseOnlineOrNotIncidents, computeOnlineOrNotUptime } from './parsers/onlineornot'
+import { parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
 import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { mergeXaiRegionalIncidents } from './xai-regions'
 
@@ -1351,6 +1351,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
   // #1089 — set when the Instatus incident parse failed STRUCTURALLY (payload shape moved), as
   // opposed to a page that genuinely lists no incidents. Only the former may not derive a status.
   let instatusParseFailure: InstatusParseFailure | null = null
+  // #1123 — the same distinction for OnlineOrNot. Its incident list is the only signal this path
+  // CONSUMES (the payload also publishes a per-component `componentStatus`, which nothing reads
+  // today), so an unreadable payload pins the card to `operational` with nothing to contradict it.
+  let onlineOrNotParseFailure: OnlineOrNotParseFailure | null = null
   const base: ServiceStatus = {
     id: config.id,
     name: config.name,
@@ -1895,20 +1899,42 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       let instatusComponents: ServiceComponent[] = [] // #761 — Instatus per-component snapshot (Next.js reads a published status; Nuxt derives one)
       if (config.onlineOrNotUrl && res.ok) {
         const html = await res.text()
-        incidents = parseOnlineOrNotIncidents(html)
-        // #1006 — computed over the trailing 30 days from the page's own incident records (started/ended/
-        // impact), like every other source, instead of reading its aggregate over an unknown period. It's
-        // the PROVIDER's own status page (not a third-party monitor), so this is 'official', not platform.
-        const uptime = computeOnlineOrNotUptime(html)
-        if (uptime != null) {
-          base.uptime30d = uptime
+        // #1123 — ONE parse yields both the incident list and the uptime, and says explicitly when the
+        // payload was unreadable. Previously an unreadable payload and a genuinely clean page were the
+        // same answer (`[]` + `null`), so a dead read published "operational, no incidents, no uptime".
+        const page = parseOnlineOrNotPage(html)
+        if (page.ok) {
+          incidents = page.incidents
+          // #1006 — computed over the trailing 30 days from the page's own incident records (started/
+          // ended/impact), like every other source, instead of reading its aggregate over an unknown
+          // period. It's the PROVIDER's own status page (not a third-party monitor), so this is
+          // 'official', not platform.
+          base.uptime30d = page.uptime30d
           base.uptimeSource = 'official'
         } else {
-          console.warn(`[fetchService] ${config.id} OnlineOrNot uptime could not be computed (payload shape change?)`)
+          onlineOrNotParseFailure = page.reason
+          console.warn(`[fetchService] ${config.id} OnlineOrNot page unreadable (${page.reason}) — NOT treating as "no incidents"`)
         }
       } else if (config.onlineOrNotUrl && !res.ok) {
         console.warn(`[fetchService] ${config.id} OnlineOrNot status page returned ${res.status}`)
         res.body?.cancel()
+        // #1123 review — this arm used to just warn and fall through, which published the WORST
+        // outcome available: `incidents` stays `[]`, and since `httpStatus` maps 403 to `operational`,
+        // a real outage behind a 403 showed a green badge with no `sourceUnknown` — and
+        // `parseErrors === 0` meant `resetFetchFailure` cleared the consecutive-failure gate every
+        // cycle, so escalation could never fire either.
+        //
+        // 403/429 are NOT treated as `dead-source` here (unlike the Statuspage summary.json arm's
+        // shared `classifyStatusPageFailure`, whose input is a JSON API where a 4xx is unambiguous):
+        // this is an HTML page fronted by Cloudflare, so a 403 is most likely a transient bot-management
+        // challenge to OUR egress, NOT a gone page — the same reason `httpStatus` (below) refuses to
+        // read a 403 as anything. Promoting it to `sourceDead` would flap openrouter in and out of the
+        // rankings at poll rate. So only an unambiguous gone/auth 4xx (404/401/410/…) is dead-source;
+        // 403/429 and every 5xx are an INDETERMINATE read → `sourceUnknown`, booked for diagnosis.
+        if (res.status !== 403 && res.status !== 429 && classifyStatusPageFailure(res.status) === 'dead-source') {
+          return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
+        }
+        onlineOrNotParseFailure = 'fetch-unreadable'
       } else if (config.instatusUrl) {
         // #1089 — this arm is entered for an Instatus service even when the scrape did NOT come back
         // ok, deliberately. Gating it on `scrapeRes?.ok` (the original shape) meant a failed scrape
@@ -2102,12 +2128,18 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       // read this source" (`svc.sourceUnknown.*`, #1004) instead of showing a green badge, and a
       // single transient blip does not fabricate an outage either. This closes the case #761's note
       // at the top of this file described but only mitigated: the discarded `shouldDegrade`.
-      if (instatusParseFailure) {
+      // #1123 — OnlineOrNot joins the same guard. The two can never BOTH be set: the arms above are
+      // an `if (onlineOrNotUrl && res.ok) / else if (onlineOrNotUrl && !res.ok) / else if (instatusUrl)`
+      // chain, so an OnlineOrNot service cannot enter the Instatus arm even if a config ever carried
+      // both URLs. (Deliberately NOT annotated `string`: keeping the union means a typo'd or invented
+      // reason fails the type-check instead of landing an unreadable bucket in the KV counter.)
+      const sourceParseFailure = instatusParseFailure ?? onlineOrNotParseFailure
+      if (sourceParseFailure) {
         // #1089 follow-up — book EVERY failure, not just the 3-strike crossings `trackFetchFailure`
         // records. A single failed cycle already drops the service out of `/api/statusline/down` and
         // makes the plugin monitor emit a false "✅ recovered", so the rising-edge counter is blind to
         // the metric the remaining decision needs. 30d retention, so a weekly check sees the window.
-        await recordParseFailure(kv, Date.now(), config.id, instatusParseFailure)
+        await recordParseFailure(kv, Date.now(), config.id, sourceParseFailure)
         const shouldDegrade = await trackFetchFailure(kv, config.id)
         return {
           ...base,
