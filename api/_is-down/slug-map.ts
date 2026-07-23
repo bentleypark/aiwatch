@@ -155,7 +155,20 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   // referral wedge needs their product URLs (without these the actual relevant vector sibling had no button).
   pinecone: 'https://www.pinecone.io', turbopuffer: 'https://turbopuffer.com',
   // Image
-  stability: 'https://stability.ai', bfl: 'https://bfl.ai',
+  // #1119 — the image tier is now reachable from an APP-category outage (a ChatGPT image-generation
+  // outage recommends these), so the "Open ↗" target has to be a surface a non-developer can actually
+  // use. `stability.ai/brandstudio` is the page for Brand Studio, Stability's consumer image product —
+  // chosen over the corporate root for actionability, and over the product's own host
+  // (`brandstudio.com`, where `dreamstudio.ai` 301s as of 2026-07-22) so the link stays on the brand
+  // the card names. Remote-page observations, dated: no test here can re-verify the destination.
+  // This matches how the rest of this map already behaves (`luma` → dream-machine, `langsmith` → the
+  // product page), not a new convention.
+  // `bfl` deliberately stays on the root: `playground.bfl.ai` redirects to `auth.bfl.ai` (a sign-in
+  // wall — Google/GitHub/SSO/email, "Sign up") before any generation, confirmed in a real browser
+  // 2026-07-23. So unlike Stability's Brand Studio (free-credit self-serve entry), BFL has no no-signup
+  // surface to point a panicking outage-moment user at — the root is the least-bad target. This
+  // asymmetry is deliberate, not a TODO.
+  stability: 'https://stability.ai/brandstudio', bfl: 'https://bfl.ai',
   // Video
   runway: 'https://runwayml.com', luma: 'https://lumalabs.ai/dream-machine',
   // Observability

@@ -11,7 +11,10 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 
 
 // Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
 // API tiers (1-8) and the agent tier (11) use distinct number ranges so TIER_LABEL stays unambiguous
-// and the cross-category category filter in getFallbacks already prevents API ↔ agent leakage.
+// and the category filter in getFallbacks prevents API ↔ agent leakage on every NON-routed path.
+// #1119 narrowed that claim: a capability-ROUTED source is pinned to the routed TIER instead of its
+// category, so an agent source can route INTO an api sub-tier (intended). The reverse cannot happen —
+// no CAPABILITY_TIER value is an agent/app tier.
 //
 // #1027 — all six coding agents share ONE tier (11). The old CLI/IDE/Plugin sub-tiers (11/12/13)
 // encoded a delivery-FORM axis that no longer distinguishes agents — each now ships both a CLI and an
@@ -67,6 +70,8 @@ export const API_TIER: Record<string, number> = {
 // session has a starting point. Module-scoped Set so the warning is throttled per worker isolate;
 // repeated calls for the same id stay quiet.
 const warnedTierIds = new Set<string>()
+// #1119 — throttles the "routed but nobody survived" warning below, per (source, tier), per isolate.
+const warnedEmptyRoutes = new Set<string>()
 export function tierFor(id: string): number {
   const t = API_TIER[id]
   if (t !== undefined) return t
@@ -122,6 +127,9 @@ function hasActiveIncident(s: FallbackCandidate): boolean {
 // tiers in #601/#602/#756/#857). Range 4–10 covers the current + near-future API sub-tiers; agents
 // (11) and apps (21) are separate CATEGORIES (filtered by `category` in getFallbacks) and keep
 // cross-tier fill within their category, so they're intentionally excluded.
+// #1119 exception: that reasoning holds for a NON-routed source only. A routed source is evaluated at
+// the CAPABILITY's tier, not its own — so a tier-21 ChatGPT whose 'Image Generation' component is down
+// has sourceTier 7, which IS specialized: it gets same-tier-only treatment and no category filter.
 export function isSpecializedSubTier(tier: number): boolean {
   return tier >= 4 && tier <= 10
 }
@@ -310,11 +318,53 @@ export function getFallbacks(
   const sourceTier = routed ?? tierFor(serviceId)
   // #859 — for a specialized sub-tier source, restrict candidates to the SAME tier (no cross-tier bleed).
   const sameTierOnly = isSpecializedSubTier(sourceTier)
-  return services
-    .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id)
+  const inSourceTier = (id: string) => tierFor(id) === sourceTier
+  const admittedBySubTier = (id: string) => inSourceTier(id) || isCapabilityProvider(id, sourceTier)
+  // #1119 — a ROUTED outage draws candidates from the CAPABILITY's tier, so the source's own category
+  // must not gate them: the image tier lives in `api` while the source (ChatGPT) is an `app`, and the
+  // unconditional category filter emptied the pool → the card showed NO recommendation at all. That is
+  // worse than the pre-#1062 default AND worse than what a service with NO components[] gets (DeepSeek
+  // App, which publishes no components at all, still recommends claude.ai) — precision in our data was
+  // reducing the recommendation to zero. Scope of the relaxation, deliberately narrow:
+  //   • only when routing fired; every non-routed path keeps `s.category === category` untouched.
+  //   • `routed > 0`, NOT `routed !== null`. ROUTE_SUPPRESS (-1) already returned above, so today the
+  //     two spellings select the same rows — the difference is COUNTERFACTUAL and about failing loudly:
+  //     if that early return is ever removed or reordered, `!== null` would absorb a suppressed route
+  //     into this branch, where it still yields [] by accident (tier -1 matches nothing) and all four
+  //     ROUTE_SUPPRESS tests stay green. `routed > 0` sends it to the category filter instead, which
+  //     returns real candidates and fails them — measured: removing the early return kills 4 tests
+  //     under this spelling and 0 under `!== null`.
+  //   • candidates stay pinned to the routed tier. Stated HERE rather than leaned on via `sameTierOnly`,
+  //     so a CAPABILITY_TIER entry added outside the specialized range could never silently widen this
+  //     to "every operational service in every category".
+  //   • the routed branch uses `inSourceTier`, NOT the facet-C-widened `admittedBySubTier`. Facet C
+  //     exists so a DEDICATED capability service's outage can also offer the multimodal provider
+  //     (Stability down → OpenAI); pulling that into the cross-category branch would answer a routed
+  //     ChatGPT image outage with "try OpenAI API" — the same provider, off the same status page, and a
+  //     developer console offered to a consumer. The dedicated tier is the right pool for a routed
+  //     source. (`CAPABILITY_PROVIDERS` holds one entry today, `openai`, so this subtracts that one.)
+  //   • app (21) / agent (11) can never be a routing DESTINATION: every CAPABILITY_TIER value is an api
+  //     sub-tier, no app/agent id sits in a specialized tier, and CAPABILITY_PROVIDERS holds no app/agent
+  //     id. All three legs are pinned by the INVARIANT test — the sentence is load-bearing, not decorative.
+  // An agent-category source may route too (a hypothetical Cursor 'Audio'-only outage → Voice tier).
+  // That is INTENDED, not an oversight: capability equality holds regardless of category. No agent
+  // component name we currently configure matches COMPONENT_CAPABILITY, so it is unreachable today —
+  // recorded so it doesn't read as a bug. (Component NAMES are live status-page data; a provider rename
+  // could make it reachable with no signal here.)
+  const routedCross = routed !== null && routed > 0
+  const picked = services
+    // The two id-only guards run FIRST, before any tier lookup. Six of the nine EXCLUDE_FALLBACK
+    // members are deliberately absent from API_TIER, and the source itself may be an id it doesn't
+    // carry — so
+    // letting a tier lookup see either fires `tierFor`'s warn-once, the #402/#403 "someone forgot a tier
+    // entry" breadcrumb, for services where nothing is wrong. On the Edge mirror that warn set is
+    // per-REQUEST, so it would be false alarms on every routed page view, drowning the real signal.
+    .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== serviceId
+      && (routedCross ? inSourceTier(s.id) : s.category === category)
+      && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
       // #1062 facet C — a specialized sub-tier (Image/Video/Voice) also admits the multimodal providers of
       // its capability (OpenAI), which the tier-distance sort ranks after the dedicated sibling.
-      && (!sameTierOnly || tierFor(s.id) === sourceTier || isCapabilityProvider(s.id, sourceTier))
+      && (!sameTierOnly || admittedBySubTier(s.id))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
       && sharesCapability(serviceId, s.id))
     .sort((a, b) => {
@@ -328,7 +378,18 @@ export function getFallbacks(
       return (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)
     })
     .slice(0, 2)
-    .map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))
+  // #1119 — a routed outage that finds NOBODY is indistinguishable, on every surface, from an outage
+  // that never routed: both render nothing. That silence is what let this bug live for weeks. Every
+  // routable tier has only 2-3 members, so one sibling incident empties the pool again. Warn once per
+  // (source, tier) so the next occurrence leaves a breadcrumb in the Worker logs instead of nothing.
+  if (routedCross && picked.length === 0) {
+    const key = `${serviceId}:${sourceTier}`
+    if (!warnedEmptyRoutes.has(key)) {
+      warnedEmptyRoutes.add(key)
+      console.warn(`[fallback] "${serviceId}" routed to tier ${sourceTier} but no candidate survived — no recommendation will render on any surface`)
+    }
+  }
+  return picked.map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))
 }
 
 export function buildFallbackText(fallbacks: Array<{ name: string; score: number | null }>): string {
@@ -375,13 +436,16 @@ export function tierLabelFor(tier: number): string | undefined {
 
 /**
  * #781 — structured per-category grouped fallbacks for a (possibly multi-surface) incident. ONE group
- * per distinct `category:tierLabel` among the affected, non-operational services; within a group the
- * candidates come from getFallbacks (operational + incident-free + same category, Score-ordered).
+ * per distinct `category:tierLabel` — or, at a SPECIALIZED tier, per `tier:<n>` with no category
+ * prefix (#1119) — among the affected, non-operational services; within a group the candidates come
+ * from getFallbacks (operational + incident-free, Score-ordered) — same category, EXCEPT a #1119
+ * routed group, whose candidates come from the routed capability's tier instead.
  *
  * perGroup mirrors the frontend `getGroupedFallbacks` (src/utils/constants.js) for dashboard parity:
  * **2 when there is a single group** (a same-category incident → top-2 alternatives, the old flat
  * behavior), **1 when there are multiple groups** (a multi-category incident → one alternative per
- * category, so the line stays scannable). Pure; the worker surfaces (Discord alert via
+ * category, so the line stays scannable). Free of I/O and of any dependence on call order, though
+ * `getFallbacks` beneath it may emit a throttled #1119 warn; the worker surfaces (Discord alert via
  * buildGroupedFallbackText, RSS feed via fallbackLine) render this structure their own way.
  */
 export function getGroupedFallbacks(
@@ -391,6 +455,42 @@ export function getGroupedFallbacks(
   const groupKeyOf = (svc: FallbackCandidate) => {
     // #1062 facet B — key by the EFFECTIVE tier (routed capability tier for a secondary-only outage),
     // so a routed OpenAI-'Images' outage groups + labels as Image, not the source's LLM tier.
+    // #1119 — the key groups anchors that draw from the same POOL. It does that on two of the three
+    // axes a pool depends on, and the third is a pre-existing limitation recorded at the end of this
+    // comment — do not read the rule as a full partition.
+    // A ROUTED anchor's pool is determined by its routed tier (`inSourceTier`, no category, no facet-C
+    // widening), so routed anchors at one tier share a key regardless of category:
+    // `openai` (api) and `chatgpt` (app) read the SAME status page and route together on one image
+    // incident, and under the old `category:tierLabel` key they produced two groups of identical
+    // content — rendered twice, and `resolved.length` 1→2 collapsed perGroup 2→1 so the second
+    // alternative silently vanished. A NON-routed anchor keeps `category:tierLabel`.
+    //
+    // A routed and a non-routed anchor at the SAME tier deliberately stay SEPARATE, even though that
+    // costs a perGroup slot. Their pools are genuinely different, so merging them answers one anchor
+    // with the other's candidates: facet C admits `openai` for a plain Stability outage but the routed
+    // branch excludes it, so a merged Image group hands a routed ChatGPT image outage "try OpenAI API"
+    // — the exact recommendation `inSourceTier` exists to prevent, re-entering one level up. Facet A is
+    // the same shape in Voice: a plain ElevenLabs (TTS) outage excludes AssemblyAI (STT), a routed
+    // anchor does not, and whichever anchor happens to be first in the array would decide. Two honest
+    // groups beat one that is wrong for half its anchors — that is the trade this key makes.
+    //
+    // Self-exclusion does NOT break the merge, though `getFallbacks` drops `s.id === serviceId`:
+    // anchoring and candidacy are exact complements (anchor = non-operational OR carrying an incident;
+    // candidate = operational AND clean), so a co-anchor is never in the other's pool to begin with.
+    //
+    // KNOWN LIMITATION, pre-existing and not fixed here: the routed pool also depends on the ANCHOR's
+    // own `SERVICE_CAPABILITY` tag via `sharesCapability`, which this key does not encode. Two routed
+    // Voice-tier anchors whose tags differ — a TAGGED one (`elevenlabs` tts / `assemblyai` stt) and an
+    // UNTAGGED one (OpenAI `Audio`, Mistral `Audio API`, a ChatGPT `Voice Mode`) — therefore share a
+    // group whose contents are decided by array order, and the tagged anchor can be answered with the
+    // wrong half of the Voice tier (ElevenLabs TTS → AssemblyAI STT, the case #1062 facet A exists to
+    // prevent). Tier 4 only, and `deepgram` never diverges (it carries both tags). Pre-#1119 both
+    // anchors keyed `api:Voice` and collapsed identically, so this is neither introduced nor repaired
+    // by #1119 — it is named here so the rule above is not mistaken for a guarantee it does not make.
+    // Tracked in #1129, which is why the behaviour is pinned as OBSERVED in fallback.test.ts rather
+    // than left undiscovered: that test is the assertion #1129 flips.
+    const routed = routingTier(svc)
+    if (routed !== null && routed > 0) return `routed:${routed}`
     const tierLabel = tierLabelFor(effectiveTierFor(svc))
     return tierLabel ? `${svc.category}:${tierLabel}` : svc.category
   }

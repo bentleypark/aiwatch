@@ -101,7 +101,12 @@ export const SERVICE_SITE_URL = {
   // Vector DB (#857) — pinecone + turbopuffer are now fallback candidates (Tier 8); keep in sync with api/is-down/slug-map.ts
   pinecone: 'https://www.pinecone.io', turbopuffer: 'https://turbopuffer.com',
   // Image
-  stability: 'https://stability.ai', bfl: 'https://bfl.ai',
+  // #1119 — MIRROR of api/_is-down/slug-map.ts (see there for the full rationale): Brand Studio is
+  // Stability's consumer image product, so an image recommendation reached from an app-category outage
+  // lands on a surface a non-developer can use. `bfl` stays on the root — its Playground redirects to a
+  // sign-in wall before any generation (confirmed in a browser 2026-07-23), so it has no no-signup
+  // surface to send an outage-moment user to. Deliberate asymmetry with Stability's free-entry product.
+  stability: 'https://stability.ai/brandstudio', bfl: 'https://bfl.ai',
   // Video
   runway: 'https://runwayml.com', luma: 'https://lumalabs.ai/dream-machine',
   // Observability
@@ -388,12 +393,26 @@ export function getFallbacks(service, allServices) {
   const sourceTier = routed ?? tierFor(service.id)
   // #859 — specialized sub-tier source → same-tier candidates only (no cross-tier bleed)
   const sameTierOnly = isSpecializedSubTier(sourceTier)
+  const inSourceTier = (id) => tierFor(id) === sourceTier
+  const admittedBySubTier = (id) => inSourceTier(id) || isCapabilityProvider(id, sourceTier)
+  // #1119 — MIRROR of the worker rule (see worker/src/fallback.ts getFallbacks for the full rationale):
+  // a ROUTED outage draws from the CAPABILITY's tier, so the source's category must not gate it (an
+  // `app` ChatGPT image outage has to reach the `api` image tier). Only the routed path relaxes; the
+  // condition is `routed > 0` so ROUTE_SUPPRESS stays suppressed by its early return alone; the routed
+  // branch pins to `inSourceTier` (NOT the facet-C-widened form, which would answer a ChatGPT image
+  // outage with "try OpenAI API"); api → app/agent stays impossible because no CAPABILITY_TIER value is
+  // an app/agent tier, no app/agent id sits in a specialized tier, and CAPABILITY_PROVIDERS holds none.
+  const routedCross = routed !== null && routed > 0
   return allServices
     // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either
-    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id)
+    // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the six deliberately-untiered
+    // services and `tierFor`'s warn-once keeps meaning "someone forgot a tier entry" (#402/#403).
+    .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== service.id
+      && (routedCross ? inSourceTier(s.id) : s.category === service.category)
+      && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
       // #1062 facet C — a specialized sub-tier (Image/Video/Voice) also admits the multimodal providers of
       // its capability (OpenAI), ranked after the dedicated sibling by tier distance.
-      && (!sameTierOnly || tierFor(s.id) === sourceTier || isCapabilityProvider(s.id, sourceTier))
+      && (!sameTierOnly || admittedBySubTier(s.id))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
       && sharesCapability(service.id, s.id))
     .sort((a, b) => {
@@ -456,8 +475,22 @@ export function getGroupedFallbacks(affected, allServices) {
   const resolved = []
   for (const svc of affected) {
     if (EXCLUDE_FALLBACK.includes(svc.id)) continue
-    const tierLabel = tierLabelFor(effectiveTierFor(svc))
-    const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
+    // #1119 — MIRROR of worker groupKeyOf (see there for the full rule + its known limitation): the
+    // key groups anchors that draw from the same pool, on the category and self-exclusion axes but NOT
+    // on the anchor's own SERVICE_CAPABILITY tag (a pre-existing tier-4 merge, tracked in #1129).
+    // A ROUTED anchor's pool depends on its routed tier, so routed anchors at one tier share a key
+    // across categories (`openai` + `chatgpt` route together off one status page and otherwise produce
+    // two identical groups, collapsing perGroup 2→1). A routed and a NON-routed anchor at the same tier
+    // stay separate on purpose: their pools differ (facet C admits openai for a plain Stability outage,
+    // the routed branch does not), so merging them would answer one anchor with the other's candidates,
+    // decided by array order. This surface reaches that shape — Overview passes the WHOLE affected
+    // board, not one incident's surfaces.
+    // `tierLabelFor` is called only on the non-routed branch, matching the worker's early return — it
+    // warns once per unlabelled tier, and a one-sided warn is the kind of drift #402/#403 guards against.
+    const routed = routingTier(svc)
+    const isRouted = routed !== null && routed > 0
+    const tierLabel = isRouted ? null : tierLabelFor(effectiveTierFor(svc))
+    const groupKey = isRouted ? `routed:${routed}` : (tierLabel ? `${svc.category}:${tierLabel}` : svc.category)
     if (seenGroups.has(groupKey)) continue
     // #554 — selection parity with the worker: keep only the live-clean guard (getFallbacks
     // already enforces it; nonOperationalIds is a defensive backstop). No same-provider exclusion.

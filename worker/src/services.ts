@@ -731,8 +731,12 @@ export function pickBreakdownComponents(
 /** #802 — minimum days of AIWatch coverage before a service is eligible for the Reliability Ranking. */
 export const MIN_COVERAGE_DAYS = 30
 
-/** #1006 — the uptime window AIWatch presents and scores on. One window for every service, computed by
- *  us from the provider's own records — the precondition the Reliability Ranking always claimed. */
+/** #1006 — the uptime window AIWatch presents and scores on, computed by us from the provider's own
+ *  records. #1110 — this constant governs the Atlassian + incident.io branch ONLY (the two reads at the
+ *  `parseUptimeData` / `computeIncidentIoUptime` call sites): `parseBetterStackUptime`, the Instatus
+ *  paths and `parseOnlineOrNotPage` carry their own `windowDays = 30` default and never import it,
+ *  and `platform_avg` narrows its denominator per resource. So do NOT read this as "one window for
+ *  every service" — that claim was retracted; see `/methodology` §3 and status-determination.md. */
 export const UPTIME_WINDOW_DAYS = 30
 
 
@@ -1639,8 +1643,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         ? statuspageDaily
         : (ioDailyImpact && Object.keys(ioDailyImpact).length > 0 ? ioDailyImpact : null)
 
-      // Uptime% — AIWatch COMPUTES it, from the provider's own published records, with ONE formula and
-      // ONE window (30 days) for every service it can:
+      // Uptime% — AIWatch COMPUTES it, from the provider's own published records. The two branches below
+      // (Atlassian + incident.io) share ONE formula and ONE window (30 days); #1110 — the other sources
+      // do NOT, so this sentence stops here and does not generalise to every service:
       //   Atlassian    → parseUptimeData sums the per-day outage SECONDS the page publishes, over the
       //                  TRAILING 30 of the ~90 days it embeds (#1006 — the pre-fix code divided by all
       //                  90, so `uptime30d` held a ninety-day figure).

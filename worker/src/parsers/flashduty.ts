@@ -315,9 +315,10 @@ export function parseFlashdutyFeed(feed: FlashdutyFeed, opts: ParseFlashdutyOpti
 
   // #1006 — uptime is COMPUTED over the trailing 30 days from `component_impacts` (the same start/end
   // intervals this parser already turns into `dailyImpact` below), not copied from the feed's published
-  // `component_uptimes` aggregate. That aggregate's period is Flashduty's, not ours, and every other
-  // source now produces a 30-day figure with the weights on /methodology — which is the only thing that
-  // makes the Reliability Ranking a ranking. Worst-of across components when the service isn't scoped to
+  // `component_uptimes` aggregate. That aggregate's period is Flashduty's, not ours, so this feed is
+  // computed over a trailing 30 days with the 1.0/0.3 weights. #1110 — do NOT generalise that to every
+  // source: `platform_avg` (Better Stack) applies no severity weighting at all and narrows its window
+  // per resource, and Instatus's Next.js path honours a provider-published `customImpactPercentage`. Worst-of across components when the service isn't scoped to
   // one: a multi-component service's availability is gated by its weakest surface.
   const uptime30d = computeFlashdutyUptime(
     (feed.structure?.component_impacts ?? []).filter((imp) => !primaryId || imp.component_id === primaryId),

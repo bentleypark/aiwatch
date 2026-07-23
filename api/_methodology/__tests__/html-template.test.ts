@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { renderMethodologyPage } from '../html-template'
 import { PROBE_TARGETS } from '../../../worker/src/probe' // #678 — lockstep source of truth
+import { SERVICES } from '../../../worker/src/services' // #1110 — Better Stack roster lockstep
 
 // #673 — the public /methodology page. Renders once (no per-request data), so these assertions
 // guard: it renders without throwing, carries all 7 section anchors + the SEO head, is bilingual,
@@ -206,5 +207,79 @@ describe('renderMethodologyPage', () => {
     // Every element the page asks to translate must have a key in both languages.
     const usedKeys = new Set([...html.matchAll(/data-i18n="([^"]+)"/g)].map((m) => m[1]))
     expect([...usedKeys].filter((k) => !koKeys.has(k) || !enKeys.has(k))).toEqual([])
+  })
+
+  // #1110 — the Better Stack roster is hand-listed in SIX strings: `s2.partial` and `s3.platformDesc`,
+  // each existing three times (the inline KO default in the HTML, the `i18n.ko` map, the `i18n.en` map).
+  // It had already drifted: Helicone was added to SERVICES in #802 and never reached `s2.partial`, so
+  // the page told readers five services behaved a way six of them do. That is the drift class the
+  // probe-count lockstep above already guards, so pin the roster the same way — to `betterStackUrl`,
+  // the flag that actually routes a service to `parseBetterStackUptime`, not to a hand-kept list.
+  //
+  // Covering all six matters: a first cut of this guard matched only `data-i18n="…"` attributes, which
+  // exist ONLY in the inline KO HTML, so dropping Helicone from either i18n map still passed 18/18.
+  // A guard whose default state is `pass` has to be mutated against itself before it is believed.
+  it('every Better Stack service is named in all six /methodology enumerations (#1110)', () => {
+    const expected = SERVICES.filter((s) => s.betterStackUrl).map((s) => s.id)
+    expect(expected.length).toBeGreaterThan(0) // sanity: the flag still exists
+
+    const decl = html.slice(html.indexOf('const i18n = {'))
+    const koStart = decl.indexOf('ko: {')
+    const enStart = decl.indexOf('en: {')
+    const enEnd = decl.indexOf('function setLang')
+    const koMap = decl.slice(koStart, enStart)
+    const enMap = decl.slice(enStart, enEnd)
+
+    /** The value of one i18n key inside one language block. */
+    const entry = (block: string, key: string) => {
+      const m = block.match(new RegExp(`'${key.replaceAll('.', '\\.')}':\\s*'((?:\\\\'|[^'])*)'`))
+      expect(m, `i18n entry '${key}' not found in its language block`).not.toBeNull()
+      return m![1]
+    }
+    /** The inline (SSR default) copy for one data-i18n key. */
+    const inline = (key: string, close: string) => {
+      const m = html.match(new RegExp(`data-i18n="${key.replaceAll('.', '\\.')}"[^>]*>([\\s\\S]*?)</${close}>`))
+      expect(m, `inline default for '${key}' not found`).not.toBeNull()
+      return m![1]
+    }
+
+    const enumerations: Array<[string, string]> = [
+      ['s2.partial inline', inline('s2.partial', 'p')],
+      ['s2.partial ko', entry(koMap, 's2.partial')],
+      ['s2.partial en', entry(enMap, 's2.partial')],
+      ['s3.platformDesc inline', inline('s3.platformDesc', 'span')],
+      ['s3.platformDesc ko', entry(koMap, 's3.platformDesc')],
+      ['s3.platformDesc en', entry(enMap, 's3.platformDesc')],
+    ]
+
+    // Compare on the service ID, not the display name: the page writes the short marketing form
+    // ("HuggingFace", "Together") while `name` is "Hugging Face" / "Together AI". Tokenise on the `·`
+    // separator so a short id can't match incidentally across two concatenated words.
+    const tokens = (block: string) =>
+      new Set(block.split(/[·(),—]/).map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean))
+
+    // Subset AND superset: a missing service is the drift that started this, but a service listed here
+    // that is NOT on Better Stack is the same lie in the other direction — and `s2.partial` states no
+    // count in either language, so nothing else would catch an over-listing there.
+    const otherIds = new Set(SERVICES.map((s) => s.id).filter((id) => !expected.includes(id)))
+    for (const [where, block] of enumerations) {
+      const present = tokens(block)
+      for (const id of expected) {
+        expect([...present], `Better Stack service "${id}" missing from ${where}`).toContain(id)
+      }
+      for (const id of present) {
+        expect(otherIds.has(id), `"${id}" is listed in ${where} but is not a Better Stack service`).toBe(false)
+      }
+    }
+
+    // The stated counts go stale silently too — pin both languages' numerals.
+    const koCounts = [...html.matchAll(/이 (\d+)개 서비스의 상태 페이지는 Better Stack/g)]
+    expect(koCounts.length, 'KO Platform bullet must state the count in both the inline copy and the ko map').toBe(2)
+    for (const m of koCounts) expect(Number(m[1])).toBe(expected.length)
+
+    const NUMBER_WORD: Record<number, string> = { 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight' }
+    const word = NUMBER_WORD[expected.length]
+    expect(word, `add ${expected.length} to NUMBER_WORD — the EN copy spells this count out`).toBeDefined()
+    expect(entry(enMap, 's3.platformDesc')).toContain(`These ${word} status pages`)
   })
 })

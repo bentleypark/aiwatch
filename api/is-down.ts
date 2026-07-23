@@ -299,6 +299,17 @@ export default async function handler(req: Request) {
           // Vector 8) recommends its OWN tier only (no cross-tier bleed); LLM tiers 1-3 keep cross-tier
           // fill. Mirror of worker/src/fallback.ts isSpecializedSubTier (range 4-10). Inline here like tierFor.
           const sameTierOnly = sourceTier >= 4 && sourceTier <= 10
+          const inSourceTier = (id: string) => tierFor(id) === sourceTier
+          const admittedBySubTier = (id: string) => inSourceTier(id) || isCapabilityProvider(id, sourceTier)
+          // #1119 — inline mirror of the worker rule (full rationale in worker/src/fallback.ts
+          // getFallbacks): a ROUTED outage draws from the CAPABILITY's tier, so the source's category
+          // must not gate it — an `app` ChatGPT image outage has to reach the `api` image tier, which
+          // the unconditional category filter emptied into NO recommendation at all. Only the routed
+          // path relaxes; `routed > 0` keeps ROUTE_SUPPRESS suppressed by its own guard alone; the
+          // routed branch pins to `inSourceTier` (NOT the facet-C-widened form, which would answer a
+          // routed ChatGPT image outage with "try OpenAI API" — same provider, developer console);
+          // api → app/agent stays impossible because no CAPABILITY_TIER value is an app/agent tier.
+          const routedCross = routed !== null && routed > 0
           fallbacks = allServices
             // #550 — exclude candidates with an unresolved incident even if status is still 'operational'.
             // Deliberately BROADER than BOTH `hasLiveIncident` (_is-down/html-template.ts), which excludes
@@ -309,12 +320,16 @@ export default async function handler(req: Request) {
             // this fires in — an incident now survives our own component's recovery — see
             // docs/reference/status-determination.md.
             // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either.
-            .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational'
+            // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the six deliberately-untiered
+            // services. `warnedTierIds` above is per-REQUEST on the Edge, so a routed page would
+            // otherwise log six "no API_TIER" false alarms on EVERY view (#402/#403 breadcrumb).
+            .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id
+              && (routedCross ? inSourceTier(s.id) : s.category === entry.category)
+              && s.status === 'operational'
               && !(s.incidents ?? []).some(i => (i as { status?: string }).status !== 'resolved')
               && !s.incidentSourceStale
-              && !EXCLUDE_FALLBACK.includes(s.id)
               // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
-              && (!sameTierOnly || tierFor(s.id) === sourceTier || isCapabilityProvider(s.id, sourceTier))
+              && (!sameTierOnly || admittedBySubTier(s.id))
               // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
               && sharesCapability(entry.id, s.id))
             .sort((a, b) => {
