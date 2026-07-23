@@ -49,7 +49,7 @@ function recordedReasons(store: Record<string, string>, svcId: string): Record<s
   return out
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('#1123 — a clean OnlineOrNot page publishes real uptime', () => {
   it('reports 100% with official provenance on the captured incident-free page', async () => {
@@ -73,6 +73,48 @@ describe('#1123 — a clean OnlineOrNot page publishes real uptime', () => {
     expect(svc.sourceUnknown).toBeUndefined()
     expect(svc.incidents.map((i) => i.id)).toEqual(['LB6mQvzYAkoz', 'wn6mpXyB9WoP'])
     expect(svc.incidents.every((i) => i.impact === 'major')).toBe(true)
+  })
+
+  it('#1134: history-page failures do not discard the readable home payload', async () => {
+    const home = fixture('openrouter-onlineornot-clean-2026-07-22.html')
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/incidents?')) return new Response('history unavailable', { status: 503 })
+      return new Response(home, { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const svc = await fetchService(openrouter, undefined, undefined)
+    expect(svc.sourceUnknown).toBeUndefined()
+    expect(svc.uptime30d).toBe(100)
+    expect(svc.incidents).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(3) // home + the two /incidents history pages
+  })
+
+  it('#1134: merges in-window /incidents history into the home payload (success path)', async () => {
+    // The forward direction the other tests never reach: a supplemental row actually LANDS in
+    // svc.incidents. Date is pinned to just after the newest real history row (2026-04-14) so the
+    // 90-day cutoff services.ts applies via Date.now() keeps the fixture's rows in range.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-04-15T00:00:00.000Z'))
+    const home = fixture('openrouter-onlineornot-clean-2026-07-22.html') // empty home → recovered rows are unambiguously supplemental
+    const p1 = fixture('openrouter-onlineornot-history-p1-2026-07-23.html')
+    const p2 = fixture('openrouter-onlineornot-history-p2-2026-07-23.html')
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const u = String(input)
+      if (u.includes('/incidents?') && u.includes('page=1')) return new Response(p1, { status: 200 })
+      if (u.includes('/incidents?') && u.includes('page=2')) return new Response(p2, { status: 200 })
+      return new Response(home, { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const svc = await fetchService(openrouter, undefined, undefined)
+    const ids = svc.incidents.map((i) => i.id)
+    expect(ids).toContain('lrkj1G0wmMoe') // Clerk auth — recovered from /incidents, absent from home
+    expect(ids).toContain('opJAdRNJ-dlR') // Bedrock upstream — recovered
+    // Display-only: supplemental rows are null-impact and must not move the official uptime.
+    expect(svc.incidents.every((i) => i.impact === null)).toBe(true)
+    expect(svc.uptime30d).toBe(100)
+    expect(svc.uptimeSource).toBe('official')
   })
 })
 

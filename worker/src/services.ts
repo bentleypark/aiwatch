@@ -22,7 +22,7 @@ import {
 } from './parsers/aistudio'
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
-import { parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
+import { mergeOnlineOrNotIncidents, parseOnlineOrNotIncidentHistory, parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
 import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { mergeXaiRegionalIncidents } from './xai-regions'
 
@@ -1928,7 +1928,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
 
       const start = Date.now()
       const scrapeUrl = config.instatusUrl || config.rssFeedUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
-      const [res, scrapeRes, betterStackRes, aistudioRes] = await Promise.all([
+      const [res, scrapeRes, betterStackRes, aistudioRes, onlineOrNotHistoryRes] = await Promise.all([
         fetchWithTimeout(config.statusUrl),
         scrapeUrl
           ? fetchWithTimeout(scrapeUrl).catch((err) => {
@@ -1957,8 +1957,43 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
               return null
             })
           : Promise.resolve(null),
+        config.onlineOrNotUrl
+          // Two pages reach well past HISTORY_WINDOW_DAYS for OpenRouter's incident cadence; the real
+          // age bound is the cutoff inside mergeOnlineOrNotIncidents, not the page count (#1134).
+          ? Promise.all([1, 2].map((page) => {
+              const url = new URL(`${config.onlineOrNotUrl!.replace(/\/$/, '')}/incidents`)
+              url.searchParams.set('page', String(page))
+              return fetchWithTimeout(url.toString()).catch((err) => {
+                console.warn(`[fetchService] ${config.id} OnlineOrNot history page ${page} failed:`, err instanceof Error ? err.message : err)
+                return null
+              })
+            }))
+          : Promise.resolve([]),
       ])
       const latency = Date.now() - start
+
+      // #1134 — consume the supplemental OnlineOrNot /incidents pages exactly ONCE here, regardless of
+      // how the home-page read turns out. The fetches fire unconditionally (part of the Promise.all
+      // above), so their Response bodies must be drained on every path — including the home-failure
+      // branches that early-return — or a Worker holds an undrained body against the subrequest
+      // concurrency limit. The parsed rows are only USED when the home page parses (the merge target,
+      // below); on a home-page failure they are still drained here, just discarded.
+      const historyIncidents: Incident[] = []
+      for (let i = 0; i < onlineOrNotHistoryRes.length; i++) {
+        const historyRes = onlineOrNotHistoryRes[i]
+        if (!historyRes) continue // network error already logged in the fetch .catch
+        if (!historyRes.ok) {
+          console.warn(`[fetchService] ${config.id} OnlineOrNot history page ${i + 1} returned ${historyRes.status}`)
+          historyRes.body?.cancel()
+          continue
+        }
+        const historyPage = parseOnlineOrNotIncidentHistory(await historyRes.text())
+        if (historyPage.ok) historyIncidents.push(...historyPage.incidents)
+        // A supplemental parse failure is display-only: it must NOT drive sourceUnknown/trackFetchFailure
+        // (that is the HOME read's job) — the home payload still publishes. Log it service-scoped so a
+        // silent /incidents shape drift (#1123-class) is diagnosable rather than a permanent no-op.
+        else console.warn(`[fetchService] ${config.id} OnlineOrNot history page ${i + 1} unreadable (${historyPage.reason}) — dropping this page's supplemental history`)
+      }
 
       let incidents: Incident[] = []
       let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
@@ -1979,6 +2014,14 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           // 'official', not platform.
           base.uptime30d = page.uptime30d
           base.uptimeSource = 'official'
+
+          // #1134 — the home payload intentionally retains only ~14 days of root-map incidents. Older
+          // non-component incidents live on the paginated /incidents route (consumed above). This is a
+          // display-history supplement only: those rows have no impact and stay excluded from
+          // uptime/Score/MTTR by the existing null-impact policy.
+          if (historyIncidents.length > 0) {
+            incidents = mergeOnlineOrNotIncidents(incidents, historyIncidents, Date.now())
+          }
         } else {
           onlineOrNotParseFailure = page.reason
           console.warn(`[fetchService] ${config.id} OnlineOrNot page unreadable (${page.reason}) — NOT treating as "no incidents"`)
