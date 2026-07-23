@@ -163,9 +163,11 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   // the card names. Remote-page observations, dated: no test here can re-verify the destination.
   // This matches how the rest of this map already behaves (`luma` → dream-machine, `langsmith` → the
   // product page), not a new convention.
-  // `bfl` deliberately stays on the root: its Playground (playground.bfl.ai) is linked from there and is
-  // the no-code entry, but we could not open it to confirm its signup/credit terms — do not point the
-  // "alternative" at an unverified paywall. Revisit once it can be checked.
+  // `bfl` deliberately stays on the root: `playground.bfl.ai` redirects to `auth.bfl.ai` (a sign-in
+  // wall — Google/GitHub/SSO/email, "Sign up") before any generation, confirmed in a real browser
+  // 2026-07-23. So unlike Stability's Brand Studio (free-credit self-serve entry), BFL has no no-signup
+  // surface to point a panicking outage-moment user at — the root is the least-bad target. This
+  // asymmetry is deliberate, not a TODO.
   stability: 'https://stability.ai/brandstudio', bfl: 'https://bfl.ai',
   // Video
   runway: 'https://runwayml.com', luma: 'https://lumalabs.ai/dream-machine',

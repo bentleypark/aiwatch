@@ -103,8 +103,9 @@ export const SERVICE_SITE_URL = {
   // Image
   // #1119 — MIRROR of api/_is-down/slug-map.ts (see there for the full rationale): Brand Studio is
   // Stability's consumer image product, so an image recommendation reached from an app-category outage
-  // lands on a surface a non-developer can use. `bfl` stays on the root — its Playground's signup/credit
-  // terms could not be confirmed, and we don't point an "alternative" at an unverified paywall.
+  // lands on a surface a non-developer can use. `bfl` stays on the root — its Playground redirects to a
+  // sign-in wall before any generation (confirmed in a browser 2026-07-23), so it has no no-signup
+  // surface to send an outage-moment user to. Deliberate asymmetry with Stability's free-entry product.
   stability: 'https://stability.ai/brandstudio', bfl: 'https://bfl.ai',
   // Video
   runway: 'https://runwayml.com', luma: 'https://lumalabs.ai/dream-machine',
