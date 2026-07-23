@@ -69,6 +69,14 @@ interface Env {
   // topic name or a full https://ntfy.sh/<topic> URL. Set via `wrangler secret put NTFY_TOPIC`. Absent
   // → push is fail-soft skipped (the Discord operator alert is unaffected). Operator-only side-channel.
   NTFY_TOPIC?: string
+  // #820: Reddit OAuth2 app-only credentials — the public JSON search endpoints now 403 from
+  // datacenter IPs, so authentication is the only robust path. Register a "script"/"web app"
+  // (confidential) client at reddit.com/prefs/apps → `wrangler secret put REDDIT_CLIENT_ID` +
+  // `REDDIT_CLIENT_SECRET`. REDDIT_USERNAME (operator handle) feeds the required descriptive
+  // User-Agent. All absent → Reddit monitoring is skipped (fail-soft; no source-dead marker).
+  REDDIT_CLIENT_ID?: string
+  REDDIT_CLIENT_SECRET?: string
+  REDDIT_USERNAME?: string
   AI?: Ai
   STATUS_CACHE: KVNamespace
   // #494: Workers Analytics Engine dataset for statusline traffic measurement.
@@ -1640,7 +1648,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 import { generateBadgeSvg } from './badge'
 import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, feedHttpResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
-import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
+import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable, readRedditSourceDead } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
@@ -2428,7 +2436,11 @@ export default {
     const now = scheduledNow
     if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
       try {
-        const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
+        const redditAlerts = await detectRedditPosts(env.STATUS_CACHE, {
+          clientId: env.REDDIT_CLIENT_ID,
+          clientSecret: env.REDDIT_CLIENT_SECRET,
+          username: env.REDDIT_USERNAME,
+        })
         // Split: service outage alerts vs competitive vs security monitoring
         const outageAlerts = redditAlerts.filter(a => a.type === 'outage')
         const competitiveAlerts = redditAlerts.filter(a => a.type === 'competitive')
@@ -2901,6 +2913,8 @@ export default {
           } catch (err) {
             console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
           }
+          // #820: surface a persistent Reddit auth/block failure so a silent zeroing-out is visible.
+          const redditSourceDead = await readRedditSourceDead(env.STATUS_CACHE)
 
           // #288: read the purpose-built daily counter instead of counting security:seen:*
           // keys (that prefix has 7d TTL and accumulates across the week, inflating the number).
@@ -3189,6 +3203,7 @@ export default {
             webhookCounts,
             deliveryCounts,
             redditCount,
+            redditSourceDead,
             securityCount,
             vitals: vitalsSummary,
             probeSnapshots,

@@ -1,8 +1,31 @@
 // Reddit community monitoring — detect "is X down?" posts in target subreddits
-// Uses Reddit's public JSON search endpoint (no OAuth required)
+// #820: authenticated OAuth2 app-only path. Reddit now 403s the public JSON search
+// endpoints from datacenter IPs (Cloudflare Worker egress), so authentication is the only
+// robust path — a token is minted from REDDIT_CLIENT_ID/SECRET and search hits oauth.reddit.com.
 
 import { defuseAutolinkDomain } from './alerts'
 import { appendStatusHint, appendUtm } from './utils'
+
+// #820 — Reddit OAuth2 app-only (client_credentials) constants. Spec verified 2026-06-29.
+export const REDDIT_TOKEN_KEY = 'reddit:token'        // KV-cached bearer token
+export const REDDIT_SOURCE_DEAD_KEY = 'reddit:source-dead' // observability marker for a persistent auth/block failure
+export const REDDIT_TRANSIENT_STREAK_KEY = 'reddit:transient-streak' // consecutive all-transient (network) runs
+const REDDIT_TOKEN_URL = 'https://www.reddit.com/api/v1/access_token'
+const REDDIT_OAUTH_HOST = 'https://oauth.reddit.com'
+// TTL for the source-dead marker: 26h so it survives to the next daily-summary read but
+// self-expires if the hourly cron stops running entirely (never a permanently stuck warning).
+const SOURCE_DEAD_TTL_SEC = 93600
+// Consecutive all-transient (network black-hole / timeout) runs before escalating to source-dead.
+// A single run tells us nothing (one blip), but a sustained streak where the token host is up yet
+// every search is unreachable is a real outage that must NOT hide as a quiet day (#820). Hourly
+// cron → ~3h of total network block before the warning fires. Same 26h self-expiring TTL.
+const TRANSIENT_STREAK_LIMIT = 3
+
+export interface RedditCreds {
+  clientId: string
+  clientSecret: string
+  username?: string  // operator reddit handle, for the required descriptive User-Agent
+}
 
 export interface RedditPost {
   id: string
@@ -166,29 +189,191 @@ export function matchesSecurityKeywords(title: string): boolean {
 }
 
 /**
- * Fetch recent posts from a subreddit matching outage keywords
+ * Spec-conforming User-Agent: `<platform>:<app-id>:<version> (by /u/<username>)`.
+ * The old `AIWatch/1.0 (...)` is non-conforming and Reddit throttles it (#820). The handle
+ * comes from REDDIT_USERNAME; a placeholder keeps the format valid if it's unset.
  */
-async function fetchSubreddit(subreddit: string, mode: 'outage' | 'competitive' | 'security' = 'outage'): Promise<RedditPost[]> {
-  const query = mode === 'competitive'
-    ? encodeURIComponent('"status monitor" OR "uptime dashboard" OR "api status" OR "is down" OR "status page"')
-    : mode === 'security'
-    ? encodeURIComponent('breach OR leak OR hacked OR vulnerability OR CVE OR "unauthorized access" OR exploit OR "security incident"')
-    : encodeURIComponent('down OR "not working" OR outage OR issues OR error')
-  const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${query}&sort=new&restrict_sr=on&t=day&limit=5`
+export function redditUserAgent(creds: Pick<RedditCreds, 'username'>): string {
+  const handle = creds.username?.trim() || 'aiwatch_ops'
+  return `web-app:dev.ai-watch.reddit-monitor:v1.0 (by /u/${handle})`
+}
 
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'AIWatch/1.0 (ai-watch.dev; status monitoring)' },
-    signal: AbortSignal.timeout(5000),
+/**
+ * Build the client_credentials token POST (HTTP Basic = client_id:client_secret).
+ * Pure + exported so the auth shape is unit-testable without a live fetch.
+ */
+export function buildTokenRequest(creds: RedditCreds): { url: string; init: RequestInit } {
+  const basic = btoa(`${creds.clientId}:${creds.clientSecret}`)
+  return {
+    url: REDDIT_TOKEN_URL,
+    init: {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': redditUserAgent(creds),
+      },
+      body: 'grant_type=client_credentials',
+    },
+  }
+}
+
+const SEARCH_QUERY: Record<RedditAlertType, string> = {
+  competitive: '"status monitor" OR "uptime dashboard" OR "api status" OR "is down" OR "status page"',
+  security: 'breach OR leak OR hacked OR vulnerability OR CVE OR "unauthorized access" OR exploit OR "security incident"',
+  outage: 'down OR "not working" OR outage OR issues OR error',
+}
+
+/**
+ * Build the authenticated search GET against oauth.reddit.com (NOT www.reddit.com).
+ * Pure + exported so the host/Bearer/UA are unit-testable.
+ */
+export function buildSearchRequest(subreddit: string, mode: RedditAlertType, token: string, ua: string): { url: string; init: RequestInit } {
+  const q = encodeURIComponent(SEARCH_QUERY[mode])
+  return {
+    url: `${REDDIT_OAUTH_HOST}/r/${subreddit}/search?q=${q}&sort=new&restrict_sr=on&t=day&limit=5`,
+    init: { headers: { Authorization: `Bearer ${token}`, 'User-Agent': ua } },
+  }
+}
+
+/**
+ * Fetch (and KV-cache) a Reddit app-only bearer token. `force` bypasses + evicts the cache
+ * to re-mint after a 401 (token rotated/expired). Returns null on any failure — the caller
+ * treats a null token as a dead source.
+ */
+export async function getRedditAppToken(kv: KVNamespace, creds: RedditCreds, opts: { force?: boolean } = {}): Promise<string | null> {
+  if (opts.force) {
+    await kv.delete(REDDIT_TOKEN_KEY).catch(() => {})
+  } else {
+    const cached = await kv.get(REDDIT_TOKEN_KEY).catch(() => null)
+    if (cached) return cached
+  }
+
+  const { url, init } = buildTokenRequest(creds)
+  let res: Response
+  try {
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(5000) })
+  } catch (err) {
+    console.error('[reddit] token fetch threw:', err instanceof Error ? err.message : err)
+    return null
+  }
+  if (!res.ok) {
+    console.warn(`[reddit] token endpoint returned HTTP ${res.status}`)
+    res.body?.cancel()
+    return null
+  }
+  const data = (await res.json().catch(() => null)) as { access_token?: string; expires_in?: number } | null
+  if (!data?.access_token) return null
+
+  // Cache under TTL = expires_in − 60s margin (floor 60s) so a near-expiry token isn't served.
+  const ttl = Math.max(60, (data.expires_in ?? 3600) - 60)
+  await kv.put(REDDIT_TOKEN_KEY, data.access_token, { expirationTtl: ttl }).catch((err) => {
+    console.error('[reddit] token cache write failed:', err instanceof Error ? err.message : err)
   })
+  return data.access_token
+}
 
+// Auth/blocking statuses that mean the SOURCE is dead (surface it), not a per-subreddit blip:
+// 401 = token rotated/expired (already retried once), 403 = IP/UA block, 429 = rate limited.
+function isDeadStatus(status: number): boolean {
+  return status === 401 || status === 403 || status === 429
+}
+
+// A single subreddit fetch resolves to one of THREE states — not two. Folding "no response at
+// all" into "success" is what let a network-level block silently zero out (#820 root cause):
+//   ok        — a 2xx response came back (proof the source is alive), regardless of post count
+//   dead      — an auth/block/rate response (401-after-refresh / 403 / 429): the SOURCE is blocked
+//   transient — no response (network throw/timeout) or a non-auth error (5xx): tells us nothing
+type FetchOutcome = 'ok' | 'dead' | 'transient'
+
+interface FetchResult {
+  posts: RedditPost[]
+  outcome: FetchOutcome
+}
+
+/**
+ * Fetch recent posts from a subreddit matching outage keywords, authenticated.
+ * On 401 (token rotated/expired) it refreshes the token once and retries.
+ */
+async function fetchSubreddit(
+  subreddit: string,
+  mode: RedditAlertType,
+  auth: { token: string; ua: string; refresh: () => Promise<string | null> },
+): Promise<FetchResult> {
+  const doFetch = async (token: string): Promise<Response | null> => {
+    const { url, init } = buildSearchRequest(subreddit, mode, token, auth.ua)
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(5000) })
+    } catch (err) {
+      console.error(`[reddit] r/${subreddit} fetch threw:`, err instanceof Error ? err.message : err)
+      return null
+    }
+  }
+
+  let res = await doFetch(auth.token)
+  // 401 → token rotated/expired: refresh once and retry with the fresh token.
+  if (res && res.status === 401) {
+    res.body?.cancel()
+    const fresh = await auth.refresh()
+    if (!fresh) return { posts: [], outcome: 'dead' } // token rotated AND re-mint blocked → source dead
+    res = await doFetch(fresh)
+  }
+
+  if (!res) return { posts: [], outcome: 'transient' } // network throw — no response; proves nothing
   if (!res.ok) {
     console.warn(`[reddit] r/${subreddit} returned HTTP ${res.status}`)
     res.body?.cancel()
-    return []
+    // Only an auth/block/rate status is source-death; a 5xx etc. is transient (won't set OR clear).
+    return { posts: [], outcome: isDeadStatus(res.status) ? 'dead' : 'transient' }
   }
+  const json = await res.json().catch(() => null)
+  return { posts: parseRedditResponse(json), outcome: 'ok' }
+}
 
-  const json = await res.json()
-  return parseRedditResponse(json)
+/**
+ * Marker so a persistent auth/block failure is visible in the daily summary instead of
+ * silently zeroing out ("403 → 0 posts" is otherwise indistinguishable from a quiet day, #820).
+ */
+async function markRedditSourceDead(kv: KVNamespace, reason: 'token' | 'fetch'): Promise<void> {
+  await kv.put(REDDIT_SOURCE_DEAD_KEY, JSON.stringify({ reason, at: Date.now() }), { expirationTtl: SOURCE_DEAD_TTL_SEC })
+    .catch((err) => console.error('[reddit] source-dead marker write failed:', err instanceof Error ? err.message : err))
+}
+async function clearRedditSourceDead(kv: KVNamespace): Promise<void> {
+  await kv.delete(REDDIT_SOURCE_DEAD_KEY)
+    .catch((err) => console.error('[reddit] source-dead marker clear failed:', err instanceof Error ? err.message : err))
+}
+
+/** Increment the consecutive-all-transient-runs counter and return the new streak (0 on any error). */
+async function bumpTransientStreak(kv: KVNamespace): Promise<number> {
+  // Log a read failure for parity with the put below: a swallowed read is indistinguishable from
+  // "no prior streak", so a repeatedly-failing read would silently cap the streak at 1 and DISABLE
+  // the escalation this counter exists for — the exact silent-zeroing #820 fights. Make it visible.
+  const raw = await kv.get(REDDIT_TRANSIENT_STREAK_KEY).catch((err) => {
+    console.error('[reddit] transient-streak read failed:', err instanceof Error ? err.message : err)
+    return null
+  })
+  const next = (Number.parseInt(raw ?? '0', 10) || 0) + 1
+  await kv.put(REDDIT_TRANSIENT_STREAK_KEY, String(next), { expirationTtl: SOURCE_DEAD_TTL_SEC })
+    .catch((err) => console.error('[reddit] transient-streak write failed:', err instanceof Error ? err.message : err))
+  return next
+}
+async function resetTransientStreak(kv: KVNamespace): Promise<void> {
+  await kv.delete(REDDIT_TRANSIENT_STREAK_KEY)
+    .catch((err) => console.error('[reddit] transient-streak reset failed:', err instanceof Error ? err.message : err))
+}
+
+export interface RedditSourceDead { reason: string; at: number }
+
+/** Read the source-dead marker for the daily summary. Returns null when the source is healthy. */
+export async function readRedditSourceDead(kv: KVNamespace): Promise<RedditSourceDead | null> {
+  const raw = await kv.get(REDDIT_SOURCE_DEAD_KEY).catch(() => null)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as RedditSourceDead
+    return typeof parsed?.reason === 'string' ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -196,8 +381,28 @@ async function fetchSubreddit(subreddit: string, mode: 'outage' | 'competitive' 
  */
 export async function detectRedditPosts(
   kv: KVNamespace | null,
+  creds?: Partial<RedditCreds>,
 ): Promise<RedditAlert[]> {
   if (!kv) return []
+
+  // #820: OAuth app-only is the only robust path. Without credentials, skip quietly — the
+  // operator hasn't registered the Reddit app / set the secrets yet (not a source death).
+  if (!creds?.clientId || !creds?.clientSecret) {
+    console.warn('[reddit] REDDIT_CLIENT_ID/SECRET not set — Reddit monitoring disabled')
+    return []
+  }
+  const fullCreds: RedditCreds = { clientId: creds.clientId, clientSecret: creds.clientSecret, username: creds.username }
+
+  const token = await getRedditAppToken(kv, fullCreds)
+  if (!token) {
+    await markRedditSourceDead(kv, 'token')
+    return []
+  }
+
+  // Dedup concurrent 401 refreshes across the parallel fetches into a single token request.
+  let refreshPromise: Promise<string | null> | null = null
+  const refresh = () => (refreshPromise ??= getRedditAppToken(kv, fullCreds, { force: true }))
+  const ua = redditUserAgent(fullCreds)
 
   const alerts: RedditAlert[] = []
 
@@ -206,17 +411,21 @@ export async function detectRedditPosts(
     REDDIT_TARGETS.map(async (target) => {
       const mode: RedditAlertType = target.service === '_competitive' ? 'competitive'
         : target.service === '_security' ? 'security' : 'outage'
-      const posts = await fetchSubreddit(target.subreddit, mode)
-      return { target, posts, mode }
+      const { posts, outcome } = await fetchSubreddit(target.subreddit, mode, { token, ua, refresh })
+      return { target, posts, mode, outcome }
     }),
   )
 
+  let anyDead = false
+  let anyOk = false
   for (const result of results) {
     if (result.status === 'rejected') {
       console.error('[reddit] Subreddit fetch failed:', result.reason instanceof Error ? result.reason.message : result.reason)
       continue
     }
-    const { target, posts, mode } = result.value
+    const { target, posts, mode, outcome } = result.value
+    if (outcome === 'dead') anyDead = true
+    else if (outcome === 'ok') anyOk = true
 
     for (const post of posts) {
       // Double-check keywords (Reddit search can be fuzzy)
@@ -239,6 +448,28 @@ export async function detectRedditPosts(
 
       alerts.push({ key, subreddit: target.subreddit, post, type: mode })
     }
+  }
+
+  // #820 observability, decided by the three-state fold:
+  //   • any OK response → the source is provably alive → self-heal (clear the marker + reset the
+  //     transient streak). A lone 403 from ONE private/banned subreddit alongside real successes is
+  //     per-subreddit noise, NOT a source-wide block, so a genuine success outweighs it.
+  //   • else if any dead-status AND zero OK → the whole source is blocked → mark it dead (a definite
+  //     signal, so the transient streak resets too).
+  //   • else (all transient — every target threw / 5xx, no OK, no dead) → this single run learned
+  //     nothing, so don't fabricate a marker off one blip; but a SUSTAINED streak of all-transient
+  //     runs (token host up, every search unreachable) is a real network block that must not hide as
+  //     a quiet day — escalate to dead once the streak crosses the limit. Below it, leave any
+  //     existing marker untouched (never wipe a real one on a run that proves nothing).
+  if (anyOk) {
+    await clearRedditSourceDead(kv)
+    await resetTransientStreak(kv)
+  } else if (anyDead) {
+    await markRedditSourceDead(kv, 'fetch')
+    await resetTransientStreak(kv)
+  } else {
+    const streak = await bumpTransientStreak(kv)
+    if (streak >= TRANSIENT_STREAK_LIMIT) await markRedditSourceDead(kv, 'fetch')
   }
 
   return alerts

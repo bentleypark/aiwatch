@@ -1,6 +1,30 @@
-import { describe, it, expect } from 'vitest'
-import { parseRedditResponse, matchesKeywords, matchesSecurityKeywords, isPromotable, formatRedditAlert, formatSecurityAlert, REDDIT_TARGETS } from '../reddit'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import {
+  parseRedditResponse, matchesKeywords, matchesSecurityKeywords, isPromotable,
+  formatRedditAlert, formatSecurityAlert, REDDIT_TARGETS,
+  redditUserAgent, buildTokenRequest, buildSearchRequest, getRedditAppToken,
+  detectRedditPosts, readRedditSourceDead, REDDIT_TOKEN_KEY, REDDIT_SOURCE_DEAD_KEY,
+  REDDIT_TRANSIENT_STREAK_KEY,
+} from '../reddit'
 import type { RedditAlert } from '../reddit'
+
+// Minimal in-memory KV with the get/put/delete/list surface reddit.ts uses.
+function mockKV(initial: Record<string, string> = {}) {
+  const store = new Map(Object.entries(initial))
+  return {
+    get: vi.fn(async (k: string) => store.get(k) ?? null),
+    put: vi.fn(async (k: string, v: string) => { store.set(k, v) }),
+    delete: vi.fn(async (k: string) => { store.delete(k) }),
+    list: vi.fn(async () => ({ keys: [] as { name: string }[] })),
+    _store: store,
+  }
+}
+
+const CREDS = { clientId: 'cid', clientSecret: 'sec', username: 'ops_handle' }
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
 
 describe('parseRedditResponse', () => {
   it('parses valid Reddit JSON response', () => {
@@ -392,5 +416,286 @@ describe('REDDIT_TARGETS — playbook coverage (#280)', () => {
         expect(specialMarkers.has(target.service)).toBe(true)
       }
     }
+  })
+})
+
+// ── #820: OAuth app-only auth ──
+
+describe('redditUserAgent (#820)', () => {
+  it('produces the spec-conforming platform:app-id:version (by /u/handle) format', () => {
+    expect(redditUserAgent({ username: 'ops_handle' })).toBe('web-app:dev.ai-watch.reddit-monitor:v1.0 (by /u/ops_handle)')
+  })
+  it('falls back to a placeholder handle when username is unset (keeps the format valid)', () => {
+    expect(redditUserAgent({})).toBe('web-app:dev.ai-watch.reddit-monitor:v1.0 (by /u/aiwatch_ops)')
+    expect(redditUserAgent({ username: '  ' })).toContain('/u/aiwatch_ops')
+  })
+  it('is NOT the retired non-conforming UA', () => {
+    expect(redditUserAgent(CREDS)).not.toContain('AIWatch/1.0')
+  })
+})
+
+describe('buildTokenRequest (#820)', () => {
+  it('POSTs client_credentials with HTTP Basic auth = client_id:client_secret', () => {
+    const { url, init } = buildTokenRequest(CREDS)
+    expect(url).toBe('https://www.reddit.com/api/v1/access_token')
+    expect(init.method).toBe('POST')
+    const h = init.headers as Record<string, string>
+    expect(h.Authorization).toBe(`Basic ${btoa('cid:sec')}`)
+    expect(h['Content-Type']).toBe('application/x-www-form-urlencoded')
+    expect(h['User-Agent']).toContain('/u/ops_handle')
+    expect(init.body).toBe('grant_type=client_credentials')
+  })
+})
+
+describe('buildSearchRequest (#820)', () => {
+  it('hits oauth.reddit.com (NOT www.reddit.com) with a Bearer token + UA', () => {
+    const { url, init } = buildSearchRequest('ClaudeAI', 'outage', 'tok-abc', 'ua-str')
+    expect(url).toContain('https://oauth.reddit.com/r/ClaudeAI/search?')
+    expect(url).not.toContain('www.reddit.com')
+    expect(url).not.toContain('search.json') // the retired 403'd endpoint
+    const h = init.headers as Record<string, string>
+    expect(h.Authorization).toBe('Bearer tok-abc')
+    expect(h['User-Agent']).toBe('ua-str')
+  })
+  it('encodes a mode-specific query with the search params', () => {
+    const { url } = buildSearchRequest('netsec', 'security', 't', 'ua')
+    expect(url).toContain('sort=new')
+    expect(url).toContain('restrict_sr=on')
+    expect(url).toContain('t=day')
+    expect(url).toContain('limit=5')
+    expect(decodeURIComponent(url)).toContain('breach OR leak') // security query
+  })
+})
+
+describe('getRedditAppToken (#820)', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  it('returns the cached token WITHOUT fetching on a cache hit', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV({ [REDDIT_TOKEN_KEY]: 'cached-tok' })
+    const tok = await getRedditAppToken(kv as unknown as KVNamespace, CREDS)
+    expect(tok).toBe('cached-tok')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('on a cache miss mints a token and caches it with TTL = expires_in − 60s', async () => {
+    const fetchSpy = vi.fn(async () => jsonResponse({ access_token: 'fresh-tok', expires_in: 3600 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV()
+    const tok = await getRedditAppToken(kv as unknown as KVNamespace, CREDS)
+    expect(tok).toBe('fresh-tok')
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(kv.put).toHaveBeenCalledWith(REDDIT_TOKEN_KEY, 'fresh-tok', { expirationTtl: 3540 })
+  })
+
+  it('force evicts the cache and re-mints (401-refresh path)', async () => {
+    const fetchSpy = vi.fn(async () => jsonResponse({ access_token: 'new-tok', expires_in: 3600 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV({ [REDDIT_TOKEN_KEY]: 'stale-tok' })
+    const tok = await getRedditAppToken(kv as unknown as KVNamespace, CREDS, { force: true })
+    expect(kv.delete).toHaveBeenCalledWith(REDDIT_TOKEN_KEY)
+    expect(fetchSpy).toHaveBeenCalledOnce() // did NOT serve the stale cache
+    expect(tok).toBe('new-tok')
+  })
+
+  it('returns null (no cache write) when the token endpoint is not OK', async () => {
+    const fetchSpy = vi.fn(async () => new Response('blocked', { status: 401 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV()
+    const tok = await getRedditAppToken(kv as unknown as KVNamespace, CREDS)
+    expect(tok).toBeNull()
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+})
+
+describe('detectRedditPosts OAuth wiring (#820)', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  it('skips quietly (no fetch, no source-dead marker) when creds are absent', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV()
+    const alerts = await detectRedditPosts(kv as unknown as KVNamespace, {})
+    expect(alerts).toEqual([])
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(kv._store.has(REDDIT_SOURCE_DEAD_KEY)).toBe(false)
+  })
+
+  it('sets the source-dead marker (reason=token) when the token cannot be minted', async () => {
+    // token endpoint 403s → no token → dead. No search fetch should happen.
+    const fetchSpy = vi.fn(async (url: string) =>
+      url.includes('access_token') ? new Response('blocked', { status: 403 }) : jsonResponse({ data: { children: [] } }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV()
+    const alerts = await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    expect(alerts).toEqual([])
+    const dead = await readRedditSourceDead(kv as unknown as KVNamespace)
+    expect(dead?.reason).toBe('token')
+    // no search fetch attempted (oauth host never called)
+    expect(fetchSpy.mock.calls.every(([u]) => !String(u).includes('oauth.reddit.com'))).toBe(true)
+  })
+
+  it('marks source-dead (reason=fetch) when authed search is blocked (403)', async () => {
+    const fetchSpy = vi.fn(async (url: string, _init?: RequestInit) =>
+      url.includes('access_token') ? jsonResponse({ access_token: 'tok', expires_in: 3600 })
+        : new Response('blocked', { status: 403 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV()
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    const dead = await readRedditSourceDead(kv as unknown as KVNamespace)
+    expect(dead?.reason).toBe('fetch')
+    // every search hit the oauth host with a Bearer header
+    const searchCalls = fetchSpy.mock.calls.filter(([u]) => String(u).includes('oauth.reddit.com'))
+    expect(searchCalls.length).toBeGreaterThan(0)
+    for (const [, init] of searchCalls) {
+      expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer tok')
+    }
+  })
+
+  it('CLEARS a pre-existing source-dead marker on a clean run (self-heal)', async () => {
+    const fetchSpy = vi.fn(async (url: string) =>
+      url.includes('access_token') ? jsonResponse({ access_token: 'tok', expires_in: 3600 })
+        : jsonResponse({ data: { children: [] } }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV({ [REDDIT_SOURCE_DEAD_KEY]: JSON.stringify({ reason: 'fetch', at: 1 }) })
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toBeNull()
+  })
+
+  it('on a 401 search, refreshes the token once and retries against oauth host', async () => {
+    let tokenMints = 0
+    const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('access_token')) {
+        tokenMints++
+        return jsonResponse({ access_token: `tok-${tokenMints}`, expires_in: 3600 })
+      }
+      // first search with tok-1 → 401; after refresh, tok-2 → 200
+      const auth = (init?.headers as Record<string, string>)?.Authorization
+      if (auth === 'Bearer tok-1') return new Response('unauthorized', { status: 401 })
+      return jsonResponse({ data: { children: [] } })
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV()
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    // EXACTLY 2: initial mint + a SINGLE forced refresh deduped across every parallel 401
+    // (refreshPromise ??= …). Without the dedup each parallel 401 mints its own → tokenMints ≫ 2.
+    expect(tokenMints).toBe(2)
+    // refreshed successfully → not a dead source
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toBeNull()
+  })
+
+  it('a persistent network throw on EVERY search is transient — does NOT set a marker', async () => {
+    // token mints (www.reddit.com), but every oauth.reddit.com search throws (datacenter black-hole).
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.includes('access_token')) return jsonResponse({ access_token: 'tok', expires_in: 3600 })
+      throw new Error('ECONNRESET')
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV()
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    // all transient (no OK, no dead-status): we learned nothing → no fabricated marker
+    expect(kv._store.has(REDDIT_SOURCE_DEAD_KEY)).toBe(false)
+  })
+
+  it('a persistent network throw does NOT wipe a pre-existing dead marker (no false self-heal)', async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.includes('access_token')) return jsonResponse({ access_token: 'tok', expires_in: 3600 })
+      throw new Error('ETIMEDOUT')
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV({ [REDDIT_SOURCE_DEAD_KEY]: JSON.stringify({ reason: 'fetch', at: 1 }) })
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    // a run that proves nothing must leave a legitimate marker intact
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toEqual({ reason: 'fetch', at: 1 })
+  })
+
+  it('a lone 403 from ONE subreddit amid real successes is per-subreddit noise, NOT source-dead', async () => {
+    // one target 403s (e.g. private/banned sub); all others return OK → the source is provably alive.
+    let searchN = 0
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.includes('access_token')) return jsonResponse({ access_token: 'tok', expires_in: 3600 })
+      searchN++
+      return searchN === 1 ? new Response('forbidden', { status: 403 }) : jsonResponse({ data: { children: [] } })
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV({ [REDDIT_SOURCE_DEAD_KEY]: JSON.stringify({ reason: 'fetch', at: 1 }) })
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    // any OK outweighs a lone dead-status → self-heal, not a permanently-stuck "source DOWN"
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toBeNull()
+  })
+
+  it('a 401 whose forced re-mint is ALSO blocked marks the source dead (does NOT zero out silently)', async () => {
+    // The #820 core promise: a token that rotated AND cannot be re-minted must SURFACE, not
+    // silently zero. First mint OK; every search 401s on it; the forced re-mint is then blocked.
+    let tokenCall = 0
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.includes('access_token')) {
+        tokenCall++
+        return tokenCall === 1
+          ? jsonResponse({ access_token: 'tok-1', expires_in: 3600 })
+          : new Response('blocked', { status: 403 }) // re-mint blocked
+      }
+      return new Response('unauthorized', { status: 401 }) // every search rejects tok-1
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const kv = mockKV()
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    // outcome:'dead' → anyDead, no anyOk → marked. reason is 'fetch' (search-path death, not token mint).
+    expect((await readRedditSourceDead(kv as unknown as KVNamespace))?.reason).toBe('fetch')
+  })
+
+  // #820 round-3: a SUSTAINED network black-hole (token host up, every search unreachable) must not
+  // hide as a quiet day. One run proves nothing; a streak crossing the limit escalates to source-dead.
+  const allSearchThrow = () => vi.fn(async (url: string) => {
+    if (url.includes('access_token')) return jsonResponse({ access_token: 'tok', expires_in: 3600 })
+    throw new Error('ECONNRESET')
+  })
+
+  it('does NOT escalate below the transient-streak limit (2 runs), only counts', async () => {
+    vi.stubGlobal('fetch', allSearchThrow())
+    const kv = mockKV()
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toBeNull()
+    expect(kv._store.get(REDDIT_TRANSIENT_STREAK_KEY)).toBe('2')
+  })
+
+  it('ESCALATES to source-dead once the all-transient streak crosses the limit (3rd run)', async () => {
+    vi.stubGlobal('fetch', allSearchThrow())
+    const kv = mockKV()
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toBeNull() // still below limit
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    expect((await readRedditSourceDead(kv as unknown as KVNamespace))?.reason).toBe('fetch')
+  })
+
+  it('an OK run RESETS the transient streak (a blip cannot accumulate toward a false escalation)', async () => {
+    const kv = mockKV()
+    vi.stubGlobal('fetch', allSearchThrow())
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    expect(kv._store.get(REDDIT_TRANSIENT_STREAK_KEY)).toBe('2')
+    // a clean run comes back → streak wiped, no marker
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url.includes('access_token') ? jsonResponse({ access_token: 'tok', expires_in: 3600 })
+        : jsonResponse({ data: { children: [] } })))
+    await detectRedditPosts(kv as unknown as KVNamespace, CREDS)
+    expect(kv._store.has(REDDIT_TRANSIENT_STREAK_KEY)).toBe(false)
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toBeNull()
+  })
+})
+
+describe('readRedditSourceDead (#820)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+  it('returns null when healthy and the parsed marker when dead', async () => {
+    expect(await readRedditSourceDead(mockKV() as unknown as KVNamespace)).toBeNull()
+    const kv = mockKV({ [REDDIT_SOURCE_DEAD_KEY]: JSON.stringify({ reason: 'token', at: 123 }) })
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toEqual({ reason: 'token', at: 123 })
+  })
+  it('returns null on malformed marker JSON', async () => {
+    const kv = mockKV({ [REDDIT_SOURCE_DEAD_KEY]: 'not json' })
+    expect(await readRedditSourceDead(kv as unknown as KVNamespace)).toBeNull()
   })
 })

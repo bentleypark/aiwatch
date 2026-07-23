@@ -293,6 +293,41 @@ describe('buildDailySummary', () => {
   })
 })
 
+// #820 — the Reddit source-DOWN warning is the deliverable: "403 → 0 posts" must not read as a
+// quiet day. Pin that it renders, suppresses the normal posts line, and varies by reason.
+describe('buildDailySummary — Reddit source-DOWN warning (#820)', () => {
+  const base = {
+    services: [makeSvc()],
+    aiUsage: null,
+    latencySnapshots: [],
+    incidentCountToday: { newCount: 0, resolvedCount: 0 },
+  }
+
+  it('renders a token/auth-failed warning when reason=token', () => {
+    const result = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'token', at: 1 } })
+    expect(result).toContain('Reddit source DOWN')
+    expect(result).toContain('token/auth failed')
+  })
+
+  it('renders a search-blocked warning when reason=fetch', () => {
+    const result = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'fetch', at: 1 } })
+    expect(result).toContain('Reddit source DOWN')
+    expect(result).toContain('search blocked')
+  })
+
+  it('SUPPRESSES the normal posts line even when redditCount > 0 (stale count is not a signal)', () => {
+    const result = buildDailySummary({ ...base, redditCount: 7, redditSourceDead: { reason: 'fetch', at: 1 } })
+    expect(result).toContain('Reddit source DOWN')
+    expect(result).not.toContain('7 posts detected')
+  })
+
+  it('emits the normal posts line (no warning) when the source is healthy', () => {
+    const result = buildDailySummary({ ...base, redditCount: 4, redditSourceDead: null })
+    expect(result).not.toContain('Reddit source DOWN')
+    expect(result).toContain('4 posts detected')
+  })
+})
+
 // #679 — classifyDegradation moved here from the (deleted) detection-lead-log module; it is the
 // KEPT RTT-degradation classifier (separate from the removed lead metric).
 describe('classifyDegradation (#464/#511)', () => {

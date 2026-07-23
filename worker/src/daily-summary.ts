@@ -91,6 +91,9 @@ export interface DailySummaryData {
   webhookCounts?: { discord: number; newToday?: number | null }
   deliveryCounts?: { discord: number; failed: number } | null
   redditCount: number
+  // #820 — set when the Reddit source hit a persistent auth/block failure (token or 401/403/429);
+  // surfaces a warning so "403 → 0 posts" isn't mistaken for a quiet day. null/absent = healthy.
+  redditSourceDead?: { reason: string; at: number } | null
   securityCount?: number
   vitals?: VitalsDaily | null
   probeSnapshots?: ProbeSnapshot[]
@@ -243,7 +246,12 @@ export function buildDailySummary(data: DailySummaryData): string {
   if (webhookCounts) {
     lines.push(`🔗 **Active Discord Webhooks**: ${webhookCounts.discord}${formatSubscriberDelta(webhookCounts.newToday)}`)
   }
-  if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
+  if (data.redditSourceDead) {
+    const reasonText = data.redditSourceDead.reason === 'token' ? 'token/auth failed' : 'search blocked or unreachable'
+    lines.push(`⚠️ **Reddit source DOWN**: ${reasonText} — outage detection is dark (check REDDIT_CLIENT_ID/SECRET)`)
+  } else if (redditCount > 0) {
+    lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
+  }
   if (data.securityCount && data.securityCount > 0) lines.push(`🔒 **Security**: ${data.securityCount} alerts detected`)
 
   // Section: Web Vitals
