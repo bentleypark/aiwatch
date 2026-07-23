@@ -485,7 +485,7 @@ ${consentInitScript(nonce)}
   <div class="subscore">
     <h3 data-i18n="s4.noUptime.title">Uptime 미제공 서비스</h3>
     <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.</p>
-    <div class="formula">Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100 <span class="fl-sub">— uptime 40점 제외</span></div>
+    <div class="formula"><span data-i18n="s4.noUptime.formula">Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100</span> <span class="fl-sub" data-i18n="s4.noUptime.formulaSub">— uptime 40점 제외</span></div>
   </div>
 
   <!-- Grades -->
@@ -604,6 +604,8 @@ const i18n = {
     's4.resp.insufficient': '새로 추가된 probe 대상 서비스는 7일치 데이터가 쌓이기 전까지 5% 페널티를 적용합니다.',
     's4.noUptime.title': 'Uptime 미제공 서비스',
     's4.noUptime.desc': '일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
+    's4.noUptime.formula': 'Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100',
+    's4.noUptime.formulaSub': '— uptime 40점 제외',
     's4.grades.title': '등급 기준',
     's5.title': '레이턴시 (Probe RTT)',
     's5.lead': '33개 AI 서비스의 엔드포인트를 Cloudflare Workers 엣지에서 5분 간격으로 직접 측정합니다. p50 / p75 / p95 분위수를 산출합니다.',
@@ -689,6 +691,8 @@ const i18n = {
     's4.resp.insufficient': 'Newly added probed services receive a 5% penalty until 7 days of probe data accumulate.',
     's4.noUptime.title': 'Services without uptime data',
     's4.noUptime.desc': 'Some services (Gemini, xAI, Bedrock, etc.) publish no official uptime. We assume no value — the 40-point uptime component is dropped and the score is rescaled over the remaining available components. Services that ARE probed (Gemini, xAI, etc.) are scored on incidents + recovery + responsiveness and included in the ranking. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
+    's4.noUptime.formula': 'Score = (sum of available component scores) / (sum of their maxima) × 100',
+    's4.noUptime.formulaSub': '— uptime 40 points excluded',
     's4.grades.title': 'Grade thresholds',
     's5.title': 'Latency (Probe RTT)',
     's5.lead': 'We measure the endpoints of 33 AI services directly from the Cloudflare Workers edge every 5 minutes, producing p50 / p75 / p95 percentiles.',

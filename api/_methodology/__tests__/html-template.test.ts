@@ -98,6 +98,60 @@ describe('renderMethodologyPage', () => {
     expect(html).toMatch(/Not provided|not provided|미제공|제공.*않/)
   })
 
+  it('no .formula div leaks untranslated Korean onto the English page (#974)', () => {
+    // Defect 1 (#974): the noUptime Score formula div had no data-i18n, so setLang('en') never
+    // rewrote it and its Korean rendered on the English page. The client toggle only rewrites
+    // [data-i18n] elements, so a .formula div is leak-safe iff EITHER the div itself carries
+    // data-i18n, OR the only Korean it contains sits inside a data-i18n child span (which IS
+    // rewritten) — pure-math formula divs (language-neutral) are safe with neither.
+    const formulaDivs = [...html.matchAll(/<div class="formula"([^>]*)>([\s\S]*?)<\/div>/g)]
+    expect(formulaDivs.length).toBeGreaterThan(0)
+    for (const [, attrs, inner] of formulaDivs) {
+      if (/\bdata-i18n=/.test(attrs)) continue // whole div is translated on toggle
+      // strip translated child spans; any Korean left is direct div text that never gets rewritten
+      const bare = inner.replace(/<span[^>]*\bdata-i18n=[^>]*>[\s\S]*?<\/span>/g, '')
+      expect(/[가-힣]/.test(bare), `.formula div leaks Korean on the EN page (needs data-i18n): ${inner.slice(0, 70)}`).toBe(false)
+    }
+    // the fix's keys BOTH exist in BOTH locale blocks (ko + en). The leak scan above strips every
+    // data-i18n span unconditionally, so a key wired in only ONE locale would still pass it while
+    // leaking the other locale's text — exactly #974's bug class. Assert both keys, both locales.
+    expect((html.match(/'s4\.noUptime\.formula':/g) ?? []).length, 's4.noUptime.formula must exist in both locales').toBeGreaterThanOrEqual(2)
+    expect((html.match(/'s4\.noUptime\.formulaSub':/g) ?? []).length, 's4.noUptime.formulaSub must exist in both locales').toBeGreaterThanOrEqual(2)
+  })
+
+  it('never lists an incident.io-uptime service as "no uptime source" (#974 anti-drift)', () => {
+    // The §3 "coverage & limits" table hardcodes the no-official-uptime service names — prose that
+    // cannot derive from data, so it silently drifted: stability/elevenlabs/replicate/turbopuffer
+    // each gained an incidentIoComponentId (we now COMPUTE their uptime from incident.io
+    // component_impacts → uptimeSource 'official') but kept sitting in the table.
+    //
+    // Sound static invariant: a service with an incidentIoComponentId ALWAYS produces official
+    // uptime, so it must never appear in the limits table. This is the one direction config can
+    // pin. LIMIT: the statusComponentId / Atlassian path (deepgram vs openrouter) depends on
+    // whether the provider's HTML actually carries window.uptimeData — runtime-only, not statically
+    // derivable here — so that direction is verified against live /api/status via the issue's
+    // Tier-A verify-after assert, not this test.
+    const uptimeSection = html.slice(html.indexOf('id="uptime"'), html.indexOf('id="latency"'))
+    const limitsBlock = uptimeSection.slice(uptimeSection.indexOf('class="limits"'))
+    // first-column cells hold the ·-separated display names ("Amazon Bedrock · Azure OpenAI", …)
+    const namedNoUptime = new Set(
+      [...limitsBlock.matchAll(/<tr>\s*<td>([^<]+)<\/td>/g)]
+        .flatMap((m) => m[1].split('·').map((s) => s.trim()))
+        .filter(Boolean),
+    )
+    expect(namedNoUptime.size, 'limits-table service names should parse').toBeGreaterThan(0)
+    // Exact-name membership (NOT substring — "OpenAI" is an incident.io service whose name is a
+    // substring of the table's "Azure OpenAI", so toContain would false-positive). This assumes the
+    // table cell uses the service's config `.name` verbatim; a few no-uptime services are listed under
+    // a shortened display name (config "Gemini API"→table "Gemini", "xAI (Grok)"→"xAI"), but none of
+    // those carry an incidentIoComponentId, so the exact-name guard covers the whole incident.io set.
+    const ioNames = SERVICES.filter((s) => s.incidentIoComponentId).map((s) => s.name)
+    expect(ioNames.length).toBeGreaterThan(0)
+    for (const name of ioNames) {
+      expect(namedNoUptime.has(name), `${name} has an incidentIoComponentId (we compute its official uptime) — it must not be listed as "no uptime source"`).toBe(false)
+    }
+  })
+
   it('names every data-source platform (kept in sync with worker/src/parsers)', () => {
     // The §1 "Data sources" list must cover the real parser set — Google AI Studio (aistudio.ts,
     // #310) and Flashduty/DeepSeek (flashduty.ts, #618) were missing on first ship.
