@@ -218,6 +218,24 @@ export const CAPABILITY_LABEL: Record<string, string> = {
   audio: 'Audio / speech',
 }
 
+// #1129 — a finer label for a ROUTED audio group, keyed by the anchor's `SERVICE_CAPABILITY` sub-tag.
+// The routed group label is otherwise the CAPABILITY ('Audio / speech'), which is identical for a TTS
+// and an STT anchor — yet #1129 splits those into two separate pools, so two concurrent Voice outages
+// render two same-labelled groups (the visible-duplication the split created). Naming the sub-tag
+// ('Text to speech' vs the general 'Audio / speech') removes that duplication and self-describes which
+// half is down, matching #1062's "label says WHY it switched". Audio-only today (the only tagged
+// services are audio), and applied ONLY when the routed cap is 'audio', so a tagged service that ever
+// routes to another tier can never be mislabelled by an audio sub-tag. Synced worker↔frontend
+// (api-tier-sync.test.ts); NOT mirrored into is-down, which shows one service and never groups.
+// Scope: this only distinguishes a SINGLE-sub-capability anchor. Two GENERAL-audio anchors — an untagged
+// multimodal (openai `Audio`) or the both-tagged `deepgram` — still share 'Audio / speech' if they anchor
+// concurrently; that is by design (general audio has no finer name), a rarer pairing than the tts-vs-general
+// case this fixes, and semantically correct rather than a duplicate to eliminate.
+export const CAPABILITY_TAG_LABEL: Record<string, string> = {
+  tts: 'Text to speech',
+  stt: 'Speech to text',
+}
+
 // #1062 facet C — the REVERSE of routing: multimodal LLM services that ALSO provide a specialized
 // capability via a MONITORED component, so a DEDICATED capability service's outage (Stability image /
 // Runway video / ElevenLabs voice) can recommend them too, not only its same-tier sibling. Only OpenAI
@@ -455,15 +473,14 @@ export function getGroupedFallbacks(
   const groupKeyOf = (svc: FallbackCandidate) => {
     // #1062 facet B — key by the EFFECTIVE tier (routed capability tier for a secondary-only outage),
     // so a routed OpenAI-'Images' outage groups + labels as Image, not the source's LLM tier.
-    // #1119 — the key groups anchors that draw from the same POOL. It does that on two of the three
-    // axes a pool depends on, and the third is a pre-existing limitation recorded at the end of this
-    // comment — do not read the rule as a full partition.
-    // A ROUTED anchor's pool is determined by its routed tier (`inSourceTier`, no category, no facet-C
-    // widening), so routed anchors at one tier share a key regardless of category:
+    // #1119 — the key groups anchors that draw from the same POOL. A ROUTED anchor's pool is determined
+    // by its routed tier (`inSourceTier`, no category, no facet-C widening) AND, per facet A, by the
+    // anchor's own `SERVICE_CAPABILITY` tag (#1129) — the key encodes both. So routed anchors at one
+    // tier share a key across categories ONLY when their tags also match:
     // `openai` (api) and `chatgpt` (app) read the SAME status page and route together on one image
-    // incident, and under the old `category:tierLabel` key they produced two groups of identical
-    // content — rendered twice, and `resolved.length` 1→2 collapsed perGroup 2→1 so the second
-    // alternative silently vanished. A NON-routed anchor keeps `category:tierLabel`.
+    // incident (both untagged → same key), and under the old `category:tierLabel` key they produced two
+    // groups of identical content — rendered twice, and `resolved.length` 1→2 collapsed perGroup 2→1 so
+    // the second alternative silently vanished. A NON-routed anchor keeps `category:tierLabel`.
     //
     // A routed and a non-routed anchor at the SAME tier deliberately stay SEPARATE, even though that
     // costs a perGroup slot. Their pools are genuinely different, so merging them answers one anchor
@@ -478,19 +495,15 @@ export function getGroupedFallbacks(
     // anchoring and candidacy are exact complements (anchor = non-operational OR carrying an incident;
     // candidate = operational AND clean), so a co-anchor is never in the other's pool to begin with.
     //
-    // KNOWN LIMITATION, pre-existing and not fixed here: the routed pool also depends on the ANCHOR's
-    // own `SERVICE_CAPABILITY` tag via `sharesCapability`, which this key does not encode. Two routed
-    // Voice-tier anchors whose tags differ — a TAGGED one (`elevenlabs` tts / `assemblyai` stt) and an
-    // UNTAGGED one (OpenAI `Audio`, Mistral `Audio API`, a ChatGPT `Voice Mode`) — therefore share a
-    // group whose contents are decided by array order, and the tagged anchor can be answered with the
-    // wrong half of the Voice tier (ElevenLabs TTS → AssemblyAI STT, the case #1062 facet A exists to
-    // prevent). Tier 4 only, and `deepgram` never diverges (it carries both tags). Pre-#1119 both
-    // anchors keyed `api:Voice` and collapsed identically, so this is neither introduced nor repaired
-    // by #1119 — it is named here so the rule above is not mistaken for a guarantee it does not make.
-    // Tracked in #1129, which is why the behaviour is pinned as OBSERVED in fallback.test.ts rather
-    // than left undiscovered: that test is the assertion #1129 flips.
+    // #1129 — the routed pool ALSO depends on the anchor's own `SERVICE_CAPABILITY` tag via
+    // `sharesCapability` (facet A: a tagged `elevenlabs` tts source excludes `assemblyai` stt), so the
+    // key encodes that tag too. Without it a TAGGED and an UNTAGGED routed Voice anchor (ElevenLabs tts
+    // vs OpenAI `Audio` / Mistral `Audio API` / a ChatGPT `Voice Mode`) shared one `routed:4` group whose
+    // contents array order decided, and the tagged anchor could be answered with the wrong half of the
+    // tier (ElevenLabs TTS → AssemblyAI STT). Two same-tagged anchors (both untagged, or both tts) still
+    // share a group; only a tag DIFFERENCE splits them, into two honestly-answered groups.
     const routed = routingTier(svc)
-    if (routed !== null && routed > 0) return `routed:${routed}`
+    if (routed !== null && routed > 0) return `routed:${routed}:${(SERVICE_CAPABILITY[svc.id] ?? []).join('|')}`
     const tierLabel = tierLabelFor(effectiveTierFor(svc))
     return tierLabel ? `${svc.category}:${tierLabel}` : svc.category
   }
@@ -520,7 +533,13 @@ export function getGroupedFallbacks(
     // #1062 facet B — a routed group is labelled by the affected CAPABILITY ("Image generation"), so the
     // recommendation self-describes WHY it switched; a non-routed group keeps its tier/category label.
     const cap = routedCapability(svc)
-    const label = cap ? CAPABILITY_LABEL[cap] : (tierLabelFor(effectiveTierFor(svc)) || CATEGORY_LABEL[svc.category] || svc.category)
+    // #1129 — when a routed AUDIO group's anchor carries a single SERVICE_CAPABILITY sub-tag, label by
+    // that sub-tag ('Text to speech' / 'Speech to text') instead of the shared 'Audio / speech', so two
+    // split Voice groups don't render as duplicate labels. Untagged (openai audio) and both-tagged
+    // (deepgram) fall through to the capability label. Guarded on cap === 'audio' — see CAPABILITY_TAG_LABEL.
+    const tags = SERVICE_CAPABILITY[svc.id] ?? []
+    const subLabel = cap === 'audio' && tags.length === 1 ? CAPABILITY_TAG_LABEL[tags[0]] : undefined
+    const label = cap ? (subLabel ?? CAPABILITY_LABEL[cap]) : (tierLabelFor(effectiveTierFor(svc)) || CATEGORY_LABEL[svc.category] || svc.category)
     resolved.push({ label, ...(cap ? { capability: cap } : {}), fallbacks: fbs })
   }
   const perGroup = resolved.length <= 1 ? 2 : 1

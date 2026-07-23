@@ -19,11 +19,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares, CAPABILITY_TIER as workerCapTier, capabilityOfComponent as workerCapOf, COMPONENT_CAPABILITY as workerCompCap, CAPABILITY_LABEL as workerCapLabel, routedCapability as workerRoutedCap, routingTier as workerRoutingTier, CAPABILITY_PROVIDERS as workerCapProv, isCapabilityProvider as workerIsCapProv } from '../fallback'
+import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares, CAPABILITY_TIER as workerCapTier, capabilityOfComponent as workerCapOf, COMPONENT_CAPABILITY as workerCompCap, CAPABILITY_LABEL as workerCapLabel, CAPABILITY_TAG_LABEL as workerCapTagLabel, routedCapability as workerRoutedCap, routingTier as workerRoutingTier, CAPABILITY_PROVIDERS as workerCapProv, isCapabilityProvider as workerIsCapProv } from '../fallback'
 // Vitest resolves cross-package paths via the repo root; this works because frontend `src/` and
 // worker `src/` share a single repo with one node_modules. The import is data-only (no runtime
 // side effects from constants.js — no environment variables are read at module load).
-import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares, CAPABILITY_TIER as frontendCapTier, capabilityOfComponent as frontendCapOf, COMPONENT_CAPABILITY as frontendCompCap, CAPABILITY_LABEL as frontendCapLabel, routedCapability as frontendRoutedCap, CAPABILITY_PROVIDERS as frontendCapProv, isCapabilityProvider as frontendIsCapProv } from '../../../src/utils/constants'
+import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares, CAPABILITY_TIER as frontendCapTier, capabilityOfComponent as frontendCapOf, COMPONENT_CAPABILITY as frontendCompCap, CAPABILITY_LABEL as frontendCapLabel, CAPABILITY_TAG_LABEL as frontendCapTagLabel, routedCapability as frontendRoutedCap, CAPABILITY_PROVIDERS as frontendCapProv, isCapabilityProvider as frontendIsCapProv } from '../../../src/utils/constants'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 
@@ -342,6 +342,15 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     // suppressed cap (embeddings/realtime) would never render, signalling a mistake.
     for (const cap of Object.keys(workerCapLabel)) {
       expect(cap in workerCapTier, `CAPABILITY_LABEL has '${cap}' but it has no CAPABILITY_TIER entry`).toBe(true)
+    }
+  })
+
+  it('#1129 — worker CAPABILITY_TAG_LABEL ≡ frontend, and every key is a real SERVICE_CAPABILITY sub-tag', () => {
+    expect(workerCapTagLabel).toEqual(frontendCapTagLabel)
+    // A label for a sub-tag no service carries would never render — guard against a dead entry.
+    const realTags = new Set(Object.values(workerCap).flat())
+    for (const tag of Object.keys(workerCapTagLabel)) {
+      expect(realTags.has(tag), `CAPABILITY_TAG_LABEL has '${tag}' but no SERVICE_CAPABILITY entry uses it`).toBe(true)
     }
   })
 

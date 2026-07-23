@@ -1063,15 +1063,12 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
     }
   })
 
-  it('KNOWN LIMITATION — a tagged and an untagged routed Voice anchor merge, and array order decides', () => {
-    // Pinned as OBSERVED behaviour, not as desired behaviour. The routed pool also depends on the
-    // anchor's own SERVICE_CAPABILITY tag (facet A), which the group key does not encode, so an
-    // ElevenLabs (tts) anchor sharing a group with an untagged OpenAI-'Audio' anchor can be answered
-    // with AssemblyAI (stt) — the pairing #1062 facet A exists to prevent — depending on which anchor
-    // the array lists first. Tier 4 only. This is PRE-EXISTING: before #1119 both anchors keyed
-    // `api:Voice` and collapsed the same way, so #1119 neither caused nor fixed it. The test exists so
-    // the behaviour is known and a future fix has a failing assertion to flip, not so it is blessed.
-    // Tracked in #1129 — flipping these two expectations is that issue's deliverable.
+  it('#1129 — a tagged and an untagged routed Voice anchor split into two groups, answer is order-independent', () => {
+    // The routed pool depends on the anchor's own SERVICE_CAPABILITY tag (facet A), so the group key
+    // encodes it (`routed:4:tts` vs `routed:4:`). A TAGGED ElevenLabs (tts) anchor and an UNTAGGED
+    // OpenAI-'Audio' anchor therefore render two honest groups instead of one whose contents array order
+    // decided — and the tagged anchor can no longer be answered with AssemblyAI (stt), the pairing #1062
+    // facet A exists to prevent. Assert BOTH orderings, which now agree.
     const oa = {
       id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 99,
       components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }],
@@ -1081,13 +1078,19 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
       components: [{ name: 'Text to Speech', status: 'degraded' }, { name: 'ElevenCreative', status: 'operational' }],
     }
     const services = [oa, el, op('assemblyai', 'api', 'AssemblyAI', 80), op('deepgram', 'api', 'Deepgram', 75)]
-    // Per-anchor, the facet-A gate still works: ElevenLabs alone never sees AssemblyAI.
+    // Per-anchor, the facet-A gate works: ElevenLabs alone never sees AssemblyAI.
     expect(getFallbacks('elevenlabs', 'api', services).map(f => f.name)).toEqual(['Deepgram'])
-    // Grouped, the two anchors share `routed:4` and the FIRST one resolves the group for both.
-    expect(getGroupedFallbacks(['openai', 'elevenlabs'], services)[0].fallbacks.map(f => f.name))
-      .toEqual(['AssemblyAI', 'Deepgram'])
-    expect(getGroupedFallbacks(['elevenlabs', 'openai'], services)[0].fallbacks.map(f => f.name))
-      .toEqual(['Deepgram'])
+    // Grouped: two separate groups (perGroup=1), keyed by label so the assertion is order-independent.
+    // The untagged OpenAI anchor keeps AssemblyAI (its whole Voice pool) under the general 'Audio / speech'
+    // label; the tagged ElevenLabs anchor is answered only with Deepgram — never AssemblyAI — and is
+    // labelled by its sub-tag 'Text to speech' (#1129) so the two groups don't render as duplicate labels.
+    for (const order of [['openai', 'elevenlabs'], ['elevenlabs', 'openai']]) {
+      const groups = getGroupedFallbacks(order, services)
+      expect(groups).toHaveLength(2)
+      const byLabel = Object.fromEntries(groups.map(g => [g.label, g.fallbacks.map(f => f.name)]))
+      expect(byLabel['Audio / speech']).toEqual(['AssemblyAI'])
+      expect(byLabel['Text to speech']).toEqual(['Deepgram'])
+    }
   })
 
   it('two routed anchors at the VOICE tier also share one group (the rule is not Image-specific)', () => {
