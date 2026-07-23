@@ -101,6 +101,11 @@ describe('renderFallbacks — outbound referral wedge (#842)', () => {
     expect((html.match(/ranked by AIWatch Score, not paid/g) ?? []).length).toBe(1)
     expect(html).toContain('href="https://ai.google.dev?ref=ai-watch.dev"') // the one button is Gemini's
   })
+
+  it('#1119 — Stability\'s Open button targets the consumer surface (Brand Studio), not the corporate root', () => {
+    // The link map is what makes a cross-category image recommendation actionable for a non-developer.
+    expect(outboundReferralUrl('stability')).toBe('https://stability.ai/brandstudio?ref=ai-watch.dev')
+  })
 })
 
 describe('renderAIInsight — predicted vs actual (#827 F4)', () => {
@@ -746,7 +751,9 @@ describe('renderFooter — Also check category grouping', () => {
     // #658 — `category` and the fine `group` now sit side by side on every entry. `category` MUST
     // remain in the worker's 3-way vocabulary because api/is-down.ts filters fallback candidates with
     // `s.category === entry.category`, where `s.category` is the worker ServiceStatus value (api/app/
-    // agent). If a contributor "aligns" category with the fine group (e.g. sets category:'voice'),
+    // agent). #1119 narrowed that to the NON-routed path — a capability-routed source is pinned to the
+    // routed tier instead — but the non-routed path is still the common one, so this guard stands.
+    // If a contributor "aligns" category with the fine group (e.g. sets category:'voice'),
     // that equality matches NO operational candidate and the service's fallback list silently goes
     // empty — no runtime error, no other test failure. Pin the coarse vocabulary here so that
     // mistake fails loudly. (The fine taxonomy is asserted on `group` in the test above.)

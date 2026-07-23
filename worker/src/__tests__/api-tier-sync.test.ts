@@ -305,6 +305,37 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     expect(/routingTier\(target\)/.test(isDownSource), 'api/is-down.ts no longer calls routingTier(target)').toBe(true)
   })
 
+  it('#1119 — api/is-down.ts inline copy relaxes the category filter ONLY on the routed path', () => {
+    // The Edge module can't be imported, so the rule is pinned by source match like the rest of this
+    // inline mirror. Four separate things must survive, because each fails differently:
+    //   1. the ternary itself — without it the routed ChatGPT card silently shows no Alternatives again
+    //   2. `routed > 0` as the condition — counterfactually: if the suppress guard below is ever
+    //      removed, `routed !== null` would absorb ROUTE_SUPPRESS (-1) into this branch, where it still
+    //      yields nothing by accident (tier -1 matches nothing) and no test notices
+    //   3. the suppress guard itself, which must remain the thing that actually suppresses
+    //   4. the tier pin on the relaxed branch, and that it is the NON-widened `inSourceTier` — the
+    //      facet-C form would answer a routed ChatGPT image outage with "try OpenAI API"
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    expect(/routedCross \? inSourceTier\(s\.id\) : s\.category === entry\.category/.test(isDownSource),
+      'is-down lost the #1119 routed-vs-category ternary').toBe(true)
+    expect(/const routedCross = routed !== null && routed > 0/.test(isDownSource),
+      'is-down routedCross must require a POSITIVE tier, not merely non-null').toBe(true)
+    expect(/routed !== ROUTE_SUPPRESS/.test(isDownSource),
+      'is-down lost the route-else-suppress guard around the fallback block').toBe(true)
+    expect(/const inSourceTier = \(id: string\) => tierFor\(id\) === sourceTier/.test(isDownSource),
+      'is-down lost the #1119 routed-tier pin').toBe(true)
+    // COUNT, not presence. Every assertion above is `RegExp.test`, which an ADDED line cannot break —
+    // re-appending `&& s.category === entry.category` to the filter reverts #1119 on the public surface
+    // with all of them still green (measured). Pinning the category comparison to exactly ONE
+    // occurrence kills that bypass, since the ternary already contains the only legitimate one.
+    expect((isDownSource.match(/s\.category === entry\.category/g) ?? []).length,
+      'api/is-down.ts must compare category exactly once — inside the #1119 ternary').toBe(1)
+    // Ordering: EXCLUDE_FALLBACK must be evaluated BEFORE any tier lookup, or `tierFor`'s warn-once
+    // fires for the six deliberately-untiered services — and on the Edge that set is per-REQUEST.
+    expect(/\.filter\(s => !EXCLUDE_FALLBACK\.includes\(s\.id\) && s\.id !== entry\.id\s*\n\s*&& \(routedCross \?/.test(isDownSource),
+      'is-down must test the id-only guards before the routed-tier lookup').toBe(true)
+  })
+
   it('worker CAPABILITY_LABEL ≡ frontend (deep equal), and only routable caps have a label', () => {
     expect(workerCapLabel).toEqual(frontendCapLabel)
     // Every label key must be a routable capability (has a CAPABILITY_TIER entry) — a label for a
@@ -370,6 +401,12 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     const inline: Record<string, string[]> = {}
     for (const e of m![1].matchAll(/(\w+):\s*\[([^\]]*)\]/g)) inline[e[1]] = [...e[2].matchAll(/'([^']+)'/g)].map(x => x[1])
     expect(inline).toEqual(workerCapProv)
-    expect(/isCapabilityProvider\(s\.id,\s*sourceTier\)/.test(isDownSource), 'is-down filter no longer calls isCapabilityProvider').toBe(true)
+    // #1119 — the filter now reaches isCapabilityProvider through the `admittedBySubTier` helper (the
+    // facet-C widening clause only — the routed branch deliberately uses `inSourceTier`), so pin it
+    // rather than a bare call site: that is the single place the widening can be dropped.
+    expect(/const admittedBySubTier = \(id: string\) => inSourceTier\(id\) \|\| isCapabilityProvider\(id, sourceTier\)/.test(isDownSource),
+      'is-down no longer widens the candidate pool via isCapabilityProvider').toBe(true)
+    expect(/!sameTierOnly \|\| admittedBySubTier\(s\.id\)/.test(isDownSource),
+      'is-down filter no longer applies the facet-C widening clause').toBe(true)
   })
 })
