@@ -814,6 +814,23 @@ export function canIdBypass(config: ServiceConfig): boolean {
   return !!(config.incidentIoComponentId && config.incidentExclude?.length && config.statusComponentIds?.length)
 }
 
+/** #1032/#1038 — does the provider's own tagging place this incident in THIS service's badge group?
+ *  The provider tagging an incident onto a component WE badge is the provider asserting it affects us,
+ *  and that outranks any title-string guess: a substring `incidentExclude` veto (#1032) OR a title-token
+ *  `incidentKeywords` miss (#1038, e.g. `gpt-4o-mini high error rate` tagged onto every API-group
+ *  component yet carrying no `'api'` token). ID-keyed, never name-keyed — names collide across product
+ *  groups on a shared page (the two "Login" on status.openai.com). `componentIds` is tagged at the
+ *  source by `attachIncidentIoComponentIds` from the page HTML's `component_impacts`; absent ⇒ false ⇒
+ *  the caller's pre-existing behaviour (fail-closed on a missing/shape-changed page). Gated on
+ *  `canIdBypass`, so `config.statusComponentIds` is non-empty here — openai/chatgpt/codex only. ONE
+ *  primitive for every reader on the id axis (`feedback_shared_primitive_over_parallel_copies`): the
+ *  #1032 exclude-bypass, the #1038 keyword-augment, and the #1104 active-keep all ask this one question. */
+export function incidentTagsOwnBadge(inc: Incident, config: ServiceConfig): boolean {
+  if (!canIdBypass(config) || !inc.componentIds?.length) return false
+  const badgeIds = config.statusComponentIds!
+  return inc.componentIds.some((id) => badgeIds.includes(id))
+}
+
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
   const { incidentKeywords, incidentExclude, incidentComponents } = config
   return incidents.filter((inc) => {
@@ -844,10 +861,7 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
       // Non-regressive by construction, not by luck: an incident only bypasses if its ids intersect
       // this service's own badge group, so the #990 FedRAMP advisory (tagged 'FedRAMP', an id in NO
       // service's `statusComponentIds`) can never reach chatgpt/codex through here.
-      if (canIdBypass(config) && inc.componentIds?.length) {
-        const badgeIds = config.statusComponentIds!
-        if (inc.componentIds.some((id) => badgeIds.includes(id))) return true
-      }
+      if (incidentTagsOwnBadge(inc, config)) return true
       return false
     }
     // aistudio incidents are component-filtered at the parser (components: [API])
@@ -867,6 +881,18 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
       return (inc.componentNames ?? []).some((n) => allow.has(n.toLowerCase()))
     }
     if (incidentKeywords && incidentKeywords.length > 0) {
+      // #1038 Part A — id-positive scoping: keep an incident the provider tagged onto a component in
+      // OUR badge group even when the TITLE carries no keyword token. incident.io returns `components: []`
+      // (#1004), so for openai/chatgpt/codex the keyword match below is title-ONLY in practice — and a
+      // model-named incident (`gpt-4o-mini high error rate`) has no `'api'`/region token, so it was
+      // dropped here even though OpenAI tagged it onto every API-group component. That produced an
+      // internal contradiction: `uptime30d` (read from `component_impacts`) fell for the outage while the
+      // Score's Incidents/Recovery inputs (the FILTERED list) never saw it — every miss skewing the same
+      // way (fewer incidents, better recovery, higher Score). The provider's own component tagging
+      // outranks a title-token guess, the same evidence the #1032 exclude-bypass above already trusts.
+      // Does NOT over-include: the billing/Login incident tags the CHATGPT-group Login (empty ∩ openai
+      // badge), FedRAMP tags a component in no badge group — both stay dropped (pinned in the replay).
+      if (incidentTagsOwnBadge(inc, config)) return true
       // Match against title OR affected component names
       const compNames = (inc.componentNames ?? []).map((n) => n.toLowerCase())
       return incidentKeywords.some((kw) => {
@@ -1080,11 +1106,11 @@ export function filterByComponentStatus(
       // it touched us. ID-keyed, not name-keyed: names collide across product groups on a shared page
       // (two "Login" on status.openai.com — the #1032 finding); `componentNames` is a bare tag with no
       // impact window, so keying on it would readmit the over-tagging this rule exists to filter (#228).
-      // Matched against `badgeGroupIds(config)`, which is `statusComponentIds ?? [statusComponentId]` —
-      // marginally broader than #1032's `statusComponentIds!` in principle, but provably the same set on
-      // THIS path: `canIdBypass` itself requires `statusComponentIds?.length`, so `badgeGroupIds` can never
-      // fall through to `[statusComponentId]` here. A guarantee, not a config coincidence — do not
-      // "align" one side to the other on the assumption that it is.
+      // `incidentTagsOwnBadge` is the shared id-axis primitive (#1032/#1038): `componentIds ∩
+      // statusComponentIds`, gated on `canIdBypass`. It matches `statusComponentIds!` where the older
+      // inline form read `badgeGroupIds(config)` — provably the same set on THIS path (`canIdBypass`
+      // requires `statusComponentIds?.length`, so `badgeGroupIds` never falls through to
+      // `[statusComponentId]` here), so the consolidation is behaviour-preserving, not a widening.
       //
       // `unjudgeable` is a NAME-resolution failure — every configured id missing from the page's
       // component list, which `badgeGroupNames` can only reach for an id-configured service (it seeds
@@ -1093,7 +1119,7 @@ export function filterByComponentStatus(
       // match here is a verdict, not a guess. The BADGE is untouched either way — `svcStatus` is resolved
       // BEFORE this filter runs and merely passed in as `componentStatus`; nothing downstream re-derives
       // status from the returned array. That ORDERING is the guarantee, not any property of this code.
-      if (canIdBypass(config) && i.componentIds?.some(cid => ids.includes(cid))) {
+      if (incidentTagsOwnBadge(i, config)) {
         // Re-arm the drop warn below: a later cycle whose join breaks again is a NEW event, not a
         // repeat of the one already logged.
         warnedMissingJoin.delete(missingJoinKey(config.id, i.id))
@@ -1148,6 +1174,43 @@ export function filterByComponentStatus(
       // guess, not a verdict. A TAGGED non-match (e.g. Billing-only) is a confident drop — no warn.
       if (names.length === 0) {
         console.warn(`[filterByComponentStatus] #970 ${config.id}: dropping UNTAGGED impact:none incident ${i.id} (no componentNames to attribute it by)`)
+        return false
+      }
+      // #1038 Part B — the NAME axis is INVALID for a `canIdBypass` service, so never fall back to it.
+      // These services are id-scoped precisely because their component NAMES collide across product
+      // groups on a shared page (the two "Login" on status.openai.com — the #1032 finding), so a
+      // name-match here would re-open the exact mis-attribution #1032 removed, through a different door:
+      // the #1104 id-keep above is the ONE positive-attribution route for such an incident to survive
+      // (the `unjudgeable` fail-open one branch up is the only other, a degenerate safety keep), and
+      // reaching this line means it did not match — the provider's own tagging says this is a sibling's.
+      // Fail closed.
+      //
+      // Inert today (no live change): incident.io returns `components: []` (#1004), so openai carries no
+      // `componentNames` and the untagged drop above already fired — this line is unreachable for the
+      // three canIdBypass services right now. It is defence for the latent route:
+      // `attachIncidentIoComponentNames`/`resolveComponentNames` (#1047) defer to the API, so a restored
+      // `components`/`affected_components` field would give a ChatGPT-only Login incident
+      // `componentNames: ['Login']`, and without this guard `inBadgeGroup` would name-match openai's badge
+      // group. The NAME match below therefore serves ONLY the OTHER (non-`canIdBypass`) services that
+      // reach this line — none of them carries the cross-product-group name collision (status.openai.com's
+      // two "Login") that makes the name axis unsafe, so for them a name match is sound.
+      // Two structurally distinct drops collapse onto this gate, mirroring the `impact !== null` split
+      // above: a present-but-non-intersecting `componentIds` is a provider VERDICT (a sibling's — drop
+      // silently, like the #1104 tagged-non-match), but an ABSENT `componentIds` is MISSING evidence — the
+      // HTML join failed, so the id-keep never got its chance. An impact:none incident whose join failed
+      // can still be OURS (an impact window closes while the incident stays open — the #1104 premise), so
+      // dropping it silently is the exact #1104 silent-loss mode on the impact:none path. It must WARN, not
+      // vanish (#970/#983: a judgement drop is never silent) — same throttle + key as the `impact !== null`
+      // branch above. The drop itself stays: names are genuinely ambiguous for these services, so we
+      // cannot re-admit on the name axis — only the SILENCE on missing evidence is the defect. Inert today
+      // (openai's `componentNames` is empty, so the untagged drop above fires first); reachable only via
+      // the #1047 name-restore route.
+      if (canIdBypass(config)) {
+        if (!i.componentIds?.length && !warnedMissingJoin.has(missingJoinKey(config.id, i.id))) {
+          if (warnedMissingJoin.size >= 500) warnedMissingJoin.clear()
+          warnedMissingJoin.add(missingJoinKey(config.id, i.id))
+          console.warn(`[filterByComponentStatus] #1038 ${config.id}: dropping impact:none active incident ${i.id} — the NAME axis is invalid for an id-scoped service and NO componentIds joined, so the evidence is MISSING not negative (the #1104 silent-loss mode on the impact:none path)`)
+        }
         return false
       }
       return inBadgeGroup(names)

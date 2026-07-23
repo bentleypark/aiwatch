@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { parseIncidents, resolveComponentNames, type StatuspageResponse } from '../parsers/statuspage'
-import { filterIncidents, filterByComponentStatus, includeUntaggedIncidents, fetchService, canIdBypass, __resetMissingJoinWarnThrottle, SERVICES } from '../services'
+import { filterIncidents, filterByComponentStatus, includeUntaggedIncidents, fetchService, canIdBypass, badgeGroupNames, __resetMissingJoinWarnThrottle, SERVICES } from '../services'
 import type { ServiceConfig } from '../types'
 
 // #1047 — Anthropic UNLINKED every component from `kqbd7wm6hnnr` ("Elevated errors for multiple
@@ -564,5 +564,105 @@ describe('#1104 fetchService — the REAL production call path, with a CLOSED im
     // This is the mutation direction: remove the attach wiring and the previous two tests go red.
     const svc = await fetchOpenai(undefined)
     expect(svc.incidents.map((i) => i.id)).not.toContain(INC)
+  })
+})
+
+// ── #1038 Part B — the NAME axis is invalid for a canIdBypass service ────────────────────────────
+// `filterByComponentStatus` answered "does this incident touch my badge group?" on the NAME axis for an
+// impact:none active incident (`inBadgeGroup(names)`) — structurally the same collision #1032 defeats:
+// `status.openai.com` carries two components both literally named "Login" (APIs group → openai, ChatGPT
+// group → chatgpt). Inert today (incident.io returns `components: []`, #1004, so openai carries no
+// componentNames → the untagged drop fires first), but `attachIncidentIoComponentNames`/`resolveComponentNames`
+// defer to the API (#1047), so a restored field would give a ChatGPT-only Login incident
+// `componentNames: ['Login']` and openai would name-match it. Part B: a canIdBypass service never falls
+// back to names — the #1104 id-keep is its ONE valid survival route.
+describe('#1038 Part B filterByComponentStatus — a canIdBypass service never name-matches', () => {
+  // Restore console.warn spies between tests — without it the warn/silent assertions below read each
+  // other's recorded calls through the shared mock (the #1104 describes all do the same).
+  afterEach(() => { vi.restoreAllMocks() })
+  // Real ULIDs — the two colliding "Login". API-group Login is in openai's badge; ChatGPT-group is not.
+  const API_LOGIN = '01JSM5RTJWHRWDTS6Q604VEW3B' // "Login", APIs group    → openai.statusComponentIds
+  const CHATGPT_LOGIN = '01JMXBNJXG1S2D9V65P1ZZTD94' // "Login", ChatGPT group → NOT openai's
+
+  // The page component list the badge-group NAMES resolve through: API_LOGIN → 'Login', so openai's
+  // badge group NAME set contains 'login' — which is exactly why a ChatGPT-only Login incident whose
+  // names were restored would name-match it.
+  const COMPONENTS = [
+    { id: API_LOGIN, name: 'Login' },
+    { id: CHATGPT_LOGIN, name: 'Login' },
+  ]
+
+  // An impact:none ACTIVE incident with restored componentNames — the latent state Part B defends.
+  // `impact: null` is what the #970 branch keys on; `status: 'identified'` keeps it out of the
+  // resolved/monitoring early-return.
+  const loginIncident = (componentIds?: string[]) => ([{
+    id: '01KXN14DD3EYYJ6PJ9M736WDSV',
+    title: 'Elevated Error Rates For SSO Login',
+    status: 'identified',
+    impact: null,
+    componentNames: ['Login'], // RESTORED by a hypothetical incident.io change — the #1047 route
+    ...(componentIds ? { componentIds } : {}),
+  }] as unknown as Parameters<typeof filterByComponentStatus>[0])
+
+  it('premise: openai\'s badge-group NAME set really does contain "login" (so a name-match WOULD collide)', () => {
+    // If this drifts, the whole collision premise is gone and the tests below are vacuous — fail here.
+    expect(canIdBypass(cfg('openai'))).toBe(true)
+    expect(badgeGroupNames(cfg('openai'), COMPONENTS).has('login')).toBe(true)
+  })
+
+  it('DROPS a ChatGPT-only Login incident whose names were restored — the collision does NOT re-open', () => {
+    // componentIds name only the ChatGPT-group Login (∩ openai badge = ∅), so the #1104 id-keep misses;
+    // pre-Part-B, `componentNames: ['Login']` then name-matched openai's badge group and it was KEPT.
+    expect(filterByComponentStatus(loginIncident([CHATGPT_LOGIN]), 'operational', cfg('openai'), COMPONENTS)).toEqual([])
+  })
+
+  it('DROPS it even with NO id evidence — a canIdBypass service trusts names for nothing', () => {
+    // componentIds absent AND names restored: the name axis is still invalid for openai, so fail closed.
+    expect(filterByComponentStatus(loginIncident(), 'operational', cfg('openai'), COMPONENTS)).toEqual([])
+  })
+
+  it('the NO-id-evidence drop WARNS — missing evidence is not a verdict (matches the #1104 impact!==null branch)', () => {
+    // The one direction that separates a MISSING-join drop from a confident verdict: an impact:none
+    // incident whose join failed can still be OURS (#1104 premise), so a silent drop is the #1104
+    // silent-loss mode. Reset first — the throttle is module state (an earlier test's (svc,inc,hour) key
+    // would make this read 0, i.e. "the warn stopped"), the #1104 lesson.
+    __resetMissingJoinWarnThrottle()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(filterByComponentStatus(loginIncident(), 'operational', cfg('openai'), COMPONENTS)).toEqual([])
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('#1038') && l.includes('01KXN14DD3EYYJ6PJ9M736WDSV'))
+    expect(lines).toHaveLength(1)
+    // …and throttled: this gate runs on EVERY /api/status request, so an un-throttled line would flood.
+    filterByComponentStatus(loginIncident(), 'operational', cfg('openai'), COMPONENTS)
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('#1038'))).toHaveLength(1)
+  })
+
+  it('the sibling-tagged drop is SILENT — a provider VERDICT (ids present, no intersection) is not a guess', () => {
+    // Warning here would fire on every ChatGPT incident against openai, every cycle — they share a page.
+    // Only the MISSING-evidence case (test above) warns; the present-but-non-intersecting case does not.
+    __resetMissingJoinWarnThrottle()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(filterByComponentStatus(loginIncident([CHATGPT_LOGIN]), 'operational', cfg('openai'), COMPONENTS)).toEqual([])
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('#1038'))).toHaveLength(0)
+  })
+
+  it('KEEPS openai\'s OWN incident via the #1104 id-keep — the id axis, above Part B, is untouched', () => {
+    // Tagged onto the API-group Login (in openai's badge) → id intersection → kept before Part B runs.
+    expect(filterByComponentStatus(loginIncident([API_LOGIN]), 'operational', cfg('openai'), COMPONENTS))
+      .toHaveLength(1)
+  })
+
+  it('the NAME fallback STILL serves a name-scoped service (Part B killed it only for id-scoped)', () => {
+    // The witness is `claudeai`, which GENUINELY flows through filterByComponentStatus in production
+    // (apiUrl status.claude.com + statusComponent 'claude.ai', not canIdBypass) — NOT a `statusComponent`
+    // service with `apiUrl: null` like mistral/perplexity/fal, which never reach this gate at all (they
+    // would be a tested twin, #966). An impact:none active incident naming claude.ai is kept via the name
+    // fallback — proving Part B removed the name axis ONLY for canIdBypass services, not for these.
+    expect(canIdBypass(cfg('claudeai'))).toBe(false)
+    const components = [{ id: CLAUDEAI, name: 'claude.ai' }]
+    const claudeaiIncident = ([{
+      id: 'CAI1', title: 'Elevated errors on claude.ai', status: 'identified', impact: null, componentNames: ['claude.ai'],
+    }] as unknown as Parameters<typeof filterByComponentStatus>[0])
+    expect(filterByComponentStatus(claudeaiIncident, 'operational', cfg('claudeai'), components).map((i) => i.id))
+      .toEqual(['CAI1'])
   })
 })
