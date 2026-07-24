@@ -6,6 +6,8 @@ import { formatChangelogSection, formatStaleSourcesWarning } from './changelog'
 import type { MonthlyIncidentEntry } from './monthly-archive'
 import type { AiUsageTrend } from './ai-analysis'
 import { formatAiUsageTrendLine } from './ai-analysis'
+import type { BadgeRepoDiscoveryDiff } from './badge-repo-discovery'
+import { formatBadgeRepoDiscoverySection } from './badge-repo-discovery'
 
 export interface WeeklyIncidentSummary {
   serviceId: string
@@ -95,6 +97,9 @@ export interface WeeklyBriefingData {
    *  write is operator error worth showing, distinct from an unset key. Ignored when strategyBrief
    *  is non-null. */
   strategyBriefMalformed?: boolean
+  /** #1158 — GitHub repo discovery for badge embeds (Code Search, weekly sweep). Absent/null → the
+   *  section is omitted (token not configured, search failed, or nothing new this week). */
+  badgeRepoDiscovery?: BadgeRepoDiscoveryDiff | null
 }
 
 /**
@@ -336,6 +341,11 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
       }
     }
   }
+
+  // Section 4.5: Badge Adopters (#1158) — new GitHub repos found embedding an AIWatch badge this
+  // week. Omitted when there's nothing new (see formatBadgeRepoDiscoverySection).
+  const badgeSection = formatBadgeRepoDiscoverySection(data.badgeRepoDiscovery ?? null)
+  if (badgeSection) lines.push(badgeSection)
 
   // Section 5: Strategy (#917) — operator-authored initiative status, NOT derived metrics (those
   // ship daily via #986). This is the judgment layer above the numbers; it moves on a ~monthly
