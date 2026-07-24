@@ -24,6 +24,7 @@ export type IncidentLike = {
 
 export type ServiceLike = {
   id?: string
+  status?: string
   incidents?: unknown[]
 }
 
