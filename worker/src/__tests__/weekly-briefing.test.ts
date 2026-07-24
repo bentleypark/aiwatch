@@ -172,6 +172,26 @@ describe('buildWeeklyBriefing', () => {
     expect(buildWeeklyBriefing({ ...base, aiUsageTrend: { days: 7, calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: null, timedOutRate: null } })).not.toContain('AI Analysis')
   })
 
+  it('#1158 — renders the Badge Adopters section when badgeRepoDiscovery has new repos', () => {
+    const base = { weekStart: '2026-04-06', weekEnd: '2026-04-12', changelog: [], incidents: [], stabilityChanges: [] }
+    const result = buildWeeklyBriefing({
+      ...base,
+      badgeRepoDiscovery: {
+        newRepos: [{ fullName: 'acme/widget', path: 'README.md', htmlUrl: 'https://github.com/acme/widget' }],
+        seen: ['acme/widget'],
+        totalKnown: 3,
+      },
+    })
+    expect(result).toContain('Badge Adopters')
+    expect(result).toContain('acme/widget')
+  })
+
+  it('#1158 — omits the Badge Adopters section when badgeRepoDiscovery is absent or has nothing new', () => {
+    const base = { weekStart: '2026-04-06', weekEnd: '2026-04-12', changelog: [], incidents: [], stabilityChanges: [] }
+    expect(buildWeeklyBriefing(base)).not.toContain('Badge Adopters')
+    expect(buildWeeklyBriefing({ ...base, badgeRepoDiscovery: { newRepos: [], seen: ['acme/widget'], totalKnown: 1 } })).not.toContain('Badge Adopters')
+  })
+
   it('renders "data unavailable" (not "No significant changes") when stabilityDataAvailable is false (#733)', () => {
     const data: WeeklyBriefingData = {
       weekStart: '2026-04-06',

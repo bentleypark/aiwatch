@@ -65,6 +65,11 @@ interface Env {
   // workflow_dispatch the deepseek-feed Action (GitHub's own schedule is throttled to ~2h). Set via
   // `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the worker skips dispatch (GH schedule backup only).
   GH_DISPATCH_TOKEN?: string
+  // #1158: classic GitHub PAT (public_repo scope) for the weekly badge-repo-discovery sweep
+  // (GitHub Code Search API — which public repos embed an AIWatch badge). Distinct from
+  // GH_DISPATCH_TOKEN above (actions:write only, cannot search). Set via
+  // `wrangler secret put GH_CODE_SEARCH_TOKEN`. Absent → the section is silently omitted.
+  GH_CODE_SEARCH_TOKEN?: string
   // #778: operator phone-push topic for Tier-1-family NEW down/degraded incidents (ntfy.sh). A bare
   // topic name or a full https://ntfy.sh/<topic> URL. Set via `wrangler secret put NTFY_TOPIC`. Absent
   // → push is fail-soft skipped (the Discord operator alert is unaffected). Operator-only side-channel.
@@ -1659,6 +1664,7 @@ import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
+import { searchBadgeEmbeds, diffBadgeRepoDiscovery, parseBadgeReposSeen, type BadgeRepoDiscoveryDiff } from './badge-repo-discovery'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
 import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOutageWindows, nominalWindowEnd, previousPeriod, periodsCoveringWindow, type GrowthDailyRow } from './growth-series'
@@ -2730,6 +2736,49 @@ export default {
             console.warn('[cron] weekly ai:usage trend read failed:', err instanceof Error ? err.message : err)
           }
 
+          // #1158 — GitHub repo discovery for badge embeds (weekly Code Search sweep). Best-effort,
+          // like the sections above. searchBadgeEmbeds returns null on missing token/HTTP failure/
+          // unparseable response — GitHub API trouble never affects /badge/:serviceId serving (this
+          // cron branch is fully separate from that handler).
+          //
+          // `badge:repos:seen` (no TTL — a permanent accumulator) is FAIL-CLOSED on both a KV read
+          // throw AND a corrupt/wrong-shape stored value: unlike `component-seen:` (#992, a few
+          // hundred lines up) whose corrupt→empty fallback is safe because its worst case is a
+          // bounded re-alert, this key has no recovery path — persisting a diff computed against a
+          // false "empty" baseline would overwrite real adopter history with just this week's hits.
+          // So any read anomaly here skips the diff+write entirely (this week's briefing section is
+          // simply omitted) rather than substituting an empty baseline. See parseBadgeReposSeen.
+          let badgeRepoDiscovery: BadgeRepoDiscoveryDiff | null = null
+          try {
+            const results = await searchBadgeEmbeds(env.GH_CODE_SEARCH_TOKEN)
+            if (results) {
+              let readFailed = false
+              const seenRaw = await env.STATUS_CACHE.get('badge:repos:seen').catch((err) => {
+                readFailed = true
+                console.warn('[cron] badge:repos:seen read failed — skipping this run to avoid clobbering history:', err instanceof Error ? err.message : err)
+                return null
+              })
+              if (!readFailed) {
+                const previouslySeen = parseBadgeReposSeen(seenRaw)
+                if (previouslySeen === null) {
+                  console.warn('[cron] badge:repos:seen corrupt/unparseable — skipping this run to avoid clobbering history')
+                } else {
+                  const diff = diffBadgeRepoDiscovery(results, previouslySeen)
+                  badgeRepoDiscovery = diff
+                  // Skip the write when nothing changed (mirrors component-seen:'s `newComponents.length
+                  // === 0` no-write branch) — a no-op re-put every week for zero real churn is pure KV budget.
+                  if (diff.newRepos.length > 0) {
+                    await env.STATUS_CACHE.put('badge:repos:seen', JSON.stringify(diff.seen)).catch((err) =>
+                      console.warn('[cron] badge:repos:seen write failed:', err instanceof Error ? err.message : err),
+                    )
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('[cron] badge repo discovery failed:', err instanceof Error ? err.message : err)
+          }
+
           // #917 — operator-authored strategy status (initiative page Status + Next action). Absent
           // key → section omitted; present-but-malformed → surface a fix nudge (not a silent drop),
           // since a broken write is operator error worth showing.
@@ -2748,7 +2797,7 @@ export default {
             console.warn('[cron] weekly strategy:brief read failed:', err instanceof Error ? err.message : err)
           }
 
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend, strategyBrief, strategyBriefMalformed })
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend, strategyBrief, strategyBriefMalformed, badgeRepoDiscovery })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,
