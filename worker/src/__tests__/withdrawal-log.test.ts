@@ -31,6 +31,7 @@ import {
   type WithdrawalLogEntry,
 } from '../withdrawal-log'
 import { appendWithdrawn, WITHDRAWN_KEY, WITHDRAWN_TTL_S, type WithdrawnIncident } from '../withdrawn'
+import { ALERTED_NEW_TTL_S } from '../alerts'
 import { accumulateIncidentsOnlyIfChanged, PHANTOM_PRUNE_AFTER_MISSED_RUNS } from '../monthly-archive'
 import type { ServiceStatus, Incident } from '../types'
 
@@ -39,7 +40,7 @@ const KEY = 'incidents:withdrawn:log:2026-07'
 const makeKV = (seed: Record<string, string> = {}) => {
   const store: Record<string, string> = { ...seed }
   // The third parameter is declared (unused here) so a test can assert on the TTL options `kvPut`
-  // forwards — the durable log must carry none, the 48h roster must keep its own.
+  // forwards — the durable log must carry none, the tombstone roster must keep its own.
   const put = vi.fn(async (k: string, v: string, _opts?: { expirationTtl?: number }) => { store[k] = v })
   return {
     store,
@@ -61,6 +62,18 @@ const row = (over: Partial<WithdrawalLogEntry> = {}): WithdrawalLogEntry => ({
   svcId: 'mistral', incId: 'aud-1', title: 'Audio API Degraded',
   startedAt: '2026-07-17T08:18:00Z', prunedAt: '2026-07-21T09:00:00Z', ...over,
 })
+
+/** `startedAt`/`prunedAt` for a row guaranteed to be PAST the neverClosed deadline as of `nowIso`,
+ *  derived from the threshold rather than written as dates. A literal "2 days before now" encodes
+ *  whatever `WITHDRAWN_TTL_S` happened to be when it was typed: #1153 widened that constant and three
+ *  `neverClosed: 1` fixtures quietly became `pending`, so the assertions kept passing their own shape
+ *  while no longer exercising the bucket they are named for. Both fields move together (a few minutes
+ *  apart) so the row stays faithful — `prunedAt >= startedAt` — no matter how wide the window grows,
+ *  and pushing the roster clock past the deadline makes the row lost regardless of which clock binds. */
+const agedOutBefore = (nowIso: string): Pick<WithdrawalLogEntry, 'startedAt' | 'prunedAt'> => {
+  const prunedMs = Date.parse(nowIso) - WITHDRAWN_LOG_UNCLOSED_AFTER_MS - 60_000
+  return { startedAt: new Date(prunedMs - 60_000).toISOString(), prunedAt: new Date(prunedMs).toISOString() }
+}
 
 // Faithful fixture (#1021) — a resolved incident carries a duration, an unresolved one does not.
 const inc = (id: string, startedAt: string, status: Incident['status'] = 'investigating'): Incident => ({
@@ -239,21 +252,47 @@ describe('isPermanentlyUnclosed', () => {
     expect(isPermanentlyUnclosed(row(), at('2026-07-22T09:00:00Z'))).toBe(false)
   })
 
-  it('is true once the tombstone has aged out, because nothing can render the notice any more', () => {
-    expect(isPermanentlyUnclosed(row(), at('2026-07-23T09:01:00Z'))).toBe(true)
+  // The deadline is the EARLIER of two clocks (#1153): the tombstone ages out at
+  // `prunedAt + WITHDRAWN_LOG_UNCLOSED_AFTER_MS`, and the alerted:new marker expires at
+  // `startedAt + ALERTED_NEW_TTL_S`. Each clock gets its own boundary probe, on a fixture built so
+  // that clock is the binding one — probing the boundary itself, not a value halfway to it, so a
+  // mutated `min`→`max` or a dropped clock is caught.
+
+  // Withdrawn ~9h after it started, so `prunedAt + 6d` lands BEFORE `startedAt + 7d` → roster binds.
+  it('flips exactly when the tombstone ages out, when the roster clock binds', () => {
+    const r = row({ startedAt: '2026-07-21T00:00:00Z', prunedAt: '2026-07-21T09:00:00Z' })
+    const deadline = Date.parse(r.prunedAt) + WITHDRAWN_LOG_UNCLOSED_AFTER_MS
+    expect(Date.parse(r.startedAt) + ALERTED_NEW_TTL_S * 1000).toBeGreaterThan(deadline) // marker is later
+    expect(isPermanentlyUnclosed(r, deadline - 60_000)).toBe(false)
+    expect(isPermanentlyUnclosed(r, deadline)).toBe(false)
+    expect(isPermanentlyUnclosed(r, deadline + 1000)).toBe(true)
   })
 
-  // Probe the boundary itself, not a value halfway to it: a mutated `/ 2` threshold survives a
-  // 24h-false + 48h-true pair, and would report routine 25h holds as #1106 regressions.
-  it('flips exactly at the roster TTL, not before', () => {
-    const pruned = Date.parse('2026-07-21T09:00:00Z')
-    expect(isPermanentlyUnclosed(row(), pruned + WITHDRAWN_LOG_UNCLOSED_AFTER_MS - 60_000)).toBe(false)
-    expect(isPermanentlyUnclosed(row(), pruned + WITHDRAWN_LOG_UNCLOSED_AFTER_MS)).toBe(false)
-    expect(isPermanentlyUnclosed(row(), pruned + WITHDRAWN_LOG_UNCLOSED_AFTER_MS + 1000)).toBe(true)
+  // The default fixture is withdrawn ~4d after it started, so `startedAt + 7d` lands BEFORE
+  // `prunedAt + 6d` → the marker binds, and a `prunedAt`-only verdict would call this row pending for
+  // ~2 more days after it is already lost. This is the case #1153 exposed.
+  it('flips exactly when the alerted:new marker expires, when the marker clock binds', () => {
+    const deadline = Date.parse(row().startedAt) + ALERTED_NEW_TTL_S * 1000
+    expect(Date.parse(row().prunedAt) + WITHDRAWN_LOG_UNCLOSED_AFTER_MS).toBeGreaterThan(deadline) // roster is later
+    expect(isPermanentlyUnclosed(row(), deadline - 60_000)).toBe(false)
+    expect(isPermanentlyUnclosed(row(), deadline)).toBe(false)
+    expect(isPermanentlyUnclosed(row(), deadline + 1000)).toBe(true)
   })
 
   it('never claims a permanent loss from an unparseable prunedAt', () => {
     expect(isPermanentlyUnclosed(row({ prunedAt: 'garbage' }), at('2026-09-01T00:00:00Z'))).toBe(false)
+  })
+
+  // A malformed `startedAt` must DROP the marker clock and fall back to the roster clock, not poison
+  // the `min` into NaN — `nowMs > NaN` is always false, which would report an aged-out row as pending
+  // forever, under-reporting the exact #1106 signal. `isLogEntry` only requires a non-empty string, so
+  // a shape-drift/rollback row with a bad `startedAt` is reachable. Without the `Number.isNaN(started)`
+  // guard this passes the "before" case but fails the "after".
+  it('falls back to the roster clock when startedAt is unparseable, rather than never flipping', () => {
+    const r = row({ startedAt: 'garbage' })
+    const rosterDeadline = Date.parse(r.prunedAt) + WITHDRAWN_LOG_UNCLOSED_AFTER_MS
+    expect(isPermanentlyUnclosed(r, rosterDeadline - 60_000)).toBe(false)
+    expect(isPermanentlyUnclosed(r, rosterDeadline + 1000)).toBe(true)
   })
 
   // The threshold is DERIVED from the roster's TTL. Restating it as a literal is how the two drift
@@ -363,7 +402,7 @@ describe('recordWithdrawalsPruned', () => {
     expect(put.mock.calls.at(-1)?.[2]).toBeUndefined()
   })
 
-  it('while the 48h tombstone roster KEEPS its TTL — the two must not converge from either side', async () => {
+  it('while the tombstone roster KEEPS its TTL — the two must not converge from either side', async () => {
     const { kv, put } = makeKV()
     await appendWithdrawn(kv, [tomb()])
     expect((put.mock.calls.at(-1)?.[2] as { expirationTtl?: number } | undefined)?.expirationTtl).toBeGreaterThan(0)
@@ -763,7 +802,7 @@ describe('GET /api/admin/withdrawals', () => {
       [KEY]: JSON.stringify([
         row({ incId: 'weird', prunedAt: 'garbage', announcedAt: '2026-07-21T09:05:00Z' }),
         row({ incId: 'open', prunedAt: 'garbage' }),
-        row({ incId: 'lost', prunedAt: '2026-07-21T09:00:00Z' }),
+        row({ incId: 'lost', ...agedOutBefore('2026-07-24T00:00:00Z') }),
         row({ incId: 'pending', prunedAt: '2026-07-23T23:00:00Z' }),
         row({ incId: 'closed', announcedAt: '2026-07-21T09:05:00Z' }),
       ]),
@@ -780,7 +819,7 @@ describe('GET /api/admin/withdrawals', () => {
     const { kv } = makeKV({
       [KEY]: JSON.stringify([
         row({ incId: 'closed', announcedAt: '2026-07-21T09:05:00Z' }),
-        row({ incId: 'lost', prunedAt: '2026-07-21T09:00:00Z' }),          // >48h ago, never announced
+        row({ incId: 'lost', ...agedOutBefore('2026-07-24T00:00:00Z') }), // past the window, never announced
         row({ incId: 'pending', prunedAt: '2026-07-23T23:00:00Z' }),        // still inside the window
       ]),
     })

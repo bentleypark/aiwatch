@@ -196,7 +196,9 @@ export const PENDING_NEW_TTL_S = 1800
  *  `feed:active-emitted:` (#793) and `alerted:wd:` (#1106). Named because #1106 reasons about it in
  *  two places: a tombstone whose incident is older than this has lost its announcement marker and can
  *  never be closed (the cron warns), and the withdrawal's own dedup key must land in this branch —
- *  the 2h status-alert TTL would re-post the same public retraction ~23 times over a 48h tombstone. */
+ *  the 2h status-alert TTL would re-post the same public retraction dozens of times over the 6d
+ *  tombstone window (#1153). This 7d also bounds that window from above: 6d < 7d keeps `alerted:wd:`
+ *  (written 7d from SEND) always outliving the tombstone it dedups. */
 export const ALERTED_NEW_TTL_S = 604800
 
 /** KV key for the #633 first-seen pending marker, scoped to the incident id. */
@@ -669,7 +671,7 @@ export function buildWithdrawalAlerts(
     if (!announcedIncIds.has(w.incId)) continue
     const svc = services.find((s) => s.id === w.svcId)
     // The same rule the RSS half applies, so neither channel publishes a retraction the other
-    // considers unsafe. Re-evaluated on ANY cycle inside the tombstone's 48h, not just the prune
+    // considers unsafe. Re-evaluated on ANY cycle inside the tombstone's 6d window, not just the prune
     // cycle — an alert crowded out by the per-cycle send cap is retried later, by which time the
     // provider may have re-listed the incident. Every hold is reported to `onHold` so the caller can
     // log it: this is the one drop in the feature that can permanently lose a notice, and a silent
