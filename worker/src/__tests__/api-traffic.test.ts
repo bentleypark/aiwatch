@@ -10,6 +10,11 @@ import {
   buildFeedTrafficSql,
   parseFeedTrafficResponse,
   queryFeedTraffic,
+  recordBadgeTraffic,
+  BADGE_UNKNOWN_SERVICE,
+  buildBadgeTrafficSql,
+  parseBadgeTrafficResponse,
+  queryBadgeTraffic,
   buildExtTrafficSql,
   parseExtTrafficResponse,
   queryExtTraffic,
@@ -229,6 +234,78 @@ describe('queryFeedTraffic (#548)', () => {
   it('parses a successful response', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data: [{ variant: 'feed-all', requests: 7 }] }), { status: 200 }))
     expect(await queryFeedTraffic('acc', 'tok', fetchImpl as unknown as typeof fetch)).toEqual({ all: 7, service: 0, total: 7 })
+  })
+})
+
+describe('recordBadgeTraffic (#1157)', () => {
+  it('writes the serviceId as blob1 for a known-service outcome', () => {
+    const writeDataPoint = vi.fn()
+    recordBadgeTraffic({ writeDataPoint } as unknown as AnalyticsEngineDataset, { known: true, serviceId: 'claude' })
+    expect(writeDataPoint).toHaveBeenCalledWith({ blobs: ['claude'], doubles: [1], indexes: ['badge-request'] })
+    recordBadgeTraffic({ writeDataPoint } as unknown as AnalyticsEngineDataset, { known: true, serviceId: 'openai' })
+    expect(writeDataPoint).toHaveBeenLastCalledWith({ blobs: ['openai'], doubles: [1], indexes: ['badge-request'] })
+  })
+
+  it('substitutes the BADGE_UNKNOWN_SERVICE sentinel for a known:false outcome — never a raw string', () => {
+    const writeDataPoint = vi.fn()
+    recordBadgeTraffic({ writeDataPoint } as unknown as AnalyticsEngineDataset, { known: false })
+    expect(writeDataPoint).toHaveBeenCalledWith({ blobs: [BADGE_UNKNOWN_SERVICE], doubles: [1], indexes: ['badge-request'] })
+  })
+
+  it('is a no-op when the binding is absent (local dev / tests)', () => {
+    expect(() => recordBadgeTraffic(undefined, { known: true, serviceId: 'claude' })).not.toThrow()
+    expect(() => recordBadgeTraffic(undefined, { known: false })).not.toThrow()
+  })
+
+  it('swallows a writeDataPoint throw (never aborts the badge response)', () => {
+    const writeDataPoint = vi.fn(() => { throw new Error('WAE down') })
+    expect(() => recordBadgeTraffic({ writeDataPoint } as unknown as AnalyticsEngineDataset, { known: true, serviceId: 'claude' })).not.toThrow()
+  })
+})
+
+describe('buildBadgeTrafficSql (#1157)', () => {
+  it('filters on index1 = badge-request over the last day, grouped by blob1', () => {
+    const sql = buildBadgeTrafficSql()
+    expect(sql).toContain("index1 = 'badge-request'")
+    expect(sql).toContain('GROUP BY blob1')
+    expect(sql).toContain('SUM(_sample_interval)')
+    expect(sql).toContain("INTERVAL '1' DAY")
+  })
+})
+
+describe('parseBadgeTrafficResponse (#1157)', () => {
+  it('sums requests per service and totals across all services', () => {
+    const json = { data: [{ service: 'claude', requests: '12' }, { service: 'openai', requests: 5 }, { service: 'claude', requests: 3 }] }
+    expect(parseBadgeTrafficResponse(json)).toEqual({ byService: { claude: 15, openai: 5 }, total: 20 })
+  })
+
+  it('returns null for a malformed payload', () => {
+    expect(parseBadgeTrafficResponse({})).toBeNull()
+    expect(parseBadgeTrafficResponse(null)).toBeNull()
+  })
+
+  it('skips rows with a missing/non-string service label and coerces NaN requests to 0', () => {
+    const json = { data: [{ service: 'claude', requests: 'oops' }, { requests: 9 }, { service: '', requests: 9 }] }
+    expect(parseBadgeTrafficResponse(json)).toEqual({ byService: { claude: 0 }, total: 0 })
+  })
+})
+
+describe('queryBadgeTraffic (#1157)', () => {
+  it('returns null without account id / token (no SQL call)', async () => {
+    const fetchImpl = vi.fn()
+    expect(await queryBadgeTraffic(undefined, 'tok', fetchImpl)).toBeNull()
+    expect(await queryBadgeTraffic('acc', undefined, fetchImpl)).toBeNull()
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('returns null on a non-OK HTTP response', async () => {
+    const fetchImpl = vi.fn(async () => new Response('err', { status: 500 }))
+    expect(await queryBadgeTraffic('acc', 'tok', fetchImpl as unknown as typeof fetch)).toBeNull()
+  })
+
+  it('parses a successful response', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data: [{ service: 'claude', requests: 7 }] }), { status: 200 }))
+    expect(await queryBadgeTraffic('acc', 'tok', fetchImpl as unknown as typeof fetch)).toEqual({ byService: { claude: 7 }, total: 7 })
   })
 })
 

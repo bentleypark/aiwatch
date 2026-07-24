@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAiUsageSection } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAiUsageSection } from '../daily-summary'
+import { BADGE_UNKNOWN_SERVICE } from '../api-traffic'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from '../outage-audience'
@@ -562,6 +563,40 @@ describe('formatFeedTrafficSection (#548)', () => {
   })
 })
 
+describe('formatBadgeTrafficSection (#1157)', () => {
+  it('renders the 24h total with the top-3 requested services', () => {
+    const out = formatBadgeTrafficSection({ byService: { claude: 12, openai: 5, gemini: 2, grok: 1 }, total: 20 })
+    expect(out).toContain('Badge Requests')
+    expect(out).toContain('Last 24h: 20')
+    expect(out).toContain('claude 12 · openai 5 · gemini 2') // top-3 by count, grok (4th) excluded
+  })
+  it('returns empty string when badge traffic is unavailable (SQL API not configured)', () => {
+    expect(formatBadgeTrafficSection(null)).toBe('')
+    expect(formatBadgeTrafficSection(undefined)).toBe('')
+  })
+  it('returns empty string on a zero-request day', () => {
+    expect(formatBadgeTrafficSection({ byService: {}, total: 0 })).toBe('')
+  })
+  it('omits the parenthesized breakdown when byService is empty but total is somehow positive', () => {
+    const out = formatBadgeTrafficSection({ byService: {}, total: 3 })
+    expect(out).toBe('\n🖼️ **Badge Requests**\n   Last 24h: 3')
+  })
+  it('excludes BADGE_UNKNOWN_SERVICE from the top-3 ranking and reports it as a separate suffix', () => {
+    const out = formatBadgeTrafficSection({ byService: { claude: 12, [BADGE_UNKNOWN_SERVICE]: 999, openai: 5 }, total: 1016 })
+    expect(out).toContain('Last 24h: 1016 (claude 12 · openai 5) · 999 unknown-id')
+    expect(out).not.toContain('__unknown__')
+  })
+  it('omits the unknown-id suffix when there are no misses', () => {
+    const out = formatBadgeTrafficSection({ byService: { claude: 12 }, total: 12 })
+    expect(out).not.toContain('unknown-id')
+  })
+  it('excludes zero-count entries from the top-3 slice', () => {
+    const out = formatBadgeTrafficSection({ byService: { claude: 5, openai: 0 }, total: 5 })
+    expect(out).toContain('(claude 5)')
+    expect(out).not.toContain('openai')
+  })
+})
+
 describe('buildDailySummary — #548 webhook delta + feed section', () => {
   const base = {
     services: [], aiUsage: null, latencySnapshots: [],
@@ -581,6 +616,17 @@ describe('buildDailySummary — #548 webhook delta + feed section', () => {
     const out = buildDailySummary({ ...base, feedTraffic: { all: 10, service: 5, total: 15 } })
     expect(out).toContain('📡 **Feed Polls (RSS/Slack)**')
     expect(out).toContain('Last 24h: 15')
+  })
+  // #1157 — pins buildDailySummary's OWN data→output contract for badgeTraffic (already covered by
+  // formatBadgeTrafficSection's unit tests above, but this confirms the `data.badgeTraffic` field is
+  // actually read and threaded to the formatter inside buildDailySummary). NOTE: this does NOT cover
+  // the index.ts cron-assembly call site — see the source-scan test below for that; a dropped
+  // `badgeTraffic,` there (a real bug this PR shipped, caught only via PR review) leaves THIS test
+  // green, because it constructs its own literal rather than exercising index.ts's object literal.
+  it('renders the badge-request section when badgeTraffic is present (#1157)', () => {
+    const out = buildDailySummary({ ...base, badgeTraffic: { byService: { claude: 7 }, total: 7 } })
+    expect(out).toContain('🖼️ **Badge Requests**')
+    expect(out).toContain('Last 24h: 7')
   })
   it('renders the statusline-poll section when statuslineTraffic is present (#918)', () => {
     const out = buildDailySummary({ ...base, statuslineTraffic: { byPreset: { branded: 88, scoped: 12 }, serverRenderTotal: 100, legacyProxy: 0, total: 100 } })
