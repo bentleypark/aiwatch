@@ -80,3 +80,24 @@ describe('region-status.ts mirror — region-aware but not region-switchable (#9
     expect(result!.docsUrl).toBe('https://docs.pinecone.io/guides/index-data/create-an-index#cloud-regions')
   })
 })
+
+describe('region-status.ts mirror — global-incident fallback gated by service status (#1149)', () => {
+  test('operational service with region-less incident returns null (no fallback)', () => {
+    const result = regionStatusOf({
+      id: 'openai',
+      status: 'operational',
+      incidents: [{ id: 'o1', status: 'investigating', title: 'Elevated error rates' }],
+    })
+    expect(result).toBeNull()
+  })
+
+  test('degraded service with region-less incident triggers global fallback', () => {
+    const result = regionStatusOf({
+      id: 'openai',
+      status: 'degraded',
+      incidents: [{ id: 'o1', status: 'investigating', title: 'Elevated error rates' }],
+    })
+    expect(result).not.toBeNull()
+    expect(result!.allDown).toBe(true)
+  })
+})

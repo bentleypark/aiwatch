@@ -24,6 +24,7 @@ export type IncidentLike = {
 
 export type ServiceLike = {
   id?: string
+  status?: string
   incidents?: unknown[]
 }
 
@@ -194,7 +195,9 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
     if (!incMatched) hasGlobalIncident = true
   }
 
-  if (!hasRegionSpecific && ongoing.length > 0) {
+  // Gated by service status (#1149): if service.status === 'operational', do not trip
+  // the global-incident fallback for a region-less incident.
+  if (!hasRegionSpecific && ongoing.length > 0 && service.status !== 'operational') {
     const globalType = classifyIncident((ongoing[0] as IncidentLike).title)
     for (const r of regionDefs) {
       status[r.key] = { status: 'incident', type: globalType }
@@ -205,6 +208,8 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
   const okRegions = regions.filter((r) => r.status === 'ok')
   const incidentRegions = regions.filter((r) => r.status === 'incident')
   const allDown = okRegions.length === 0
+
+  if (incidentRegions.length === 0 && !alwaysShow) return null
 
   return {
     regions,

@@ -208,6 +208,24 @@ describe('regionStatusOf — global-incident fallback', () => {
     })
     expect(result.regions.every((r) => r.type === 'down')).toBe(true)
   })
+
+  test('operational service with region-less incident does NOT trigger global fallback (#1149)', () => {
+    const result = regionStatusOf({
+      id: 'openai',
+      status: 'operational',
+      incidents: [{ id: 'o1', status: 'investigating', title: 'Elevated error rates' }],
+    })
+    expect(result).toBeNull()
+
+    const degradedResult = regionStatusOf({
+      id: 'openai',
+      status: 'degraded',
+      incidents: [{ id: 'o1', status: 'investigating', title: 'Elevated error rates' }],
+    })
+    expect(degradedResult).not.toBeNull()
+    expect(degradedResult.allDown).toBe(true)
+    expect(degradedResult.regions.every((r) => r.status === 'incident')).toBe(true)
+  })
 })
 
 describe('regionStatusOf — region-aware but not region-switchable (#973)', () => {
