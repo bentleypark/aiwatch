@@ -228,7 +228,13 @@ export function regionStatusOf(service, opts = {}) {
   // something IS ongoing. Mark every region with the first incident's type.
   // This is intentionally pessimistic: better to over-warn than under-warn
   // when the upstream feed gives us no region signal.
-  if (!hasRegionSpecific && ongoing.length > 0) {
+  //
+  // Gated by service status (#1149): if the component-aware service status is
+  // 'operational', component-level resolution has already determined this service's
+  // own capability is unaffected (e.g. OpenAI dropped the 'api' component from an
+  // open incident). Do not trip the pessimistic global fallback when the badge says
+  // operational.
+  if (!hasRegionSpecific && ongoing.length > 0 && service.status !== 'operational') {
     const globalType = classifyIncident(ongoing[0].title)
     for (const r of regionDefs) {
       status[r.key] = { status: 'incident', type: globalType }
@@ -239,6 +245,8 @@ export function regionStatusOf(service, opts = {}) {
   const okRegions = regions.filter((r) => r.status === 'ok')
   const incidentRegions = regions.filter((r) => r.status === 'incident')
   const allDown = okRegions.length === 0
+
+  if (incidentRegions.length === 0 && !alwaysShow) return null
 
   return {
     regions,
