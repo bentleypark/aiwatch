@@ -30,15 +30,15 @@ export const SONNET_MAX_TOKENS = 600
  * after a Gemma failure — Sonnet's own cap is 10s — and (b) cancelled nothing when it won, so a
  * Sonnet response arriving at 9s was paid for, thrown away, and booked as `failed`. It is now an
  * AbortController budget that reaches the Sonnet fetch, and it leaves room for a Gemma failure to
- * fall through to a Sonnet success inline. That matters most for Tier-1 (claude/openai/gemini),
- * which #882 never holds: for those services the inline call is the only chance to attach an AI
+ * fall through to a Sonnet success inline. That matters most for a service #882 never holds
+ * (`NEVER_AI_HELD`, alerts.ts): for those the inline call is the only chance to attach an AI
  * section before the alert ships.
  *
  * 15s is a judgement call, not a measurement. Gemma's own latency is wildly variable (0.3s to
  * >115s against the real binding on 2026-07-09), so some inline calls WILL overrun no matter what
  * this is set to. That is by design and now costs nothing: an overrun is booked as `timedOut`
- * (not `failed`), writes no re-analysis lock, and the next cron cycle retries — for non-Tier-1
- * inside the #882 hold window. The `timedOut` counter in the daily summary is what should drive
+ * (not `failed`), writes no re-analysis lock, and the next cron cycle retries — for a hold-eligible
+ * service, inside the #882 hold window. The `timedOut` counter in the daily summary is what should drive
  * any future change to this number; do not tune it on intuition.
  */
 export const INLINE_ANALYSIS_BUDGET_MS = 15_000
@@ -733,8 +733,9 @@ export interface AiUsageCounters {
   /**
    * #1080 — which service each `timedOut` belongs to (`{svcId: count}`).
    *
-   * `timedOut` alone cannot answer #882's question: an overrun on a Tier-1 service is *correctly*
-   * never held, so "1 overrun happened" is only actionable once you know whether it was Tier-1. With
+   * `timedOut` alone cannot answer #882's question: an overrun on a never-held service
+   * (`NEVER_AI_HELD`) is *correctly* never held, so "1 overrun happened" is only actionable once you
+   * know which service it was, i.e. whether that service is ever held at all. With
    * the id, an overrun becomes findable after the fact — Discord messages are durable, so date +
    * service is enough to open that alert and read whether it shipped with the AI section.
    *
@@ -1022,7 +1023,7 @@ export async function analyzeIncidentWithBudget(
   apiKey: string | undefined,
   ai: Ai | undefined,
   // #1080 — takes the id AND the name as one object rather than two adjacent strings. The id is what
-  // `ai:usage.timedOutBy` books and what `TIER1_IDS` is keyed by (`alerts.ts`), while the name is what
+  // `ai:usage.timedOutBy` books and what the alert-scope sets are keyed by (`alerts.ts`), while the name is what
   // the prompt reads; as two positional strings they would be silently transposable, and a swap would
   // produce attribution that looks right and answers nothing.
   service: { id: string; name: string },

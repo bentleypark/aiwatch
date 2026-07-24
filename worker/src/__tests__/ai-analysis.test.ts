@@ -655,9 +655,8 @@ describe('applyAttempt / parseUsage', () => {
     expect(usage.timedOutBy).toEqual({ mistral: 2, claude: 1 })
   })
 
-  // The whole point of #1080: `timedOut: 1` cannot answer #882 because a Tier-1 overrun is CORRECTLY
-  // never held. Attribution is what makes the two distinguishable after the fact.
-  it('separates a Tier-1 overrun from a non-Tier-1 one', () => {
+  // The whole point of #1080: `timedOut: 1` cannot answer #882 without knowing WHICH service overran.
+  it('attributes each overrun to its own service', () => {
     let usage = applyAttempt(emptyUsage(), { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'openai')
     usage = applyAttempt(usage, { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'cursor')
     expect(Object.keys(usage.timedOutBy ?? {}).sort()).toEqual(['cursor', 'openai'])
@@ -684,7 +683,7 @@ describe('applyAttempt / parseUsage', () => {
   })
 
   // The aiwatch-reports#76 trap, in this repo: a pre-#1080 record HAS overruns and NO map. Reporting
-  // that as "0 non-Tier-1 overruns" would be a confident lie about every day before this shipped.
+  // that as "0 hold-eligible overruns" would be a confident lie about every day before this shipped.
   it('timedOutAttribution: overruns with no map read as null (unknown), not zero', () => {
     expect(timedOutAttribution({ ...emptyUsage(), timedOut: 2 })).toBeNull()
   })
@@ -961,8 +960,8 @@ describe('analyzeIncidentWithBudget', () => {
     spy.mockRestore()
   })
 
-  // The budget must be long enough for Gemma-fails → Sonnet-succeeds to complete inline: Tier-1
-  // services are never held by #882, so the inline call is their only chance at an AI section.
+  // The budget must be long enough for Gemma-fails → Sonnet-succeeds to complete inline: a
+  // NEVER_AI_HELD service is never held by #882, so the inline call is its only chance at an AI section.
   it('gives the Sonnet fallback (10s cap) room to finish after a Gemma failure', () => {
     expect(INLINE_ANALYSIS_BUDGET_MS).toBeGreaterThan(ANTHROPIC_TIMEOUT_MS)
   })

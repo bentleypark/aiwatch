@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, buildTweetDrafts, buildTweetSearches, buildReplyDraft, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, FLAP_SUPPRESSION_ESCAPE_MS, incidentRunMs, shouldHoldNewIncident, shouldHoldForAiAnalysis, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, buildTweetDrafts, buildTweetSearches, buildReplyDraft, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, FLAP_SUPPRESSION_ESCAPE_MS, incidentRunMs, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, PUSH_SCOPE, TIER1_IDS, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 import { SERVICES } from '../services'
@@ -1581,10 +1581,10 @@ describe('short-incident hold (#792)', () => {
 
 describe('shouldHoldForAiAnalysis (#882 — Discord AI-hold on the push path)', () => {
   const NOW = 1_700_000_000_000
-  // Base: a non-Tier-1 service (mistral), AI not ready, not skipped, first sight.
+  // Base: an out-of-NEVER_AI_HELD service (mistral), AI not ready, not skipped, first sight.
   const base = { svcId: 'mistral', aiReady: false, analysisSkipped: false, firstSeenMs: null as number | null, nowMs: NOW }
 
-  it('HOLDS a non-Tier-1 new incident on first sight when AI is not ready', () => {
+  it('HOLDS a hold-eligible new incident on first sight when AI is not ready', () => {
     expect(shouldHoldForAiAnalysis({ ...base })).toBe(true)
   })
 
@@ -1608,15 +1608,42 @@ describe('shouldHoldForAiAnalysis (#882 — Discord AI-hold on the push path)', 
     expect(shouldHoldForAiAnalysis({ ...base, analysisSkipped: true })).toBe(false)
   })
 
-  it('NEVER holds Tier-1 (claude/openai/gemini) — operator alert + phone push stay immediate', () => {
-    for (const svcId of ['claude', 'openai', 'gemini']) {
-      expect(shouldHoldForAiAnalysis({ ...base, svcId })).toBe(false)
+  it('NEVER holds a NEVER_AI_HELD service — the alert ships at cron cadence', () => {
+    for (const svcId of NEVER_AI_HELD) {
+      expect(shouldHoldForAiAnalysis({ ...base, svcId }), svcId).toBe(false)
     }
   })
 
-  it('HOLDS non-Tier-1 apps + agents too (chatgpt / claudecode) — "non-Tier-1" = not {claude,openai,gemini}', () => {
-    expect(shouldHoldForAiAnalysis({ ...base, svcId: 'chatgpt' })).toBe(true)
-    expect(shouldHoldForAiAnalysis({ ...base, svcId: 'claudecode' })).toBe(true)
+  // #1148 — the regression: chatgpt/claudeai are phone-push-worthy (#778) yet were held up to
+  // AI_HOLD_MS because the gate read TIER1_IDS. The live 2026-07-23 ChatGPT event lagged the
+  // provider's post by ~17min, far more than the ≤5min cron floor accounts for.
+  it('NEVER holds the consumer apps (chatgpt / claudeai) — push-urgency and alert-urgency agree', () => {
+    expect(shouldHoldForAiAnalysis({ ...base, svcId: 'chatgpt' })).toBe(false)
+    expect(shouldHoldForAiAnalysis({ ...base, svcId: 'claudeai' })).toBe(false)
+  })
+
+  // Since #1148 the exemption lives in its own set, so two containments carry the promises made
+  // elsewhere: Tier-1 is still never held (#767/#778), and holding a push-scope alert would delay
+  // the phone push (the cron `continue`s before both). The second is by construction (the spread);
+  // this pins it against a refactor that inlines the list, and pins the first outright.
+  it('keeps TIER1_IDS ⊆ PUSH_SCOPE ⊆ NEVER_AI_HELD — neither promise can drift', () => {
+    for (const id of TIER1_IDS) expect(PUSH_SCOPE.has(id), `TIER1 ${id}`).toBe(true)
+    for (const id of PUSH_SCOPE) expect(NEVER_AI_HELD.has(id), `PUSH ${id}`).toBe(true)
+  })
+
+  // #1148 — the coding agents.
+  it('NEVER holds the four coding agents (claudecode / codex / cursor / copilot)', () => {
+    for (const svcId of ['claudecode', 'codex', 'cursor', 'copilot']) {
+      expect(shouldHoldForAiAnalysis({ ...base, svcId }), svcId).toBe(false)
+    }
+  })
+
+  // windsurf/junie are agents too and are deliberately NOT exempt — the set is a judgement call, so
+  // its boundary is pinned rather than left to drift into "every agent".
+  it('still HOLDS outside the set (windsurf / junie / mistral) — narrowed, not removed', () => {
+    for (const svcId of ['windsurf', 'junie', 'mistral']) {
+      expect(shouldHoldForAiAnalysis({ ...base, svcId }), svcId).toBe(true)
+    }
   })
 
   it('a KV read error (firstSeenMs=0) does NOT hold — fail-open, mirrors shouldHoldNewIncident', () => {

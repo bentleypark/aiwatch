@@ -39,9 +39,38 @@ import { withdrawalHold, liveIncidentIds, type WithdrawalHold, type WithdrawnInc
 // Flow: first flap's down + res alerts both fire normally; flap KV key is written when
 // the first flap's res alert fires. Subsequent flaps (same normalized title, within 60min)
 // are suppressed on both down and res via suppressedIncIds passed to buildIncidentAlerts.
-/** Tier-1: alerted immediately and NEVER held for AI (#767/#778/#882). Exported so #1080's hold-ledger
- *  diagnostic keys off the same set the hold gate uses, rather than a second copy that can drift. */
+/** Tier-1: the only set the flap (#283) / short-incident (#792) holds exempt. NOT the AI-hold's
+ *  exemption set since #1148 — that is `NEVER_AI_HELD` below. Exported for the containment test that
+ *  keeps Tier-1 inside it (transitively, via `PUSH_SCOPE`). */
 export const TIER1_IDS = new Set(['claude', 'openai', 'gemini'])
+
+// #778 — phone-push scope: the surfaces whose outages spawn viral "is X down" tweets (Tier-1 LLMs +
+// the consumer ChatGPT / claude.ai apps). NARROWER than the search scope (TWEET_SEARCH_TERMS) on
+// purpose — a phone push is urgent + DND-bypassing, so it's reserved for the highest-volume moments;
+// claudecode/codex outages rarely trend on X. Every id here is also in TWEET_SEARCH_TERMS, so
+// buildTweetSearchUrl always resolves the push Click target.
+// Declared here (above its consumers) rather than beside pushTargetFor so it sits next to TIER1_IDS,
+// which it is easily confused with — and next to NEVER_AI_HELD, which contains it.
+export const PUSH_SCOPE = new Set(['claude', 'openai', 'gemini', 'chatgpt', 'claudeai'])
+
+/**
+ * #1148 — the #882 AI-hold's never-held set: every service whose new-incident Discord alert must ship
+ * at cron cadence rather than wait for an AI section.
+ *
+ * A SUPERSET of PUSH_SCOPE, and a separate set on purpose: push scope answers "is this worth waking
+ * the operator's phone (DND-bypassing)", this answers "must this alert be fast". Gating the hold on
+ * PUSH_SCOPE itself made the second question unanswerable without also turning on phone pushes.
+ *
+ * Why PUSH_SCOPE is contained (by construction, via the spread): the hold `continue`s before BOTH the
+ * Discord send and the #778 push, so holding a push-scope outage delayed the very phone alert that
+ * set exists to fire. The containment test guards a refactor that inlines the list.
+ *
+ * Why the four coding agents: an agent outage is the moment this project's audience asks "is it them
+ * or me", so a 5-10min-late alert costs more than an alert missing its AI paragraph (the dashboard
+ * modal carries the analysis either way). `windsurf`/`junie` are deliberately left hold-eligible:
+ * operator judgement on which agents this audience actually runs, not a measured threshold.
+ */
+export const NEVER_AI_HELD = new Set([...PUSH_SCOPE, 'claudecode', 'codex', 'cursor', 'copilot'])
 
 // BetterStack emits the literal em-dash (U+2014); guard against both "— recovered" and
 // "— down" since a flap cycle can be caught mid-state, and the suppression window should
@@ -235,12 +264,13 @@ export function shouldHoldNewIncident(
 
 // #882 — the Discord new-incident AI-hold window. Orthogonal to the #633/#835 flap hold above (that
 // holds a SHORT/FLAP incident to suppress a phantom alert; this holds a REAL incident briefly so its
-// alert ships WITH the AI section instead of AI-less). A non-Tier-1 new incident whose 8s inline
-// analysis overran is held until ai:analysis lands (the next cron's refreshOrReanalyze backfills it,
-// with no 8s cap) OR this window elapses — then fail-open, send AI-less so an alert is never lost.
-// ~2 */5 cron cycles: the held incident gets one retry cycle for the analysis before the alert ships
-// without it, matching the accepted ~5min-typical / ~10min-worst delay (#882). Slack /feed already
-// does the analogous hold via rss.ts AI_HOLD_MS (#759); this is its Discord-push counterpart.
+// alert ships WITH the AI section instead of AI-less). A hold-eligible new incident (outside
+// `NEVER_AI_HELD`, #1148) whose inline analysis overran is held until ai:analysis lands (the next cron's
+// refreshOrReanalyze backfills it, with no budget cap) OR this window elapses — then fail-open, send
+// AI-less so an alert is never lost. ~2 */5 cron cycles: the held incident gets one retry cycle for
+// the analysis before the alert ships without it (#882). Slack /feed does the analogous hold via
+// rss.ts AI_HOLD_MS (#759) — but with NO service exemption at all, deliberately: a polled item cannot
+// be edited without re-notifying, so completeness beats speed there.
 export const AI_HOLD_MS = 10 * 60 * 1000
 
 /** KV marker: first-seen epoch ms for the #882 AI-hold window, scoped to the incident id (write-once,
@@ -251,11 +281,12 @@ export function pendingAiKey(incId: string): string {
 
 /**
  * #882 — should the cron HOLD a fresh new-incident Discord alert because its AI analysis isn't ready
- * yet? Holds ONLY a non-Tier-1 incident whose analysis is genuinely pending, and only within the
- * bounded window (fail-open past it). Holds NEITHER surface when:
+ * yet? Holds ONLY an incident outside `NEVER_AI_HELD` whose analysis is genuinely pending, and only
+ * within the bounded window (fail-open past it). Holds NEITHER surface when:
  *   - aiReady: an AI section is already available (from KV or a successful inline call) → send now
  *   - analysisSkipped: AI will never come for this incident (merged / no-model / generic) → send now
- *   - Tier-1 (claude/openai/gemini): never held so the operator alert + phone push stay immediate (#767/#778)
+ *   - NEVER_AI_HELD: never held, so the operator alert (and, for its PUSH_SCOPE members, the #778
+ *     phone push) stays immediate (#767/#778/#1148)
  * A KV-read error should reach here as firstSeenMs=0 (age huge → past window → NOT held → fire),
  * mirroring shouldHoldNewIncident's fail-not-hold convention (dropping a real alert is worse than a
  * few-minute-early AI-less one). Pure — unit-tested.
@@ -269,7 +300,11 @@ export function shouldHoldForAiAnalysis(state: {
 }): boolean {
   if (state.aiReady) return false            // AI present → nothing to wait for
   if (state.analysisSkipped) return false     // AI intentionally not produced → don't wait for it
-  if (TIER1_IDS.has(state.svcId)) return false  // Tier-1 never held (speed: #767/#778)
+  // #1148 — NEVER_AI_HELD, not TIER1_IDS: chatgpt/claudeai were already phone-push-worthy (#778) yet
+  // held, and since the cron `continue`s before the send, the hold delayed the #778 push too. The
+  // live 2026-07-23 ChatGPT event lagged the provider's post by ~17min, far more than the ≤5min cron
+  // floor can account for. See NEVER_AI_HELD for why the coding agents are in it too.
+  if (NEVER_AI_HELD.has(state.svcId)) return false  // never held (speed: #767/#778/#1148)
   const firstSeen = state.firstSeenMs ?? state.nowMs  // first sight → window starts now
   return state.nowMs - firstSeen < AI_HOLD_MS          // within window → hold; past it → fail-open send
 }
@@ -1283,13 +1318,6 @@ export function appendTweetSearchSection(
   }
   return build(true) ?? build(false) ?? description
 }
-
-// #778 — phone-push scope: the surfaces whose outages spawn viral "is X down" tweets (Tier-1 LLMs +
-// the consumer ChatGPT / claude.ai apps). NARROWER than the search scope (TWEET_SEARCH_TERMS, 7) on
-// purpose — a phone push is urgent + DND-bypassing, so it's reserved for the highest-volume moments;
-// claudecode/codex outages rarely trend on X. Every id here is also in TWEET_SEARCH_TERMS, so
-// buildTweetSearchUrl always resolves the push Click target.
-export const PUSH_SCOPE = new Set(['claude', 'openai', 'gemini', 'chatgpt', 'claudeai'])
 
 export interface PushTarget {
   svcId: string

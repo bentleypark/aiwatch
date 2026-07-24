@@ -16,7 +16,7 @@ import { join } from 'node:path'
 // invisible to every other test:
 //
 //   1. Passing the display NAME where the id belongs. `ai:usage.timedOutBy` is only useful because it is
-//      keyed the same way `TIER1_IDS` is (`alerts.ts`) — by id. A swap produces attribution that looks
+//      keyed the same way the alert-scope sets are (`alerts.ts`) — by id. A swap produces attribution that looks
 //      populated and answers nothing, and no assertion on the pure fn would notice.
 //   2. A NEW `recordUsage` call site that omits the service id. TypeScript catches a missing argument
 //      today because the param is required — but a future author reaching for a defensive `''` or `any`
@@ -78,6 +78,19 @@ describe('#1080 — ai:usage attribution + #882 hold-ledger wiring', () => {
     expect(reHold, 're-hold else branch not found — has the hold block been restructured?').toBeGreaterThan(-1)
     expect(bump, 'the held bump must follow the first-sight stamp').toBeGreaterThan(stamp)
     expect(bump - stamp, 'the held bump must NOT live in the per-cycle re-hold branch').toBeLessThan(reHold)
+  })
+
+  // #1148 — the gate's exemption lives in `shouldHoldForAiAnalysis` (behaviourally tested), but it only
+  // takes effect if the call site passes the REAL service id. `svcId: ''` is in no set, so it silently
+  // restores the #1148 bug for every service while the pure-fn tests stay green.
+  it('passes the resolved service id into the AI-hold gate — not a placeholder', () => {
+    expect(index).toMatch(/shouldHoldForAiAnalysis\(\{\s*svcId:\s*holdSvcId,/)
+  })
+
+  // The other half of #1148: the fail-open warn must skip the same never-held set the gate exempts.
+  // Pointing it at TIER1_IDS/PUSH_SCOPE re-splits one diagnostic across two definitions of "never held".
+  it('filters the fail-open warn on the same set the gate exempts', () => {
+    expect(index).toMatch(/firstSeenMs === 0 && !NEVER_AI_HELD\.has\(holdSvcId\)/)
   })
 
   it('distinguishes a release WITH the AI section from one without', () => {
