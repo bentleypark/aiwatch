@@ -9,7 +9,8 @@ import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
 import type { AiUsageCounters } from './ai-analysis'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
-import type { StatuslineTrafficCounts, StatuslineTrafficDelta } from './api-traffic'
+import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts } from './api-traffic'
+import { BADGE_UNKNOWN_SERVICE } from './api-traffic'
 
 // #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
 // polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
@@ -110,6 +111,10 @@ export interface DailySummaryData {
   // `newItems` (#748) — incidents AIWatch first-detected in the 24h window (alert-worthy events),
   // distinct from the mostly-empty poll volume; absent when the KV read failed.
   feedTraffic?: { all: number; service: number; total: number; newItems?: number } | null
+  // #1157 — badge-request volume (last-24h, from WAE): SVG status-badge embeds (READMEs, status
+  // pages) as a retention/distribution signal, mirroring #518/#548. Absent (null) when the SQL API
+  // isn't configured. No cumulative — same rationale as feedTraffic (a daily snapshot is the signal).
+  badgeTraffic?: BadgeTrafficCounts | null
   // #842-B — consent-free outage-moment audience (is-down page-load beacon → WAE): last-24h views by
   // inbound source (x/search/feed/direct), split by whether the service was in an active outage. The
   // sponsor-evidence "outage-spike audience" (#637/#803). Absent (null) when the AE SQL isn't configured.
@@ -286,6 +291,10 @@ export function buildDailySummary(data: DailySummaryData): string {
   const feedSection = formatFeedTrafficSection(data.feedTraffic)
   if (feedSection) lines.push(feedSection)
 
+  // Section: badge-request volume (#1157) — SVG status-badge embed signal (READMEs, status pages).
+  const badgeSection = formatBadgeTrafficSection(data.badgeTraffic)
+  if (badgeSection) lines.push(badgeSection)
+
   // Section: Chrome-extension activity (#837) — consent-free usage proxy (poll volume + ext reports).
   const extSection = formatExtActivitySection(data.extActivity)
   if (extSection) lines.push(extSection)
@@ -407,6 +416,34 @@ export function formatFeedTrafficSection(
   return (
     `\n📡 **Feed Polls (RSS/Slack)**\n` +
     `   Last 24h: ${feed.total} polls (all-feed ${feed.all} · per-service ~${feed.service})${newItems}`
+  )
+}
+
+/**
+ * Format the badge-request volume as a Discord section (#1157). Empty string when unavailable (SQL
+ * API not configured, or zero requests today) so the caller skips it. Shows the last-24h total plus,
+ * when present, the top-3 requested KNOWN serviceIds — the SVG status badges (READMEs, status pages)
+ * most actively embedded. The BADGE_UNKNOWN_SERVICE bucket (not-found/retired/typo'd ids, see
+ * api-traffic.ts) is excluded from the top-3 ranking (it isn't a real service) and instead reported
+ * as a separate "N unknown-id" suffix when present. WAE sampling estimate (SUM(_sample_interval)),
+ * like the other traffic sections. Pure.
+ */
+export function formatBadgeTrafficSection(
+  badge: DailySummaryData['badgeTraffic'],
+): string {
+  if (!badge || badge.total <= 0) return ''
+  const unknown = badge.byService[BADGE_UNKNOWN_SERVICE] ?? 0
+  const top = Object.entries(badge.byService)
+    .filter(([id, n]) => id !== BADGE_UNKNOWN_SERVICE && n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([id, n]) => `${id} ${n}`)
+    .join(' · ')
+  const topSuffix = top ? ` (${top})` : ''
+  const unknownSuffix = unknown > 0 ? ` · ${unknown} unknown-id` : ''
+  return (
+    `\n🖼️ **Badge Requests**\n` +
+    `   Last 24h: ${badge.total}${topSuffix}${unknownSuffix}`
   )
 }
 

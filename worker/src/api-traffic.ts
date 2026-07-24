@@ -146,6 +146,120 @@ export async function queryFeedTraffic(
   }
 }
 
+// ── Badge request traffic (#1157) ──────────────────────────────────────────
+// /badge/:serviceId (SVG status badges embedded in READMEs / status pages) has the same
+// instrumentation gap #518 closed for /api/v1 and #548 closed for /feed — embeds are a
+// retention/distribution signal AIWatch otherwise can't see. Mirrors the feed-poll pattern on the
+// SAME dataset, but blob1 carries the requested serviceId (rather than a binary all/service split)
+// so per-service embed counts are directly queryable via GROUP BY blob1.
+//   index1  = 'badge-request'                                  → total badge traffic, one index filter
+//   blob1   = serviceId, or BADGE_UNKNOWN_SERVICE on a miss     → per-service breakdown
+//   double1 = 1                                                 → request counter (SUM in AE SQL)
+// blob1 is NOT restricted to known service ids by the handler's `^[a-z0-9_-]+$` validation — that
+// regex only constrains the character set, and the badge handler deliberately still records a
+// not-found id (a stale/retired-service embed is itself a signal worth surfacing). Recording the
+// RAW miss string would make blob1 cardinality caller-controlled (unbounded, and inflatable by
+// anyone hitting /badge/<random> in a loop — the exact shape #518/#548 avoided by collapsing blob1
+// to a fixed enum). Collapsing every miss into the BADGE_UNKNOWN_SERVICE sentinel instead keeps
+// blob1 bounded by (known services + 1) regardless of what the caller sends. Unlike v1Variant/
+// feedVariant (which classify from the raw pathname), the caller here already knows which case it's
+// in (it just did the service lookup), so recordBadgeTraffic takes a discriminated `BadgeRequestOutcome`
+// rather than a bare string — the sentinel substitution happens INSIDE this function, so a future call
+// site can't pass an arbitrary raw string through to blob1 (the exact failure mode this section exists
+// to prevent, and the one the pre-fix code originally shipped).
+const BADGE_INDEX = 'badge-request'
+
+/** Sentinel blob1 value recorded for a serviceId with no match — see the cardinality note above.
+ *  Never a real service id (services are validated slugs; this literal can't collide, though nothing
+ *  currently enforces that against future SERVICES entries). */
+export const BADGE_UNKNOWN_SERVICE = '__unknown__'
+
+/** What a `/badge/:serviceId` request resolved to — the input `recordBadgeTraffic` classifies from.
+ *  The `known: false` variant carries no serviceId field at all, so there's nothing left to
+ *  accidentally thread through to blob1 on a miss. */
+export type BadgeRequestOutcome =
+  | { known: true; serviceId: string }
+  | { known: false }
+
+/** Record one badge-request data point. Best-effort (guarded binding + try/catch), like recordV1Traffic/recordFeedTraffic. */
+export function recordBadgeTraffic(
+  analytics: AnalyticsEngineDataset | undefined,
+  outcome: BadgeRequestOutcome,
+): void {
+  if (!analytics) return
+  const blob = outcome.known ? outcome.serviceId : BADGE_UNKNOWN_SERVICE
+  try {
+    analytics.writeDataPoint({
+      blobs: [blob],
+      doubles: [1],
+      indexes: [BADGE_INDEX],
+    })
+  } catch (err) {
+    console.warn('[wae] badge writeDataPoint failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+export interface BadgeTrafficCounts {
+  // last-24h badge requests per blob1 value: a real serviceId, OR the BADGE_UNKNOWN_SERVICE sentinel
+  // (aggregating every not-found/retired/typo'd id into one bucket — see the cardinality note above).
+  byService: Record<string, number>
+  total: number  // sum across all buckets, known services + unknown
+}
+
+/** AE SQL summing the last-24h badge request count per blob1 bucket (a service id or the
+ *  BADGE_UNKNOWN_SERVICE sentinel), sampling-corrected. */
+export function buildBadgeTrafficSql(dataset = V1_DATASET): string {
+  return (
+    `SELECT blob1 AS service, SUM(_sample_interval) AS requests ` +
+    `FROM ${dataset} ` +
+    `WHERE index1 = '${BADGE_INDEX}' AND timestamp > NOW() - INTERVAL '1' DAY ` +
+    `GROUP BY blob1 ` +
+    `FORMAT JSON`
+  )
+}
+
+/** Parse the AE SQL badge-traffic JSON into per-service counts. Tolerant of string/number requests
+ *  and a missing/invalid service label. */
+export function parseBadgeTrafficResponse(json: unknown): BadgeTrafficCounts | null {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data)) return null
+  const byService: Record<string, number> = {}
+  let total = 0
+  for (const row of data) {
+    const r = row as { service?: unknown; requests?: unknown }
+    if (typeof r.service !== 'string' || !r.service) continue
+    const parsed = Number(r.requests)
+    const n = Number.isFinite(parsed) ? parsed : 0
+    byService[r.service] = (byService[r.service] ?? 0) + n
+    total += n
+  }
+  return { byService, total }
+}
+
+/** Query the last-24h badge request count via the AE SQL API. Best-effort: null on missing creds /
+ *  HTTP failure / unparseable response. Never throws. Mirrors queryFeedTraffic. */
+export async function queryBadgeTraffic(
+  accountId: string | undefined,
+  token: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<BadgeTrafficCounts | null> {
+  if (!accountId || !token) return null
+  try {
+    const res = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildBadgeTrafficSql() },
+    )
+    if (!res.ok) {
+      console.warn(`[wae] badge SQL query failed: HTTP ${res.status}`)
+      return null
+    }
+    return parseBadgeTrafficResponse(await res.json())
+  } catch (err) {
+    console.warn('[wae] badge SQL query error:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 // ── Chrome-extension poll volume (#837) ───────────────────────────────────
 // The extension polls /api/status/cached?src=ext-claude, tagged `ext-claude` in the SAME
 // aiwatch_statusline dataset (index1). Counting it gives a CONSENT-FREE active-usage proxy

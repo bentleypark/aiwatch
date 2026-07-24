@@ -28,7 +28,7 @@ import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest, renderStatuslinePreset, isStatuslinePreset, renderStatuslineBrief, renderStatuslineDownList } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
+import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -3104,6 +3104,16 @@ export default {
             if (newItems != null) feedTraffic = { ...feedTraffic, newItems }
           }
 
+          // #1157 — badge-request volume (last 24h), the SVG status-badge embed signal. Best-effort,
+          // like feedTraffic; null (section skipped) when the AE token/account is absent. No
+          // cumulative — same rationale as feedTraffic (the daily value is the signal).
+          let badgeTraffic = null
+          try {
+            badgeTraffic = await queryBadgeTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+          } catch (err) {
+            console.warn('[daily-summary] badge traffic read failed:', err instanceof Error ? err.message : err)
+          }
+
           // #842-B — consent-free outage-moment audience (is-down page-load beacon → WAE). Last-24h
           // views by source (x/search/feed/direct), split by active-outage window. null (section
           // omitted) when the AE token/account is absent. The sponsor-evidence "outage-spike audience".
@@ -3211,6 +3221,7 @@ export default {
             degradationNoStatusCounts,
             v1Traffic,
             feedTraffic,
+            badgeTraffic,
             audience,
             extActivity,
             statuslineTraffic,
@@ -4029,11 +4040,22 @@ export default {
       }
 
       if (!service) {
+        // #1157 — still record: a stale/retired-service embed (or a typo'd/scanner-probed id) is a
+        // real signal worth counting. `{ known: false }` — recordBadgeTraffic itself substitutes the
+        // BADGE_UNKNOWN_SERVICE sentinel, so this call site has no raw string to accidentally leak
+        // into blob1 (see the cardinality note in api-traffic.ts).
+        recordBadgeTraffic(env.ANALYTICS, { known: false })
         return new Response(generateBadgeSvg(customLabel ?? serviceId, 'not found', '#9e9e9e', style), {
           status: 404,
           headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=60', 'Access-Control-Allow-Origin': '*' },
         })
       }
+
+      // #1157 — badge-request WAE instrumentation, mirrors #518 (/api/v1) and #548 (/feed). Excludes
+      // the 400 invalid-id branch above (mirrors #518 excluding 429s: that branch never resolves to a
+      // real service, so it isn't a meaningful embed signal). `serviceId` is a known service id here
+      // (the `find(s => s.id === serviceId)` lookup above just matched).
+      recordBadgeTraffic(env.ANALYTICS, { known: true, serviceId })
 
       const label = customLabel ?? service.name
       const statusColor = service.status === 'operational' ? '#3fb950'
