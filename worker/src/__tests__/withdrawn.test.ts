@@ -21,6 +21,8 @@ import {
   appendWithdrawn,
   withdrawalHold,
   liveIncidentIds,
+  shouldRefreshWithdrawnKey,
+  refreshWithdrawnKey,
   WITHDRAWN_KEY,
   WITHDRAWN_TTL_S,
   type WithdrawnIncident,
@@ -228,6 +230,121 @@ describe('withdrawn roster KV (#1106)', () => {
     await expect(appendWithdrawn(kv, [TOMB])).resolves.toBe(false)
     expect(err.mock.calls.flat().join(' ')).toContain('mistral/aud-1')
     err.mockRestore()
+  })
+})
+
+// #1153 — the roster KEY's TTL is fixed at write time by whatever `WITHDRAWN_TTL_S` was in force at
+// the prune, and `appendWithdrawn` is the only writer. Widening the entry window therefore does not
+// reach a tombstone already in KV: the extra days exist in the read filter and nowhere else. Both
+// directions matter here more than usual — a refresh that fires every cycle is a write-budget bug,
+// and one that never fires is the #1153 defect left in place, and NEITHER shows up as a failed
+// assertion on the happy path.
+describe('withdrawn roster key-TTL refresh (#1153)', () => {
+  const trackingKV = (seed?: string) => {
+    const store: Record<string, string> = seed !== undefined ? { [WITHDRAWN_KEY]: seed } : {}
+    const puts: Array<{ key: string; value: string; ttl?: number }> = []
+    const kv = {
+      get: async (k: string) => store[k] ?? null,
+      put: async (k: string, v: string, o?: { expirationTtl?: number }) => {
+        store[k] = v; puts.push({ key: k, value: v, ttl: o?.expirationTtl })
+      },
+    } as unknown as KVNamespace
+    return { kv, puts, store }
+  }
+  // The cron is every 5 minutes, so the hourly slot is minutes < 5. Anchored to a real ISO instant
+  // rather than an arbitrary epoch so the UTC-minute arithmetic is legible.
+  const atMinute = (m: number) => Date.parse(`2026-07-24T03:${String(m).padStart(2, '0')}:30Z`)
+
+  it('fires once per hour while a tombstone waits — not on every cycle', () => {
+    expect(shouldRefreshWithdrawnKey([TOMB], atMinute(0))).toBe(true)
+    expect(shouldRefreshWithdrawnKey([TOMB], atMinute(4))).toBe(true)
+    // The other eleven cycles of the hour must not write, or a pending withdrawal costs 288
+    // writes/day against a free-tier budget instead of 24.
+    expect(shouldRefreshWithdrawnKey([TOMB], atMinute(5))).toBe(false)
+    expect(shouldRefreshWithdrawnKey([TOMB], atMinute(30))).toBe(false)
+    expect(shouldRefreshWithdrawnKey([TOMB], atMinute(55))).toBe(false)
+  })
+
+  it('never fires with an empty roster — this is what keeps the steady state at zero writes', () => {
+    // The common case by far: no withdrawal pending. If this direction is not pinned, dropping the
+    // length check is invisible (the happy-path test above still passes) and the worker starts
+    // writing a `[]` roster every hour forever.
+    expect(shouldRefreshWithdrawnKey([], atMinute(0))).toBe(false)
+    expect(shouldRefreshWithdrawnKey([], atMinute(30))).toBe(false)
+  })
+
+  it('re-puts the stored roster under the SAME key with a TTL that outlives the entry window', async () => {
+    const { kv, puts } = trackingKV(JSON.stringify([TOMB]))
+    await expect(refreshWithdrawnKey(kv, [TOMB], atMinute(0))).resolves.toBe(true)
+    expect(puts).toHaveLength(1)
+    expect(puts[0].key).toBe(WITHDRAWN_KEY)
+    expect(JSON.parse(puts[0].value)).toEqual([TOMB])
+    // The whole point: a refreshed key must cover the entry window it is being refreshed FOR.
+    // `toBeGreaterThan` and not a literal — the margin is derived, and pinning the number here is
+    // how the two constants drift into disagreeing.
+    expect(puts[0].ttl).toBeGreaterThan(WITHDRAWN_TTL_S)
+  })
+
+  // The load-bearing race-safety property (#1153 review). `appendWithdrawn` read-modify-wrote this
+  // key earlier in the SAME tick; KV's per-colo read cache means the caller's snapshot can be the
+  // PRE-append roster. The refresh must re-read and re-put the CURRENT stored value verbatim, never
+  // re-serialise the stale snapshot — otherwise it deletes the just-appended tombstone for good.
+  it('writes back what is CURRENTLY stored, not the caller stale snapshot — no clobber of a fresh append', async () => {
+    const T2: WithdrawnIncident = { ...TOMB, incId: 'aud-2', title: 'A second withdrawal' }
+    // KV already holds BOTH (an append landed T2 this tick); the caller only saw T1.
+    const { kv, puts } = trackingKV(JSON.stringify([TOMB, T2]))
+    await expect(refreshWithdrawnKey(kv, [TOMB], atMinute(0))).resolves.toBe(true)
+    expect(JSON.parse(puts[0].value)).toEqual([TOMB, T2])
+  })
+
+  // A verbatim re-put must not COMPACT: entries `readWithdrawn` merely skips (expired / shape-drift)
+  // survive to the key's full life, preserving the `logExpired` diagnostic and the rollback-shape
+  // guarantee. If the refresh re-serialised the read-filtered list instead, this stale entry would be
+  // deleted within the hour.
+  it('preserves entries that readWithdrawn would skip — it touches the TTL, it does not filter', async () => {
+    const stale = { ...TOMB, incId: 'stale', prunedAt: '2000-01-01T00:00:00Z' }
+    const { kv, puts } = trackingKV(JSON.stringify([TOMB, stale]))
+    await refreshWithdrawnKey(kv, [TOMB], atMinute(0))
+    expect(JSON.parse(puts[0].value)).toEqual([TOMB, stale])
+  })
+
+  it('does not write when the key was evicted between the caller read and the refresh', async () => {
+    const { kv, puts } = trackingKV() // gate passes on the snapshot, but KV holds nothing now
+    await expect(refreshWithdrawnKey(kv, [TOMB], atMinute(0))).resolves.toBe(false)
+    expect(puts).toEqual([])
+  })
+
+  it('writes NOTHING when the cycle is not due — the mutation that turns 24 writes/day into 288', async () => {
+    const { kv, puts } = trackingKV(JSON.stringify([TOMB]))
+    await expect(refreshWithdrawnKey(kv, [TOMB], atMinute(30))).resolves.toBe(false)
+    expect(puts).toEqual([])
+  })
+
+  it('is best-effort: a KV write failure returns false and does not throw, so the alert build survives', async () => {
+    const kv = {
+      get: async () => JSON.stringify([TOMB]),
+      put: async () => { throw new Error('KV down') },
+    } as unknown as KVNamespace
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(refreshWithdrawnKey(kv, [TOMB], atMinute(0))).resolves.toBe(false)
+    expect(warn.mock.calls.flat().join(' ')).toContain('mistral/aud-1')
+    warn.mockRestore()
+  })
+
+  it('is best-effort: a KV READ failure returns false and does not throw', async () => {
+    const kv = {
+      get: async () => { throw new Error('KV read down') },
+      put: async () => { throw new Error('should not be reached') },
+    } as unknown as KVNamespace
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(refreshWithdrawnKey(kv, [TOMB], atMinute(0))).resolves.toBe(false)
+    warn.mockRestore()
+  })
+
+  // A refresh that widened the entry window but not the key would be a no-op dressed as a fix, and a
+  // key shorter than the window silently caps it — the exact #1153 failure, one level down.
+  it('keeps the entry window strictly inside the alerted:new marker that gates the notice', () => {
+    expect(WITHDRAWN_TTL_S * 1000).toBeLessThan(ALERTED_NEW_TTL_S * 1000)
   })
 })
 
@@ -621,6 +738,22 @@ describe('#1106 index.ts wiring', () => {
 
     it('withdrawal alerts actually reach the send list', () => {
       expect(src).toMatch(/const allAlerts = \[[^\]]*\.\.\.withdrawalAlerts[^\]]*\]/)
+    })
+
+    // #1153 — the refresh is a pure-function-plus-KV-write with no observable output of its own, so
+    // nothing else in this file would go red if the call were deleted: the roster would simply keep
+    // its old, shorter key TTL and the widened window would quietly stop reaching KV. Scoped to the
+    // cron block for the same reason `readWithdrawn` is.
+    it('the roster key-TTL refresh is actually called on the cron path, with the tombstones it read and the scheduled clock', () => {
+      expect(cron()).toMatch(/refreshWithdrawnKey\(\s*env\.STATUS_CACHE,\s*withdrawnTombstones,\s*scheduledTimeMs\s*\)/)
+    })
+
+    // #1153 — the refresh's slot gate is meaningless on wall clock: a slow tick would skip the whole
+    // hour. `scheduledTimeMs` only carries `event.scheduledTime` if `scheduled()` passes it in, and
+    // because the param defaults to `Date.now()`, reverting this call to `cronAlertCheck(env)` silently
+    // restores the wall-clock bug with every OTHER test still green. So pin the call site itself.
+    it('scheduled() threads event.scheduledTime into cronAlertCheck, not wall clock', () => {
+      expect(src).toMatch(/cronAlertCheck\(\s*env,\s*event\.scheduledTime\s*\)/)
     })
 
     it('and are ordered AFTER the service alerts, so a retraction cannot evict a live down alert', () => {

@@ -7,7 +7,7 @@ import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidate
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
-import { readWithdrawn, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
+import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
@@ -569,7 +569,11 @@ interface CronResult {
   recoveredCount: number
 }
 
-async function cronAlertCheck(env: Env): Promise<CronResult> {
+// `scheduledTimeMs` is `event.scheduledTime`, not wall clock: time-of-day slot checks (e.g. the
+// #1153 hourly roster-key refresh, `getUTCMinutes() < 5`) must stay accurate even when this function
+// takes 60+ seconds, otherwise a slow tick skips its slot for the whole hour. Defaults to `Date.now()`
+// for the rare direct caller / test. (Same convention `scheduled()` states for its own `scheduledNow`.)
+async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): Promise<CronResult> {
   const empty: CronResult = { total: 0, operational: 0, issues: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0 }
   if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return empty
 
@@ -762,6 +766,13 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // `logExpired` on the CRON only: a tombstone that ages out never notified anyone, which is #1106
     // recurring, and the 5-min cadence bounds the line. The /feed handler leaves it off (request path).
     const withdrawnTombstones = await readWithdrawn(env.STATUS_CACHE, Date.now(), true)
+    // #1153 — keep the roster KEY alive for as long as its entries are readable. The key's TTL is
+    // fixed by whichever `WITHDRAWN_TTL_S` was in force at the prune, so without this an entry widened
+    // by a later deploy is capped by the old, shorter key life. Hourly + only while a tombstone is
+    // pending (`shouldRefreshWithdrawnKey`), on the SCHEDULED clock so a slow tick doesn't skip the
+    // slot for the whole hour. Placed BEFORE the alert build so an exception there can't skip this
+    // durability chore; it re-reads the roster itself and cannot throw.
+    await refreshWithdrawnKey(env.STATUS_CACHE, withdrawnTombstones, scheduledTimeMs)
     const announcedWithdrawnIds = new Set<string>()
     await Promise.all(withdrawnTombstones.map(async (w) => {
       // Read failure → treat as NOT announced → stay silent. A withdrawal notice is only correct when
@@ -808,7 +819,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // #1106 — withdrawals go LAST. `sent` is capped at 5 per cycle, so ordering is a priority: a
   // retraction of a days-old incident must never evict a live `down`/`degraded` alert. A withdrawal
   // pushed past the cap is simply retried next cycle (its dedup key is only written on send, and the
-  // tombstone lives 48h), whereas a delayed outage alert is the thing users actually wait on.
+  // tombstone lives 6d), whereas a delayed outage alert is the thing users actually wait on.
   const allAlerts = [...incidentAlerts, ...serviceAlerts, ...withdrawalAlerts]
 
   // Dedup: skip alerts already sent + same-batch dedup + anti-flapping for degraded
@@ -941,7 +952,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // BEHIND the `⚪` retractions that rode through in `rest`. Ordering `allAlerts` alone therefore does
   // not survive to the cap below — and `mergedToSend`, not `allAlerts`, is the array that gets sliced.
   // A withdrawal pushed past the cap is retried next cycle (no dedup key is written for an unsent
-  // alert, and the tombstone lives 48h); a live outage alert delayed a cycle is the real cost.
+  // alert, and the tombstone lives 6d); a live outage alert delayed a cycle is the real cost.
   const merged = mergeXaiRegionalAlerts(mergeTogetherAlerts(toSend))
   const isWithdrawal = (a: AlertCandidate) => a.key.startsWith('alerted:wd:')
   const mergedToSend = [...merged.filter((a) => !isWithdrawal(a)), ...merged.filter(isWithdrawal)]
@@ -963,7 +974,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
     // #1106 — `alerted:wd:` MUST land in the 7d branch, and does so only because it is neither a
     // status nor a recovery key. That is correct by omission, and the omission is load-bearing: its
-    // subject is a tombstone that survives 48h and reproduces the alert deterministically, so a 2h
+    // subject is a tombstone that survives 6d and reproduces the alert deterministically, so a 2h
     // TTL would re-post the same public retraction to the operator AND every subscriber ~23 times.
     // Pinned by a test — see `ALERTED_NEW_TTL_S` below, which is the same 7d window.
     const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : ALERTED_NEW_TTL_S
@@ -1169,8 +1180,8 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const writes = await Promise.all(keysToWrite.map(async k => ({ k, ok: await kvPut(env.STATUS_CACHE, k, kvValue, { expirationTtl: ttl }) })))
       // #1106 — surface a failed `alerted:wd:` dedup write specifically. Every other kind here is
       // bounded by its subject leaving the live feed, but a withdrawal's subject is a tombstone that
-      // sits in KV for 48h and reproduces the alert deterministically — so a lost dedup key means the
-      // same retraction re-posts to the operator AND every subscriber every 5 minutes for two days.
+      // sits in KV for 6d and reproduces the alert deterministically — so a lost dedup key means the
+      // same retraction re-posts to the operator AND every subscriber every 5 minutes for that window.
       for (const { k, ok } of writes) {
         if (!ok && k.startsWith('alerted:wd:')) console.error('[cron] #1106 alerted:wd dedup write FAILED — this withdrawal will re-fire every cycle until a write lands:', k)
       }
@@ -1373,14 +1384,14 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // alert will never re-fire. Stamping before the send would therefore let the log record
     // "the thread was closed" for a notice nobody received, which is exactly the reassuring-direction
     // lie the whole module exists to prevent. A failure leaves the row un-announced (it will read
-    // `neverClosed` after 48h, which is the truth) and says so loudly, because nothing will retry it.
+    // `neverClosed` once its deadline passes, which is the truth) and says so loudly, because nothing will retry it.
     // Fail-soft — bookkeeping must never affect the alerting that follows.
     const wdIds = withdrawalIdsFromAlertKeys(keysToWrite)
     if (wdIds.size > 0) {
       if (!operatorSent) {
         // OPERATOR webhook only: the #486 per-user relay and the `alert:feed` projection are built
         // from this same alert and fan out after the loop, unaffected by this failure. So the row
-        // reading `neverClosed` in 48h means "no operator notice went out", not "nobody was told".
+        // reading `neverClosed` at its deadline means "no operator notice went out", not "nobody was told".
         console.error('[cron] #1106 ⚪ withdrawal notice FAILED to send to the OPERATOR webhook and will never retry (the alerted:wd dedup key is already written; the per-user relay is unaffected) — leaving the row un-announced:', [...wdIds].join(', '))
       } else {
         try {
@@ -2274,7 +2285,7 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
     droppedMalformed,
     count: withVerdict.length,
     announced: withVerdict.filter((r) => r.announcedAt).length,
-    // Split rather than one "not announced" bucket: `pending` is still inside the tombstone's 48h and
+    // Split rather than one "not announced" bucket: `pending` is still before its send deadline and
     // may yet notify (normally a `withdrawalHold`), `neverClosed` no longer can. Only the second is
     // the #1106 bug recurring — collapsing them would make a routine hold look like a regression.
     // A row whose `prunedAt` cannot be parsed is neither: it is unageable, so it is counted apart
@@ -2422,7 +2433,7 @@ export default {
       }
     }
 
-    const result = await cronAlertCheck(env)
+    const result = await cronAlertCheck(env, event.scheduledTime)
     if (!env.DISCORD_WEBHOOK_URL) return
 
     // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits

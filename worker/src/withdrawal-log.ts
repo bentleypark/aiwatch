@@ -1,7 +1,7 @@
 // #1106 Part 5 — the durable record that a withdrawal HAPPENED.
 //
 // Every other trace of a withdrawal is short-lived by design: the `incidents:withdrawn` tombstone
-// roster is 48h, `alerted:wd:{incId}` is 7d, `alert:feed:recent` is 2h, and Workers Logs are ~3d on
+// roster is 6d, `alerted:wd:{incId}` is 7d, `alert:feed:recent` is 2h, and Workers Logs are ~3d on
 // the free plan. The accumulator row is gone by definition — its prune is what starts all of this —
 // so `archive:monthly:{month}` is structurally missing the incident too. Past a week, nothing in KV
 // can answer "did the ⚪ path ever fire, how often, and did the thread actually close?".
@@ -19,7 +19,7 @@
 // Two write points, and only two:
 //   1. the prune (`accumulateIncidentsOnlyIfChanged`) records the row with `announcedAt` ABSENT;
 //   2. the cron's `alerted:wd:` dedup write stamps `announcedAt`.
-// A row still missing `announcedAt` once its tombstone's 48h has passed is therefore a thread that
+// A row still missing `announcedAt` once its send deadline has passed is therefore a thread that
 // was opened and never closed — the #1106 failure recurring — and it is DERIVED, not separately
 // wired. Holds are not rows on purpose: `withdrawalHold` re-evaluates every 5 minutes, so a held
 // notice is a STATE, not an event, and one row per evaluation would turn a bounded log into a
@@ -27,6 +27,9 @@
 // worth keeping; the reason is in the cron log line for as long as logs live.
 
 import { WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
+// ALERTED_NEW_TTL_S only — the second of the two clocks that bound a sendable notice. No cycle:
+// alerts.ts imports withdrawn.ts, not this module.
+import { ALERTED_NEW_TTL_S } from './alerts'
 import { kvPut } from './utils'
 import type { KVLike } from './utils'
 
@@ -40,7 +43,7 @@ export interface WithdrawalLogEntry {
   /** ISO — when the prune removed the accumulator row, i.e. when AIWatch learned of the withdrawal. */
   prunedAt: string
   /** ISO — when the ⚪ notice was accepted by the OPERATOR Discord webhook. Absent means it was not:
-   *  either still held / never announced, or (once `prunedAt` is more than the tombstone's 48h old)
+   *  either still held / never announced, or (once its send deadline has passed)
    *  permanently so.
    *
    *  Scoped to the operator send on purpose, because that is the only dispatch whose result is known
@@ -89,7 +92,7 @@ export function monthsBackFrom(from: string, count: number): string[] {
 export const WITHDRAWAL_LOG_MAX = 200
 
 /** Is this a row we wrote? A durable value outlives any number of deploys, so a shape change leaves
- *  the OLD shape readable forever — unlike the 48h tombstone roster, this one never ages out of the
+ *  the OLD shape readable forever — unlike the 6d tombstone roster, this one never ages out of the
  *  problem. A malformed element is dropped rather than allowed to reach a consumer half-built. */
 function isLogEntry(v: unknown): v is WithdrawalLogEntry {
   if (!v || typeof v !== 'object') return false
@@ -106,7 +109,7 @@ function isLogEntry(v: unknown): v is WithdrawalLogEntry {
  * First-write-wins is what makes the prune's call idempotent, and it is not merely tidy: a re-prune
  * (or a second accumulator pass over the same cycle) would otherwise move `prunedAt` forward, and
  * `prunedAt` is the clock the "never closed" reading is derived from — a moving one would keep
- * resetting the 48h window and make a permanently-lost notice look perpetually pending. It also
+ * resetting the roster window and make a permanently-lost notice look perpetually pending. It also
  * protects an already-stamped `announcedAt` from being erased by a later prune of the same id.
  */
 export function upsertPrunedRows(
@@ -172,24 +175,37 @@ export function markRowsAnnounced(
   return { rows: changed ? out : rows, changed, stamped, matched }
 }
 
-/** After this long without an `announcedAt`, the notice can no longer be sent: the tombstone it would
- *  render from has aged out of `incidents:withdrawn`, and nothing recreates it. DERIVED from that
- *  roster's own TTL rather than restated, so the two can never drift into disagreeing about when a
- *  pending row becomes a permanent loss. Before this point an un-announced row is merely PENDING —
- *  normally a `withdrawalHold` waiting on the provider's state to become readable and clean. */
+/** How long after `prunedAt` the tombstone this row renders from ages out of `incidents:withdrawn`.
+ *  DERIVED from that roster's own TTL rather than restated, so the two can never drift. It is only
+ *  ONE of the two clocks that bound the notice — see `isPermanentlyUnclosed`. */
 export const WITHDRAWN_LOG_UNCLOSED_AFTER_MS = WITHDRAWN_TTL_S * 1000
 
 /** Was this row's 🔴 thread left permanently open? The verdict #1106 exists to make answerable — and
  *  the reason it is computed on READ rather than stored: it is a function of elapsed time, so a
  *  stored flag would need a writer to come back and flip it, which is exactly the extra wiring this
- *  design avoids. */
+ *  design avoids.
+ *
+ *  Two independent clocks can each make the notice unsendable, so the deadline is the EARLIER of them
+ *  (#1153 review): the tombstone ages out at `prunedAt + WITHDRAWN_LOG_UNCLOSED_AFTER_MS`, and the
+ *  `alerted:new:{incId}` marker `buildWithdrawalAlerts` gates on expires at
+ *  `startedAt + ALERTED_NEW_TTL_S` — after which the alert build skips the tombstone even while it
+ *  still exists. When a provider withdraws well after the incident started, the marker binds first, so
+ *  keying the verdict off `prunedAt` alone would report a row that is ALREADY lost as `pending` for up
+ *  to a day — the exact under-reporting #1153 widened the roster and thereby exposed. */
 export function isPermanentlyUnclosed(row: WithdrawalLogEntry, nowMs: number): boolean {
   if (row.announcedAt) return false
-  const at = Date.parse(row.prunedAt)
+  const pruned = Date.parse(row.prunedAt)
+  const started = Date.parse(row.startedAt)
   // An unparseable `prunedAt` cannot be aged. Do NOT claim a permanent loss from it — the row is
   // reported as pending and its malformed timestamp is visible in the row itself.
-  if (Number.isNaN(at)) return false
-  return nowMs - at > WITHDRAWN_LOG_UNCLOSED_AFTER_MS
+  if (Number.isNaN(pruned)) return false
+  const rosterDeadline = pruned + WITHDRAWN_LOG_UNCLOSED_AFTER_MS
+  // A malformed `startedAt` just drops the marker clock (its absence can only push the deadline
+  // LATER, i.e. toward reporting pending — the safe direction, matching the prunedAt guard above).
+  const deadline = Number.isNaN(started)
+    ? rosterDeadline
+    : Math.min(rosterDeadline, started + ALERTED_NEW_TTL_S * 1000)
+  return nowMs > deadline
 }
 
 /**
@@ -236,7 +252,7 @@ export async function readWithdrawalLog(
   if (!Array.isArray(parsed)) {
     // Valid JSON of the wrong shape — a `{rows:[…]}` migration, a rollback, a hand-edit. Same class
     // and same frozen consequence as the branch above, so it gets the same treatment; leaving it
-    // silent (as the 48h roster can afford to) would make the freeze undiagnosable.
+    // silent (as the 6d roster can afford to) would make the freeze undiagnosable.
     console.error('[withdrawal-log] value is not an array — this month is frozen; repair or delete the key by hand:', month, raw.slice(0, 300))
     return unreadable
   }
@@ -244,7 +260,7 @@ export async function readWithdrawalLog(
   const droppedMalformed = parsed.length - valid.length
   if (droppedMalformed > 0) {
     // NOT just a count, and NOT a `warn`. The next `recordWithdrawalsPruned` writes the filtered
-    // array back, permanently deleting these rows from the only durable record — so unlike the 48h
+    // array back, permanently deleting these rows from the only durable record — so unlike the 6d
     // roster this borrows from, the drop is destructive and this is the last chance to reconstruct it.
     console.error(
       `[withdrawal-log] dropping ${droppedMalformed} malformed row(s) in ${month} (shape drift across a rollback?) — the next write erases them permanently:`,
@@ -285,7 +301,7 @@ export async function recordWithdrawalsPruned(
     const { rows, readable } = await readWithdrawalLog(kv, month)
     if (!readable) {
       // Name the tombstones, not just the month: this is the LAST moment their identities exist
-      // outside the 48h roster. The accumulator row is already pruned, so `diffPrunedIncidents` can
+      // outside the 6d roster. The accumulator row is already pruned, so `diffPrunedIncidents` can
       // never re-derive them on a later cycle — `existing` will no longer contain the id.
       console.error(
         '[withdrawal-log] skipping write — the existing value could not be read, and an empty start would erase the month:',
@@ -306,13 +322,14 @@ export async function recordWithdrawalsPruned(
 /**
  * Write point 2 — stamp the rows whose ⚪ notice was just dispatched.
  *
- * Checks the CURRENT month and the PREVIOUS one. A tombstone lives 48h, so an incident pruned on the
+ * Checks the CURRENT month and the PREVIOUS one. A tombstone lives 6d, so an incident pruned on the
  * last day of a month can legitimately have its notice sent in the next one, and looking only at the
  * current month would leave that row permanently reading "never closed" — the exact false positive
- * this log exists to make trustworthy. Two months is sufficient by that same 48h bound.
+ * this log exists to make trustworthy. Two months is sufficient: 6d cannot cross two month boundaries
+ * (the shortest month is 28 days), so a tombstone never reaches a third month.
  *
  * There is exactly ONE attempt to stamp any given id, ever: the cron's dedup loop skips an alert once
- * `alerted:wd:{incId}` exists, and the tombstone it renders from dies at 48h. So every way this can
+ * `alerted:wd:{incId}` exists, and the tombstone it renders from dies at 6d. So every way this can
  * fail to stamp is PERMANENT, and each one leaves the row asserting `neverClosed` for a notice that
  * did go out — the only place in the module whose failure direction is "claim something false"
  * rather than "stay silent". That is why every branch below is logged with identity.
