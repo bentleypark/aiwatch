@@ -4,7 +4,7 @@ import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import type { StatuspageResponse } from './statuspage'
 import { fetchWithTimeout } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
-import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
+import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
 // ── Uptime (#1006) ────────────────────────────────────────────────────────────────────────────────
 //
@@ -38,6 +38,10 @@ export interface IncidentIoUptime {
    *  A status-page migration creates a NEW component, so this can drop to a handful of days (#1004):
    *  the figure is then honest for the days it has, and the UI says which. */
   days: number
+  /** #1017 — today's (UTC calendar day) weighted outage seconds, from the SAME intervals/weights as
+   *  `pct` above, just windowed to [startOfTodayUTC, nowMs] instead of the trailing 30 days. The
+   *  durable per-day archive input — see ServiceStatus.todayWeightedOutageSec. */
+  todayWeightedOutageSec: number
 }
 
 /** Every `component_impacts` entry on the page, parsed once. Returns [] when the page has no impacts
@@ -187,7 +191,9 @@ function componentUptime(
   const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
   // Floor, like parseUptimeData: never round 99.998% up to a clean 100%.
   const pct = Math.max(0, Math.floor((1 - weightedSec / windowSec) * 10000) / 100)
-  return { pct, days: Math.floor(covered) }
+  // #1017 — cheap second call over the SAME intervals, today's window instead of 30d.
+  const todayWeightedOutageSec = weightedDowntimeSeconds(intervals, startOfTodayUTC(nowMs), nowMs)
+  return { pct, days: Math.floor(covered), todayWeightedOutageSec }
 }
 
 /** #1006 — the trailing-30-day uptime for a service, computed from the provider's impact records.
@@ -215,6 +221,7 @@ export function computeIncidentIoUptime(
   }
   let worstPct = Infinity
   let shortestDays = Infinity
+  let worstTodaySec = 0
   let resolved = 0
 
   for (const id of ids) {
@@ -225,6 +232,9 @@ export function computeIncidentIoUptime(
     resolved++
     worstPct = Math.min(worstPct, result.pct)
     shortestDays = Math.min(shortestDays, result.days)
+    // #1017 — worst-of like pct/days above: the most-affected component's TODAY figure, not a sum
+    // (a sum across components would double-count a shared outage worst-of'd elsewhere in this file).
+    worstTodaySec = Math.max(worstTodaySec, result.todayWeightedOutageSec)
   }
 
   if (resolved === 0) return null
@@ -234,7 +244,7 @@ export function computeIncidentIoUptime(
       `component_uptimes (upstream id rotation?) — uptime is a worst-of over the ${resolved} that resolved`,
     )
   }
-  return { pct: worstPct, days: shortestDays }
+  return { pct: worstPct, days: shortestDays, todayWeightedOutageSec: worstTodaySec }
 }
 
 

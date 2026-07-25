@@ -169,6 +169,15 @@ export interface UptimeDataResult {
   /** Days `uptimeReported` covers (≈90) — stated in the UI, because the provider's own page does not
    *  commit to one: it renders 30 / 60 / 90 days depending on the viewport. */
   uptimeReportedDays: number | null
+  /** #1017 — TODAY's (UTC calendar day) weighted outage seconds, the exact `weighted(day)` value the
+   *  loop below already computes per published day — just read off today's entry instead of summed
+   *  into the 30-day total. `null` when the page has no entry for today yet (first cycle of the day,
+   *  before the provider publishes it) or the component wasn't found. Same weight scheme as
+   *  `uptimePercent` (MAJOR_WEIGHT/MINOR_WEIGHT) — the durable per-day archive input, see
+   *  ServiceStatus.todayWeightedOutageSec. NOT computed for Better Stack (`platform_avg`), whose
+   *  weighting is a genuinely different computation (#1110) — mixing them into one field would be
+   *  exactly the "not the same window and weights" mistake that doc warns against. */
+  todayWeightedOutageSec: number | null
 }
 
 // #1006 — WHY the trailing 30 and not all 90.
@@ -192,11 +201,11 @@ export interface UptimeDataResult {
  *  single component while the badge spans several is what let LangSmith show a partial outage in its
  *  incident list beside a spotless 100% uptime; the same gap exists on the Atlassian side for every
  *  multi-component service (cursor / copilot / windsurf / bfl / runway). */
-export function parseUptimeData(html: string, componentId: string | string[], windowDays = 30): UptimeDataResult {
+export function parseUptimeData(html: string, componentId: string | string[], windowDays = 30, nowMs: number = Date.now()): UptimeDataResult {
   const ids = Array.isArray(componentId) ? componentId : [componentId]
   if (ids.length > 1) {
-    const results = ids.map((id) => parseUptimeDataSingle(html, id, windowDays)).filter((r) => r.uptimePercent != null)
-    if (results.length === 0) return { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null }
+    const results = ids.map((id) => parseUptimeDataSingle(html, id, windowDays, false, nowMs)).filter((r) => r.uptimePercent != null)
+    if (results.length === 0) return { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null, todayWeightedOutageSec: null }
     if (results.length < ids.length) {
       // A configured badge component no longer resolves on the page (renamed/rotated id, page
       // restructure). The worst-of then shrinks to the survivors → a too-optimistic uptime with no
@@ -218,21 +227,25 @@ export function parseUptimeData(html: string, componentId: string | string[], wi
       }
     }
     const reported = results.map((r) => r.uptimeReported).filter((v): v is number => v != null)
+    // #1017 — worst-of independently like the dailyImpact union above (NOT tied to `worst`, the
+    // 30-day-worst component — the most-affected-TODAY component can differ from it).
+    const todaySecs = results.map((r) => r.todayWeightedOutageSec).filter((v): v is number => v != null)
     return {
       dailyImpact,
       uptimePercent: worst.uptimePercent,
       windowDays: worst.windowDays,
       uptimeReported: reported.length > 0 ? Math.min(...reported) : null,
       uptimeReportedDays: worst.uptimeReportedDays,
+      todayWeightedOutageSec: todaySecs.length > 0 ? Math.max(...todaySecs) : null,
     }
   }
   // #989 — warnOnMiss only on the genuine single-component path; the multi-id branch above owns its own
   // aggregate "N/M configured components absent" warn, so per-id warns here would double-count it.
-  return parseUptimeDataSingle(html, ids[0], windowDays, true)
+  return parseUptimeDataSingle(html, ids[0], windowDays, true, nowMs)
 }
 
-function parseUptimeDataSingle(html: string, componentId: string, windowDays = 30, warnOnMiss = false): UptimeDataResult {
-  const result: UptimeDataResult = { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null }
+function parseUptimeDataSingle(html: string, componentId: string, windowDays = 30, warnOnMiss = false, nowMs: number = Date.now()): UptimeDataResult {
+  const result: UptimeDataResult = { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null, todayWeightedOutageSec: null }
   // Locate the uptimeData JSON object, then extract it by brace counting (50KB+ object).
   // #868 — Atlassian Statuspage now embeds it as `window.uptimeData = {…}` with a
   // `var uptimeData = window.uptimeData;` ALIAS line. The old `html.indexOf('var uptimeData = ')`
@@ -300,6 +313,15 @@ function parseUptimeDataSingle(html: string, componentId: string, windowDays = 3
       result.uptimeReported = pctOver(scored)
       result.uptimeReportedDays = scored.length
     }
+    // #1017 — the LAST scored day is USUALLY today's (same "tail = trailing window ending today"
+    // assumption `trailing` above relies on for windowDays), but verified rather than assumed: if the
+    // provider hasn't published today's bucket yet this cycle, the last entry is yesterday's, and
+    // silently mislabeling it as today's would bake a stale figure into the permanent `history:{date}`
+    // archive (index.ts `cacheWrite`). `weighted()` is the exact per-day figure already computed for
+    // the pct sum, just read off the single most-recent entry instead of summed over the window.
+    const latest = scored[scored.length - 1]
+    const todayStr = new Date(nowMs).toISOString().split('T')[0]
+    if (latest && latest.date === todayStr) result.todayWeightedOutageSec = weighted(latest)
   } catch (err) {
     console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
   }

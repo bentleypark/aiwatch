@@ -14,6 +14,7 @@ import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTo
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
+import { restoreArchivedCalendar } from './uptime-archive'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved } from './recovery-mark'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -153,6 +154,12 @@ interface DailyCounters {
     // keyed by component id (+ name for display). Populated from ServiceStatus.components (#604/#606).
     // Rides the existing `daily:{date}` value (+0 KV writes); the monthly archive aggregates it.
     components?: Record<string, { ok: number; total: number; name: string }>
+    // #1017 — durable per-day archive input, same +0-writes pattern as `components` above: last-write-
+    // wins per cycle (like `officialUptime`), from ServiceStatus.todayWeightedOutageSec. Archived into
+    // `history:{date}` (90d) automatically — no new write site. Lets the calendar survive a provider
+    // status-page migration by reconstructing a day's classification from this when the live source has
+    // forgotten it — see kv-schema.md `daily:{date}` row for the read-side mechanism.
+    weightedOutageSec?: number | null
   }
 }
 
@@ -179,6 +186,29 @@ export function accumulateComponentCounters(
 
 function todayUTC(): string {
   return new Date().toISOString().split('T')[0]
+}
+
+/** #1017 — restore archived calendar days for any service whose live window looks incomplete (a
+ *  status-page migration reset it, #1004's disclosed `uptimeWindowDays` signal). Mutates each
+ *  service's `dailyImpact` in place. `restoreArchivedCalendar` itself gates on `uptimeWindowDays`
+ *  being present, so this pays the extra `history:` reads ONLY for a service actually flagged short —
+ *  never on the common full-window path. Per-service try/catch (mirrors `component-seen:`/
+ *  `badge:repos:seen`'s same discipline): one service's anomaly must degrade only that service's
+ *  calendar for this cycle, never abort the whole batch — an unguarded Promise.all would let one
+ *  throw cancel every other service's restore too. Extracted from `cacheWrite` (not inlined) so this
+ *  isolation guarantee is directly testable with a mock KV that fails one service, rather than only
+ *  provable by a source-scan regex. */
+export async function restoreArchivedCalendars(kv: KVNamespace, services: ServiceStatus[], todayISO: string): Promise<void> {
+  await Promise.all(services.map(async (s) => {
+    try {
+      const restored = await restoreArchivedCalendar(kv, {
+        serviceId: s.id, liveDailyImpact: s.dailyImpact, calendarDays: s.calendarDays ?? 30, uptimeWindowDays: s.uptimeWindowDays, todayISO,
+      })
+      if (restored !== s.dailyImpact) s.dailyImpact = restored
+    } catch (err) {
+      console.error(`[uptime-archive] restore failed for ${s.id} — serving live-only dailyImpact this cycle:`, err instanceof Error ? err.message : err)
+    }
+  }))
 }
 
 // Returns true when this call PASSED the 10-min throttle and issued the writes (counters + CACHE_KEY),
@@ -216,9 +246,17 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
     // "Official Uptime" display number, so it stays month-accurate and survives a later rebuild
     // (unlike a one-shot snapshot taken only at build time).
     counters[s.id].officialUptime = s.uptime30d ?? null
+    // #1017 — same last-write-wins cadence as officialUptime above: today's weighted outage seconds,
+    // the durable per-day archive input (rides the SAME daily:{date} write — +0 new KV writes).
+    counters[s.id].weightedOutageSec = s.todayWeightedOutageSec ?? null
     // #605 — accumulate per-component uptime (same cadence) for services with a breakdown.
     accumulateComponentCounters(counters[s.id], s.components)
   })
+
+  // #1017 — restored BEFORE CACHE_KEY is serialized below, so every reader of the live snapshot
+  // (frontend calendar, is-down SSR) sees the restored days with no changes on their end. See
+  // restoreArchivedCalendars's own doc for the per-service isolation guarantee.
+  await restoreArchivedCalendars(kv, services, today)
 
   // Write cache + daily counters (2 writes per interval). The CACHE_KEY snapshot shape
   // ({ services, upstreamFeeds, cachedAt }) MUST match cache-refresh.ts `writeStatusCache` (the #488/#1057 primitive);

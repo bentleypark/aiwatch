@@ -63,9 +63,9 @@ describe('parseFlashdutyFeed (#618)', () => {
     // The feed PUBLISHES 99.88 (API) / 99.48 (Web Chat) over its own ~90-day period. Recomputed over the
     // trailing 30 days with the weights on /methodology: 99.93 / 99.90 — the older outages that drag the
     // published figures down fall outside the window. Worst-of → 99.90.
-    expect(parsed.uptime30d).toBeCloseTo(99.9, 2)
+    expect(parsed.flashdutyUptime?.pct).toBeCloseTo(99.9, 2)
     // …and it is NOT the published aggregate, which is the entire point of #1006.
-    expect(parsed.uptime30d).not.toBeCloseTo(99.48, 2)
+    expect(parsed.flashdutyUptime?.pct).not.toBeCloseTo(99.48, 2)
   })
 
   it('builds a dailyImpact map keyed by YYYY-MM-DD with valid levels', () => {
@@ -108,7 +108,7 @@ describe('parseFlashdutyFeed (#618)', () => {
     const empty = parseFlashdutyFeed({})
     expect(empty.status).toBe('operational')
     expect(empty.incidents).toEqual([])
-    expect(empty.uptime30d).toBeNull()
+    expect(empty.flashdutyUptime).toBeNull()
     expect(empty.components).toEqual([])
   })
 
@@ -133,8 +133,8 @@ describe('parseFlashdutyFeed (#618)', () => {
     it('uptime is scoped to the API component alone, not a worst-of with Web Chat', () => {
       // #1006 — computed over 30 days: API 99.93, Web Chat 99.90. Scoping must yield the API figure,
       // so the two must differ for this assertion to prove anything.
-      expect(scoped.uptime30d).toBeCloseTo(99.93, 2)
-      expect(scoped.uptime30d).not.toBeCloseTo(parsed.uptime30d!, 2)
+      expect(scoped.flashdutyUptime?.pct).toBeCloseTo(99.93, 2)
+      expect(scoped.flashdutyUptime?.pct).not.toBeCloseTo(parsed.flashdutyUptime!.pct, 2)
     })
 
     it('a Web-Chat-only active incident does NOT flip the API badge', () => {

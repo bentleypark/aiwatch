@@ -34,12 +34,39 @@ describe('parseUptimeData embed-format handling (#868)', () => {
   })
 
   it('returns null (no throw) when no uptimeData embed is present', () => {
-    expect(parseUptimeData('<html><body>no data here</body></html>', 'comp1')).toEqual({ dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null })
+    expect(parseUptimeData('<html><body>no data here</body></html>', 'comp1')).toEqual({ dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null, todayWeightedOutageSec: null })
   })
 
   it('returns null for a component id not present in the data (no throw)', () => {
     const html = `<script>window.uptimeData = ${OBJ}; var uptimeData = window.uptimeData;</script>`
     expect(parseUptimeData(html, 'missing').uptimePercent).toBeNull()
+  })
+
+  describe('todayWeightedOutageSec (#1017)', () => {
+    const html = `<script>window.uptimeData = ${OBJ}; var uptimeData = window.uptimeData;</script>`
+
+    it('is set when the LAST published day matches the given nowMs (today)', () => {
+      // 2026-07-02 (the fixture's last day) IS "today" for this nowMs → weighted(864s @ 0.3) = 259.2
+      const nowMs = Date.parse('2026-07-02T18:00:00Z')
+      expect(parseUptimeData(html, 'comp1', 30, nowMs).todayWeightedOutageSec).toBe(259.2)
+    })
+
+    it('is null when the last published day is NOT today — the provider hasn\'t published yet this cycle', () => {
+      // nowMs is a day later than the fixture's last entry (2026-07-02) — must NOT silently reuse it.
+      const nowMs = Date.parse('2026-07-03T02:00:00Z')
+      expect(parseUptimeData(html, 'comp1', 30, nowMs).todayWeightedOutageSec).toBeNull()
+    })
+
+    it('worst-of\'s independently across a multi-component scope (NOT tied to the pct-worst component)', () => {
+      // comp2's last day is CLEAN, comp1's has the 864s outage — pct-worst is comp1, but todayWeightedOutageSec
+      // must still surface comp1's value via the independent Math.max, not silently drop to comp2's 0/null.
+      const days2 = '"days":[{"date":"2026-07-01","outages":{"p":0,"m":0}},{"date":"2026-07-02","outages":{"p":0,"m":0}}]'
+      const twoComp = `{"comp1":{"component":{"code":"comp1","name":"API"},${DAYS}},"comp2":{"component":{"code":"comp2","name":"Web"},${days2}}}`
+      const multiHtml = `<script>window.uptimeData = ${twoComp}; var uptimeData = window.uptimeData;</script>`
+      const nowMs = Date.parse('2026-07-02T18:00:00Z')
+      const r = parseUptimeData(multiHtml, ['comp1', 'comp2'], 30, nowMs)
+      expect(r.todayWeightedOutageSec).toBe(259.2)
+    })
   })
 
   it('the alias-only line without a real data object yields null, not a throw', () => {

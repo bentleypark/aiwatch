@@ -1366,7 +1366,11 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
     incidents: parsed.incidents,
     // #1006 — COMPUTED over the trailing 30 days from the feed's `component_impacts` intervals, like
     // every other source; the feed's own `component_uptimes` aggregate is used only as the roster.
-    ...(parsed.uptime30d != null ? { uptime30d: parsed.uptime30d, uptimeSource: 'official' as const } : {}),
+    // #1017 — todayWeightedOutageSec (the durable per-day archive input) rides the SAME
+    // `flashdutyUptime` object as uptime30d, one spread, so the two can't drift apart.
+    ...(parsed.flashdutyUptime != null
+      ? { uptime30d: parsed.flashdutyUptime.pct, uptimeSource: 'official' as const, todayWeightedOutageSec: parsed.flashdutyUptime.todayWeightedOutageSec }
+      : {}),
     ...(Object.keys(parsed.dailyImpact).length > 0 ? { dailyImpact: parsed.dailyImpact } : {}),
     ...(parsed.components.length >= 2 ? { components: parsed.components } : {}),
   }
@@ -1726,9 +1730,12 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       let uptimeWindow: number | undefined
       let uptimeRep: number | undefined
       let uptimeRepDays: number | undefined
+      // #1017 — durable per-day archive input, rides whichever branch below actually computes uptime.
+      let todayWeightedOutageSec: number | undefined
       if (uptimeResult?.uptimePercent != null) {
         uptimeValue = uptimeResult.uptimePercent
         uptimeSrc = 'official'
+        if (uptimeResult.todayWeightedOutageSec != null) todayWeightedOutageSec = uptimeResult.todayWeightedOutageSec
         if (uptimeResult.windowDays != null && uptimeResult.windowDays < UPTIME_WINDOW_DAYS) uptimeWindow = uptimeResult.windowDays
         // The provider's own figure IS shown for Atlassian too — the ~90-day number a desktop visitor
         // sees on their page (status.claude.com: "90 days ago … 99.58%"). Its period is stated, because
@@ -1750,6 +1757,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         if (io) {
           uptimeValue = io.pct
           uptimeSrc = 'official'
+          todayWeightedOutageSec = io.todayWeightedOutageSec
           // A status-page migration creates a NEW component whose records may not reach back 30 days.
           // The figure is honest for the days it covers — surface WHICH, rather than passing a short
           // window off as a 30-day one. Absent when the window is whole. (junie itself dodges this by
@@ -1847,6 +1855,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         ...(uptimeWindow != null ? { uptimeWindowDays: uptimeWindow } : {}),
         ...(uptimeRep != null ? { uptimeReported: uptimeRep } : {}),
         ...(uptimeRepDays != null ? { uptimeReportedDays: uptimeRepDays } : {}),
+        ...(todayWeightedOutageSec != null ? { todayWeightedOutageSec } : {}),
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
@@ -1997,6 +2006,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
 
       let incidents: Incident[] = []
       let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
+      // #1017 — MUST stay assigned together with instatusUptime above (both read off the same
+      // `parseInstatusUptime()` result, same as instatusReported/instatusReportedDays below) — an edit
+      // to one assignment site without the other silently drops todayWeightedOutageSec from the archive.
+      let instatusTodayWeightedOutageSec: number | null = null
       let instatusReported: number | null = null // #1006 — the page's own published aggregate (disclosure)
       let instatusReportedDays: number | null = null
       let instatusComponents: ServiceComponent[] = [] // #761 — Instatus per-component snapshot (Next.js reads a published status; Nuxt derives one)
@@ -2014,6 +2027,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           // 'official', not platform.
           base.uptime30d = page.uptime30d
           base.uptimeSource = 'official'
+          base.todayWeightedOutageSec = page.todayWeightedOutageSec // #1017
 
           // #1134 — the home payload intentionally retains only ~14 days of root-map incidents. Older
           // non-component incidents live on the paginated /incidents route (consumed above). This is a
@@ -2089,7 +2103,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         if (res.ok) {
           const mainHtml = await res.text()
           if (config.statusComponent) {
-            instatusUptime = parseInstatusUptime(mainHtml, config.statusComponent)
+            const instatusResult = parseInstatusUptime(mainHtml, config.statusComponent)
+            instatusUptime = instatusResult?.pct ?? null
+            instatusTodayWeightedOutageSec = instatusResult?.todayWeightedOutageSec ?? null // #1017
             // #1006 — the % the page itself shows (over its own ~90-day period), for the side-by-side
             // disclosure. Only kept when it differs from our computed figure.
             instatusReported = parseInstatusReportedUptime(mainHtml, config.statusComponent)
@@ -2264,6 +2280,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           latency: config.category === 'api' ? latency : null,
           uptime30d: instatusUptime ?? base.uptime30d,
           ...(instatusUptime != null ? { uptimeSource: 'official' as const } : {}),
+          ...(instatusTodayWeightedOutageSec != null ? { todayWeightedOutageSec: instatusTodayWeightedOutageSec } : {}), // #1017
           // #1006's side-by-side disclosure comes from the SAME independent main-page fetch as
           // `instatusUptime`, so carrying one without the others would silently drop the
           // comparison on every parse failure.
@@ -2314,6 +2331,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
             ? {
                 uptime30d: instatusUptime,
                 uptimeSource: 'official' as const,
+                ...(instatusTodayWeightedOutageSec != null ? { todayWeightedOutageSec: instatusTodayWeightedOutageSec } : {}), // #1017
                 ...(instatusReported != null && instatusReported !== instatusUptime
                   ? { uptimeReported: instatusReported, ...(instatusReportedDays != null ? { uptimeReportedDays: instatusReportedDays } : {}) }
                   : {}),

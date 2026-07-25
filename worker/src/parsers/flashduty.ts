@@ -13,7 +13,7 @@
 import type { Incident, TimelineEntry, ServiceComponent, DailyImpactLevel } from '../types'
 import { formatDuration } from '../utils'
 import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
-import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
+import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
 // ── Raw Flashduty payload shapes (only the fields we consume) ──
 export interface FlashdutyComponent {
@@ -62,17 +62,25 @@ interface FlashdutyComponentUptime {
  *  component absent from it is one Flashduty doesn't monitor, and an empty roster yields null rather
  *  than a fabricated 100%: absence of impact records is not evidence of absence of downtime (#713).
  *  Worst-of across the roster. Times are unix SECONDS on this feed. */
+export interface FlashdutyUptime {
+  pct: number
+  /** #1017 — worst-of independently of `pct` (the most-affected-TODAY component can differ from the
+   *  30-day-worst one, same reasoning as the incident-io / Statuspage / Instatus aggregations). */
+  todayWeightedOutageSec: number
+}
+
 export function computeFlashdutyUptime(
   impacts: FlashdutyComponentImpact[],
   roster: FlashdutyComponentUptime[],
   nowMs: number,
   windowDays = 30,
-): number | null {
+): FlashdutyUptime | null {
   if (roster.length === 0) return null
   const windowStart = nowMs - windowDays * 86_400_000
   const windowSec = windowDays * 86_400
+  const todayStart = startOfTodayUTC(nowMs)
 
-  let worst: number | null = null
+  let worst: FlashdutyUptime | null = null
   for (const component of roster) {
     // Collect (start, end, weight) in ms and let the shared accumulator clamp open impacts (0/absent
     // end) to now and merge overlaps (worst-weight-wins) so an escalation isn't summed on top of itself.
@@ -89,7 +97,10 @@ export function computeFlashdutyUptime(
     }
     const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
     const pct = Math.max(0, Math.floor((1 - weightedSec / windowSec) * 10000) / 100)
-    if (worst === null || pct < worst) worst = pct
+    // #1017 — cheap second call over the SAME intervals, today's window instead of the trailing one.
+    const todayWeightedOutageSec = weightedDowntimeSeconds(intervals, todayStart, nowMs)
+    if (worst === null) worst = { pct, todayWeightedOutageSec }
+    else worst = { pct: Math.min(worst.pct, pct), todayWeightedOutageSec: Math.max(worst.todayWeightedOutageSec, todayWeightedOutageSec) }
   }
   return worst
 }
@@ -133,7 +144,11 @@ export const DEEPSEEK_FEED_SOFT_STALE_S = 60 * 60
 export interface ParsedFlashduty {
   status: 'operational' | 'degraded' | 'down'
   incidents: Incident[]
-  uptime30d: number | null
+  /** #1017 — pct + today's weighted outage seconds, ALWAYS both present or both absent (a single
+   *  `computeFlashdutyUptime()` call produces them together) — kept as one field rather than two
+   *  independently-optional ones so a future edit can't update one half without the other. Null when
+   *  there's no roster / no scoped component. */
+  flashdutyUptime: FlashdutyUptime | null
   dailyImpact: Record<string, DailyImpactLevel>
   components: ServiceComponent[]
 }
@@ -320,15 +335,14 @@ export function parseFlashdutyFeed(feed: FlashdutyFeed, opts: ParseFlashdutyOpti
   // source: `platform_avg` (Better Stack) applies no severity weighting at all and narrows its window
   // per resource, and Instatus's Next.js path honours a provider-published `customImpactPercentage`. Worst-of across components when the service isn't scoped to
   // one: a multi-component service's availability is gated by its weakest surface.
-  const uptime30d = computeFlashdutyUptime(
+  const flashdutyUptime = computeFlashdutyUptime(
     (feed.structure?.component_impacts ?? []).filter((imp) => !primaryId || imp.component_id === primaryId),
     (feed.structure?.component_uptimes ?? []).filter((u) => !primaryId || u.component_id === primaryId),
     nowMs,
   )
-
   const dailyImpact = buildDailyImpact(
     (feed.structure?.component_impacts ?? []).filter((imp) => !primaryId || imp.component_id === primaryId),
   )
 
-  return { status, incidents, uptime30d, dailyImpact, components }
+  return { status, incidents, flashdutyUptime, dailyImpact, components }
 }

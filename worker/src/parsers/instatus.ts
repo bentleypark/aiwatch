@@ -2,7 +2,7 @@
 
 import type { TimelineEntry, Incident } from '../types'
 import { formatDuration } from '../utils'
-import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
+import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
 // #556 — map an Instatus severity/impact string to AIWatch's impact scale. Instatus exposes it
 // differently per SSR format, so this helper handles BOTH vocabularies:
@@ -540,28 +540,36 @@ export function parseInstatusUptimeDays(html: string): number | null {
   return Number.isFinite(days) && days > 0 && days <= 400 ? days : null
 }
 
+/** #1017 — pct + today's (UTC calendar day) weighted outage seconds, the durable per-day archive
+ *  input. `todayWeightedOutageSec` is null in the same cases `pct` is (component/page not found). */
+export interface InstatusUptime {
+  pct: number
+  todayWeightedOutageSec: number
+}
+
 export function parseInstatusUptime(
   html: string,
   componentName: string | undefined,
   nowMs: number = Date.now(),
   windowDays = 30,
-): number | null {
+): InstatusUptime | null {
   if (!componentName) return null
   if (html.includes('__NUXT_DATA__')) return parseInstatusNuxtUptime(html, componentName, nowMs, windowDays)
   if (html.includes('__next_f')) return parseInstatusNextUptime(html, componentName, nowMs, windowDays)
   return null
 }
 
-function parseInstatusNuxtUptime(html: string, componentName: string, nowMs: number, windowDays: number): number | null {
+function parseInstatusNuxtUptime(html: string, componentName: string, nowMs: number, windowDays: number): InstatusUptime | null {
   const match = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
   if (!match) return null
   try {
     const arr: unknown[] = JSON.parse(match[1])
     const deref = (v: unknown) => (typeof v === 'number' ? arr[v] : v) // Nuxt scalars are index refs
     const windowStart = nowMs - windowDays * 86_400_000
+    const todayStart = startOfTodayUTC(nowMs)
 
     /** Weighted outage seconds inside the window for ONE component node (the node that carries `days`). */
-    const componentUptime = (node: Record<string, unknown>): number | null => {
+    const componentUptime = (node: Record<string, unknown>): InstatusUptime | null => {
       const days = deref(node.days)
       if (!Array.isArray(days)) return null
       // Nuxt events carry a resolved `duration` (seconds), not an end timestamp, so an in-progress event
@@ -586,7 +594,10 @@ function parseInstatusNuxtUptime(html: string, componentName: string, nowMs: num
       }
       const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
       // Floor, like every other source — never round 99.998% up to a clean 100%.
-      return Math.max(0, Math.floor((1 - weightedSec / (windowDays * 86_400)) * 10000) / 100)
+      const pct = Math.max(0, Math.floor((1 - weightedSec / (windowDays * 86_400)) * 10000) / 100)
+      // #1017 — cheap second call over the SAME intervals, today's window instead of the trailing one.
+      const todayWeightedOutageSec = weightedDowntimeSeconds(intervals, todayStart, nowMs)
+      return { pct, todayWeightedOutageSec }
     }
 
     for (const item of arr) {
@@ -608,13 +619,17 @@ function parseInstatusNuxtUptime(html: string, componentName: string, nowMs: num
       // the group entirely, silently dropping Mistral's uptime to "Not provided".
       const services = deref(o.services)
       if (!Array.isArray(services)) continue
-      let worst: number | null = null
+      let worst: InstatusUptime | null = null
       for (const ref of services) {
         const member = deref(ref) as Record<string, unknown> | undefined
         if (!member || !('days' in member)) continue
-        const pct = componentUptime(member)
-        if (pct === null) continue
-        if (worst === null || pct < worst) worst = pct
+        const result = componentUptime(member)
+        if (result === null) continue
+        // #1017 — pct picks the worst member; todayWeightedOutageSec independently worst-of's (the
+        // most-affected-TODAY member can differ from the 30-day-worst one, same reasoning as the
+        // incident-io / Statuspage aggregations).
+        if (worst === null) worst = result
+        else worst = { pct: Math.min(worst.pct, result.pct), todayWeightedOutageSec: Math.max(worst.todayWeightedOutageSec, result.todayWeightedOutageSec) }
       }
       return worst
     }
@@ -651,7 +666,7 @@ function warnNextUptimeShape(componentName: string, reason: string): null {
   return null
 }
 
-function parseInstatusNextUptime(html: string, componentName: string, nowMs: number, windowDays: number): number | null {
+function parseInstatusNextUptime(html: string, componentName: string, nowMs: number, windowDays: number): InstatusUptime | null {
   // Resolve component name → id from the escaped payload (buildInstatusComponentMap reads the `\"`
   // form), then read componentsUptime[id] from the unescaped JSON.
   let id: string | undefined
@@ -697,7 +712,10 @@ function parseInstatusNextUptime(html: string, componentName: string, nowMs: num
       intervals.push({ start: Date.parse(outage.from ?? ''), end: Date.parse(outage.to ?? ''), weight })
     }
     const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
-    return Math.max(0, Math.floor((1 - weightedSec / (windowDays * 86_400)) * 10000) / 100)
+    const pct = Math.max(0, Math.floor((1 - weightedSec / (windowDays * 86_400)) * 10000) / 100)
+    // #1017 — cheap second call over the SAME intervals, today's window instead of the trailing one.
+    const todayWeightedOutageSec = weightedDowntimeSeconds(intervals, startOfTodayUTC(nowMs), nowMs)
+    return { pct, todayWeightedOutageSec }
   } catch (err) {
     console.warn('[parseInstatusNextUptime] failed:', err instanceof Error ? err.message : err)
     return null

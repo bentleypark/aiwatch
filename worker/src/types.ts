@@ -105,6 +105,21 @@ export interface ServiceStatus {
   // UTC-vs-local off-by-one; #693 follow-up). buildCalendarFromIncidents handles both key forms.
   dailyImpact?: Record<string, DailyImpactLevel>
   calendarDays?: number
+  /** #1017 — TODAY's weighted outage seconds (UTC calendar day, [startOfTodayUTC, now]). Populated
+   *  by all 5 "official" uptime sources, via two different mechanisms: incident.io / Instatus /
+   *  Flashduty / OnlineOrNot compute it with a SECOND, cheap `weightedDowntimeSeconds` call over the
+   *  same `intervals[]` already built for their 30-day `uptime30d` figure (today's window instead of
+   *  30d); Atlassian Statuspage instead reads the provider's own last-published per-day bucket
+   *  directly (it doesn't build an `OutageInterval[]` at all — see statuspage.ts). Absent for Better
+   *  Stack (`platform_avg` — a genuinely different weighting scheme, #1110, mixing it into this field
+   *  would misrepresent the archive) and for any service with no uptime source at all.
+   *
+   *  Folded into the `daily:{date}` KV counter (index.ts `cacheWrite`) every cycle — the SAME write
+   *  as `officialUptime`, so this durably archives one weighted-seconds figure per service per day
+   *  via `history:{date}` (90d) with +0 new KV writes. That durable record is what lets the calendar
+   *  survive a provider status-page migration (`uptimeWindowDays` below drops when the LIVE page's
+   *  history resets) — the archive keeps what the live page has since forgotten. */
+  todayWeightedOutageSec?: number
   /** Where `uptime30d` came from — the reader MUST know, because they are not the same kind of number.
    *  #713 — 'estimate' removed; no invented uptime.
    *  #1006 —

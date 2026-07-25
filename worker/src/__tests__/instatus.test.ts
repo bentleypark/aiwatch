@@ -279,30 +279,95 @@ describe('parseInstatusUptime — Nuxt (#627 → #1006: computed, not copied)', 
   it('computes the trailing 30 days from days[].events, ignoring the published aggregate', () => {
     // 24h MAJOR inside the window → 1 day of 30 → 96.66%. The page's own `uptime` (99.599) is not used.
     const html = nuxtHtml([{ daysAgo: 5, duration: 86_400, severity: 'CRITICAL' }])
-    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66)
+    expect(parseInstatusUptime(html, 'API', NOW)?.pct).toBe(96.66)
   })
 
   it('weights a MEDIUM severity as a partial outage (0.3), per /methodology', () => {
     // 24h × 0.3 = 7.2h of 30 days → 99.00%
     const html = nuxtHtml([{ daysAgo: 5, duration: 86_400, severity: 'MEDIUM' }])
-    expect(parseInstatusUptime(html, 'API', NOW)).toBe(99)
+    expect(parseInstatusUptime(html, 'API', NOW)?.pct).toBe(99)
   })
 
   it('ignores an event OUTSIDE the 30-day window — the whole point of the rewrite', () => {
     const html = nuxtHtml([{ daysAgo: 60, duration: 86_400, severity: 'CRITICAL' }])
-    expect(parseInstatusUptime(html, 'API', NOW)).toBe(100)
+    expect(parseInstatusUptime(html, 'API', NOW)?.pct).toBe(100)
   })
 
   it('clips an event that straddles the window edge', () => {
     // Starts 31 days ago, runs 2 days → only ~1 day lands inside.
     const html = nuxtHtml([{ daysAgo: 31, duration: 2 * 86_400, severity: 'CRITICAL' }])
-    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66)
+    expect(parseInstatusUptime(html, 'API', NOW)?.pct).toBe(96.66)
   })
 
   it('returns null for an unknown component or a missing name', () => {
     const html = nuxtHtml([])
     expect(parseInstatusUptime(html, 'Nonexistent', NOW)).toBeNull()
     expect(parseInstatusUptime(html, undefined, NOW)).toBeNull()
+  })
+
+  // #1017 — this block's NOW is exactly midnight UTC, so "today so far" is always a zero-length
+  // window there (correctly 0 in every test above, same reason incident-io.test.ts needed a second
+  // NOW). `daysAgo` accepts a negative/fractional value (ago(-0.5) = NOW + 12h) to place an event
+  // later in the SAME UTC day without a second fixture builder — the day-bucket index (`i===0`) the
+  // event structurally lands in is irrelevant to the computation, which sweeps on created_at/duration.
+  it('todayWeightedOutageSec (#1017) reflects only the portion of an event inside today', () => {
+    const queryNow = NOW + 15 * 3_600_000 // 15h into the same UTC day as NOW
+    const html = nuxtHtml([{ daysAgo: -0.5, duration: 2 * 3600, severity: 'CRITICAL' }]) // NOW+12h, 2h long
+    expect(parseInstatusUptime(html, 'API', queryNow)?.todayWeightedOutageSec).toBe(2 * 3600)
+  })
+})
+
+describe('parseInstatusUptime — Nuxt GROUP node worst-of independence (#1017)', () => {
+  // Mistral's configured `statusComponent: 'API'` addresses the API GROUP, not a single component
+  // (instatus.ts's `services` branch, ~line 615) — every test in the describe block above exercises
+  // only the single-component `'days' in o` branch, leaving this group branch's worst-of logic
+  // completely untested even though it runs in production every cycle for Mistral.
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const DAY = 86_400_000
+  const ago = (d: number) => new Date(NOW - d * DAY).toISOString()
+
+  /** Appends one Nuxt member component ({id,name,uptime,days}) to the flat array; returns its index. */
+  function pushMember(arr: unknown[], name: string, events: Array<{ daysAgo: number; duration: number; severity: string }>): number {
+    arr.push(name); const nameIdx = arr.length - 1
+    const eventIdx: number[] = []
+    for (const e of events) {
+      arr.push(ago(e.daysAgo)); const createdAt = arr.length - 1
+      arr.push(e.severity); const sev = arr.length - 1
+      arr.push(e.duration); const dur = arr.length - 1
+      arr.push({ created_at: createdAt, duration: dur, severity: sev })
+      eventIdx.push(arr.length - 1)
+    }
+    const dayIdx: number[] = []
+    for (let i = 0; i < 90; i++) {
+      arr.push(i === 0 ? eventIdx : [])
+      const evList = arr.length - 1
+      arr.push({ date: ago(i), events: evList })
+      dayIdx.push(arr.length - 1)
+    }
+    arr.push(dayIdx); const daysList = arr.length - 1
+    arr.push({ id: name, name: nameIdx, uptime: 99, days: daysList })
+    return arr.length - 1
+  }
+
+  // Alpha: a large outage 5 days ago (the 30-day-worst member), nothing today.
+  // Beta: a small outage TODAY only (negligible 30-day impact, but the worst-TODAY member).
+  // A group that just takes the 30-day-worst member's todayWeightedOutageSec (instead of independently
+  // worst-of'ing it) would report 0 — Alpha's figure — hiding Beta's live outage entirely.
+  function nuxtGroupHtml(): string {
+    const arr: unknown[] = []
+    const alphaIdx = pushMember(arr, 'Alpha', [{ daysAgo: 5, duration: 86_400, severity: 'CRITICAL' }])
+    const betaIdx = pushMember(arr, 'Beta', [{ daysAgo: -0.5, duration: 2 * 3600, severity: 'CRITICAL' }])
+    arr.push([alphaIdx, betaIdx]); const servicesList = arr.length - 1
+    arr.push('API'); const groupNameIdx = arr.length - 1
+    arr.push({ id: 'grp-api', name: groupNameIdx, services: servicesList, uptime: 99.5, order: 0 })
+    return `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
+  }
+
+  it('pct worst-of picks the 30-day-worst member while todayWeightedOutageSec independently picks the worst-TODAY member', () => {
+    const queryNow = NOW + 15 * 3_600_000 // 15h in — after Beta's event, same UTC day
+    const result = parseInstatusUptime(nuxtGroupHtml(), 'API', queryNow)
+    expect(result?.pct).toBe(96.66) // Alpha's 24h outage dominates the 30-day figure
+    expect(result?.todayWeightedOutageSec).toBe(2 * 3600) // Beta's today outage — Alpha contributes 0 today
   })
 })
 
@@ -337,41 +402,52 @@ describe('parseInstatusUptime — Next.js componentsUptime (#635 → #1006)', ()
 
   it('computes from outages over 30 days, not from the published aggregate', () => {
     const html = nextHtml([outage(5, 24, 'MAJOROUTAGE')])
-    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66) // NOT 99.82
+    expect(parseInstatusUptime(html, 'API', NOW)?.pct).toBe(96.66) // NOT 99.82
   })
 
   it('uses the provider’s OWN impact fraction when it states one (customImpactPercentage)', () => {
     // Instatus says this partial outage hit 50% of capacity. Their number beats our 0.3 default.
     // 24h × 0.5 = 12h of 30 days → 98.33%
     const html = nextHtml([outage(5, 24, 'PARTIALOUTAGE', 50)])
-    expect(parseInstatusUptime(html, 'API', NOW)).toBe(98.33)
+    expect(parseInstatusUptime(html, 'API', NOW)?.pct).toBe(98.33)
   })
 
   it('falls back to the documented weights when no custom fraction is given', () => {
     // PARTIALOUTAGE → 0.3. 24h × 0.3 = 7.2h of 30 → 99.00%
     const html = nextHtml([outage(5, 24, 'PARTIALOUTAGE')])
-    expect(parseInstatusUptime(html, 'API', NOW)).toBe(99)
+    expect(parseInstatusUptime(html, 'API', NOW)?.pct).toBe(99)
   })
 
   it('ignores an OPERATIONAL "outage" row and anything outside the window', () => {
-    expect(parseInstatusUptime(nextHtml([outage(5, 24, 'OPERATIONAL')]), 'API', NOW)).toBe(100)
-    expect(parseInstatusUptime(nextHtml([outage(60, 24, 'MAJOROUTAGE')]), 'API', NOW)).toBe(100)
+    expect(parseInstatusUptime(nextHtml([outage(5, 24, 'OPERATIONAL')]), 'API', NOW)?.pct).toBe(100)
+    expect(parseInstatusUptime(nextHtml([outage(60, 24, 'MAJOROUTAGE')]), 'API', NOW)?.pct).toBe(100)
   })
 
   // #1006 review — an OPEN outage has `to: null`; it must count to now, not be dropped (the "spotless
   // 100% during a live outage" symptom the rewrite exists to kill).
   it('an ONGOING outage (to null) counts to now, it is not dropped', () => {
     const openOutage = `{\\"from\\":\\"${iso(1)}\\",\\"to\\":null,\\"status\\":\\"MAJOROUTAGE\\"}` // started 24h ago, still open
-    expect(parseInstatusUptime(nextHtml([openOutage]), 'API', NOW)).toBe(96.66) // 24h of 30d, NOT 100
+    expect(parseInstatusUptime(nextHtml([openOutage]), 'API', NOW)?.pct).toBe(96.66) // 24h of 30d, NOT 100
   })
 
   it('a clean component is 100%', () => {
-    expect(parseInstatusUptime(nextHtml([]), 'API', NOW)).toBe(100)
+    expect(parseInstatusUptime(nextHtml([]), 'API', NOW)?.pct).toBe(100)
   })
 
   it('returns null for an unknown component or undefined name', () => {
     expect(parseInstatusUptime(nextHtml([]), 'Nonexistent', NOW)).toBeNull()
     expect(parseInstatusUptime(nextHtml([]), undefined, NOW)).toBeNull()
+  })
+
+  // #1017 — this describe block's NOW is exactly midnight UTC (see the file-level comment on the Nuxt
+  // block's equivalent test below), so exercising a genuinely non-zero todayWeightedOutageSec needs a
+  // query time later in the same UTC day. `outage()`'s `fromDaysAgo` accepts a negative/fractional
+  // value to place the interval AFTER the closure's NOW without needing a second fixture builder.
+  it('todayWeightedOutageSec (#1017) reflects only the portion of an outage inside today', () => {
+    const queryNow = NOW + 15 * 3_600_000 // 15h into the same UTC day as NOW
+    // fromDaysAgo=-0.5 → iso(-0.5) = NOW + 12h; a 2h outage ending at NOW+14h, entirely before queryNow.
+    const html = nextHtml([outage(-0.5, 2, 'MAJOROUTAGE')])
+    expect(parseInstatusUptime(html, 'API', queryNow)?.todayWeightedOutageSec).toBe(2 * 3600)
   })
 })
 
