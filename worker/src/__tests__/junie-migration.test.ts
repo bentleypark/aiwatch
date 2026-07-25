@@ -215,7 +215,7 @@ describe('junie uptime is reachable through the Central Console id and reports t
       pageHtml([], [uptimeEntry(junie.incidentIoComponentId as string, '100.00', '2026-05-29T00:00:00Z')]),
       junie.incidentIoComponentId!, now,
     )
-    expect(out).toEqual({ pct: 100, days: 30 })
+    expect(out).toEqual({ pct: 100, days: 30, todayWeightedOutageSec: 0 })
   })
 
   it('a worst-of [Central Console, JetBrains AI] scope WOULD pin the window to 6d — why the badge scope excludes it', () => {

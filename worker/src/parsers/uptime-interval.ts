@@ -14,6 +14,14 @@
 //     concurrent incidents on one component, must not double-count — summing can drive weightedSec
 //     past the window and floor a service to a misleading 0%.
 
+/** #1017 — start of the current UTC calendar day, in epoch ms. Shared by every interval-based uptime
+ *  parser to compute a SECOND, cheap `weightedDowntimeSeconds` call (today's window instead of 30d)
+ *  over the SAME `intervals[]` already built for the 30-day figure — the durable per-day archive input
+ *  (see `daily:{date}`/`history:{date}` in index.ts's `cacheWrite`, kv-schema.md). */
+export function startOfTodayUTC(nowMs: number): number {
+  return Date.parse(new Date(nowMs).toISOString().split('T')[0] + 'T00:00:00Z')
+}
+
 export interface OutageInterval {
   /** epoch ms; an unparseable start is the caller's signal to drop the interval (can't place it). */
   start: number

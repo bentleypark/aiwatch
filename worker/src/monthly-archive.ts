@@ -716,11 +716,17 @@ export function parseDurationMin(d: string): number {
 
 // #605 — the live daily:{date} value also carries per-component daily counters (index.ts
 // accumulateComponentCounters); Phase 2 reads them into per-component monthly uptime.
+// #1017 — kept manually in sync with index.ts's DailyCounters (not shared/imported — same as before
+// this field was added; see that type for the field's full rationale).
 type DailyCounters = Record<string, {
   ok: number
   total: number
   officialUptime?: number | null
   components?: Record<string, { ok: number; total: number; name: string }>
+  // Declared for type accuracy against the real `daily:`/`history:` KV shape (uptime-archive.ts's
+  // readArchivedWeightedOutageSec reads it directly by key, bypassing this file). Not yet consumed by
+  // any monthly aggregation in this file.
+  weightedOutageSec?: number | null
 }>
 
 /** How many of the month's FINAL days may supply the "as of month end" official uptime. A value last

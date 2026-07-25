@@ -52,7 +52,7 @@ describe('turbopuffer — the real region roster resolves to a worst-of uptime (
   it('computes a worst-of across the CONFIGURED ids, though the page publishes no percentage', () => {
     // One region takes a 24h full outage; every other region is clean.
     const html = page([impactEntry(ids[3], 5, 4, 'full_outage')], established())
-    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 96.66, days: 30 })
+    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0 })
   })
 
   it('WARNS when a configured id no longer resolves — a rotated ULID must not silently shrink the worst-of', () => {
@@ -60,7 +60,7 @@ describe('turbopuffer — the real region roster resolves to a worst-of uptime (
     // component-miss alert fires. This warn is the only signal that the roster went stale.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const html = page([], [uptimeEntry(ids[0], '2023-12-07T00:00:00Z')])
-    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 100, days: 30 })
+    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 100, days: 30, todayWeightedOutageSec: 0 })
     expect(warn).toHaveBeenCalledOnce()
     expect(warn.mock.calls[0][0]).toContain(`${ids.length - 1}/${ids.length} configured components absent`)
   })
@@ -86,6 +86,6 @@ describe('chart_only pages now get an uptime (#1006)', () => {
       (Array.isArray(scope) ? scope : [scope]).map((c) => uptimeEntry(c, '2024-01-01T00:00:00Z')),
     )
     // 6h × 0.3 = 1.8h of 30 days → 99.75%
-    expect(computeIncidentIoUptime(html, scope, NOW)).toEqual({ pct: 99.75, days: 30 })
+    expect(computeIncidentIoUptime(html, scope, NOW)).toEqual({ pct: 99.75, days: 30, todayWeightedOutageSec: 0 })
   })
 })

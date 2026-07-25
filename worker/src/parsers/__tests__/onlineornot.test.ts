@@ -531,6 +531,30 @@ describe('computed uptime (#1006 — computed from incidents, not the aggregate)
   })
 })
 
+// #1017 — this file's shared NOW (above) is exactly midnight UTC, so todayWeightedOutageSec would
+// always read 0 there (a genuinely zero-length "today so far" window, not a computation gap — same
+// reason incident-io.test.ts needed its own separate mid-day NOW, see there). A second NOW mid-day is
+// needed to exercise a non-zero value end-to-end through the real parser (had zero coverage before).
+describe('todayWeightedOutageSec (#1017)', () => {
+  const MID_DAY = Date.parse('2026-07-14T15:00:00Z') // 15h into the UTC day
+  const midAgo = (msAgo: number) => new Date(MID_DAY - msAgo).toISOString()
+
+  it('reflects only the portion of an outage inside today', () => {
+    // 2h outage entirely inside today: started 3h ago, ended 1h ago.
+    const impact = { id: 'i1', title: 'Outage', started: midAgo(3 * 3_600_000), ended: midAgo(1 * 3_600_000), impact: 'MAJOR_OUTAGE' }
+    const page = parseOnlineOrNotPage(makeHtml([impact]), MID_DAY)
+    expect(page.ok && page.todayWeightedOutageSec).toBe(2 * 3600) // 2h at full weight (1.0)
+  })
+
+  it('an outage entirely before today contributes 0, but still counts toward the 30-day pct', () => {
+    const yesterday9pm = MID_DAY - 18 * 3_600_000
+    const impact = { id: 'i1', title: 'Outage', started: new Date(yesterday9pm - 3_600_000).toISOString(), ended: new Date(yesterday9pm).toISOString(), impact: 'MAJOR_OUTAGE' }
+    const page = parseOnlineOrNotPage(makeHtml([impact]), MID_DAY)
+    expect(page.ok && page.todayWeightedOutageSec).toBe(0)
+    expect(page.ok && page.uptime30d).toBeLessThan(100)
+  })
+})
+
 // #1123 — captured live/archived status.openrouter.ai pages. The hand-built fixture above describes
 // what we BELIEVE the payload looks like; these are what it actually is, at three points across
 // eight months. A shape change now fails the test instead of the site.

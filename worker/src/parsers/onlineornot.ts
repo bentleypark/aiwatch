@@ -3,7 +3,7 @@
 import type { Incident, TimelineEntry } from '../types'
 import { formatDuration } from '../utils'
 import { MAINTENANCE_TITLE } from './betterstack'
-import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
+import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
 /**
  * Structural exits — we could not see this page's incident list AT ALL. Distinct from "this page
@@ -24,8 +24,15 @@ export type OnlineOrNotParseFailure =
   | 'incidents-unreadable'  // the containers name incidents we failed to turn into records
   | 'fetch-unreadable'      // set by the CALLER: the page fetch returned a transient non-OK
 
+/** #1017 — named to match its siblings (IncidentIoUptime / InstatusUptime / FlashdutyUptime), rather
+ *  than an inline shape private to this file. `pct` here is spread into `uptime30d` below. */
+export interface OnlineOrNotUptime {
+  pct: number
+  todayWeightedOutageSec: number
+}
+
 export type OnlineOrNotPageResult =
-  | { ok: true; incidents: Incident[]; uptime30d: number }
+  | { ok: true; incidents: Incident[]; uptime30d: number; todayWeightedOutageSec: number }
   | { ok: false; reason: OnlineOrNotParseFailure }
 
 export type OnlineOrNotHistoryResult =
@@ -434,7 +441,7 @@ export function mergeOnlineOrNotIncidents(
  */
 const WINDOW_DAYS = 30
 
-function computeUptime(incidents: Incident[], nowMs: number): number {
+function computeUptime(incidents: Incident[], nowMs: number): OnlineOrNotUptime {
   const windowStart = nowMs - WINDOW_DAYS * 86_400_000
   const windowSec = WINDOW_DAYS * 86_400
   // Collect (start, end, weight) and let the shared accumulator clamp open incidents to now and merge
@@ -446,7 +453,10 @@ function computeUptime(incidents: Incident[], nowMs: number): number {
   }))
   const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
   // Floor, like every other source — never round 99.998% up to a clean 100%.
-  return Math.max(0, Math.floor((1 - weightedSec / windowSec) * 10000) / 100)
+  const pct = Math.max(0, Math.floor((1 - weightedSec / windowSec) * 10000) / 100)
+  // #1017 — cheap second call over the SAME intervals, today's window instead of the trailing one.
+  const todayWeightedOutageSec = weightedDowntimeSeconds(intervals, startOfTodayUTC(nowMs), nowMs)
+  return { pct, todayWeightedOutageSec }
 }
 
 /** Incidents returned for DISPLAY. Uptime is computed before this cap is applied. */
@@ -505,10 +515,12 @@ export function parseOnlineOrNotPage(
     return { ok: false, reason: 'incidents-unreadable' }
   }
 
+  const uptime = computeUptime(incidents, nowMs)
   return {
     ok: true,
     incidents: incidents.slice(0, DISPLAY_LIMIT),
-    uptime30d: computeUptime(incidents, nowMs),
+    uptime30d: uptime.pct,
+    todayWeightedOutageSec: uptime.todayWeightedOutageSec,
   }
 }
 

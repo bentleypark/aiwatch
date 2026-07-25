@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { weightedDowntimeSeconds } from '../uptime-interval'
+import { weightedDowntimeSeconds, startOfTodayUTC } from '../uptime-interval'
 
 // #1006 — the shared interval accumulator. These pin the two rules a code review found the parsers
 // drifting on: OPEN incidents clamp to now, and OVERLAPPING intervals merge (worst-weight-wins),
@@ -88,5 +88,31 @@ describe('weightedDowntimeSeconds', () => {
   it('skips zero/negative-weight intervals (announced maintenance)', () => {
     const start = NOW - 5 * 86_400_000
     expect(weightedDowntimeSeconds([{ start, end: start + 2 * H, weight: 0 }], WINDOW_START, NOW)).toBe(0)
+  })
+})
+
+describe('startOfTodayUTC (#1017)', () => {
+  it('returns midnight UTC of the given instant', () => {
+    expect(new Date(startOfTodayUTC(Date.parse('2026-07-25T14:30:00Z'))).toISOString()).toBe('2026-07-25T00:00:00.000Z')
+  })
+
+  it('is idempotent on an instant already at midnight', () => {
+    const midnight = Date.parse('2026-07-25T00:00:00Z')
+    expect(startOfTodayUTC(midnight)).toBe(midnight)
+  })
+
+  it('does not roll to the next/previous day across a month boundary', () => {
+    // Regression guard: an earlier draft built this via Date.UTC(...parts) with the month passed
+    // 1-based instead of Date.UTC's 0-based index, silently landing on the WRONG month.
+    expect(new Date(startOfTodayUTC(Date.parse('2026-08-01T05:00:00Z'))).toISOString()).toBe('2026-08-01T00:00:00.000Z')
+    expect(new Date(startOfTodayUTC(Date.parse('2026-01-31T23:59:59Z'))).toISOString()).toBe('2026-01-31T00:00:00.000Z')
+  })
+
+  it('a full-day interval ending at nowMs contributes its whole duration to "today"', () => {
+    const now = Date.parse('2026-07-25T18:00:00Z') // 18h into the UTC day
+    const todayStart = startOfTodayUTC(now)
+    // Outage spans yesterday evening through now — only the portion inside today counts.
+    const start = now - 30 * 3_600_000 // 30h before now (started yesterday)
+    expect(weightedDowntimeSeconds([{ start, end: now, weight: 1 }], todayStart, now)).toBe(18 * 3600) // 18h of today
   })
 })

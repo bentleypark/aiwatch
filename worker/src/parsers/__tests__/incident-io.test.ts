@@ -31,7 +31,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
   const at = (daysAgo: number, hours = 0) => new Date(NOW - daysAgo * day + hours * 3_600_000).toISOString()
 
   it('a clean 30-day window is 100%', () => {
-    expect(computeIncidentIoUptime(html([], ESTABLISHED), 'c1', NOW)).toEqual({ pct: 100, days: 30 })
+    expect(computeIncidentIoUptime(html([], ESTABLISHED), 'c1', NOW)).toEqual({ pct: 100, days: 30, todayWeightedOutageSec: 0 })
   })
 
   it('a full outage is weighted 1.0 — 24h out of 30 days', () => {
@@ -39,7 +39,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
       html([{ id: 'c1', start: at(5), end: at(4), status: 'full_outage' }], ESTABLISHED), 'c1', NOW,
     )
     // 1 day of 30 → 96.66% (floored, never rounded up)
-    expect(out).toEqual({ pct: 96.66, days: 30 })
+    expect(out).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0 })
   })
 
   it('partial_outage and degraded_performance are weighted 0.3 — the same as Atlassian\'s `p` bucket', () => {
@@ -67,7 +67,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
     const out = computeIncidentIoUptime(
       html([{ id: 'c1', start: at(60), end: at(60, 10), status: 'partial_outage' }], ESTABLISHED), 'c1', NOW,
     )
-    expect(out).toEqual({ pct: 100, days: 30 })
+    expect(out).toEqual({ pct: 100, days: 30, todayWeightedOutageSec: 0 })
   })
 
   it('an impact STRADDLING the window edge is clipped to the part inside it', () => {
@@ -87,7 +87,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
 
   it('a young component reports the window it actually covers (#1004 — a page migration resets it)', () => {
     const out = computeIncidentIoUptime(html([], [{ id: 'c1', since: at(6) }]), 'c1', NOW)
-    expect(out).toEqual({ pct: 100, days: 6 })
+    expect(out).toEqual({ pct: 100, days: 6, todayWeightedOutageSec: 0 })
   })
 
   it('a short window is not a free pass: the same outage weighs more against fewer days', () => {
@@ -95,7 +95,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
       html([{ id: 'c1', start: at(5), end: at(4), status: 'full_outage' }], [{ id: 'c1', since: at(6) }]), 'c1', NOW,
     )
     // 24h out of 6 days = 83.33% — which is exactly why the UI must state the window (#1006).
-    expect(out).toEqual({ pct: 83.33, days: 6 })
+    expect(out).toEqual({ pct: 83.33, days: 6, todayWeightedOutageSec: 0 })
   })
 
   it('a LIST of ids is a worst-of, over the shortest covered window (turbopuffer regions, #857)', () => {
@@ -106,12 +106,12 @@ describe('computeIncidentIoUptime (#1006)', () => {
       ),
       ['r1', 'r2'], NOW,
     )
-    expect(out).toEqual({ pct: 95, days: 20 }) // r2: 24h of 20 days = 95.00 (worse than r1's 100)
+    expect(out).toEqual({ pct: 95, days: 20, todayWeightedOutageSec: 0 }) // r2: 24h of 20 days = 95.00 (worse than r1's 100)
   })
 
   it('ids that resolve to nothing are skipped, and the result reflects only what resolved', () => {
     const out = computeIncidentIoUptime(html([], [{ id: 'r1', since: '2024-01-01T00:00:00Z' }]), ['r1', 'gone'], NOW)
-    expect(out).toEqual({ pct: 100, days: 30 })
+    expect(out).toEqual({ pct: 100, days: 30, todayWeightedOutageSec: 0 })
   })
 
   // #1006 review — an ONGOING impact has end_at `$undefined` (→ null). It must count to NOW, not be
@@ -121,7 +121,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
       html([{ id: 'c1', start: at(0, -24), end: '$undefined', status: 'full_outage' }], ESTABLISHED), 'c1', NOW,
     )
     // started 24h ago, still open → 24h of 30 days counts to now → 96.66%, NOT 100%.
-    expect(out).toEqual({ pct: 96.66, days: 30 })
+    expect(out).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0 })
   })
 
   // #1006 review — a degraded window escalating into a full outage must not double-count the overlap.
@@ -137,7 +137,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
       'c1', NOW,
     )
     // Summed: 10h*0.3 + 1h*1.0 = 4.0h. Merged: 9h@0.3 + 1h@1.0 = 3.7h of 30d → 99.48%.
-    expect(out).toEqual({ pct: 99.48, days: 30 })
+    expect(out).toEqual({ pct: 99.48, days: 30, todayWeightedOutageSec: 0 })
   })
 
   // #1006 review / #713 — when component_impacts is PRESENT but unparseable, withhold (null), never read
@@ -149,7 +149,33 @@ describe('computeIncidentIoUptime (#1006)', () => {
       `\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"100.00\\"}],\\"incident_links\\":[]}"])</script>`
     expect(computeIncidentIoUptime(broken, 'c1', NOW)).toBeNull()
   })
+
+  // #1017 — the file's shared NOW is exactly midnight UTC, so "today so far" is always a zero-length
+  // window there (correctly 0 in every test above). A separate NOW mid-day is needed to exercise a
+  // genuinely non-zero todayWeightedOutageSec end-to-end through the real parser.
+  it('#1017 — todayWeightedOutageSec reflects only the portion of an outage inside today, not the full 30d', () => {
+    const midDay = Date.parse('2026-07-14T15:00:00Z') // 15h into the UTC day
+    // Outage ran from 3h before midDay to 1h before midDay — 2h, entirely inside today.
+    const impact = { id: 'c1', start: at2(midDay, 3), end: at2(midDay, 1), status: 'full_outage' }
+    const out = computeIncidentIoUptime(html([impact], ESTABLISHED), 'c1', midDay)
+    expect(out?.todayWeightedOutageSec).toBe(2 * 3600) // 2h at full weight (1.0)
+  })
+
+  it('#1017 — an outage entirely BEFORE today contributes 0 to todayWeightedOutageSec but still counts toward the 30d pct', () => {
+    const midDay = Date.parse('2026-07-14T15:00:00Z')
+    const yesterday9pm = midDay - 18 * 3_600_000 // well before today's UTC midnight
+    const impact = { id: 'c1', start: new Date(yesterday9pm - 3_600_000).toISOString(), end: new Date(yesterday9pm).toISOString(), status: 'full_outage' }
+    const out = computeIncidentIoUptime(html([impact], ESTABLISHED), 'c1', midDay)
+    expect(out?.todayWeightedOutageSec).toBe(0)
+    expect(out?.pct).toBeLessThan(100) // the outage is still inside the 30-day window
+  })
 })
+
+/** ISO timestamp `hoursAgo` hours before `nowMs`. Distinct from the file's `at(daysAgo, hours)`
+ *  helper (which offsets from the shared midnight NOW) — this one is for the #1017 mid-day tests. */
+function at2(nowMs: number, hoursAgo: number): string {
+  return new Date(nowMs - hoursAgo * 3_600_000).toISOString()
+}
 
 describe('parseIncidentIoComponentImpacts', () => {
   const makeHtml = (impacts: Array<{ component_id: string; start_at: string; end_at: string; status: string }>) => {
