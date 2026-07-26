@@ -14,7 +14,10 @@ const MAX_RANKED = ALL_SERVICE_IDS.length
 
 const PAGES = [
   // Phase A — original 6 services
-  { slug: 'claude', title: 'Is Claude Down?', displayName: 'Claude' },
+  // #1164 — 'claude' moved to 'claude-api' when /is-claude-down became the Anthropic-family group
+  // page (a deliberately light page with none of the FAQ/About/CTA content this suite checks below —
+  // see the separate 'Provider-family group pages' describe block near the bottom of this file).
+  { slug: 'claude-api', title: 'Is Claude Down?', displayName: 'Claude' },
   { slug: 'chatgpt', title: 'Is ChatGPT Down?', displayName: 'ChatGPT' },
   { slug: 'gemini', title: 'Is Gemini Down?', displayName: 'Gemini' },
   { slug: 'github-copilot', title: 'Is GitHub Copilot Down?', displayName: 'GitHub Copilot' },
@@ -134,7 +137,7 @@ test.describe('Is X Down? SSR pages', () => {
   })
 
   test('meta description contains dynamic status', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     const desc = page.locator('meta[name="description"]')
     // #566: answer-first — leads with No/Yes/Issues + the plain-language status phrase.
     await expect(desc).toHaveAttribute('content', /(No|Yes|Issues) — Claude (is operational|is down right now|is having problems right now)/)
@@ -142,7 +145,7 @@ test.describe('Is X Down? SSR pages', () => {
 
   // #321 — 30-day incident window + grouping on SSR page for SEO depth.
   test('Recent Incidents heading says "Last 7 days"', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     // #incident-history-collapse — the incident-history window aligned 30d → 7d. Claude reliably
     // has incidents in any recent 7-day window, so the heading is rendered.
     const heading = page.locator('h2', { hasText: 'Recent Incidents' })
@@ -154,7 +157,7 @@ test.describe('Is X Down? SSR pages', () => {
     // Use a service that tends to have incidents tracked in the 30-day window.
     // If operational AND >0 incidents, description should surface "N incidents tracked (30d)".
     // When status is non-operational, AI Analysis copy replaces this — assertion is skipped.
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     const desc = await page.locator('meta[name="description"]').getAttribute('content')
     const isOperational = /No — Claude is operational/i.test(desc ?? '')
     if (!isOperational) {
@@ -184,23 +187,23 @@ test.describe('Is X Down? SSR pages', () => {
   })
 
   test('footer has internal cross-links to other service pages', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('a[href="/is-chatgpt-down"]').first()).toBeAttached()
     await expect(page.locator('a[href="/is-gemini-down"]').first()).toBeAttached()
     await expect(page.locator('a[href="/is-cursor-down"]').first()).toBeAttached()
   })
 
   test('OG meta tags point to dynamic OG image', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', /Is Claude Down/)
-    await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', 'https://ai-watch.dev/is-claude-down')
+    await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', 'https://ai-watch.dev/is-claude-api-down')
     // Dynamic OG image URL should contain /api/og with service param
     await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', /\/api\/og\?service=Claude/)
     await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute('content', /\/api\/og\?service=Claude/)
   })
 
   test('share buttons are present', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     // X (Twitter) share link
     await expect(page.locator('a.share-x')).toHaveAttribute('href', /x\.com\/intent\/tweet/)
     // Threads share link
@@ -212,7 +215,7 @@ test.describe('Is X Down? SSR pages', () => {
   })
 
   test('share text includes AIWatch branding', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     // Copy button data-text should mention AIWatch
     const copyText = await page.locator('button.share-copy').getAttribute('data-text')
     expect(copyText).toContain('AIWatch')
@@ -222,14 +225,14 @@ test.describe('Is X Down? SSR pages', () => {
   })
 
   test('related cross-links are present in footer', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     // Claude page should cross-link to Claude Code and OpenAI
     await expect(page.locator('a[href="/is-claude-code-down"]').first()).toBeAttached()
-    await expect(page.locator('a[href="/is-openai-down"]').first()).toBeAttached()
+    await expect(page.locator('a[href="/is-openai-api-down"]').first()).toBeAttached()
   })
 
   test('AI Insight card shows when analysis available', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     // AI Insight card is conditional — only shows when Worker has analysis data
     const aiCard = page.locator('text=AI Analysis').or(page.locator('text=Post-Incident Analysis'))
     if (await aiCard.isVisible({ timeout: 3000 }).catch(() => false)) {
@@ -310,7 +313,7 @@ test.describe('Is X Down? SSR pages', () => {
       // Regression guard: the alert subscription prompt must sit directly below
       // the status header, ahead of AI Analysis, so it catches peak intent.
       // Reverting the order would silently tank conversion on real outage traffic.
-      await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+      await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
       const cta = page.locator('.cta').first()
       await expect(cta).toBeVisible()
 
@@ -334,7 +337,7 @@ test.describe('Is X Down? SSR pages', () => {
     })
 
     test('primary CTA is the Slack-feed button; RSS secondary; Discord demoted to a text link (#547/#696)', async ({ page }) => {
-      await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+      await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
       // #696 Primary = zero-config Slack /feed button → copy_slack_feed (success proxy).
       // #482: the click fires from the delegated [data-action] dispatcher (no inline onclick).
       const primary = page.locator('.cta button.btn-primary[data-slack]')
@@ -370,6 +373,36 @@ test.describe('Is X Down? SSR pages', () => {
       // #696: the primary button is the zero-config Slack-feed button (both states).
       const btnText = (await page.locator('.cta button.btn-primary').textContent()) || ''
       expect(btnText).toMatch(/Get alerts in Slack/i)
+    })
+  })
+
+  // #1164 — /is-claude-down and /is-openai-down are now provider-family GROUP pages (a deliberately
+  // light template — headline + member list + links, none of the FAQ/CTA/AI-analysis content the
+  // parametrized suite above checks for the single-service pages).
+  test.describe('Provider-family group pages', () => {
+    test('/is-claude-down renders the Anthropic family headline + links to every member page', async ({ page }) => {
+      await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+      await expect(page).toHaveTitle(/Is Anthropic \(Claude\) Down\?/)
+      const canonical = page.locator('link[rel="canonical"]')
+      await expect(canonical).toHaveAttribute('href', 'https://ai-watch.dev/is-claude-down')
+      await expect(page.locator('a[href="/is-claude-api-down"]').first()).toBeAttached()
+      await expect(page.locator('a[href="/is-claude-ai-down"]').first()).toBeAttached()
+      await expect(page.locator('a[href="/is-claude-code-down"]').first()).toBeAttached()
+    })
+
+    test('/is-openai-down renders the OpenAI family headline + links to every member page', async ({ page }) => {
+      await page.goto('/is-openai-down', { waitUntil: 'domcontentloaded' })
+      await expect(page).toHaveTitle(/Is OpenAI Down\?/)
+      const canonical = page.locator('link[rel="canonical"]')
+      await expect(canonical).toHaveAttribute('href', 'https://ai-watch.dev/is-openai-down')
+      await expect(page.locator('a[href="/is-openai-api-down"]').first()).toBeAttached()
+      await expect(page.locator('a[href="/is-chatgpt-down"]').first()).toBeAttached()
+      await expect(page.locator('a[href="/is-codex-down"]').first()).toBeAttached()
+    })
+
+    test('an unknown family 404s', async ({ page }) => {
+      const res = await page.request.get('/api/is-down-group?family=gemini')
+      expect(res.status()).toBe(404)
     })
   })
 })

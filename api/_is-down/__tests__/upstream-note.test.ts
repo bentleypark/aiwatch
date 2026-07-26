@@ -31,7 +31,7 @@ describe('buildUpstreamNote (#1053)', () => {
         status: 'degraded',
         incidentTitle: 'Elevated errors on Sonnet 5 and Haiku 4.5',
         startedAt: '2026-07-17T06:47:54.909Z',
-        href: '/is-claude-down',
+        href: '/is-claude-api-down',
       external: false,
         leadMinutes: 29,
       }],
@@ -306,6 +306,6 @@ it('#1072 — an upstream with BOTH an is-down page and a statusUrl links INTERN
     }],
   }
   const note = buildUpstreamNote([both], 'chatgpt')!
-  expect(note.upstream[0].href).toBe('/is-claude-down')
+  expect(note.upstream[0].href).toBe('/is-claude-api-down')
   expect(note.upstream[0].external).toBe(false)
 })

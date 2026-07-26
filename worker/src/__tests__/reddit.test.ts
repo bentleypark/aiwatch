@@ -277,7 +277,7 @@ describe('formatRedditAlert', () => {
     const formatted = formatRedditAlert(alert)
     expect(formatted.title).toBe('📢 Reddit: r/ClaudeAI [🎯 PROMOTE]')
     expect(formatted.description).toContain('Is Claude down?')
-    expect(formatted.description).toContain('ai-watch.dev/is-claude-down')
+    expect(formatted.description).toContain('ai-watch.dev/is-claude-api-down')
     // #548 — the promote share link carries the Reddit-channel utm (after the #539 ?e=reddit hint).
     expect(formatted.description).toContain('?e=reddit&utm_source=reddit&utm_medium=social&utm_campaign=outage')
     expect(formatted.description).not.toContain('Suggested reply')
@@ -304,7 +304,7 @@ describe('formatRedditAlert', () => {
     const formatted = formatRedditAlert(alert)
     expect(formatted.description).toContain('claude ai is down again') // brand defused
     expect(formatted.description).not.toContain('claude.ai')
-    expect(formatted.description).toContain('ai-watch.dev/is-claude-down?e=reddit') // source-namespaced share link
+    expect(formatted.description).toContain('ai-watch.dev/is-claude-api-down?e=reddit') // source-namespaced share link
   })
 
   it('omits Is X Down link for unknown subreddit', () => {

@@ -104,7 +104,7 @@ describe('buildReplyDraft', () => {
     expect(reply).not.toBeNull()
     expect(reply!.serviceId).toBe('claude')
     expect(reply!.text).toBe(
-      '🔴 yes — Claude API is down right now. live status, affected components & recovery ETA → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&utm_content=reply&i=inc1',
+      '🔴 yes — Claude API is down right now. live status, affected components & recovery ETA → https://ai-watch.dev/is-claude-api-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&utm_content=reply&i=inc1',
     )
   })
 
@@ -144,6 +144,29 @@ describe('buildReplyDraft', () => {
       mockService({ id: 'claudecode', name: 'Claude Code' }),
     ])
     expect(reply!.serviceId).toBe('claude')
+  })
+
+  // #1164 — a grouped same-family incident (2+ TWEET_DRAFT_SERVICES-scoped members covered by the
+  // alert) replies with the family's GROUP is-down page, not the single primary surface: the reply
+  // targets "is claude down" searches — the bare product-name query — so once more than one surface is
+  // affected, the group page is the better answer than a single-surface one.
+  it('links + names the family group page for a grouped same-family incident (2+ members covered)', () => {
+    const a = alert({ svcIds: ['claude', 'claudeai', 'claudecode'] })
+    const reply = buildReplyDraft(a, [
+      mockService({ id: 'claude', name: 'Claude API' }),
+      mockService({ id: 'claudeai', name: 'claude.ai' }),
+      mockService({ id: 'claudecode', name: 'Claude Code' }),
+    ])
+    expect(reply!.text).toContain('https://ai-watch.dev/is-claude-down?')
+    expect(reply!.text).not.toContain('is-claude-api-down')
+    expect(reply!.text).toContain('Anthropic (Claude) is down right now')
+  })
+
+  it('still links the single surface when only ONE family member is covered by the alert', () => {
+    const a = alert({ svcIds: ['claude'] })
+    const reply = buildReplyDraft(a, [mockService({ id: 'claude', name: 'Claude API' })])
+    expect(reply!.text).toContain('https://ai-watch.dev/is-claude-api-down?')
+    expect(reply!.text).not.toContain('is-claude-down')
   })
 
   it('defuses a bare claude.ai brand in the reply text (operator pastes into X)', () => {

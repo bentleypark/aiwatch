@@ -902,7 +902,7 @@ ${announcementHtml}
         <div class="feature-tag">SEO PAGE</div>
         <div class="feature-icon">🔍</div>
         <div class="feature-title" data-i18n="feat.4.title">"Is X Down?" 전용 페이지</div>
-        <div class="feature-desc" data-i18n="feat.4.desc">ai-watch.dev/is-claude-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.</div>
+        <div class="feature-desc" data-i18n="feat.4.desc">ai-watch.dev/is-claude-api-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.</div>
       </div>
     </div>
   </div>
@@ -1134,7 +1134,7 @@ const i18n = {
     'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'Uptime(40) + 인시던트 영향 일수(25) + 복구 시간(15) + 응답성(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 패널티가 적용됩니다.',
     'feat.2.title': 'AI 장애 분석', 'feat.2.desc': '장애 발생 시 AIWatch가 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.',
     'feat.3.title': 'Fallback 추천', 'feat.3.desc': '장애 중인 서비스의 대안을 같은 카테고리 Score 상위 순으로 즉시 제안합니다. 같은 제공사 서비스는 자동 제외됩니다.',
-    'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
+    'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-api-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
     'how.title': '이렇게 동작합니다', 'how.sub': '각 서비스의 공식 상태 페이지 데이터를 기반으로 동작합니다',
     'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 44개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '제공사마다 개별 구독', 'compare.r2b': '44개를 한 곳에서 — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': '종합 점수 없음 (업타임 %만)', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
     'how.1.badge': '자동', 'how.2.badge': '장애 감지 시', 'how.3.badge': '실시간', 'how.4.badge': '매월',
@@ -1163,7 +1163,7 @@ const i18n = {
     'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score combining Uptime (40) + Incident impact days (25) + Recovery time (15) + Responsiveness (20). Services without official data use industry averages with a penalty.',
     'feat.2.title': 'AI Incident Analysis', 'feat.2.desc': 'When an outage hits, AIWatch analyzes the pattern and tells you the estimated recovery time and impact scope. No more guessing.',
     'feat.3.title': 'Fallback Recommendations', 'feat.3.desc': 'Get instant alternative suggestions ranked by Score within the same category. Same-provider services are automatically excluded.',
-    'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
+    'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-api-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
     'how.title': 'How it works', 'how.sub': 'Powered by official status page data from each provider',
     'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 44 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Subscribe per provider, separately', 'compare.r2b': 'All 44 in one — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'No composite score (uptime % only)', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery + Responsiveness', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
     'how.1.badge': 'Auto', 'how.2.badge': 'On detection', 'how.3.badge': 'Real-time', 'how.4.badge': 'Monthly',

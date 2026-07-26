@@ -128,7 +128,7 @@ describe('shouldShowFallback (status-gated, mirrors dashboard)', () => {
 
 describe('isDownPath (per-surface deep link)', () => {
   it('maps each Anthropic surface to its OWN is-down page', () => {
-    expect(isDownPath('claude')).toBe('/is-claude-down')
+    expect(isDownPath('claude')).toBe('/is-claude-api-down')
     expect(isDownPath('claudeai')).toBe('/is-claude-ai-down')
     expect(isDownPath('claudecode')).toBe('/is-claude-code-down')
   })

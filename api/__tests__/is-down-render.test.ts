@@ -45,7 +45,7 @@ describe('renderDelegatedListeners integrity (#842-B)', () => {
 })
 
 describe('buildMetaDescription — recovery estimate exceeded (Mistral 2–4h on a days-long incident)', () => {
-  const seo = getSEOContent('claude')!
+  const seo = getSEOContent('claude-api')!
   const degraded = { status: 'degraded' } as unknown as Parameters<typeof buildMetaDescription>[1]
   const recent = new Date(Date.now() - 60_000).toISOString() // 1 min ago
 
