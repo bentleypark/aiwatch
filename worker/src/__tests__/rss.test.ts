@@ -610,6 +610,22 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     expect(xml).not.toContain('Also affecting')
   })
 
+  // #1164 — a shared multi-surface incident's <link> now points at the family GROUP is-down page
+  // instead of the (arbitrary) primary surface's own page, matching the item's own provider-grouped
+  // title ("Anthropic (Claude API, claude.ai, Claude Code): …") — a subscriber reading THAT title
+  // and clicking through used to land on the narrower Claude API page alone.
+  it('points the collapsed multi-surface item\'s <link> at the family GROUP is-down page', () => {
+    const xml = buildRssFeed(anthropic, { scope: 'all' }, NOW)
+    expect(xml).toContain('<link>https://ai-watch.dev/is-claude-down?utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+    expect(xml).not.toContain('is-claude-api-down')
+  })
+
+  it('a single-surface incident still links its OWN is-down page, not a group page', () => {
+    const xml = buildRssFeed([service({ incidents: [incident({ id: 'solo' })] })], { scope: 'all' }, NOW)
+    expect(xml).toMatch(/<link>https:\/\/ai-watch\.dev\/is-[a-z-]+-down\?/)
+    expect(xml).not.toMatch(/<link>https:\/\/ai-watch\.dev\/is-claude-down/)
+  })
+
   it('uses a per-incident guid for the collapsed item (no Slack re-post churn)', () => {
     const xml = buildRssFeed(anthropic, { scope: 'all' }, NOW)
     expect((xml.match(/aiwatch:claude:shared/g) ?? []).length).toBe(1)

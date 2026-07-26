@@ -943,7 +943,9 @@ export const TWEET_DRAFT_SERVICES: Record<string, string> = {
 // (see buildTweetDrafts) when 2+ in-scope services from the SAME family are covered by one alert.
 // DERIVED from FAMILY_GROUPS (imported above, not hand-copied) — inverts {slug: {members}} into
 // {memberId: {slug, name}} once at module load, so there is nothing here to drift out of sync.
-const FAMILY_OF_SERVICE: Record<string, { slug: string; name: string }> = Object.fromEntries(
+// Exported — webhook-subscriptions.ts's toPerUserEntry (#726 general-subscriber relay) reuses this
+// SAME map so its own group-vs-single-surface link decision can't drift from the tweet-draft one.
+export const FAMILY_OF_SERVICE: Record<string, { slug: string; name: string }> = Object.fromEntries(
   Object.values(FAMILY_GROUPS).flatMap((family) => family.members.map((id) => [id, { slug: family.slug, name: family.name }])),
 )
 
