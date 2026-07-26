@@ -157,6 +157,10 @@ const FEED_SLUG_OVERRIDE = {
   langsmith:   'langchain',
   deepseekapp: 'deepseek-app',
   bfl:         'flux', // #756 — SEO-friendly "is flux down" slug
+  // #1164 — /is-claude-down and /is-openai-down became provider-family group pages; the
+  // single-service pages moved to '-api' slugs.
+  claude:      'claude-api',
+  openai:      'openai-api',
 }
 
 // Services with no /is-{slug}-down page and therefore no RSS feed — estimate-only

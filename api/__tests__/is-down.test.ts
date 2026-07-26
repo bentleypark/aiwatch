@@ -46,14 +46,14 @@ describe('is-down.ts cache-header divergence (#378)', () => {
 
   it('returns 200 + s-maxage=60 cache headers when Worker fetch succeeds', async () => {
     fetchMock.mockResolvedValueOnce(makeWorkerSuccess())
-    const res = await handler(makeReq('claude'))
+    const res = await handler(makeReq('claude-api'))
     expect(res.status).toBe(200)
     expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=60, stale-while-revalidate=300')
   })
 
   it('returns 503 + no-store when Worker fetch is rejected (timeout / network failure)', async () => {
     fetchMock.mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
-    const res = await handler(makeReq('claude'))
+    const res = await handler(makeReq('claude-api'))
     expect(res.status).toBe(503)
     expect(res.headers.get('Cache-Control')).toMatch(/no-store/)
     expect(res.headers.get('Cache-Control')).toMatch(/must-revalidate/)
@@ -61,7 +61,7 @@ describe('is-down.ts cache-header divergence (#378)', () => {
 
   it('returns 503 + no-store when Worker returns a non-2xx HTTP status', async () => {
     fetchMock.mockResolvedValueOnce(new Response('upstream error', { status: 502 }))
-    const res = await handler(makeReq('claude'))
+    const res = await handler(makeReq('claude-api'))
     expect(res.status).toBe(503)
     expect(res.headers.get('Cache-Control')).toMatch(/no-store/)
   })
@@ -72,7 +72,7 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ services: [], aiAnalysis: {} }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     }))
-    const res = await handler(makeReq('claude'))
+    const res = await handler(makeReq('claude-api'))
     expect(res.status).toBe(503)
     expect(res.headers.get('Cache-Control')).toMatch(/no-store/)
   })
@@ -94,10 +94,10 @@ describe('is-down.ts cache-header divergence (#378)', () => {
 
     // Worker timeout (AbortError)
     fetchMock.mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
-    await handler(makeReq('claude'))
+    await handler(makeReq('claude-api'))
     // Worker non-2xx
     fetchMock.mockResolvedValueOnce(new Response('upstream', { status: 502 }))
-    await handler(makeReq('openai'))
+    await handler(makeReq('openai-api'))
     // Worker 200 but slug missing from services array
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ services: [], aiAnalysis: {} }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
@@ -115,7 +115,7 @@ describe('is-down.ts cache-header divergence (#378)', () => {
 
   it('does NOT cache 5xx responses anywhere on the CDN — `no-store` blocks both edge and shared caches', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'))
-    const res = await handler(makeReq('claude'))
+    const res = await handler(makeReq('claude-api'))
     const cc = res.headers.get('Cache-Control') ?? ''
     expect(cc).toContain('no-store')
     expect(cc).toContain('max-age=0')
@@ -146,7 +146,7 @@ describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => 
   // page to the fallback render. Handler-level so the data-wiring (not just renderAIInsight) is covered.
   it('renders the predicted-vs-actual line (does not throw to the fallback page)', async () => {
     fetchMock.mockResolvedValueOnce(makeWorkerResolved())
-    const res = await handler(makeReq('claude'))
+    const res = await handler(makeReq('claude-api'))
     expect(res.status).toBe(200)
     const html = await res.text()
     expect(html).toContain('Predicted vs actual:')
@@ -166,7 +166,7 @@ describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => 
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     fetchMock.mockResolvedValueOnce(payload)
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await handler(makeReq('claude')) // 'claude' service missing from `services`
+    const res = await handler(makeReq('claude-api')) // 'claude' service missing from `services`
     const threwParseError = errSpy.mock.calls.some(c => String(c[0]).includes('JSON parse failed'))
     errSpy.mockRestore()
     expect(threwParseError).toBe(false)   // buggy version logs this; fixed version takes the clean path
@@ -199,7 +199,7 @@ describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => 
       ] },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     fetchMock.mockResolvedValueOnce(payload)
-    const res = await handler(makeReq('claude'))
+    const res = await handler(makeReq('claude-api'))
     expect(res.status).toBe(200)
     const html = await res.text()
     // Both summaries present (the whole array is rendered, not just [0])…

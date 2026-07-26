@@ -9,7 +9,9 @@ export interface ServiceSEO {
 }
 
 const SEO_CONTENT: Record<string, ServiceSEO> = {
-  claude: {
+  // #1164 — keyed by URL slug (matches SLUG_TO_SERVICE); 'claude'/'openai' moved to
+  // 'claude-api'/'openai-api' when those slugs were repurposed as provider-family group pages.
+  'claude-api': {
     displayName: 'Claude',
     description: 'Claude is a large language model API developed by Anthropic. It powers applications ranging from chatbots to code generation tools, offering multiple model tiers for different performance and cost trade-offs.',
     insight: 'Unlike other providers, Anthropic reports incidents per model tier, resulting in higher incident counts compared to competitors. This does not necessarily indicate lower reliability — it reflects more granular reporting. When evaluating Claude API stability, focus on uptime percentage and recovery time rather than raw incident count.',
@@ -93,7 +95,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is claude.ai down because of Claude API?', a: 'claude.ai depends on Claude API models but can also have web-specific issues. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
     ],
   },
-  openai: {
+  'openai-api': {
     displayName: 'OpenAI',
     description: 'OpenAI API provides access to OpenAI\'s language, image, and audio models used by millions of developers. It serves both the ChatGPT consumer product and enterprise API integrations.',
     insight: 'OpenAI API and ChatGPT share infrastructure but are monitored separately by AIWatch. An API outage may not affect ChatGPT and vice versa. OpenAI maintains one of the highest uptime records among AI providers, with most incidents resolved within 30 minutes.',

@@ -164,6 +164,10 @@ export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
   langsmith: 'langchain',
   deepseekapp: 'deepseek-app',
   bfl: 'flux', // #756
+  // #1164 — /is-claude-down and /is-openai-down were repurposed as provider-family group pages; the
+  // single-service pages moved to '-api' slugs, so the per-service feed URL follows (/feed/claude-api).
+  claude: 'claude-api',
+  openai: 'openai-api',
 }
 
 // Services with no /is-{slug}-down page — estimate-only, excluded per #263.

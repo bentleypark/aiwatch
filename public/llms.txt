@@ -15,4 +15,9 @@
 ## "Is X down?" pages (one per service)
 Answer-first pages stating whether a given service is currently down, with live status, 30-day uptime, incident history, and recommended alternatives.
 - Pattern: `https://ai-watch.dev/is-{service}-down`
-- Examples: [/is-claude-down](https://ai-watch.dev/is-claude-down), [/is-chatgpt-down](https://ai-watch.dev/is-chatgpt-down), [/is-gemini-down](https://ai-watch.dev/is-gemini-down), [/is-cursor-down](https://ai-watch.dev/is-cursor-down), [/is-pinecone-down](https://ai-watch.dev/is-pinecone-down)
+- Examples: [/is-claude-api-down](https://ai-watch.dev/is-claude-api-down), [/is-chatgpt-down](https://ai-watch.dev/is-chatgpt-down), [/is-gemini-down](https://ai-watch.dev/is-gemini-down), [/is-cursor-down](https://ai-watch.dev/is-cursor-down), [/is-pinecone-down](https://ai-watch.dev/is-pinecone-down)
+
+## "Is X down?" provider-family pages
+Lighter pages answering the same question for a whole provider (worst-of status across every surface they ship, with links to each surface's own page above) — for when the question is about the provider broadly, not one specific product surface.
+- [/is-claude-down](https://ai-watch.dev/is-claude-down): Anthropic (Claude API, claude.ai, Claude Code).
+- [/is-openai-down](https://ai-watch.dev/is-openai-down): OpenAI (OpenAI API, ChatGPT, Codex).

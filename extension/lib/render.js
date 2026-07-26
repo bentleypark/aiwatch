@@ -99,8 +99,12 @@ export function shouldShowFallback(status) {
 
 // Per-surface "Is X Down?" page path. Each Anthropic surface has its own SEO page
 // (verified against api/_is-down/slug-map.ts + vercel.json), so a card deep-links to
-// the RIGHT one instead of everything pointing at /is-claude-down. Unknown id → null.
-const IS_DOWN_SLUG = { claude: 'claude', claudeai: 'claude-ai', claudecode: 'claude-code' }
+// the RIGHT one instead of everything pointing at the same page. Unknown id → null.
+// #1164 — 'claude' moved from 'claude' to 'claude-api' when /is-claude-down was repurposed as the
+// Anthropic-family group page. NOTE: an already-installed extension keeps its OLD copy of this map
+// until the user updates — its Claude API card will deep-link to the (still valid, just repurposed)
+// group page until then, not a broken link.
+const IS_DOWN_SLUG = { claude: 'claude-api', claudeai: 'claude-ai', claudecode: 'claude-code' }
 export function isDownPath(id) {
   const slug = IS_DOWN_SLUG[id]
   return slug ? `/is-${slug}-down` : null

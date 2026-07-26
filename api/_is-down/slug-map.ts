@@ -8,13 +8,16 @@
 // check" grouping (renderFooter / FOOTER_CATEGORY_ORDER).
 export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provider: string; category: string; group: string }> = {
   // Phase A — top services
-  'claude':          { id: 'claude',     name: 'Claude API',       provider: 'Anthropic',   category: 'api', group: 'llm' },
+  // #1164 — 'claude'/'openai' used to be these single-service slugs; both URLs were repurposed as
+  // provider-family group pages (api/is-down-group.ts), so the single-service content moved to
+  // '-api' slugs. `id`/`name` are UNCHANGED — only the URL slug (this map's key) moved.
+  'claude-api':      { id: 'claude',     name: 'Claude API',       provider: 'Anthropic',   category: 'api', group: 'llm' },
   'chatgpt':         { id: 'chatgpt',    name: 'ChatGPT',          provider: 'OpenAI',      category: 'app', group: 'apps' },
   'gemini':          { id: 'gemini',     name: 'Gemini API',       provider: 'Google',      category: 'api', group: 'llm' },
   'github-copilot':  { id: 'copilot',    name: 'GitHub Copilot',   provider: 'Microsoft',   category: 'agent', group: 'agents' },
   'cursor':          { id: 'cursor',     name: 'Cursor',           provider: 'Anysphere',   category: 'agent', group: 'agents' },
   'claude-code':     { id: 'claudecode', name: 'Claude Code',      provider: 'Anthropic',   category: 'agent', group: 'agents' },
-  'openai':          { id: 'openai',     name: 'OpenAI API',       provider: 'OpenAI',      category: 'api', group: 'llm' },
+  'openai-api':      { id: 'openai',     name: 'OpenAI API',       provider: 'OpenAI',      category: 'api', group: 'llm' },
   'windsurf':        { id: 'windsurf',   name: 'Windsurf',         provider: 'Codeium',     category: 'agent', group: 'agents' },
   'claude-ai':       { id: 'claudeai',   name: 'claude.ai',        provider: 'Anthropic',   category: 'app', group: 'apps' },
   // Phase B — LLM APIs (#263)
@@ -78,31 +81,34 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
 }
 
 // Related services for cross-linking (SEO internal links)
+// #1164 — every 'claude'/'openai' reference below points at the specific API product
+// ('claude-api'/'openai-api'), not the provider-family group page — an "Alternatives" link should
+// land on the product being recommended, not a status aggregation page.
 export const RELATED_SLUGS: Record<string, string[]> = {
   // Phase A
-  'claude':         ['claude-ai', 'claude-code', 'openai', 'chatgpt'],
-  'claude-ai':      ['claude', 'chatgpt', 'claude-code'],
-  'claude-code':    ['claude', 'cursor', 'github-copilot', 'windsurf', 'codex', 'junie'],
-  'chatgpt':        ['claude-ai', 'openai', 'claude', 'gemini'],
-  'openai':         ['chatgpt', 'claude', 'gemini', 'mistral', 'cohere'],
-  'gemini':         ['openai', 'claude', 'chatgpt'],
+  'claude-api':     ['claude-ai', 'claude-code', 'openai-api', 'chatgpt'],
+  'claude-ai':      ['claude-api', 'chatgpt', 'claude-code'],
+  'claude-code':    ['claude-api', 'cursor', 'github-copilot', 'windsurf', 'codex', 'junie'],
+  'chatgpt':        ['claude-ai', 'openai-api', 'claude-api', 'gemini'],
+  'openai-api':     ['chatgpt', 'claude-api', 'gemini', 'mistral', 'cohere'],
+  'gemini':         ['openai-api', 'claude-api', 'chatgpt'],
   'github-copilot': ['cursor', 'windsurf', 'claude-code', 'codex', 'junie'],
   'cursor':         ['windsurf', 'github-copilot', 'claude-code', 'codex', 'junie'],
   'windsurf':       ['cursor', 'github-copilot', 'claude-code', 'codex', 'junie'],
   'codex':          ['github-copilot', 'cursor', 'windsurf', 'claude-code', 'junie'],
   'junie':          ['cursor', 'github-copilot', 'claude-code', 'codex', 'windsurf'],
   // LLM APIs — same-tier alternatives
-  'mistral':        ['cohere', 'groq', 'together', 'openai', 'claude'],
-  'cohere':         ['mistral', 'groq', 'together', 'openai'],
+  'mistral':        ['cohere', 'groq', 'together', 'openai-api', 'claude-api'],
+  'cohere':         ['mistral', 'groq', 'together', 'openai-api'],
   'groq':           ['together', 'fireworks', 'cerebras', 'mistral'],
   'together':       ['fireworks', 'groq', 'cerebras'],
   'fireworks':      ['together', 'groq', 'cerebras'],
   'cerebras':       ['groq', 'together', 'fireworks', 'mistral'],
-  'perplexity':     ['openai', 'claude', 'gemini'],
-  'xai':            ['openai', 'claude', 'gemini'],
-  'deepseek':       ['deepseek-app', 'mistral', 'groq', 'openai'],
-  'kimi':           ['deepseek', 'mistral', 'openai', 'claude'],
-  'openrouter':     ['openai', 'claude', 'mistral'],
+  'perplexity':     ['openai-api', 'claude-api', 'gemini'],
+  'xai':            ['openai-api', 'claude-api', 'gemini'],
+  'deepseek':       ['deepseek-app', 'mistral', 'groq', 'openai-api'],
+  'kimi':           ['deepseek', 'mistral', 'openai-api', 'claude-api'],
+  'openrouter':     ['openai-api', 'claude-api', 'mistral'],
   // Voice — same category
   'elevenlabs':     ['assemblyai', 'deepgram'],
   'assemblyai':     ['deepgram', 'elevenlabs'],
@@ -132,6 +138,22 @@ export const RELATED_SLUGS: Record<string, string[]> = {
 export const SERVICE_ID_TO_SLUG: Record<string, string> = Object.fromEntries(
   Object.entries(SLUG_TO_SERVICE).map(([slug, entry]) => [entry.id, slug])
 )
+
+// #1164 — provider-family group pages (api/is-down-group.ts), living at the URL slots the
+// single-service pages used to occupy (`/is-claude-down`, `/is-openai-down`) — someone searching the
+// bare product name is more likely asking about the product broadly than one specific surface.
+// `members` are worker service ids (NOT slugs); the group page worst-of's their live status and
+// links out to each member's own (now `-api`-suffixed, for the API member) is-down page.
+export interface ServiceFamily {
+  slug: string
+  name: string
+  members: string[]
+}
+
+export const FAMILY_GROUPS: Record<string, ServiceFamily> = {
+  claude: { slug: 'claude', name: 'Anthropic (Claude)', members: ['claude', 'claudeai', 'claudecode'] },
+  openai: { slug: 'openai', name: 'OpenAI', members: ['openai', 'chatgpt', 'codex'] },
+}
 
 // #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a
 // fallback on the is-down page, so an outage-moment visitor can ACT on the (Score-ranked, UNPAID)
