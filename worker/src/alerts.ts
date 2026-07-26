@@ -935,6 +935,18 @@ export const TWEET_DRAFT_SERVICES: Record<string, string> = {
   codex: 'codex',
 }
 
+// #1162 — one discoverability hashtag per service, appended to OUTAGE drafts only (never recovery —
+// search demand for "#XDown" spikes during the outage itself, not after). claude/claudeai share one
+// tag since they're the same product from a searcher's perspective (API vs claude.ai surface).
+const TWEET_DRAFT_HASHTAGS: Record<string, string> = {
+  claude: '#ClaudeDown',
+  claudeai: '#ClaudeDown',
+  claudecode: '#ClaudeCodeDown',
+  openai: '#OpenAIDown',
+  chatgpt: '#ChatGPTDown',
+  codex: '#CodexDown',
+}
+
 // Headroom under X's 280-char limit. Literal .length is conservative: X counts any URL as 23 chars
 // (t.co) regardless of its literal length, so a cap on the literal string can never under-count.
 const TWEET_MAX = 270
@@ -1038,7 +1050,10 @@ function buildTweetForService(
     const inc = incId ? findIncident(services, incId) : null
     const phrase = (inc && impactPhrase(inc.impact)) || (svc.status === 'degraded' ? 'degraded performance' : 'an outage')
     const head = `🔴 ${name} is reporting ${phrase}`
-    const tail = `. Live status → ${url}`
+    // #1162 — the hashtag rides IN `tail` (not appended after `text` is built) so the existing
+    // incident-title truncation budget below (`room`) already accounts for its length.
+    const hashtag = TWEET_DRAFT_HASHTAGS[svc.id]
+    const tail = `. Live status → ${url}${hashtag ? ` ${hashtag}` : ''}`
     if (inc) {
       const cleaned = defuseAutolinkDomain(cleanForTweet(inc.title))
       const room = TWEET_MAX - head.length - 2 /* ": " */ - tail.length

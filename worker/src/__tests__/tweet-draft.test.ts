@@ -41,7 +41,7 @@ describe('buildTweetDraft', () => {
     })
     const draft = buildTweetDraft(alert(), [svc])
     expect(draft).not.toBeNull()
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: API returning 500s. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1')
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: API returning 500s. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1 #ClaudeDown')
     expect(draft!.intentUrl).toBe(X_INTENT + encodeURIComponent(draft!.text))
   })
 
@@ -57,13 +57,13 @@ describe('buildTweetDraft', () => {
   it('falls back to status phrasing for a status-only down alert (no incident)', () => {
     const svc = mockService({ id: 'openai', name: 'OpenAI API', provider: 'OpenAI', status: 'down' })
     const draft = buildTweetDraft(alert({ key: 'alerted:down:openai', title: '🔴 OpenAI API — Service Down' }), [svc])
-    expect(draft!.text).toBe('🔴 OpenAI API is reporting an outage. Live status → https://ai-watch.dev/is-openai-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(draft!.text).toBe('🔴 OpenAI API is reporting an outage. Live status → https://ai-watch.dev/is-openai-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage #OpenAIDown')
   })
 
   it('uses "degraded performance" for a degraded status alert', () => {
     const svc = mockService({ id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', status: 'degraded' })
     const draft = buildTweetDraft(alert({ key: 'alerted:degraded:chatgpt', title: '🟠 ChatGPT — Partially Degraded' }), [svc])
-    expect(draft!.text).toBe('🔴 ChatGPT is reporting degraded performance. Live status → https://ai-watch.dev/is-chatgpt-down?e=degraded&utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(draft!.text).toBe('🔴 ChatGPT is reporting degraded performance. Live status → https://ai-watch.dev/is-chatgpt-down?e=degraded&utm_source=x&utm_medium=social&utm_campaign=outage #ChatGPTDown')
   })
 
   it('maps minor incident impact to "degraded performance"', () => {
@@ -72,7 +72,7 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'inc1', title: 'Slow responses', status: 'investigating', startedAt: new Date().toISOString(), impact: 'minor' } as any],
     })
     const draft = buildTweetDraft(alert(), [svc])
-    expect(draft!.text).toBe('🔴 Claude API is reporting degraded performance: Slow responses. Live status → https://ai-watch.dev/is-claude-down?e=degraded&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1')
+    expect(draft!.text).toBe('🔴 Claude API is reporting degraded performance: Slow responses. Live status → https://ai-watch.dev/is-claude-down?e=degraded&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1 #ClaudeDown')
   })
 
   it('builds a recovery draft with duration parsed from the resolved title (claude.ai slug)', () => {
@@ -102,7 +102,7 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'inc1', title: 'CLI down', status: 'investigating', startedAt: new Date().toISOString(), impact: 'critical' } as any],
     })
     const draft = buildTweetDraft(alert(), [svc])
-    expect(draft!.text).toBe('🔴 Claude Code is reporting a major outage: CLI down. Live status → https://ai-watch.dev/is-claude-code-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1')
+    expect(draft!.text).toBe('🔴 Claude Code is reporting a major outage: CLI down. Live status → https://ai-watch.dev/is-claude-code-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1 #ClaudeCodeDown')
   })
 
   it('skips a non-target sibling and resolves the in-scope service in a shared-incident group', () => {
@@ -112,7 +112,7 @@ describe('buildTweetDraft', () => {
     const gemini = mockService({ id: 'gemini', name: 'Gemini API', provider: 'Google', status: 'down', incidents: [inc] })
     const claude = mockService({ status: 'down', incidents: [inc] })
     const draft = buildTweetDraft(alert(), [gemini, claude])
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Shared multi-provider outage. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1')
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Shared multi-provider outage. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1 #ClaudeDown')
   })
 
   it('consults _mergedKeys when resolving the covered service', () => {
@@ -123,7 +123,7 @@ describe('buildTweetDraft', () => {
     })
     const draft = buildTweetDraft(alert({ key: 'alerted:new:incA', _mergedKeys: ['alerted:new:incA', 'alerted:new:incB'] }), [svc])
     // #804 — token derives from the representative alert.key (incA), not the merged tail
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Merged incident. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=incA')
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Merged incident. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=incA #ClaudeDown')
   })
 
   it('returns null for a non-target service', () => {
@@ -157,6 +157,30 @@ describe('buildTweetDraft', () => {
     expect(draft!.text).not.toContain('\n')
     expect(draft!.text).not.toContain('`')
     expect(draft!.text).toContain('line1 line2 code')
+  })
+
+  // #1162 — hashtag discoverability, outage-only (recovery has low search demand for "#XDown").
+  it('#1162 — appends the service hashtag to an outage draft', () => {
+    const svc = mockService({ id: 'codex', name: 'Codex', category: 'agent', status: 'down' })
+    const draft = buildTweetDraft(alert({ key: 'alerted:down:codex', title: '🔴 Codex — Service Down' }), [svc])
+    expect(draft!.text).toBe('🔴 Codex is reporting an outage. Live status → https://ai-watch.dev/is-codex-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage #CodexDown')
+  })
+
+  it('#1162 — never appends a hashtag to a recovery draft', () => {
+    const svc = mockService({ status: 'operational' })
+    const draft = buildTweetDraft(alert({ key: 'alerted:recovered:claude', title: '🟢 Claude API — Service Recovered (45m)' }), [svc])
+    expect(draft!.text).not.toContain('#')
+    expect(draft!.text).toBe('🟢 Claude API recovered after 45m. Live status → https://ai-watch.dev/is-claude-down?e=resolved&utm_source=x&utm_medium=social&utm_campaign=outage')
+  })
+
+  it('#1162 — the hashtag counts toward the 270-char truncation budget for long incident titles', () => {
+    const svc = mockService({
+      status: 'down',
+      incidents: [{ id: 'inc1', title: 'x'.repeat(400), status: 'investigating', startedAt: new Date().toISOString(), impact: 'major' } as any],
+    })
+    const draft = buildTweetDraft(alert(), [svc])
+    expect(draft!.text.length).toBeLessThanOrEqual(270)
+    expect(draft!.text).toContain('#ClaudeDown')
   })
 })
 
