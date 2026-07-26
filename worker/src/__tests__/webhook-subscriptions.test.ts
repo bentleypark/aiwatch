@@ -391,6 +391,34 @@ describe('toPerUserEntry — per-user is-down link rewrite (#726, #936 UTM)', ()
     toPerUserEntry(entry)
     expect(entry.embed.description).toContain(`?${UTM}#claude`) // original untouched
   })
+
+  // #1164 — a shared multi-surface incident (2+ of entry.svcIds in the SAME family) points general
+  // subscribers at the family GROUP is-down page instead of one arbitrary surface, matching the
+  // embed's own provider-grouped title ("Anthropic (Claude API, claude.ai) — New Incident").
+  it('rewrites to the family GROUP is-down page when svcIds spans 2+ same-family members', () => {
+    const out = toPerUserEntry(feedEntry({
+      svcIds: ['claude', 'claudeai'],
+      embed: { title: 'Anthropic (Claude API, claude.ai) — New Incident', description: `${desc(opLink('claude'))}\nalso [b](${opLink('claudeai')})`, color: 1 },
+    }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
+    expect(out.embed.description).not.toContain('is-claude-api-down')
+    expect(out.embed.description).not.toContain('is-claude-ai-down')
+  })
+
+  it('still uses the single-surface page when only ONE member of a family is in svcIds', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc(opLink('claude')), color: 1 } }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-api-down?${UTM}`)
+    expect(out.embed.description).not.toContain('is-claude-down')
+  })
+
+  it('does NOT group across different families — claude + openai stay on their own single-surface pages', () => {
+    const out = toPerUserEntry(feedEntry({
+      svcIds: ['claude', 'openai'],
+      embed: { title: 't', description: `${desc(opLink('claude'))}\nalso [b](${opLink('openai')})`, color: 1 },
+    }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-api-down?${UTM}`)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-openai-api-down?${UTM}`)
+  })
 })
 
 describe('deliverToSubscribers', () => {

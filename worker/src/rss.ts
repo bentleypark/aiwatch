@@ -5,7 +5,7 @@
 import type { ServiceStatus, Incident } from './types'
 import { escapeXml } from './badge'
 import { getGroupedFallbacks } from './fallback'
-import { defuseAutolinkDomain, WITHDRAWN_NOTE } from './alerts'
+import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
@@ -229,7 +229,14 @@ export function isDownUrl(serviceId: string): string {
 // mis-pinned the Slack unfurl to a green Operational card. Mirror the alerts.ts derivation: operational
 // (monitoring / green badge) → `active`, otherwise the live status → `degraded`/`down`. `resolved` is
 // unchanged (recovery cache-bust, #539).
-function serviceLink(serviceId: string, kind: ItemKind, status: ServiceStatus['status']): string {
+// #1164 — `groupUrl`, when given, wins outright: a shared multi-surface incident (2+ of the SAME
+// family carrying this incident id — see itemXml's `familyMemberCount` check) points general
+// subscribers at the family group is-down page instead of one arbitrarily-"first" surface, matching
+// the #724 provider-grouped TITLE this item already renders ("Anthropic (Claude API, claude.ai): …").
+// No `?e=` hint on the group URL — is-down-group.ts computes its own live worst-of headline and
+// never reads the query param, unlike the single-surface page's OG-pinning use of it.
+function serviceLink(serviceId: string, kind: ItemKind, status: ServiceStatus['status'], groupUrl?: string): string {
+  if (groupUrl) return appendUtm(groupUrl, 'rss')
   // NO_IS_DOWN_PAGE services fall back to the dashboard hash (no OG page) → no hint and no utm.
   if (NO_IS_DOWN_PAGE.has(serviceId)) return isDownUrl(serviceId)
   // #1106 — a withdrawal gets its OWN `?e=` token rather than reusing 'resolved' (which would pin a
@@ -271,15 +278,17 @@ function rfc822(iso: string): string {
 // A subscriber whose 🔴 read "Anthropic (Claude API, claude.ai, Claude Code)" must not get a ⚪ that
 // looks like it is about one of them. The roster remembers the sibling svcIds; this maps them back
 // to names via `services` (a tombstone for a service we no longer carry contributes nothing).
-function buildIncidentServiceMap(services: ServiceStatus[], withdrawn?: WithdrawnIncident[]): Map<string, string[]> {
-  const map = new Map<string, string[]>()
-  const add = (incId: string, name: string) => {
-    const names = map.get(incId) ?? []
-    if (!names.includes(name)) names.push(name)
-    map.set(incId, names)
+// #1164 — carries `id` alongside `name` (not just name) so a caller can decide whether the
+// co-affected set shares a FAMILY_OF_SERVICE family (group is-down link), not just render a name list.
+function buildIncidentServiceMap(services: ServiceStatus[], withdrawn?: WithdrawnIncident[]): Map<string, Array<{ id: string; name: string }>> {
+  const map = new Map<string, Array<{ id: string; name: string }>>()
+  const add = (incId: string, id: string, name: string) => {
+    const entries = map.get(incId) ?? []
+    if (!entries.some((e) => e.id === id)) entries.push({ id, name })
+    map.set(incId, entries)
   }
   for (const svc of services) {
-    for (const inc of svc.incidents ?? []) add(inc.id, svc.name)
+    for (const inc of svc.incidents ?? []) add(inc.id, svc.id, svc.name)
   }
   // Snapshot the LIVE ids before folding, so the check below can't be satisfied by a sibling
   // tombstone this same loop just added (a multi-surface withdrawal must still group).
@@ -290,8 +299,8 @@ function buildIncidentServiceMap(services: ServiceStatus[], withdrawn?: Withdraw
     // adding its name here would inject a surface into the LIVE item's provider-grouped title,
     // naming a service that no longer carries the incident. Only genuinely-gone ids may contribute.
     if (liveIds.has(w.incId)) continue
-    const name = services.find((s) => s.id === w.svcId)?.name
-    if (name) add(w.incId, name)
+    const svc = services.find((s) => s.id === w.svcId)
+    if (svc) add(w.incId, svc.id, svc.name)
   }
   return map
 }
@@ -452,12 +461,20 @@ function descHtml(
 function itemXml(
   service: ServiceStatus,
   inc: Incident,
-  incidentServices: Map<string, string[]>,
+  incidentServices: Map<string, Array<{ id: string; name: string }>>,
   opts: { kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis },
 ): string {
   const isResolved = opts.kind === 'resolved'
   const isWithdrawn = opts.kind === 'withdrawn'
-  const coAffected = (incidentServices.get(inc.id) ?? []).filter((n) => n !== service.name)
+  const coAffectedEntries = (incidentServices.get(inc.id) ?? []).filter((e) => e.id !== service.id)
+  const coAffected = coAffectedEntries.map((e) => e.name)
+  // #1164 — 2+ members of the SAME family carrying this incident id → group is-down link (see
+  // serviceLink's `groupUrl` param). Threshold matches buildTweetDrafts/buildReplyDraft/
+  // toPerUserEntry (worker/src/alerts.ts, worker/src/webhook-subscriptions.ts) — one incident, one
+  // rule for "does this count as a family-wide event" across every subscriber-facing surface.
+  const family = FAMILY_OF_SERVICE[service.id]
+  const familyMemberCount = family ? 1 + coAffectedEntries.filter((e) => FAMILY_OF_SERVICE[e.id]?.slug === family.slug).length : 0
+  const groupUrl = family && familyMemberCount >= 2 ? `${SITE}/is-${family.slug}-down` : undefined
   const emoji = severityEmoji(service, inc, opts.kind)
   // #724 — provider-grouped header for a multi-surface (shared) incident, mirroring the Discord
   // embed ("Anthropic (Claude API, claude.ai, Claude Code) — …") instead of an API-centric
@@ -478,7 +495,7 @@ function itemXml(
 
   return `    <item>
       <title>${xml(title)}</title>
-      <link>${xml(serviceLink(service.id, opts.kind, service.status))}</link>
+      <link>${xml(serviceLink(service.id, opts.kind, service.status, groupUrl))}</link>
       <guid isPermaLink="false">${xml(guid)}</guid>
       <pubDate>${rfc822(opts.pubDate)}</pubDate>${inc.impact ? `\n      <category>${xml(inc.impact)}</category>` : ''}
       <description><![CDATA[${descHtml(service, inc, opts)}]]></description>
