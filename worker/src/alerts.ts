@@ -939,6 +939,18 @@ export const TWEET_DRAFT_SERVICES: Record<string, string> = {
   codex: 'codex',
 }
 
+// #1162 — one discoverability hashtag per service, appended to OUTAGE drafts only (never recovery —
+// search demand for "#XDown" spikes during the outage itself, not after). claude/claudeai share one
+// tag since they're the same product from a searcher's perspective (API vs claude.ai surface).
+const TWEET_DRAFT_HASHTAGS: Record<string, string> = {
+  claude: '#ClaudeDown',
+  claudeai: '#ClaudeDown',
+  claudecode: '#ClaudeCodeDown',
+  openai: '#OpenAIDown',
+  chatgpt: '#ChatGPTDown',
+  codex: '#CodexDown',
+}
+
 // #1164 — provider family → group is-down page slug + display name, for the ADDITIONAL group draft
 // (see buildTweetDrafts) when 2+ in-scope services from the SAME family are covered by one alert.
 // DERIVED from FAMILY_GROUPS (imported above, not hand-copied) — inverts {slug: {members}} into
@@ -1052,7 +1064,10 @@ function buildTweetForService(
     const inc = incId ? findIncident(services, incId) : null
     const phrase = (inc && impactPhrase(inc.impact)) || (svc.status === 'degraded' ? 'degraded performance' : 'an outage')
     const head = `🔴 ${name} is reporting ${phrase}`
-    const tail = `. Live status → ${url}`
+    // #1162 — the hashtag rides IN `tail` (not appended after `text` is built) so the existing
+    // incident-title truncation budget below (`room`) already accounts for its length.
+    const hashtag = TWEET_DRAFT_HASHTAGS[svc.id]
+    const tail = `. Live status → ${url}${hashtag ? ` ${hashtag}` : ''}`
     if (inc) {
       const cleaned = defuseAutolinkDomain(cleanForTweet(inc.title))
       const room = TWEET_MAX - head.length - 2 /* ": " */ - tail.length
