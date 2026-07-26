@@ -13,6 +13,8 @@
 import { FAMILY_GROUPS, SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE } from './_is-down/slug-map'
 import { cspForHtml } from './_shared/csp-hash'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
+import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
+import { cookieBannerHtml } from './_shared/cookie-banner'
 
 export const config = { runtime: 'edge' }
 
@@ -110,7 +112,19 @@ function renderGroupPage(family: { slug: string; name: string }, members: Member
     ? `No — every ${family.name} service AIWatch monitors is currently operational.`
     : `${STATUS_LABEL[headline]} — see which ${family.name} service is affected and its live status.`
   const canonical = `https://ai-watch.dev/is-${family.slug}-down`
-  const ogImage = 'https://ai-watch.dev/og-intro.png'
+  // #1164 follow-up — the group page originally used the static site-wide og-intro.png, unlike every
+  // individual is-down page (which draws a live status card via the worker's /api/og). Reuses that
+  // SAME endpoint: `service`/`status` alone render a full card (STATUS_STYLE covers 'unknown' too —
+  // worker/src/og.ts), `score`/`uptime` are optional and simply omitted since there's no
+  // family-level analog for either.
+  //
+  // #1103 (diagnosed on the individual pages, applies identically here) — og:url ("canonical" below)
+  // never changes for this page (no `?e=`/`?i=` pin like a per-incident share), so a static og:image
+  // query string lets a social platform's crawler cache the URL indefinitely against a card that can
+  // go stale OR — #1103's actual observed failure — unfurl with NO image at all once the crawler
+  // decides the (unchanged) URL doesn't need a re-fetch. `v`, a 10-min bucket, forces periodic
+  // re-fetch on the LIVE page the same way the individual pages' unpinned share does.
+  const ogImage = `https://aiwatch-worker.p2c2kbf.workers.dev/api/og?${new URLSearchParams({ service: family.name, status: headline, v: String(Math.floor(Date.now() / 600_000)) }).toString()}`
 
   const rows = members.map((m) => `
     <li class="member-row">
@@ -210,13 +224,15 @@ function renderGroupPage(family: { slug: string; name: string }, members: Member
 <meta property="og:url" content="${canonical}">
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(desc)}">
-<meta property="og:image" content="${ogImage}">
+<meta property="og:image" content="${esc(ogImage)}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(title)}">
 <meta name="twitter:description" content="${esc(desc)}">
-<meta name="twitter:image" content="${ogImage}">
+<meta name="twitter:image" content="${esc(ogImage)}">
 <link rel="icon" type="image/png" href="/favicon.png">
 <script type="application/ld+json">${JSON.stringify(jsonLd)}</script>
+${CONSENT_INIT_COMMENT}
+${consentInitScript()}
 <style>
   body { background:#080c10; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; max-width:640px; margin:0 auto; padding:32px 20px; }
   h1 { font-size:1.5rem; text-align:center; }
@@ -273,13 +289,15 @@ document.querySelector('[data-action="copy-link"]')?.addEventListener('click', f
   })
 })
 // #482-style delegated GA4 hook — CSP-clean (no inline handlers). Mirrors the individual is-down
-// pages' [data-ga] listener, minimal subset (location only) since this page has no gtag script of its
-// own yet; a no-op until GA4 is wired here (typeof gtag guard, same as the individual pages).
+// pages' [data-ga] listener, minimal subset (location only) — every CTA on this page (alerts,
+// extension install, share, cross-links) already carries data-ga/data-ga-loc attributes from the
+// section builders above, so this listener now actually fires once gtag exists (below).
 document.addEventListener('click', function(e){
   var g = e.target.closest('[data-ga]')
   if (g && typeof gtag === 'function') gtag('event', g.dataset.ga, { location: g.dataset.gaLoc })
 })
 </script>
+${cookieBannerHtml()}
 </body>
 </html>`
 }

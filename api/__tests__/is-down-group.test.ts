@@ -39,6 +39,40 @@ describe('is-down-group.ts', () => {
     expect(res.status).toBe(404)
   })
 
+  // #1164 follow-up — the group page originally shipped with NO gtag.js/consent-init/cookie-banner
+  // (the [data-ga] listener was a dead no-op), unlike every individual is-down page. Regression guard
+  // for the fix: both shared modules must actually render, not just be imported.
+  it('wires GA4 (consent-init) + the cookie consent banner, same as the individual is-down pages', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const res = await handler(makeReq('claude'))
+    const html = await res.text()
+    expect(html).toContain('googletagmanager.com/gtag/js')
+    expect(html).toContain("gtag('consent','default'")
+    expect(html).toContain('id="aiwatch-cookie-banner"')
+    expect(html).toContain('data-aiwatch-cb="accept"')
+  })
+
+  // #1164 follow-up — the group page originally hardcoded the static site-wide og-intro.png for every
+  // share, unlike the individual is-down pages' live status card. Regression guard: og:image must be
+  // the dynamic worker endpoint, carrying the family name + CURRENT worst-of status (not a fixed image
+  // that never reflects an outage) — plus a `v` cache-buster (#1103: a static og:image query string
+  // behind a static og:url can make a social crawler unfurl with NO image at all, not just a stale one).
+  it('uses the dynamic /api/og live-status card for og:image, reflecting the worst-of headline + cache-busted', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational' },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'down' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const res = await handler(makeReq('openai'))
+    const html = await res.text()
+    expect(html).toContain('og:image" content="https://aiwatch-worker.p2c2kbf.workers.dev/api/og?service=OpenAI&amp;status=down&amp;v=')
+    expect(html).not.toContain('og-intro.png')
+  })
+
   it('renders operational when every family member is operational', async () => {
     fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
