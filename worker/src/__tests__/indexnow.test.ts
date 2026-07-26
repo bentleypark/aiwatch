@@ -3,29 +3,29 @@ import { buildIndexNowBody, indexNowUrlsFor, pingIndexNow, INDEXNOW_KEY } from '
 
 describe('buildIndexNowBody', () => {
   it('builds the IndexNow payload with host, key, and keyLocation', () => {
-    const body = buildIndexNowBody(['https://ai-watch.dev/is-claude-down'])
+    const body = buildIndexNowBody(['https://ai-watch.dev/is-claude-api-down'])
     expect(body).toEqual({
       host: 'ai-watch.dev',
       key: INDEXNOW_KEY,
       keyLocation: `https://ai-watch.dev/${INDEXNOW_KEY}.txt`,
-      urlList: ['https://ai-watch.dev/is-claude-down'],
+      urlList: ['https://ai-watch.dev/is-claude-api-down'],
     })
   })
 })
 
 describe('indexNowUrlsFor', () => {
   it('maps service ids to canonical is-down URLs', () => {
-    expect(indexNowUrlsFor(['claude'])).toEqual(['https://ai-watch.dev/is-claude-down'])
+    expect(indexNowUrlsFor(['claude'])).toEqual(['https://ai-watch.dev/is-claude-api-down'])
   })
   it('uses the feed-slug override (claudecode → is-claude-code-down)', () => {
     expect(indexNowUrlsFor(['claudecode'])).toEqual(['https://ai-watch.dev/is-claude-code-down'])
   })
   it('dedups repeated ids', () => {
-    expect(indexNowUrlsFor(['claude', 'claude'])).toEqual(['https://ai-watch.dev/is-claude-down'])
+    expect(indexNowUrlsFor(['claude', 'claude'])).toEqual(['https://ai-watch.dev/is-claude-api-down'])
   })
   it('excludes no-is-down-page services (bedrock → dashboard hash, dropped)', () => {
     expect(indexNowUrlsFor(['bedrock'])).toEqual([])
-    expect(indexNowUrlsFor(['claude', 'bedrock'])).toEqual(['https://ai-watch.dev/is-claude-down'])
+    expect(indexNowUrlsFor(['claude', 'bedrock'])).toEqual(['https://ai-watch.dev/is-claude-api-down'])
   })
 })
 
@@ -39,7 +39,7 @@ describe('pingIndexNow', () => {
     expect(url).toBe('https://api.indexnow.org/IndexNow')
     expect(init.method).toBe('POST')
     const sent = JSON.parse(init.body as string)
-    expect(sent.urlList).toEqual(['https://ai-watch.dev/is-claude-down'])
+    expect(sent.urlList).toEqual(['https://ai-watch.dev/is-claude-api-down'])
     expect(sent.keyLocation).toBe(`https://ai-watch.dev/${INDEXNOW_KEY}.txt`)
   })
 

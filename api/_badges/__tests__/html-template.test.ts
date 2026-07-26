@@ -4,8 +4,18 @@ import { SLUG_TO_SERVICE } from '../../_is-down/slug-map'
 
 describe('badgeMarkdownFor (#805) — links to the crawlable is-down page', () => {
   it('builds markdown with the worker service id image + is-down link (slug == id)', () => {
-    expect(badgeMarkdownFor('claude')).toBe(
-      '[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/is-claude-down)',
+    expect(badgeMarkdownFor('gemini')).toBe(
+      '[![Gemini API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/gemini)](https://ai-watch.dev/is-gemini-down)',
+    )
+  })
+  // #1164 — 'claude'/'openai' moved to '-api-down' slugs when those bare URLs became
+  // provider-family group pages.
+  it('builds markdown for the renamed Claude API / OpenAI API slugs', () => {
+    expect(badgeMarkdownFor('claude-api')).toBe(
+      '[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/is-claude-api-down)',
+    )
+    expect(badgeMarkdownFor('openai-api')).toBe(
+      '[![OpenAI API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/openai)](https://ai-watch.dev/is-openai-api-down)',
     )
   })
   it('uses the worker id (not the slug) for the image when they differ', () => {

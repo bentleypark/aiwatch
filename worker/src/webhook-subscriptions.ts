@@ -18,6 +18,7 @@
 
 import { kvPut, kvDel, isAllowedAlertWebhook, appendUtm } from './utils'
 import { isDownUrl } from './rss'
+import { FAMILY_OF_SERVICE } from './alerts'
 import type { AlertFeedEntry, AlertKind } from './alert-feed'
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -441,9 +442,20 @@ const DASHBOARD_HASH_LINK_RE = /https:\/\/ai-watch\.dev\/(?:\?[^#\s)]*)?#([a-z0-
 export function toPerUserEntry(entry: AlertFeedEntry): AlertFeedEntry {
   const desc = entry.embed.description
   if (!desc) return entry
-  // Rewrite to the is-down page AND re-tag it (discord/notification) so per-user clicks attribute the
-  // same as the operator's — isDownUrl() drops the operator's query, appendUtm re-adds ours.
-  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => appendUtm(isDownUrl(id), 'discord'))
+  // #1164 — a shared multi-surface incident (2+ of `entry.svcIds` in the SAME family — the exact
+  // roster this alert covers, so no scope guess) points general subscribers at the family's GROUP
+  // is-down page instead of one arbitrarily-first surface: the embed's own title already reads
+  // "Anthropic (Claude API, claude.ai, Claude Code)", so a single-surface link under it is a mismatch.
+  // Mirrors the same threshold buildTweetDrafts/buildReplyDraft use (worker/src/alerts.ts).
+  const linkFor = (id: string): string => {
+    const family = FAMILY_OF_SERVICE[id]
+    const familyMemberCount = family ? entry.svcIds.filter((s) => FAMILY_OF_SERVICE[s]?.slug === family.slug).length : 0
+    return family && familyMemberCount >= 2 ? `https://ai-watch.dev/is-${family.slug}-down` : isDownUrl(id)
+  }
+  // Rewrite to the is-down (or group) page AND re-tag it (discord/notification) so per-user clicks
+  // attribute the same as the operator's — linkFor()/isDownUrl() drop the operator's query, appendUtm
+  // re-adds ours.
+  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => appendUtm(linkFor(id), 'discord'))
   return rewritten === desc ? entry : { ...entry, embed: { ...entry.embed, description: rewritten } }
 }
 

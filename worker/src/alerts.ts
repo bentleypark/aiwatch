@@ -24,7 +24,9 @@ import { regionStatusOf } from '../../api/_is-down/region-status'
 // #777 — is-down slug for the copyable reply draft's live-status link. SERVICE_ID_TO_SLUG is pure data
 // (no @vercel/edge deps, same module the tweet-draft-slug-sync test imports) and covers gemini, which
 // TWEET_DRAFT_SERVICES does not. Same cross-dir-import trade-off as regionStatusOf above (#422).
-import { SERVICE_ID_TO_SLUG } from '../../api/_is-down/slug-map'
+// #1164 — FAMILY_GROUPS imported the same way (pure data, zero drift risk) rather than hand-copied —
+// see FAMILY_OF_SERVICE below, derived from it once at module load.
+import { SERVICE_ID_TO_SLUG, FAMILY_GROUPS } from '../../api/_is-down/slug-map'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
 import { withdrawalHold, liveIncidentIds, type WithdrawalHold, type WithdrawnIncident } from './withdrawn'
@@ -927,8 +929,10 @@ export function buildServiceAlerts(
 //
 // id → is-down slug. Slugs MUST match api/_is-down/slug-map.ts — pinned by tweet-draft-slug-sync.test.ts.
 export const TWEET_DRAFT_SERVICES: Record<string, string> = {
-  claude: 'claude',
-  openai: 'openai',
+  // #1164 — /is-claude-down and /is-openai-down were repurposed as provider-family group pages; the
+  // single-service pages moved to '-api' slugs.
+  claude: 'claude-api',
+  openai: 'openai-api',
   claudeai: 'claude-ai',
   chatgpt: 'chatgpt',
   claudecode: 'claude-code',
@@ -946,6 +950,16 @@ const TWEET_DRAFT_HASHTAGS: Record<string, string> = {
   chatgpt: '#ChatGPTDown',
   codex: '#CodexDown',
 }
+
+// #1164 — provider family → group is-down page slug + display name, for the ADDITIONAL group draft
+// (see buildTweetDrafts) when 2+ in-scope services from the SAME family are covered by one alert.
+// DERIVED from FAMILY_GROUPS (imported above, not hand-copied) — inverts {slug: {members}} into
+// {memberId: {slug, name}} once at module load, so there is nothing here to drift out of sync.
+// Exported — webhook-subscriptions.ts's toPerUserEntry (#726 general-subscriber relay) reuses this
+// SAME map so its own group-vs-single-surface link decision can't drift from the tweet-draft one.
+export const FAMILY_OF_SERVICE: Record<string, { slug: string; name: string }> = Object.fromEntries(
+  Object.values(FAMILY_GROUPS).flatMap((family) => family.members.map((id) => [id, { slug: family.slug, name: family.name }])),
+)
 
 // Headroom under X's 280-char limit. Literal .length is conservative: X counts any URL as 23 chars
 // (t.co) regardless of its literal length, so a cap on the literal string can never under-count.
@@ -1073,12 +1087,32 @@ export interface TweetDraft {
   intentUrl: string
 }
 
+/** #1164 — the ADDITIONAL draft for a multi-surface same-family incident, pointing at the family's
+ *  group is-down page so one share reflects the whole blast radius instead of a single surface.
+ *  Never replaces the per-service drafts below — the operator still picks whichever fits. */
+function buildGroupTweetDraft(
+  family: { slug: string; name: string },
+  members: ScoredService[],
+  kind: AlertKind,
+): { text: string; intentUrl: string } {
+  const isRecovery = kind === 'resolved' || kind === 'recovered'
+  const names = members.map((s) => defuseAutolinkDomain(s.name)).join(', ')
+  const url = `https://ai-watch.dev/is-${family.slug}-down?${X_UTM}`
+  const text = isRecovery
+    ? `🟢 ${family.name} services have recovered (${names}). Live status → ${url}`
+    : `🔴 Multiple ${family.name} services are affected (${names}). Live status → ${url}`
+  return { text, intentUrl: X_INTENT_BASE + encodeURIComponent(text) }
+}
+
 /**
  * Build a tweet draft per in-scope (Claude/OpenAI-family) service the alert covers (#521). A grouped
  * multi-surface incident (one incidentId across Claude API / claude.ai / Claude Code) yields one draft
  * per affected surface, in svcIds order, so the operator PICKS which surface to tweet about instead of
  * being locked to a single auto-chosen "primary". Empty when the alert covers no in-scope service.
  * Operator-only (the caller appends these after the per-user feed entry — never relayed, #475).
+ *
+ * #1164 — when 2+ in-scope services share a family (Anthropic or OpenAI), ONE group draft is
+ * prepended ahead of the per-service ones, pointing at the family's group is-down page.
  */
 export function buildTweetDrafts(
   alert: AlertCandidate,
@@ -1095,9 +1129,30 @@ export function buildTweetDrafts(
   // resolve the key tail (svcId/incId) the legacy way.
   const keys = alert._mergedKeys ?? [alert.key]
   const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
+  const inScopeIds = svcIds.filter((id) => TWEET_DRAFT_SERVICES[id])
+
   const drafts: TweetDraft[] = []
-  for (const id of svcIds) {
-    if (!TWEET_DRAFT_SERVICES[id]) continue // not a Claude/OpenAI-family service in scope
+
+  // #1164 — group draft(s) first: bucket in-scope ids by family, one group draft per family with 2+
+  // members covered by THIS alert (a single-member "family" is just the normal per-service draft below).
+  const byFamily = new Map<string, string[]>()
+  for (const id of inScopeIds) {
+    const family = FAMILY_OF_SERVICE[id]
+    if (!family) continue
+    const bucket = byFamily.get(family.slug) ?? []
+    bucket.push(id)
+    byFamily.set(family.slug, bucket)
+  }
+  for (const ids of byFamily.values()) {
+    if (ids.length < 2) continue
+    const members = ids.map((id) => services.find((s) => s.id === id)).filter((s): s is ScoredService => !!s)
+    if (members.length < 2) continue
+    const family = FAMILY_OF_SERVICE[ids[0]]
+    const { text, intentUrl } = buildGroupTweetDraft(family, members, kind)
+    drafts.push({ serviceId: `family:${family.slug}`, serviceName: family.name, text, intentUrl })
+  }
+
+  for (const id of inScopeIds) {
     const svc = services.find((s) => s.id === id)
     if (!svc) continue
     const { text, intentUrl } = buildTweetForService(svc, kind, alert, services)
@@ -1247,10 +1302,16 @@ export interface ReplyDraft {
  * 🐦 TWEET DRAFT compose link can't pre-fill a *reply* to someone else's viral "is X down" tweet — the
  * operator has to paste text — so this provides that text, rendered in a Discord code block (one-click
  * copy on desktop) right above the 🔎 search links. Conversational tone so it blends into the reply thread
- * (not a press release). Primary = the first service in svcIds order that's in search scope (one reply per
- * alert: a grouped Anthropic incident → reply to "claude down" tweets with the Claude API surface). The
+ * (not a press release). Primary = the first service in svcIds order that's in search scope. The
  * live-status link reuses the same `?e=` hint + X UTM as the tweet draft, and the service name is defused
  * (`claude.ai` → `claude ai`) since the operator pastes this into X where a bare domain auto-links (#539).
+ *
+ * #1164 — when the primary service's family has 2+ TWEET_DRAFT_SERVICES-scoped members covered by THIS
+ * alert (the same threshold buildTweetDrafts uses for its group draft), the reply links + names the
+ * family's group is-down page instead of the single surface: the reply targets "is claude down" searches
+ * (TWEET_SEARCH_TERMS' bare product-name query), which is exactly the group page's audience once more
+ * than one surface is affected — a grouped Anthropic incident now replies with the Claude group page, not
+ * just the Claude API surface.
  */
 export function buildReplyDraft(alert: AlertCandidate, services: ScoredService[]): ReplyDraft | null {
   const kind = kindFromKey(alert.key)
@@ -1272,8 +1333,14 @@ export function buildReplyDraft(alert: AlertCandidate, services: ScoredService[]
   const hint = isRecovery ? 'resolved' : svc.status === 'operational' ? 'active' : svc.status
   // #804 — per-incident token (incident alerts only) → distinct og:url per outage, fresh card on re-share.
   const token = incidentTokenForAlert(alert)
-  const url = `${appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, hint)}&${X_REPLY_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
-  const name = defuseAutolinkDomain(svc.name)
+  const family = FAMILY_OF_SERVICE[id]
+  const familyMemberCount = family
+    ? svcIds.filter((s) => TWEET_DRAFT_SERVICES[s] && FAMILY_OF_SERVICE[s]?.slug === family.slug).length
+    : 0
+  const isGroup = !!family && familyMemberCount >= 2
+  const linkSlug = isGroup ? family!.slug : slug
+  const url = `${appendStatusHint(`https://ai-watch.dev/is-${linkSlug}-down`, hint)}&${X_REPLY_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
+  const name = isGroup ? family!.name : defuseAutolinkDomain(svc.name)
   // #936 — lead with a status circle (🔴 down / 🟠 degraded / 🟢 recovered) so the pasted tweet reply
   // shows severity at a glance in the thread. Mirrors the dashboard/feed dot convention.
   const circle = isRecovery ? '🟢' : svc.status === 'degraded' ? '🟠' : '🔴'

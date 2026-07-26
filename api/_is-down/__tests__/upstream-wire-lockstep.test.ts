@@ -69,7 +69,7 @@ describe('worker UpstreamLink → Edge UpstreamLinkLike wire lockstep (#1053)', 
       status: 'degraded',
       incidentTitle: 'Elevated errors on Sonnet 5 and Haiku 4.5',
       startedAt: '2026-07-17T06:47:54.909Z',
-      href: '/is-claude-down',
+      href: '/is-claude-api-down',
       external: false, // a SERVICE upstream keeps the reader on AIWatch
       leadMinutes: 29, // derived across the boundary: worker startedAt(s) → Edge arithmetic
     }])

@@ -107,7 +107,7 @@ describe('buildRssFeed — service scope', () => {
     expect(xml).toContain('<title>AIWatch — OpenAI Incidents</title>')
     expect(xml).toContain('OpenAI issue')
     expect(xml).not.toContain('Claude issue')
-    expect(xml).toContain('href="https://ai-watch.dev/feed/openai"')
+    expect(xml).toContain('href="https://ai-watch.dev/feed/openai-api"')
   })
 
   it('uses the is-down slug in the self link for dash-dropped IDs', () => {
@@ -384,7 +384,8 @@ describe('feed slug resolution', () => {
   ]
 
   it('feedSlug matches the is-down page slug', () => {
-    expect(feedSlug('claude')).toBe('claude')
+    // #1164 — 'claude' stopped being an identity slug when /is-claude-down became the group page.
+    expect(feedSlug('claude')).toBe('claude-api')
     expect(feedSlug('claudecode')).toBe('claude-code')
     expect(feedSlug('characterai')).toBe('character-ai')
     expect(feedSlug('bedrock')).toBe('bedrock')
@@ -425,9 +426,11 @@ describe('isValidFeedSegment', () => {
 
 describe('buildRssFeed — item link', () => {
   it('links to the /is-{id}-down SEO page for identity-slug services', () => {
-    const xml = buildRssFeed([service({ id: 'openai', incidents: [incident()] })], { scope: 'all' }, NOW)
+    // #1164 — 'openai' stopped being an identity slug when /is-openai-api-down was repurposed as the
+    // provider-family group page; 'gemini' still demonstrates the identity-slug case.
+    const xml = buildRssFeed([service({ id: 'gemini', incidents: [incident()] })], { scope: 'all' }, NOW)
     // #539 status hint (?e=) + #548 utm (&amp; XML-escaped). The link <link>s through escapeXml.
-    expect(xml).toContain('<link>https://ai-watch.dev/is-openai-down?e=active&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+    expect(xml).toContain('<link>https://ai-watch.dev/is-gemini-down?e=active&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
   })
 
   it('applies the slug override for dash-dropped service IDs', () => {
@@ -453,14 +456,14 @@ describe('buildRssFeed — item link', () => {
   // maps `active → operational`). operational (monitoring / green badge) still ships `active`.
   it('pins the ?e= hint to the live severity for an active outage item', () => {
     const degraded = buildRssFeed([service({ id: 'openai', status: 'degraded', incidents: [incident()] })], { scope: 'all' }, NOW)
-    expect(degraded).toContain('<link>https://ai-watch.dev/is-openai-down?e=degraded&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+    expect(degraded).toContain('<link>https://ai-watch.dev/is-openai-api-down?e=degraded&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
 
     const down = buildRssFeed([service({ id: 'openai', status: 'down', incidents: [incident()] })], { scope: 'all' }, NOW)
-    expect(down).toContain('<link>https://ai-watch.dev/is-openai-down?e=down&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+    expect(down).toContain('<link>https://ai-watch.dev/is-openai-api-down?e=down&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
 
     // operational service (e.g. an incident in `monitoring`, badge already green) keeps `?e=active`.
     const operational = buildRssFeed([service({ id: 'openai', status: 'operational', incidents: [incident({ status: 'monitoring' })] })], { scope: 'all' }, NOW)
-    expect(operational).toContain('is-openai-down?e=active&amp;')
+    expect(operational).toContain('is-openai-api-down?e=active&amp;')
   })
 
   it('keeps ?e=resolved on a resolved item regardless of live status (#539 cache-bust)', () => {
@@ -469,7 +472,7 @@ describe('buildRssFeed — item link', () => {
       { scope: 'all' },
       NOW,
     )
-    expect(xml).toContain('<link>https://ai-watch.dev/is-openai-down?e=resolved&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+    expect(xml).toContain('<link>https://ai-watch.dev/is-openai-api-down?e=resolved&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
   })
 })
 
@@ -605,6 +608,22 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     expect(xml).toContain('🔴 Anthropic (Claude API, claude ai, Claude Code): Elevated errors') // 'major' → 🔴, #539 brand defused
     // #760 — the redundant "Also affecting" line is dropped; the grouped title already lists the set.
     expect(xml).not.toContain('Also affecting')
+  })
+
+  // #1164 — a shared multi-surface incident's <link> now points at the family GROUP is-down page
+  // instead of the (arbitrary) primary surface's own page, matching the item's own provider-grouped
+  // title ("Anthropic (Claude API, claude.ai, Claude Code): …") — a subscriber reading THAT title
+  // and clicking through used to land on the narrower Claude API page alone.
+  it('points the collapsed multi-surface item\'s <link> at the family GROUP is-down page', () => {
+    const xml = buildRssFeed(anthropic, { scope: 'all' }, NOW)
+    expect(xml).toContain('<link>https://ai-watch.dev/is-claude-down?utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+    expect(xml).not.toContain('is-claude-api-down')
+  })
+
+  it('a single-surface incident still links its OWN is-down page, not a group page', () => {
+    const xml = buildRssFeed([service({ incidents: [incident({ id: 'solo' })] })], { scope: 'all' }, NOW)
+    expect(xml).toMatch(/<link>https:\/\/ai-watch\.dev\/is-[a-z-]+-down\?/)
+    expect(xml).not.toMatch(/<link>https:\/\/ai-watch\.dev\/is-claude-down/)
   })
 
   it('uses a per-incident guid for the collapsed item (no Slack re-post churn)', () => {

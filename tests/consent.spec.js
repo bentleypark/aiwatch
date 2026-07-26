@@ -26,8 +26,11 @@ async function getGaCookies(page) {
   return cookies.filter((c) => c.name.startsWith('_ga') || c.name.startsWith('_gid') || c.name.startsWith('_gcl_au'))
 }
 
+// #1164 — /is-claude-down became the Anthropic family group page (no GA4/consent-banner script of
+// its own yet); the single-service consent/GA4 apparatus this spec exercises moved with the rest of
+// the single-service content to /is-claude-api-down.
 const SURFACES = [
-  { name: '/is-claude-down', path: '/is-claude-down' },
+  { name: '/is-claude-api-down', path: '/is-claude-api-down' },
   { name: '/intro', path: '/intro' },
 ]
 
@@ -112,7 +115,7 @@ for (const surface of SURFACES) {
 
 test.describe('Consent banner DOM (#352)', () => {
   test('banner is visible on first visit (no consent key)', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     const banner = page.locator('#aiwatch-cookie-banner')
     await expect(banner).toBeVisible()
   })
@@ -121,13 +124,13 @@ test.describe('Consent banner DOM (#352)', () => {
     await page.addInitScript(() => {
       try { localStorage.setItem('aiwatch-cookie-consent', 'granted') } catch {}
     })
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     const banner = page.locator('#aiwatch-cookie-banner')
     await expect(banner).toBeHidden()
   })
 
   test('clicking "Essential Only" writes "denied" and hides the banner', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     await page.locator('[data-aiwatch-cb="essential"]').click()
     const stored = await page.evaluate(() => localStorage.getItem('aiwatch-cookie-consent'))
     expect(stored).toBe('denied')
@@ -135,7 +138,7 @@ test.describe('Consent banner DOM (#352)', () => {
   })
 
   test('clicking "Accept All" writes "granted" and hides the banner', async ({ page }) => {
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     await page.locator('[data-aiwatch-cb="accept"]').click()
     const stored = await page.evaluate(() => localStorage.getItem('aiwatch-cookie-consent'))
     expect(stored).toBe('granted')
@@ -175,7 +178,7 @@ test.describe('Consent banner DOM (#352)', () => {
         }
       }, 5)
     })
-    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     await page.locator('[data-aiwatch-cb="accept"]').click()
     // Banner must remain visible — user re-prompted next interaction since choice didn't persist.
     await expect(page.locator('#aiwatch-cookie-banner')).toBeVisible()

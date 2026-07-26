@@ -4,7 +4,7 @@ import { SERVICE_ID_TO_SLUG } from '../../../api/_is-down/slug-map'
 
 describe('buildBadgeLinkTarget — #805 backlinks must hit the crawlable is-down page', () => {
   it('links to the is-down page when slug == id', () => {
-    expect(buildBadgeLinkTarget('claude')).toBe('https://ai-watch.dev/is-claude-down')
+    expect(buildBadgeLinkTarget('gemini')).toBe('https://ai-watch.dev/is-gemini-down')
   })
 
   it('uses the slug override when id != slug (claudeai → claude-ai)', () => {
@@ -17,6 +17,11 @@ describe('buildBadgeLinkTarget — #805 backlinks must hit the crawlable is-down
     ['langsmith', 'langchain'],
     ['bfl', 'flux'],
     ['characterai', 'character-ai'],
+    // #1164 — 'claude'/'openai' moved to '-api-down' slugs when those bare URLs became
+    // provider-family group pages; the badge (a single-service embed) must still target the
+    // service's OWN page, not the group.
+    ['claude', 'claude-api'],
+    ['openai', 'openai-api'],
   ])('resolves the override slug for %s → is-%s-down', (id, slug) => {
     expect(buildBadgeLinkTarget(id)).toBe(`https://ai-watch.dev/is-${slug}-down`)
   })
@@ -36,7 +41,7 @@ describe('buildBadgeLinkTarget — #805 backlinks must hit the crawlable is-down
 describe('buildBadgeMarkdown', () => {
   it('embeds the badge image and links it to the is-down page', () => {
     expect(buildBadgeMarkdown('claude', 'Claude API')).toBe(
-      '[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/is-claude-down)',
+      '[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/is-claude-api-down)',
     )
   })
 })

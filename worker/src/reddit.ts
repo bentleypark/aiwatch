@@ -245,9 +245,13 @@ export async function detectRedditPosts(
 }
 
 // Subreddit → Is X Down slug mapping for share links
+// #1164 — ClaudeAI/OpenAI point at the '-api' slugs (Claude API / OpenAI API), matching every other
+// slug map this migration touched (TWEET_DRAFT_SERVICES, RSS/SPA feed overrides, RELATED_SLUGS, the
+// extension). A Reddit promote share is about the specific product a subreddit discusses, not the
+// provider broadly — same reasoning "Alternatives" links point at a product, not a family group page.
 const SUBREDDIT_SLUG: Record<string, string> = {
-  ClaudeAI: 'claude', ClaudeCode: 'claude-code',
-  ChatGPT: 'chatgpt', OpenAI: 'openai',
+  ClaudeAI: 'claude-api', ClaudeCode: 'claude-code',
+  ChatGPT: 'chatgpt', OpenAI: 'openai-api',
   cursor: 'cursor', windsurf: 'windsurf', Codeium: 'windsurf',
 }
 

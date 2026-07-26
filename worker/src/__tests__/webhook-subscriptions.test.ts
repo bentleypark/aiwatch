@@ -323,7 +323,7 @@ describe('toPerUserEntry — per-user is-down link rewrite (#726, #936 UTM)', ()
 
   it('rewrites the operator dashboard link to the tagged is-down page', () => {
     const out = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc(opLink('claude')), color: 1 } }))
-    expect(out.embed.description).toContain(`[View on AIWatch](https://ai-watch.dev/is-claude-down?${UTM})`)
+    expect(out.embed.description).toContain(`[View on AIWatch](https://ai-watch.dev/is-claude-api-down?${UTM})`)
     expect(out.embed.description).not.toContain('ai-watch.dev/?' + UTM + '#claude')
   })
 
@@ -334,7 +334,7 @@ describe('toPerUserEntry — per-user is-down link rewrite (#726, #936 UTM)', ()
 
   it('also tolerates a BARE (untagged) dashboard link — regex robustness', () => {
     const out = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc('https://ai-watch.dev/#claude'), color: 1 } }))
-    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-api-down?${UTM}`)
   })
 
   it('keeps a tagged DASHBOARD link for a no-is-down-page service (azureopenai) — no-op, same entry ref', () => {
@@ -358,15 +358,15 @@ describe('toPerUserEntry — per-user is-down link rewrite (#726, #936 UTM)', ()
   it('rewrites the exact tagged "[View on AIWatch](…)" markup the operator embed emits (format pin)', () => {
     const operatorLink = `[View on AIWatch](${opLink('openai')})`
     const out = toPerUserEntry(feedEntry({ svcIds: ['openai'], embed: { title: 't', description: `🔴 Down\n${operatorLink}`, color: 1 } }))
-    expect(out.embed.description).toContain(`[View on AIWatch](https://ai-watch.dev/is-openai-down?${UTM})`)
+    expect(out.embed.description).toContain(`[View on AIWatch](https://ai-watch.dev/is-openai-api-down?${UTM})`)
     expect(out.embed.description).not.toContain(operatorLink)
   })
 
   // The `/g` flag is load-bearing: a future description section could add a second dashboard link.
   it('rewrites EVERY dashboard link (global), each to its own tagged is-down page', () => {
     const out = toPerUserEntry(feedEntry({ svcIds: ['claude', 'openai'], embed: { title: 't', description: `${desc(opLink('claude'))}\nalso [b](${opLink('openai')})`, color: 1 } }))
-    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
-    expect(out.embed.description).toContain(`https://ai-watch.dev/is-openai-down?${UTM}`)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-api-down?${UTM}`)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-openai-api-down?${UTM}`)
     expect(out.embed.description).not.toContain('#claude')
     expect(out.embed.description).not.toContain('#openai')
   })
@@ -374,7 +374,7 @@ describe('toPerUserEntry — per-user is-down link rewrite (#726, #936 UTM)', ()
   // Mixed eligibility in one description: the per-link isDownUrl branch diverges within a single pass.
   it('rewrites an is-down-eligible service but leaves a tagged dashboard link for a no-page service', () => {
     const out = toPerUserEntry(feedEntry({ svcIds: ['claude', 'bedrock'], embed: { title: 't', description: `${desc(opLink('claude'))}\nalso [b](${opLink('bedrock')})`, color: 1 } }))
-    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-api-down?${UTM}`)
     expect(out.embed.description).toContain(`https://ai-watch.dev/?${UTM}#bedrock`) // no is-down page → tagged dashboard hash kept
     expect(out.embed.description).not.toContain('#claude')
   })
@@ -383,13 +383,41 @@ describe('toPerUserEntry — per-user is-down link rewrite (#726, #936 UTM)', ()
     const once = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc(opLink('claude')), color: 1 } }))
     const twice = toPerUserEntry(once)
     expect(twice).toBe(once)
-    expect(twice.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
+    expect(twice.embed.description).toContain(`https://ai-watch.dev/is-claude-api-down?${UTM}`)
   })
 
   it('does not mutate the input entry (returns a copy)', () => {
     const entry = feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc(opLink('claude')), color: 1 } })
     toPerUserEntry(entry)
     expect(entry.embed.description).toContain(`?${UTM}#claude`) // original untouched
+  })
+
+  // #1164 — a shared multi-surface incident (2+ of entry.svcIds in the SAME family) points general
+  // subscribers at the family GROUP is-down page instead of one arbitrary surface, matching the
+  // embed's own provider-grouped title ("Anthropic (Claude API, claude.ai) — New Incident").
+  it('rewrites to the family GROUP is-down page when svcIds spans 2+ same-family members', () => {
+    const out = toPerUserEntry(feedEntry({
+      svcIds: ['claude', 'claudeai'],
+      embed: { title: 'Anthropic (Claude API, claude.ai) — New Incident', description: `${desc(opLink('claude'))}\nalso [b](${opLink('claudeai')})`, color: 1 },
+    }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
+    expect(out.embed.description).not.toContain('is-claude-api-down')
+    expect(out.embed.description).not.toContain('is-claude-ai-down')
+  })
+
+  it('still uses the single-surface page when only ONE member of a family is in svcIds', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc(opLink('claude')), color: 1 } }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-api-down?${UTM}`)
+    expect(out.embed.description).not.toContain('is-claude-down')
+  })
+
+  it('does NOT group across different families — claude + openai stay on their own single-surface pages', () => {
+    const out = toPerUserEntry(feedEntry({
+      svcIds: ['claude', 'openai'],
+      embed: { title: 't', description: `${desc(opLink('claude'))}\nalso [b](${opLink('openai')})`, color: 1 },
+    }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-api-down?${UTM}`)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-openai-api-down?${UTM}`)
   })
 })
 
@@ -420,7 +448,7 @@ describe('deliverToSubscribers', () => {
     let sentDesc = ''
     const post = vi.fn(async (_url: string, entry: AlertFeedEntry) => { sentDesc = entry.embed.description; return 204 })
     await deliverToSubscribers(kv, KEY, feed, post, 1)
-    expect(sentDesc).toContain('https://ai-watch.dev/is-claude-down')
+    expect(sentDesc).toContain('https://ai-watch.dev/is-claude-api-down')
     expect(sentDesc).not.toContain('ai-watch.dev/#claude')
   })
 
