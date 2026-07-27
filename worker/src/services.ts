@@ -150,7 +150,11 @@ export const SERVICES: ServiceConfig[] = [
   // → supersedes the mirror, clears the stale flag). The deepseek.statuspage.io Atlassian mirror
   // (#498) is the FALLBACK when the feed is missing/expired — it FROZE at 2026-05-08 (#591/#507),
   // returning 200 with stale data, so `incidentSourceStale` keeps it out of Score rankings then.
-  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'], incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: '01KR3NC9ETZYF436Z8YT1HM047' },
+  // #1171 — flashdutyPrimaryComponentId updated to the V4-era API component pair (DeepSeek reorganized
+  // its status page, retiring the single old "API 服务" component this used to point at — 01KR3NC9ET...
+  // no longer appears in component_uptimes/component_impacts, so uptime silently went null). Worst-of
+  // across both models, mirroring how a multi-component API surface is scored elsewhere.
+  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'], incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: ['01KY4MVS8BM3F9JSYWACGQVG7A', '01KY4MVS8BSBSVW6053QJ37RJE'] },
   // #989 — Kimi (Moonshot AI). Atlassian Statuspage, data-rich (verified 2026-07-18: x-statuspage-version
   // header + window.uptimeData for the badge component). `.cn` is a CNAME to Statuspage (AtlassianEdge)
   // so a Worker fetch reaches it — no China-network risk, no mirror needed.
@@ -357,7 +361,10 @@ export const SERVICES: ServiceConfig[] = [
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
   // clears incidentSourceStale; when absent, fetchService returns an empty stale base (it does NOT
   // fetch the bot-walled status.deepseek.com directly). incidentSourceStale is the feed-absent flag.
-  { id: 'deepseekapp', name: 'DeepSeek App', provider: 'DeepSeek', category: 'app', statusUrl: 'https://status.deepseek.com', apiUrl: null, incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: '01KR3NC9ETESRRQ4GABE0TGW53', addedAt: '2026-06-12' }, // #802
+  // #1171 — flashdutyPrimaryComponentId updated to the V4-era chat/app components (DeepSeek's status
+  // page reorg split the old single "Web Chat" component this used to point at — 01KR3NC9ET... — into
+  // 5 finer-grained ones: Instant/Expert/Vision Mode, File Upload, Search). Worst-of across all 5.
+  { id: 'deepseekapp', name: 'DeepSeek App', provider: 'DeepSeek', category: 'app', statusUrl: 'https://status.deepseek.com', apiUrl: null, incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: ['01KY4ND2PNYT9FY5W4ZH80VGJ4', '01KY4ND2PN1CCNW2MFT5VW713H', '01KY4ND2PNJ6MFA4VJ0DSN6M2J', '01KY4ND2PNNFFY6QKV67WFJW8N', '01KY4ND2PN6EFSJ4RDYDJYPMNK'], addedAt: '2026-06-12' }, // #802
   // #1165 — Grok consumer app (iOS/Android/Web), the api-vs-app split mirror of xai/Grok (same
   // pattern as OpenAI API↔ChatGPT, DeepSeek API↔DeepSeek App above). Same rssFeedUrl as `xai` — the
   // `config.rssFeedUrl.includes('status.x.ai')` branch in fetchServiceUntagged routes ANY service on
@@ -1384,11 +1391,19 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
     lastChecked: now,
     incidents: parsed.incidents,
     // #1006 — COMPUTED over the trailing 30 days from the feed's `component_impacts` intervals, like
-    // every other source; the feed's own `component_uptimes` aggregate is used only as the roster.
+    // every other source, so it's comparable across services on the same basis.
     // #1017 — todayWeightedOutageSec (the durable per-day archive input) rides the SAME
     // `flashdutyUptime` object as uptime30d, one spread, so the two can't drift apart.
     ...(parsed.flashdutyUptime != null
       ? { uptime30d: parsed.flashdutyUptime.pct, uptimeSource: 'official' as const, todayWeightedOutageSec: parsed.flashdutyUptime.todayWeightedOutageSec }
+      : {}),
+    // #1171 — status.deepseek.com's own "System status" page displays a rolling ~90-day uptime% per
+    // component (confirmed live: a date-range picker labelled e.g. "Apr 2026 - Jul 2026"); surface it
+    // as `uptimeReported` (worst-of the scoped roster) the same way BetterStack/Instatus do, but only
+    // when it actually differs from our own 30-day figure — otherwise the two numbers side by side
+    // would just be visual noise.
+    ...(parsed.reportedUptime != null && parsed.reportedUptime !== parsed.flashdutyUptime?.pct
+      ? { uptimeReported: parsed.reportedUptime, uptimeReportedDays: 90 }
       : {}),
     ...(Object.keys(parsed.dailyImpact).length > 0 ? { dailyImpact: parsed.dailyImpact } : {}),
     ...(parsed.components.length >= 2 ? { components: parsed.components } : {}),

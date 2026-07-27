@@ -82,9 +82,9 @@ demoted to an hourly backup):
                                   ▲
                                   │  read each */5 cron + each /api/status fan-out
 [Worker]  fetchService('deepseek' | 'deepseekapp')  (services.ts readFlashdutyStatus)
-  → parseFlashdutyFeed(feed, { primaryComponentId })   ← option A: scope to ONE component
-       deepseek    → API Service component   (api.deepseek.com)  → category api
-       deepseekapp → Web Chat Service component (chat.deepseek.com) → category app (DeepSeek App, #619)
+  → parseFlashdutyFeed(feed, { primaryComponentId })   ← option A: scope to a SET of components (worst-of, #1171)
+       deepseek    → V4 Pro API + V4 Flash API components        → category api
+       deepseekapp → Instant/Expert/Vision Mode + File Upload + Search components → category app (DeepSeek App, #619)
   → FRESH feed (≤1h)   → live data, incidentSourceStale cleared (ranked)
   → AGING feed (1–3h)  → live badge/incidents but incidentSourceStale re-asserted (ranking-excluded)
   → ABSENT/expired feed (>3h KV TTL):
