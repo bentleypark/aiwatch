@@ -263,7 +263,7 @@ export const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'degraded',
+    id: 'xai', category: 'api', name: 'xAI API', provider: 'xAI', status: 'degraded',
     latency: 203, uptime30d: 99.75,
     history30d: hist([24]),
     history3m: [{ month: '2026-01', uptime: 99.82 }, { month: '2026-02', uptime: 99.79 }, { month: '2026-03', uptime: 99.75 }],
@@ -571,6 +571,16 @@ export const MOCK_SERVICES = [
     id: 'deepseekapp', category: 'app', name: 'DeepSeek App', provider: 'DeepSeek', status: 'operational',
     latency: null, uptime30d: 99.48,
     history30d: hist([13, 18, 22]),
+    history3m: null,
+    incidents: [],
+  },
+  {
+    // #1165 — no official uptime% (status.x.ai publishes neither Atlassian window.uptimeData nor an
+    // incident.io component_uptimes payload for any component, including this one) — null, same
+    // posture as xai itself, not a fabricated number.
+    id: 'grok', category: 'app', name: 'Grok', provider: 'xAI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist(),
     history3m: null,
     incidents: [],
   },

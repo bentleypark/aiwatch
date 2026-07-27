@@ -780,7 +780,7 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
 // (#703) so the alert merge + the AI-analysis dedup can't drift. xAI-only by design.
 
 /**
- * Merge concurrent xAI (Grok) per-region incident alerts (same event, different region) into one
+ * Merge concurrent xAI API per-region incident alerts (same event, different region) into one
  * grouped alert. New + resolved handled independently (a staggered resolve fires individually — same
  * limitation as mergeTogetherAlerts). Non-region-tagged xAI alerts and all non-xAI alerts pass through.
  * Sets `_mergedKeys` so every collapsed incidentId lands in the `alerted:new:` roster (no re-fire) and
@@ -788,7 +788,7 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
  */
 export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate[] {
   const isXai = (a: AlertCandidate) =>
-    a.title.startsWith('🔴 xAI (Grok) — New Incident') || a.title.startsWith('🟢 xAI (Grok) — Incident Resolved')
+    a.title.startsWith('🔴 xAI API — New Incident') || a.title.startsWith('🟢 xAI API — Incident Resolved')
   const xai = alerts.filter(isXai)
   if (xai.length <= 1) return alerts
   const rest = alerts.filter((a) => !isXai(a))
@@ -808,7 +808,7 @@ export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate
       const regions = arr.map((a) => XAI_REGION_RE.exec(a.description)?.[1]).filter(Boolean)
       const merged: AlertCandidate = {
         key: arr[0].key,
-        title: `${kind === 'new' ? '🔴' : '🟢'} xAI (Grok) — ${kind === 'new' ? 'New Incident' : 'Incident Resolved'} (${regions.join(', ')})`,
+        title: `${kind === 'new' ? '🔴' : '🟢'} xAI API — ${kind === 'new' ? 'New Incident' : 'Incident Resolved'} (${regions.join(', ')})`,
         description: arr.map((a) => a.description).join('\n'), // preserve each region's original title
         color: kind === 'new' ? 0xED4245 : 0x57F287,
         url: 'https://ai-watch.dev/#xai',

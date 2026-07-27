@@ -139,7 +139,9 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#761): top-level Instatus components API (Sonar) + Website + Computer (#911).
   // Display-only — badge stays on statusComponent 'API'. Next.js Instatus exposes per-component status.
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l'] },
-  { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
+  // #1165 — renamed 'xAI (Grok)' → 'xAI API': now that Grok's consumer app is its own service
+  // ('grok', in the Apps section below), "(Grok)" on this card would misname the API surface.
+  { id: 'xai', name: 'xAI API', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from
   // the SAME IP succeeds where curl/fetch are reset, so it's a JA3/bot wall, NOT an IP block).
@@ -363,6 +365,23 @@ export const SERVICES: ServiceConfig[] = [
   // page reorg split the old single "Web Chat" component this used to point at — 01KR3NC9ET... — into
   // 5 finer-grained ones: Instant/Expert/Vision Mode, File Upload, Search). Worst-of across all 5.
   { id: 'deepseekapp', name: 'DeepSeek App', provider: 'DeepSeek', category: 'app', statusUrl: 'https://status.deepseek.com', apiUrl: null, incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: ['01KY4ND2PNYT9FY5W4ZH80VGJ4', '01KY4ND2PN1CCNW2MFT5VW713H', '01KY4ND2PNJ6MFA4VJ0DSN6M2J', '01KY4ND2PNNFFY6QKV67WFJW8N', '01KY4ND2PN6EFSJ4RDYDJYPMNK'], addedAt: '2026-06-12' }, // #802
+  // #1165 — Grok consumer app (iOS/Android/Web), the api-vs-app split mirror of xai/Grok (same
+  // pattern as OpenAI API↔ChatGPT, DeepSeek API↔DeepSeek App above). Same rssFeedUrl as `xai` — the
+  // `config.rssFeedUrl.includes('status.x.ai')` branch in fetchServiceUntagged routes ANY service on
+  // this feed through parseXaiRssIncidents, so no new parser code was needed, only this config entry.
+  // parseXaiRssIncidents never sets componentNames (unlike a Statuspage/incident.io JSON source), so
+  // filterIncidents' incidentKeywords match is TITLE-substring-only here — same as xai's own
+  // `['api']`. status.x.ai tags every incident title `[<Component>] ...`; 'grok (' (with the open
+  // paren) matches exactly the 3 app-surface tags `[Grok (iOS)]` / `[Grok (Android)]` / `[Grok (Web)]`
+  // and nothing else on the page (not '[Grok in X]' — no paren; not '[API...]', '[API Console]',
+  // '[Docs]', '[xAI Website]'). mergeXaiRegionalIncidents (xai's per-region dedup) is a safe no-op
+  // here: its regex only matches the `[API (<region>.api.x.ai)]` tag shape, never `[Grok (...)]` — and
+  // per-platform Grok incidents are deliberately NOT merged across iOS/Android/Web (unlike xai's API
+  // regions): the live feed shows genuinely platform-scoped incidents (e.g. "Partial Outage of Grok
+  // Android App" with no iOS/Web counterpart) alongside near-identical simultaneous ones, so merging
+  // by title would risk collapsing real per-platform outages — the same over-eager-merge failure class
+  // #940's own region merge was built to avoid, just on the opposite axis.
+  { id: 'grok', name: 'Grok', provider: 'xAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok ('], addedAt: '2026-07-26' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the

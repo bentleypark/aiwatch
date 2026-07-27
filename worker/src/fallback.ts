@@ -55,12 +55,12 @@ export const API_TIER: Record<string, number> = {
   pinecone: 8, turbopuffer: 8,
   // Tier 11 = Coding agents (#1027) — one tier for all six; multi-form (CLI + IDE), Score-ordered.
   claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11,
-  // App-category services. All four share tier 21, so same-tier distance collapses to 0
+  // App-category services. All five share tier 21, so same-tier distance collapses to 0
   // across every pairing and ordering reduces to Score — identical to the pre-#403 `?? 99`
   // fall-through, just without the warn-once noise. Entries exist only to suppress the
-  // `tierFor` warn-once that would otherwise fire whenever chatgpt/claudeai/deepseekapp surface as
-  // the affected service in a fallback flow (Character.AI is in EXCLUDE_FALLBACK so it never does).
-  chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
+  // `tierFor` warn-once that would otherwise fire whenever chatgpt/claudeai/deepseekapp/grok surface
+  // as the affected service in a fallback flow (Character.AI is in EXCLUDE_FALLBACK so it never does).
+  chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21, grok: 21,
 }
 
 // #403 — surfaces the silent-fallback failure mode that produced #402 (Junie-as-#1) without
