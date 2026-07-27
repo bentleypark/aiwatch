@@ -381,10 +381,16 @@ export interface ServiceConfig {
   // clears incidentSourceStale, while a missing/expired feed falls through to apiUrl (the frozen
   // Atlassian mirror) keeping incidentSourceStale. Pairs with incidentSourceStale (the fallback).
   flashdutyFeed?: boolean
-  // #618 option A — scope the Flashduty feed to a single component id (the API surface), excluding
-  // sibling consumer-app components (e.g. DeepSeek's Web Chat) from the badge/incidents/uptime/score
-  // — the same api-vs-app split as OpenAI API (incidentExclude:['chatgpt']). Absent → whole feed.
-  flashdutyPrimaryComponentId?: string
+  // #618 option A — scope the Flashduty feed to a component id, or a SET of ids (worst-of — #1171,
+  // when the provider's status page splits one surface into several components, e.g. DeepSeek's V4
+  // reorg turning one "API Service" into "V4 Pro API" + "V4 Flash API"), excluding sibling
+  // consumer-app components (e.g. DeepSeek's Web Chat) from the badge/incidents/uptime/score — the
+  // same api-vs-app split as OpenAI API (incidentExclude:['chatgpt']). Absent → whole feed. The tuple
+  // (mirroring incidentIoComponentId below) forbids `[]`, which would be silently truthy: it would run
+  // the parser over zero ids and reinstate the exact silent uptime drop #1171 fixed. Unrelated to
+  // `statusComponentIds` above — that's the Statuspage.io-API path; this only applies when
+  // `flashdutyFeed: true` (the browser-scraped-feed path, currently DeepSeek only).
+  flashdutyPrimaryComponentId?: string | [string, ...string[]]
 }
 
 export interface ProbeSummary {
