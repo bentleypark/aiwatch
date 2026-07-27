@@ -18,9 +18,11 @@ describe('parseFlashdutyFeed (#618)', () => {
   const parsed = parseFlashdutyFeed(feed, { nowMs: CAPTURED_AT })
 
   it('maps the two page components to breakdown rows, all operational when no active incident', () => {
+    // #1171 — names go through cleanComponentName (CJK stripped, English kept) now that a scoped
+    // service can actually reach ≥2 components and render this breakdown on ServiceDetails.
     expect(parsed.components.map((c) => c.name)).toEqual([
-      'API 服务 (API Service)',
-      '网页对话服务 (Web Chat Service)',
+      'API (API Service)',
+      'Web Chat Service',
     ])
     expect(parsed.components.every((c) => c.status === 'operational')).toBe(true)
   })
