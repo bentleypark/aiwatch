@@ -168,6 +168,8 @@ export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
   // single-service pages moved to '-api' slugs, so the per-service feed URL follows (/feed/claude-api).
   claude: 'claude-api',
   openai: 'openai-api',
+  // #1165 — same repurposing for /is-xai-down (group page). 'grok' needs no entry — slug == id.
+  xai: 'xai-api',
 }
 
 // Services with no /is-{slug}-down page — estimate-only, excluded per #263.

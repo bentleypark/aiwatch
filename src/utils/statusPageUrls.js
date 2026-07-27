@@ -44,6 +44,7 @@ export const STATUS_URL = {
   claudeai:    'https://status.claude.com',
   chatgpt:     'https://status.openai.com',
   deepseekapp: 'https://status.deepseek.com',
+  grok:        'https://status.x.ai',
   claudecode:  'https://status.claude.com',
   copilot:     'https://githubstatus.com',
   cursor:      'https://status.cursor.com',

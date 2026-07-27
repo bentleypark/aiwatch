@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **44 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **45 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -22,9 +22,9 @@ Real-time monitoring dashboard for **44 AI services** — track status, latency,
 | ![AIWatch Dashboard](docs/screenshot.png?v=3) | ![AIWatch Mobile](docs/screenshot-mobile.png?v=1) |
 
 **Share**
-[![Share on X](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2044%20AI%20services%20%28Claude%2C%20ChatGPT%2C%20Gemini%2C%20and%20more%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
-[![Share on Reddit](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2044%20AI%20services)
-[![Share on Hacker News](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2044%20AI%20services)
+[![Share on X](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2045%20AI%20services%20%28Claude%2C%20ChatGPT%2C%20Gemini%2C%20and%20more%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
+[![Share on Reddit](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2045%20AI%20services)
+[![Share on Hacker News](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2045%20AI%20services)
 [![Share on LinkedIn](https://img.shields.io/badge/Share-LinkedIn-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
 
 ## 🛰️ Live Demo
@@ -33,7 +33,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 44 AI services
+- **Real-time status** — Operational / Degraded / Down for 45 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Direct endpoint response time (RTT) for 33 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
@@ -52,7 +52,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
-- **Is X Down SEO pages** — 42 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
+- **Is X Down SEO pages** — 43 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
 - **Health check probing** — Direct RTT measurement to service endpoints (33 probe targets) with early outage detection via consecutive spike alerts and RTT degradation tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
@@ -66,7 +66,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Monitored Services
 
-Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Overview sections mirror these).
+Grouped by the dashboard's category taxonomy (45 total — sidebar filters / Overview sections mirror these).
 
 ### LLM APIs (16)
 
@@ -82,7 +82,7 @@ Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Ove
 | Fireworks AI | Fireworks | Better Stack RSS + uptime API |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
 | Perplexity | Perplexity AI | Instatus (Next.js SSR) |
-| xAI (Grok) | xAI | RSS feed |
+| xAI API | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Flashduty (browser-rendered feed) |
 | Kimi (Moonshot AI) | Moonshot AI | Atlassian Statuspage (Chinese titles → English) |
 | OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
@@ -143,7 +143,7 @@ Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Ove
 | Stability AI | Stability AI | incident.io (Atlassian compat) |
 | Black Forest Labs (FLUX) | Black Forest Labs | Atlassian Statuspage |
 
-### AI Apps (4)
+### AI Apps (5)
 
 | Service | Provider |
 |---------|----------|
@@ -151,6 +151,7 @@ Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Ove
 | ChatGPT | OpenAI |
 | Character.AI | Character AI |
 | DeepSeek App | DeepSeek |
+| Grok | xAI |
 
 ## Tech Stack
 
@@ -170,7 +171,7 @@ Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Ove
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (44 services) → normalize
+  ├── GET /api/status    → parallel fetch (45 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → Discord webhook proxy (SSRF protected)
   ↓
@@ -338,7 +339,7 @@ Every monitored service — the same ids `/api/v1/status` returns.
 | `fireworks` | Fireworks AI | `turbopuffer` | turbopuffer |
 | `cerebras` | Cerebras Inference | `twelvelabs` | Twelve Labs |
 | `perplexity` | Perplexity | `langsmith` | LangChain (LangSmith) |
-| `xai` | xAI (Grok) | `helicone` | Helicone |
+| `xai` | xAI API | `helicone` | Helicone |
 | `deepseek` | DeepSeek API | `langfuse` | Langfuse |
 | `kimi` | Kimi (Moonshot AI) | `runway` | Runway |
 | `openrouter` | OpenRouter | `luma` | Luma (Dream Machine) |
@@ -348,10 +349,11 @@ Every monitored service — the same ids `/api/v1/status` returns.
 | `copilot` | GitHub Copilot | `chatgpt` | ChatGPT |
 | `windsurf` | Windsurf | `characterai` | Character.AI |
 | `junie` | Junie | `deepseekapp` | DeepSeek App |
+| `grok` | Grok | | |
 
 ## Claude Code Statusline Integration
 
-Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 40 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). The recommended preset keeps an always-on, clickable **AIWatch** label (`AIWatch 🟢` while all healthy, `AIWatch 🔴 Claude API` when something breaks — cmd/ctrl+click opens the dashboard). Prefer zero footprint when healthy? A minimalist preset that stays empty until something degrades is on the [presets page](https://ai-watch.dev/#statusline).
+Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 41 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). The recommended preset keeps an always-on, clickable **AIWatch** label (`AIWatch 🟢` while all healthy, `AIWatch 🔴 Claude API` when something breaks — cmd/ctrl+click opens the dashboard). Prefer zero footprint when healthy? A minimalist preset that stays empty until something degrades is on the [presets page](https://ai-watch.dev/#statusline).
 
 Quickest install — add to `~/.claude/settings.json`:
 
@@ -398,7 +400,7 @@ src/                   # React 19 SPA (Vite, no router — hash routing in App.j
 api/                   # Helpers live in `_`-prefixed dirs and handlers run on the edge runtime,
                        # so neither counts against the Hobby 12-Serverless-Function cap (#862/#867)
   intro.ts             # Landing page (/intro)              _intro/       # its SSR template
-  is-down.ts           # "Is X Down?" SSR pages (42 services)   _is-down/  # slug-map, seo-content, template
+  is-down.ts           # "Is X Down?" SSR pages (43 services)   _is-down/  # slug-map, seo-content, template
   methodology.ts       # "How AIWatch Works" (/methodology) _methodology/
   plugin.ts            # Claude Code plugin landing         _plugin/
   badges.ts            # Status-badge gallery (/badges)     _badges/

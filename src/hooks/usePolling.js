@@ -574,6 +574,16 @@ export const MOCK_SERVICES = [
     history3m: null,
     incidents: [],
   },
+  {
+    // #1165 — no official uptime% (status.x.ai publishes neither Atlassian window.uptimeData nor an
+    // incident.io component_uptimes payload for any component, including this one) — null, same
+    // posture as xai itself, not a fabricated number.
+    id: 'grok', category: 'app', name: 'Grok', provider: 'xAI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
   // ── Coding Agents ──
   {
     id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational',

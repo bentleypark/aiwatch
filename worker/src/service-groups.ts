@@ -22,7 +22,7 @@ export const GROUP_MEMBERS: Record<ServiceGroup, readonly string[]> = {
   observability: ['langsmith', 'helicone', 'langfuse'],
   video: ['runway', 'luma'],
   image: ['stability', 'bfl'],
-  apps: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp'],
+  apps: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok'],
 }
 
 const ID_TO_GROUP: Record<string, ServiceGroup> = Object.fromEntries(

@@ -22,7 +22,7 @@ export const API_SERVICE_IDS = [
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
-export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai', 'deepseekapp']
+export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok']
 
 // Coding agents
 export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie']
@@ -30,7 +30,7 @@ export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'w
 // Display order: app → LLM → voice → inference → agent
 export const SERVICE_AND_APP_IDS = [
   // app
-  'claudeai', 'chatgpt', 'characterai', 'deepseekapp',
+  'claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok',
   // LLM API
   'claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'kimi', 'openrouter',
@@ -63,7 +63,7 @@ export const SERVICE_CATEGORIES = {
   observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
   video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
   image:     { labelKey: 'filter.image',     ids: ['stability', 'bfl'] }, // #756 — image-gen split out (Stability + FLUX recommend each other, fallback tier 7); mirrors the video/observability precedent
-  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp'] },
+  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok'] },
 }
 
 // #676 — the rankable category buckets in #658 canonical order (LLM → Agents → Voice → Inference →
@@ -115,7 +115,7 @@ export const SERVICE_SITE_URL = {
   cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://windsurf.com',
   junie: 'https://junie.jetbrains.com', claudecode: 'https://claude.com/product/claude-code', codex: 'https://developers.openai.com/codex',
   // Apps
-  chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com',
+  chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com', grok: 'https://grok.com',
 }
 
 /** Disclosed outbound referral URL for a recommended alternative (appends `ref=ai-watch.dev`).
@@ -161,6 +161,9 @@ const FEED_SLUG_OVERRIDE = {
   // single-service pages moved to '-api' slugs.
   claude:      'claude-api',
   openai:      'openai-api',
+  // #1165 — /is-xai-down became the xAI/Grok family group page; the single-service xAI API page
+  // moved to 'xai-api'. 'grok' (the new consumer-app id) needs no override — its slug == id.
+  xai:         'xai-api',
 }
 
 // Services with no /is-{slug}-down page and therefore no RSS feed — estimate-only
@@ -206,7 +209,7 @@ export const API_TIER = {
   pinecone: 8, turbopuffer: 8,
   // Tier 11 = Coding agents (#1027) — one tier for all six; multi-form (CLI + IDE), Score-ordered.
   claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11,
-  chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
+  chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21, grok: 21,
 }
 
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;

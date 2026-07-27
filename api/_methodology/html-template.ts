@@ -25,7 +25,7 @@ export function renderMethodologyPage(nonce?: string): string {
 <title>How AIWatch Works — Methodology | AIWatch</title>
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript(nonce)}
-<meta name="description" content="Transparent, independent measurement of AI service reliability. How AIWatch determines status, computes uptime and the AIWatch Score, and — explicitly — what we can't measure and why. 44 services, polled every 5 min, UTC.">
+<meta name="description" content="Transparent, independent measurement of AI service reliability. How AIWatch determines status, computes uptime and the AIWatch Score, and — explicitly — what we can't measure and why. 45 services, polled every 5 min, UTC.">
 <meta name="robots" content="index, follow">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ai-watch.dev/methodology">
@@ -244,7 +244,7 @@ ${consentInitScript(nonce)}
     <div class="hero-badge"><span data-i18n="hero.badge">METHODOLOGY</span></div>
     <h1 data-i18n="hero.title">AIWatch는 <em>어떻게</em> 동작하는가 — 측정 방법론</h1>
     <p class="tagline" data-i18n="hero.tagline">AI 서비스 신뢰도를 독립적이고 투명하게 측정합니다 — 계정도, 개인정보도 필요 없습니다.</p>
-    <p class="meta-line" data-i18n="hero.meta">44개 서비스 · 5분 간격 폴링 · UTC 기준</p>
+    <p class="meta-line" data-i18n="hero.meta">45개 서비스 · 5분 간격 폴링 · UTC 기준</p>
     <p class="principle" data-i18n="hero.principle"><strong>측정할 수 있는 것은 공개하고, 측정할 수 없는 것은 분명히 밝힙니다.</strong></p>
   </div>
 </header>
@@ -271,7 +271,7 @@ ${consentInitScript(nonce)}
 <section class="section" id="sources">
   <p class="section-label">// 01</p>
   <h2 data-i18n="s1.title">측정 대상</h2>
-  <p class="lead" data-i18n="s1.lead">AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 4개 — 총 44개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.</p>
+  <p class="lead" data-i18n="s1.lead">AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 5개 — 총 45개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.</p>
   <h3 data-i18n="s1.sourcesTitle">데이터 출처</h3>
   <p data-i18n="s1.sourcesDesc">상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다.</p>
   <ul>
@@ -359,7 +359,7 @@ ${consentInitScript(nonce)}
         <tbody>
           <tr><td>Amazon Bedrock · Azure OpenAI</td><td data-i18n="s3.limits.estimate">공식 롤링 uptime% 미공개 — 인시던트 피드만 존재</td></tr>
           <tr><td>Gemini · Deepgram</td><td data-i18n="s3.limits.norolling">상태 페이지가 비교 가능한 롤링 30일 % 미노출</td></tr>
-          <tr><td>xAI</td><td data-i18n="s3.limits.xai">재시작 이후 엔드포인트별 성공률만 노출 — 30일 수치와 비교 불가</td></tr>
+          <tr><td>xAI API · Grok</td><td data-i18n="s3.limits.xai">재시작 이후 컴포넌트별 성공률만 노출 — 30일 수치와 비교 불가</td></tr>
           <tr><td>Character.AI</td><td data-i18n="s3.limits.deadsource">공식 상태 페이지가 비활성화됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)</td></tr>
         </tbody>
       </table>
@@ -550,10 +550,10 @@ const i18n = {
     'hero.badge': 'METHODOLOGY',
     'hero.title': 'AIWatch는 <em>어떻게</em> 동작하는가 — 측정 방법론',
     'hero.tagline': 'AI 서비스 신뢰도를 독립적이고 투명하게 측정합니다 — 계정도, 개인정보도 필요 없습니다.',
-    'hero.meta': '44개 서비스 · 5분 간격 폴링 · UTC 기준',
+    'hero.meta': '45개 서비스 · 5분 간격 폴링 · UTC 기준',
     'hero.principle': '<strong>측정할 수 있는 것은 공개하고, 측정할 수 없는 것은 분명히 밝힙니다.</strong>',
     's1.title': '측정 대상',
-    's1.lead': 'AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 4개 — 총 44개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.',
+    's1.lead': 'AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 5개 — 총 45개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.',
     's1.sourcesTitle': '데이터 출처',
     's1.sourcesDesc': '상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다.',
     's1.src.atlassian': '— 다수의 주요 제공사', 's1.src.incidentio': '— 컴포넌트 단위 인시던트 + 영향도', 's1.src.gcloud': '— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)', 's1.src.others': '— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)', 's1.src.flashduty': '— DeepSeek 상태 피드 정규화 (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음', 's1.src.rss': '— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집', 's1.src.probe': '— 33개 AI 서비스의 엔드포인트 직접 측정',
@@ -582,7 +582,7 @@ const i18n = {
     's3.limits.col1': '서비스', 's3.limits.col2': '측정 불가 사유',
     's3.limits.estimate': '공식 롤링 uptime% 미공개 — 인시던트 피드만 존재',
     's3.limits.norolling': '상태 페이지가 비교 가능한 롤링 30일 % 미노출',
-    's3.limits.xai': '재시작 이후 엔드포인트별 성공률만 노출 — 30일 수치와 비교 불가',
+    's3.limits.xai': '재시작 이후 컴포넌트별 성공률만 노출 — 30일 수치와 비교 불가',
     's3.limits.deadsource': '공식 상태 페이지가 비활성화됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)',
     's4.title': 'AIWatch Score',
     's4.intro': 'AIWatch Score는 uptime, 인시던트 영향 일수, 복구 시간, (probe 대상 API 서비스의 경우) 응답성을 종합한 0~100점 신뢰도 지표입니다. 30일 데이터를 기준으로 합니다.',
@@ -637,10 +637,10 @@ const i18n = {
     'hero.badge': 'METHODOLOGY',
     'hero.title': 'How AIWatch <em>Works</em> — Methodology',
     'hero.tagline': 'Independent, transparent measurement of AI service reliability — no account, no PII.',
-    'hero.meta': '44 services · polled every 5 min · UTC',
+    'hero.meta': '45 services · polled every 5 min · UTC',
     'hero.principle': '<strong>We publish what we can measure — and are explicit about what we can\\\'t.</strong>',
     's1.title': 'What we measure',
-    's1.lead': 'AIWatch polls 44 AI services — 16 LLM APIs, 6 coding agents, 3 voice, 8 inference & infra, 3 observability, 2 video, 2 image, and 4 AI apps — up to every 5 minutes. All timestamps are in UTC.',
+    's1.lead': 'AIWatch polls 45 AI services — 16 LLM APIs, 6 coding agents, 3 voice, 8 inference & infra, 3 observability, 2 video, 2 image, and 5 AI apps — up to every 5 minutes. All timestamps are in UTC.',
     's1.sourcesTitle': 'Data sources',
     's1.sourcesDesc': 'Status, incident, and uptime data are all collected from each service\\\'s official status page. The provider\\\'s published data is the primary source, and we never fill a missing value with our own estimate — how a missing official uptime is handled is covered in the <a href="#uptime">Uptime section</a> below.',
     's1.src.atlassian': '— many major providers', 's1.src.incidentio': '— per-component incidents + impact', 's1.src.gcloud': '— Gemini API (Google Cloud status + AI Studio component incidents, merged)', 's1.src.others': '— additional status-page platforms (incident RSS + uptime JSON)', 's1.src.flashduty': '— normalized DeepSeek status feed (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — public events JSON API (incident start/end), no uptime API', 's1.src.rss': '— Azure Status (Azure OpenAI) · xAI (status.x.ai) — incident RSS only, no uptime API', 's1.src.probe': '— direct measurement of 33 AI services\\\' endpoints',
@@ -669,7 +669,7 @@ const i18n = {
     's3.limits.col1': 'Service', 's3.limits.col2': 'Reason',
     's3.limits.estimate': 'No official rolling uptime — incident feed only',
     's3.limits.norolling': 'Status page exposes no comparable rolling-30d %',
-    's3.limits.xai': 'Exposes a since-restart per-endpoint success rate — not comparable to a 30-day figure',
+    's3.limits.xai': 'Exposes a since-restart per-component success rate — not comparable to a 30-day figure',
     's3.limits.deadsource': 'Official status page deactivated — no records to read (the API is checked by direct probe instead)',
     's4.title': 'AIWatch Score',
     's4.intro': 'AIWatch Score is a composite 0–100 reliability metric combining uptime, incident affected days, recovery time, and (for probed API services) responsiveness. It is based on 30-day data.',

@@ -223,7 +223,7 @@ export default async function handler(req: Request) {
           stability: 7, bfl: 7, // Image (#756) — keep in sync with worker/src/fallback.ts
           pinecone: 8, turbopuffer: 8, // Vector (#857) — keep in sync with worker/src/fallback.ts
           claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11, // Coding agents (#1027) — one tier; keep in sync with worker/src/fallback.ts
-          chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
+          chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21, grok: 21,
         }
         // Inline tierFor — same warn-once shape as worker/src/fallback.ts and src/utils/constants.js.
         // The Edge Function runs once per request so the warned set is functionally a one-shot per

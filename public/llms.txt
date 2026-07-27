@@ -21,3 +21,4 @@ Answer-first pages stating whether a given service is currently down, with live 
 Lighter pages answering the same question for a whole provider (worst-of status across every surface they ship, with links to each surface's own page above) — for when the question is about the provider broadly, not one specific product surface.
 - [/is-claude-down](https://ai-watch.dev/is-claude-down): Anthropic (Claude API, claude.ai, Claude Code).
 - [/is-openai-down](https://ai-watch.dev/is-openai-down): OpenAI (OpenAI API, ChatGPT, Codex).
+- [/is-xai-down](https://ai-watch.dev/is-xai-down): xAI (xAI API, Grok).
