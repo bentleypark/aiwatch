@@ -263,7 +263,7 @@ export const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'degraded',
+    id: 'xai', category: 'api', name: 'xAI API', provider: 'xAI', status: 'degraded',
     latency: 203, uptime30d: 99.75,
     history30d: hist([24]),
     history3m: [{ month: '2026-01', uptime: 99.82 }, { month: '2026-02', uptime: 99.79 }, { month: '2026-03', uptime: 99.75 }],

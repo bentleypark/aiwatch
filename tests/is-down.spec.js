@@ -288,7 +288,9 @@ test.describe('Is X Down? SSR pages', () => {
     // than show "Uptime: N/A" (regression: previously hardcoded with N/A literal).
     // #654 — the "(30d)" window qualifier was dropped (the source window varies: official pages
     // report 30/60/90d, estimate is 90d), so the label is now a neutral "Uptime:".
-    await page.goto('/is-xai-down', { waitUntil: 'domcontentloaded' })
+    // #1165 — /is-xai-down is now the xAI/Grok/Cursor FAMILY group page (a different template with
+    // no "Last checked" meta line); xai's own individual page moved to /is-xai-api-down.
+    await page.goto('/is-xai-api-down', { waitUntil: 'domcontentloaded' })
     const meta = page.locator('p.meta.mono', { hasText: 'Last checked' })
     await expect(meta).toBeVisible()
     const text = (await meta.textContent()) || ''
