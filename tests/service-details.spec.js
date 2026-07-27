@@ -226,7 +226,7 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
 test.describe('xAI Regional Availability', () => {
   // Inject mock xAI data with EU region ongoing incident via API intercept
   const XAI_MOCK = {
-    id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'degraded',
+    id: 'xai', category: 'api', name: 'xAI API', provider: 'xAI', status: 'degraded',
     latency: 203, uptime30d: 99.75, calendarDays: 30,
     incidents: [
       { id: 'xa-0', title: 'eu-west-1.api.x.ai went down', startedAt: new Date(Date.now() - 7200000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [] },

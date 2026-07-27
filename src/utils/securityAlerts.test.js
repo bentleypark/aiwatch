@@ -124,7 +124,7 @@ const NVD_SERVICES = [
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app' },
   { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api' },
-  { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api' },
+  { id: 'xai', name: 'xAI API', provider: 'xAI', category: 'api' },
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api' },
 ]
 const nvdSvc = (id) => NVD_SERVICES.find((s) => s.id === id)

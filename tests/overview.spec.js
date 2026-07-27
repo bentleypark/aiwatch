@@ -18,7 +18,7 @@ test.describe('Overview page', () => {
       'claude.ai', 'ChatGPT', 'Character.AI',
       'Claude API', 'OpenAI API', 'Gemini API', 'Amazon Bedrock', 'Azure OpenAI',
       'Mistral API', 'Cohere API', 'Groq Cloud', 'Together AI', 'Perplexity',
-      'xAI (Grok)', 'DeepSeek API', 'OpenRouter',
+      'xAI API', 'DeepSeek API', 'OpenRouter',
       'Hugging Face', 'Replicate', 'ElevenLabs', 'Pinecone', 'Stability AI',
       'Claude Code', 'GitHub Copilot', 'Cursor', 'Windsurf',
     ]
@@ -443,7 +443,7 @@ test.describe('ActionBanner region recommendation', () => {
   })
   const MOCK_DEGRADED_OVERRIDE = [
     operationalize('openai', 'OpenAI API'),
-    operationalize('xai', 'xAI (Grok)'),
+    operationalize('xai', 'xAI API'),
     operationalize('huggingface', 'Hugging Face'),
     operationalize('elevenlabs', 'ElevenLabs'),
   ]
@@ -512,7 +512,7 @@ test.describe('ActionBanner region recommendation', () => {
           status: 'degraded', latency: 250, uptime30d: 99.7, calendarDays: 30, incidents: [inc] },
         { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
           status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [], aiwatchScore: 95 },
-        operationalize('xai', 'xAI (Grok)'),
+        operationalize('xai', 'xAI API'),
         operationalize('huggingface', 'Hugging Face'),
         operationalize('elevenlabs', 'ElevenLabs'),
       ],
@@ -612,7 +612,7 @@ test.describe('#553 Issues filter — agent-only issue', () => {
     const op = (id, name, category = 'api') => ({ id, category, name, provider: 'x', status: 'operational', latency: 200, uptime30d: 99.9, calendarDays: 30, incidents: [] })
     const mockData = { json: {
       services: [
-        op('openai', 'OpenAI API'), op('xai', 'xAI (Grok)'), op('huggingface', 'Hugging Face'), op('elevenlabs', 'ElevenLabs'),
+        op('openai', 'OpenAI API'), op('xai', 'xAI API'), op('huggingface', 'Hugging Face'), op('elevenlabs', 'ElevenLabs'),
         { id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'degraded', latency: null, uptime30d: 99.05, calendarDays: 30,
           incidents: [{ id: 'cc1', title: 'Partial outage', status: 'investigating', impact: 'minor', startedAt: new Date(Date.now() - 120_000).toISOString(), timeline: [] }] },
       ],

@@ -22,7 +22,7 @@ const MOCK = {
     { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, incidents: [] },
     { id: 'claudeai', category: 'app', name: 'claude.ai', provider: 'Anthropic', status: 'operational', latency: 0, incidents: [] },
     { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, incidents: [] },
-    { id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'operational', latency: 150, incidents: [] },
+    { id: 'xai', category: 'api', name: 'xAI API', provider: 'xAI', status: 'operational', latency: 150, incidents: [] },
   ],
   lastUpdated: new Date().toISOString(),
 }
