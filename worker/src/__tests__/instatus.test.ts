@@ -451,7 +451,12 @@ describe('parseInstatusUptime — Next.js componentsUptime (#635 → #1006)', ()
   })
 })
 
-describe('parseInstatusIncidents — Next.js component capture (#623, Perplexity)', () => {
+describe('parseInstatusIncidents — Next.js component capture (#623, keyword-scoped service)', () => {
+  // #1177 — the config below is a KEYWORD-SCOPED Instatus service, which is what this describe is
+  // about. It was perplexity until #1177 widened perplexity's scope to every component its card
+  // displays; `fal` is the surviving example, and `perplexity-scope.test.ts` now asserts the opposite
+  // outcome for the real perplexity. The PAYLOAD stays perplexity-shaped — it is real captured data and
+  // exercises the parser regardless of which service consumes it.
   // Mirrors the real status.perplexity.com payload: a `components` array (id→name: Website, API) —
   // each TOP-LEVEL component carries `nameHtml` + a `group` field (#911) — plus notices that reference
   // component ids and carry `name:{en,default}` (no nameHtml).
@@ -475,9 +480,9 @@ describe('parseInstatusIncidents — Next.js component capture (#623, Perplexity
     return `<script>self.__next_f.push([1,"x:${components}:notices\\":{${n1},${n2}},\\"metrics\\":{}"])</script>`
   }
 
-  const perplexity = {
-    id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api',
-    statusUrl: 'https://status.perplexity.com', apiUrl: null, incidentKeywords: ['api'],
+  const apiScopedSvc = {
+    id: 'fal', name: 'fal.ai', provider: 'fal', category: 'api',
+    statusUrl: 'https://status.fal.ai', apiUrl: null, incidentKeywords: ['api'],
   } as ServiceConfig
 
   it('resolves each incident’s affected component ids → componentNames', () => {
@@ -488,7 +493,7 @@ describe('parseInstatusIncidents — Next.js component capture (#623, Perplexity
   })
 
   it('incidentKeywords:[api] keeps the Website+API incident, drops the Website-only one', () => {
-    const kept = filterIncidents(parseInstatusIncidents(nextHtmlWithComponents()), perplexity).map((i) => i.id)
+    const kept = filterIncidents(parseInstatusIncidents(nextHtmlWithComponents()), apiScopedSvc).map((i) => i.id)
     expect(kept).toContain('n1')     // affects API → kept
     expect(kept).not.toContain('n2') // Website-only → dropped
   })
