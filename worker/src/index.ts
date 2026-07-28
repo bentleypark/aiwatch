@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
+import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, readSuppressionsFreshOrNull, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
@@ -13,7 +13,7 @@ import type { AlertCandidate } from './alerts'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
 import { restoreArchivedCalendar } from './uptime-archive'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved } from './recovery-mark'
@@ -1660,11 +1660,27 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         continue
       }
       if (newComponents.length === 0) continue // nextSeen == seen → no write (KV budget)
+      // #1125 — a component AIWatch already reads needs no "decide whether to track it" from anyone.
+      // Filters the ALERT only: nextSeen still unions every current id below, so a component recorded
+      // silently here can never come back as a new-component alert later.
+      const { alertable, absorbed } = partitionFirstSeen(newComponents, TRACKED_COMPONENT_IDS)
+      if (alertable.length === 0) {
+        // Nothing to send, so there is no send to gate the write on — but it must still happen, or the
+        // same set is re-diffed and re-written every cron tick. Logged only once the write succeeded:
+        // until then nothing is recorded, and the suppression this line describes has not happened.
+        if (await kvPut(env.STATUS_CACHE, `component-seen:${apiUrl}`, JSON.stringify(nextSeen))) {
+          console.warn(`[cron] ${apiUrl}: recorded ${absorbed.length} first-seen component(s) AIWatch already tracks, without alerting (#1125): ${absorbed.map(c => `${c.name} (${c.id})`).join(', ')}`)
+        }
+        continue
+      }
+      if (absorbed.length > 0) {
+        console.warn(`[cron] ${apiUrl}: ${absorbed.length} of ${newComponents.length} first-seen component(s) suppressed as already tracked (#1125): ${absorbed.map(c => `${c.name} (${c.id})`).join(', ')}`)
+      }
       const pageSvcs = SERVICES.filter(s => s.apiUrl === apiUrl)
       const dynamic = pageSvcs.some(s => s.displayAllComponents)
       const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-        title: `🆕 New status-page component${newComponents.length === 1 ? '' : 's'}: ${pageSvcs.map(s => s.name).join(', ') || apiUrl}`,
-        description: formatNewComponentAlert(pageSvcs.map(s => s.name), newComponents, dynamic),
+        title: `🆕 New status-page component${alertable.length === 1 ? '' : 's'}: ${pageSvcs.map(s => s.name).join(', ') || apiUrl}`,
+        description: formatNewComponentAlert(pageSvcs.map(s => s.name), alertable, dynamic),
         color: 0x3B82F6,
       })
       // Persist ONLY after a CONFIRMED send — sendDiscordAlert returns false (does NOT throw) on a
