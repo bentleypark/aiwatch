@@ -268,6 +268,29 @@ export function diffPageComponents(
 }
 
 /**
+ * #1125 — split the components `diffPageComponents` reports as never-before-seen into the ones worth an
+ * operator's attention and the ones AIWatch already reads (`TRACKED_COMPONENT_IDS`).
+ *
+ * The alert's whole ask is "decide whether to track it", so an already-tracked id is not a quieter
+ * alert — it is a question with no answer, and it is what fired on `Images` (2026-07-22) and `Sora`
+ * (2026-07-27). Kept out of `diffPageComponents` on purpose: `seen` must still union EVERY current id
+ * (that is what makes the alert once-per-component-ever), so this splits what we SAY, not what we
+ * record. Consequently an id that is untracked today and tracked tomorrow does not re-alert.
+ *
+ * Returns both halves because the cron needs both: `alertable` decides whether to send, `absorbed` is
+ * the only record that a suppression happened at all.
+ */
+export function partitionFirstSeen<T extends { id: string }>(
+  newComponents: T[],
+  trackedIds: ReadonlySet<string>,
+): { alertable: T[]; absorbed: T[] } {
+  const alertable: T[] = []
+  const absorbed: T[] = []
+  for (const c of newComponents) (trackedIds.has(c.id) ? absorbed : alertable).push(c)
+  return { alertable, absorbed }
+}
+
+/**
  * #992 — operator Discord body for a page that gained ≥1 new component. `pageServices` are the AIWatch
  * service names monitoring the page (context: which service's config to update); `dynamic` flags a
  * displayAllComponents page where the component is ALREADY auto-tracked (informational, no action).

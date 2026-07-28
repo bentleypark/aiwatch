@@ -6,7 +6,7 @@ import { recordParseFailure } from './parse-failure-log'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut, isNonReliabilityAdvisory } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
-import { buildUpstreamFeeds, type UpstreamCandidate } from './upstream-feed'
+import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
@@ -51,21 +51,16 @@ export const SERVICES: ServiceConfig[] = [
   // status, and (the #1090 half) whether or not Claude API was itself degraded at the time. See
   // filterByComponentStatus. claudeai/claudecode are keyword-scoped and do NOT set this.
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp', scopeIncidentsToComponent: true },
-  // displayComponentIds (#606 Cat B): the official "APIs" group (12) + "Platform" group (FedRAMP,
-  // Ads Manager) on the shared status.openai.com page (incident.io). Display-only allowlist (badge
-  // unchanged — no statusComponentId); disjoint from chatgpt/codex (pinned by the shared-page no-leak
-  // test). componentsUrl sources the list from components.json (31) since summary.json (25) omits
-  // Chat Completions / Embeddings / Moderations / the API Login / FedRAMP / Ads Manager.
-  // #693 — incidentExclude uses 'chatgpt workspaces' (NOT a bare 'workspaces'): FedRAMP is a curated
-  // openai surface (above), so an API-affecting "FedRAMP workspaces and API orgs …" incident must
-  // surface here; a bare 'workspaces' dropped it. ChatGPT consumer/Team Workspaces incidents are
+  // displayComponentIds (#606 Cat B): the curated openai surfaces of the shared status.openai.com page
+  // (incident.io) — the breakdown's allowlist, kept apart from chatgpt's and codex's so one page's
+  // three cards never show each other's components. componentsUrl sources the list from
+  // components.json, a superset: summary.json serves only part of a large page's components and which
+  // part rotates (#1125) — it has omitted core API surfaces the badge worst-of and the breakdown both
+  // need (Chat Completions, openai's own statusComponentId, was missing from it on 2026-07-28).
+  // #693 — incidentExclude uses 'chatgpt workspaces' (NOT a bare 'workspaces') so an API-affecting
+  // "FedRAMP workspaces and API orgs …" incident still surfaces here; a bare 'workspaces' dropped it. ChatGPT consumer/Team Workspaces incidents are
   // still excluded via 'chatgpt'/'login'/'conversation' + the narrowed term, and an incident only
-  // reaches openai if it also matches the api/region incidentKeywords. NOTE: openai has no
-  // statusComponentId, so its badge falls back to the overall page indicator once ANY matching
-  // unresolved incident survives the filter (status-determination step 4). Surfacing the FedRAMP
-  // incident therefore ALSO flips the openai badge to the page's overall status (e.g. degraded /
-  // "Partial System Degradation") — accepted in #693: it mirrors what OpenAI itself reports, and the
-  // surfaced incident clarifies the FedRAMP scope.
+  // reaches openai if it also matches the api/region incidentKeywords.
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'chatgpt workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'], statusComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', statusComponentIds: ['01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01JSM5RTJWHRWDTS6Q604VEW3B', '01K9G527YRPY1EFRMHTKB5BKT5'], displayComponentIds: ['01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01K9G527YRPY1EFRMHTKB5BKT5', '01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JSM5RTJWHRWDTS6Q604VEW3B'] },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://aistudio.google.com/status', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
   { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null,
@@ -754,6 +749,155 @@ export function pickBreakdownComponents(
   return summaryComponents
 }
 
+/**
+ * #1125 — read a page's `componentsUrl` (components.json). Returns an OUTCOME, never throws. Every
+ * failure logs —
+ * a components.json that starts 404ing after a provider migration silently reverts #1125 (the detector
+ * drops back to summary.json's narrower list) and there is otherwise nothing to see: the fix stays in
+ * place, the tests stay green, and the false alerts come back.
+ *
+ * `ok:true` requires a NON-EMPTY array. An empty one is a successful transport carrying nothing usable,
+ * and `pickBreakdownComponents` would fall back to summary.json anyway — so it takes the same branch as
+ * a failed read. That keeps `ok` meaning "we have this page's real component list": treated as success
+ * it would suppress `fetchService`'s re-fetch, leaving the badge on the narrower list.
+ */
+export async function fetchPageComponents(componentsUrl: string): Promise<PageComponentsFetch> {
+  const res = await fetchWithTimeout(componentsUrl, 8000).catch((err) => {
+    console.warn(`[prefetch] components.json fetch failed for ${componentsUrl}:`, err instanceof Error ? err.message : err)
+    return null
+  })
+  if (!res) return { ok: false }
+  if (!res.ok) {
+    console.warn(`[prefetch] components.json returned HTTP ${res.status} for ${componentsUrl} — detector falls back to summary.json; fetchService will retry`)
+    res.body?.cancel().catch(() => {}) // contract here is warn-only; a cancel that rejects must not escape
+    return { ok: false }
+  }
+  let components: unknown
+  try {
+    components = ((await res.json()) as { components?: unknown }).components
+  } catch (err) {
+    // No `body.cancel()` here: `.json()` locked the reader, so cancelling rejects with "ReadableStream
+    // is locked" — an unhandled rejection on a path that is only meant to warn. (The `!res.ok` branch
+    // above never read the body, so its cancel is correct and must stay.)
+    console.warn(`[prefetch] components.json parse failed for ${componentsUrl}:`, err instanceof Error ? err.message : err)
+    return { ok: false }
+  }
+  // A 200 whose body carries no usable `components` array is the provider-schema-drift case, and it
+  // passes both catches above — so check it here rather than let an unreadable payload look like a read.
+  if (!Array.isArray(components) || components.length === 0) {
+    console.warn(`[prefetch] components.json for ${componentsUrl} served ${Array.isArray(components) ? 'an EMPTY array' : 'no components array'} — treating as unreadable`)
+    return { ok: false }
+  }
+  return { ok: true, components }
+}
+
+/** A component as the detector records it. Narrower than the status path's component (no `status`) —
+ *  the detector only ever answers "have we seen this id before, and what do we call it". */
+type PageComponent = { id: string; name: string }
+
+/**
+ * #1125 — every component id named by a service's `statusComponentId` / `statusComponentIds` /
+ * `displayComponentIds` / `incidentIoComponentId` / `incidentIoGroupId`, plus the non-carded upstream
+ * feeds (#1072). A group id belongs here for the same reason as the rest: `uptimeReported` reads it,
+ * so a payload that ever lists the group as a component would be asking about something we consume.
+ *
+ * The #992 detector's alert asks the operator to "decide whether to track it" — a question with no
+ * answer when we already do. Both observed false alerts (`Images`, `Sora`) named ids in this set, as
+ * do all 9 components.json-only ids on `status.openai.com` (measured 2026-07-28) — the set the #1125
+ * source fix would otherwise re-evaluate in one burst on deploy: widening the detector's input means
+ * diffing against a `component-seen:` snapshot that only ever accumulated summary.json's rotating
+ * window, and `diffPageComponents` reports `current − seen` regardless of the union it persists.
+ *
+ * Ids are the only membership signal, so a page whose components AIWatch tracks WITHOUT naming ids
+ * (`displayAllComponents`, or a name-matched `statusComponent`) contributes none and still alerts —
+ * for `displayAllComponents` that is the pre-#1125 design, and `formatNewComponentAlert` already says
+ * "already auto-tracked — heads-up only" there.
+ *
+ * Filters the ALERT only. The snapshot must still record everything, or a component absorbed here
+ * would be re-evaluated — and alert — later.
+ *
+ * Global, not page-scoped: an id tracked on one page suppresses that id on any page. Checked across
+ * all 168 configured ids (2026-07-28) — none is reused on a second page, and the id spaces are opaque
+ * 12-char base36 / 26-char ULIDs, so scoping it per page would buy nothing today.
+ */
+export const TRACKED_COMPONENT_IDS: ReadonlySet<string> = new Set(
+  [
+    ...SERVICES.flatMap((s) => [
+      s.statusComponentId,
+      ...(s.statusComponentIds ?? []),
+      ...(s.displayComponentIds ?? []),
+      ...(Array.isArray(s.incidentIoComponentId) ? s.incidentIoComponentId : [s.incidentIoComponentId]),
+      s.incidentIoGroupId,
+    ]),
+    ...UPSTREAM_FEEDS.flatMap((f) => f.componentIds),
+  ].filter((id): id is string => typeof id === 'string' && id.length > 0),
+)
+
+/**
+ * #992/#1125 — per-page component list (apiUrl → `{id,name}[]`) harvested from the prefetch, the input
+ * to the cron's new-component change detector (`diffPageComponents`). The detector iterates this record,
+ * so a page absent from it is skipped for the cycle, not diffed.
+ *
+ * Resolution goes through `pickBreakdownComponents` — the SAME precedence the badge/breakdown uses — so
+ * the detector and the status path always mean the same thing by "this page's components". #1125: they
+ * did not. This read summary.json alone, which on `status.openai.com` is a fluctuating subset of
+ * components.json (25 of 34 when measured 2026-07-28), so a component AIWatch already tracked
+ * false-alerted as new the moment it rotated into that window (`Images` 2026-07-22, `Sora` 2026-07-27)
+ * — while a component outside the window could never alert at all, the miss the detector exists for.
+ *
+ * A narrower list (components.json unreadable ⇒ summary.json's window) costs only DELAY, not a false
+ * alert: `TRACKED_COMPONENT_IDS` filters the alert, so whatever a short list later reports as new is by
+ * construction something AIWatch does not track — a correct alert, arriving when the component rotates
+ * into view. That is why nothing here tries to detect or defer a degraded cycle.
+ *
+ * Entries without a string `id` ARE dropped, because that one is not a delay: what this returns is
+ * written to `component-seen:{apiUrl}`, a key with no TTL, and `JSON.stringify` turns an `undefined` id
+ * into `null`, which no later `seen.has()` can match — recording one would make the alert fire every
+ * cron tick forever, naming `undefined`. `name` is required to be a string for the same reason in
+ * miniature (the alert body renders it), but it is the id that the snapshot matches on. A dropped entry
+ * is simply not "seen", so it alerts once, correctly, if the payload shape recovers.
+ */
+export function buildPageComponents(
+  prefetched: Map<string, { summary?: { components?: Array<{ id: string; name: string; status: string }> }; componentsFetch?: PageComponentsFetch }>,
+): Record<string, PageComponent[]> {
+  const out: Record<string, PageComponent[]> = {}
+  for (const [apiUrl, data] of prefetched) {
+    const fetched = data.componentsFetch?.ok ? data.componentsFetch.components : undefined
+    const summary = data.summary?.components
+    let comps = pickBreakdownComponents(summary, fetched)
+    if (!Array.isArray(comps) || comps.length === 0) continue
+    let valid = recordableComponents(comps, apiUrl)
+    // components.json served entries but NONE are recordable (a schema rename, `name: null`, bare
+    // strings). `fetchPageComponents` already routes an empty payload to the summary fallback for
+    // exactly this reason — a successful transport carrying nothing usable must not suppress it — and
+    // the same reasoning has to hold here, one level down: a well-formed summary list was in hand the
+    // whole time, and dropping the page instead blinds the detector for as long as the provider keeps
+    // serving that shape.
+    if (valid.length === 0 && comps !== summary && Array.isArray(summary) && summary.length > 0) {
+      console.warn(`[buildPageComponents] ${apiUrl}: components.json carried ${comps.length} entries, none recordable — falling back to summary.json`)
+      comps = summary
+      valid = recordableComponents(comps, apiUrl)
+    }
+    if (valid.length === 0) continue
+    out[apiUrl] = valid.map((c) => ({ id: c.id, name: c.name }))
+  }
+  return out
+}
+
+/** #1125 — the entries of a page's component list that can safely be written to `component-seen`.
+ *  Widened to `unknown[]` deliberately: `pickBreakdownComponents` TYPES the componentsUrl branch by an
+ *  unchecked cast, so the entries are only as well-formed as the provider's payload. */
+function recordableComponents(comps: unknown, apiUrl: string): PageComponent[] {
+  const list = comps as unknown[]
+  const valid = list.filter((c): c is PageComponent =>
+    typeof (c as PageComponent | null)?.id === 'string' && (c as PageComponent).id.length > 0 &&
+    typeof (c as PageComponent).name === 'string')
+  if (valid.length !== list.length) {
+    console.warn(`[buildPageComponents] ${apiUrl}: dropped ${list.length - valid.length} of ${list.length} components without a string id/name (first 5): ${JSON.stringify(list.filter((c) => !valid.includes(c as PageComponent)).slice(0, 5))}`)
+  }
+  return valid
+}
+
 /** #802 — minimum days of AIWatch coverage before a service is eligible for the Reliability Ranking. */
 export const MIN_COVERAGE_DAYS = 30
 
@@ -1354,7 +1498,16 @@ interface PrefetchedData {
   incidents: StatuspageResponse | null
   latency: number
   uptimeHtml?: string  // Status page HTML for uptimeData parsing
+  // #1125 — outcome of this page's `componentsUrl` (components.json) fetch, done ONCE per page here
+  // instead of once per service. ABSENT = no service on this page configures a componentsUrl.
+  // `{ok:false}` = it was configured and we could not read it (network / HTTP / parse / not an array),
+  // which is what tells `fetchService` to fetch it itself, so a prefetch miss never narrows the badge.
+  componentsFetch?: PageComponentsFetch
 }
+
+/** #1125 — a page's components.json fetch outcome. `ok:false` carries no reason: the reason is logged
+ *  where it is known (the fetch site), and no consumer branches on it — they branch on readable-or-not. */
+export type PageComponentsFetch = { ok: true; components: unknown } | { ok: false }
 
 // ── Fetch Single Service ──
 // NOTE: `latency` measures status page response time, not actual AI API latency.
@@ -1680,18 +1833,28 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       // and it's now read by the BADGE worst-of, the component-miss alert, AND the breakdown alike. This
       // matters because OpenAI's summary.json OMITS core API components (Chat Completions / Embeddings /
       // Moderations); without the superset the badge couldn't see a Chat Completions outage and the
-      // statusComponentId miss-check false-fired the migration alert every cycle. One fetch, moved up.
+      // statusComponentId miss-check false-fired the migration alert every cycle.
+      // #1125 — that one fetch now happens once per PAGE in the prefetch (openai + codex are the only
+      // two configuring a componentsUrl, and it is the same URL), so reuse its result. Fetch here only
+      // when the prefetch could not: no prefetch entry for this page (summary.json failed and was
+      // re-fetched above), or its components.json read failed. Same precedence either way
+      // (`pickBreakdownComponents`), so the badge/breakdown source is unchanged by the move.
       let breakdownComponents = summaryData.components
       if (config.componentsUrl) {
-        const cRes = await fetchWithTimeout(config.componentsUrl, 8000).catch(() => null)
-        if (cRes?.ok) {
-          try {
-            const cJson = await cRes.json() as { components?: unknown }
-            breakdownComponents = pickBreakdownComponents(summaryData.components, cJson.components)
-          } catch (err) {
-            console.warn(`[fetchService] ${config.id} components.json parse failed — using summary.json:`, err instanceof Error ? err.message : err)
-          }
-        } else cRes?.body?.cancel()
+        const reusable = prefetched?.componentsFetch
+        if (reusable?.ok) {
+          breakdownComponents = pickBreakdownComponents(summaryData.components, reusable.components)
+        } else {
+          const cRes = await fetchWithTimeout(config.componentsUrl, 8000).catch(() => null)
+          if (cRes?.ok) {
+            try {
+              const cJson = await cRes.json() as { components?: unknown }
+              breakdownComponents = pickBreakdownComponents(summaryData.components, cJson.components)
+            } catch (err) {
+              console.warn(`[fetchService] ${config.id} components.json parse failed — using summary.json:`, err instanceof Error ? err.message : err)
+            }
+          } else cRes?.body?.cancel()
+        }
       }
       const badgeSummary = { ...summaryData, components: breakdownComponents }
 
@@ -2510,6 +2673,15 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     const baseUrl = apiUrl.replace('/summary.json', '')
     const start = Date.now()
     try {
+      // #1125 — components.json (the superset) for any page that configures a componentsUrl, started
+      // HERE so it runs alongside summary/incidents rather than adding a serial round-trip. It is still
+      // awaited inside this page's prefetch entry, so if it is the slowest leg it delays that entry —
+      // concurrently, not serially. Deliberately NOT inside the Promise.all below: `latency` is
+      // measured off that pair and is the page's published response time, which a slow components.json
+      // must not inflate. `fetchPageComponents` never rejects, so this can't produce an unhandled
+      // rejection on the early-return path below.
+      const componentsUrl = SERVICES.find((s) => s.apiUrl === apiUrl && s.componentsUrl)?.componentsUrl
+      const componentsFetch = componentsUrl ? fetchPageComponents(componentsUrl) : Promise.resolve(undefined)
       // Use fetchWithTimeout (no retry) — prefetch failure falls through to direct fetch
       // in fetchService, so retrying here would waste 2 subrequests before the fallback.
       const [summaryRes, incidentsRes] = await Promise.all([
@@ -2524,6 +2696,9 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
         console.warn(`[prefetch] ${apiUrl} returned HTTP ${summaryRes.status} — skipping; fetchService will fetch directly`)
         summaryRes.body?.cancel()
         incidentsRes?.body?.cancel()
+        await componentsFetch // settle it on this path rather than abandon it mid-flight (its body is
+        // consumed or cancelled inside). `componentsFetch` is scoped to the try, so the outer catch
+        // cannot do the same — harmless, since fetchPageComponents never rejects.
         return
       }
       const summary: StatuspageResponse = await summaryRes.json()
@@ -2544,23 +2719,14 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
           else htmlRes.body?.cancel()
         } catch (err) { console.warn(`[prefetch] HTML fetch failed for ${statusUrl}:`, err instanceof Error ? err.message : err) }
       }
-      prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml })
+      prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml, componentsFetch: await componentsFetch })
     } catch (err) {
       const isJsonErr = err instanceof SyntaxError
       console.warn(`[prefetch] ${isJsonErr ? 'JSON parse' : 'network'} failure for ${baseUrl}:`, err instanceof Error ? err.message : err)
     }
   }))
 
-  // #992 — per-page raw component list (apiUrl → {id,name}[]) harvested from the prefetch, for the
-  // cron's new-component change detector. Only successfully-prefetched Statuspage/incident.io pages
-  // carry a components array; a page that failed prefetch this cycle is simply checked next cycle.
-  const pageComponents: Record<string, Array<{ id: string; name: string }>> = {}
-  for (const [apiUrl, data] of prefetchMap) {
-    const comps = data.summary?.components
-    if (Array.isArray(comps) && comps.length > 0) {
-      pageComponents[apiUrl] = comps.map((c) => ({ id: c.id, name: c.name }))
-    }
-  }
+  const pageComponents = buildPageComponents(prefetchMap)
 
   // #1072 — non-carded upstream feeds, built from the SAME prefetch map (zero extra subrequests).
   // These never enter `raw`/`enriched`: they are not services, and everything downstream of this
