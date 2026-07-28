@@ -3,7 +3,7 @@
 // Fixture / shape verification: worker/src/parsers/__tests__/fixtures/aistudio-sample.json
 // Tests under worker/src/parsers/__tests__/aistudio.test.ts lock the enum mapping.
 
-import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
+import type { TimelineEntry, Incident, DailyImpactLevel, ServiceComponent } from '../types'
 import { formatDuration } from '../utils'
 
 // Public API key extracted from the aistudio.google.com/status JS bundle. The
@@ -210,6 +210,11 @@ export function parseAistudioIncidents(
           resolvedAt,
           duration,
           timeline,
+          // #1012 — carry the raw AISTUDIO_COMPONENT tags (stringified) so a downstream transform
+          // (synthesizeAistudioComponents) can attribute active incidents to API vs Multimodal Live
+          // without re-parsing the raw entries. Mirrors the incident.io componentIds precedent
+          // (attachIncidentIoComponentIds) — never write an empty array.
+          ...(components?.length ? { componentIds: components.map(String) } : {}),
         },
       ]
     } catch (err) {
@@ -219,5 +224,38 @@ export function parseAistudioIncidents(
       )
       return []
     }
+  })
+}
+
+// #1012 — the two AISTUDIO_COMPONENT surfaces gemini's breakdown discloses. AI Studio (enum 3) is
+// deliberately excluded here — it's the web build IDE, not an API surface (see issue #1012 scope).
+const AISTUDIO_BREAKDOWN_COMPONENTS: ReadonlyArray<{ id: 'API' | 'MULTIMODAL_LIVE'; slug: string; name: string }> = [
+  { id: 'API', slug: 'api', name: 'API' },
+  { id: 'MULTIMODAL_LIVE', slug: 'multimodal-live', name: 'Multimodal Live API' },
+]
+
+/**
+ * #1012 — synthesize a `ServiceComponent[]` breakdown from the incident list, since aistudio has no
+ * dedicated component-status endpoint (only ListIncidentsHistory, incident-derived). Mirrors
+ * `deriveAwsStatus`'s (`parsers/aws.ts`) worst-of-active-incidents structure exactly, including its
+ * null-impact handling: `status !== 'resolved'` alone decides "active" (an unclassifiable severity —
+ * `mapImpact`'s null, e.g. an unrecognized enum — still counts, same as AWS's unmatched-title case),
+ * and only the top severity escalates to `down`. `mapImpact` above caps at `'major'` (severity 2) —
+ * aistudio has no `'critical'` tier — so `'major'` is that top severity here, not `'critical'`.
+ *
+ * Reads `Incident.componentIds` (stamped by `parseAistudioIncidents` above) — incidents from other
+ * sources (e.g. vertex/gcloud, merged in by `mergeAistudioIncidents`) carry no `componentIds` and so
+ * never match here, no filtering needed on the caller's side.
+ */
+export function synthesizeAistudioComponents(incidents: Incident[]): ServiceComponent[] {
+  return AISTUDIO_BREAKDOWN_COMPONENTS.map(({ id, slug, name }) => {
+    const tag = String(AISTUDIO_COMPONENT[id])
+    const active = incidents.filter(
+      (inc) => inc.status !== 'resolved' && (inc.componentIds ?? []).includes(tag),
+    )
+    const hasMajor = active.some((inc) => inc.impact === 'major')
+    const status: ServiceComponent['status'] =
+      active.length === 0 ? 'operational' : hasMajor ? 'down' : 'degraded'
+    return { id: `aistudio-${slug}`, name, status }
   })
 }

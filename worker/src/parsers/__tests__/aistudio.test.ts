@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import {
   parseAistudioIncidents,
   computeDailyImpactFromIncidents,
+  synthesizeAistudioComponents,
   AISTUDIO_COMPONENT,
   AISTUDIO_ENDPOINT,
   AISTUDIO_HEADERS,
@@ -91,6 +92,18 @@ describe('parseAistudioIncidents', () => {
     ])
     const result = parseAistudioIncidents(data, { componentFilter: [AISTUDIO_COMPONENT.API] })
     expect(result.map((i) => i.id.replace('aistudio:', ''))).toEqual(['api1', 'mixed'])
+  })
+
+  it('#1012 — attaches stringified componentIds to a parsed incident', () => {
+    const data = wrap([entry('api1', 'API issue', 1, [[1, 't', 'x']], [AISTUDIO_COMPONENT.API, AISTUDIO_COMPONENT.MULTIMODAL_LIVE])])
+    const [inc] = parseAistudioIncidents(data)
+    expect(inc.componentIds).toEqual(['1', '2'])
+  })
+
+  it('#1012 — omits componentIds (never an empty array) when the entry has no components and no filter is set', () => {
+    const data = wrap([entry('nocomp', 'T', 1, [[1, 't', 'x']], [] as number[])])
+    const [inc] = parseAistudioIncidents(data)
+    expect(inc.componentIds).toBeUndefined()
   })
 
   it('returns empty array for empty wrapping', () => {
@@ -252,6 +265,80 @@ describe('parseAistudioIncidents', () => {
 
     it('returns empty record for empty input', () => {
       expect(computeDailyImpactFromIncidents([], 30, now)).toEqual({})
+    })
+  })
+
+  describe('#1012 synthesizeAistudioComponents', () => {
+    const mkInc = (over: Partial<Incident>): Incident => ({
+      id: 'aistudio:x',
+      title: 't',
+      status: 'investigating',
+      impact: 'minor',
+      startedAt: '2026-04-20T10:00:00.000Z',
+      resolvedAt: null,
+      duration: null,
+      timeline: [],
+      ...over,
+    })
+
+    it('both components operational when there are no incidents', () => {
+      const out = synthesizeAistudioComponents([])
+      expect(out).toEqual([
+        { id: 'aistudio-api', name: 'API', status: 'operational' },
+        { id: 'aistudio-multimodal-live', name: 'Multimodal Live API', status: 'operational' },
+      ])
+    })
+
+    it('an active API-only incident degrades API but leaves Multimodal Live operational', () => {
+      const out = synthesizeAistudioComponents([mkInc({ componentIds: ['1'], impact: 'minor' })])
+      expect(out.find((c) => c.id === 'aistudio-api')?.status).toBe('degraded')
+      expect(out.find((c) => c.id === 'aistudio-multimodal-live')?.status).toBe('operational')
+    })
+
+    it('a major active Multimodal Live incident marks it down (worst-of, not just degraded)', () => {
+      // aistudio's mapImpact caps at 'major' (severity 2) — there is no 'critical' tier here,
+      // unlike most other sources. 'major' is the top severity that escalates to 'down'.
+      const out = synthesizeAistudioComponents([mkInc({ componentIds: ['2'], impact: 'major' })])
+      expect(out.find((c) => c.id === 'aistudio-multimodal-live')?.status).toBe('down')
+    })
+
+    it('a RESOLVED incident does not affect component status', () => {
+      const out = synthesizeAistudioComponents([
+        mkInc({ componentIds: ['1', '2'], status: 'resolved', impact: 'major' }),
+      ])
+      expect(out.every((c) => c.status === 'operational')).toBe(true)
+    })
+
+    it('an AI-Studio-only incident (component 3) affects neither breakdown row', () => {
+      const out = synthesizeAistudioComponents([mkInc({ componentIds: ['3'], impact: 'major' })])
+      expect(out.every((c) => c.status === 'operational')).toBe(true)
+    })
+
+    it('a non-aistudio incident (no componentIds, e.g. merged vertex) affects neither row', () => {
+      const out = synthesizeAistudioComponents([mkInc({ componentIds: undefined, impact: 'major' })])
+      expect(out.every((c) => c.status === 'operational')).toBe(true)
+    })
+
+    it('worst-of across multiple active incidents on the same component', () => {
+      const out = synthesizeAistudioComponents([
+        mkInc({ id: 'a', componentIds: ['1'], impact: 'minor' }),
+        mkInc({ id: 'b', componentIds: ['1'], impact: 'major' }),
+      ])
+      expect(out.find((c) => c.id === 'aistudio-api')?.status).toBe('down')
+    })
+
+    it('an active incident with impact:null (unclassifiable severity) still degrades the component', () => {
+      // Mirrors deriveAwsStatus (parsers/aws.ts) exactly: "active" is decided by status alone, not
+      // impact — an unrecognized severity enum (mapImpact's null case) is still a real active incident,
+      // not silently invisible. Only the escalation to 'down' needs a known top-severity impact.
+      const out = synthesizeAistudioComponents([mkInc({ componentIds: ['1'], impact: null })])
+      expect(out.find((c) => c.id === 'aistudio-api')?.status).toBe('degraded')
+    })
+
+    it('Multimodal Live still counts when AI Studio is ALSO tagged on the same incident ([2,3])', () => {
+      const out = synthesizeAistudioComponents([mkInc({ componentIds: ['2', '3'], impact: 'minor' })])
+      expect(out.find((c) => c.id === 'aistudio-multimodal-live')?.status).toBe('degraded')
+      expect(out.find((c) => c.id === 'aistudio-api')?.status).toBe('operational')
     })
   })
 
