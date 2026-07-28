@@ -333,9 +333,6 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'], statusSourceDeactivated: true }, // #800 — Statuspage deactivated (401) since ~2026-06-18 (#689), no replacement; suppress recurring dead-source alerts. REMOVE when the page reactivates.
-  // ChatGPT has no single umbrella status-page component. Status determination uses the overall
-  // indicator + incidentKeywords filter with the "no relevant unresolved incidents → operational"
-  // cross-contamination guard (#292); `incidentIoComponentId` only feeds uptime, not the status path.
   // #1006 — uptime is now COMPUTED from the impact records of the ChatGPT badge scope (the full
   // `statusComponentIds` worst-of, matching the badge), over a common 30 days, instead of copying the
   // page's published ChatGPT-group aggregate (#367). That aggregate is
@@ -344,14 +341,20 @@ export const SERVICES: ServiceConfig[] = [
   // figure the page actually DISPLAYS for this service, so `uptimeReported` reads it and the detail page
   // can show the provider's own number beside ours. Conversations carries the real incident activity.
   // displayComponentIds (#606 Cat B): the official "ChatGPT" group (12) on status.openai.com.
-  // Display-only; disjoint from openai/codex. Compliance API + Agent belong to ChatGPT per the
-  // official grouping (not the API group, despite the names). Login here is the ChatGPT Login
-  // (the APIs group has a separate API-Login id absent from summary.json).
+  // Display-only; disjoint from openai/codex. Agent belongs to ChatGPT per the official grouping
+  // (not the API group, despite the name). Login here is the ChatGPT Login (the APIs group has a
+  // separate API-Login id).
   // #1008: "Codex in ChatGPT Desktop" (01KMKFAMWKQ81YWSE1Z18R6VHR) is officially a ChatGPT-group
   //   component (Codex surfaced inside the ChatGPT desktop app, sits between ChatGPT Atlas / ChatGPT
   //   Work on the official page), so it belongs here — NOT under codex, where it used to be
   //   mis-attributed and let a ChatGPT-only incident flip the Codex badge to degraded.
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
+  // #1175 — componentsUrl, like its page-mates. The badge is a worst-of over all 12 ids below, so
+  //   resolving them against summary.json's partial rotating window (#1125) narrowed it to whichever
+  //   ids that window happened to serve — 7 of 12 when measured 2026-07-28 — leaving the card green on
+  //   an outage in any of the rest. "Its primary is in the window" was the wrong criterion: it says
+  //   nothing about the other 11 the badge reads. It also widens the breakdown 7→12, which the #1062
+  //   capability routing reads (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
   // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
   // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
@@ -390,9 +393,7 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
   // OpenAI Codex (coding agent): published across 4 distinct surface components on
   // status.openai.com (Codex Web / Codex API / CLI / VS Code extension) with a
-  // Codex group aggregate over all four. Same #292 pattern as chatgpt — overall
-  // indicator + incidentKeywords filter, cross-contamination guard in fetchService
-  // blocks OpenAI API / ChatGPT incidents from bleeding through.
+  // Codex group aggregate over all four.
   //
   // Uptime source: Codex group aggregate (#367 — '01KMKF9EBTCD8BN9PG8DJZXRSQ').
   // Matches what OpenAI publishes on status.openai.com. The original #301 scoping
@@ -1833,17 +1834,18 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       let filtered = filterIncidents(incidents, config)
 
       // #606 Cat B / #693 follow-up — source the component list from componentsUrl (components.json, a
-      // SUPERSET on shared pages like status.openai.com) when set, else summary.json. The page OVERALL
-      // indicator, incidents, and uptime still come from summaryData; only the component LIST changes —
-      // and it's now read by the BADGE worst-of, the component-miss alert, AND the breakdown alike. This
-      // matters because OpenAI's summary.json OMITS core API components (Chat Completions / Embeddings /
-      // Moderations); without the superset the badge couldn't see a Chat Completions outage and the
-      // statusComponentId miss-check false-fired the migration alert every cycle.
-      // #1125 — that one fetch now happens once per PAGE in the prefetch (openai + codex are the only
-      // two configuring a componentsUrl, and it is the same URL), so reuse its result. Fetch here only
-      // when the prefetch could not: no prefetch entry for this page (summary.json failed and was
-      // re-fetched above), or its components.json read failed. Same precedence either way
-      // (`pickBreakdownComponents`), so the badge/breakdown source is unchanged by the move.
+      // SUPERSET on shared pages like status.openai.com) when set, else summary.json. This list is NOT
+      // display-only — `grep breakdownComponents` before assuming a change here is cosmetic.
+      // It matters because OpenAI's summary.json omits core API components; without the superset the badge
+      // couldn't see a Chat Completions outage and the statusComponentId miss-check false-fired the
+      // migration alert every cycle.
+      // #1125 — that one fetch now happens once per PAGE in the prefetch, so reuse its result (every
+      // service on a page agrees on one componentsUrl — 'every componentsUrl on a shared page agrees'
+      // in page-components-source.test.ts). Fetch here only when the prefetch could not: no prefetch
+      // entry for this page (summary.json failed and was re-fetched above), or its components.json read
+      // failed — that degraded path costs one re-fetch per affected service, not one per page. Same
+      // precedence either way (`pickBreakdownComponents`), so the badge/breakdown source is unchanged
+      // by the move.
       let breakdownComponents = summaryData.components
       if (config.componentsUrl) {
         const reusable = prefetched?.componentsFetch

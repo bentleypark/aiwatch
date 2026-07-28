@@ -972,13 +972,19 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
     op('claude', 'api', 'Claude API', 95),
     op('gemini', 'api', 'Gemini API', 90),
     op('cursor', 'agent', 'Cursor', 88),
+    // The Voice tier in full (all three members) — a partial tier would make the routed assertion below
+    // an artifact of who was left out rather than what production would answer.
+    op('elevenlabs', 'api', 'ElevenLabs', 72),
+    op('deepgram', 'api', 'Deepgram', 68),
+    op('assemblyai', 'api', 'AssemblyAI', 75),
   ]
-  // ChatGPT's component names as its status page published them on 2026-07-22 (8 of the 12 ids
-  // services.ts configures were present in the live payload), so the fixture can't drift into a
-  // shape ChatGPT never had.
+  // ChatGPT's component names as components.json published them on 2026-07-28 — all 12 of the ids
+  // services.ts configures. Provenance note, not a guarantee: nothing in the repo binds these names to
+  // those ids, so a provider rename is invisible to the suite. (#1175 gave chatgpt a componentsUrl;
+  // before it, `components[]` carried only the subset summary.json's rotating window served that cycle.)
   const CHATGPT_COMPONENTS = [
     'Conversations', 'Connectors/Apps', 'Search', 'GPTs', 'Image Generation', 'Login', 'Agent',
-    'Codex in ChatGPT Desktop',
+    'Codex in ChatGPT Desktop', 'Voice mode', 'Deep Research', 'File uploads', 'ChatGPT Atlas',
   ]
   const chatgpt = (degradedNames: string[]) => ({
     id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'degraded', aiwatchScore: 57,
@@ -990,6 +996,17 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
     expect(routingTier(src)).toBe(CAPABILITY_TIER.image)
     expect(getFallbacks('chatgpt', 'app', [src, ...pool]).map(f => f.name))
       .toEqual(['Stability AI', 'Black Forest Labs (FLUX)'])
+  })
+
+  it('ChatGPT Voice-mode-only outage reaches the api Voice tier, crossing the app→api filter (#1175)', () => {
+    // Recorded as a decision, not a side effect: a consumer-app reader whose ChatGPT voice chat is down
+    // is offered developer voice APIs. Same mechanism as the Image case above — 'Voice mode' is the
+    // second routable component in chatgpt's badge scope. Score-ranked, capped at 2, so the tier's
+    // third member (Deepgram, 68) is cut — not absent from the pool.
+    const src = chatgpt(['Voice mode'])
+    expect(routingTier(src)).toBe(CAPABILITY_TIER.audio)
+    expect(getFallbacks('chatgpt', 'app', [src, ...pool]).map(f => f.name))
+      .toEqual(['AssemblyAI', 'ElevenLabs'])
   })
 
   it('the routed group is labelled by capability and holds the api services (Discord/RSS shape)', () => {
