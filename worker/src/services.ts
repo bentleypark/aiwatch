@@ -19,6 +19,7 @@ import {
   AISTUDIO_COMPONENT,
   parseAistudioIncidents,
   computeDailyImpactFromIncidents,
+  synthesizeAistudioComponents,
 } from './parsers/aistudio'
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
@@ -532,8 +533,12 @@ export async function mergeAistudioIncidents(
   }
   try {
     const raw = await aistudioRes.json()
+    // #1012 — Multimodal Live API (enum 2) is a Gemini API surface (bidirectional streaming),
+    // distinct from the plain API component; widened from [API]-only so a pure Live API outage
+    // (tagged [2,3], no 1) is no longer silently dropped. AI Studio (enum 3, the web IDE) stays
+    // excluded — it is not an API surface (see #1012 scope).
     const extras = parseAistudioIncidents(raw, {
-      componentFilter: [AISTUDIO_COMPONENT.API],
+      componentFilter: [AISTUDIO_COMPONENT.API, AISTUDIO_COMPONENT.MULTIMODAL_LIVE],
     })
     // Cross-source audit trail (helps diagnose divergence / shape drift in tail logs)
     if (primary.length > 0 || extras.length > 0) {
@@ -2337,6 +2342,22 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       const aistudioDailyImpact = config.aistudioStatus
         ? computeDailyImpactFromIncidents(filtered)
         : null
+      // #1012 — likewise synthesize the API/Multimodal Live component breakdown from the same
+      // post-filter incident list (aistudio has no dedicated component-status endpoint either).
+      // Shares aistudioDailyImpact's accepted limitation just above: both read only what `filtered`
+      // currently holds, so a multi-day aistudio outage (past the #717 24h carry-over cap, nothing
+      // left to hold) reads as a stale "operational"/clean calendar rather than an explicit unknown —
+      // `ServiceComponent.status` has no unknown state to say otherwise. Not a NEW class of wrongness:
+      // gemini's own badge (`derivedStatus` below) is ALSO derived vertex-only on a failed aistudio
+      // read, so the breakdown asserts nothing more confidently than the badge already does from the
+      // same incomplete data. A same-cycle trust gate was tried and reverted (#1012 review, 3 rounds):
+      // the only reliable read-freshness signal would be a NEW persisted last-successful-read timestamp
+      // (`cacheWrite` unconditionally re-caches gemini every cycle regardless of aistudio's own outcome,
+      // so "was gemini ever cached" proves nothing here) — out of this issue's scope; tracked as a
+      // follow-up rather than layering another heuristic.
+      const aistudioComponents = config.aistudioStatus
+        ? synthesizeAistudioComponents(filtered)
+        : []
 
       const dailyImpact = bsDailyImpact ?? aistudioDailyImpact
       const has30dCalendar = bsDailyImpact != null || aistudioDailyImpact != null
@@ -2376,7 +2397,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           ? { components: betterStackComponents }
           : instatusComponents.length > 0
             ? { components: instatusComponents } // #761 — Instatus per-component snapshot (Next.js + Nuxt)
-            : {}),
+            : aistudioComponents.length > 0
+              ? { components: aistudioComponents } // #1012 — API + Multimodal Live, incident-derived
+              : {}),
       }
     }
   } catch (err) {
