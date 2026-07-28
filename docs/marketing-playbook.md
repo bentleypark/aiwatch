@@ -45,8 +45,8 @@ Show HN: Open-source AI status dashboard with AI-powered incident analysis
 ```
 Author here. Quick context since this went up during the Claude outage:
 
-AIWatch is an open-source status dashboard for 37 AI services (27 APIs + 4 apps
-+ 6 coding agents). What makes it different from Downdetector / StatusGator:
+AIWatch is an open-source status dashboard for [N] AI services. What makes it
+different from Downdetector / StatusGator:
 
 - AI-powered incident analysis — hybrid Gemma 4 26B (Cloudflare Workers AI
   binding) as primary, Claude Sonnet (via AI Gateway) as fallback. Per-incident
@@ -84,14 +84,6 @@ formula, or Workers AI in production.
 
 Keep these ready in a scratchpad before submitting. Do not pre-post them; HN readers dislike copy-paste commentary. Use only when the question actually appears.
 
-**Q: "If you poll every 5 minutes, isn't the max lead 5 minutes?"**
-
-No. The 5-minute cadence is observation granularity — the lead is the gap between our earliest anomaly signal and the provider's status page acknowledgment. Status pages often lag the underlying outage by 15-45 minutes because they require human acknowledgment or tiered escalation. So if our probe spike lands at T+0 and the status page updates at T+32, the recorded lead is ~32 minutes. The formula and floor/cap logic is visible in `worker/src/detection.ts`.
-
-**Q: "What's the measured average lead?"**
-
-We don't have a verified 90-day average published yet — a `/press` page with audited figures is tracked in issue #266. Until that ships, quote the specific incident in front of us (e.g., "27 min on this Claude outage"), never a generic average.
-
 **Q: "Why Gemma 4 26B as primary instead of Claude/GPT?"**
 
 Cost and operational surface. The Workers AI binding is auth-free (no API key to rotate or scope) and keeps per-incident inference inside the Cloudflare control plane, which simplifies deploy and cost accounting. Claude Sonnet via AI Gateway is the fallback when Gemma 4 rate-limits or returns a degraded analysis — judged by a `needsFallback` heuristic in the analysis code.
@@ -105,7 +97,7 @@ See `worker/src/services.ts` — per-service status resolution has a `filterByCo
 Lower expectations. Lead with the technical angle, not the outage angle:
 
 ```
-Show HN: Monitoring 30 AI services on Cloudflare Workers
+Show HN: Monitoring [N] AI services on Cloudflare Workers
 ```
 
 First comment opens with the stack and cost profile, not the outage framing. RTT degradation detection becomes a secondary bullet, not the headline.
@@ -127,39 +119,56 @@ First comment opens with the stack and cost profile, not the outage framing. RTT
 
 Reddit communities discuss AI outages in real time. AIWatch is useful in those threads — confirms "yes it's down for everyone, here's the AI analysis" — but only if the post is substantive. Reddit's spam filters auto-flag new accounts linking to the same domain repeatedly; the rule below exists because the platform enforces it.
 
+**A sub's own rules may name "is X down?" posts for removal** — r/ChatGPT's do (see "Removed posts" below). That is *subreddit* moderation, not a Reddit-wide behaviour, so it tells you nothing about any other sub.
+
 ### Subreddit list
 
-| Subreddit | Self-promo policy | When to engage | Cron coverage |
-|---|---|---|---|
-| r/ClaudeAI | Strict — mods remove obvious promo | Active Claude outage thread on front page of sub | ✅ outage mode |
-| r/ChatGPT | Permissive on outage threads | Active OpenAI / ChatGPT outage thread | ✅ outage mode |
-| r/OpenAI | Moderate — outage posts allowed | Active OpenAI outage | ✅ outage mode |
-| r/LocalLLaMA | Strict technical bar — no fluff posts | Only when discussion already cites API reliability as a local-vs-hosted argument | ✅ outage mode |
-| r/AINews | Permissive | Major outage with journalist coverage | ✅ outage mode (Discord 🎯 PROMOTE alert only fires if the title passes the question-style promotable filter — news-style headlines still require manual engagement) |
-| r/MachineLearning | Very strict — must be research-relevant | Do not post unless AIWatch shipped a methodology writeup | ❌ not monitored by cron — check manually |
+| Subreddit | Relevant when | Cron coverage |
+|---|---|---|
+| r/ClaudeAI | Claude outage | ✅ outage mode |
+| r/ChatGPT | OpenAI / ChatGPT outage | ✅ outage mode |
+| r/OpenAI | OpenAI outage | ✅ outage mode |
+| r/LocalLLaMA | Discussion already cites API reliability as a local-vs-hosted argument | ✅ outage mode |
+| r/AINews | Major outage with journalist coverage | ✅ outage mode |
+| r/MachineLearning | Out of scope for outage engagement | ❌ not monitored by cron — check manually |
 
-Before each first post to any of these, **read the sub's rules page** — `/wiki/rules` or the sidebar. Rule changes are not tracked here.
+Before posting or commenting in any of these, **read the sub's rules page** — `/about/rules/`, and the sidebar too, since the two renderings can differ (they do on r/ChatGPT) — and check what it says about outage posts and about self-advertising. Rule changes are not tracked here, so read it again even if you read it last time.
 
-**Cron coverage caveat.** `worker/src/reddit.ts` watches r/ClaudeAI, r/ChatGPT, r/OpenAI, r/LocalLLaMA, r/AINews (+ r/ClaudeCode / r/cursor / r/windsurf / r/Codeium for coding agents) in outage mode — matches on "down / not working / outage / broken / offline / unavailable / degraded" keywords and sends a Discord alert with a "🎯 PROMOTE" tag when the post's title either (a) is question-style / help-seeking, or (b) contains a strong outage keyword (`down`/`outage`/`broken`/`offline`/`unavailable`/`degraded`) **and** the post is less than 2 hours old — the second path is the "live outage megathread" hook added in #296 after the 2026-04-20 ChatGPT outage, where declarative titles like "Every single AI app is down" and "ChatGPT outage update" slipped through the question-only filter. `matchesKeywords` also treats a `?` as a context substitute for weak keywords, so titles like "Error while signing in?" now match. Stale threads older than 2h still require manual engagement (avoids resurfacing post-incident retrospectives). News-flavored headlines on r/AINews without a strong outage keyword also remain manual. r/MachineLearning stays out of scope — research posts use outage keywords in methodology contexts ("what's wrong with this loss curve"), and adding it without a service-name-required matcher would spam Discord.
+> **Status (2026-07-28): the 🎯 PROMOTE alerts below are not being delivered.** Reddit's public search endpoint returns 403 to the Worker's unauthenticated requests (observed 2026-06-29, #820). The OAuth fix (PR #1136) is written and MERGEABLE with no GitHub review since it was opened 2026-07-23 — **merging is not what is blocked**: without credentials the Reddit monitor fail-soft skips, and obtaining those credentials is what waits on the Reddit Data API access approval. Treat every `✅ outage mode` in the table as *intended* coverage, not live coverage, until an outage-mode Discord alert is actually seen. (The daily summary's `📢 Reddit` count does not settle it — it counts live `reddit:seen:*` keys across the competitive and security modes too.)
+
+**Cron coverage caveat.** Which subs the cron watches, which titles it tags `🎯 PROMOTE`, and the age window it applies are defined in `worker/src/reddit.ts` and pinned by its unit tests — read them there rather than trusting a copy here. r/MachineLearning is deliberately out of scope.
 
 ### When to engage
 
-**Engage:**
-- A fresh outage thread (< 2 hours old) is on the front page of the sub.
-- Top comments are still speculating ("is it just me?") — AIWatch data answers the question.
+The target is an individual outage thread. Open the URL from an F5Bot alert when you have one; browsing the sub is the fallback, and reaches only the threads that were not removed.
+
+**Engage when:**
+- The outage is live and confirmed on the AIWatch dashboard.
+- The conversation is still on "is it just me?" — that is the question AIWatch data answers.
 
 **Do not engage:**
 - General "what's the best LLM" threads.
 - Threads where the discussion has moved past confirmation (mods will mark this off-topic).
-- Any thread older than 6 hours (reply won't be seen; looks like necroposting for promo).
+
+### Removed posts
+
+Point observations from 2026-07-28 unless dated otherwise, read logged-out via `old.reddit.com`. Re-check before relying on any of them.
+
+- **The removal is rule-backed, and the rules cover comments too.** Both quotes below are from the [`/about/rules/` widget](https://old.reddit.com/r/ChatGPT/about/rules/), read 2026-07-28. **Rule 2, "No Trashposts"** (scope: Posts & Comments): *"Posts deemed to be entirely without value or effort may be removed if they have not generated interesting discussions before their discovery. … Specifically mentioning that "Is ChatGPT down?" posts will be removed; the stickied FAQ deals with that."* **Rule 3, "Self Advertising"** (same scope): posts *"solely focused on advertising a single other LLM service … should directly go to weekly self-promotional mega thread, which is pinned"*. Both are this sub's policy; every other sub has to be read on its own page.
+- **A removed post is not a dead post.** The instance the owner shared (~2026-07-25, permalink not recorded) carried a moderator-removal notice and still had a live comment section. Do not read "not in the listings" as "nobody is there."
+- **Neither thread the rules name was found in the sticky slots.** Rule 2 points at a stickied FAQ, Rule 3 at a pinned weekly self-promo megathread; on 2026-07-28 the sub's two stickied slots held a "Tuesdays, text posts only" notice and a ChatGPT Images post. The wiki, sidebar links and menu were not checked — so look for both before concluding they don't exist.
+
+**Untested idea: ask the mods to point at AIWatch.** The observation behind it — an AutoModerator reply carrying provider-status links on the removed post above — comes from the thread whose permalink was not recorded, so it is unverified. Re-observe it, **saving the permalink first**, before spending anything on this. If it holds and mods accepted an AIWatch link, the payoff would be a standing, mod-approved placement that needs no post from us.
+
+That would be **mod outreach, not posting**: message the mods, explain what AIWatch is, and ask. One sub at a time; any link in the message still carries `?utm_source=reddit`. Treat a "no" as final for that sub, and **log the ask and its answer in the post log below** so it is not re-tried blind a year later. Because nothing is being posted, the frequency limit below does not apply.
 
 ### Response template
 
 Adapt to the specific thread — never copy-paste verbatim across subreddits.
 
 ```
-It's down for everyone — just pulled this from AIWatch
-(ai-watch.dev/is-claude-down?utm_source=reddit):
+Author here (I built AIWatch) — it's down for everyone, just pulled this from
+AIWatch (ai-watch.dev/is-claude-down?utm_source=reddit):
 
 - Status: Down (confirmed [HH:MM UTC — pull from dashboard])
 - Early RTT signal: [X minutes — ONLY if the dashboard shows one] — our probe
@@ -180,15 +189,16 @@ A genuine early-RTT signal is **rare** (most incidents are component/connector d
 ### Frequency limit
 
 - Max 1 link-bearing post per subreddit per 7 days.
+- **Max 1 link-bearing comment per thread, and max 2 per subreddit per outage** — count the whole outage, not each dashboard incident. A comment is not a post, so the 7-day post limit does not cover it — but repeating the link is the same spam signal whether it is a post or a comment.
 - Text-only contributions (no link) don't count — be helpful without promoting.
-- Track removed posts per subreddit. Two removals from the same sub = stop posting links there for 30 days.
+- Track removed posts per subreddit, and log which rule the mods cited. Two removals from the same sub = stop posting links there for 30 days.
 
 ### Account preparation
 
 Reddit and large-sub AutoMod configurations filter links from new/low-karma accounts. Exact thresholds are private and vary by sub — don't assume a fixed number. Before any posting:
 
 - Use an account with a real comment history across multiple unrelated subs — treat "several months of organic activity" as the bar, not days.
-- Check the target sub's `/wiki/rules` and `/wiki/config/automoderator` if public — some large subs publish their karma floor; most don't.
+- Check the target sub's `/wiki/config/automoderator` if public — some large subs publish their karma floor; most don't.
 - Never create a throwaway for this. Fresh-account promotion patterns get the domain shadowbanned platform-wide after a few instances, and the damage is not reversible.
 - **Owner action required**: confirm the posting account meets the bar before the first outage window — don't discover the shadowban mid-outage.
 
@@ -200,7 +210,7 @@ have to pull.
 - **[F5Bot](https://f5bot.com) — the live method.** Free, native keyword email alerts across Reddit,
   Hacker News, and Lobsters. Register the outage keywords (`claude down`, `openai down`, `gemini down`,
   `chatgpt down`, `copilot down`, and `aiwatch` for mentions); it emails you when a matching post or
-  comment appears. This is what's actually in use.
+  comment appears. This is the chosen method — the setup checklist below is what confirms it is live.
 - Cross-reference against AIWatch's own Discord alert feed — if AIWatch detected the outage, a Reddit
   thread is often spinning up shortly after.
 
@@ -224,32 +234,36 @@ have to pull.
 - **No vote manipulation.** Never ask anyone — Twitter, Discord, colleagues — to upvote. Both HN and Reddit detect coordinated voting and penalize the domain permanently.
 - **Disclose affiliation.** "I built this" / "Author here" in the first line. Hiding authorship on a self-promo post is grounds for immediate removal on most subs and HN flags.
 - **No fabricated screenshots.** Every screenshot in a post or comment must be a live capture of ai-watch.dev at the time claimed. Placeholder values in the response templates above (timestamps, lead minutes) are for dry-run planning only — never ship them.
-- **Track everything.** Append an entry to the log table below after every post — takes ~30 seconds and compounds across posts so we can learn which subs/times actually convert.
+- **Track everything.** Append an entry to the log table below after every logged action — takes ~30 seconds and compounds so we can learn which subs/times actually convert.
 
 ### Pre-post dry run
 
-Every post, every channel, no exceptions. Run through this in order before hitting submit:
+Every post and every link-bearing comment, every channel, no exceptions. Run through this in order before hitting submit:
 
-- [ ] All `[bracket placeholders]` in the template replaced with live values pulled from the dashboard at posting time
+- [ ] All `[bracket placeholders]` in the template replaced with live values pulled from ai-watch.dev at posting time (the service count is published on `/methodology`, not on the dashboard)
 - [ ] Numbers (timestamps, early-RTT signal minutes if shown, uptime %) match what ai-watch.dev shows right now — not a cached tab from 30 minutes ago
 - [ ] Link points to the specific service page (`/is-<service>-down`), not the homepage
-- [ ] **Reddit posts:** the link carries `?utm_source=reddit` — otherwise the visit may be unattributable (see Reddit § "Response template")
+- [ ] **Reddit posts and comments:** the link carries `?utm_source=reddit` — otherwise the visit may be unattributable (see Reddit § "Response template")
 - [ ] Authorship disclosed in the first line ("Author here" / "I built this")
 - [ ] Only one AIWatch URL in the body
 - [ ] No competitor named in the title
-- [ ] Ran today's outage through the Trigger criteria — this is actually in-window, not a stretch
+- [ ] **Show HN only:** ran today's outage through the Trigger criteria — this is actually in-window, not a stretch
 
 ### Post log
 
-Append one row per post. Keep it in this file so the history travels with the playbook.
+Append one row per post, link-bearing comment, or mod-outreach attempt (`Channel: mod-outreach`, the ask and the answer in `Notes`). Keep it in this file so the history travels with the playbook.
 
-| Date (UTC) | Channel | URL | Score / upvotes | Comments | Removed? | Notes |
+**Upvotes are not the metric.** What this channel is being measured on is `?utm_source=reddit` traffic in the outage-audience data — a well-received comment can send no clicks at all. Log the upvote/comment counts as context. Mod-outreach rows have no URL or counts: dashes in the count columns.
+
+| Date (UTC) | Channel | URL | Score / upvotes | Comments | Removed? (rule cited) | Notes |
 |---|---|---|---|---|---|---|
 | _e.g. 2026-05-02_ | _r/ClaudeAI_ | _reddit.com/r/.../comments/..._ | _+12_ | _3_ | _no_ | _top comment was "thanks, confirmed"_ |
 
 ## Change log
 
 Update this file when:
-- Subreddit rules change materially (a sub goes no-promo)
+- A sub's rules on outage posts or self-advertising turn out to matter — record what the rule says, with its number and the date read
 - A post is removed — log the reason so we learn the pattern
 - The product gains a new hook worth leading with in HN copy
+- **An outage-mode 🎯 PROMOTE alert is seen in Discord** — delete the Reddit-cron Status callout
+- Mod outreach is attempted — log the sub, the ask and the answer in the post log
