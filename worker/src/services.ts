@@ -124,17 +124,20 @@ export const SERVICES: ServiceConfig[] = [
   // (Website/Docs) must not enter the dynamic worst-of badge or the breakdown.
   { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', displayAllComponents: true, componentSurfaces: ['Developer Console'], componentDenylist: ['Website', 'Docs'] },
   // #623 — status.perplexity.com (Instatus, Next.js) has 3 components: "API" (Sonar) + "Website"
-  // (the consumer perplexity.ai) + "Computer" (agentic/computer-use surface, added #911).
-  // The Next.js parser now resolves each incident's affected components
-  // → componentNames (#623), so `incidentKeywords: ['api']` (matched against componentNames) scopes
-  // the badge/Score to the API: a Website-only incident is dropped, a Website+API incident kept (it
-  // affects the API). Allowlist is correct here — the API component is literally named "API", and
-  // unlike a title-denylist it keeps a multi-component "Website and API" incident.
-  // #635 — statusComponent 'API' selects the Instatus "API" component for the official uptime% (the
-  // Next.js payload carries componentsUptime[id].uptime, ~90d) instead of "Not provided".
-  // displayComponentIds (#761): top-level Instatus components API (Sonar) + Website + Computer (#911).
-  // Display-only — badge stays on statusComponent 'API'. Next.js Instatus exposes per-component status.
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l'] },
+  // (the consumer perplexity.ai) + "Computer" (agentic/computer-use surface, added #911), all three
+  // shown on the breakdown card (displayComponentIds, #761/#911).
+  // #1177 — the card therefore represents ALL THREE, so the incident list and uptime cover all three
+  // too. #623's `incidentKeywords: ['api']` scoped incidents to the API component while the card kept
+  // displaying the other two: on 2026-07-23 `Computer sandbox issues` (MAJOROUTAGE, tagged onto
+  // Computer) was dropped, so the card read "Computer chip Major Outage · Recent Incidents empty ·
+  // uptime 100%". Dropping the keyword scoping is the fix — this is a SINGLE-OWNER page, so every
+  // notice on it is a Perplexity incident and there is no sibling product to leak in (the reason
+  // keyword scoping exists for a shared page like status.openai.com).
+  // `uptimeOverDisplayComponents` moves uptime onto the same three components (worst-of); without it
+  // the Computer outage would show as an incident while uptime still read the API component's 100%.
+  // #635 — statusComponent 'API' stays as the PRIMARY component: the uptime fallback for the cycle
+  // where the page's component list can't be parsed.
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l'], uptimeOverDisplayComponents: true },
   // #1165 — renamed 'xAI (Grok)' → 'xAI API': now that Grok's consumer app is its own service
   // ('grok', in the Apps section below), "(Grok)" on this card would misname the API surface.
   { id: 'xai', name: 'xAI API', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
@@ -2306,16 +2309,53 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         // component tree + ongoing-incident attribution), so read it ONCE for uptime + components.
         if (res.ok) {
           const mainHtml = await res.text()
-          if (config.statusComponent) {
-            const instatusResult = parseInstatusUptime(mainHtml, config.statusComponent)
+          const instatusComps = parseInstatusComponents(mainHtml)
+          // #1177 — the uptime SCOPE. Default: the single `statusComponent`. With
+          // `uptimeOverDisplayComponents` (perplexity), the whole displayed set instead, so uptime
+          // covers exactly what the card shows and what the incident list now carries.
+          // The parser addresses components by NAME, so the ids are joined to names through THIS page's
+          // own component list — no second hand-maintained mapping to drift. An empty join (component
+          // parse failed / every id renamed) falls back to `statusComponent`: losing the wider scope is
+          // a worse-but-correct number, losing uptime entirely is a blank card.
+          const uptimeScope = ((): string | string[] | undefined => {
+            if (!config.uptimeOverDisplayComponents) return config.statusComponent
+            // Half-applied config, not upstream drift: the flag is on but there is no set to widen to,
+            // so uptime silently reverts to the single component while the incident list stays wide —
+            // the "1 incident listed, uptime 100%" split the flag exists to prevent. It cannot happen
+            // in-repo (`perplexity-scope.test.ts` sweeps SERVICES), so this is the runtime backstop for
+            // a config edited outside that guard.
+            if (!config.displayComponentIds?.length) {
+              console.warn(`[fetchService] ${config.id} sets uptimeOverDisplayComponents but has no displayComponentIds — uptime stays scoped to statusComponent "${config.statusComponent}" while incidents cover the whole page`)
+              return config.statusComponent
+            }
+            const names = config.displayComponentIds
+              .map((id) => instatusComps.find((c) => c.id === id)?.name)
+              .filter((n): n is string => !!n)
+            if (names.length > 0) return names
+            // Every configured id is gone from the page (or the component parse yielded nothing). Say
+            // what the reader gets, not just what we tried: with no `statusComponent` there is no
+            // fallback at all and the service loses its uptime — an operator reading "falling back"
+            // would otherwise stop looking.
+            console.warn(config.statusComponent
+              ? `[fetchService] ${config.id} uptimeOverDisplayComponents: no displayComponentIds resolved to a component name — falling back to statusComponent "${config.statusComponent}"`
+              : `[fetchService] ${config.id} uptimeOverDisplayComponents: no displayComponentIds resolved to a component name and no statusComponent is configured — NO uptime will be computed this cycle`)
+            return config.statusComponent
+          })()
+          if (uptimeScope) {
+            const instatusResult = parseInstatusUptime(mainHtml, uptimeScope)
             instatusUptime = instatusResult?.pct ?? null
             instatusTodayWeightedOutageSec = instatusResult?.todayWeightedOutageSec ?? null // #1017
             // #1006 — the % the page itself shows (over its own ~90-day period), for the side-by-side
             // disclosure. Only kept when it differs from our computed figure.
-            instatusReported = parseInstatusReportedUptime(mainHtml, config.statusComponent)
-            instatusReportedDays = parseInstatusUptimeDays(mainHtml)
+            // #1177 — WITHHELD for a multi-component scope: this number is attributed to the provider,
+            // and the page publishes one per COMPONENT, never one for a card that spans three. Any
+            // aggregate we formed would be ours wearing their label — and would not even be the same
+            // component our own worst-of picked. No disclosure beats a mis-attributed one (#713).
+            if (typeof uptimeScope === 'string') {
+              instatusReported = parseInstatusReportedUptime(mainHtml, uptimeScope)
+              instatusReportedDays = parseInstatusUptimeDays(mainHtml)
+            }
           }
-          const instatusComps = parseInstatusComponents(mainHtml)
           if (instatusComps.length > 0) {
             instatusComponents = resolveSvcComponents(config, { components: instatusComps })
             // #761 — the #606 curated-id drift signal above is inside the ATLASSIAN branch and gates on

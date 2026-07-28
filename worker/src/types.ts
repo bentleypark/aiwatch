@@ -266,6 +266,27 @@ export interface ServiceConfig {
   // worst-of'ing every component into the badge would be too noisy (e.g. a Billing blip).
   // When both are set, the breakdown prefers displayComponentIds.
   displayComponentIds?: string[]
+  // #1177 — Instatus ONLY (read inside fetchService's `instatusUrl` branch; silently inert on an
+  // Atlassian / incident.io / BetterStack service, so setting it there does nothing). This card
+  // represents EVERY component it displays, not just `statusComponent`: uptime is computed over the
+  // whole `displayComponentIds` set, worst-of — the same aggregation the Nuxt GROUP path already
+  // applies to its members.
+  //
+  // Set it TOGETHER WITH dropping `incidentKeywords`, because the two express ONE decision and split
+  // apart they re-create the bug this fixes (the full case is in
+  // docs/reference/status-determination.md, "When the card displays a component, that component is the
+  // service"). Wide incidents + narrow uptime leaves "1 incident listed, uptime 100%"; narrow incidents
+  // + wide uptime is the same contradiction reversed. `perplexity-scope.test.ts` sweeps SERVICES so the
+  // pair cannot drift apart in-repo.
+  //
+  // Dropping `incidentKeywords` also widens the BADGE, which is the most user-visible half: on this
+  // branch the Instatus badge is `hasOngoing ? 'degraded' : httpStatus` over the post-filter list, so
+  // an ongoing incident on ANY displayed component now degrades the card (and with it the Discord
+  // alert, the RSS entry and the /is-*-down answer).
+  //
+  // Off by default: a service whose card is deliberately an API-surface view (fal, mistral) keeps its
+  // keyword scoping and its single-component uptime, and must NOT be swept along by this flag.
+  uptimeOverDisplayComponents?: boolean
   // Per-component-id → group label, mirroring the OFFICIAL status page's component groups
   // (the v2 summary/components JSON does NOT expose group membership, so it must be curated
   // here). Applied in the explicit-id breakdown path (displayComponentIds, or the statusComponentIds
