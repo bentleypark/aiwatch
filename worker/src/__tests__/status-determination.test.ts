@@ -732,16 +732,8 @@ describe('displayComponentIds config sanity (#606)', () => {
     }
   })
 
-  it('openai + codex source the breakdown from components.json (summary.json omits their primary)', () => {
-    // The APIs Login / Chat Completions / Embeddings / Moderations are components.json-only, so openai
-    // must set componentsUrl. #783: OpenAI later dropped "Codex API" (codex's PRIMARY statusComponentId)
-    // from summary.json too, so codex now needs componentsUrl as well (without it the statusComponentId
-    // miss-check false-fired the migration alert every cycle). chatgpt stays summary.json-complete —
-    // its primary "Conversations" is present in summary.json.
-    expect(SERVICES.find((s) => s.id === 'openai')!.componentsUrl).toBe('https://status.openai.com/api/v2/components.json')
-    expect(SERVICES.find((s) => s.id === 'codex')!.componentsUrl).toBe('https://status.openai.com/api/v2/components.json')
-    expect(SERVICES.find((s) => s.id === 'chatgpt')!.componentsUrl).toBeUndefined()
-  })
+  // `componentsUrl` per service is asserted in component-mismatch.test.ts (#783/#1175), beside the
+  // miss-check it protects.
 
   it('#800 — characterai is flagged statusSourceDeactivated (its Statuspage is a known 401 deactivation)', () => {
     // The production wiring of the #800 recurring-alert suppression. A silent drop of this flag would

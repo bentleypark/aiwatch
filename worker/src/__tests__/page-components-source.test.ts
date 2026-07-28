@@ -333,6 +333,110 @@ describe('fetchService reuses the prefetched components (#1125)', () => {
 
 })
 
+// #1175 — the same narrow view, one layer down: chatgpt badges a worst-of over its statusComponentIds
+// but configured no componentsUrl, so it resolved them against summary.json's rotating window (7 of its
+// 12 resolved when measured live 2026-07-28) and `resolveSvcStatus` treats a partial resolve as the whole
+// answer — an outage on one of the rest left the card green. These ride the REAL chatgpt config: drop its
+// componentsUrl and 'reddens the card' below fails, as does the wiring guard further down.
+describe('a badge component outside summary.json\'s window (#1175)', () => {
+  const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
+  const VOICE = '01JMXBNJXGGT5SR5DB9J7GYY48' // "Voice mode"
+  // The ids summary.json's window omitted when measured live 2026-07-28. Names are irrelevant here —
+  // every assertion below is on ids and statuses — so components carry their id as their name.
+  const OUT_OF_WINDOW = new Set([VOICE, '01JSYVYQSWMJ9QG35XHP08BHA7', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'])
+
+  // components.json: every badged component, Voice mode down. summary.json: the same list minus the ones
+  // the window omitted.
+  const SUPERSET = CHATGPT.statusComponentIds!.map((id) => comp(id, id, id === VOICE ? 'major_outage' : 'operational'))
+  const WINDOW = SUPERSET.filter((c) => !OUT_OF_WINDOW.has(c.id))
+  const summary = { status: { indicator: 'none', description: 'All Systems Operational' }, components: WINDOW, incidents: [] }
+  const prefetched = () => ({ summary: summary as never, incidents: null, latency: 100, componentsFetch: ok(SUPERSET) })
+
+  let fetchSpy: ReturnType<typeof vi.fn>
+  beforeEach(() => {
+    fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes('components.json')) return new Response('', { status: 500 })
+      if (String(url).endsWith('.json')) return new Response(JSON.stringify({ incidents: [] }), { status: 200 })
+      return new Response('', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('is one chatgpt badges but summary.json omitted — otherwise the fixture proves nothing', () => {
+    expect(CHATGPT.statusComponentIds).toContain(VOICE)
+    expect(WINDOW.map((c) => c.id)).not.toContain(VOICE)
+    // Relational, not a headcount: adding a 13th component must not fail this on an unrelated change.
+    expect(WINDOW.length).toBeGreaterThan(0)
+    expect(WINDOW.length).toBeLessThan(SUPERSET.length)
+  })
+
+  it('reddens the card', async () => {
+    const svc = await fetchService(CHATGPT, prefetched())
+    expect(svc.status).toBe('down')
+  })
+
+  it('and appears in the breakdown, and the per-cycle drift warns go silent', async () => {
+    const svc = await fetchService(CHATGPT, prefetched())
+    expect(svc.components?.map((c) => c.id)).toEqual(CHATGPT.displayComponentIds)
+    expect(svc.components).toContainEqual(expect.objectContaining({ id: VOICE, status: 'down' }))
+    // The other half of the live evidence for this fix: pre-fix chatgpt emitted BOTH of these every
+    // cycle, naming the 5 omitted ids. Scoped to the two strings — `fetchService` has other warn paths,
+    // so asserting no warns at all would fail for unrelated reasons.
+    expect(warnText()).not.toContain('chatgpt additional component ids missing')
+    expect(warnText()).not.toContain('chatgpt displayComponentIds missing')
+  })
+
+  it('reaches the superset by REUSING the page prefetch, not by fetching components.json itself', async () => {
+    const svc = await fetchService(CHATGPT, prefetched())
+    // Without the second assertion this passes VACUOUSLY under the config mutation: strip componentsUrl
+    // and the fetch branch is never entered, so "0 fetches" is trivially true. The second pins that the
+    // 0 was reached by REUSING the prefetch rather than by skipping the superset.
+    expect(fetchSpy.mock.calls.filter((c) => String(c[0]).includes('components.json'))).toHaveLength(0)
+    expect(svc.components).toHaveLength(CHATGPT.displayComponentIds!.length)
+  })
+
+  it('the defect replayed: without componentsUrl the identical outage leaves the card operational', async () => {
+    // The paired direction. It strips ONLY componentsUrl and keeps the prefetched superset available, so
+    // what it pins is that the config field is the gate.
+    //
+    // The page indicator says `major` here, unlike the other cases: that is the production symptom #1175
+    // filed (provider reporting an outage, our card green) AND it discriminates this fix from the other
+    // candidate — had `resolveSvcStatus` instead fallen back to the overall indicator on a PARTIAL
+    // resolve, the card would read `down` and the bug would have been masked. With `indicator: 'none'`
+    // no test can tell the two apart.
+    const outageSummary = { ...summary, status: { indicator: 'major', description: 'Partial outage' } }
+    const svc = await fetchService({ ...CHATGPT, componentsUrl: undefined }, { ...prefetched(), summary: outageSummary as never })
+    expect(svc.status).toBe('operational')
+    expect(svc.components?.map((c) => c.id)).not.toContain(VOICE)
+  })
+
+  it('an unreadable components.json re-narrows the badge — the fix\'s failure mode', async () => {
+    // With both the prefetch AND the per-service re-fetch failing there is no superset to read, so the
+    // badge falls back to the window and #1175 returns for that cycle. Pinned because of HOW it degrades:
+    // the #135 miss-check inspects only the primary, which resolves here, so the operator is never paged
+    // and the drift warn is the whole signal — asserted in both directions below.
+    const svc = await fetchService(CHATGPT, { ...prefetched(), componentsFetch: { ok: false } })
+    expect(svc.status).toBe('operational')
+    // Scoped to the ONE warn: the display-drift warn below it names the same ids, so a joined-text match
+    // would still pass if this warn stopped enumerating them.
+    const drift = warn.mock.calls.map((c: unknown[]) => c.join(' ')).find((m: string) => m.includes('chatgpt additional component ids missing'))
+    expect(drift).toBeDefined()
+    expect(drift).toContain(VOICE)
+    // Positive control for the OTHER negative in the breakdown test above: without it, renaming this
+    // warn string turns that assertion into a vacuous pass with nothing failing.
+    expect(warnText()).toContain('chatgpt displayComponentIds missing')
+    expect(warnText()).not.toContain('Component ID not found: chatgpt')
+  })
+
+  it('…and the miss-check DOES fire when the PRIMARY is the one out of window — anchors the negative above', async () => {
+    // Without this, renaming that warn string turns the assertion above into a vacuous pass with no test
+    // failing: a negative string match defaults to true, so it needs a positive control on the same string.
+    await fetchService({ ...CHATGPT, statusComponentId: VOICE }, { ...prefetched(), componentsFetch: { ok: false } })
+    expect(warnText()).toContain('Component ID not found: chatgpt')
+  })
+})
+
 describe('prefetch + alert wiring (#1125)', () => {
   // buildPageComponents and partitionFirstSeen being green proves nothing about whether production
   // calls them: the prefetch fetch and the cron's alert branch are not reachable from a unit test
@@ -345,6 +449,13 @@ describe('prefetch + alert wiring (#1125)', () => {
   it('the prefetch reads a page\'s componentsUrl and stores the OUTCOME on the prefetch entry', () => {
     expect(SERVICES_SRC).toMatch(/const componentsFetch = componentsUrl \? fetchPageComponents\(componentsUrl\)/)
     expect(SERVICES_SRC).toMatch(/prefetchMap\.set\(apiUrl,\s*\{[^}]*componentsFetch: await componentsFetch[^}]*\}\)/)
+  })
+
+  it('and every service on the page reads that one entry BY PAGE — the shared-read half (#1175)', () => {
+    // The write is pinned above; without the read there is nothing to stop a refactor keying the prefetch
+    // per service id, which would put openai/chatgpt/codex back on one components.json fetch EACH — a
+    // silent +2 subrequests per cycle with the whole suite green.
+    expect(SERVICES_SRC).toMatch(/prefetchMap\.get\(config\.apiUrl\)/)
   })
 
   it('starts that fetch OUTSIDE the summary/incidents Promise.all — latency must stay the page\'s own', () => {
@@ -402,6 +513,25 @@ describe('prefetch + alert wiring (#1125)', () => {
     }
     for (const [apiUrl, urls] of byPage) {
       expect(urls.size, `${apiUrl} has ${urls.size} distinct componentsUrl values`).toBe(1)
+    }
+  })
+
+  it('every service resolving components on such a page configures it too (#1175)', () => {
+    // The #1175 drift: chatgpt sat on status.openai.com beside page-mates reading the superset while it
+    // resolved its own badge ids against summary.json's window. The prefetch reads one components.json
+    // per PAGE, so a page-mate left off it buys nothing — it only narrows what that service can see.
+    // A lone `statusComponentId` counts too, and so does a name-matched `statusComponent`: both fall back
+    // to the page overall indicator when the component rotates out (the #783 shape). BOUNDARY: the
+    // population is pages that ALREADY have a componentsUrl, so this is a page-mate consistency check,
+    // not proof the defect class is closed — a page where NO service sets one is invisible here.
+    const withUrl = new Set(SERVICES.filter((s) => s.componentsUrl && s.apiUrl).map((s) => s.apiUrl!))
+    expect(withUrl.size, 'no page configures a componentsUrl — the assertion would be vacuous').toBeGreaterThan(0)
+    const resolving = SERVICES.filter((s) => s.apiUrl && withUrl.has(s.apiUrl)
+      && ((s.statusComponentIds?.length ?? 0) > 0 || (s.displayComponentIds?.length ?? 0) > 0
+        || !!s.statusComponentId || !!s.statusComponent))
+    expect(resolving.length, 'no component-resolving service on those pages').toBeGreaterThan(0)
+    for (const s of resolving) {
+      expect(s.componentsUrl, `${s.id} resolves components on ${s.apiUrl} but reads only summary.json`).toBeTruthy()
     }
   })
 })

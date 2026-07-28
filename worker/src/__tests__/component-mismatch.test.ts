@@ -29,18 +29,20 @@ describe('COMPONENT_ID_SERVICES', () => {
   })
 })
 
-describe('#783 — OpenAI shared-page services with a summary-omitted primary must set componentsUrl', () => {
-  // status.openai.com's summary.json OMITS core API components (Chat Completions for openai, "Codex API"
-  // for codex), so the primary statusComponentId lives only in the components.json SUPERSET. Without
-  // componentsUrl the badge can't see the primary AND the statusComponentId miss-check false-fires the
-  // migration alert every cycle (the #783 Codex regression; openai already had the fix). chatgpt's primary
-  // ("Conversations") IS in summary.json, so it intentionally does NOT need componentsUrl.
+describe('#783/#1175 — OpenAI shared-page services source their component list from components.json', () => {
+  // status.openai.com's summary.json serves only PART of the page and rotates which part, so an id
+  // resolved against it resolves or not by luck of the window. Without componentsUrl the badge can't see
+  // a component outside it AND — when the missing id is the primary — the statusComponentId miss-check
+  // false-fires the migration alert every cycle (the #783 Codex regression; openai already had the fix).
+  // #1175 — chatgpt was exempted here on the grounds that its primary ("Conversations") is in the window.
+  // That is the wrong criterion: the badge is a worst-of over ALL its statusComponentIds, so a
+  // summary.json-complete PRIMARY says nothing about the ids the badge actually reads.
   const COMPONENTS_JSON = 'https://status.openai.com/api/v2/components.json'
 
-  it.each(['openai', 'codex'])('%s sources its component list from components.json', (id) => {
+  it.each(['openai', 'codex', 'chatgpt'])('%s sources its component list from components.json', (id) => {
     const svc = SERVICES.find((s) => s.id === id)!
     expect(svc).toBeTruthy()
-    expect(svc.apiUrl).toContain('summary.json')      // overall/incidents still from summary.json
+    expect(svc.apiUrl).toContain('summary.json')
     expect(svc.componentsUrl).toBe(COMPONENTS_JSON)    // component LIST from the superset
     // the primary must be one of the worst-of statusComponentIds it scopes the badge to
     expect(svc.statusComponentIds).toContain(svc.statusComponentId)

@@ -298,9 +298,11 @@ export interface ServiceConfig {
   componentSurfaces?: string[]
   // #606 Cat B — source the breakdown's component LIST from this URL (an Atlassian/incident.io
   // `components.json`) instead of the `apiUrl` summary.json. Needed when a shared status page
-  // exposes more components in components.json than summary.json (e.g. status.openai.com:
-  // FedRAMP, Chat Completions, the separate API Login). Status/incidents/uptime still come from
-  // summary.json; only resolveSvcComponents reads this. Falls back to summary.json on fetch error.
+  // exposes more components in components.json than summary.json. NOT display-only: the resolved list is what
+  // the badge worst-of resolves `statusComponentIds` against, so a service whose ids the summary.json
+  // window serves only in part badges on a subset without it (#1175) —
+  // `grep breakdownComponents worker/src/services.ts` for the full consumer set. Falls back to
+  // summary.json on fetch error.
   componentsUrl?: string
   // A list is a worst-of (min) across the components — for a page whose only components are
   // per-region endpoints and which publishes no group aggregate (turbopuffer, #857). Unlike
