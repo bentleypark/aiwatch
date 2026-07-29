@@ -2,7 +2,7 @@
 // Used by cronAlertCheck in index.ts
 
 import { buildGroupedFallbackText, API_TIER } from './fallback'
-import { sanitize, formatDuration, appendStatusHint, isNonReliabilityAdvisory } from './utils'
+import { sanitize, formatDuration, appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 import { XAI_REGION_RE } from './xai-regions'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
@@ -338,8 +338,8 @@ export interface AlertCandidate {
   advisory?: boolean
 }
 
-/** #1106 — this alert must never produce outage PROMOTION tooling (tweet draft, viral-reply search,
- *  reply draft). Both cases are "AIWatch is not claiming an outage is happening right now": an
+/** #1106 — this alert must never produce outage PROMOTION tooling. See its call sites for who gates on
+ *  it. NOT gated: the #778 phone push (`pushTargetFor`), which filters on `impact != null`. Both cases are "AIWatch is not claiming an outage is happening right now": an
  *  advisory (#1021) never was one, a withdrawal (#1106) is the provider taking the claim back.
  *  Drafting "X is having an outage" off either would be factually false at the moment it is posted.
  *
@@ -1400,6 +1400,158 @@ export function appendTweetSearchSection(
     const more = searches.length - fit.length
     return `${description}${prefix}${fit.join(' · ')}${more > 0 ? ` · +${more} more` : ''}`
   }
+  return build(true) ?? build(false) ?? description
+}
+
+// #1182 — operator-only Reddit engagement links, the Reddit twin of the #777 X-search block above.
+//
+// Why LINKS and not a search the Worker runs: #1138 wants the Worker to fetch Reddit and pick the
+// threads. It cannot — from the CF edge the unauthenticated listing feeds mostly return Reddit's
+// per-IP 429 and `search.json` is a flat 403. The Worker's egress IP is shared with other Cloudflare
+// tenants, so the limit is not ours to back off from. A link the OPERATOR opens in a browser is
+// subject to none of this, so this block is pure string-building: no fetch, no auth, no rate limit,
+// unaffected by #820's Data API approval.
+//
+// The subreddits below were measured, not assumed, and two high-volume BOT MIRRORS are deliberately
+// excluded — ranking by raw hit count would have put a zero-human mirror first (pinned in
+// reddit-engage.test.ts). Both measurements, with their dates and denominators, live in ONE place:
+// docs/marketing-playbook.md §Reddit. They were written out three times and drifted twice.
+//
+// TWO LIMITS THIS BLOCK DOES NOT SOLVE, both stated because silence would read as coverage:
+//  1. A sub's own rules may remove the very threads these links search for — r/ChatGPT Rule 2 names
+//     "Is ChatGPT down?" posts for removal, and a removed post drops out of the listings.
+//     Whether it also drops out of SEARCH results is not measured, and every link here is a
+//     search URL — so treat an F5Bot alert, which reads the posting stream, as the primary entry.
+//     See the playbook's "Removed posts" section.
+//  2. Scope under-coverage is invisible. A service in NEITHER this map nor TWEET_SEARCH_TERMS
+//     renders no block, forever, with no signal — the scope-parity test passes when both maps are
+//     equally wrong. Adding a surface here is a deliberate act.
+//
+// Keys are exactly TWEET_SEARCH_TERMS' keys (pinned by a scope-parity test) — the same surfaces that
+// spawn viral "is X down" posts — and the search phrase is reused from there so the two channels can
+// never drift apart. Max 3 subs per service keeps the block scannable and its share of the 4096-char
+// embed budget small; it is not related to the playbook's per-outage POSTING cap, which limits
+// actions taken, not links shown.
+export const REDDIT_ENGAGE_SUBS: Record<string, readonly string[]> = {
+  claude: ['ClaudeAI', 'Anthropic', 'claude'],
+  claudeai: ['ClaudeAI', 'claude', 'ClaudeHomies'],
+  claudecode: ['ClaudeCode', 'ClaudeAI'],
+  openai: ['OpenAI', 'ChatGPT'],
+  chatgpt: ['ChatGPT', 'ChatGPTcomplaints'],
+  codex: ['codex', 'OpenAI'],
+  gemini: ['GeminiAI', 'GoogleGeminiAI'],
+}
+
+const REDDIT_BASE = 'https://www.reddit.com'
+
+/** Scoped in-sub search, newest first, last 24h — the operator opens this in a browser, which is why
+ *  the 403/429 that block the Worker's own fetch do not apply. */
+export function buildRedditSearchUrl(subreddit: string, term: string): string {
+  return `${REDDIT_BASE}/r/${subreddit}/search/?q=${encodeURIComponent(term)}&restrict_sr=1&sort=new&t=day`
+}
+
+/** All-of-Reddit search. The measured long tail is why this exists: of 82 subreddits carrying outage
+ *  posts, most contributed 1–2 hits from communities no fixed list would ever carry (r/UAE, r/nairobi,
+ *  r/teenagers, r/Btechtards, r/EngineeringStudents…). A sub list cannot cover that tail; this can. */
+export function buildRedditAllSearchUrl(term: string): string {
+  return `${REDDIT_BASE}/search/?q=${encodeURIComponent(term)}&sort=new&t=day`
+}
+
+export interface RedditEngageTarget {
+  serviceId: string
+  serviceName: string
+  /** The phrase searched — shared with the X block via TWEET_SEARCH_TERMS. */
+  term: string
+  subs: { subreddit: string; url: string }[]
+  allRedditUrl: string
+  /** UTM-tagged is-down link to paste in the reply. NOT optional: the link is the only reason the
+   *  block exists (without it a Reddit click lands in `(direct)` and the #270 channel measures zero),
+   *  so a service with no is-down slug is SKIPPED rather than rendered link-less — #970's lesson that
+   *  an optional field on a derived record re-empties silently, made a type error instead. */
+  replyLink: string
+}
+
+/**
+ * Build one engagement target per in-scope service the alert covers, mirroring buildTweetSearches'
+ * svcIds resolution (#545 svcIds → merged keys → legacy key-tail). It dedupes by service id, where the sibling dedupes by URL. Empty
+ * when the alert covers no in-scope service, and empty for a non-outage alert.
+ *
+ * The non-outage gate is the load-bearing part: handing the operator "go find the outage threads"
+ * links during an advisory (#1021) or a withdrawal (#1106) invites confirming an outage that is not
+ * happening. */
+export function buildRedditEngageTargets(alert: AlertCandidate, services: ScoredService[]): RedditEngageTarget[] {
+  const kind = kindFromKey(alert.key)
+  if (!kind) return []
+  // #1021 advisory / #1106 withdrawal — same gate as the tweet draft + X-search block.
+  if (isNonOutageAlert(alert, kind)) return []
+  const keys = alert._mergedKeys ?? [alert.key]
+  const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
+  const out: RedditEngageTarget[] = []
+  const seen = new Set<string>()
+  for (const id of svcIds) {
+    const subs = REDDIT_ENGAGE_SUBS[id]
+    const term = TWEET_SEARCH_TERMS[id]
+    if (!subs || !term) continue // not an in-scope service
+    if (seen.has(id)) continue
+    seen.add(id)
+    const slug = SERVICE_ID_TO_SLUG[id]
+    if (!slug) {
+      // Scoped diagnostic rather than a half-rendered block: the scope test pins that every keyed id
+      // has a slug, so reaching this means the slug map changed under us and the operator would
+      // otherwise get "go find the threads" links with nothing to paste.
+      console.warn('[alerts] #1182 no is-down slug — skipping reddit target:', id)
+      continue
+    }
+    const svc = services.find((s) => s.id === id)
+    out.push({
+      serviceId: id,
+      serviceName: svc ? svc.name : id,
+      term,
+      subs: subs.map((s) => ({ subreddit: s, url: buildRedditSearchUrl(s, term) })),
+      allRedditUrl: buildRedditAllSearchUrl(term),
+      // #548 — utm_source=reddit is what attributes the click to the Reddit channel in the
+      // outage-audience classifier; `?e=reddit` namespaces the social-card unfurl (#539). Same
+      // construction formatRedditAlert uses, so both Reddit surfaces tag identically.
+      replyLink: appendUtm(appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, 'reddit'), 'reddit'),
+    })
+  }
+  return out
+}
+
+/** The playbook's posting caps, rendered INSIDE the block rather than left in the doc: this section
+ *  hands the operator several links at the exact moment the temptation to use all of them is highest,
+ *  and the cap is what keeps the account out of Reddit's spam filters. */
+const REDDIT_LIMIT_LINE = '⚖️ 1 link-comment per thread · 2 per sub per outage · 1 post per sub / 7d'
+
+/**
+ * Append the operator-only Reddit block. Length-guarded against the Discord 4096 description cap:
+ * nothing is emitted unless it fits, so the block can never cost
+ * the alert itself.
+ *
+ * Degrades once: drop the per-sub links (the all-Reddit search alone still
+ * reaches the measured 82-sub tail), and if that still does not fit, drop the section. The caps line is never traded away: it is
+ * what keeps the account out of Reddit's spam filters, so buying room by removing it is the wrong
+ * trade.
+ */
+export function appendRedditSection(description: string, targets: RedditEngageTarget[], div: string): string {
+  if (targets.length === 0) return description
+  const SAFETY = 16
+  const cap = DISCORD_EMBED_DESC_MAX - SAFETY
+  const header = `\n${div}\n🧵 **FIND REDDIT THREADS TO REPLY TO**`
+
+  const build = (withSubs: boolean): string | null => {
+    const body = targets
+      .map((t) => {
+        const subLinks = withSubs ? t.subs.map((s) => `[r/${s.subreddit}](${s.url})`).join(' · ') + ' · ' : ''
+        // #535 — defuse a domain-shaped service name ("claude.ai") so Discord doesn't unfurl a
+        // thumbnail into the operator embed.
+        return `\n→ ${defuseAutolinkDomain(t.serviceName)}: ${subLinks}[all of Reddit](${t.allRedditUrl})\n   🔗 ${t.replyLink}`
+      })
+      .join('')
+    const full = `${header}${body}\n${REDDIT_LIMIT_LINE}`
+    return description.length + full.length <= cap ? description + full : null
+  }
+
   return build(true) ?? build(false) ?? description
 }
 

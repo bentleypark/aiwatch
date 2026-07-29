@@ -123,20 +123,27 @@ Reddit communities discuss AI outages in real time. AIWatch is useful in those t
 
 ### Subreddit list
 
-| Subreddit | Relevant when | Cron coverage |
-|---|---|---|
-| r/ClaudeAI | Claude outage | ✅ outage mode |
-| r/ChatGPT | OpenAI / ChatGPT outage | ✅ outage mode |
-| r/OpenAI | OpenAI outage | ✅ outage mode |
-| r/LocalLLaMA | Discussion already cites API reliability as a local-vs-hosted argument | ✅ outage mode |
-| r/AINews | Major outage with journalist coverage | ✅ outage mode |
-| r/MachineLearning | Out of scope for outage engagement | ❌ not monitored by cron — check manually |
+**The per-service list is not reproduced here.** During an outage the operator does not read this file — the Discord incident alert hands them the subreddit links directly (#1182). A copy of either code list in this table would drift the first time that list is edited, and nothing would catch it.
 
-Before posting or commenting in any of these, **read the sub's rules page** — `/about/rules/`, and the sidebar too, since the two renderings can differ (they do on r/ChatGPT) — and check what it says about outage posts and about self-advertising. Rule changes are not tracked here, so read it again even if you read it last time.
+Two subs carry engagement value that the per-service map does not express, so they are listed rather than mapped:
 
-> **Status (2026-07-28): the 🎯 PROMOTE alerts below are not being delivered.** Reddit's public search endpoint returns 403 to the Worker's unauthenticated requests (observed 2026-06-29, #820). The OAuth fix (PR #1136) is written and MERGEABLE with no GitHub review since it was opened 2026-07-23 — **merging is not what is blocked**: without credentials the Reddit monitor fail-soft skips, and obtaining those credentials is what waits on the Reddit Data API access approval. Treat every `✅ outage mode` in the table as *intended* coverage, not live coverage, until an outage-mode Discord alert is actually seen. (The daily summary's `📢 Reddit` count does not settle it — it counts live `reddit:seen:*` keys across the competitive and security modes too.)
+| Subreddit | Relevant when |
+|---|---|
+| r/LocalLLaMA | Discussion already cites API reliability as a local-vs-hosted argument |
+| r/AINews | Major outage with journalist coverage |
 
-**Cron coverage caveat.** Which subs the cron watches, which titles it tags `🎯 PROMOTE`, and the age window it applies are defined in `worker/src/reddit.ts` and pinned by its unit tests — read them there rather than trusting a copy here. r/MachineLearning is deliberately out of scope.
+**How the engagement list was chosen (2026-07-29).** 12 quoted outage phrases via Reddit search over a year, 584 results scanned, 463 kept after requiring both an outage word and an AI-service word in the *title*, tallied by subreddit: **82 distinct subs**. Two caveats that came out of it:
+
+- **Two high-volume subs are bot mirrors and are deliberately excluded.** r/Claude_reports ranked **first** by raw hits — and 25 of its 25 newest posts are by `ClaudeAI-mod-bot`, mean **0.0** comments. r/outagealerts is 23/25 by `isdownapp`, a competitor's feed. Ranking subs by hit count alone puts a zero-human mirror at the top; check author concentration and comments-per-post before adding any sub here.
+- **The tail is most of the volume and no list can hold it.** Most of the 82 subs contributed one or two posts from communities this table would never carry — r/UAE, r/nairobi, r/teenagers, r/Btechtards, r/EngineeringStudents. This is why the keyword alerting below is the primary discovery method and the sub list is the fallback, not the reverse.
+
+Before posting or commenting in any of these, **read the sub's rules page** — `/about/rules/`, and the sidebar too, since the two renderings can differ (they do on r/ChatGPT) — and check what it says about outage posts and about self-advertising. Rule changes are not tracked here, so read it again even if you read it last time. Being listed above is not clearance to post.
+
+> **Status (2026-07-29): the 🎯 PROMOTE alerts are not being delivered.** Reddit's public search endpoint returns 403 to the Worker's unauthenticated requests (observed 2026-06-29, #820). The OAuth fix (PR #1136) is written and MERGEABLE with no GitHub review since it was opened 2026-07-23 — **merging is not what is blocked**: without credentials the Reddit monitor fail-soft skips, and obtaining those credentials is what waits on the Reddit Data API access approval. Assume no cron Reddit coverage until an outage-mode Discord alert is actually seen. (The daily summary's `📢 Reddit` count does not settle it — it counts live `reddit:seen:*` keys across the competitive and security modes too.)
+>
+> **Auth is not the only obstacle (measured 2026-07-29).** From the Cloudflare edge (`wrangler dev --remote`, production UA, 00:19–00:33 UTC), the *unauthenticated* listing feeds that need no approval also fail: counting only `www.reddit.com` listing-feed requests, **4 of 18 succeeded (~22%)** — per endpoint on r/ChatGPT, `/new/.rss` 1/5 and `/comments/.rss` 1/8. Spacing requests to one per 60s did not recover it. The 429 body is Reddit's per-IP limiter, and the Worker shares its egress IP with other Cloudflare tenants, so the limit is not ours to back off from. The #1182 alert links exist because a link the operator opens in a browser is subject to none of this.
+
+**Cron coverage caveat.** Which subs the cron watches, which titles it tags `🎯 PROMOTE`, and the age window it applies are defined in `worker/src/reddit.ts` and pinned by its unit tests — read them there rather than trusting a copy here. r/MachineLearning is deliberately out of scope. The operator alert's link list (`REDDIT_ENGAGE_SUBS`, #1182) is separate from the cron's scan list and needs no Reddit access, so it works while the scan does not.
 
 ### When to engage
 
@@ -168,7 +175,7 @@ Adapt to the specific thread — never copy-paste verbatim across subreddits.
 
 ```
 Author here (I built AIWatch) — it's down for everyone, just pulled this from
-AIWatch (ai-watch.dev/is-claude-down?utm_source=reddit):
+AIWatch (ai-watch.dev/is-claude-api-down?utm_source=reddit):
 
 - Status: Down (confirmed [HH:MM UTC — pull from dashboard])
 - Early RTT signal: [X minutes — ONLY if the dashboard shows one] — our probe
@@ -180,9 +187,9 @@ Fallback recommendation from the dashboard: [top 1-2 fallbacks by Score].
 Source is open — happy to explain how the detection works if anyone's curious.
 ```
 
-Link to the **specific service page** (`/is-claude-down`, `/is-openai-down`, etc.), **never** the homepage. The homepage link looks like spam; the service page is the contextually useful answer.
+Link to the **specific service page** (`/is-claude-api-down`, `/is-openai-api-down`, etc. — after #1164 the bare `/is-claude-down` is the provider-FAMILY page; the Discord alert already hands you the right one), **never** the homepage. The homepage link looks like spam; the service page is the contextually useful answer.
 
-**Always append `?utm_source=reddit`** to the link — it is what reliably attributes the visit to the Reddit channel in AIWatch's audience classifier (`worker/src/outage-audience.ts`); without the tag the visit may not be counted as Reddit at all. One clean `?utm_source=reddit` is all the link needs — no other UTM params are required.
+**Always append `?utm_source=reddit`** to the link — it is what reliably attributes the visit to the Reddit channel in AIWatch's audience classifier (`worker/src/outage-audience.ts`); without the tag the visit may not be counted as Reddit at all. Paste the link the Discord alert gives you as-is; hand-built links need `?utm_source=reddit` at minimum.
 
 A genuine early-RTT signal is **rare** (most incidents are component/connector degradations that don't spike the probed endpoint's RTT, and status-page detection is structurally bounded by polling lag — #464). If the dashboard does not show one, **drop the line entirely** rather than guess or claim "ahead of official." The rest of the template still stands — confirmed outage + AI analysis + fallback recs are useful on their own. Never frame AIWatch as "faster than the official status page" as a blanket claim; the verifiable pillars are independent detection (MTTD) + RTT degradation that status pages don't report.
 

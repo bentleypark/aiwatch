@@ -25,8 +25,10 @@ export interface RedditAlert {
 
 // Subreddit → search keywords mapping.
 // service value semantics: '_competitive' / '_security' → those modes; anything else → outage mode.
-// Exported for tests — presence/mode assertions enforce that the playbook's engagement list
-// stays in sync with the cron (#280).
+// Exported for tests — presence/mode assertions pin the named subs in outage mode (#280). They do
+// NOT read the playbook: #1182 removed the playbook's per-sub cron column (a prose mirror of this
+// list), so nothing is being kept "in sync" with a doc. Note this is the CRON's scan list; the
+// operator alert's link list is a separate map, REDDIT_ENGAGE_SUBS in alerts.ts.
 export const REDDIT_TARGETS: ReadonlyArray<{ subreddit: string; service: string }> = [
   // Service-specific subreddits (outage detection + promotion)
   { subreddit: 'ClaudeAI',        service: 'Claude' },
