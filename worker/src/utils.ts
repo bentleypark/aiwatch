@@ -173,6 +173,29 @@ export async function resetFetchFailure(kv: KVLike | undefined, svcId: string): 
  *  is a structural block (URL/IP), not a transient blip. */
 export const PERSISTENT_FAILURE_THRESHOLD_MS = 3_600_000 // 1h
 
+/**
+ * Pure: has a condition first observed at `sinceIso` persisted for >= `thresholdMs`?
+ *
+ * Frequency-INDEPENDENT — it keys off a first-observation wall-clock timestamp, not a count of
+ * polling cycles. That property is the whole point: `fetchAllServices` runs on every `/api/status`
+ * request (60s browser polling), as well as the cron when its snapshot is stale, so a
+ * consecutive-cycle counter measures traffic, not duration. Absent/unparseable timestamp → false:
+ * it never alerts off a garbage timestamp (the caller is responsible for repairing the record).
+ *
+ * Two named callers share this: #500 persistent status-page failure and #1179 partial component
+ * resolve. Extracted at the second one rather than copied.
+ */
+export function elapsedAtLeast(
+  sinceIso: string | null | undefined,
+  nowMs: number,
+  thresholdMs: number,
+): boolean {
+  if (!sinceIso) return false
+  const sinceMs = new Date(sinceIso).getTime()
+  if (isNaN(sinceMs)) return false
+  return nowMs - sinceMs >= thresholdMs
+}
+
 /** Pure decision: has the status page been continuously unreachable for >= threshold? Frequency-
  *  independent — keys off the first-failure wall-clock timestamp, not a count of polling cycles. */
 export function shouldAlertPersistentFailure(
@@ -180,10 +203,7 @@ export function shouldAlertPersistentFailure(
   nowMs: number,
   thresholdMs: number = PERSISTENT_FAILURE_THRESHOLD_MS,
 ): boolean {
-  if (!sinceIso) return false
-  const sinceMs = new Date(sinceIso).getTime()
-  if (isNaN(sinceMs)) return false
-  return nowMs - sinceMs >= thresholdMs
+  return elapsedAtLeast(sinceIso, nowMs, thresholdMs)
 }
 
 /** Operator Discord alert body for a persistent (structural) status-page block (#500). */
@@ -236,6 +256,230 @@ export async function detectComponentMismatches(
     results.push({ ...svc, missCount, alertKey })
   }
   return results
+}
+
+// ── Partial `statusComponentIds` resolve (#1179) ────────────────────────────────────────────────
+//
+// `resolveSvcStatus` drops the configured ids it cannot find and badges off the survivors, so its
+// return value cannot say that it judged only some of them — and the #135 alert cannot see it,
+// because that path watches the primary `statusComponentId` only. Rationale, and why this is not an
+// extension of #135: docs/reference/discord-alert-paths.md.
+//
+// The record is REFRESHED while the drift is live and EXPIRES on its own; nothing deletes it. A
+// design that cleared on the first clean cycle could not fire on a flapping `components.json` at
+// all, because every clean poll reset a clock the previous partial poll had just started.
+
+export const PARTIAL_RESOLVE_THRESHOLD_MS = 6 * 3_600_000
+/** Minimum gap between refresh writes for one service, so a drift does not write on every poll. A
+ *  cycle in which every id resolves neither reads nor writes. */
+export const PARTIAL_RESOLVE_REFRESH_MS = 10 * 60_000
+/** A record not refreshed for this long is not evidence of a live drift and must not page. Above the
+ *  worst-case gap between two `fetchAllServices` runs — the cron re-fetches on a >10min-stale
+ *  snapshot, so ~15min — with room for a missed cycle. */
+export const PARTIAL_RESOLVE_STALE_MS = 40 * 60_000
+/**
+ * Expiry is what retires a record once reports stop. It is ALSO the longest gap between two reports
+ * that still counts as one condition: further apart than this and the record expires between them,
+ * so `since` restarts. Both directions bite, which is why it sits just above
+ * PARTIAL_RESOLVE_THRESHOLD_MS rather than far above it — below, a real-but-sparse drift could never
+ * reach the threshold at any duration; well above, two isolated blips hours apart merge into one
+ * reported span.
+ */
+export const PARTIAL_RESOLVE_TTL_S = 7 * 3600
+
+/**
+ * `since` — when the service was FIRST seen resolving incompletely, preserved across every refresh.
+ * `updatedAt` — the most recent cycle that observed it, which is what makes "still happening"
+ * decidable. `missing` — the union of every id seen unresolved since `since` (a union, not the
+ * latest snapshot, so a page rotating which ids it serves does not rewrite the record every poll).
+ * `viaSummary` — whether the resolve was EVER observed falling back to `summary.json` on a service
+ * that configures a `componentsUrl`, i.e. a recorded #1175 revert rather than a guess from config.
+ * Monotone within a record's life for the same reason `missing` is.
+ */
+export type PartialResolveEntry = { since: string; updatedAt: string; missing: string[]; viaSummary: boolean }
+
+const partialResolveKey = (svcId: string) => `component-partial:${svcId}`
+
+/**
+ * Pure: parse a stored record. Returns null on absent/corrupt/wrong-shape/empty-`missing`, and on a
+ * `since` or `updatedAt` that is not a parseable date — that last one matters: `elapsedAtLeast`
+ * would answer false on a bad timestamp forever while the refresh throttle declined to rewrite it,
+ * so one bad value would make the service permanently unalertable. Null makes the next partial cycle
+ * write a fresh record instead, so the record self-heals.
+ *
+ * Every rejection warns. Silently dropping a record is the failure mode this mechanism exists to
+ * remove, so it must not be reintroduced in the mechanism's own parser.
+ */
+export function parsePartialResolve(raw: string | null, svcId?: string): PartialResolveEntry | null {
+  if (!raw) return null
+  const reject = (why: string): null => {
+    console.warn(`[partial-resolve] discarding ${svcId ?? 'unknown'}'s component-partial record (${why}) — the ${PARTIAL_RESOLVE_THRESHOLD_MS / 3_600_000}h clock restarts: ${raw.slice(0, 120)}`)
+    return null
+  }
+  let parsed: Partial<PartialResolveEntry>
+  try {
+    parsed = JSON.parse(raw) as Partial<PartialResolveEntry>
+  } catch {
+    return reject('unparseable JSON')
+  }
+  if (typeof parsed?.since !== 'string' || !Array.isArray(parsed.missing)) return reject('wrong shape')
+  // `updatedAt` defaults to `since` so a record written before this field existed still reads.
+  const updatedAt = typeof parsed.updatedAt === 'string' ? parsed.updatedAt : parsed.since
+  if (!Number.isFinite(new Date(parsed.since).getTime())) return reject('unparseable `since`')
+  if (!Number.isFinite(new Date(updatedAt).getTime())) return reject('unparseable `updatedAt`')
+  const missing = parsed.missing.filter((id): id is string => typeof id === 'string')
+  if (missing.length === 0) return reject('no usable missing ids')
+  if (missing.length !== parsed.missing.length) {
+    console.warn(`[partial-resolve] ${svcId ?? 'unknown'}'s record carried ${parsed.missing.length - missing.length} non-string id(s); they were dropped rather than rendered into an alert`)
+  }
+  return { since: parsed.since, updatedAt, missing, viaSummary: parsed.viaSummary === true }
+}
+
+/** Pure: is every id in `next` already in `prev`? When true the stored union needs no growth. */
+export function coversIdSet(prev: string[], next: string[]): boolean {
+  const have = new Set(prev)
+  return next.every((id) => have.has(id))
+}
+
+/** Pure: the stored union plus anything newly unresolved, in a stable (sorted) order. */
+export function unionIds(prev: string[], next: string[]): string[] {
+  return [...new Set([...prev, ...next])].sort()
+}
+
+/**
+ * Pure: given the stored record (or null) and this cycle's observation, the record to write — or
+ * `null` for "nothing to write this cycle". Split out from the KV plumbing so the write-bound rule,
+ * which is the whole reason this mechanism is affordable, is directly testable.
+ *
+ * Writes on: a first sighting, a newly-unresolved id, a first observed `summary.json` fallback, or
+ * the refresh throttle elapsing. `since` and the monotone `missing`/`viaSummary` all survive; only
+ * `updatedAt` moves. (The throttle is evaluated against the `updatedAt` this cycle READ, so
+ * concurrent readers of a not-yet-visible write can each refresh once — it bounds the cadence, not
+ * the exact count.)
+ */
+export function nextPartialResolveEntry(
+  prev: PartialResolveEntry | null,
+  missing: string[],
+  viaSummary: boolean,
+  nowMs: number,
+): PartialResolveEntry | null {
+  const nowIso = new Date(nowMs).toISOString()
+  if (!prev) return { since: nowIso, updatedAt: nowIso, missing: [...missing].sort(), viaSummary }
+  const grewMissing = !coversIdSet(prev.missing, missing)
+  const grewViaSummary = viaSummary && !prev.viaSummary
+  const dueForRefresh = elapsedAtLeast(prev.updatedAt, nowMs, PARTIAL_RESOLVE_REFRESH_MS)
+  if (!grewMissing && !grewViaSummary && !dueForRefresh) return null
+  return {
+    since: prev.since,
+    updatedAt: nowIso,
+    missing: unionIds(prev.missing, missing),
+    viaSummary: prev.viaSummary || viaSummary,
+  }
+}
+
+/**
+ * Record that this cycle resolved a service's badge from an incomplete component list.
+ *
+ * Call ONLY on a genuine partial resolve. There is deliberately no "clear" call: a clean cycle does
+ * nothing at all (no read, no write, so the steady state is free), and the record retires by TTL
+ * once refreshes stop. Clearing eagerly is what made an earlier revision of this unable to fire on a
+ * flapping `components.json`.
+ *
+ * Fails CLOSED on a KV read fault. Treating a rejected `get` as "no record" would rewrite `since` to
+ * now on every failing cycle — the clock could never mature, the alert would never fire, and the
+ * write bound would be lost. Same posture as the #992 detector's `component-seen` read.
+ */
+export async function trackPartialResolve(
+  kv: KVLike | undefined,
+  svcId: string,
+  missing: string[],
+  nowMs: number,
+  viaSummary = false,
+): Promise<void> {
+  if (!kv || missing.length === 0) return
+  const key = partialResolveKey(svcId)
+  let readFailed = false
+  const raw = await kv.get(key).catch((err) => {
+    readFailed = true
+    console.warn(`[partial-resolve] KV read failed for ${svcId} — skipping this cycle, clock NOT restarted:`, err instanceof Error ? err.message : err)
+    return null
+  })
+  if (readFailed) return
+  const entry = nextPartialResolveEntry(parsePartialResolve(raw, svcId), missing, viaSummary, nowMs)
+  if (!entry) return
+  const wrote = await kvPut(kv, key, JSON.stringify(entry), { expirationTtl: PARTIAL_RESOLVE_TTL_S })
+  if (!wrote) {
+    console.error(`[partial-resolve] could not record ${svcId}'s partial resolve — the ${PARTIAL_RESOLVE_THRESHOLD_MS / 3_600_000}h alert clock did not start or advance (missing: ${missing.join(', ')})`)
+  }
+}
+
+/**
+ * Which services have been resolving incompletely for >= the threshold and are STILL doing so, with
+ * no live alert dedup. Mirrors `detectComponentMismatches`' shape (the cron sends + writes `alertKey`).
+ *
+ * The two reads take deliberately opposite postures. A fault on the RECORD read is reported and
+ * skips the service — treating it as "no drift" would silently disarm the alert this whole mechanism
+ * is. A fault on the DEDUP read is fail-open: it re-pages rather than dropping the page, so it is
+ * also reported, since a read that keeps faulting re-pages every cron tick.
+ */
+export async function detectPartialResolves(
+  services: { id: string; name: string }[],
+  kv: KVLike,
+  nowMs: number,
+  thresholdMs = PARTIAL_RESOLVE_THRESHOLD_MS,
+): Promise<{ id: string; name: string; since: string; missing: string[]; viaSummary: boolean; alertKey: string }[]> {
+  const results: { id: string; name: string; since: string; missing: string[]; viaSummary: boolean; alertKey: string }[] = []
+  for (const svc of services) {
+    // The `.catch` is load-bearing twice over: it stops one faulting key from rejecting the whole
+    // cron pass (this runs at the top level of `cronAlertCheck`, ahead of the #992 detector), and it
+    // reports the fault, which a bare `?? null` would not. Returning null then skips the service via
+    // the `!entry` guard below — no separate flag, which would be a branch no mutation can reach.
+    const raw = await kv.get(partialResolveKey(svc.id)).catch((err) => {
+      console.error(`[partial-resolve] KV read failed for ${svc.id} — cannot tell a drift record from none, so it is UNCHECKED this cycle:`, err instanceof Error ? err.message : err)
+      return null
+    })
+    const entry = parsePartialResolve(raw, svc.id)
+    if (!entry) continue
+    if (!elapsedAtLeast(entry.since, nowMs, thresholdMs)) continue
+    // Still live? A record whose last observation is old means the drift stopped (or polling did);
+    // TTL will retire it shortly, and until then it must not page.
+    if (elapsedAtLeast(entry.updatedAt, nowMs, PARTIAL_RESOLVE_STALE_MS)) continue
+    const alertKey = `alerted:component-partial:${svc.id}`
+    const alreadyAlerted = await kv.get(alertKey).catch((err) => {
+      console.warn(`[partial-resolve] dedup read failed for ${svc.id} — paging again rather than dropping it; a repeating fault here re-pages every cron tick:`, err instanceof Error ? err.message : err)
+      return null
+    })
+    if (alreadyAlerted) continue
+    results.push({ ...svc, since: entry.since, missing: entry.missing, viaSummary: entry.viaSummary, alertKey })
+  }
+  return results
+}
+
+/**
+ * Operator Discord body for a persistent partial resolve (#1179).
+ *
+ * Every claim is scoped to the window, because the record is a union over it: `missing` lists every
+ * id seen unresolved since `since`, so some may be resolving again right now — the body says so
+ * rather than asserting a present-tense blind spot for all of them, which would invite the operator
+ * to delete a healthy id from the config.
+ *
+ * The `viaSummary` line is likewise a window claim, gated on the OBSERVATION recorded at resolve
+ * time rather than on the presence of a `componentsUrl` in config: a provider deleting one id from a
+ * perfectly readable `components.json` produces the same missing set, and sending the operator to
+ * debug a working fetch would be the wrong root cause.
+ */
+export function formatPartialResolveAlert(
+  serviceName: string,
+  missing: string[],
+  sinceIso: string,
+  nowMs: number,
+  viaSummary: boolean,
+): string {
+  const elapsedH = Math.floor((nowMs - new Date(sinceIso).getTime()) / 3_600_000)
+  const cause = viaSummary
+    ? `\n\nAt least once in that window it resolved off \`summary.json\` despite configuring a \`componentsUrl\` — check whether that read is failing, which would mean the #1175 fix has reverted.`
+    : ''
+  return `⚠️ **${serviceName}** has been resolving its badge from an INCOMPLETE component list since **${elapsedH}h+** ago.\n\n\`statusComponentIds\` seen unresolved in that window (some may resolve again intermittently): ${missing.map((id) => `\`${id}\``).join(', ')}\n\nWhile an id is unresolved the badge is a worst-of over the others, so an outage on it reads as operational.${cause}\n\n**Action**: check the provider's component list and reconcile \`worker/src/services.ts\`.`
 }
 
 /**

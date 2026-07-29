@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure } from './parse-failure-log'
-import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut, isNonReliabilityAdvisory } from './utils'
+import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, kvPut, isNonReliabilityAdvisory } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
@@ -2010,12 +2010,36 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           await resetComponentMiss(kv, config.id)
         }
       }
-      if (config.statusComponentIds && breakdownComponents) {
-        const missing = config.statusComponentIds.filter(
-          (id) => id !== config.statusComponentId && !breakdownComponents!.some((c) => c.id === id),
-        )
+      // #1179 — the SECONDARY ids get their own operator path, because a partial resolve is exactly
+      // what neither existing signal sees: `resolveSvcStatus` badges off the survivors without saying
+      // so, and the #135 check above only watches the primary. `missing` is computed against the same
+      // `breakdownComponents` the badge resolved from, so it IS the set that was silently dropped —
+      // no separate resolution logic. The primary is excluded from it because #135 already pages for
+      // that id.
+      //
+      // The ALERT is raised only when at least one configured id actually resolved. `anyResolved` is
+      // over the FULL id list, primary included, because that is exactly the condition
+      // `resolveSvcStatus` branches on: with nothing matched it returns the page's overall indicator
+      // instead of a worst-of, so there is no narrowed badge to describe. (`missing` cannot stand in
+      // for it — it omits the primary, so "nothing resolved" and "everything but the primary
+      // resolved" produce the same list.) The WARN is not gated on it: enumerating the ids we could
+      // not find is useful in both cases, and for most of these services it is the only enumeration
+      // there is.
+      //
+      // There is no "clear" call: `trackPartialResolve` REPORTS a live partial resolve, and a cycle
+      // with nothing to report says nothing. The record retires by TTL once reports stop.
+      if (config.statusComponentIds && config.statusComponentIds.length > 0) {
+        const resolves = (id: string) => (breakdownComponents ?? []).some((c) => c.id === id)
+        const missing = config.statusComponentIds.filter((id) => id !== config.statusComponentId && !resolves(id))
         if (missing.length > 0) {
           console.warn(`[fetchService] ${config.id} additional component ids missing: ${missing.join(', ')}`)
+        }
+        const anyResolved = config.statusComponentIds.some(resolves)
+        if (anyResolved && missing.length > 0) {
+          // OBSERVED, not inferred from config: the badge resolved off the summary window, which is the
+          // real #1175 revert signal rather than a guess the alert would otherwise have to make.
+          const viaSummary = Boolean(config.componentsUrl) && breakdownComponents === summaryData.components
+          await trackPartialResolve(kv, config.id, missing, Date.now(), viaSummary)
         }
       }
       // #606 — drift signal for the display-only breakdown list. These services have no
@@ -2628,6 +2652,15 @@ export const CACHE_KEY = 'services:latest'
 /** Service IDs that use statusComponentId — used by cron for component mismatch alerts */
 export const COMPONENT_ID_SERVICES: { id: string; name: string; statusComponentId: string }[] =
   SERVICES.filter((s) => s.statusComponentId).map((s) => ({ id: s.id, name: s.name, statusComponentId: s.statusComponentId! }))
+
+/** #1179 — services whose badge is a worst-of over `statusComponentIds`, i.e. the ones that CAN
+ *  resolve partially. Derived from SERVICES so adding a service to the multi-component branch
+ *  enrolls it in the alert with no second list to keep in sync. Carries no `componentsUrl` flag:
+ *  whether a resolve actually fell back to `summary.json` is an observation `fetchService` records
+ *  on the entry, not something config can answer. */
+export const PARTIAL_COMPONENT_SERVICES: { id: string; name: string }[] =
+  SERVICES.filter((s) => s.statusComponentIds && s.statusComponentIds.length > 0)
+    .map((s) => ({ id: s.id, name: s.name }))
 
 // ── Platform grouping for quorum-based outage detection ──
 // When 70%+ of services on the same status page platform fail simultaneously,

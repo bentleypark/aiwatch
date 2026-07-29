@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
+import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, readSuppressionsFreshOrNull, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
@@ -13,7 +13,7 @@ import type { AlertCandidate } from './alerts'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
 import { restoreArchivedCalendar } from './uptime-archive'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved } from './recovery-mark'
@@ -1632,6 +1632,33 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       await kvPut(env.STATUS_CACHE, svc.alertKey, '1', { expirationTtl: 86400 })
     } catch (err) {
       console.error(`[cron] component mismatch alert failed for ${svc.id}:`, err instanceof Error ? err.message : err)
+    }
+  }
+
+  // Partial component resolve detection (#1179) — the miss alert above watches the PRIMARY
+  // statusComponentId only, so a service resolving its badge from some but not all of its configured
+  // ids reaches nobody. Time-based (6h), so a summary.json that rotates which components it serves
+  // (#1125) cannot page on a single cycle.
+  const partialNow = Date.now()
+  const partials = await detectPartialResolves(PARTIAL_COMPONENT_SERVICES, env.STATUS_CACHE, partialNow)
+  for (const svc of partials) {
+    try {
+      // Dedup marker written only on a SUCCESSFUL send — `sendDiscordAlert` returns false rather than
+      // throwing on a webhook failure, so writing unconditionally would swallow this page for 24h on
+      // a 429. Same gating as the #500 persistent-failure and #992 new-component sends; the older
+      // #135 block above predates it.
+      const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+        title: `⚠️ Partial Component Resolve: ${svc.name}`,
+        description: formatPartialResolveAlert(svc.name, svc.missing, svc.since, partialNow, svc.viaSummary),
+        color: 0xFFA500,
+      })
+      if (sent) {
+        await kvPut(env.STATUS_CACHE, svc.alertKey, '1', { expirationTtl: 86400 })
+      } else {
+        console.error(`[cron] partial resolve alert for ${svc.id} was NOT delivered — not deduped, retries next cron`)
+      }
+    } catch (err) {
+      console.error(`[cron] partial resolve alert failed for ${svc.id}:`, err instanceof Error ? err.message : err)
     }
   }
 
