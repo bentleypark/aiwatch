@@ -414,8 +414,10 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
   it('an unreadable components.json re-narrows the badge — the fix\'s failure mode', async () => {
     // With both the prefetch AND the per-service re-fetch failing there is no superset to read, so the
     // badge falls back to the window and #1175 returns for that cycle. Pinned because of HOW it degrades:
-    // the #135 miss-check inspects only the primary, which resolves here, so the operator is never paged
-    // and the drift warn is the whole signal — asserted in both directions below.
+    // the #135 miss-check inspects only the primary, which resolves here, so THAT alert stays silent —
+    // asserted in both directions below. #1179 added the operator path this case lacked (a durable
+    // `component-partial:` record → Discord after 6h); it is covered in partial-component-resolve.test.ts,
+    // and this test still pins that the #135 path is not the one that fires.
     const svc = await fetchService(CHATGPT, { ...prefetched(), componentsFetch: { ok: false } })
     expect(svc.status).toBe('operational')
     // Scoped to the ONE warn: the display-drift warn below it names the same ids, so a joined-text match
