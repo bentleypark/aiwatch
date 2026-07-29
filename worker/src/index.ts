@@ -10,7 +10,7 @@ import { serviceGroupOf } from './service-groups'
 import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
-import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
@@ -1415,7 +1415,27 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     } catch (err) {
       console.error('[cron] tweet search build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
     }
-    const operatorDescription = appendTweetSearchSection(withDrafts, searches, reply, DIV)
+    const withSearches = appendTweetSearchSection(withDrafts, searches, reply, DIV)
+    // #1182 — operator-only Reddit engagement links, appended after the X block. Same operator-only
+    // boundary (never on the per-user feed built above) and the same guard: a bug here must not abort
+    // the critical send. Pure string-building — no Reddit fetch, so unlike #1138 it does not depend on
+    // #820's Data API approval and cannot be throttled by Reddit's per-IP 429.
+    // The guard covers the RENDER too, not just the build: the dedup keys are written ~230 lines
+    // above, so a throw here would lose this alert permanently AND skip every remaining alert in
+    // `sent` (the loop has no per-alert try) along with the per-user relay and the #488 cache refresh.
+    let operatorDescription = withSearches
+    try {
+      const redditTargets = buildRedditEngageTargets(alert, scored)
+      operatorDescription = appendRedditSection(withSearches, redditTargets, DIV)
+      // The cap-drop is otherwise indistinguishable from "no targets" — same byte-identical output,
+      // no error. Without this, "why did the Reddit links stop appearing on big outages?" is
+      // unanswerable from the logs, and a merged Tier-1 alert is exactly where the budget runs out.
+      if (redditTargets.length > 0 && operatorDescription === withSearches) {
+        console.warn('[cron] #1182 reddit section dropped (embed cap):', alert.key, 'desc=', withSearches.length, 'targets=', redditTargets.length)
+      }
+    } catch (err) {
+      console.error('[cron] reddit engage build/render failed (alert still sent):', alert.key, err instanceof Error ? (err.stack ?? err.message) : err)
+    }
     const operatorSent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: defuseAutolinkDomain(alert.title),
       description: operatorDescription,

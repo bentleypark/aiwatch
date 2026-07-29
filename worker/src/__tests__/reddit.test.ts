@@ -328,24 +328,23 @@ describe('formatRedditAlert', () => {
   })
 })
 
-describe('REDDIT_TARGETS — playbook coverage (#280)', () => {
-  // Locks the playbook Subreddit list ↔ cron coverage mapping. If this table diverges from
-  // docs/marketing-playbook.md, either update this test or the playbook — whichever reflects
-  // the intent. Do not silently drop a playbook engagement target.
+describe('REDDIT_TARGETS — outage-mode scan targets (#280)', () => {
+  // Locks a hardcoded subset of REDDIT_TARGETS in outage mode. It does not read the playbook —
+  // #1182 deleted the playbook's per-sub cron column because nothing pinned it. So this guards
+  // against silently dropping a scan target, not against doc drift.
   const modeOf = (service: string) =>
     service === '_competitive' ? 'competitive'
       : service === '_security' ? 'security' : 'outage'
 
-  it('includes all playbook engagement targets in outage mode', () => {
+  it('keeps the named subs in outage mode', () => {
     const subsInOutageMode = REDDIT_TARGETS
       .filter(t => modeOf(t.service) === 'outage')
       .map(t => t.subreddit)
-    // Playbook-listed subs where cron should auto-detect outage posts for Discord 🎯 PROMOTE
+    // Subs the cron must keep auto-detecting outage posts in, for the Discord 🎯 PROMOTE alert
     expect(subsInOutageMode).toContain('ClaudeAI')
     expect(subsInOutageMode).toContain('ChatGPT')
     expect(subsInOutageMode).toContain('OpenAI')
-    // #280: r/LocalLLaMA switched from competitive → outage to match the playbook's
-    // "API reliability in local-vs-hosted threads" engagement hook.
+    // #280: r/LocalLLaMA switched from competitive → outage.
     expect(subsInOutageMode).toContain('LocalLLaMA')
     // #280: r/AINews added for press-adjacent outage threads.
     expect(subsInOutageMode).toContain('AINews')
