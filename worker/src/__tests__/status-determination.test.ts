@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
-import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents, classifyStatusPageFailure, coverageDaysFrom, MIN_COVERAGE_DAYS, existedInMonth } from '../services'
+import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents, classifyStatusPageFailure, coverageDaysFrom, MIN_COVERAGE_DAYS, existedInMonth, TRACKED_COMPONENT_IDS } from '../services'
 import type { Incident, ServiceConfig } from '../types'
 import { type KVLike } from '../utils'
 
@@ -703,11 +703,13 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   // #606 Category B — shared status.openai.com page split across 3 services by the official groups.
   // #1008: "Codex in ChatGPT Desktop" moved from codex (5→4) to its official ChatGPT group (11→12).
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 12, codex: 4 }
+  // #1010: `Compliance API` joined chatgpt's badge scope (12→13). Two members are deliberately still
+  // out — see the chatgpt config comment in services.ts.
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 13, codex: 4 }
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
-  // stops a non-API component (FedRAMP/Ads Manager) from flipping the OpenAI API badge, and gives a
+  // stops a non-API component from flipping the OpenAI API badge, and gives a
   // 30-day calendar (calendarDays keys off statusComponentId). The curated group == displayComponentIds.
   const SHARED_PAGE_PRIMARY: Record<string, string> = {
     openai: '01JMXBRMFE6N2NNT7DG6XZQ6PW',   // Chat Completions
@@ -803,7 +805,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(12 + 12 + 4) // #1008: moved "Codex in ChatGPT Desktop" codex(5→4) → chatgpt(11→12)
+    expect(all.length).toBe(12 + 13 + 4) // #1008: codex(5→4) → chatgpt(11→12); #1010: chatgpt(12→13)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
@@ -841,11 +843,27 @@ describe('displayComponentIds config sanity (#606)', () => {
     // Sora + the API Login are OpenAI API.
     expect(has('openai', '01K9G527YRPY1EFRMHTKB5BKT5'), 'Sora → openai').toBe(true)
     expect(has('openai', '01JSM5RTJWHRWDTS6Q604VEW3B'), 'API Login → openai').toBe(true)
-    // #693 follow-up — FedRAMP / Ads Manager / Compliance API are non-API Platform surfaces, now in
-    // NO monitored service's breakdown (orphaned by design, so they never flip openai/chatgpt).
-    expect(has('openai', '01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP NOT in openai').toBe(false)
-    expect(has('openai', '01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager NOT in openai').toBe(false)
-    expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API NOT in chatgpt').toBe(false)
+    // #693 follow-up — FedRAMP / Ads Manager / Ads API are adopted by no monitored service (orphaned
+    // by design, so they never flip openai/chatgpt). Asserted through TRACKED_COMPONENT_IDS, which
+    // spans every service's id lists; `has` reads only one service's `displayComponentIds`, so it
+    // cannot carry a "no service" claim.
+    expect(TRACKED_COMPONENT_IDS.has('01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP tracked by no service').toBe(false)
+    expect(TRACKED_COMPONENT_IDS.has('01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager tracked by no service').toBe(false)
+    expect(TRACKED_COMPONENT_IDS.has('01KVR95C58GGWHV7RYBT32NP11'), 'Ads API tracked by no service').toBe(false)
+    // #1010 — `Compliance API` was orphaned alongside FedRAMP / Ads Manager by #693 on the premise that
+    // it is likewise a non-ChatGPT Platform surface. The status page files it inside the official
+    // ChatGPT group — the same group `incidentIoGroupId` names and the badge scope is drawn from.
+    expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API → chatgpt').toBe(true)
+    // #1010 — `Sites` and `ChatGPT Work` are held out
+    // deliberately, for the reason on the chatgpt config comment in services.ts. Asserted on BOTH id lists:
+    // the harm is specific to `statusComponentIds` (badge scope is uptime scope), and `has` reads
+    // `displayComponentIds`, so checking only that would leave the harmful edit to be caught by an
+    // unrelated failure message elsewhere. Failing here is the intended outcome of adopting them.
+    for (const [name, id] of [['Sites', '01KX45G1SHQQ9DTAX9S4W7FV8G'], ['ChatGPT Work', '01KX45G1SH21AX5DT93D4HMF0P']] as const) {
+      const chatgpt = SERVICES.find((s) => s.id === 'chatgpt')!
+      expect(chatgpt.statusComponentIds, `${name} held out of the badge scope`).not.toContain(id)
+      expect(chatgpt.displayComponentIds, `${name} held out of the breakdown`).not.toContain(id)
+    }
     // #1008 — "Codex in ChatGPT Desktop" is a ChatGPT-group surface (Codex inside the ChatGPT
     // desktop app), NOT a Codex-product component. It was mis-attributed to codex; now under chatgpt.
     expect(has('chatgpt', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'Codex in ChatGPT Desktop → chatgpt').toBe(true)
@@ -1232,7 +1250,7 @@ describe('component miss tracking (#135)', () => {
   })
 })
 
-// #693 follow-up — the badge-scoping fix: a non-API component (FedRAMP/Ads Manager) must NOT flip the
+// #693 follow-up — the badge-scoping fix: a non-API component must NOT flip the
 // OpenAI API badge, while a real API component still does. This is the behavior the original bug
 // violated (FedRAMP "degraded performance" drove openai to degraded via the overall indicator).
 describe('OpenAI API badge scoping (#693 follow-up) — non-API components do not flip the badge', () => {

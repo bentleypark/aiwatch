@@ -343,7 +343,7 @@ export const SERVICES: ServiceConfig[] = [
   // comparable with any other service's number. `incidentIoGroupId` survives with a NEW job: it is the
   // figure the page actually DISPLAYS for this service, so `uptimeReported` reads it and the detail page
   // can show the provider's own number beside ours. Conversations carries the real incident activity.
-  // displayComponentIds (#606 Cat B): the official "ChatGPT" group (12) on status.openai.com.
+  // displayComponentIds (#606 Cat B): the official "ChatGPT" group on status.openai.com.
   // Display-only; disjoint from openai/codex. Agent belongs to ChatGPT per the official grouping
   // (not the API group, despite the name). Login here is the ChatGPT Login (the APIs group has a
   // separate API-Login id).
@@ -351,13 +351,20 @@ export const SERVICES: ServiceConfig[] = [
   //   component (Codex surfaced inside the ChatGPT desktop app, sits between ChatGPT Atlas / ChatGPT
   //   Work on the official page), so it belongs here — NOT under codex, where it used to be
   //   mis-attributed and let a ChatGPT-only incident flip the Codex badge to degraded.
-  // #1175 — componentsUrl, like its page-mates. The badge is a worst-of over all 12 ids below, so
+  // #1175 — componentsUrl, like its page-mates. The badge is a worst-of over every id below, so
   //   resolving them against summary.json's partial rotating window (#1125) narrowed it to whichever
-  //   ids that window happened to serve — 7 of 12 when measured 2026-07-28 — leaving the card green on
-  //   an outage in any of the rest. "Its primary is in the window" was the wrong criterion: it says
-  //   nothing about the other 11 the badge reads. It also widens the breakdown 7→12, which the #1062
-  //   capability routing reads (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
+  //   ids that window happened to serve, leaving the card green on an outage in any of the rest. "Its
+  //   primary is in the window" was the wrong criterion: it says nothing about the other ids the badge
+  //   reads. It also widened the breakdown, which the #1062 capability routing reads
+  //   (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
+  // #1010 — `Compliance API` is a ChatGPT-group member; it joins the badge scope here.
+  //   Two group members are held out (named in `status-determination.test.ts`): badge scope is also
+  //   uptime scope (see #1006 above), and `computeIncidentIoUptime` reports the SHORTEST covered window
+  //   across that scope, so adopting a component whose `data_available_since` is recent drops this
+  //   whole service's uptime window below 30 days. Re-check that field before adopting them. Same trade
+  //   junie declines, for the same reason — see its config comment below; it keeps its young component
+  //   in the breakdown, which the `statusComponentIds` ≡ `displayComponentIds` invariant forbids here.
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4'] },
   // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
   // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
@@ -1037,9 +1044,10 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
       // `componentIds` is tagged at the source from the page HTML (`attachIncidentIoComponentIds`);
       // absent ⇒ no bypass ⇒ pre-#1032 behaviour, so a missing/shape-changed page fails CLOSED (the
       // fetch side warns when that happens — a silent revert to the bug is the failure mode here).
-      // Non-regressive by construction, not by luck: an incident only bypasses if its ids intersect
-      // this service's own badge group, so the #990 FedRAMP advisory (tagged 'FedRAMP', an id in NO
-      // service's `statusComponentIds`) can never reach chatgpt/codex through here.
+      // An incident only bypasses if its ids intersect this service's own badge group, so the #990
+      // FedRAMP advisory cannot reach chatgpt/codex by its own `FedRAMP` component id — that id is in
+      // no service's `statusComponentIds`. It CAN reach them via any other id the provider also tags
+      // that we do badge. Pinned in both directions in `openai-login-attribution.test.ts`.
       if (incidentTagsOwnBadge(inc, config)) return true
       return false
     }
