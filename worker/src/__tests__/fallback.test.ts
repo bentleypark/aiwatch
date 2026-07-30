@@ -978,13 +978,14 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
     op('deepgram', 'api', 'Deepgram', 68),
     op('assemblyai', 'api', 'AssemblyAI', 75),
   ]
-  // ChatGPT's component names as components.json published them on 2026-07-28 — all 12 of the ids
-  // services.ts configures. Provenance note, not a guarantee: nothing in the repo binds these names to
+  // ChatGPT's component names, for the ids services.ts configures.
+  // Provenance note, not a guarantee: nothing in the repo binds these names to
   // those ids, so a provider rename is invisible to the suite. (#1175 gave chatgpt a componentsUrl;
   // before it, `components[]` carried only the subset summary.json's rotating window served that cycle.)
   const CHATGPT_COMPONENTS = [
     'Conversations', 'Connectors/Apps', 'Search', 'GPTs', 'Image Generation', 'Login', 'Agent',
     'Codex in ChatGPT Desktop', 'Voice mode', 'Deep Research', 'File uploads', 'ChatGPT Atlas',
+    'Compliance API', // #1010
   ]
   const chatgpt = (degradedNames: string[]) => ({
     id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'degraded', aiwatchScore: 57,

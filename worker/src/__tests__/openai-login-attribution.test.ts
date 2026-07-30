@@ -110,6 +110,23 @@ describe('filterIncidents — id-keyed exclude-bypass (#1032)', () => {
     expect(filterIncidents([kitchenSink], cfg('codex'))).toHaveLength(0)
   })
 
+  it('a `fedramp`-titled advisory is admitted to chatgpt by ANY badged id — Login since #693, Compliance API since #1010', () => {
+    // The exclude yields to `incidentTagsOwnBadge`, which intersects the WHOLE badge list, so the axis
+    // is per-id and not per-domain.
+    const COMPLIANCE = '01JNKS9D9S72PMP1938PVFFQN4'
+    const title =
+      'Codex, workspace analytics, conversation search, searching for custom GPTs, ChatGPT user invites, ' +
+      'and Compliance Log Platform download endpoint not working in FedRAMP workspaces'
+    expect(cfg('chatgpt').statusComponentIds ?? []).toContain(COMPLIANCE)
+    expect(cfg('chatgpt').statusComponentIds ?? []).toContain(CHATGPT_LOGIN)
+    expect(filterIncidents([apiIncident('FED3', title, [FEDRAMP, COMPLIANCE])], cfg('chatgpt'))).toHaveLength(1)
+    expect(filterIncidents([apiIncident('FED6', title, [FEDRAMP, CHATGPT_LOGIN])], cfg('chatgpt'))).toHaveLength(1)
+    // FedRAMP-only tag → still dropped, so the two admissions above are the ids' doing, not the title's.
+    expect(filterIncidents([apiIncident('FED4', title, [FEDRAMP])], cfg('chatgpt'))).toHaveLength(0)
+    // codex badges neither id, so it is unaffected either way.
+    expect(filterIncidents([apiIncident('FED5', title, [FEDRAMP, COMPLIANCE])], cfg('codex'))).toHaveLength(0)
+  })
+
   it('#693 non-regression: an EXCLUDE-matching FedRAMP title tagged onto openai badge components still surfaces', () => {
     // NOT the plain "FedRAMP workspaces and API orgs…" title — that matches none of openai's excludes,
     // so it never enters the bypass branch and would pass with the bypass present, absent, or wrong

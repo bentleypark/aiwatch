@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildPageComponents, fetchPageComponents, pickBreakdownComponents, fetchService, SERVICES, TRACKED_COMPONENT_IDS } from '../services'
 import { diffPageComponents, partitionFirstSeen } from '../utils'
+import { computeIncidentIoUptime } from '../parsers/incident-io'
 import { UPSTREAM_FEEDS } from '../upstream-feed'
 
 const SERVICES_SRC = readFileSync(join(__dirname, '..', 'services.ts'), 'utf8')
@@ -334,9 +335,9 @@ describe('fetchService reuses the prefetched components (#1125)', () => {
 })
 
 // #1175 — the same narrow view, one layer down: chatgpt badges a worst-of over its statusComponentIds
-// but configured no componentsUrl, so it resolved them against summary.json's rotating window (7 of its
-// 12 resolved when measured live 2026-07-28) and `resolveSvcStatus` treats a partial resolve as the whole
-// answer — an outage on one of the rest left the card green. These ride the REAL chatgpt config: drop its
+// but configured no componentsUrl, so it resolved them against summary.json's rotating window and
+// `resolveSvcStatus` treats a partial resolve as the whole answer — an outage on one of the rest left
+// the card green. These ride the REAL chatgpt config: drop its
 // componentsUrl and 'reddens the card' below fails, as does the wiring guard further down.
 describe('a badge component outside summary.json\'s window (#1175)', () => {
   const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
@@ -437,6 +438,171 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
     await fetchService({ ...CHATGPT, statusComponentId: VOICE }, { ...prefetched(), componentsFetch: { ok: false } })
     expect(warnText()).toContain('Component ID not found: chatgpt')
   })
+})
+
+// #1010 — the layer under #1175 again, and the one no source-widening could reach: the component was
+// absent from the CONFIG, not merely unresolvable from the narrow source, so an outage on it could not
+// redden the ChatGPT card however well the page was read. Pinned in both directions (#1032
+// convention): the outage reddens the card, and with that id removed from the config the identical
+// outage leaves it operational — so a revert of the config line fails here rather than going quiet.
+describe('an official ChatGPT-group component absent from the config (#1010)', () => {
+  const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
+  // Only the member actually adopted by #1010. Two group members are deliberately still
+  // out (see the chatgpt config comment in services.ts); their absence is pinned in
+  // status-determination.test.ts, which is where flipping them has to be noticed.
+  const ADDED: [string, string][] = [
+    ['Compliance API', '01JNKS9D9S72PMP1938PVFFQN4'],
+  ]
+  // Names are irrelevant to every assertion here (all are on ids and statuses), so each component
+  // carries its id as its name — same convention as the #1175 fixture above.
+  const page = (downId: string) =>
+    CHATGPT.statusComponentIds!.map((id) => comp(id, id, id === downId ? 'major_outage' : 'operational'))
+  const prefetched = (components: ReturnType<typeof page>) => ({
+    summary: { status: { indicator: 'major', description: 'Partial outage' }, components, incidents: [] } as never,
+    incidents: null,
+    latency: 100,
+    componentsFetch: ok(components),
+  })
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      String(url).endsWith('.json')
+        ? new Response(JSON.stringify({ incidents: [] }), { status: 200 })
+        : new Response('', { status: 200 })))
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it.each(ADDED)('%s is in the badge scope AND the breakdown — otherwise the pair below proves nothing', (_name, id) => {
+    expect(CHATGPT.statusComponentIds).toContain(id)
+    expect(CHATGPT.displayComponentIds).toContain(id)
+  })
+
+  it.each(ADDED)('an outage on %s reddens the ChatGPT card', async (_name, id) => {
+    const svc = await fetchService(CHATGPT, prefetched(page(id)))
+    expect(svc.status).toBe('down')
+  })
+
+  it.each(ADDED)('the defect replayed: with %s dropped from the config the identical outage leaves the card operational', async (_name, id) => {
+    // Drops ONLY this id, so what it pins is that the config entry is the gate — the page still reports
+    // the same outage, and the other badge ids still resolve, so `resolveSvcStatus` stays on its
+    // worst-of branch instead of falling back to the page indicator (which would read `down` here).
+    const cfg = {
+      ...CHATGPT,
+      statusComponentIds: CHATGPT.statusComponentIds!.filter((c) => c !== id),
+      displayComponentIds: CHATGPT.displayComponentIds!.filter((c) => c !== id),
+    }
+    const svc = await fetchService(cfg, prefetched(page(id)))
+    expect(svc.status).toBe('operational')
+  })
+})
+
+// #1010 — the hold-out rationale, made executable. The chatgpt config declines two group members
+// because badge scope IS uptime scope: `uptimeScope` (`services.ts`) reads `statusComponentIds`, and
+// `computeIncidentIoUptime` worst-ofs the percentage and takes the SHORTEST covered window across it.
+// Each `it` carries its own control on the SAME html, so neither
+// can pass just because the fixture is clean.
+describe('uptime is computed over the badge scope, not the primary alone (#1010/#1006)', () => {
+  const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
+  const PRIMARY = CHATGPT.incidentIoComponentId as string // "Conversations"
+  const COMPLIANCE = '01JNKS9D9S72PMP1938PVFFQN4' // a NON-primary badge id, adopted by #1010
+  const DAY = 86_400_000
+  const now = Date.now()
+  const iso = (daysAgo: number) => new Date(now - daysAgo * DAY).toISOString()
+
+  // `component_uptimes` / `component_impacts` in the page's real backslash-escaped RSC form.
+  const uptimeEntry = (id: string, sinceDaysAgo: number) =>
+    `{\\"component_id\\":\\"${id}\\",\\"data_available_since\\":\\"${iso(sinceDaysAgo)}\\",` +
+    `\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"$undefined\\"}`
+  const impactEntry = (id: string, startDaysAgo: number, endDaysAgo: number, status: string) =>
+    `{\\"component_id\\":\\"${id}\\",\\"end_at\\":\\"${iso(endDaysAgo)}\\",\\"id\\":\\"IMP\\",` +
+    `\\"start_at\\":\\"${iso(startDaysAgo)}\\",\\"status\\":\\"${status}\\",\\"status_page_incident_id\\":\\"INC\\"}`
+  const rsc = (impacts: string[], uptimes: string[]) =>
+    `<script>self.__next_f.push([1,"a:{\\"component_impacts\\":[${impacts.join(',')}],` +
+    `\\"component_uptimes\\":[${uptimes.join(',')}],\\"incident_links\\":[]}"])</script>`
+
+  const allOperational = () => CHATGPT.statusComponentIds!.map((id) => comp(id, id))
+  const withUptimeHtml = (uptimeHtml: string) => ({
+    summary: { status: { indicator: 'none', description: 'All Systems Operational' }, components: allOperational(), incidents: [] } as never,
+    incidents: null,
+    latency: 100,
+    componentsFetch: ok(allOperational()),
+    uptimeHtml,
+  })
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      String(url).endsWith('.json')
+        ? new Response(JSON.stringify({ incidents: [] }), { status: 200 })
+        : new Response('', { status: 200 })))
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('a 24h outage on a NON-primary badge component moves uptime30d', async () => {
+    const html = rsc(
+      [impactEntry(COMPLIANCE, 5, 4, 'full_outage')],
+      CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, 400)),
+    )
+    // Control on the SAME html: scoped to the primary alone the page reads a spotless 100, so the
+    // figure below can only have come from the wider scope.
+    expect(computeIncidentIoUptime(html, PRIMARY, now)!.pct).toBe(100)
+    const svc = await fetchService(CHATGPT, withUptimeHtml(html))
+    expect(svc.uptime30d).toBe(96.66)
+  })
+
+  it('a badge component with a short record shortens the disclosed window — the cost the hold-out declines', async () => {
+    // Exactly the shape `Sites` / `ChatGPT Work` would create: one young member, every other one old.
+    const html = rsc([], CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, id === COMPLIANCE ? 20 : 400)))
+    expect(computeIncidentIoUptime(html, PRIMARY, now)!.days).toBe(30) // control: the primary alone is whole
+    const svc = await fetchService(CHATGPT, withUptimeHtml(html))
+    expect(svc.uptimeWindowDays).toBe(20)
+  })
+
+  // chatgpt cannot catch a swap to `displayComponentIds`: its two id lists are identical by design,
+  // so both read the same scope. langfuse is where they differ — 3 `statusComponentIds` and NO
+  // `displayComponentIds` — so under that swap its uptime falls back to the primary alone, which is
+  // the #1006 defect on a second service. Driven from the real langfuse config for that reason.
+  it('langfuse: the scope is `statusComponentIds` specifically, not whichever id list is to hand', async () => {
+    const LANGFUSE = SERVICES.find((s) => s.id === 'langfuse')!
+    const ids = LANGFUSE.statusComponentIds!
+    expect(LANGFUSE.displayComponentIds).toBeUndefined() // the property that makes this case discriminating
+    const nonPrimary = ids.find((id) => id !== LANGFUSE.incidentIoComponentId)!
+    const html = rsc([impactEntry(nonPrimary, 5, 4, 'full_outage')], ids.map((id) => uptimeEntry(id, 400)))
+    expect(computeIncidentIoUptime(html, LANGFUSE.incidentIoComponentId as string, now)!.pct).toBe(100)
+    const components = ids.map((id) => comp(id, id))
+    const svc = await fetchService(LANGFUSE, {
+      summary: { status: { indicator: 'none', description: 'All Systems Operational' }, components, incidents: [] } as never,
+      incidents: null,
+      latency: 100,
+      uptimeHtml: html,
+    })
+    expect(svc.uptime30d).toBe(96.66)
+  })
+
+  // The FALLBACK arm of the same expression. `uptimeScope` is `statusComponentIds ?? incidentIoComponentId`,
+  // while the Atlassian branch ~60 lines above reads `statusComponentIds ?? statusComponentId` — two
+  // near-identical expressions one screen apart, so harmonising them looks like tidying. It is not: these
+  // services set NO `statusComponentId`, so under that edit the scope resolves to `undefined`,
+  // `computeIncidentIoUptime` matches nothing and returns null, and each card silently loses its headline
+  // uptime AND (per #713) has its Score Uptime component withheld and rescaled. Derived from SERVICES
+  // rather than listed, so a service that later drops its `statusComponentId` joins the guard by itself.
+  const IO_PRIMARY_ONLY = SERVICES.filter((s) => s.incidentIoComponentId && !s.statusComponentId && !s.statusComponentIds)
+  it('the guard below covers a non-empty set — an empty filter would pass vacuously', () => {
+    expect(IO_PRIMARY_ONLY.length).toBeGreaterThan(0)
+  })
+  it.each(IO_PRIMARY_ONLY.map((s) => [s.id, s] as const))(
+    '%s resolves its uptime scope from incidentIoComponentId alone',
+    async (_id, cfg) => {
+      const ids = [cfg.incidentIoComponentId].flat() as string[]
+      const html = rsc([], ids.map((id) => uptimeEntry(id, 400)))
+      const svc = await fetchService(cfg, {
+        summary: { status: { indicator: 'none', description: 'All Systems Operational' }, components: ids.map((id) => comp(id, id)), incidents: [] } as never,
+        incidents: null,
+        latency: 100,
+        uptimeHtml: html,
+      })
+      expect(svc.uptime30d).toBe(100)
+    },
+  )
 })
 
 describe('prefetch + alert wiring (#1125)', () => {
