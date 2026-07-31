@@ -13,7 +13,7 @@ export const EXTENSION_STORE_URL = 'https://chromewebstore.google.com/detail/aiw
 const escAttr = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-// The extension is Claude-ONLY (#837), but the is-down pages cover 38 services — so the install CTA
+// The extension is Claude-ONLY (#837), but the is-down pages cover other services too — so the install CTA
 // renders only on the three Anthropic surfaces' pages (a Claude extension on /is-openai-down is a
 // mismatch). Exported + unit-tested. Landing (/intro) is Claude-focused so it's ungated there.
 export const CLAUDE_SURFACE_IDS = ['claude', 'claudeai', 'claudecode'] as const
@@ -40,7 +40,7 @@ export function renderExtInstallCta(url: string, opts: ExtInstallCtaOpts): strin
     return `<div class="ext-strip"><a href="${href}" target="_blank" rel="noopener" ${ga}>🧩 Skip the manual check &mdash; see Claude's status right from your toolbar. <strong>Add to Chrome &rarr;</strong></a></div>`
   }
   // landing: a secondary button matching the cta-box button styling. Label names "Claude" explicitly —
-  // the landing/dashboard is the multi-service (41) AIWatch context, so a bare "Chrome extension" would
+  // the landing/dashboard is the multi-service AIWatch context, so a bare "Chrome extension" would
   // imply full coverage and mis-set expectations (the extension is Claude-only → retention/review risk).
   return `<a href="${href}" target="_blank" rel="noopener" class="btn-secondary" style="font-size:14px;padding:12px 24px;" ${ga}>🧩 Get the Claude Status extension</a>`
 }

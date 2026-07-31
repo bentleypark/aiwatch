@@ -808,8 +808,9 @@ export async function enrichIncidentIoText(incidents: Incident[], baseUrl: strin
   }
 
   // Phase 2: Scrape incidents still missing text after cache application (up to budget=1).
-  // Budget = 1 per service: 44 base requests + 6 services × 1 = 50 (kept as a self-imposed cap
-  // for CPU-time hygiene — well under the 1,000 subrequest cap on Workers Paid / Standard).
+  // Budget = 1 per service: SERVICES.length base requests + one per incident.io service enriched
+  // here (kept as a self-imposed cap for CPU-time hygiene — far under the 1,000 subrequest cap on
+  // Workers Paid / Standard).
   // Prioritise: non-resolved first (may get new updates), then most recently started.
   const toEnrich = workingIncidents
     .filter((inc) => inc.timeline.some((t) => !t.text))
