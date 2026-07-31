@@ -79,7 +79,7 @@ export default async function handler(req: Request) {
 
     // Single API call to the KV-backed /api/status/cached (fast SSR). The cron refreshes that cache
     // on every status-change edge (#488), so an incident is visible here within one cron cycle —
-    // without paying the ~34-service live fan-out of /api/status on this high-traffic SEO surface.
+    // without paying the live all-service fan-out of /api/status on this high-traffic SEO surface.
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
     // #1062 facet B — set when the outage ROUTES to a capability tier (OpenAI 'Images' down → image tier),

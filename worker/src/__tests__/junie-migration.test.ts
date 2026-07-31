@@ -70,12 +70,13 @@ describe('junie config (#1004 revert guard)', () => {
 })
 
 // Guards the class of half-done migration this issue actually was: someone updates `apiUrl` and forgets
-// `statusUrl` or `incidentIoBaseUrl`, leaving one field pointing at a host that 301s. Applies to all 43.
+// `statusUrl` or `incidentIoBaseUrl`, leaving one field pointing at a host that 301s. Scope is every
+// service that declares an `apiUrl` — the machine endpoint is what the agreement is against.
 describe('every service points its status URLs at ONE host', () => {
   const hostOf = (u: string) => new URL(u).host.replace(/^www\./, '')
   // A provider may legitimately serve its HUMAN page from a vanity domain while the machine endpoint
   // stays on the vendor host (deepseek: status.deepseek.com → deepseek.statuspage.io). Pinned so the
-  // list stays a deliberate, short one — the invariant still holds for the other 42.
+  // list stays a deliberate, short one — the invariant still holds for every other in-scope service.
   const VANITY_DOMAIN = new Set(['deepseek'])
 
   it.each(SERVICES.filter((s) => s.apiUrl).map((s) => [s.id, s] as const))(

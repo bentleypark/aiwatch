@@ -170,7 +170,7 @@ test.describe('Mobile viewport', () => {
   // #978 — the Dashboard nav grew (methodology #673, badges #805, Claude Code section #920) until
   // nav + filter + footer alone exceeded a short mobile viewport. The drawer could not scroll (its
   // child was pinned to `h-full`), so the only flexible child — the service list — absorbed the whole
-  // shortfall and collapsed to 0px, leaving all 43 services unreachable. Assert the drawer scrolls as
+  // shortfall and collapsed to 0px, leaving the whole service list unreachable. Assert the drawer scrolls as
   // a whole and the list keeps its height. A 600px-tall viewport is what a 844px phone actually shows
   // once browser chrome is subtracted.
   test('#978 — mobile sidebar scrolls as a whole; the service list never collapses', async ({ page }) => {

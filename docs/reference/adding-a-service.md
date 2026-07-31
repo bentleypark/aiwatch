@@ -90,10 +90,11 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 > ownership of the non-probed service LIST (Bedrock / Azure OpenAI / Modal).
 >
 > **Also pinned:** the README **per-bucket headings** (`### Voice (3)` / `### 음성 (3개)`); the
-> URL-ENCODED **social-share badges** (`monitoring%20for%2044%20AI`); the **is-down count** (`TOTAL − 2`
+> URL-ENCODED **social-share badges** (`monitoring%20for%20N%20AI`); the **is-down count** (`TOTAL − 2`
 > — every service except Bedrock / Azure OpenAI, 5 copies); CLAUDE.md's **Status-Data-Flow** sentence
-> (`parallel N-service fetch`); and the **`/intro` dashboard mock**'s `+ N more services`, which must
-> equal `TOTAL −` the cards it actually renders.
+> (`parallel N-service fetch`); the **`/intro` dashboard mock**'s `+ N more services`, which must
+> equal `TOTAL −` the cards it actually renders; **`docs/reference/data-flow.md`**'s api-diagram
+> `parallel fetch (N services)`; and **`public/llms.txt`**'s lead + dashboard-link counts (#1184).
 >
 > **Enumerate count occurrences by PHRASING, never by grepping the current value** — that search cannot
 > see a stale copy, by construction. Every number in the list above was found that way, and four of them
@@ -125,9 +126,12 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 >
 > **Not covered — still hand-checked:** the prose service LISTS themselves (the service NAMES in
 > CLAUDE.md's architecture section and the README category tables — the counts beside them are pinned,
-> the rows are not); the mock's `Operational N` / `Issues N` tabs (fabricated demo state, not derived
-> from the roster — note they do not currently sum to `All N`); `docs/aiwatch-landing.html`;
-> `CONTRIBUTING.md`; and `docs/reference/*` prose counts (`data-flow.md` held a stale 37 and 24). Also note a **docs-only PR runs none of this** — `test.yml` `paths-ignore`s
+> the rows are not); the mock's `Issues N` tab (fabricated demo state — `Operational`
+> and the stat card are pinned to `TOTAL − Issues`, so they DO sum to `All N`); `docs/aiwatch-landing.html`;
+> `CONTRIBUTING.md`; and `docs/reference/*` prose counts OTHER than the `data-flow.md` sentence now
+> pinned above — including the two probe-count copies (`data-flow.md`'s overlay line and
+> `directory-map.md`'s probe.ts line), which `PROBE_TARGETS` determines and which are therefore
+> pinnable, just not pinned yet. Also note a **docs-only PR runs none of this** — `test.yml` `paths-ignore`s
 > `*.md`, so a later edit touching only `README*.md`/`CLAUDE.md` starts no jobs (same shape as the
 > #877/#961 gaps). The add-a-service PR itself touches code, so the primary flow IS gated.
 

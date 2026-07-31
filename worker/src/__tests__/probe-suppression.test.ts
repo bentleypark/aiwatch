@@ -3,7 +3,7 @@ import { recordProbeSuppression } from '../services'
 
 // Regression guard for #501: the probe cross-validation suppression counter shipped with
 // `kvPut` un-imported in services.ts, so the inline write threw `ReferenceError: kvPut is not
-// defined`. That throw is uncaught inside fetchAllServices(), so the WHOLE 34-service fetch
+// defined`. That throw is uncaught inside fetchAllServices(), so the WHOLE multi-service fetch
 // rejected → "fetchAllServices() 전체 실패 / kvPut is not defined" Worker Error alert.
 // These tests exercise the exact write path; if the import regresses, they throw at runtime
 // (esbuild/wrangler dry-run does NOT type-check, so only a runtime test catches this).

@@ -2832,8 +2832,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   const upstreamFeeds = buildUpstreamFeeds(prefetchMap)
 
   // Batch services to avoid exceeding Cloudflare Workers concurrent connection limit.
-  // BetterStack services use 3 connections each (statusUrl + RSS + index.json);
-  // 30 services in parallel would create ~60-90 concurrent connections.
+  // BetterStack services use 3 connections each (statusUrl + RSS + index.json).
   const BATCH_SIZE = 10
   const results: PromiseSettledResult<ServiceStatus>[] = []
   try {

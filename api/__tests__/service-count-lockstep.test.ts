@@ -9,7 +9,7 @@
 // it into this surface drags in nothing. (SERVICES from services.ts would drag ~12 modules — don't.)
 //
 // WHY ANCHORED PATTERNS, NOT A BARE NUMBER SEARCH: `/methodology` states TWO different service counts
-// — 44 monitored and 33 probed (PROBE_TARGETS, pinned separately by the #678 test). A generic
+// — the monitored count and the probed count (PROBE_TARGETS, pinned separately by the #678 test). A generic
 // /\d+개 AI 서비스/ matches both, so a test written that way would pass while pointing at the wrong
 // sentence. Every assertion below anchors on text unique to its occurrence.
 import { describe, it, expect } from 'vitest'
@@ -167,7 +167,7 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     expectCount(read('README.md'), 'README.md', TOTAL, EN)
     expectCount(read('README.ko.md'), 'README.ko.md', TOTAL, KO)
     // The social-share badges pre-fill the text a visitor posts to X / Reddit / HN, so a stale number
-    // here gets published OFF-site. They are URL-ENCODED (`%2044%20`, `44%EA%B0%9C`), so a
+    // here gets published OFF-site. They are URL-ENCODED (`%20N%20`, `N%EA%B0%9C`), so a
     // decoded-form search never sees them — that is how they sat at 39 while every other count read 44.
     expectCount(read('README.md'), 'README.md badges', TOTAL, [
       ['share badge EN', /monitoring%20for%20(\d+)%20AI/, 3],
@@ -223,7 +223,7 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     const md = read('CLAUDE.md')
     expectCount(md, 'CLAUDE.md', TOTAL, [
       ['intro line', /monitors (\d+) AI services in real time/],
-      // Same sentence as the READMEs' `parallel fetch (44 services)` — but phrased `N-service fetch`,
+      // Same sentence as the READMEs' api diagram — but phrased `N-service fetch`,
       // so their anchor never matched it and this copy sat at 39 across five service additions.
       ['data-flow sentence', /parallel (\d+)-service fetch/],
     ])
@@ -296,8 +296,8 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
 
   it('the is-down page count is TOTAL minus the two no-official-uptime services', () => {
     // Derived, not independent: /is-*-down covers every monitored service except bedrock and
-    // azureopenai. Correct today across all 5 copies, and unguarded — the same shape the social-share
-    // badges had one step before they went stale.
+    // azureopenai. The copies this block pins are the ones that state a number; #1184 deleted two more
+    // in docs/reference that had already gone stale at 42, rather than re-arming them.
     const isDown = TOTAL - 2
     expectCount(read('CLAUDE.md'), 'CLAUDE.md', isDown, [['directory map', /"Is X Down\?" SEO pages \((\d+) services/]])
     expectCount(read('README.md'), 'README.md', isDown, [
@@ -311,7 +311,7 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
   })
 
   it('the /intro dashboard mock is internally consistent with its own "All N" tab', () => {
-    // The mock renders a few service cards under an `All 44` filter tab and a "+ N more services"
+    // The mock renders a few service cards under an `All <TOTAL>` filter tab and a "+ N more services"
     // link. N is not free: it is TOTAL minus the cards actually shown. It read 34 against 3 cards and
     // a 44 tab — visible arithmetic, wrong by 7, on an indexed page.
     const html = renderLandingPage()
@@ -377,6 +377,24 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
       expect(bullet, `${f}: the "${head}" bullet must exist for this guard to mean anything`).toBeTruthy()
       expect(bullet!, `${f}: the "${head}" bullet must state no service count — the set is a parse outcome`).not.toMatch(/\d/)
     }
+  })
+
+  it("docs/reference and public/llms.txt state the total where they state one", () => {
+    // #1184 — data-flow.md carries the SAME `parallel fetch (N services)` sentence as README.md, and
+    // the README copy is anchored above. This one was not: docs/reference was outside this suite's
+    // surface list, so it sat at 44 while every guarded surface read 45. Being a reference doc rather
+    // than an indexed page is not a reason to leave it unpinned — it is what the next change reads.
+    expectCount(read('docs/reference/data-flow.md'), 'data-flow.md', TOTAL, [
+      ['api diagram', /parallel fetch \((\d+) services\)/],
+    ])
+    // `public/llms.txt` is served by Vercel's filesystem at /llms.txt and exists so AI crawlers read
+    // it — the "published off-site" harm class this suite was built for, and it was in NO list: not
+    // the surfaces here, not adding-a-service's steps, not even its hand-checked note. It read 43
+    // (the is-down subtotal) for the monitored total; the dashboard lists every service.
+    expectCount(read('public/llms.txt'), 'llms.txt', TOTAL, [
+      ['lead', /incidents of (\d+) AI services \(LLM APIs/],
+      ['dashboard link', /live status of all (\d+) monitored services/],
+    ])
   })
 
   it('does NOT confuse the monitored count with the probed count (#678 regression guard)', () => {
