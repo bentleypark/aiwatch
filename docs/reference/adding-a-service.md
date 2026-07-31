@@ -127,7 +127,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 > **Not covered — still hand-checked:** the prose service LISTS themselves (the service NAMES in
 > CLAUDE.md's architecture section and the README category tables — the counts beside them are pinned,
 > the rows are not); the mock's `Issues N` tab (fabricated demo state — `Operational`
-> and the stat card are pinned to `TOTAL − Issues`, so they DO sum to `All N`); `docs/aiwatch-landing.html`;
+> and the stat card are pinned to `TOTAL − Issues`, so they DO sum to `All N`);
 > `CONTRIBUTING.md`; and `docs/reference/*` prose counts OTHER than the `data-flow.md` sentence now
 > pinned above — including the two probe-count copies (`data-flow.md`'s overlay line and
 > `directory-map.md`'s probe.ts line), which `PROBE_TARGETS` determines and which are therefore
@@ -149,10 +149,9 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
     - hero pill number ("N AI Services")
     - dashboard preview mock: services running count, "All N", "Operational N", "+ N more" (KO/EN)
     - i18n strings KO/EN with service count (~12+ occurrences)
-17. `docs/aiwatch-landing.html` — same as intro template (design draft)
 
 ## Methodology page (`/methodology`, #673)
-17a. `api/_methodology/html-template.ts` — self-contained Edge SSR, **KO + EN i18n duplicated TWICE** (inline `data-i18n` defaults AND the `i18n` JS maps), so each count appears ~4×. Update ALL:
+17. `api/_methodology/html-template.ts` — self-contained Edge SSR, **KO + EN i18n duplicated TWICE** (inline `data-i18n` defaults AND the `i18n` JS maps), so each count appears ~4×. Update ALL:
     - `hero.meta` service count ("N services · polled every 5 min") + the `<meta name="description">` count
     - **`s1.lead` category breakdown** — "N AI services — X LLM APIs, Y coding agents, Z voice, … inference & infra, … observability, … video, … AI apps" (KO `…개` + EN). The sub-counts MUST sum to the total; update the right bucket(s) for the new service's category.
     - **probe count** (only if the new service is probed — search the page for the probe phrasings: "directly-probed" / "are probed" / `probe 세트(N개)` / "N AI services … health-check probes"; currently 33) — kept in **LOCKSTEP with `PROBE_TARGETS.length`** — every occurrence, on this page and in the READMEs/CLAUDE.md, by `api/__tests__/service-count-lockstep.test.ts` (#1074). (`html-template.test.ts`'s #678 check is existence-only and would pass with most of them wrong.)
