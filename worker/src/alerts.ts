@@ -332,16 +332,16 @@ export interface AlertCandidate {
    *  to them — so a service joining an already-alerted incident doesn't re-draft/re-notify the
    *  services that already fired. Absent on status alerts (down/degraded/recovered). */
   svcIds?: string[]
-  /** #1021 — set on a non-reliability ADVISORY alert (usage-limits/quota/…, reframed ℹ️/blue). Lets
-   *  downstream consumers keep the informational framing WITHOUT re-deriving from the title: buildTweetDrafts
-   *  skips it (an advisory must not draft an "X is having an outage" tweet). The dedup `key` is unchanged. */
+  /** #1021 — set on a non-reliability ADVISORY alert (usage-limits/quota/…, reframed ℹ️/blue).
+   *  Downstream consumers read it through the shared `isNonOutageAlert` predicate. The dedup `key`
+   *  is unchanged. */
   advisory?: boolean
 }
 
-/** #1106 — this alert must never produce outage PROMOTION tooling. See its call sites for who gates on
- *  it. NOT gated: the #778 phone push (`pushTargetFor`), which filters on `impact != null`. Both cases are "AIWatch is not claiming an outage is happening right now": an
- *  advisory (#1021) never was one, a withdrawal (#1106) is the provider taking the claim back.
- *  Drafting "X is having an outage" off either would be factually false at the moment it is posted.
+/** #1106 — this alert must never produce outage PROMOTION tooling. Both cases are "AIWatch is not
+ *  claiming an outage is happening right now": an advisory (#1021) never was one, a withdrawal
+ *  (#1106) is the provider taking the claim back. Drafting "X is having an outage" off either would
+ *  be factually false at the moment it is posted.
  *
  *  A withdrawal is identified by its KIND, not by a flag on the candidate: `alerted:wd:` already
  *  states it, `kindFromKey` is the single source of truth every other consumer reads (`alert-feed.ts`),
@@ -583,7 +583,7 @@ export function buildIncidentAlerts(
     // the TITLE (same isNonReliabilityAdvisory the live down-classification + archive downtime use), NOT
     // impact==null — a mis-parsed null-impact REAL incident (status-determination.md footgun) keeps the
     // outage alert, the fail-safe direction. The dedup `key` is UNCHANGED, so the paired resolved alert
-    // still matches. The #778 phone push already skips impact==null (pushTargetFor), so it stays silent.
+    // still matches.
     const isAdvisory = isNonReliabilityAdvisory(inc.title)
     const regionText = isAdvisory ? undefined : buildRegionHint(firstSvc)
     // #641 — suppress the cross-service fallback when a region switch is offered: a region-specific
@@ -1563,14 +1563,21 @@ export interface PushTarget {
 /**
  * Decide whether a NEW Tier-1-family down/degraded incident warrants an operator phone push (#778), and
  * for WHICH service — returns that primary service (for the push title + the Click X-search URL), or null
- * to skip. Gating: (1) NEW-incident edge only (`alerted:new` — never a status edge, recovery, or TTL
- * refresh); (2) a service in PUSH_SCOPE; (3) incident impact non-null (down/degraded — never an
- * informational / maintenance null-impact notice). Per-incident dedup is handled UPSTREAM by the cron's
+ * to skip. Gating: a NEW-incident edge only (`alerted:new` — never a status edge, recovery,
+ * or TTL refresh); not a non-outage alert (#1184); a service in PUSH_SCOPE; and incident impact
+ * non-null (down/degraded — never an informational / maintenance null-impact notice).
+ * Per-incident dedup is handled UPSTREAM by the cron's
  * `alerted:new` roster: the push fires in the same already-deduped send path as the Discord alert, so a
  * confirmed incident pushes exactly once. v1 excludes recovery pushes by the kind!=='new' guard.
  */
 export function pushTargetFor(alert: AlertCandidate, services: ServiceStatus[]): PushTarget | null {
-  if (kindFromKey(alert.key) !== 'new') return null
+  const kind = kindFromKey(alert.key)
+  if (kind !== 'new') return null
+  // #1184 — an advisory (#1021) keeps an ordinary `alerted:new:` key, so nothing about the key stops
+  // it, and it changes no outcome today: it is already impact-null. Gate on the shared predicate
+  // anyway, so the silence is this function's own rule and not a consequence of services.ts.
+  // Rationale: docs/reference/discord-alert-paths.md.
+  if (isNonOutageAlert(alert, kind)) return null
   const keys = alert._mergedKeys ?? [alert.key]
   const svcIds = alert.svcIds ?? svcIdsForAlert(keys, 'new', services)
   const id = svcIds.find((s) => PUSH_SCOPE.has(s)) // primary in-push-scope service

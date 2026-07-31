@@ -2739,8 +2739,8 @@ export async function recordProbeSuppression(kv: KVNamespace, svcId: string, dat
  *   - the cron alert path — `buildIncidentAlerts` REFRAMES an advisory informational (ℹ️ / blurple /
  *     "Advisory", no fallback), so the Discord alert, the Slack/RSS feed, and the #486 user webhooks (which
  *     all inherit the alert object) no longer frame a quota notice as a red "🔴 New Incident" outage;
- *     `buildTweetDrafts` skips it (no "X is having an outage" tweet); and the #778 operator phone push
- *     already keyed off `impact == null` (`pushTargetFor`) so it stays silent. That reframing is title-keyed
+ *     and the outage-promotion tooling skips it via the shared `isNonOutageAlert` predicate — the #778
+ *     operator phone push included, since #1184. That reframing is title-keyed
  *     in alerts.ts (not this null impact), so a mis-parsed null-impact REAL incident keeps the outage alert.
  *     Flap/hold (`isFlapNotice`) is unchanged (both `minor` and `null` fall through to the title-shape test,
  *     which a usage-limit title does not match).
