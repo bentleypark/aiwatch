@@ -271,6 +271,37 @@ describe('calculateAIWatchScore', () => {
     expect(probed.confidence).toBe('medium')
   })
 
+  // #1186 — pins the corrected score.ts comment: the no-uptime rescale is mathematically an imputation,
+  // not an omission. A medium-confidence score (uptime absent, rescaled over 60) is EXACTLY reproducible
+  // by a high-confidence score (uptime present, over 100) whose uptime component equals the FIXED ratio
+  // 40/60 of the other three (not an empirical average) — i.e. the rescale silently assumes
+  // `uptime = 0.667 × (I+R+P)`. If this ever stops holding, the score.ts comment (and Ranking.jsx's
+  // high/medium split rationale) go stale with it.
+  it('#1186: the no-uptime rescale is exactly reproducible by imputing uptime = 0.667 × (I+R+P)', () => {
+    const svc = makeSvc({ uptime30d: null, incidents: [makeIncident(3, '20m')] })
+    const probe = probeAvailable({ p50: 250, cvCombined: 0.4 })
+    const medium = scoreWithProbe(svc, probe)
+    expect(medium.confidence).toBe('medium')
+    expect(medium.breakdown.uptime).toBeNull()
+
+    // PRECISION NOTE: `breakdown.{incidents,recovery,responsiveness}` are score.ts's DISPLAY values,
+    // rounded to 1 decimal (`Math.round(x*10)/10`) — the internal sum that actually produces `.score`
+    // uses the unrounded floats. This inversion is therefore reconstructed from already-lossy inputs,
+    // not the true internal computation; it survives because `.score` itself is `Math.round`ed to an
+    // integer and the injected error is a small fraction of a point in this fixture. A case landing
+    // near an integer rounding boundary could fail (or pass) for a reason unrelated to the rescale
+    // property this test exists to pin. Acceptable for now — flagged so a future flake here is
+    // diagnosed as precision, not a real rescale regression.
+    const { incidents, recovery, responsiveness } = medium.breakdown
+    const impliedUptimeScore = (2 / 3) * (incidents + recovery! + responsiveness!) // out of 40
+    const impliedUptimePct = 95 + (impliedUptimeScore / 40) * 5 // invert score.ts's uptimeScore formula
+
+    const high = scoreWithProbe(makeSvc({ ...svc, uptime30d: impliedUptimePct }), probe)
+    expect(high.confidence).toBe('high')
+    // Rounds to the same published integer score — the rescale and the imputed-uptime path agree.
+    expect(high.score).toBe(medium.score)
+  })
+
   it('filters incidents to 30 days only', () => {
     const oldIncident = makeIncident(60)
     const recentIncident = makeIncident(5)

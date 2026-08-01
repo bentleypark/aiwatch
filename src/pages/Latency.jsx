@@ -111,6 +111,11 @@ function LatencyTrendSection({ services, t, hourlyData }) {
     let apiServices = probeServiceIds
       ? services.filter((s) => probeServiceIds.includes(s.id) && s.category !== 'app') // #921 — apps (Character.AI) are probed for the detail card but excluded from the latency ranking/chart
       : services.filter((s) => s.category === 'api' && s.latency != null)
+    // #1186 KNOWN GAP (deliberately not fixed here) — this sorts across confidence tiers by raw
+    // aiwatchScore, the same cross-scale comparison #1186 removed from Ranking.jsx/is-down.ts/the
+    // fallback engine. Left as-is because this only decides CHART MEMBERSHIP (which 8 services get a
+    // latency line on mobile), not a displayed rank or a recommendation — lower stakes than the
+    // surfaces that were fixed. `?? 0` still correctly sinks a null-score (`low`-confidence) service.
     if (isMobile) apiServices = [...apiServices].sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)).slice(0, 8)
     const styles = getComputedStyle(document.documentElement)
     const textMuted = styles.getPropertyValue('--text2').trim() || '#6b7280'

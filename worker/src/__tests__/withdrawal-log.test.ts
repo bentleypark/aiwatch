@@ -621,10 +621,14 @@ describe('accumulateIncidentsOnlyIfChanged → withdrawal-log wiring (#1106 Part
 
   it('writes a durable row for the incident the prune deletes, un-announced', async () => {
     const { kv, store } = makeKV()
-    await accumulateIncidentsOnlyIfChanged(kv, live([['aud-1', '2026-07-17T08:18:00Z'], ['conv-1', '2026-07-17T08:03:00Z']]), '2026-07')
+    // #1106 — `prunedAt` (and therefore which month's withdrawal-log KEY this lands in) comes from the
+    // injectable `now`, not the real wall-clock — this test's fixture dates are all July, so `now` must
+    // be too, or the write lands under a different month's key than the hardcoded `KEY` above expects.
+    const now = new Date('2026-07-24T12:00:00Z')
+    await accumulateIncidentsOnlyIfChanged(kv, live([['aud-1', '2026-07-17T08:18:00Z'], ['conv-1', '2026-07-17T08:03:00Z']]), '2026-07', now)
     expect(Object.keys(store).some((k) => k.startsWith('incidents:withdrawn:log:'))).toBe(false)
     for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS; i++) {
-      await accumulateIncidentsOnlyIfChanged(kv, live([['conv-1', '2026-07-17T08:03:00Z']]), '2026-07')
+      await accumulateIncidentsOnlyIfChanged(kv, live([['conv-1', '2026-07-17T08:03:00Z']]), '2026-07', now)
     }
     const logged: WithdrawalLogEntry[] = JSON.parse(store[KEY])
     expect(logged).toHaveLength(1)

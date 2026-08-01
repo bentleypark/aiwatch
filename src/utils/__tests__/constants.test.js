@@ -216,6 +216,28 @@ describe('getGroupedFallbacks (#445 multi-category incident alternatives)', () =
     expect(groups.every(g => g.items.length === 1)).toBe(true)  // perGroup=1 when numGroups>1
   })
 
+  it('#1186 — perGroup=1: a genuine high-vs-medium tie resolves to high, even when medium scores higher', () => {
+    // claude and gemini are BOTH tier 1 (same tier distance from the openai anchor, also tier 1) — a
+    // genuine same-tier-distance tie, isolating the confidence tiebreak from tier distance (a candidate
+    // on a DIFFERENT tier would already win/lose by distance alone, regardless of confidence).
+    const affMulti = [
+      { ...op('openai', 'api', 'OpenAI', 80), status: 'degraded', scoreConfidence: 'high' },
+      { ...op('claudeai', 'app', 'Anthropic', 60), status: 'down', scoreConfidence: 'high' },
+    ]
+    const poolMulti = [
+      ...affMulti,
+      { ...op('claude', 'api', 'Anthropic', 70), scoreConfidence: 'high' },
+      { ...op('gemini', 'api', 'Google', 95), scoreConfidence: 'medium' }, // higher raw score
+      { ...op('chatgpt', 'app', 'OpenAI', 85), scoreConfidence: 'high' },
+    ]
+    // Multi-category (api + app) → perGroup collapses to 1.
+    const groups = getGroupedFallbacks(affMulti, poolMulti)
+    const byCat = Object.fromEntries(groups.map(g => [g.category, g.items.map(i => i.id)]))
+    // gemini (medium, 95) would win on raw Score alone — the tiebreak must still pick claude (high, 70).
+    expect(byCat.api).toEqual(['claude'])
+    expect(byCat.app).toEqual(['chatgpt'])
+  })
+
   it('returns [] when every affected service is in EXCLUDE_FALLBACK', () => {
     const excluded = [
       { ...op('bedrock', 'api', 'AWS', 90), status: 'down' },
@@ -279,6 +301,78 @@ describe('#1062 facet A — frontend getFallbacks Voice STT/TTS capability gate'
       v('assemblyai', 'AssemblyAI', 'operational', 90),
     ]
     expect(getFallbacks(services[0], services)).toEqual([])
+  })
+})
+
+// #1186 — frontend MIRROR of worker/src/fallback.ts's proportional-interleave fix. Same rationale: a
+// medium score (no official uptime, #713 rescale) is not on the same scale as a high one, but
+// "confidence always wins" would structurally exclude medium whenever 2+ high peers exist, a plain "0
+// on mismatch" comparator breaks Array.sort's transitivity requirement with 3+ candidates, and a naive
+// 1-per-tier-per-round merge over-corrects (gives a size-1 medium tier the same guaranteed slot as a
+// size-9 high tier, and gives 'low'/withheld-score its own slot too — see the low-confidence test below).
+describe('#1186 — frontend getFallbacks does not rank across confidence tiers by raw Score', () => {
+  const v = (id, name, aiwatchScore, scoreConfidence) =>
+    ({ id, category: 'api', name, status: 'operational', aiwatchScore, scoreConfidence, incidents: [] })
+
+  it('does not let a higher medium-confidence score outrank a lower high-confidence one (order preserved)', () => {
+    const services = [
+      v('claude', 'Claude API', 85, 'high'),
+      v('gemini', 'Gemini API', 92, 'medium'),
+    ]
+    expect(getFallbacks({ id: 'openai', category: 'api' }, services).map(f => f.name)).toEqual(['Claude API', 'Gemini API'])
+  })
+
+  it('still sorts by Score within the SAME confidence tier', () => {
+    const services = [
+      v('claude', 'Claude API', 70, 'high'),
+      v('gemini', 'Gemini API', 92, 'high'),
+    ]
+    expect(getFallbacks({ id: 'openai', category: 'api' }, services).map(f => f.name)).toEqual(['Gemini API', 'Claude API'])
+  })
+
+  it('a lone medium candidate gets a fair shot alongside 1-2 high peers (comparable pool sizes)', () => {
+    const services = [
+      v('mistral', 'Mistral API', 95, 'high'),
+      v('cohere', 'Cohere API', 90, 'high'),
+      v('xai', 'xAI API', 60, 'medium'),
+    ]
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'xAI API'])
+  })
+
+  it('a lone medium candidate is NOT guaranteed a slot once high outnumbers it 3-to-1 or more', () => {
+    const services = [
+      v('mistral', 'Mistral API', 95, 'high'),
+      v('cohere', 'Cohere API', 90, 'high'),
+      v('groq', 'Groq Cloud', 85, 'high'),
+      v('xai', 'xAI API', 60, 'medium'),
+    ]
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+  })
+
+  it('#402/#1027 guard restored: a low-confidence (score-withheld) candidate never displaces a real-scored peer', () => {
+    const services = [
+      v('mistral', 'Mistral API', 95, 'high'),
+      v('cohere', 'Cohere API', 90, 'high'),
+      v('groq', 'Groq Cloud', null, 'low'),
+    ]
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+  })
+
+  it('a candidate with an unrecognized scoreConfidence value sinks below high/medium, never vanishes', () => {
+    // A regression in the proportional-interleave rewrite: only ['low', '__none__'] were appended after
+    // the interleave, so any OTHER scoreConfidence value (a legacy/future value) was bucketed but never
+    // pushed to the result — silently dropped instead of sunk.
+    const services = [
+      v('mistral', 'Mistral API', 95, 'high'),
+      v('cohere', 'Cohere API', 90, 'high'),
+      v('groq', 'Groq Cloud', 99, 'insufficient'), // would win #1 on raw Score alone
+    ]
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+  })
+
+  it('an unrecognized-confidence candidate DOES surface when nothing better exists (sink, not exclusion)', () => {
+    const services = [v('groq', 'Groq Cloud', 99, 'insufficient')]
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Groq Cloud'])
   })
 })
 

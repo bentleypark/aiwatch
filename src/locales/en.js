@@ -399,6 +399,8 @@ const en = {
   // Ranking
   'ranking.title': 'Reliability Ranking',
   'ranking.table': 'Full Rankings',
+  'ranking.mediumTable': 'No Official Uptime',
+  'ranking.mediumReason': 'Scored on Incidents + Recovery + Responsiveness only — no official uptime metric, so not directly comparable to the table above. Kept separate rather than merged into one shared rank.',
   'ranking.service': 'Service',
   'ranking.affectedDays': 'Affected Days',
   'ranking.na': 'Insufficient Data',

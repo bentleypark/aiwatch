@@ -485,7 +485,7 @@ ${consentInitScript(nonce)}
   <!-- No uptime data -->
   <div class="subscore">
     <h3 data-i18n="s4.noUptime.title">Uptime 미제공 서비스</h3>
-    <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.</p>
+    <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 화면에 표시되는 uptime %는 추정하지 않습니다. 다만 계산 방식에는 차이가 있습니다. uptime 컴포넌트(40점)를 빼고 나머지 컴포넌트만으로 100점을 환산하는데, 이는 수학적으로 uptime 자리에 나머지 세 컴포넌트 합의 고정 비율(40/60)에 해당하는 값을 대입한 것과 동일한 결과를 냅니다 — 그래서 이렇게 산정된 점수는 공식 uptime이 있는 서비스와 같은 기준이 아닙니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정하되, 랭킹에서는 공식 uptime 서비스와 섞지 않고 별도 표로 분리해 보여줍니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.</p>
     <div class="formula"><span data-i18n="s4.noUptime.formula">Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100</span> <span class="fl-sub" data-i18n="s4.noUptime.formulaSub">— uptime 40점 제외</span></div>
   </div>
 
@@ -605,7 +605,7 @@ const i18n = {
     's4.resp.naFormula': 'probe-less: base 80 → 100 환산',
     's4.resp.insufficient': '새로 추가된 probe 대상 서비스는 7일치 데이터가 쌓이기 전까지 5% 페널티를 적용합니다.',
     's4.noUptime.title': 'Uptime 미제공 서비스',
-    's4.noUptime.desc': '일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
+    's4.noUptime.desc': '일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 화면에 표시되는 uptime %는 추정하지 않습니다. 다만 계산 방식에는 차이가 있습니다. uptime 컴포넌트(40점)를 빼고 나머지 컴포넌트만으로 100점을 환산하는데, 이는 수학적으로 uptime 자리에 나머지 세 컴포넌트 합의 고정 비율(40/60)에 해당하는 값을 대입한 것과 동일한 결과를 냅니다 — 그래서 이렇게 산정된 점수는 공식 uptime이 있는 서비스와 같은 기준이 아닙니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정하되, 랭킹에서는 공식 uptime 서비스와 섞지 않고 별도 표로 분리해 보여줍니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
     's4.noUptime.formula': 'Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100',
     's4.noUptime.formulaSub': '— uptime 40점 제외',
     's4.grades.title': '등급 기준',
@@ -693,7 +693,7 @@ const i18n = {
     's4.resp.naFormula': 'probe-less: rescale base 80 → 100',
     's4.resp.insufficient': 'Newly added probed services receive a 5% penalty until 7 days of probe data accumulate.',
     's4.noUptime.title': 'Services without uptime data',
-    's4.noUptime.desc': 'Some services (Gemini, xAI, Bedrock, etc.) publish no official uptime. We assume no value — the 40-point uptime component is dropped and the score is rescaled over the remaining available components. Services that ARE probed (Gemini, xAI, etc.) are scored on incidents + recovery + responsiveness and included in the ranking. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
+    's4.noUptime.desc': 'Some services (Gemini, xAI, Bedrock, etc.) publish no official uptime. We never estimate the displayed uptime % — but rescaling the score over the remaining available components (dropping the 40-point uptime component) is mathematically equivalent to filling that component with a fixed 40/60 of the sum of the other three — not a measured value — so a rescaled score is not on the same scale as one with real uptime measured. Services that ARE probed (Gemini, xAI, etc.) are scored on incidents + recovery + responsiveness and shown in a separate ranking table — never mixed with services that have official uptime. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
     's4.noUptime.formula': 'Score = (sum of available component scores) / (sum of their maxima) × 100',
     's4.noUptime.formulaSub': '— uptime 40 points excluded',
     's4.grades.title': 'Grade thresholds',

@@ -472,6 +472,10 @@ export function buildRegionHint(svc: ScoredService): string | undefined {
 export interface ScoredService extends ServiceStatus {
   aiwatchScore?: number | null
   scoreGrade?: string | null
+  // #1186 — carried through so buildGroupedFallbackText → getFallbacks/orderForFallback can bucket
+  // candidates by confidence tier before the proportional interleave (see fallback.ts's
+  // FallbackCandidate.scoreConfidence and orderForFallback's doc comment for the full rationale).
+  scoreConfidence?: 'high' | 'medium' | 'low' | null
 }
 
 /**

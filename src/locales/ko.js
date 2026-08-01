@@ -398,6 +398,8 @@ const ko = {
   // Ranking
   'ranking.title': '신뢰도 랭킹',
   'ranking.table': '전체 순위',
+  'ranking.mediumTable': '공식 업타임 미제공',
+  'ranking.mediumReason': '인시던트 + 복구 + 응답성만으로 산정된 점수입니다 — 공식 업타임 지표가 없어 위 표와 직접 비교할 수 없습니다. 하나의 순위로 합치지 않고 별도로 표시합니다.',
   'ranking.service': '서비스',
   'ranking.affectedDays': '영향 일수',
   'ranking.na': '데이터 불충분 서비스',

@@ -398,8 +398,70 @@ export function hasActiveIncident(s) {
   return (s?.incidents ?? []).some(i => i.status !== 'resolved' && !isNonReliabilityAdvisory(i.title ?? ''))
 }
 
+// #1186 — MIRROR of worker/src/fallback.ts orderForFallback (see there for the full design history —
+// attempt 1 [return 0 on confidence mismatch: breaks Array.sort transitivity with 3+ candidates],
+// attempt 2 ["confidence always wins": structurally excludes medium whenever 2+ high peers exist], and
+// attempt 3 [1-per-tier-per-round: over-corrected — a size-1 medium tier got the SAME guaranteed slot
+// as a size-9 high tier, and a 'low'/withheld-score candidate got its own round-0 slot, defeating the
+// `?? 0` sink]). Final design: 'low'/no-confidence NEVER compete for an early slot (Score-sorted,
+// appended after — restores the `?? 0` sink); 'high'/'medium' interleave PROPORTIONALLY by rank
+// fraction within their own tier `(rank + 0.5) / tierSize` — ties (equal fraction) favor 'high'. A
+// small medium tier still gets a fair shot when pools are comparable in size, and naturally fades out
+// (not excluded, not over-weighted) as the high pool grows relative to it — no magic threshold, the
+// fraction IS the rule.
+export function orderForFallback(candidates, sourceTier) {
+  const byDistance = new Map()
+  for (const c of candidates) {
+    const dist = Math.abs(tierFor(c.id) - sourceTier)
+    const group = byDistance.get(dist)
+    if (group) group.push(c)
+    else byDistance.set(dist, [c])
+  }
+  const distances = [...byDistance.keys()].sort((a, b) => a - b)
+  const result = []
+  for (const dist of distances) {
+    const group = byDistance.get(dist)
+    const byConfidence = new Map()
+    for (const c of group) {
+      const key = c.scoreConfidence ?? '__none__'
+      const bucket = byConfidence.get(key)
+      if (bucket) bucket.push(c)
+      else byConfidence.set(key, [c])
+    }
+    for (const bucket of byConfidence.values()) {
+      bucket.sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
+    }
+    // Interleave 'high'/'medium' proportionally by rank fraction within their own tier. Ties favor
+    // 'high' (index 0 below), matching the already-agreed tiebreak for an incomparable-Score case.
+    const interleaved = []
+    ;['high', 'medium'].forEach((key, priority) => {
+      const bucket = byConfidence.get(key)
+      if (!bucket) return
+      bucket.forEach((item, rank) => {
+        interleaved.push({ item, pos: (rank + 0.5) / bucket.length, priority })
+      })
+    })
+    interleaved.sort((a, b) => a.pos - b.pos || a.priority - b.priority)
+    result.push(...interleaved.map((e) => e.item))
+    // 'low' (score withheld), '__none__' (no confidence signal), and any OTHER value never compete for
+    // an early slot — appended after, Score-sorted among themselves (mirrors the old `?? 0` sink).
+    // Iterates every REMAINING bucket rather than a hardcoded ['low', '__none__'] pair — a candidate
+    // with a scoreConfidence outside {high,medium,low} (a legacy KV record predating this field, or a
+    // future value) must sink here, not silently vanish from the recommendation.
+    for (const [key, bucket] of byConfidence) {
+      if (key === 'high' || key === 'medium') continue
+      if (key !== 'low' && key !== '__none__') {
+        console.warn(`[fallback] unrecognized scoreConfidence "${key}" on ${bucket.map((c) => c.id).join(', ')} — sinking below high/medium instead of dropping`)
+      }
+      result.push(...bucket)
+    }
+  }
+  return result
+}
+
 /**
- * Get top 2 fallback recommendations for a service, sorted by tier proximity + AIWatch Score.
+ * Get top 2 fallback recommendations for a service, ordered by tier proximity then by
+ * `orderForFallback` (#1186 — a confidence-aware proportional interleave, not a raw Score sort).
  * A candidate must be genuinely clean: operational AND no unresolved incident (#550).
  * @param {object} service - Source service (needs .id, .category)
  * @param {object[]} allServices - All services (needs .id, .category, .status, .incidents, .aiwatchScore)
@@ -424,7 +486,7 @@ export function getFallbacks(service, allServices) {
   // outage with "try OpenAI API"); api → app/agent stays impossible because no CAPABILITY_TIER value is
   // an app/agent tier, no app/agent id sits in a specialized tier, and CAPABILITY_PROVIDERS holds none.
   const routedCross = routed !== null && routed > 0
-  return allServices
+  const eligible = allServices
     // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either
     // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the six deliberately-untiered
     // services and `tierFor`'s warn-once keeps meaning "someone forgot a tier entry" (#402/#403).
@@ -436,12 +498,7 @@ export function getFallbacks(service, allServices) {
       && (!sameTierOnly || admittedBySubTier(s.id))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
       && sharesCapability(service.id, s.id))
-    .sort((a, b) => {
-      const distA = Math.abs(tierFor(a.id) - sourceTier)
-      const distB = Math.abs(tierFor(b.id) - sourceTier)
-      if (distA !== distB) return distA - distB
-      return (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)
-    })
+  return orderForFallback(eligible, sourceTier)
     .slice(0, 2)
     .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
 }

@@ -649,16 +649,28 @@ test.describe('No-official-uptime services (Bedrock, Azure OpenAI)', () => {
     })
     await page.goto('/#ranking')
     await expect(page.locator('h2').filter({ hasText: /랭킹|Ranking/i })).toBeVisible({ timeout: 20000 })
-    const rankingTable = page.locator('table').first()
-    await expect(rankingTable).toBeVisible({ timeout: 10000 })
-    // Official-uptime services are ranked
-    await expect(rankingTable.getByText('Claude API')).toBeVisible()
-    await expect(rankingTable.getByText('OpenAI API')).toBeVisible()
-    // #713 — a no-official-uptime service WITH a probe (confidence 'medium') stays ranked on its measured score
-    await expect(rankingTable.getByText('Gemini API')).toBeVisible()
-    // #713 — no-uptime AND no-probe (confidence 'low') are NOT in the scored ranking (they over-score)
-    await expect(rankingTable.getByText('Amazon Bedrock')).not.toBeVisible()
-    await expect(rankingTable.getByText('Azure OpenAI')).not.toBeVisible()
+    // #1186 — high and medium confidence are no longer one shared table: a medium score (no official
+    // uptime, #713's rescale) is not on the same numeric scale as a high one, so they render as two
+    // independently-ranked tables. The first table is high-confidence only; a probed no-uptime service
+    // (medium) now appears in the SECOND table, not the first.
+    const highTable = page.locator('table').first()
+    await expect(highTable).toBeVisible({ timeout: 10000 })
+    // Official-uptime services are ranked in the high-confidence table
+    await expect(highTable.getByText('Claude API')).toBeVisible()
+    await expect(highTable.getByText('OpenAI API')).toBeVisible()
+    // #1186 — Gemini (medium) must NOT be mixed into the high-confidence table...
+    await expect(highTable.getByText('Gemini API')).not.toBeVisible()
+    // ...but IS ranked, in its own separate medium-confidence table.
+    const mediumTable = page.locator('table').nth(1)
+    await expect(mediumTable).toBeVisible({ timeout: 10000 })
+    await expect(mediumTable.getByText('Gemini API')).toBeVisible()
+    // #713 — no-uptime AND no-probe (confidence 'low') are NOT in either scored table (they over-score
+    // under the rescale) — they DO still appear elsewhere on the page (e.g. an "Insufficient Data"
+    // list), so scope the check to the two ranking tables specifically, not the whole page.
+    await expect(highTable.getByText('Amazon Bedrock')).not.toBeVisible()
+    await expect(highTable.getByText('Azure OpenAI')).not.toBeVisible()
+    await expect(mediumTable.getByText('Amazon Bedrock')).not.toBeVisible()
+    await expect(mediumTable.getByText('Azure OpenAI')).not.toBeVisible()
   })
 })
 

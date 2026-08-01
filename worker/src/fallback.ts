@@ -9,7 +9,9 @@ import { isNonReliabilityAdvisory } from './utils'
 // each other in Tier 8); turbopuffer is fallback-eligible from the start (never added here).
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs']
 
-// Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
+// Tier-based priority — same-tier services first via orderForFallback (#1186 — a confidence-aware
+// proportional interleave, NOT a raw Score sort; see that function's doc comment), then adjacent tiers
+// by distance.
 // API tiers (1-8) and the agent tier (11) use distinct number ranges so TIER_LABEL stays unambiguous
 // and the category filter in getFallbacks prevents API ↔ agent leakage on every NON-routed path.
 // #1119 narrowed that claim: a capability-ROUTED source is pinned to the routed TIER instead of its
@@ -25,10 +27,13 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 
 // TRADE-OFF (honest): this RE-EXPOSES the #402 failure mode — a shallow-history agent whose Score is
 // *inflated* (few incidents → high, non-null Score) ranking #1 for an unrelated agent outage — WITHIN
 // the agent category. The old sub-tiers masked it via form-proximity; #1027 adds NO structural guard.
-// getFallbacks (below) sorts on raw aiwatchScore and does NOT consult the coverage gate (#802 is a
-// rankings-page-only exclusion) or confidence withholding (#713 nulls a Score only when a service has
-// neither official uptime nor a probe — every agent HAS official uptime, so #713 never fires for them).
-// Only a genuinely null Score sinks, via `?? 0`. Mitigation is procedural, not structural: verify after
+// getFallbacks (below) orders by Score via orderForFallback — which reduces to a plain Score sort here
+// since every agent is 'high' confidence (every agent HAS official uptime, so #713's confidence-
+// downgrade never fires for them) — and does NOT consult the coverage gate (#802 is a rankings-page-
+// only exclusion).
+// Only a genuinely null/low-confidence Score sinks (via orderForFallback's low/'__none__' bucket) — every
+// agent here is 'high', so that sink never fires for them in practice. Mitigation is procedural, not
+// structural: verify after
 // adding any new agent that it doesn't dominate the fallback slot on an unrelated outage. This is an
 // accepted trade-off of design A (Score-neutral ordering over a form axis that no longer discriminates).
 //
@@ -96,6 +101,15 @@ interface FallbackCandidate {
    *  same product surface. */
   incidentSourceStale?: boolean
   aiwatchScore?: number | null
+  /** #1186 — 'high' (official uptime) and 'medium' (no uptime, but a probe — the #713 rescale) are not
+   *  on the same numeric scale despite sharing 0-100 (see score.ts's #1186 correction), so `aiwatchScore`
+   *  must never be compared directly across confidence tiers. `orderForFallback` reads this field to
+   *  bucket candidates by tier, interleave 'high'/'medium' PROPORTIONALLY by rank-within-tier (never a
+   *  raw Score comparison across tiers), and sink 'low' (score withheld) below both. Absent on a caller
+   *  that hasn't attached it (e.g. the RSS feed's degraded path, when the raw `services:latest` is
+   *  served unenriched) — degrades to a single '__none__' bucket, i.e. a plain Score sort, unchanged
+   *  pre-#1186 behavior. See `orderForFallback`'s doc comment for the full design history. */
+  scoreConfidence?: 'high' | 'medium' | 'low' | null
   /** #1062 facet B — per-component status snapshot (ServiceStatus.components, #604). Read by
    *  `routingTier` to detect a secondary-capability-only outage (OpenAI 'Images' down while 'Chat
    *  Completions' operational) and route the fallback to that capability's tier. Absent for services
@@ -323,6 +337,115 @@ export function effectiveTierFor(svc: FallbackCandidate): number {
   return routed !== null && routed !== ROUTE_SUPPRESS ? routed : tierFor(svc.id)
 }
 
+// #1186 — orders candidates for fallback selection: tier distance first (closer wins), then WITHIN a
+// tier-distance group, a PROPORTIONAL INTERLEAVE across confidence tiers instead of a single global
+// sort. Three prior designs were tried and rejected here; this is the fourth.
+//
+// Attempt 1 — a comparator that returns 0 for a cross-confidence pair: only safe for exactly 2
+// elements. With 3+, it breaks the transitivity Array.sort requires — e.g. A(high,90) vs B(medium,95)
+// → 0 (different confidence), B vs C(high,70) → 0, yet A vs C (both high) → A firmly outranks C. A~B
+// and B~C but NOT A~C is not a valid equivalence, and per the sort spec a non-transitive comparator's
+// result is undefined once there are 3+ candidates — not just "which of two ties displays first", but
+// potentially WHICH candidates make the top-2 cut at all.
+//
+// Attempt 2 — "confidence always beats score": in any tier with 2+ high-confidence members (tier 2 —
+// mistral/cohere/groq/together/fireworks/cerebras/deepseek/kimi/perplexity — alongside xai, medium),
+// that STRUCTURALLY excludes every medium candidate from ever being picked, regardless of how good its
+// measured signal is. Reintroduces the "unmeasured ⇒ treated as worse" assumption #1186 exists to
+// remove (the #713 rescale runs GENEROUS, not punitive — see score.ts's #1186 correction).
+//
+// Attempt 3 — 1-per-confidence-tier-per-round: sort each tier internally by Score, merge one candidate
+// per PRESENT tier per round. Fixed attempt 1's transitivity break and attempt 2's total exclusion, but
+// over-corrected: because the top-2 output only ever consumes round 0 (and round 1 only when a tier is
+// exhausted), a SINGLE medium candidate got the SAME one-slot-per-round guarantee as a 9-member high
+// tier — 50% of a 2-slot recommendation to a tier that is 10% of the measured pool, worse than the
+// score.ts rescale it was supposed to correct for. Discovered by testing it against the very tier-2
+// shape named above: xai (medium, lowest score) beat 3 higher-scoring high peers into the #2 slot
+// unconditionally. It also gave a `low`-confidence (WITHHELD score, e.g. a probe still warming up —
+// see docs/reference/fallback-tiers.md) candidate its own round-0 slot, defeating the `?? 0` sink that
+// exists specifically so an unscored candidate never displaces a real one (the #402/#1027 guard).
+//
+// Final — proportional interleave, `low`/no-confidence excluded from the interleave entirely:
+//   1. `low` (score genuinely withheld — untrustworthy, not just on a different scale) and candidates
+//      with no `scoreConfidence` at all NEVER compete for an early slot. They are Score-sorted among
+//      themselves and appended AFTER every high/medium candidate in this tier-distance group — the
+//      `?? 0` sink, restored. (When high/medium are BOTH absent — e.g. the RSS feed's degraded path,
+//      when `STATUS_CACHE`/`cached` is unavailable and rss.ts falls back to the raw, unenriched
+//      `services:latest` — this degrades to a single bucket, i.e. a plain Score sort, unchanged
+//      pre-#1186 behavior. On the normal serving path index.ts DOES attach `scoreConfidence` to the RSS
+//      candidate pool same as every other caller.)
+//   2. `high` and `medium` interleave by PROPORTION, not by fixed round: each candidate gets a virtual
+//      position `(rankInTier + 0.5) / tierSize` (its rank fraction WITHIN its own confidence tier,
+//      Score-sorted), and the merge is a plain sort of both tiers by that position (ties → high wins,
+//      matching the "high before medium" tiebreak already agreed for the equal/incomparable case).
+//      A tier's own internal order is preserved (rank is monotonic in Score), but a tier's SIZE now
+//      governs how much of the merged order it gets to occupy early: a size-1 medium tier's one member
+//      sits at position 0.5 — competitive for the #2 slot when high has 1-2 members (high size 2:
+//      0.25/0.75, medium's 0.5 lands 2nd), but pushed OUT of the top-2 once high has 3+: at high size 3
+//      (members at 0.167/0.5/0.833) medium's 0.5 TIES high's own middle member and loses the tie,
+//      landing 3rd, not 2nd — it keeps sliding further back as high grows (6th at high size 9, per the
+//      worked fixture in fallback.test.ts). No magic threshold: the fraction IS the fairness rule, and
+//      it degrades gracefully as the pools grow apart instead of granting either extreme (never /
+//      always) a fixed share.
+export function orderForFallback<T extends { id: string; aiwatchScore?: number | null; scoreConfidence?: string | null }>(
+  candidates: T[],
+  sourceTier: number,
+): T[] {
+  const byDistance = new Map<number, T[]>()
+  for (const c of candidates) {
+    const dist = Math.abs(tierFor(c.id) - sourceTier)
+    const group = byDistance.get(dist)
+    if (group) group.push(c)
+    else byDistance.set(dist, [c])
+  }
+  const distances = [...byDistance.keys()].sort((a, b) => a - b)
+  const result: T[] = []
+  for (const dist of distances) {
+    const group = byDistance.get(dist)!
+    const byConfidence = new Map<string, T[]>()
+    for (const c of group) {
+      // '__none__' covers a caller that doesn't attach scoreConfidence at all (e.g. the RSS feed's
+      // degraded path — see orderForFallback's doc comment).
+      const key = c.scoreConfidence ?? '__none__'
+      const bucket = byConfidence.get(key)
+      if (bucket) bucket.push(c)
+      else byConfidence.set(key, [c])
+    }
+    // Score-sort WITHIN each confidence bucket only — a valid same-scale comparison.
+    for (const bucket of byConfidence.values()) {
+      bucket.sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
+    }
+    // Interleave 'high' and 'medium' proportionally by rank fraction within their own tier (see doc
+    // comment above). Ties (equal fraction) favor 'high' — index 0 in this array — matching the
+    // already-agreed tiebreak for a comparison Score truly cannot arbitrate.
+    const interleaved: Array<{ item: T; pos: number; priority: number }> = []
+    ;(['high', 'medium'] as const).forEach((key, priority) => {
+      const bucket = byConfidence.get(key)
+      if (!bucket) return
+      bucket.forEach((item, rank) => {
+        interleaved.push({ item, pos: (rank + 0.5) / bucket.length, priority })
+      })
+    })
+    interleaved.sort((a, b) => a.pos - b.pos || a.priority - b.priority)
+    result.push(...interleaved.map((e) => e.item))
+    // 'low' (score withheld), '__none__' (no confidence signal), and any OTHER value never compete for
+    // an early slot — appended after, Score-sorted among themselves (mirrors the old `?? 0` sink: a
+    // `low` candidate's score is null, so this is a stable/arbitrary order among them, same as before).
+    // Iterates every REMAINING bucket rather than a hardcoded ['low', '__none__'] pair — a candidate
+    // with a scoreConfidence outside {high,medium,low} (a legacy KV record predating this field, or a
+    // future value) must sink here, not silently vanish from the recommendation. serviceReliability.js's
+    // buildRanking hit this exact shape on the Ranking page; a hardcoded 2-key list here missed it.
+    for (const [key, bucket] of byConfidence) {
+      if (key === 'high' || key === 'medium') continue
+      if (key !== 'low' && key !== '__none__') {
+        console.warn(`[fallback] unrecognized scoreConfidence "${key}" on ${bucket.map((c) => c.id).join(', ')} — sinking below high/medium instead of dropping`)
+      }
+      result.push(...bucket)
+    }
+  }
+  return result
+}
+
 export function getFallbacks(
   serviceId: string,
   category: string,
@@ -370,7 +493,7 @@ export function getFallbacks(
   // recorded so it doesn't read as a bug. (Component NAMES are live status-page data; a provider rename
   // could make it reachable with no signal here.)
   const routedCross = routed !== null && routed > 0
-  const picked = services
+  const eligible = services
     // The two id-only guards run FIRST, before any tier lookup. Six of the nine EXCLUDE_FALLBACK
     // members are deliberately absent from API_TIER, and the source itself may be an id it doesn't
     // carry — so
@@ -385,17 +508,7 @@ export function getFallbacks(
       && (!sameTierOnly || admittedBySubTier(s.id))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
       && sharesCapability(serviceId, s.id))
-    .sort((a, b) => {
-      // Prefer same or adjacent tier to the affected service
-      const tierA = tierFor(a.id)
-      const tierB = tierFor(b.id)
-      const distA = Math.abs(tierA - sourceTier)
-      const distB = Math.abs(tierB - sourceTier)
-      if (distA !== distB) return distA - distB
-      // Within same tier distance, sort by Score descending
-      return (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)
-    })
-    .slice(0, 2)
+  const picked = orderForFallback(eligible, sourceTier).slice(0, 2)
   // #1119 — a routed outage that finds NOBODY is indistinguishable, on every surface, from an outage
   // that never routed: both render nothing. That silence is what let this bug live for weeks. Every
   // routable tier has only 2-3 members, so one sibling incident empties the pool again. Warn once per
@@ -456,7 +569,8 @@ export function tierLabelFor(tier: number): string | undefined {
  * #781 — structured per-category grouped fallbacks for a (possibly multi-surface) incident. ONE group
  * per distinct `category:tierLabel` — or, at a SPECIALIZED tier, per `tier:<n>` with no category
  * prefix (#1119) — among the affected, non-operational services; within a group the candidates come
- * from getFallbacks (operational + incident-free, Score-ordered) — same category, EXCEPT a #1119
+ * from getFallbacks (operational + incident-free, ordered by orderForFallback — tier distance then a
+ * confidence-aware Score ordering, #1186) — same category, EXCEPT a #1119
  * routed group, whose candidates come from the routed capability's tier instead.
  *
  * perGroup mirrors the frontend `getGroupedFallbacks` (src/utils/constants.js) for dashboard parity:

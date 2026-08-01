@@ -41,6 +41,25 @@ export const hasSufficientCoverage = (s) => s.coverageDays == null || s.coverage
 export const hasReliableScoreData = (s) =>
   !s.incidentSourceStale && s.scoreConfidence !== 'low' && hasSufficientCoverage(s)
 
+/** #1186 — split an already-`hasReliableScoreData`-filtered array into confidence tiers for the
+ *  ranking. A 'high' score (official uptime measured) and a 'medium' score (no official uptime — the
+ *  #713 rescale fills the missing Uptime component at the FIXED ratio 40/60 of the other three (not an
+ *  empirical average — it's `UPTIME_SCORE_MAX / (INCIDENTS+RECOVERY+RESPONSIVENESS_SCORE_MAX)`), which is
+ *  mathematically an imputed uptime figure, not an absence of one) are NOT on the same scale despite
+ *  sharing a 0-100 range: the rescale is systematically more generous than a real, moderately-bad measured
+ *  uptime would be (verified: holding I/R/P at 25/15/12.5, the rescaled medium score is 87.5, while a
+ *  service genuinely MEASURED at 96% uptime with the same I/R/P scores only 60.5 — score.ts's uptime curve
+ *  maps 95-100% linearly onto 0-40, so 96% actual uptime is a mere uptimeScore of 8 — i.e. the rescaled
+ *  score sits **27 points above** the real one, not below; a "no value assumed" score should not routinely
+ *  outscore a real-but-imperfect measurement). Two ranked tables, never merged into one shared rank
+ *  sequence — `scored` is assumed pre-filtered to `high`/`medium` only (never `low`, which
+ *  `hasReliableScoreData` already excludes), so this only partitions; the caller re-derives rank per tier
+ *  (array index), same as the existing tied-rank logic. */
+export const splitByConfidence = (scored) => ({
+  high: scored.filter((s) => s.scoreConfidence === 'high'),
+  medium: scored.filter((s) => s.scoreConfidence === 'medium'),
+})
+
 /** #870 — the service HAS a probe target but hasn't accrued ≥7d of samples yet, so score.ts marks its
  *  Responsiveness `insufficient` and confidence falls to `low`. `scoreBreakdown.responsivenessStatus`
  *  (score.ts `ProbeContext.kind`) distinguishes this WARMING state from `unsupported` (no probe target
@@ -57,3 +76,53 @@ export const isProbeWarming = (s) => s.scoreBreakdown?.responsivenessStatus === 
 export const isRecentlyAdded = (s) =>
   !s.incidentSourceStale && s.coverageDays != null && s.coverageDays < MIN_COVERAGE_DAYS
   && ((s.aiwatchScore != null && s.scoreConfidence !== 'low') || isProbeWarming(s))
+
+/** #1186 — rank one confidence tier's array independently. Sorted by score descending; `rank`/`isTied`
+ *  are derived from the array (competition ranking: ties share a rank, the next distinct score skips
+ *  ahead), same logic Ranking.jsx used pre-split. Callers pass ONE tier at a time (never a mixed
+ *  high+medium array) — see splitByConfidence for why the two must never share a rank sequence. */
+export const rankTier = (arr) => [...arr]
+  .sort((a, b) => b.aiwatchScore - a.aiwatchScore)
+  .map((svc, i, sorted) => {
+    const score = Math.round(svc.aiwatchScore)
+    const rank = sorted.findIndex((s) => Math.round(s.aiwatchScore) === score) + 1
+    const isTied = sorted.filter((s) => Math.round(s.aiwatchScore) === score).length > 1
+    return { ...svc, rank, isTied }
+  })
+
+// #1186 — warn-once set for buildRanking's orphaned-confidence guard below. `buildRanking` runs inside
+// a `useMemo` keyed on a freshly-filtered `services` array every render (Ranking.jsx never memoizes
+// input identity), so an un-deduped warn would fire on every render for as long as the page stays open
+// — matching the warn-once shape already used elsewhere in this codebase (fallback.ts's tierFor, etc.).
+const warnedOrphanedIds = new Set()
+
+/** #1186 — the full Ranking-page assembly: filter to reliable-score services, split by confidence tier,
+ *  rank each tier independently, and bucket the rest into "recently added" vs "insufficient data" by
+ *  reason (#802/#870). Pulled out of Ranking.jsx as a pure function so the wiring #1186 exists to
+ *  protect (tier split → independent rank sequences → podium sourced from `high` only) has direct test
+ *  coverage, not just coverage of its pieces in isolation. */
+export const buildRanking = (services) => {
+  const eligible = services.filter((s) => s.aiwatchScore != null && hasReliableScoreData(s))
+  const { high, medium } = splitByConfidence(eligible)
+  const scoredHigh = rankTier(high)
+  const scoredMedium = rankTier(medium)
+  // #1186 — splitByConfidence only recognizes 'high'/'medium' by strict ===, and hasReliableScoreData
+  // only excludes 'low' — so a service with any OTHER scoreConfidence (undefined, or a legacy/future
+  // value) passes eligibility but lands in NEITHER bucket above. Pre-#1186 this partition was strictly
+  // binary (scored vs not) and such a service still rendered; route it to `insufficient` instead of
+  // letting it silently vanish from the page. Unreachable from a single score.ts compute (`confidence`
+  // is a non-optional 'high'|'medium'|'low' union there, #713 — see monthly-archive.ts:801's analogous
+  // #1016 `scoreConfidence == null` guard), but this app persists monthly-archive/KV snapshots across
+  // deploys, and a legacy record predating this field is a plausible real vector.
+  const orphaned = eligible.filter((s) => s.scoreConfidence !== 'high' && s.scoreConfidence !== 'medium')
+  const newlyOrphaned = orphaned.filter((s) => !warnedOrphanedIds.has(s.id))
+  if (newlyOrphaned.length > 0) {
+    newlyOrphaned.forEach((s) => warnedOrphanedIds.add(s.id))
+    console.warn(`[buildRanking] ${newlyOrphaned.map((s) => s.id).join(', ')} passed hasReliableScoreData but scoreConfidence is neither 'high' nor 'medium' — routed to insufficient instead of vanishing from the Ranking page`)
+  }
+  const na = services.filter((s) => s.aiwatchScore == null || !hasReliableScoreData(s))
+  const recentlyAdded = na.filter(isRecentlyAdded)
+  const recentIds = new Set(recentlyAdded.map((s) => s.id))
+  const insufficient = [...na.filter((s) => !recentIds.has(s.id)), ...orphaned]
+  return { scoredHigh, scoredMedium, recentlyAdded, insufficient }
+}

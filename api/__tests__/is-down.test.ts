@@ -212,3 +212,134 @@ describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => 
     expect((html.match(/🔄 Alternatives/g) ?? []).length).toBe(1)
   })
 })
+
+// #1186 — the rank/"#N of M" clause must count WITHIN the target's own confidence tier only, mirroring
+// the dashboard's split into two independent rank sequences (Ranking.jsx / serviceReliability.js's
+// splitByConfidence). Before this fix, is-down.ts computed rank over ALL high+medium services combined
+// — the same apples-to-oranges comparison #1186 removed from the dashboard, just on a different surface.
+describe('is-down.ts — rank is scoped to the target\'s own confidence tier (#1186)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  afterEach(() => { fetchMock.mockRestore() })
+
+  const now = new Date().toISOString()
+  const svc = (over: Record<string, unknown>) => ({
+    category: 'api', status: 'operational', latency: 100, uptime30d: null,
+    lastChecked: now, incidents: [], scoreGrade: 'good', ...over,
+  })
+
+  it('a medium-confidence target ranks only against OTHER medium-confidence services, not high', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'gemini', name: 'Gemini API', aiwatchScore: 86, scoreConfidence: 'medium' }),
+        svc({ id: 'xai', name: 'xAI API', aiwatchScore: 70, scoreConfidence: 'medium' }),
+        // Two high-confidence services with scores that would change gemini's rank/total if merged in.
+        svc({ id: 'claude', name: 'Claude API', aiwatchScore: 99, uptime30d: 99.99, scoreConfidence: 'high' }),
+        svc({ id: 'openai', name: 'OpenAI API', aiwatchScore: 95, uptime30d: 99.9, scoreConfidence: 'high' }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const res = await handler(makeReq('gemini'))
+    const html = await res.text()
+    // #1 of 2 (gemini, xai) — NOT #3 of 4, which is what merging in the two high-confidence services
+    // above would have produced.
+    expect(html).toContain('is ranked <strong>#1</strong> of 2 AI services')
+    // The disclosure qualifier renders for a medium-confidence target.
+    expect(html).toContain('with no official uptime metric (scored on incidents, recovery, and responsiveness only)')
+  })
+
+  it('a high-confidence target\'s rank/total is unaffected by medium-confidence services in the payload', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'claude', name: 'Claude API', aiwatchScore: 92, uptime30d: 99.9, scoreConfidence: 'high' }),
+        svc({ id: 'openai', name: 'OpenAI API', aiwatchScore: 80, uptime30d: 99.5, scoreConfidence: 'high' }),
+        svc({ id: 'gemini', name: 'Gemini API', aiwatchScore: 999, scoreConfidence: 'medium' }), // would win #1 if tiers merged
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const res = await handler(makeReq('claude-api'))
+    const html = await res.text()
+    expect(html).toContain('is ranked <strong>#1</strong> of 2 AI services')
+    // No medium-tier disclosure qualifier on a high-confidence target.
+    expect(html).not.toContain('with no official uptime metric')
+  })
+})
+
+// #1186 — is-down.ts's inline orderForFallback (the "🔄 Alternatives" recommendation, a SEPARATE
+// feature from the rank/"#N of M" clause tested above, touched in the same file diff) previously had
+// only a string-pattern check (fallback-order-sync.test.ts) that the mirror exists and has the right
+// shape — never a behavioral test through the real handler. These exercise it end-to-end.
+describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  afterEach(() => { fetchMock.mockRestore() })
+
+  const now = new Date().toISOString()
+  const svc = (over: Record<string, unknown>) => ({
+    category: 'api', status: 'operational', latency: 100, uptime30d: null,
+    lastChecked: now, incidents: [], scoreGrade: 'good', ...over,
+  })
+
+  // Extract the rendered order of names from the "Alternatives When X is Down" list
+  // (`renderFallbacks`'s `<span class="fallback-name">` — wrapped in an `<a>` when a slug is known).
+  const bulletOrder = (html: string): string[] =>
+    [...html.matchAll(/class="fallback-name">(?:<a[^>]*>)?([^<]+)/g)].map(m => m[1].trim())
+
+  it('a higher medium-confidence score does not outrank a lower high-confidence one', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'openai', name: 'OpenAI API', status: 'down', uptime30d: 99, scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 'o-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'claude', name: 'Claude API', uptime30d: 99.9, scoreConfidence: 'high', aiwatchScore: 85 }),
+        svc({ id: 'gemini', name: 'Gemini API', scoreConfidence: 'medium', aiwatchScore: 92 }), // higher raw score
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const res = await handler(makeReq('openai-api'))
+    const html = await res.text()
+    const order = bulletOrder(html)
+    expect(order.indexOf('Claude API')).toBeLessThan(order.indexOf('Gemini API'))
+  })
+
+  it('a low-confidence (score-withheld) candidate never displaces a real-scored peer', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'mistral', name: 'Mistral API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
+        svc({ id: 'groq', name: 'Groq Cloud', scoreConfidence: 'low', aiwatchScore: null }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const res = await handler(makeReq('together'))
+    const html = await res.text()
+    const order = bulletOrder(html)
+    expect(order).toEqual(['Mistral API', 'Cohere API'])
+    expect(order).not.toContain('Groq Cloud')
+  })
+
+  it('a candidate with an unrecognized scoreConfidence value sinks below high/medium, never vanishes', async () => {
+    // A regression in the proportional-interleave rewrite: only 'low'/undefined were appended after the
+    // interleave, so a candidate whose scoreConfidence was neither 'high'/'medium' NOR literally
+    // 'low'/undefined (a legacy KV record predating a future confidence value) was bucketed but never
+    // rendered — silently dropped instead of sunk.
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'mistral', name: 'Mistral API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
+        svc({ id: 'groq', name: 'Groq Cloud', scoreConfidence: 'insufficient', aiwatchScore: 99 }), // would win #1 on raw Score alone
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const res = await handler(makeReq('together'))
+    const html = await res.text()
+    const order = bulletOrder(html)
+    expect(order).toEqual(['Mistral API', 'Cohere API'])
+    expect(order).not.toContain('Groq Cloud')
+  })
+})

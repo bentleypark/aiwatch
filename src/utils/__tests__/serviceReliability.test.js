@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData, hasSufficientCoverage, isProbeWarming, isRecentlyAdded } from '../serviceReliability'
+import { describe, it, expect, vi } from 'vitest'
+import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData, hasSufficientCoverage, isProbeWarming, isRecentlyAdded, splitByConfidence, rankTier, buildRanking } from '../serviceReliability'
 
 // #713 — AIWatch no longer invents a uptime % for services without an official figure (the old
 // `uptimeSource: 'estimate'` was removed). A no-official-uptime service carries `uptime30d: null` and
@@ -102,5 +102,170 @@ describe('isProbeWarming / isRecentlyAdded (#870)', () => {
 
   it('a warming service that has reached 30d coverage is no longer held out (not <30)', () => {
     expect(isRecentlyAdded({ ...warmingNew, coverageDays: 30 })).toBe(false)
+  })
+})
+
+// #1186 — a medium-confidence score (no official uptime; the #713 rescale imputes uptime = 0.667 ×
+// (Incidents+Recovery+Responsiveness), verified against score.ts) is not on the same scale as a
+// high-confidence one. Ranking.jsx must render them as two SEPARATE rank sequences, never one shared
+// table — this pins the partition so a future change that re-merges them into one array fails here
+// first, not silently in the rendered page.
+describe('splitByConfidence (#1186)', () => {
+  const high1 = { id: 'claude', scoreConfidence: 'high' }
+  const high2 = { id: 'openai', scoreConfidence: 'high' }
+  const medium1 = { id: 'gemini', scoreConfidence: 'medium' }
+  const medium2 = { id: 'xai', scoreConfidence: 'medium' }
+
+  it('partitions a mixed array into high and medium buckets, order preserved within each', () => {
+    const out = splitByConfidence([high1, medium1, high2, medium2])
+    expect(out.high).toEqual([high1, high2])
+    expect(out.medium).toEqual([medium1, medium2])
+  })
+
+  it('an all-high input produces an empty medium bucket (not omitted, not undefined)', () => {
+    const out = splitByConfidence([high1, high2])
+    expect(out.high).toEqual([high1, high2])
+    expect(out.medium).toEqual([])
+  })
+
+  it('an all-medium input produces an empty high bucket', () => {
+    const out = splitByConfidence([medium1, medium2])
+    expect(out.high).toEqual([])
+    expect(out.medium).toEqual([medium1, medium2])
+  })
+
+  it('an empty input produces two empty buckets, no throw', () => {
+    const out = splitByConfidence([])
+    expect(out).toEqual({ high: [], medium: [] })
+  })
+
+  it('never puts a low-confidence entry in either bucket (the caller must pre-filter via hasReliableScoreData)', () => {
+    const low = { id: 'bedrock', scoreConfidence: 'low' }
+    const out = splitByConfidence([high1, low, medium1])
+    expect(out.high).toEqual([high1])
+    expect(out.medium).toEqual([medium1])
+    expect(out.high).not.toContainEqual(low)
+    expect(out.medium).not.toContainEqual(low)
+  })
+
+  // hasReliableScoreData's `scoreConfidence !== 'low'` check lets `undefined` through (it isn't `'low'`),
+  // but splitByConfidence's strict `=== 'high'`/`=== 'medium'` checks don't recognize it — same silent-drop
+  // shape as the existing `console.warn` guard at worker/src/monthly-archive.ts:800 for scoreConfidence == null.
+  it('silently drops a service with scoreConfidence undefined from both buckets', () => {
+    const undefinedConf = { id: 'mystery' }
+    const out = splitByConfidence([high1, undefinedConf, medium1])
+    expect(out.high).toEqual([high1])
+    expect(out.medium).toEqual([medium1])
+    expect(out.high).not.toContainEqual(undefinedConf)
+    expect(out.medium).not.toContainEqual(undefinedConf)
+  })
+})
+
+describe('rankTier (#1186)', () => {
+  it('sorts descending by score and assigns rank 1 to the highest', () => {
+    const out = rankTier([
+      { id: 'a', aiwatchScore: 70 },
+      { id: 'b', aiwatchScore: 95 },
+      { id: 'c', aiwatchScore: 82 },
+    ])
+    expect(out.map((s) => s.id)).toEqual(['b', 'c', 'a'])
+    expect(out.map((s) => s.rank)).toEqual([1, 2, 3])
+    expect(out.every((s) => s.isTied === false)).toBe(true)
+  })
+
+  it('competition ranking: tied scores share a rank, the next distinct score skips ahead', () => {
+    const out = rankTier([
+      { id: 'a', aiwatchScore: 90 },
+      { id: 'b', aiwatchScore: 90 },
+      { id: 'c', aiwatchScore: 80 },
+    ])
+    const byId = Object.fromEntries(out.map((s) => [s.id, s]))
+    expect(byId.a.rank).toBe(1)
+    expect(byId.b.rank).toBe(1)
+    expect(byId.a.isTied).toBe(true)
+    expect(byId.b.isTied).toBe(true)
+    expect(byId.c.rank).toBe(3)
+    expect(byId.c.isTied).toBe(false)
+  })
+
+  it('does not mutate the input array', () => {
+    const input = [{ id: 'a', aiwatchScore: 70 }, { id: 'b', aiwatchScore: 95 }]
+    const inputCopy = [...input]
+    rankTier(input)
+    expect(input).toEqual(inputCopy)
+  })
+
+  it('an empty array returns an empty array', () => {
+    expect(rankTier([])).toEqual([])
+  })
+})
+
+// #1186 — pins the full assembly (filter → split by confidence → rank each tier independently → bucket
+// the rest by reason) as ONE tested unit, since Ranking.jsx now just wires buildRanking's output to
+// JSX. A regression here (e.g. a future edit re-merging high/medium into one sort) fails this test, not
+// just a visual check of the rendered page.
+describe('buildRanking (#1186)', () => {
+  const highA = { id: 'claude', aiwatchScore: 95, scoreConfidence: 'high' }
+  const highB = { id: 'openai', aiwatchScore: 88, scoreConfidence: 'high' }
+  const mediumA = { id: 'gemini', aiwatchScore: 86, scoreConfidence: 'medium' }
+  const mediumB = { id: 'xai', aiwatchScore: 70, scoreConfidence: 'medium' }
+  const low = { id: 'bedrock', aiwatchScore: 60, scoreConfidence: 'low' } // over-scores under the rescale, never ranked
+  const recentlyAdded = { id: 'turbopuffer', aiwatchScore: null, scoreConfidence: null, coverageDays: 3, scoreBreakdown: { responsivenessStatus: 'insufficient' } }
+  const insufficient = { id: 'sagemaker', aiwatchScore: null, scoreConfidence: null, coverageDays: 3, scoreBreakdown: { responsivenessStatus: 'unsupported' } }
+
+  it('ranks high and medium as two independent tiers, sorted and numbered within each', () => {
+    const out = buildRanking([highA, highB, mediumA, mediumB, low])
+    expect(out.scoredHigh.map((s) => s.id)).toEqual(['claude', 'openai'])
+    expect(out.scoredHigh.map((s) => s.rank)).toEqual([1, 2])
+    expect(out.scoredMedium.map((s) => s.id)).toEqual(['gemini', 'xai'])
+    expect(out.scoredMedium.map((s) => s.rank)).toEqual([1, 2]) // separate rank-1 sequence, not [3, 4]
+  })
+
+  it('excludes low-confidence services from both scored tiers', () => {
+    const out = buildRanking([highA, low])
+    expect(out.scoredHigh.map((s) => s.id)).toEqual(['claude'])
+    expect(out.scoredMedium).toEqual([])
+  })
+
+  it('a low-confidence service with no coverageDays lands in insufficient, not recentlyAdded', () => {
+    const out = buildRanking([low])
+    expect(out.recentlyAdded).toEqual([])
+    expect(out.insufficient.map((s) => s.id)).toEqual(['bedrock'])
+  })
+
+  it('buckets the not-ranked set into recentlyAdded vs insufficient by reason (#802/#870)', () => {
+    const out = buildRanking([highA, recentlyAdded, insufficient])
+    expect(out.recentlyAdded.map((s) => s.id)).toEqual(['turbopuffer'])
+    expect(out.insufficient.map((s) => s.id)).toEqual(['sagemaker'])
+  })
+
+  it('an all-empty input returns four empty arrays, no throw', () => {
+    expect(buildRanking([])).toEqual({ scoredHigh: [], scoredMedium: [], recentlyAdded: [], insufficient: [] })
+  })
+
+  it('a service with a real score but scoreConfidence outside {high,medium,low} lands in insufficient, not vanishing', () => {
+    // hasReliableScoreData only excludes 'low' (scoreConfidence !== 'low'), so undefined passes it —
+    // but splitByConfidence's strict === checks don't recognize undefined either. Pre-#1186 this
+    // service (real score, live feed) would have rendered in the single table; it must still render
+    // SOMEWHERE now, not disappear.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const orphan = { id: 'mystery', aiwatchScore: 77, scoreConfidence: undefined }
+    const out = buildRanking([highA, orphan])
+    expect(out.scoredHigh.map((s) => s.id)).toEqual(['claude'])
+    expect(out.scoredMedium).toEqual([])
+    expect(out.recentlyAdded).toEqual([])
+    expect(out.insufficient.map((s) => s.id)).toEqual(['mystery'])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('mystery'))
+    warn.mockRestore()
+  })
+
+  it('every input service appears in exactly one of the four output buckets (total partition invariant)', () => {
+    const all = [highA, highB, mediumA, mediumB, low, recentlyAdded, insufficient, { id: 'mystery', aiwatchScore: 77, scoreConfidence: undefined }]
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const out = buildRanking(all)
+    const seen = [...out.scoredHigh, ...out.scoredMedium, ...out.recentlyAdded, ...out.insufficient].map((s) => s.id)
+    expect(seen.sort()).toEqual(all.map((s) => s.id).sort())
+    expect(new Set(seen).size).toBe(seen.length) // no id appears twice across buckets
+    vi.restoreAllMocks()
   })
 })
