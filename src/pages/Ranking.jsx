@@ -7,12 +7,120 @@ import { usePage } from '../utils/pageContext'
 import { useSettings } from '../hooks/useSettings'
 import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
 import { formatTime } from '../utils/time'
-import { hasReliableScoreData, isRecentlyAdded, MIN_COVERAGE_DAYS } from '../utils/serviceReliability'
+import { buildRanking, MIN_COVERAGE_DAYS } from '../utils/serviceReliability'
 import { trackEvent } from '../utils/analytics'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 
 const MEDALS = ['🥇', '🥈', '🥉']
+
+// #1186 — one confidence tier's ranking table (desktop + mobile). Extracted so the high and medium
+// tiers render identically (same columns, same row shape) without sharing a rank sequence — each
+// caller passes its own already-ranked `rows` (rank/isTied from Ranking's rankTier).
+function RankingTable({ t, setPage, rows, label, note }) {
+  return (
+    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
+          {label}
+        </div>
+        {note && <p className="text-[11px] text-[var(--text2)]" style={{ marginTop: '6px' }}>{note}</p>}
+      </div>
+
+      {/* Desktop: Table */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full mono text-[11px]" style={{ borderCollapse: 'collapse' }}>
+          <thead>
+            <tr className="border-b border-[var(--border)] text-[var(--text2)]">
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 500 }}>#</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 500 }}>{t('ranking.service')}</th>
+              <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.score')}</th>
+              <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 500 }}>{t('ranking.grade')}</th>
+              <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.uptime')}</th>
+              <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.responsiveness')}</th>
+              <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.affectedDays')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((svc) => (
+              <tr
+                key={svc.id}
+                className="border-b border-[var(--border)] hover:bg-[var(--bg3)] cursor-pointer transition-colors"
+                onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+              >
+                <td style={{ padding: '10px 12px' }} className="text-[var(--text2)]">
+                  {svc.isTied ? `${svc.rank}=` : svc.rank}
+                </td>
+                <td style={{ padding: '10px 12px' }} className="text-[var(--text0)] font-medium">{svc.name}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right' }} className={`font-semibold ${SCORE_TEXT_CLASS[svc.scoreGrade] ?? ''}`}>
+                  {svc.aiwatchScore}
+                </td>
+                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                  <span className={`inline-block rounded text-[9px] ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '3px 8px' }}>
+                    {svc.scoreGrade}
+                  </span>
+                </td>
+                <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
+                  {svc.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : '—'}
+                </td>
+                <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
+                  {svc.scoreMetrics?.probe?.p50 != null ? `${svc.scoreMetrics.probe.p50}ms` : '—'}
+                </td>
+                <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
+                  {svc.scoreMetrics?.affectedDays30d != null ? `${svc.scoreMetrics.affectedDays30d}${t('ranking.day')}` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile: Card List */}
+      <div className="md:hidden flex flex-col">
+        {rows.map((svc, i) => {
+          const affectedDays = svc.scoreMetrics?.affectedDays30d ?? null
+          const probeP50 = svc.scoreMetrics?.probe?.p50 ?? null
+          const hasUptime = svc.uptime30d != null
+          const hasAffected = affectedDays != null && affectedDays > 0
+          const hasProbe = probeP50 != null
+          const metaParts = [
+            hasUptime ? `${svc.uptime30d.toFixed(2)}%` : null,
+            hasProbe ? `${probeP50}ms` : null,
+            hasAffected ? `${affectedDays}${t('ranking.day')}` : null,
+          ].filter(Boolean)
+          return (
+            <div
+              key={svc.id}
+              onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+              className={`cursor-pointer hover:bg-[var(--bg3)] active:bg-[var(--bg3)] transition-colors${i < rows.length - 1 ? ' border-b border-[var(--border)]' : ''}`}
+              style={{ padding: '10px 16px' }}
+            >
+              {/* Row 1: Rank + Name + Score + Grade */}
+              <div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5">
+                <span className="mono text-[11px] text-[var(--text2)] shrink-0 text-right" style={{ width: '20px' }}>
+                  {svc.isTied ? `${svc.rank}=` : svc.rank}
+                </span>
+                <span className="text-[12px] text-[var(--text0)] font-medium">{svc.name}</span>
+                <span className={`mono text-[13px] font-semibold shrink-0 ${SCORE_TEXT_CLASS[svc.scoreGrade] ?? ''}`}>
+                  {svc.aiwatchScore}
+                </span>
+                <span className={`mono text-[9px] rounded shrink-0 ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '2px 6px' }}>
+                  {svc.scoreGrade}
+                </span>
+                {metaParts.length > 0 && (
+                  <span className="mono text-[10px] text-[var(--text2)]">
+                    {metaParts.join(' · ')}
+                  </span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
 
 export default function Ranking() {
   const { t } = useLang()
@@ -21,27 +129,9 @@ export default function Ranking() {
   const { settings } = useSettings()
   const services = (rawServices ?? []).filter((s) => settings.enabledServices.includes(s.id))
 
-  const ranked = useMemo(() => {
-    const scored = services.filter((s) => s.aiwatchScore != null && hasReliableScoreData(s))
-      .sort((a, b) => b.aiwatchScore - a.aiwatchScore)
-      .map((svc, i, arr) => {
-        const score = Math.round(svc.aiwatchScore)
-        const rank = arr.findIndex((s) => Math.round(s.aiwatchScore) === score) + 1
-        const isTied = arr.filter((s) => Math.round(s.aiwatchScore) === score).length > 1
-        return { ...svc, rank, isTied }
-      })
-    const na = services.filter((s) => s.aiwatchScore == null || !hasReliableScoreData(s))
-    // #802/#870 — split the not-ranked bucket by REASON so "recently added" isn't conflated with "not
-    // enough measurement signal". A service is "recently added" when coverage is its sole disqualifier
-    // (already scorable, just <30d) OR its only gap is a warming probe (new probe target, e.g.
-    // turbopuffer days 1-7 — no official uptime by design + a probe that reaches `available` at ~7d, so
-    // it WILL rank). Genuinely un-measurable (no probe target + no uptime → `unsupported`, or a stale
-    // feed) stays in the insufficient group. See serviceReliability.isRecentlyAdded.
-    const recentlyAdded = na.filter(isRecentlyAdded)
-    const recentIds = new Set(recentlyAdded.map((s) => s.id))
-    const insufficient = na.filter((s) => !recentIds.has(s.id))
-    return { scored, recentlyAdded, insufficient }
-  }, [services])
+  // #1186 — filter/split/rank/bucket assembly lives in serviceReliability.buildRanking (pure, unit
+  // tested) so this component only wires data to JSX.
+  const ranked = useMemo(() => buildRanking(services), [services])
 
   if (loading && services.length === 0) return <SkeletonUI />
   if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
@@ -62,10 +152,12 @@ export default function Ranking() {
         </span>
       </div>
 
-      {/* Top 3 Highlight */}
-      {ranked.scored.length >= 3 && (
+      {/* Top 3 Highlight — #1186: high-confidence only. A medium-confidence score (no official uptime,
+          rescaled over Incidents+Recovery+Responsiveness) sits on a different scale and must never take
+          a medal beside a high-confidence peer — the exact comparison this issue exists to prevent. */}
+      {ranked.scoredHigh.length >= 3 && (
         <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: '10px' }}>
-          {ranked.scored.slice(0, 3).map((svc, i) => (
+          {ranked.scoredHigh.slice(0, 3).map((svc, i) => (
             <button
               key={svc.id}
               onClick={() => setPage({ name: 'service', serviceId: svc.id })}
@@ -102,106 +194,25 @@ export default function Ranking() {
         </a>
       </div>
 
-      {/* Full Ranking */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
-            {t('ranking.table')}
-          </div>
-        </div>
+      {/* Full Ranking — #1186: high-confidence only (official uptime measured). Medium-confidence
+          services get their own table below, never this one — see splitByConfidence. */}
+      {ranked.scoredHigh.length > 0 && (
+        <RankingTable t={t} setPage={setPage} rows={ranked.scoredHigh} label={t('ranking.table')} />
+      )}
 
-        {/* Desktop: Table */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full mono text-[11px]" style={{ borderCollapse: 'collapse' }}>
-            <thead>
-              <tr className="border-b border-[var(--border)] text-[var(--text2)]">
-                <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 500 }}>#</th>
-                <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 500 }}>{t('ranking.service')}</th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.score')}</th>
-                <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 500 }}>{t('ranking.grade')}</th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.uptime')}</th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.responsiveness')}</th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.affectedDays')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ranked.scored.map((svc) => (
-                <tr
-                  key={svc.id}
-                  className="border-b border-[var(--border)] hover:bg-[var(--bg3)] cursor-pointer transition-colors"
-                  onClick={() => setPage({ name: 'service', serviceId: svc.id })}
-                >
-                  <td style={{ padding: '10px 12px' }} className="text-[var(--text2)]">
-                    {svc.isTied ? `${svc.rank}=` : svc.rank}
-                  </td>
-                  <td style={{ padding: '10px 12px' }} className="text-[var(--text0)] font-medium">{svc.name}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right' }} className={`font-semibold ${SCORE_TEXT_CLASS[svc.scoreGrade] ?? ''}`}>
-                    {svc.aiwatchScore}
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                    <span className={`inline-block rounded text-[9px] ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '3px 8px' }}>
-                      {svc.scoreGrade}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
-                    {svc.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : '—'}
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
-                    {svc.scoreMetrics?.probe?.p50 != null ? `${svc.scoreMetrics.probe.p50}ms` : '—'}
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
-                    {svc.scoreMetrics?.affectedDays30d != null ? `${svc.scoreMetrics.affectedDays30d}${t('ranking.day')}` : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile: Card List */}
-        <div className="md:hidden flex flex-col">
-          {ranked.scored.map((svc, i) => {
-            const affectedDays = svc.scoreMetrics?.affectedDays30d ?? null
-            const probeP50 = svc.scoreMetrics?.probe?.p50 ?? null
-            const hasUptime = svc.uptime30d != null
-            const hasAffected = affectedDays != null && affectedDays > 0
-            const hasProbe = probeP50 != null
-            const metaParts = [
-              hasUptime ? `${svc.uptime30d.toFixed(2)}%` : null,
-              hasProbe ? `${probeP50}ms` : null,
-              hasAffected ? `${affectedDays}${t('ranking.day')}` : null,
-            ].filter(Boolean)
-            return (
-              <div
-                key={svc.id}
-                onClick={() => setPage({ name: 'service', serviceId: svc.id })}
-                className={`cursor-pointer hover:bg-[var(--bg3)] active:bg-[var(--bg3)] transition-colors${i < ranked.scored.length - 1 ? ' border-b border-[var(--border)]' : ''}`}
-                style={{ padding: '10px 16px' }}
-              >
-                {/* Row 1: Rank + Name + Score + Grade */}
-                <div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5">
-                  <span className="mono text-[11px] text-[var(--text2)] shrink-0 text-right" style={{ width: '20px' }}>
-                    {svc.isTied ? `${svc.rank}=` : svc.rank}
-                  </span>
-                  <span className="text-[12px] text-[var(--text0)] font-medium">{svc.name}</span>
-                  <span className={`mono text-[13px] font-semibold shrink-0 ${SCORE_TEXT_CLASS[svc.scoreGrade] ?? ''}`}>
-                    {svc.aiwatchScore}
-                  </span>
-                  <span className={`mono text-[9px] rounded shrink-0 ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '2px 6px' }}>
-                    {svc.scoreGrade}
-                  </span>
-                  {metaParts.length > 0 && (
-                    <span className="mono text-[10px] text-[var(--text2)]">
-                      {metaParts.join(' · ')}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </section>
+      {/* #1186 — medium-confidence table: no official uptime, scored on Incidents + Recovery +
+          Responsiveness only (rescaled over 60, not 100). A SEPARATE rank-1 sequence, never merged
+          with the table above — see splitByConfidence / score.ts's #1186 correction for why a medium
+          score is not comparable to a high one despite sharing the same 0-100 display range. */}
+      {ranked.scoredMedium.length > 0 && (
+        <RankingTable
+          t={t}
+          setPage={setPage}
+          rows={ranked.scoredMedium}
+          label={t('ranking.mediumTable')}
+          note={t('ranking.mediumReason')}
+        />
+      )}
 
       {/* #802 — Recently Added (excluded only for a <30d window — distinct from insufficient data) */}
       {ranked.recentlyAdded.length > 0 && (

@@ -154,9 +154,13 @@ export default async function handler(req: Request) {
         //    mirror of serviceReliability.js:hasReliableScoreData (#713). `low` confidence means the
         //    worker found NEITHER an official uptime % NOR a real probe (e.g. Bedrock/Azure — scored on
         //    only incidents+recovery, which over-scores under the rescale), so it's excluded from the
-        //    rank; a `high`/`medium` service (has official uptime, or a probe) is ranked. Keeps this in
-        //    lockstep with the dashboard (avoids the cross-surface drift #591/#713).
-        // 2. Use competition ranking (1, 2, 4=, 4=, 4=, 7=, ...) based on rounded score,
+        //    rank; a `high`/`medium` service (has official uptime, or a probe) is ranked.
+        // 2. #1186 — ranked WITHIN the target's own confidence TIER only, never across tiers. A
+        //    medium-confidence score (no official uptime; the rescale is mathematically equivalent to
+        //    imputing uptime = 0.667×(I+R+P), see score.ts) is not on the same scale as a high-confidence
+        //    one, so "#N of M" must count only the target's own tier — mirrors Ranking.jsx's split into
+        //    two independent rank sequences (serviceReliability.js:splitByConfidence), not one shared "M".
+        // 3. Use competition ranking (1, 2, 4=, 4=, 4=, 7=, ...) based on rounded score,
         //    not array index — otherwise tied services display different ranks per service
         if (Number.isFinite(target?.aiwatchScore)) {
           // #802 — ALSO exclude a recently-added service (<30d coverage) from the ranked set: its
@@ -165,11 +169,19 @@ export default async function handler(req: Request) {
           const hasReliableData = (s: { scoreConfidence?: string; incidentSourceStale?: boolean; coverageDays?: number }) =>
             !s.incidentSourceStale && s.scoreConfidence !== 'low' && (s.coverageDays == null || s.coverageDays >= 30)
           const targetScore = Math.round(target!.aiwatchScore as number)
-          if (!hasReliableData(target!)) {
+          // #1186 — the tier-scope filter below (`s.scoreConfidence === target!.scoreConfidence`) always
+          // matches the target against ITSELF, so an orphaned confidence value (undefined, or a legacy/
+          // future value outside 'high'/'medium'/'low') would never actually fail the rank lookup — it
+          // would just produce a misleading "ranked #1 of 1" (or "of N" for however many OTHER services
+          // happen to share that same value). serviceReliability.js's buildRanking treats this identical
+          // shape as unrankable (routes it to `insufficient` rather than a degenerate tier of its own);
+          // mirror that here by requiring the target's own confidence be literally 'high' or 'medium'
+          // before attempting a rank at all.
+          if (!hasReliableData(target!) || (target!.scoreConfidence !== 'high' && target!.scoreConfidence !== 'medium')) {
             // Target itself fails the reliability filter — dedup'd to avoid log spam
             if (!warnedExcludedSlugs.has(slug)) {
               warnedExcludedSlugs.add(slug)
-              console.warn(`[is-down/${slug}] target excluded from ranked set (low-confidence score — no official uptime + no probe, or stale incident source #591/#713) — check SLUG_TO_SERVICE vs scoreConfidence/incidentSourceStale`)
+              console.warn(`[is-down/${slug}] target excluded from ranked set (low-confidence score — no official uptime + no probe, an unrecognized scoreConfidence value, or stale incident source #591/#713) — check SLUG_TO_SERVICE vs scoreConfidence/incidentSourceStale`)
             }
           } else {
             // Use Number.isFinite instead of != null so NaN scores (from a corrupt pipeline)
@@ -183,8 +195,9 @@ export default async function handler(req: Request) {
                 console.error(`[is-down] non-finite aiwatchScore for: ${key}`)
               }
             }
+            // #1186 — same confidence tier as the target ONLY (see comment block above).
             const scored = allServices
-              .filter(s => Number.isFinite(s.aiwatchScore) && hasReliableData(s))
+              .filter(s => Number.isFinite(s.aiwatchScore) && hasReliableData(s) && s.scoreConfidence === target!.scoreConfidence)
               .sort((a, b) => (b.aiwatchScore as number) - (a.aiwatchScore as number))
             // #787 — rank by ROUNDED score (competition ranking: tied services share the first
             // position), derivation extracted to the pure computeRankPosition for deterministic tests.
@@ -310,7 +323,71 @@ export default async function handler(req: Request) {
           // routed ChatGPT image outage with "try OpenAI API" — same provider, developer console);
           // api → app/agent stays impossible because no CAPABILITY_TIER value is an app/agent tier.
           const routedCross = routed !== null && routed > 0
-          fallbacks = allServices
+          // #1186 — inline mirror of worker/src/fallback.ts orderForFallback (see there for the full
+          // design history — attempt 1 [return 0 on confidence mismatch: breaks Array.sort transitivity
+          // with 3+ candidates], attempt 2 ["confidence always wins": structurally excludes medium
+          // whenever 2+ high peers exist], attempt 3 [1-per-tier-per-round: over-corrected — a size-1
+          // medium tier got the SAME guaranteed slot as a size-9 high tier, and a 'low'/withheld-score
+          // candidate got its own round-0 slot, defeating the `?? 0` sink]). Final design: 'low'/no-
+          // confidence NEVER compete for an early slot (Score-sorted, appended after — restores the
+          // `?? 0` sink); 'high'/'medium' interleave PROPORTIONALLY by rank fraction within their own
+          // tier `(rank + 0.5) / tierSize` — ties favor 'high'. A small medium tier still gets a fair
+          // shot when pools are comparable in size, and naturally fades out as the high pool grows
+          // relative to it — no magic threshold, the fraction IS the rule.
+          const orderForFallback = <T extends { id: string; aiwatchScore?: number | null; scoreConfidence?: string }>(
+            candidates: T[],
+          ): T[] => {
+            const byDistance = new Map<number, T[]>()
+            for (const c of candidates) {
+              const dist = Math.abs(tierFor(c.id) - sourceTier)
+              const group = byDistance.get(dist)
+              if (group) group.push(c)
+              else byDistance.set(dist, [c])
+            }
+            const distances = [...byDistance.keys()].sort((a, b) => a - b)
+            const result: T[] = []
+            for (const dist of distances) {
+              const group = byDistance.get(dist)!
+              const byConfidence = new Map<string, T[]>()
+              for (const c of group) {
+                const key = c.scoreConfidence ?? '__none__'
+                const bucket = byConfidence.get(key)
+                if (bucket) bucket.push(c)
+                else byConfidence.set(key, [c])
+              }
+              for (const bucket of byConfidence.values()) {
+                bucket.sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
+              }
+              // Interleave 'high'/'medium' proportionally by rank fraction within their own tier. Ties
+              // favor 'high' (index 0 below), matching the already-agreed tiebreak for an incomparable
+              // Score case.
+              const interleaved: Array<{ item: T; pos: number; priority: number }> = []
+              ;(['high', 'medium'] as const).forEach((key, priority) => {
+                const bucket = byConfidence.get(key)
+                if (!bucket) return
+                bucket.forEach((item, rank) => {
+                  interleaved.push({ item, pos: (rank + 0.5) / bucket.length, priority })
+                })
+              })
+              interleaved.sort((a, b) => a.pos - b.pos || a.priority - b.priority)
+              result.push(...interleaved.map((e) => e.item))
+              // 'low' (score withheld), '__none__' (no confidence signal), and any OTHER value never
+              // compete for an early slot — appended after, Score-sorted among themselves (mirrors the
+              // old `?? 0` sink). Iterates every REMAINING bucket rather than a hardcoded
+              // ['low', '__none__'] pair — a candidate with a scoreConfidence outside {high,medium,low}
+              // (a legacy KV record predating this field, or a future value) must sink here, not
+              // silently vanish from the recommendation.
+              for (const [key, bucket] of byConfidence) {
+                if (key === 'high' || key === 'medium') continue
+                if (key !== 'low' && key !== '__none__') {
+                  console.warn(`[is-down] unrecognized scoreConfidence "${key}" on ${bucket.map((c) => c.id).join(', ')} — sinking below high/medium instead of dropping`)
+                }
+                result.push(...bucket)
+              }
+            }
+            return result
+          }
+          fallbacks = orderForFallback(allServices
             // #550 — exclude candidates with an unresolved incident even if status is still 'operational'.
             // Deliberately BROADER than BOTH `hasLiveIncident` (_is-down/html-template.ts), which excludes
             // `monitoring`, AND worker `fallback.ts`'s own gate, which exempts #811 advisory titles. Not a
@@ -331,15 +408,9 @@ export default async function handler(req: Request) {
               // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
               && (!sameTierOnly || admittedBySubTier(s.id))
               // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
-              && sharesCapability(entry.id, s.id))
-            .sort((a, b) => {
-              const distA = Math.abs(tierFor(a.id) - sourceTier)
-              const distB = Math.abs(tierFor(b.id) - sourceTier)
-              if (distA !== distB) return distA - distB
-              return ((b as any).aiwatchScore ?? 0) - ((a as any).aiwatchScore ?? 0)
-            })
+              && sharesCapability(entry.id, s.id)))
             .slice(0, 2)
-            .map(s => ({ id: s.id, name: s.name, score: (s as any).aiwatchScore ?? null, status: s.status }))
+            .map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status }))
         }
 
         // Extract AI analysis for this service. #926 — take the WHOLE array (one entry per active

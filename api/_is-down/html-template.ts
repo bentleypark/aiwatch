@@ -1062,8 +1062,12 @@ ${/* #1104 — withholding the "Resolved" label stopped the false claim but left
 ${'' /* #857 — this meta line always renders. When the service is ranked it leads with the rank clause;
    when it's unranked (score withheld during a new service's coverage/confidence ramp, e.g. turbopuffer)
    it leads with a monthly-report context sentence instead of the rank — so the reports pointer keeps a
-   real lead-in rather than a bare link, without adding the (info-dense, #802-declined) "not yet ranked" note. */}
-<p class="meta">${service.rank ? `${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" data-ga="click_ranking" data-ga-loc="is_down_page" data-ga-source="header">AIWatch reliability score</a>` : `See how AI services rank on reliability, uptime, and incidents each month`} &middot; <a href="${REPORTS_INDEX_HREF}" data-ga="click_reports" data-ga-loc="is_down_page" data-ga-source="header">${REPORTS_INDEX_LABEL} &rarr;</a></p>
+   real lead-in rather than a bare link, without adding the (info-dense, #802-declined) "not yet ranked" note.
+   #1186 — `totalRanked` is now the target's own confidence-tier count (is-down.ts filters `scored` to
+   `s.scoreConfidence === target.scoreConfidence`), never a combined high+medium count — so a medium-
+   confidence service's "#N of M" must say what M actually counts, or a small M (e.g. "of 4") reads as an
+   unexplained shrink for a reader who just saw a much larger number on the dashboard's high table. */}
+<p class="meta">${service.rank ? `${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services${service.scoreConfidence === 'medium' ? ' with no official uptime metric (scored on incidents, recovery, and responsiveness only)' : ''} by <a href="https://ai-watch.dev/#ranking" data-ga="click_ranking" data-ga-loc="is_down_page" data-ga-source="header">AIWatch reliability score</a>` : `See how AI services rank on reliability, uptime, and incidents each month`} &middot; <a href="${REPORTS_INDEX_HREF}" data-ga="click_reports" data-ga-loc="is_down_page" data-ga-source="header">${REPORTS_INDEX_LABEL} &rarr;</a></p>
 ${service.incidentSourceStale ? `<p class="meta" style="color:var(--amber)">⚠️ ${esc(seo.displayName)}'s status page moved to a source AIWatch can't reach, so its incident feed is frozen — uptime, score, and ranking are omitted until the source is reachable again. Live status above is still measured directly.</p>` : ''}
 </div>`
 }

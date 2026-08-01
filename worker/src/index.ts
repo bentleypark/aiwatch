@@ -687,7 +687,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   const cronProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'cron')
   const scored = services.map((svc) => {
     const s = scoreFor(svc, cronProbeSummaries)
-    return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+    return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
   })
 
   // #587 — accumulate this cycle's incidents into incidents:monthly every */5 (not just the daily
@@ -4016,7 +4016,7 @@ export default {
           ...cached,
           services: cached.services.map((svc) => {
             const s = scoreFor(svc, feedProbe)
-            return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+            return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
           }),
         }
         // #750 — first-detected stamp for each ACTIVE incident → a FRESH active-item pubDate (a
@@ -4376,7 +4376,7 @@ export default {
       // Score the FULL set — getFallbacks needs the candidate pool — then narrow in the renderer.
       const scoredAll = (cacheData?.services ?? []).map((svc) => {
         const s = scoreFor(svc, summaries)
-        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
       })
       // AI summary of each ACTIVE incident on a non-operational service (bounded: only down/degraded
       // services, usually few). Best-effort per key: a missing/unparseable ai:analysis → no summary,
@@ -4477,7 +4477,7 @@ export default {
         // with empty services (statusline-style fail-silent), not a 503.
         const scoredAll = (cacheData?.services ?? []).map((svc) => {
           const s = scoreFor(svc, summaries)
-          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
         })
         // #837 PR2 — enrich so the popup shows what's actually happening, not just a color:
         // (1) the GATED crowd-report map (same #575 gate as the dashboard — only corroborated

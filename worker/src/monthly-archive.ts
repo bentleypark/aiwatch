@@ -604,6 +604,7 @@ export async function accumulateIncidentsOnlyIfChanged(
   kv: KVNamespace,
   services: ServiceStatus[],
   month: string, // YYYY-MM
+  now: Date = new Date(), // injectable so a test isn't coupled to the real wall-clock month
 ): Promise<'unchanged' | 'written' | 'failed'> {
   const incKey = `incidents:monthly:${month}`
   // #975 — a THROWN KV get must not be collapsed into "no accumulator yet". `existing = null` makes
@@ -648,7 +649,7 @@ export async function accumulateIncidentsOnlyIfChanged(
   // re-derive them — and a bare "capture failed" would leave the loss unreconstructible.
   let tombstones: WithdrawnIncident[] = []
   try {
-    tombstones = diffPrunedIncidents(existing, updated, new Date().toISOString())
+    tombstones = diffPrunedIncidents(existing, updated, now.toISOString())
     if (tombstones.length > 0) {
       await appendWithdrawn(kv, tombstones)
       // #1106 Part 5 — the tombstone above is 6d; this is the durable record that the withdrawal

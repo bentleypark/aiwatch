@@ -78,8 +78,16 @@ export const P50_FLOOR_MS = 50 // prevents bimodal distributions (e.g., Claude C
 
 // Component maxes (sum = 100 when all four are present). #713 — the score is computed on the
 // components we can actually MEASURE and rescaled to 100 by their AVAILABLE max, so a missing
-// component (no official uptime, or no probe) is simply omitted — never filled with an assumed/
-// estimated value. This generalizes the old "no-probe rescale 80→100" to "no-uptime" too.
+// component's RAW figure (an uptime %, a p50 ms) is never invented. This generalizes the old
+// "no-probe rescale 80→100" to "no-uptime" too.
+//
+// #1186 correction — the RESCALE ITSELF is still an imputation, despite the paragraph above (and the
+// removed old wording) claiming otherwise. Omitting uptime and rescaling (I+R+P)/60×100 is algebraically
+// identical to keeping uptime IN the sum at U = 0.667×(I+R+P) — the FIXED ratio UPTIME_SCORE_MAX / (other
+// three maxes), not an empirical average. That is a concrete, unmeasured uptime figure, produced by the
+// rescale math, not "no value assumed". Ranking.jsx's high/medium split (#1186) exists because a
+// medium-confidence score is on a different scale than a high one for exactly this reason — never
+// compare or co-rank them directly.
 const UPTIME_SCORE_MAX = 40
 const INCIDENTS_SCORE_MAX = 25
 const RECOVERY_SCORE_MAX = 15

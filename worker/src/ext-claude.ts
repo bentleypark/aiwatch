@@ -23,6 +23,10 @@ export const EXT_CLAUDE_IDS = ['claude', 'claudeai', 'claudecode'] as const
 export type ScoredService = ServiceStatus & {
   aiwatchScore: number | null
   scoreGrade: string | null
+  // #1186 — carried through so getFallbacks/orderForFallback can bucket candidates by confidence tier
+  // before the proportional interleave (see fallback.ts's FallbackCandidate.scoreConfidence and
+  // orderForFallback's doc comment for the full rationale).
+  scoreConfidence?: 'high' | 'medium' | 'low' | null
 }
 
 export interface ExtClaudeIncident {
