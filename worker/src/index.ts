@@ -3933,8 +3933,17 @@ export default {
     // was removed with the browser relay — active-webhook counts now come from confirmed
     // subscriptions (webhook:sub:*, counted via listConfirmedHashes in the daily summary).
 
-    // GET /api/og — dynamic OG image (PNG) for social share previews
-    if (request.method === 'GET' && url.pathname === '/api/og') {
+    // GET/HEAD /api/og — dynamic OG image (PNG) for social share previews.
+    // #1196 — HEAD support: this route used to match GET only, so a HEAD request fell through to
+    // the generic router-level 404 — a real gap found while diagnosing a "card didn't unfurl" report
+    // tied to #1063/#1194's og:url pin (the actual cause there turned out to be a transient X-side
+    // retry, not this, but a link-unfurling endpoint with no HEAD handling is a latent risk
+    // regardless — some crawlers/validators probe with HEAD before committing to a GET). Same body-
+    // generation path as GET; HEAD strips the body before responding (the standard HEAD contract:
+    // identical headers, no body) rather than skipping the render — simpler and avoids a
+    // Content-Length that could disagree with a real GET.
+    if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/og') {
+      const isHead = request.method === 'HEAD'
       const service = (url.searchParams.get('service') || 'Unknown').slice(0, 50)
       const status = url.searchParams.get('status') || 'operational'
       const score = (url.searchParams.get('score') || '').slice(0, 5)
@@ -3943,7 +3952,7 @@ export default {
       try {
         const { renderPng } = await import('./og-render')
         const png = await renderPng(svg)
-        return new Response(png, {
+        return new Response(isHead ? null : png, {
           headers: {
             'Content-Type': 'image/png',
             'Cache-Control': 'public, max-age=600, s-maxage=600',
@@ -3952,7 +3961,7 @@ export default {
         })
       } catch (err) {
         console.error('[og] PNG render failed, falling back to SVG:', err instanceof Error ? err.message : err)
-        return new Response(svg, {
+        return new Response(isHead ? null : svg, {
           headers: {
             'Content-Type': 'image/svg+xml',
             'Cache-Control': 'public, max-age=60, s-maxage=60',
