@@ -105,7 +105,22 @@ function incidentMeta(inc: FamilyIncident): string {
   return `${dateStr} · ongoing`
 }
 
-function renderGroupPage(family: { slug: string; name: string }, members: MemberStatus[], incidents: FamilyIncident[], otherFamilies: Array<{ slug: string; name: string; status: MemberStatus['status'] }>): string {
+// Same vocabulary + mapping as api/_is-down/html-template.ts's HINT_TO_OG_STATUS — kept as a hand-copied
+// mirror (api/is-down.ts and api/is-down-group.ts are the same Vercel Edge deploy target but different
+// files with no established shared-import path yet, matching this file's existing hand-copy posture for
+// RESOLVED_ANALYSIS_WINDOW_MS above). 'active' means "we know there's a live incident but the computed
+// status hasn't caught up to non-operational yet" (mirrors worker/src/alerts.ts buildTweetForService's
+// hint fallback) — maps to 'operational' since that's the literal current value in that edge case.
+const HINT_TO_OG_STATUS: Record<string, MemberStatus['status']> = { down: 'down', degraded: 'degraded', active: 'operational', resolved: 'operational', withdrawn: 'unknown' }
+
+function renderGroupPage(
+  family: { slug: string; name: string },
+  members: MemberStatus[],
+  incidents: FamilyIncident[],
+  otherFamilies: Array<{ slug: string; name: string; status: MemberStatus['status'] }>,
+  ogStatusHint?: string | null,
+  ogIncidentToken?: string | null,
+): string {
   const headline = worstStatus(members)
   const title = `Is ${family.name} Down? ${STATUS_LABEL[headline]} | AIWatch`
   const desc = headline === 'operational'
@@ -118,13 +133,30 @@ function renderGroupPage(family: { slug: string; name: string }, members: Member
   // worker/src/og.ts), `score`/`uptime` are optional and simply omitted since there's no
   // family-level analog for either.
   //
-  // #1103 (diagnosed on the individual pages, applies identically here) — og:url ("canonical" below)
-  // never changes for this page (no `?e=`/`?i=` pin like a per-incident share), so a static og:image
-  // query string lets a social platform's crawler cache the URL indefinitely against a card that can
-  // go stale OR — #1103's actual observed failure — unfurl with NO image at all once the crawler
-  // decides the (unchanged) URL doesn't need a re-fetch. `v`, a 10-min bucket, forces periodic
-  // re-fetch on the LIVE page the same way the individual pages' unpinned share does.
-  const ogImage = `https://aiwatch-worker.p2c2kbf.workers.dev/api/og?${new URLSearchParams({ service: family.name, status: headline, v: String(Math.floor(Date.now() / 600_000)) }).toString()}`
+  // #1103 (diagnosed on the individual pages) / <NEW> (this file never got the fix) — og:url
+  // ("canonical" below) used to NEVER change for this page (no `?e=`/`?i=` pin like the individual
+  // pages and buildTweetForService got in #1063/#804), so a social platform's og:url-keyed card cache
+  // reused whatever it first fetched — usually the routine "operational" card — no matter how many
+  // real outages were shared afterward. `pinnedHint`/`ogUrlPinned` below port the SAME fix #1063/#804
+  // shipped for api/is-down.ts: when the share carries `?e=`/`&i=` (worker/src/alerts.ts's
+  // buildGroupTweetDraft appends both), the OG tags (not the live page body) freeze to the share-moment
+  // status and the og:url becomes a per-incident-unique identity instead of the bare canonical.
+  const pinnedHint = ogStatusHint && Object.prototype.hasOwnProperty.call(HINT_TO_OG_STATUS, ogStatusHint) ? ogStatusHint : null
+  const ogStatus = pinnedHint ? HINT_TO_OG_STATUS[pinnedHint] : headline
+  const ogUrlPinned = Boolean(pinnedHint || ogIncidentToken)
+  const ogQuery = new URLSearchParams()
+  if (pinnedHint) ogQuery.set('e', pinnedHint)
+  if (ogIncidentToken) ogQuery.set('i', ogIncidentToken)
+  const ogUrl = [...ogQuery.keys()].length ? `${canonical}?${ogQuery.toString()}` : canonical
+  const ogParams = new URLSearchParams({ service: family.name, status: ogStatus })
+  // The `v` 10-min cache-buster is for the LIVE (unpinned) card only — a PIN exists to make the card
+  // represent the SHARE MOMENT, so its image must not keep moving afterward (#1103's same reasoning).
+  if (!ogUrlPinned) ogParams.set('v', String(Math.floor(Date.now() / 600_000)))
+  const ogImage = `https://aiwatch-worker.p2c2kbf.workers.dev/api/og?${ogParams.toString()}`
+  // og:title pins to the hint too so the card headline matches the pinned IMAGE — otherwise the card
+  // reads "Operational" (live) over a "Degraded" image. The page <title>/body/JSON-LD stay LIVE; only
+  // the social card pins.
+  const ogTitle = pinnedHint ? `Is ${family.name} Down? ${STATUS_LABEL[ogStatus]} | AIWatch` : title
 
   const rows = members.map((m) => `
     <li class="member-row">
@@ -221,12 +253,12 @@ function renderGroupPage(family: { slug: string; name: string }, members: Member
 <meta name="description" content="${esc(desc)}">
 <link rel="canonical" href="${canonical}">
 <meta property="og:type" content="website">
-<meta property="og:url" content="${canonical}">
-<meta property="og:title" content="${esc(title)}">
+<meta property="og:url" content="${esc(ogUrl)}">
+<meta property="og:title" content="${esc(ogTitle)}">
 <meta property="og:description" content="${esc(desc)}">
 <meta property="og:image" content="${esc(ogImage)}">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="${esc(title)}">
+<meta name="twitter:title" content="${esc(ogTitle)}">
 <meta name="twitter:description" content="${esc(desc)}">
 <meta name="twitter:image" content="${esc(ogImage)}">
 <link rel="icon" type="image/png" href="/favicon.png">
@@ -306,6 +338,13 @@ export default async function handler(req: Request) {
   try {
     const url = new URL(req.url)
     const familyKey = url.searchParams.get('family') ?? ''
+    // #1063/#804 parity, mirroring api/is-down.ts exactly (same sanitization — id-safe chars + a
+    // length cap, since the token only namespaces a cache key, not an id we look anything up by).
+    const ogStatusHint = url.searchParams.get('e')
+    const rawIncidentToken = url.searchParams.get('i')
+    const ogIncidentToken = rawIncidentToken
+      ? rawIncidentToken.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || null
+      : null
     const family = FAMILY_GROUPS[familyKey]
     if (!family) return new Response('Not Found', { status: 404 })
     // #1164 review — cross-links to every OTHER family (currently just the one sibling, but this
@@ -438,7 +477,7 @@ export default async function handler(req: Request) {
       console.warn(`[is-down-group/${familyKey}] status fetch failed:`, err instanceof Error ? err.message : err)
     }
 
-    const html = renderGroupPage(family, members, incidents, otherFamilies)
+    const html = renderGroupPage(family, members, incidents, otherFamilies, ogStatusHint, ogIncidentToken)
     const csp = await cspForHtml(html, { enforce: true })
     // Mirrors is-down.ts's fallback semantics: a fetch failure renders "unknown" for every member
     // (never a fabricated status), and the 503 + no-store tells caches/crawlers not to trust or cache

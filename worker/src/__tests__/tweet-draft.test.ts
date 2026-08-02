@@ -207,12 +207,17 @@ describe('buildTweetDrafts (#521 — operator picks the surface)', () => {
   })
 
   // #1164 — the group draft itself: text + link shape, distinct from the per-service ones above.
-  it('the group draft points at the family is-down page and names every affected member', () => {
+  // <NEW> — also carries the #1063/#804 og:url pin (status hint + per-incident token), same as every
+  // other tweet-draft link; this group draft never had it before, so a real share of it reused
+  // whatever card a social platform had cached for the bare `is-claude-down` URL regardless of the
+  // actual outage (reproduced live 2026-08-02).
+  it('the group draft points at the family is-down page (pinned) and names every affected member', () => {
     const drafts = buildTweetDrafts(alert({ key: 'alerted:new:opus47' }), anthropic)
     const group = drafts[0]
     expect(group.serviceId).toBe('family:claude')
     expect(group.serviceName).toBe('Anthropic (Claude)')
-    expect(group.text).toBe('🔴 Multiple Anthropic (Claude) services are affected (Claude API, claude ai, Claude Code). Live status → https://ai-watch.dev/is-claude-down?utm_source=x&utm_medium=social&utm_campaign=outage')
+    // worst-of the 3 'degraded' members → ?e=degraded; alert's incident id → &i=opus47.
+    expect(group.text).toBe('🔴 Multiple Anthropic (Claude) services are affected (Claude API, claude ai, Claude Code). Live status → https://ai-watch.dev/is-claude-down?e=degraded&utm_source=x&utm_medium=social&utm_campaign=outage&i=opus47')
     expect(group.intentUrl).toBe(X_INTENT + encodeURIComponent(group.text))
   })
 
@@ -279,7 +284,7 @@ describe('buildTweetDrafts (#521 — operator picks the surface)', () => {
   it('builds recovery drafts per surface for a resolved multi-surface incident, group draft first', () => {
     const drafts = buildTweetDrafts(alert({ key: 'alerted:res:opus47', title: '🟢 Claude API — Incident Resolved (34m)' }), anthropic)
     expect(drafts).toHaveLength(4)
-    expect(drafts[0].text).toBe('🟢 Anthropic (Claude) services have recovered (Claude API, claude ai, Claude Code). Live status → https://ai-watch.dev/is-claude-down?utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(drafts[0].text).toBe('🟢 Anthropic (Claude) services have recovered (Claude API, claude ai, Claude Code). Live status → https://ai-watch.dev/is-claude-down?e=resolved&utm_source=x&utm_medium=social&utm_campaign=outage&i=opus47')
     expect(drafts[1].text).toBe('🟢 Claude API recovered after 34m. Live status → https://ai-watch.dev/is-claude-api-down?e=resolved&utm_source=x&utm_medium=social&utm_campaign=outage&i=opus47')
     expect(drafts[2].text).toContain('🟢 claude ai recovered after 34m') // #539: brand defused
   })
