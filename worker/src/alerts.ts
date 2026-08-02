@@ -1093,15 +1093,33 @@ export interface TweetDraft {
 
 /** #1164 — the ADDITIONAL draft for a multi-surface same-family incident, pointing at the family's
  *  group is-down page so one share reflects the whole blast radius instead of a single surface.
- *  Never replaces the per-service drafts below — the operator still picks whichever fits. */
+ *  Never replaces the per-service drafts below — the operator still picks whichever fits.
+ *
+ *  <NEW> — this never got the #1063/#804 og:url pin `buildTweetForService` (below) has: the URL used
+ *  to be byte-identical across every share of this family (only `X_UTM`, no `?e=`/`&i=`), so a social
+ *  platform's og:url-keyed card cache reused whatever it first fetched no matter how many real outages
+ *  were shared afterward — reproduced live via the operator's "Anthropic (Claude)" group tweet draft
+ *  option on 2026-08-02, still showing a stale operational card during a real Claude incident. Fixed
+ *  the same way: a status hint (worst-of the affected members, since there's no single `svc.status`
+ *  here) + the per-incident token, both read by api/is-down-group.ts's matching fix. */
 function buildGroupTweetDraft(
   family: { slug: string; name: string },
   members: ScoredService[],
   kind: AlertKind,
+  alert: AlertCandidate,
 ): { text: string; intentUrl: string } {
   const isRecovery = kind === 'resolved' || kind === 'recovered'
   const names = members.map((s) => defuseAutolinkDomain(s.name)).join(', ')
-  const url = `https://ai-watch.dev/is-${family.slug}-down?${X_UTM}`
+  // Worst-of across the affected members — mirrors api/is-down-group.ts's own STATUS_RANK/worstStatus,
+  // hand-copied for the same reason (no shared-import path between worker/ and api/ for this shape).
+  const STATUS_RANK: Record<string, number> = { operational: 0, degraded: 1, down: 2 }
+  const worst = members.reduce((w, s) => ((STATUS_RANK[s.status] ?? 0) > (STATUS_RANK[w] ?? 0) ? s.status : w), 'operational')
+  // Hint vocab mirrors buildTweetForService below: 'active' is the fallback for "known live incident,
+  // but the worst member status hasn't flipped off 'operational' yet" — never emit ?e=operational on
+  // an outage share.
+  const hint = isRecovery ? 'resolved' : worst === 'operational' ? 'active' : worst
+  const token = incidentTokenForAlert(alert)
+  const url = `${appendStatusHint(`https://ai-watch.dev/is-${family.slug}-down`, hint)}&${X_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
   const text = isRecovery
     ? `🟢 ${family.name} services have recovered (${names}). Live status → ${url}`
     : `🔴 Multiple ${family.name} services are affected (${names}). Live status → ${url}`
@@ -1152,7 +1170,7 @@ export function buildTweetDrafts(
     const members = ids.map((id) => services.find((s) => s.id === id)).filter((s): s is ScoredService => !!s)
     if (members.length < 2) continue
     const family = FAMILY_OF_SERVICE[ids[0]]
-    const { text, intentUrl } = buildGroupTweetDraft(family, members, kind)
+    const { text, intentUrl } = buildGroupTweetDraft(family, members, kind, alert)
     drafts.push({ serviceId: `family:${family.slug}`, serviceName: family.name, text, intentUrl })
   }
 

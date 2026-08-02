@@ -4,8 +4,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import handler from '../is-down-group'
 
-function makeReq(family: string): Request {
-  return new Request(`https://ai-watch.dev/api/is-down-group?family=${family}`, { method: 'GET' })
+function makeReq(family: string, extraParams?: Record<string, string>): Request {
+  const params = new URLSearchParams({ family, ...extraParams })
+  return new Request(`https://ai-watch.dev/api/is-down-group?${params.toString()}`, { method: 'GET' })
 }
 
 interface MockIncident {
@@ -178,6 +179,77 @@ describe('is-down-group.ts', () => {
     const res = await handler(makeReq('claude'))
     const html = await res.text()
     expect(html).toContain('Is Anthropic (Claude) Down? Down')
+  })
+})
+
+// <NEW> — this page never got the #1063/#804 og:url pin the individual is-down pages (api/is-down.ts)
+// and buildTweetForService got: og:url was ALWAYS the bare canonical, so a social platform's
+// og:url-keyed card cache reused whatever it first fetched no matter how many real outages were
+// shared afterward. Reproduced live 2026-08-02 via the operator's "Anthropic (Claude)" group tweet
+// draft option (worker/src/alerts.ts buildGroupTweetDraft), which was ALSO never pinned. Both are
+// fixed together — the worker now appends `?e=`/`&i=` to the group draft link, and this page now reads
+// + reflects them.
+describe('is-down-group.ts — og:url pin (#1063/#804 parity, group page)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  afterEach(() => { fetchMock?.mockRestore() })
+
+  it('with no ?e=/&i=, og:url is the bare canonical (unpinned — unchanged legacy behavior)', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('og:url" content="https://ai-watch.dev/is-claude-down">')
+  })
+
+  it('with ?e=degraded&i=<token>, og:url carries BOTH — a distinct, per-incident card identity', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' }, // live status is IRRELEVANT once pinned
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude', { e: 'degraded', i: 'opus47' }))).text()
+    expect(html).toContain('og:url" content="https://ai-watch.dev/is-claude-down?e=degraded&amp;i=opus47">')
+    // The og:image reflects the PINNED status, not the live 'operational' data above.
+    expect(html).toContain('og:image" content="https://aiwatch-worker.p2c2kbf.workers.dev/api/og?service=Anthropic+%28Claude%29&amp;status=degraded">')
+    // og:title pins too — otherwise the card reads "Operational" over a "Degraded" image.
+    expect(html).toContain('og:title" content="Is Anthropic (Claude) Down? Degraded Performance | AIWatch">')
+    // The page <title> stays LIVE (unpinned) — only the social card pins.
+    expect(html).toContain('<title>Is Anthropic (Claude) Down? Operational | AIWatch</title>')
+  })
+
+  it('a pinned share drops the 10-min cache-buster (the image must not move after the share moment)', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational' },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai', { e: 'down', i: 'inc1' }))).text()
+    expect(html).toContain('og:image" content="https://aiwatch-worker.p2c2kbf.workers.dev/api/og?service=OpenAI&amp;status=down">')
+    expect(html).not.toContain('&amp;v=')
+  })
+
+  it('an unrecognized ?e= value is ignored (falls back to unpinned live behavior)', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'down' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude', { e: '__proto__' }))).text()
+    expect(html).toContain('og:url" content="https://ai-watch.dev/is-claude-down">')
+    expect(html).toContain('og:image" content="https://aiwatch-worker.p2c2kbf.workers.dev/api/og?service=Anthropic+%28Claude%29&amp;status=down&amp;v=')
+  })
+
+  it('?i= alone (no ?e=) still pins the og:url — an incident-token-only share is just as frozen', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude', { i: 'opus47' }))).text()
+    expect(html).toContain('og:url" content="https://ai-watch.dev/is-claude-down?i=opus47">')
+    expect(html).not.toContain('&amp;v=')
   })
 })
 
