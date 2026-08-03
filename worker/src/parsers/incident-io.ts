@@ -237,7 +237,19 @@ export function computeIncidentIoUptime(
     worstTodaySec = Math.max(worstTodaySec, result.todayWeightedOutageSec)
   }
 
-  if (resolved === 0) return null
+  // A multi-id config (turbopuffer/fireworks) losing ALL of its ids in one cycle is a stronger signal
+  // than a single-id config resolving nothing (which stays silent — "this page doesn't track that
+  // component" is the ordinary, expected reason there). For N>1 ids configured together, expecting
+  // SOME subset to keep resolving, a simultaneous total loss reads as an upstream reorg/rotation the
+  // partial-loss warn below would otherwise never surface (it only fires when 0 < resolved < ids.length).
+  if (resolved === 0) {
+    if (ids.length > 1) {
+      console.warn(
+        `[computeIncidentIoUptime] 0/${ids.length} configured components resolved (upstream id rotation / page reorg?) — withholding uptime`,
+      )
+    }
+    return null
+  }
   if (ids.length > 1 && resolved < ids.length) {
     console.warn(
       `[computeIncidentIoUptime] ${ids.length - resolved}/${ids.length} configured components absent from ` +
@@ -576,6 +588,16 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
       }>
       // Filter to the target component(s); worst-of per day across them (loop below escalates).
       const mine = impacts.filter((i) => idSet.has(i.component_id))
+      // Mirrors computeIncidentIoUptime's total-loss warn: a multi-id config (turbopuffer/fireworks)
+      // matching NONE of its ids against a non-empty impacts array is a stronger signal than a single-id
+      // config resolving nothing (silently normal there — "this page just has no impacts for it"). Total
+      // loss across several configured ids reads as an upstream reorg/rotation, and unlike the uptime
+      // path this function has NO partial-loss warn either, so this is the only diagnostic trail at all.
+      if (mine.length === 0 && idSet.size > 1 && impacts.length > 0) {
+        console.warn(
+          `[parseIncidentIoComponentImpacts] 0/${idSet.size} configured components matched ${impacts.length} parsed impact(s) (upstream id rotation / page reorg?) — calendar withheld`,
+        )
+      }
       for (const impact of mine) {
         const start = new Date(impact.start_at)
         const end = new Date(impact.end_at)

@@ -1,7 +1,8 @@
 /**
  * Group flap-style auto-recovery incidents in the UI without altering source data.
  *
- * Background: BetterStack-based status feeds (Fireworks AI, Together AI) emit a separate
+ * Background: BetterStack-based status feeds (Together AI, HuggingFace, Modal; fireworks left
+ * this group in #1198 — migrated to incident.io) emit a separate
  * "<model> — recovered" entry per transient blip. A single model can flap 10-20 times in a
  * day, swamping the Incident History UI. Grouping pulls these into a single expandable
  * row while leaving raw incident data untouched (Discord pipeline + monthly reports stay raw).

@@ -112,7 +112,40 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['Coral', 'Infrastructure', 'Playground', 'embeddings'] },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'] },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true, componentDenylist: ['Website'] },
-  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: null, rssFeedUrl: 'https://status.fireworks.ai/feed', betterStackUrl: 'https://status.fireworks.ai', flapSuppression: true, componentDenylist: ['Website'] },
+  // #1198 — migrated off BetterStack (dead: /index.json and /feed both 404) onto the incident.io
+  // Statuspage-compat API, same shape as cohere/groq above. Fireworks sets no `statusComponent`/
+  // `statusComponentId`/`statusComponentIds`, so `resolveSvcStatus` returns at its FIRST branch (the
+  // page's overall indicator) — same as cohere/groq/together, which are in the identical bucket. The
+  // badge is therefore NOT a dynamic worst-of; only `displayAllComponents`' BREAKDOWN is dynamic (every
+  // page component minus componentDenylist, via `resolveSvcComponents`) — chosen because a hand-
+  // maintained breakdown id list would go stale the way cerebras' did pre-#992 (Fireworks' 16 are all
+  // per-model and the roster churns — new ones have appeared roughly every 1-4 weeks per the ULID
+  // creation-date spread below, as observed through 2026-08-02).
+  // `incidentIoComponentId` IS also a hand-maintained list here (mirrors turbopuffer's no-canonical-
+  // component shape), but ONLY for the uptime worst-of via `computeIncidentIoUptime` — deliberately
+  // NOT the full 16-model roster above, to avoid a churn trap distinct from the breakdown one: incident.io
+  // stamps each component's `data_available_since` at CREATION, and `computeIncidentIoUptime` takes the
+  // shortest covered window across every listed id — so a brand-new model in the list pins the whole
+  // service's uptime window down to that model's age. Excludes 4 of the 16 as of #1198 (ULID creation
+  // timestamps decoded 2026-08-02): the "Kimi K3"/"Kimi K3 Fast"/"Kimi K3 US" trio (3 days old — would
+  // have collapsed a 30-day figure to 3) and "GLM 5.2 Fast" `01KXRHGRD149W1YP3WS59SWC2P` (15 days old —
+  // still short of the 30-day window). If you're reconciling 16-vs-12 and tempted to add one back:
+  // check its age first, not just whether it's "missing" — re-adding GLM 5.2 Fast today would still
+  // shrink the window to ~15d. Scoped instead to the 12 ids ≥40 days old as of #1198 — same fix junie
+  // already applies for
+  // the identical reason (see its config comment: "putting it in the badge scope pins uptimeWindowDays
+  // to 6... an incoherent '99.8% over 6d'"). Accepted tradeoffs: a model this list omits contributes no
+  // uptime signal until someone manually ages it in (real, not fabricated — matches the "no invented
+  // value" rule, #713); a REMOVED id from this shorter list still warns via
+  // `computeIncidentIoUptime`'s `resolved < ids.length` log.
+  // holdShortIncidents, NOT flapSuppression: live incident.io titles ("Service Degradation for one of
+  // our models on Serverless", observed 2026-08-02) carry no "— down/recovered" suffix, so
+  // `isFlapNotice`'s title regex never matches on this platform — flapSuppression would be silently
+  // inert while real per-model blips (18 incidents/7d, 8-41min each, observed 2026-08-02) fire an unheld
+  // Discord New+Resolved pair apiece. holdShortIncidents (the mistral/langfuse mechanism, #792/#929)
+  // holds on impact alone — real incident.io `impact` (not BetterStack's hardcoded null) still lets
+  // `major`/`critical` through immediately, only non-major short blips get the ~9min hold.
+  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KTM9PHXTZPW4Z1VXF78MQ3WS', '01KTM9PHXTRAV1Q7H06Y4WWSBZ', '01KTM9G064204E1Q8XBQEYESSH', '01KTM9G064Y9AE48A0ZY1WTTB2', '01KTM9G06402NMVSVM7WGEQEK2', '01KTNFZQEJ62PJ2C68P6G2576M', '01KVEMVZJRNJ2RJVFKSRFKRM4E', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMYTCCMV80Z2SSGE7YMRKX', '01KVEMYTCC3B1ZSXC0EJHPY01P', '01KVEMZE3M15ZV46ZEB7X88H61'], displayAllComponents: true, holdShortIncidents: true },
   // Cerebras Inference (#391, #992) — Atlassian Statuspage, single-tenant, per-model. Its model lineup
   // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
   // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
@@ -669,8 +702,8 @@ export function resolveSvcStatus(
   //   breakdown so a new/churned model degrades the badge with NO config edit. Positioned AFTER the
   //   statusComponentIds branch (BFL has BOTH and keeps its curated worst-of) and BEFORE the single-
   //   component branch (so a dynamic service's uptime-primary statusComponentId — e.g. Cerebras'
-  //   Developer Console — does not pin the badge to that one component). cohere/groq/together have no
-  //   statusComponent* so they returned at branch 1 (overall indicator) already; they never reach here.
+  //   Developer Console — does not pin the badge to that one component). cohere/groq/together/fireworks
+  //   have no statusComponent* so they returned at branch 1 (overall indicator) already; they never reach here.
   if (config.displayAllComponents && summaryData.components) {
     const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
     const shown = summaryData.components.filter((c) => !deny.has(c.name.toLowerCase()))

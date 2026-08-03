@@ -79,7 +79,7 @@ Grouped by the dashboard's category taxonomy (45 total — sidebar filters / Ove
 | Cohere API | Cohere | incident.io (Atlassian compat) |
 | Groq Cloud | Groq | incident.io (Atlassian compat) |
 | Together AI | Together | Better Stack RSS + uptime API |
-| Fireworks AI | Fireworks | Better Stack RSS + uptime API |
+| Fireworks AI | Fireworks | incident.io (Atlassian compat) |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
 | Perplexity | Perplexity AI | Instatus (Next.js SSR) |
 | xAI API | xAI | RSS feed |

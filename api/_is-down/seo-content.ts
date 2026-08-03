@@ -183,7 +183,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   fireworks: {
     displayName: 'Fireworks AI',
     description: 'Fireworks AI offers fast, scalable inference for popular open-source LLMs and image models, plus fine-tuning and dedicated deployments. It is positioned as a high-performance alternative to Together AI.',
-    insight: 'Fireworks runs its status page on Better Stack rather than Atlassian, giving AIWatch slightly different signal granularity. Fireworks tends to publish official uptime numbers rather than rely on incident history alone, making its reliability data among the most transparent in the inference category.',
+    insight: 'Fireworks reports incidents per model (16 tracked, e.g. Kimi, DeepSeek, GLM), so AIWatch aggregates across them for overall status and computes a rolling uptime figure from the incident record. Most incidents are short, single-model degradations rather than full API outages.',
     whenDown: 'When Fireworks AI is down, developers lose hosted inference for open-source models. Production apps relying on Fireworks for serverless or dedicated endpoints will see request failures.',
     faqs: [
       { q: 'Is Fireworks AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Fireworks every 5 minutes and shows real-time operational status.' },

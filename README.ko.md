@@ -78,7 +78,7 @@
 | Cohere API | Cohere | incident.io (Atlassian 호환) |
 | Groq Cloud | Groq | incident.io (Atlassian 호환) |
 | Together AI | Together | Better Stack RSS + 가동률 API |
-| Fireworks AI | Fireworks | Better Stack RSS + 가동률 API |
+| Fireworks AI | Fireworks | incident.io (Atlassian 호환) |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
 | Perplexity | Perplexity AI | Instatus (Next.js SSR) |
 | xAI API | xAI | RSS 피드 |

@@ -168,15 +168,18 @@ test.describe('Is X Down? SSR pages', () => {
   })
 
   test('<details> incident-group elements render with open attribute (crawler-friendly)', async ({ page }) => {
-    // Target Fireworks: BetterStack per-model feed consistently produces ≥3 same-day
+    // Target Together AI: BetterStack per-model feed consistently produces ≥3 same-day
     // "<model> — recovered" entries, so grouping should materialize at least one row.
+    // (Fireworks used to be this target too, but #1198 moved it off BetterStack to
+    // incident.io, whose titles no longer match the flap-grouping regex — see
+    // src/utils/incidentGrouping.js — so it would reliably degrade to the no-op branch now.)
     // If no data happens to group on the test day, the test degrades to a structural
     // presence check and annotates the run.
-    await page.goto('/is-fireworks-down', { waitUntil: 'domcontentloaded' })
+    await page.goto('/is-together-down', { waitUntil: 'domcontentloaded' })
     const groups = page.locator('details.incident-group')
     const n = await groups.count()
     if (n === 0) {
-      test.info().annotations.push({ type: 'note', description: 'No grouped incidents on Fireworks today — structure-only check' })
+      test.info().annotations.push({ type: 'note', description: 'No grouped incidents on Together AI today — structure-only check' })
       return
     }
     // Each group must be <details open> so crawlers read the entries without JS.
