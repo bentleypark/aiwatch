@@ -1,4 +1,4 @@
-// Better Stack RSS Feed Parser — for HuggingFace, Together, Fireworks, Modal, xAI
+// Better Stack RSS Feed Parser — for HuggingFace, Together, Modal, xAI (fireworks left this group in #1198)
 
 import type { TimelineEntry, Incident, DailyImpactLevel, ServiceComponent } from '../types'
 import { formatDuration } from '../utils'
@@ -19,7 +19,7 @@ function isValidDate(s: string): boolean {
 // read 'resolved' at rest, losing the historical severity), so the wording is the only signal — and it
 // is NOT reliable for severity: BetterStack's automated monitors emit a generic "<X> went down" for
 // ANY failed check (a single model/endpoint flap), so "down" does NOT mean a declared major outage.
-// Treating "down" as major over-penalizes monitor-flap services (Together/Fireworks are 20/20 "went
+// Treating "down" as major over-penalizes monitor-flap services (Together is 20/20 "went
 // down") vs services with human-written titles (Modal). So we map MAJOR only on explicit broad-outage
 // wording ("outage"/"unavailable"/"offline") and everything else (down/went down/degraded/...) → MINOR.
 // This is the conservative default and is SYMMETRIC with the Instatus fix (#556, which resolved to all
@@ -61,7 +61,7 @@ export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
 
   // Group by incident key:
   // - Modal: <link> has unique incident URL (/incident/ID) → use link
-  // - Together/HuggingFace/Fireworks: <link> is just homepage, guid hash is per-incident → use full guid
+  // - Together/HuggingFace: <link> is just homepage, guid hash is per-incident → use full guid
   // - Modal guid has per-update hashes (incident/ID#updateHash) → split('#')[0] groups correctly
   const groups = new Map<string, Array<{ title: string; date: string; desc: string }>>()
   for (const item of items) {

@@ -4,8 +4,9 @@
 // viewer's local timezone because its output is rendered client-side; the SSR page
 // must be deterministic across visitors, so this port defaults to 'UTC'.
 //
-// Background (same as SPA): BetterStack-backed feeds (Fireworks, Together, HuggingFace,
-// Modal) emit a separate "<model> — recovered" entry per transient blip. Same-day
+// Background (same as SPA): BetterStack-backed feeds (Together, HuggingFace, Modal;
+// fireworks left this group in #1198 — migrated to incident.io) emit a separate
+// "<model> — recovered" entry per transient blip. Same-day
 // normalized-title clusters of ≥2 collapse into a single group row so the visible list
 // stays readable while the underlying data remains intact for downstream pipelines.
 //

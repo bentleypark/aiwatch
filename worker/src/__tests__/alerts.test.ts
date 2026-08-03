@@ -1492,8 +1492,9 @@ describe('short-incident hold (#792)', () => {
 
     it('does NOT widen the net for flapSuppression-ONLY services — a normal-titled minor stays immediate', () => {
       // Regression guard: the OR with isFlapSuppressible must NOT make existing flap services
-      // (together/fireworks/huggingface/modal/luma) start holding ordinary, normal-titled minor
-      // incidents. Only the "— down/recovered" flap shape is held for them; a real incident fires now.
+      // (together/huggingface/modal/luma; fireworks left this group in #1198) start holding
+      // ordinary, normal-titled minor incidents. Only the "— down/recovered" flap shape is held
+      // for them; a real incident fires now.
       const flapOnly = { flapSuppression: true }
       expect(shouldHoldNewIncident('modal', flapOnly, mkInc({ title: '[EU] Elevated ingestion times', impact: 'minor' }), firstSight)).toBe(false)
     })
@@ -1575,6 +1576,62 @@ describe('short-incident hold (#792)', () => {
     it('does NOT hold a `major` Mistral incident — a real broad outage alerts immediately', () => {
       const cfg = SERVICES.find((x) => x.id === 'mistral')!
       expect(shouldHoldNewIncident('mistral', cfg, mistralFlap({ impact: 'major' }), firstSight)).toBe(false)
+    })
+  })
+
+  describe('Fireworks incident.io migration (#1198)', () => {
+    // #1198 — Fireworks moved off BetterStack (whose "<model> — down/recovered" title shape
+    // flapSuppression's isFlapNotice matched) onto incident.io, whose real titles carry no such
+    // suffix ("Service Degradation for one of our models on Serverless", confirmed live 2026-08-02). Without
+    // this coverage, flapSuppression would be silently inert for fireworks and every per-model blip
+    // (observed live 2026-08-02: 18 incidents/7d, 8-41min each) would fire an unheld Discord New+Resolved pair —
+    // exactly the phantom-alert failure #633/#835/#792 exist to prevent. fireworks now opts into
+    // holdShortIncidents instead (the mistral/langfuse mechanism), which holds on `impact` alone.
+    const fireworksBlip = (overrides: Partial<Incident> = {}): Incident => inc({
+      id: 'fireworks-blip-1',
+      title: 'Service Degradation for one of our models on Serverless',
+      status: 'investigating',
+      impact: 'minor', // real incident.io impact, not BetterStack's hardcoded null
+      startedAt: new Date(NOW - 60_000).toISOString(),
+      timeline: [],
+      ...overrides,
+    })
+
+    it('the real SERVICES config opts fireworks into holdShortIncidents, NOT flapSuppression', () => {
+      const s = SERVICES.find((x) => x.id === 'fireworks')
+      expect(s, 'fireworks missing from SERVICES').toBeDefined()
+      expect(s!.holdShortIncidents, 'fireworks must opt into the #792/#1198 short-incident hold').toBe(true)
+      expect(s!.flapSuppression, 'flapSuppression would be inert — incident.io titles have no "— down/recovered" suffix').toBeFalsy()
+    })
+
+    it('a real incident.io title does not match isFlapNotice\'s "— down/recovered" regex (proving flapSuppression would have been inert)', () => {
+      // Direct proof of the title-shape claim: isFlapSuppressible short-circuits on `!config.flapSuppression`
+      // before ever reaching isFlapNotice, so testing it against the REAL (flapSuppression-less) fireworks
+      // config would pass for the wrong reason regardless of title shape. Prove the title claim in isolation
+      // (and via a throwaway flapSuppression:true config below) instead of relying on that config gap.
+      expect(isFlapNotice(fireworksBlip())).toBe(false)
+      expect(isFlapSuppressible('fireworks', { flapSuppression: true }, fireworksBlip(), NOW)).toBe(false)
+    })
+
+    it('a real incident.io-titled blip is NOT flap-suppressible (real config has no flapSuppression) but IS short-incident-holdable', () => {
+      const cfg = SERVICES.find((x) => x.id === 'fireworks')!
+      expect(isFlapSuppressible('fireworks', cfg, fireworksBlip(), NOW)).toBe(false)
+      expect(isShortIncidentHoldable('fireworks', cfg, fireworksBlip())).toBe(true)
+    })
+
+    it('holds a real-shaped Fireworks blip on first sight, using the real config', () => {
+      const cfg = SERVICES.find((x) => x.id === 'fireworks')!
+      expect(shouldHoldNewIncident('fireworks', cfg, fireworksBlip(), firstSight)).toBe(true)
+    })
+
+    it('fires once the blip survives ~2 cycles (a genuine longer incident)', () => {
+      const cfg = SERVICES.find((x) => x.id === 'fireworks')!
+      expect(shouldHoldNewIncident('fireworks', cfg, fireworksBlip(), confirmed)).toBe(false)
+    })
+
+    it('does NOT hold a `major` Fireworks incident — a real broad outage alerts immediately', () => {
+      const cfg = SERVICES.find((x) => x.id === 'fireworks')!
+      expect(shouldHoldNewIncident('fireworks', cfg, fireworksBlip({ impact: 'major' }), firstSight)).toBe(false)
     })
   })
 })
@@ -1768,7 +1825,7 @@ describe('auto-monitor tagged incidents (#983)', () => {
       expect(isFlapSuppressible('modal', config, shortFlap, AM_NOW)).toBe(true)
     })
 
-    it('a backdated first sight on a flapSuppression-only service alerts immediately (modal/together/fireworks)', () => {
+    it('a backdated first sight on a flapSuppression-only service alerts immediately (modal/together/huggingface/luma)', () => {
       // These services have flapSuppression but NOT holdShortIncidents and carry no tag, so the flap
       // branch is their only path into the hold. Past the escape window it closes → no hold → alert.
       const backdated = inc({ id: 'mb', title: 'Web endpoints — down', status: 'investigating', impact: 'minor', startedAt: longAgo })

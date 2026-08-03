@@ -827,13 +827,47 @@ describe('displayComponentIds config sanity (#606)', () => {
     }
   })
 
-  it('the 5 BetterStack services exclude the Website section from their breakdown (#606 Cat C1)', () => {
+  it('every BetterStack service excludes the Website section from their breakdown (#606 Cat C1)', () => {
     // parseBetterStackComponents reads componentDenylist; without it the marketing "Website" row leaks.
-    for (const id of ['together', 'fireworks', 'huggingface', 'modal', 'luma']) {
+    // #1198 follow-up: this used to be a hand-maintained id list, and helicone had silently been missing
+    // from it since #802 (same config shape as the rest — betterStackUrl + componentDenylist:['Website']
+    // — just never added here) despite the list otherwise being kept in sync (fireworks was removed from
+    // it in #1198). A hardcoded roster is exactly how that omission happened, so derive it from the real
+    // config instead — the length pin below is what forces this test to notice the NEXT roster change.
+    const betterStackIds = SERVICES.filter((s) => s.betterStackUrl).map((s) => s.id)
+    expect(betterStackIds.length, 'BetterStack roster changed — update this comment/count if intentional').toBe(5)
+    for (const id of betterStackIds) {
       const svc = SERVICES.find((s) => s.id === id)!
-      expect(svc.betterStackUrl, id).toBeDefined()
       expect(svc.componentDenylist, id).toEqual(['Website'])
     }
+  })
+
+  it('#1198 — fireworks migrated off BetterStack to the incident.io compat API (overall-indicator badge, dynamic breakdown, worst-of uptime over a stable id subset)', () => {
+    const svc = SERVICES.find((s) => s.id === 'fireworks')!
+    expect(svc.betterStackUrl).toBeUndefined()
+    expect(svc.rssFeedUrl).toBeUndefined()
+    expect(svc.apiUrl).toBe('https://status.fireworks.ai/api/v2/summary.json')
+    expect(svc.incidentIoBaseUrl).toBe('https://status.fireworks.ai/incidents')
+    // No statusComponent*, so resolveSvcStatus returns at its first branch (overall page indicator) —
+    // same bucket as cohere/groq/together. displayAllComponents drives only the BREAKDOWN (no
+    // canonical single component to single out or deny there).
+    expect(svc.statusComponent).toBeUndefined()
+    expect(svc.statusComponentId).toBeUndefined()
+    expect(svc.statusComponentIds).toBeUndefined()
+    expect(svc.displayAllComponents).toBe(true)
+    expect(svc.componentDenylist).toBeUndefined()
+    // incidentIoComponentId IS set — but only for the uptime worst-of (mirrors turbopuffer's
+    // no-canonical-component shape), NOT the full 16-model roster: deliberately scoped to the 12 ids
+    // ≥40 days old (ULID-verified) so a brand-new model can't pin the uptime window down to its own
+    // age (see the config comment — the same failure junie's config avoids).
+    expect(Array.isArray(svc.incidentIoComponentId)).toBe(true)
+    expect((svc.incidentIoComponentId as string[]).length).toBe(12)
+    expect(new Set(svc.incidentIoComponentId as string[]).size).toBe(12)
+    // holdShortIncidents, NOT flapSuppression: incident.io titles carry no "— down/recovered" suffix,
+    // so flapSuppression's isFlapNotice title regex would never match — see alerts.test.ts for the
+    // behavioral coverage (a real per-model blip must still be held, using the real SERVICES config).
+    expect(svc.flapSuppression).toBeUndefined()
+    expect(svc.holdShortIncidents).toBe(true)
   })
 
   it('pins the non-obvious official-group assignments (the ones the comments justify)', () => {
