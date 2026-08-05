@@ -72,9 +72,13 @@ if [ -z "$nag" ]; then
   exit 0
 fi
 
-# Matched fragment for the audit note (truncate hard).
-frag_note="$(printf '%s' "$TAIL_FRAG" | tr '\n"\\' '   ' | tail -c 120)"
-audit "block" "${nag}: …${frag_note}"
+# The classified id ONLY — never the matched text (#1150). This was the last producer writing free-form
+# prose into hook-audit.jsonl, and `npm run hook-audit` echoes notes verbatim, so the assistant's own
+# closing line ("dev 서버 띄웠습니다. 브라우저에서 확인해 보시고 문제없으면…") reached a report that an
+# operator then pastes into the chat — a genuine role:user turn satisfying step35's CONFIRM_RE and
+# HOOK_WORK_RE, which lifts the HARD commit gate as `commit:confirmed` and authorizes a hook self-edit.
+# The id carries the whole diagnostic value; the fragment carried the poison.
+audit "block" "${nag}"
 
 # Block the stop, re-prompt the model to revise. (Hard by design — a soft
 # warning would be useless here: the nag has already been written; only a
