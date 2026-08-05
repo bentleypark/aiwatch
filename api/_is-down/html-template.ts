@@ -9,6 +9,7 @@ import { buildShareUrl } from './share-url'
 // handler hashes the rendered inline scripts per-response (a content hash survives caching, unlike a
 // random nonce). So the no-nonce static script forms are used here; the inline handlers are still
 // refactored to delegated listeners (CSP can't admit inline on*= via hashes cleanly).
+import { audienceBeaconScript } from '../_shared/audience-beacon'
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { EXTENSION_STORE_URL, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
@@ -621,17 +622,9 @@ export function renderDelegatedListeners(svcId: string, active: boolean): string
 // #842-B — consent-free outage-moment audience beacon. Fires once on load, OUTSIDE any GA/consent
 // guard (no cookie, no PII: the referrer is reduced to its HOSTNAME client-side). Body = { svc,
 // ref(host), utm(utm_source), active }; classifyReferrer folds ref+utm to a fixed source bucket
-// server-side. The active flag is the SSR-time outage status — note is-down is edge-cached
-// (s-maxage=60), so within that <=60s window a cached page can tag a view with a stale flag; the metric
-// is an approximate consent-free proxy (see the module docstring). → one WAE point → daily Outage Audience.
-(function () {
-  try {
-    var u = new URLSearchParams(location.search).get('utm_source') || '';
-    var r = '';
-    try { if (document.referrer) r = new URL(document.referrer).hostname; } catch (e0) {}
-    fetch('https://aiwatch-worker.p2c2kbf.workers.dev/api/pageview', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ svc: ${JSON.stringify(svcId)}, ref: r, utm: u, active: ${active ? 'true' : 'false'} }) }).catch(function () {});
-  } catch (e1) {}
-})();
+// server-side. → one WAE point → daily Outage Audience. Shared with the group page (#1193), which
+// the Reddit block's family link points at — see api/_shared/audience-beacon.ts.
+${audienceBeaconScript(svcId, active)}
 document.addEventListener('click', function (e) {
   var g = e.target.closest('[data-ga]');
   if (g) {

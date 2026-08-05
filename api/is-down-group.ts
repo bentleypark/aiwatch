@@ -10,7 +10,8 @@
 // cross-links to sibling family pages — real-review feedback that a bare status list read as too
 // empty, especially on the (common) all-operational day.
 
-import { FAMILY_GROUPS, SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE } from './_is-down/slug-map'
+import { FAMILY_GROUPS, SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, type ServiceFamily } from './_is-down/slug-map'
+import { audienceBeaconScript } from './_shared/audience-beacon'
 import { cspForHtml } from './_shared/csp-hash'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
@@ -114,7 +115,7 @@ function incidentMeta(inc: FamilyIncident): string {
 const HINT_TO_OG_STATUS: Record<string, MemberStatus['status']> = { down: 'down', degraded: 'degraded', active: 'operational', resolved: 'operational', withdrawn: 'unknown' }
 
 function renderGroupPage(
-  family: { slug: string; name: string },
+  family: ServiceFamily,
   members: MemberStatus[],
   incidents: FamilyIncident[],
   otherFamilies: Array<{ slug: string; name: string; status: MemberStatus['status'] }>,
@@ -122,6 +123,11 @@ function renderGroupPage(
   ogIncidentToken?: string | null,
 ): string {
   const headline = worstStatus(members)
+  // #1193 — the member the audience beacon attributes a view to: the one carrying the headline
+  // status, so the (active-flag, svcId) pair the WAE row stores cannot contradict itself. `headline`
+  // is always a status some member holds, so the `??` is belt-and-braces, not the all-operational
+  // path — that case resolves to the first member through `find` like any other.
+  const beaconSvcId = members.find((m) => m.status === headline)?.id ?? family.members[0]
   const title = `Is ${family.name} Down? ${STATUS_LABEL[headline]} | AIWatch`
   const desc = headline === 'operational'
     ? `No — every ${family.name} service AIWatch monitors is currently operational.`
@@ -314,6 +320,17 @@ ${incidentSection}
 ${shareSection}
 ${otherFamiliesSection}
 <script>
+// #842-B / #1193 — consent-free outage-moment audience beacon, the same one the per-service is-down
+// pages fire (api/_shared/audience-beacon.ts). It has to be here because the operator Reddit block
+// hands out THIS page URL for a family-wide incident: without it a Reddit visitor arriving on a
+// group link is invisible to audienceBySource. svc must be a real SERVICE id: parsePageviewBody validates it
+// against SERVICES and drops the row otherwise, which reads as no traffic rather than as an error.
+// It names the WORST-OF member rather than the first one, so the row recordOutageView writes
+// (source, active-flag, svcId) stays internally consistent: the active flag is the family headline,
+// and pairing it with a member that was operational at render time would assert an outage view of a
+// service that had no outage.
+// (No backticks in this comment: it sits inside a template literal — see #842-B.)
+${audienceBeaconScript(beaconSvcId, headline === 'down' || headline === 'degraded')}
 document.querySelector('[data-action="copy-link"]')?.addEventListener('click', function(e){
   navigator.clipboard.writeText(e.currentTarget.dataset.url).then(function(){
     e.currentTarget.textContent = '✓ Copied'

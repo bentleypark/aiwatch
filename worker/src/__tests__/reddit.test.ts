@@ -284,6 +284,24 @@ describe('formatRedditAlert', () => {
     expect(formatted.color).toBe(0x3fb950)
   })
 
+  it('renders the share link as INLINE CODE so an operator click cannot enter the reddit bucket', () => {
+    // The same measurement rule the #1182 engage block carries, on the OTHER operator surface that
+    // emits utm_source=reddit. It matters more here, not less: this alert's whole purpose is "go
+    // engage with this post", so it is the likelier click. `classifyReferrer` reads utm first, so a
+    // click from Discord lands in the same `reddit` bucket as a real visitor and is inseparable
+    // afterwards. Asserted in both directions — the backticked form present AND the bare
+    // auto-linking form absent, since Discord auto-links any bare URL.
+    const alert: RedditAlert = {
+      key: 'reddit:seen:z1', subreddit: 'ClaudeAI', type: 'outage',
+      post: { id: 'z1', title: 'Is Claude down?', author: 'u', subreddit: 'ClaudeAI', score: 5, url: 'https://reddit.com/x', createdUtc: Math.floor(Date.now() / 1000) - 60 },
+    }
+    const link = 'https://ai-watch.dev/is-claude-api-down?e=reddit&utm_source=reddit&utm_medium=social&utm_campaign=outage'
+    const { description } = formatRedditAlert(alert)
+    expect(description).toContain(`\`${link}\``)
+    expect(description).not.toContain(`🔗 ${link}\n`)
+    expect(description.endsWith(`🔗 ${link}`)).toBe(false)
+  })
+
   it('filters promotable alerts from mixed list (integration)', () => {
     const alerts: RedditAlert[] = [
       { key: 'k1', subreddit: 'ClaudeAI', type: 'outage' as const, post: { id: '1', title: 'Is Claude down?', author: 'a', subreddit: 'ClaudeAI', score: 5, url: '', createdUtc: 0 } },
