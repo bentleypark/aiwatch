@@ -57,9 +57,7 @@ if (entries.length === 0) {
 //   - block (stop-nag): the assistant tried to end on an auto-proceed nag → blocked.
 //   - any entry whose note carries `no_verify=1` (git-mutation): --no-verify/--no-gpg-sign
 //     was on a commit/push, which CLAUDE.md forbids unless the user asked.
-// NOTE the structural blind spot (#415's own 2026-05-19 comment): step-3.5 violations (advancing
-// without the user's in-browser confirmation) are invisible to hooks — the confirmation is a user
-// message the hook never sees. So even this violation count UNDERCOUNTS; it is a floor, not a total.
+// This count is a floor, not a total: see the step-3.5 section below for what it still cannot see.
 const isViolation = (e) => {
   if (e.decision === 'block') return true
   if (typeof e.note === 'string' && /\bno_verify=1\b/.test(e.note)) return true
@@ -68,12 +66,18 @@ const isViolation = (e) => {
   // caught violation. NOTE a step35 commit-deny is ALSO where false-positives live (a real user
   // confirmation the parser missed); see the dedicated step35 section below for the caveat.
   if (e.hook === 'step35-verify-gate' && e.decision === 'deny' && e.note !== 'fail-closed') return true
+  // NOTE `review-loop-gate` (#1150) never emits a `deny` — it is telemetry, not a gate, for the reasons
+  // recorded in its own header. It contributes nothing to this tally; its output is read by the 🔁 section.
   return false
 }
 
 const dayKey = (ts) => (typeof ts === 'string' && ts.length >= 10 ? ts.slice(0, 10) : 'unknown')
 const todayUTC = new Date().toISOString().slice(0, 10)
 const cutoff7 = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)
+
+// Computed once and shared by the per-day trend and the tally.
+const violations = entries.filter(isViolation)
+const violationSet = new Set(violations)
 
 // By hook -> by decision count
 const byHook = {}
@@ -113,11 +117,9 @@ for (const e of entries) {
   else if (d === 'clean') dayCounts[k].clean++
   else if (d === 'inject') dayCounts[k].inject++
   else dayCounts[k].other++
-  if (isViolation(e)) dayCounts[k].violations++
+  if (violationSet.has(e)) dayCounts[k].violations++
 }
 
-// Violation tally (the real effectiveness signal — see isViolation).
-const violations = entries.filter(isViolation)
 const violationsLast7 = violations.filter((e) => dayKey(e.ts) >= cutoff7)
 const violByKind = {}
 for (const e of violations) {
@@ -148,6 +150,39 @@ const step35Pass = step35.filter((e) => e.decision === 'pass').length
 // A `pass` with note `commit:override` = the user had to say "검증 생략" to lift the gate on a real
 // UI/Edge commit → the strongest false-positive proxy (the gate fired on already-verified work).
 const step35Override = step35.filter((e) => e.decision === 'pass' && e.note === 'commit:override').length
+
+// #1150 review-loop telemetry — its own section, because it is the deliverable rather than a side effect.
+// The hook never denies (the deny designs that were measured and dropped are in
+// docs/reference/workflow-hooks.md), so there is nothing here to count as an intercepted violation. What it records is what the review loop
+// actually did: the round each reviewer spawn declared, or that it declared none.
+const revloop = entries.filter((e) => e.hook === 'review-loop-gate')
+const revloopFailOpen = {}
+const revloopRounds = {}
+const revloopBySession = {}
+let revloopUndeclared = 0
+for (const e of revloop) {
+  const n = String(e.note ?? '')
+  if (n.startsWith('fail-open:')) {
+    // Bucket on the whole reason, not its first colon-segment, so a future reason carrying a detail
+    // (an errno, a count) stays distinguishable from its siblings rather than merging with them.
+    const why = n.slice('fail-open:'.length)
+    revloopFailOpen[why] = (revloopFailOpen[why] ?? 0) + 1
+    continue
+  }
+  const s = /:s=(\S+)/.exec(n)?.[1]
+  if (s) revloopBySession[s] = (revloopBySession[s] ?? 0) + 1
+  const m = /^round-(\d+)/.exec(n)
+  if (m) revloopRounds[m[1]] = (revloopRounds[m[1]] ?? 0) + 1
+  else revloopUndeclared++ // `round-none` — the prompt tracked no round
+}
+// Spawns per session is the depth proxy that needs NO cooperation from the prompt. It matters because the
+// declared round is entirely self-reported, and `/pr-review-toolkit:review-pr` — the entry point CLAUDE.md
+// step 5 names — never tells the caller to state one: a loop driven straight through it records
+// `round-none` throughout, so the histogram is blind in exactly the runaway case, where "stopped tracking
+// rounds" and "ran long" co-occur. A session's spawn count still rises with every round.
+const revloopMaxPerSession = Math.max(0, ...Object.values(revloopBySession))
+const revloopFailOpenTotal = Object.values(revloopFailOpen).reduce((a, b) => a + b, 0)
+const revloopRecorded = revloop.length - revloopFailOpenTotal
 const days = []
 for (let i = DAYS - 1; i >= 0; i--) {
   days.push(new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10))
@@ -185,9 +220,29 @@ if (step35.length) {
   out.push('🚦 step-3.5 hard gate (#657):')
   const reasons = Object.entries(step35ByReason).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`)
   out.push(`  ${step35Deny.length} deny · ${step35Pass} pass (UI/Edge commit allowed)${reasons.length ? '  — deny: ' + reasons.join(', ') : ''}`)
-  out.push(`  ⚠️ a commit:* deny is EITHER an intercepted step-3.5 skip OR a false-positive — check if the NEXT turn was an override/confirmation (a confirmed-but-missed reply = tune CONFIRM_RE).`)
-  if (step35Override) out.push(`  ⚑ override=${step35Override} pass(es) needed a manual "검증 생략" — the strongest false-positive proxy. A rising override rate means the gate fires on already-verified work → tune CONFIRM_RE or soften.`)
+  out.push(`  ⚠️ a commit:* deny is EITHER an intercepted step-3.5 skip OR a false-positive — check if the NEXT turn was an override/confirmation (a genuine-but-unmatched reply = tune CONFIRM_RE).`)
+  if (step35Override) out.push(`  ⚑ override=${step35Override} pass(es) needed a manual step-3.5 override — the strongest false-positive proxy. A rising override rate means the gate fires on work the user had already checked → tune CONFIRM_RE or soften.`)
   if (step35FailClosed) out.push(`  ❗ fail-closed=${step35FailClosed} — gate-health, NOT a violation: the transcript read is breaking. Should be ~0; investigate if it trends up.`)
+  out.push('')
+}
+// #1150 review-loop telemetry. This hook does not gate, so read this section as a record of the loop,
+// not as an enforcement tally: how deep the rounds went, and how often a round went untracked.
+if (revloop.length) {
+  out.push('🔁 review-loop telemetry (#1150):')
+  out.push(`  ${revloopRecorded} reviewer spawn(s) recorded across ${Object.keys(revloopBySession).length} session(s) · busiest session ${revloopMaxPerSession} spawn(s)`)
+  const hist = Object.entries(revloopRounds).sort((a, b) => Number(a[0]) - Number(b[0])).map(([k, v]) => `R${k}=${v}`)
+  // Per SPAWN — one round spawns several reviewers — and from the round each prompt DECLARED. There is no
+  // independent counter, so a deep tail here means prompts SAID they were deep, which is the signal a
+  // runaway loop leaves behind.
+  if (hist.length) out.push(`  first round number per spawn: ${hist.join('  ')}`)
+  // A prompt that declares no round leaves no round to report. That count is the instrument's blind rate:
+  // if it dwarfs the histogram, the loop ran without tracking rounds at all — the condition under which
+  // every runaway loop before this hook had to be reconstructed from memory afterwards.
+  if (revloopUndeclared) out.push(`  ⚑ no round declared=${revloopUndeclared} spawn(s) — the loop was not tracking rounds in those spawns, so nothing here describes their depth.`)
+  if (revloopFailOpenTotal) {
+    const fo = Object.entries(revloopFailOpen).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`)
+    out.push(`  ❗ fail-open=${revloopFailOpenTotal} — instrument health, not a finding: the hook recorded nothing for that spawn (${fo.join(', ')}). Should be ~0; a rising count means the telemetry is blind, not that the loop is healthy.`)
+  }
   out.push('')
 }
 out.push(`Most recent ${LAST_N}:`)

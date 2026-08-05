@@ -205,7 +205,7 @@ sequential** (single prod Worker/KV). Full workflow + launch-method table + port
 ### Workflow-gate hooks (#415/#657)
 
 Written rules are passive context — loaded once per session, dropped by compaction — so they get only
-probabilistic compliance. `.claude/settings.json` wires **six** hooks (`.claude/hooks/`) that fire at
+probabilistic compliance. `.claude/settings.json` wires **seven** hooks (`.claude/hooks/`) that fire at
 the decision moment instead:
 
 | Hook | Event | Enforces |
@@ -215,7 +215,8 @@ the decision moment instead:
 | `stop-nag-gate.sh` | Stop | Blocks a closing "shall I proceed / 진행할까요?" and re-prompts. |
 | `tooling-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | Reminds to run chub / modern-web-guidance by file path. Soft. |
 | `korean-copy-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | On a Korean-copy file (ko.js / methodology·intro templates / LegalContent·AnalysisModal), reminds to run `lint:korean` + re-read the whole card (#1094/#1097). Soft. |
-| **`step35-verify-gate.mjs`** | PreToolUse/Bash + Edit\|Write\|MultiEdit | **HARD** — DENIES a UI/Edge `git commit` with no transcript-confirmed user verification, denies `--no-verify`, denies unauthorized self-edits to `.claude/hooks/**` + `.claude/settings*.json`. Fail-closed; override = a user turn saying `검증 생략하고 커밋`. |
+| **`step35-verify-gate.mjs`** | PreToolUse/Bash + Edit\|Write\|MultiEdit | **HARD** — DENIES a UI/Edge `git commit` with no transcript-confirmed user verification, denies `--no-verify`, denies unauthorized self-edits to `.claude/hooks/**` + `.claude/settings*.json`. Fail-closed. The COMMIT deny's override is a user turn saying `검증 생략하고 커밋`; a self-edit deny needs stated intent toward the gate instead (`훅 작업`), which that path checks separately. |
+| `review-loop-gate.mjs` | PreToolUse/Task\|Agent | **Telemetry, not a gate** (#1150) — records the round each `pr-review-toolkit:*` spawn declares (or that it declared none). Never blocks; read via `hook-audit`'s `🔁` section. Enforcing convergence stays `ship-issue` steps 5-6 — why, in workflow-hooks.md. |
 
 Every fire is logged to `.claude/hook-audit.jsonl` (gitignored); `npm run hook-audit` summarizes.
 The effectiveness signal is the **`Violations intercepted`** tally (`block` / `deny` except `fail-closed` / `no_verify=1`),

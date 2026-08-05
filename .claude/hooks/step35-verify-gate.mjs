@@ -17,9 +17,10 @@
 //   • Edit|Write|MultiEdit → deny self-edits to .claude/hooks/** and .claude/settings*.json
 //             (a gate the agent can rewrite is no gate).
 //
-// Fail-CLOSED: on any parse error we deny — but every deny message states the one-line override so a
-// false-deny is recoverable in a single user turn (the user replies with a confirmation, or
-// "검증 생략하고 커밋" / "skip verify"). Non-UI/Edge commits are NOT gated here (the soft
+// Fail-CLOSED: on any parse error we deny. Each deny states the authorization that lifts IT — which is
+// not the same phrase on every path: the commit and fail-closed denies advise the step-3.5 override,
+// the self-edit deny advises stated intent toward the gate (the override does NOT lift it), and
+// `--no-verify` advises none by design. See each branch. Non-UI/Edge commits are NOT gated here (the soft
 // git-mutation-gate.sh still nudges those). Reload note: settings changes need /hooks opened once.
 
 import fs from 'node:fs'
@@ -37,7 +38,7 @@ import { execSync } from 'node:child_process'
 // early-exits (non-commit Bash, non-protected edits, non-UI/Edge commits) are
 // NOT logged — they'd flood the log and drown the signal. decision vocab:
 //   deny  — gate blocked. note: commit:<reason> | no-verify | self-edit:<fp> | fail-closed
-//   pass  — gate evaluated a real gated action and ALLOWED it. note: commit:confirmed | self-edit-authorized:<fp>
+//   pass  — gate evaluated a real gated action and ALLOWED it. note: commit:confirmed | commit:override | self-edit-authorized:<fp>
 // Non-fatal by construction: a logging failure must never break the turn.
 // Default to the real gitignored log; HOOK_AUDIT_LOG overrides it (tests point it at a temp file so
 // the CLI integration tests don't pollute the production telemetry the monitoring plan depends on).
@@ -47,8 +48,8 @@ const AUDIT_FILE = process.env.HOOK_AUDIT_LOG
 // Pure (exported for tests): build the JSONL line. note is single-lined + JSON-escaped so a stray
 // path char can't corrupt the log. Schema matches _audit.sh exactly so the summary parses both.
 export function auditLine(decision, note = '', ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')) {
-  // Strip ALL control chars (not just \r\n\t) → single space, matching _audit.sh's tr -d set, so a
-  // stray byte can never emit invalid JSON the summary would silently drop. Then JSON-escape \\ and ".
+  // Strip ALL control chars (not just \r\n\t) → single space, so a stray byte in a note can never emit
+  // invalid JSON the summary would silently drop. Then JSON-escape \\ and ".
   const esc = String(note).replace(/[\u0000-\u001f]+/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
   return `{"ts":"${ts}","hook":"step35-verify-gate","decision":"${decision}","note":"${esc}"}`
 }
@@ -88,13 +89,45 @@ export function isUiEdgePath(p) {
 // "ok now add a button"), opening the gate without real verification. Require affirmative-verified
 // phrasing: "확인했/확인 완료/확인됨", "잘 나옴/잘 된다", "괜찮", "문제없/이상없", "정상 작동",
 // "브라우저…(확인/좋/괜찮/정상)", or EN "lgtm / looks good / verified / works (fine|now) / confirmed".
-export const CONFIRM_RE = /확인\s?했|확인\s?(?:완료|됨|됐|함)|잘\s?나(?:옴|와|온다|옵니다)|잘\s?(?:된다|됩니다|돼요?|작동)|괜찮(?:아|네|습니다|음)|문제\s?없|이상\s?없|정상\s?(?:작동|동작)|브라우저[^.\n]{0,20}(?:확인|좋|괜찮|정상)|lgtm|looks?\s?good|verified|works\s?(?:fine|now|well)|confirmed(?:\s?(?:working|in.?browser))?/i
+// `(?<!:)confirmed` — NOT a stylistic detail. `npm run hook-audit` echoes this gate's own audit notes,
+// one of which is `commit:confirmed`; an operator pasting that report into the chat types a genuine
+// `role:user` turn, which the harness-wrapper skip-list structurally cannot filter. A confirmation is
+// written by a human in prose, never as a colon-prefixed token, so the non-colon boundary costs nothing.
+// But this side ALONE does not make the report inert — that is a two-sided invariant, and the other side
+// is the report's own prose in `scripts/hook-audit-summary.mjs`, which must not phrase its advice in the
+// words these regexes look for. Both sides are pinned together by a test that runs the real summary over
+// a maximal fixture and asserts CONFIRM_RE / OVERRIDE_RE / HOOK_WORK_RE all refuse the output.
+export const CONFIRM_RE = /확인\s?했|확인\s?(?:완료|됨|됐|함)|잘\s?나(?:옴|와|온다|옵니다)|잘\s?(?:된다|됩니다|돼요?|작동)|괜찮(?:아|네|습니다|음)|문제\s?없|이상\s?없|정상\s?(?:작동|동작)|브라우저[^.\n]{0,20}(?:확인|좋|괜찮|정상)|lgtm|looks?\s?good|verified|works\s?(?:fine|now|well)|(?<!:)confirmed(?:\s?(?:working|in.?browser))?/i
 export const OVERRIDE_RE = /검증\s?생략|확인\s?생략|스킵하고\s?커밋|커밋만\s?(?:해|진행)|skip\s?(?:the\s?)?(?:local\s?)?verif|no\s?verif(?:y|ication)\s?needed|force\s?commit/i
+/** The phrases each deny message tells the user to type, as CONSTANTS the message interpolates — so the
+ *  advice and the regex that has to accept it cannot drift apart. A test renders every deny path and
+ *  requires each phrase it advises to satisfy that branch's OWN regex (not any of the three), and a
+ *  second test requires the same of the phrases CLAUDE.md and workflow-hooks.md quote. */
+export const HOOK_WORK_EXAMPLES = ['work on the gate', '훅 작업']
+export const COMMIT_OVERRIDE_EXAMPLES = ['검증 생략하고 커밋', 'skip verify']
+/** Which regex has to accept each advice list — the branch that RENDERS it is the branch that checks it.
+ *  The self-edit deny consults `HOOK_WORK_RE` and nothing else; the commit and fail-closed denies consult
+ *  `CONFIRM_RE` or `OVERRIDE_RE`. A test iterates these, so an advice phrase no branch would accept fails. */
+export const ADVICE = [
+  { phrases: HOOK_WORK_EXAMPLES, accepts: () => HOOK_WORK_RE },
+  { phrases: COMMIT_OVERRIDE_EXAMPLES, accepts: () => OVERRIDE_RE },
+]
+
 // User-authorized hook/gate work — only then may the agent edit a .claude/hooks/** or settings file.
-// NARROW (the threat is the agent rationalizing a self-edit): require an explicit gate reference
-// (#657 / step35 / step-3.5 gate) OR a verb+target pairing ("edit/fix/work on the gate|hook",
-// "훅/게이트 작업|수정"). Bare "gate"/"hook"/".claude"/an issue-number range are NOT enough.
-export const HOOK_WORK_RE = /#?657\b|step-?35|step-?3\.?5\s?gate|(?:hooks?|gate|훅|게이트)\s*(?:작업|수정|개선|편집|edit|fix|work)|(?:work\s?on|edit|fix|수정|작업|개선)[^.\n]{0,15}(?:gate|hook|훅|게이트)/i
+// NARROW (the threat is the agent rationalizing a self-edit): require a verb+target pairing
+// ("edit/fix/work on the gate|hook", "훅/게이트 작업|수정"). Bare "gate"/"hook"/".claude" is NOT enough.
+// The bare-NAME alternatives (`#?657`, `step-?35`, `step-?3\.?5 gate`) were REMOVED after #1150's review:
+// naming a thing is not authorizing work on it, and `npm run hook-audit`'s own output contains this hook's
+// name — so pasting that report into the chat authorized the agent to edit its own gate.
+//
+// The lookarounds exist because the strings most likely to be pasted back into the chat are this repo's
+// OWN — audit notes, branch names, this gate's deny messages, these docs. They are scoped to ASCII word
+// chars so Korean still inflects (`훅 수정해줘` must authorize), and they are deliberately NOT total:
+// `fix the gateway` still authorizes, as it did before #1150. Which shapes are refused and which are
+// accepted is stated where it is executable — one fixture per guard in
+// `scripts/step35-verify-gate.test.mjs`. Two attempts to also enumerate it here drifted within one
+// review round each, so this comment no longer does.
+export const HOOK_WORK_RE = /(?<![-\w])(?:hooks?|gate|훅|게이트)\s*(?:작업|수정|개선|편집|고쳐|고침|edit|fix|work)(?![-\w])|(?<![-\w])(?:work(?:ing)?\s?on|edit|fix|수정|작업|개선|고쳐)(?![-_])[^.\n]{0,15}(?<![-\w])(?:gate|hook|훅|게이트)/i
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 // Bash write-redirect to a UI/Edge path (cat > / >> / tee). Heuristic — covers the heredoc edit path.
 // Shares EDGE_PAGE_NAMES with UI_EDGE_RE (#1023) so the two matchers can't drift. Matches the template
@@ -120,23 +153,33 @@ export function lastUiEditIndex(entries) {
   return idx
 }
 
+/** Harness-injected `role:user` turns that are NOT a human speaking, recognised by their leading tag.
+ *  Their text routinely contains the very words this gate looks for: a slash-command body, an
+ *  agent-authored task-notification summary, or the stdout of a `!` command that printed "확인했" or
+ *  "hook" out of a file. **#1150** added the `bash-*` entries after finding that a `!cat`/`!npm` echo
+ *  could otherwise authorise a UI commit or a hook edit here.
+ *  NOT every impostor carries a tag — see `isCompactSummary` below, which is why the shape check alone
+ *  was not enough. */
+const HARNESS_WRAPPER_RE = /^\s*<(?:command-|local-command|task-notification|system-reminder|bash-input|bash-stdout|bash-stderr)/
+
 /** True if a genuine human text turn (external, not meta/sidechain) matching `re` appears at an index
  *  > afterIdx. The agent cannot author such a turn → unfabricable. */
 export function hasUserTurnAfter(entries, afterIdx, re) {
   for (let i = entries.length - 1; i > afterIdx; i--) {
     const e = entries[i]
-    if (e?.type !== 'user' || e.isMeta === true || e.isSidechain === true) continue
+    // `isCompactSummary` is the one impostor with no tag to recognise it by: a compaction summary is
+    // `type:user`, `isMeta:false`, plain string content — and it is written by the AGENT, quoting earlier
+    // user turns verbatim. So a "확인 완료" from hours ago is replayed as a fresh post-edit confirmation
+    // and lifts this gate. Every compaction turn in this project's transcripts satisfies CONFIRM_RE, and
+    // the flag has not appeared on a human turn — so skipping it costs no real confirmation (#1150).
+    if (e?.type !== 'user' || e.isMeta === true || e.isSidechain === true || e.isCompactSummary === true) continue
     // Real human prompts store message.content as a STRING; tool-result turns store an ARRAY whose
     // first block is a tool_result (NOT a human message — skip those). Some clients use an array with
     // a leading text block. Extract the human text from string OR array-with-text only.
     const c = e.message?.content
     const text = typeof c === 'string' ? c
       : (Array.isArray(c) && c[0]?.type === 'text' ? (c[0].text ?? '') : '')
-    if (!text) continue
-    // Skip HARNESS-injected user turns (slash-command wrappers, command stdout, task notifications,
-    // interrupt markers) — they're string-content + isMeta:false but not a human confirmation, and
-    // their text can incidentally contain confirm/authorize words.
-    if (/^\s*<(?:command-|local-command|task-notification|system-reminder)/.test(text)) continue
+    if (!text || HARNESS_WRAPPER_RE.test(text)) continue
     if (re.test(text)) return true
   }
   return false
@@ -147,7 +190,7 @@ export function decideCommit(stagedUiEdge, entries) {
   if (stagedUiEdge.length === 0) return { deny: false, reason: 'not-ui' } // not a UI/Edge commit → soft path elsewhere
   const editIdx = lastUiEditIndex(entries)
   // No UI/Edge edit event in this transcript → the edits predate it; we can't verify → fail-closed.
-  // An explicit override anywhere recent still lifts it. `reason` distinguishes a genuine in-browser
+  // An explicit override anywhere in the transcript still lifts it. `reason` distinguishes a genuine in-browser
   // confirmation from an operator override in the audit log (the override count is the false-positive
   // proxy for #659 monitoring — a high override rate means the gate is firing on already-verified work).
   if (editIdx === -1) return hasUserTurnAfter(entries, -1, OVERRIDE_RE) ? { deny: false, reason: 'override' } : { deny: true, reason: 'no-edit-event' }
@@ -164,11 +207,15 @@ function denyJson(reason) {
   })
 }
 
-function readEntries(transcriptPath) {
+/** Parse a JSONL transcript. Exported ONLY so the torn-line tolerance below is testable: the harness
+ *  appends to this file while the hook reads it, and if a partial trailing line threw, `main()`'s outer
+ *  catch would turn every UI commit made mid-append into a `fail-closed` deny on this HARD gate. */
+export function readEntries(transcriptPath) {
   const raw = fs.readFileSync(transcriptPath, 'utf8')
   const out = []
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue
+    // A torn trailing line is expected — the harness appends to this file while we read it.
     try { out.push(JSON.parse(line)) } catch { /* skip malformed line */ }
   }
   return out
@@ -184,8 +231,10 @@ function main() {
   if (EDIT_TOOLS.has(tool)) {
     const fp = ti.file_path ?? ti.notebook_path ?? ''
     if (/\.claude\/(?:hooks\/|settings(?:\.local)?\.json)/.test(fp)) {
-      // Allow ONLY when the user has authorized hook/gate work in a recent turn (e.g. "#657",
-      // "hook", "gate", "훅 작업", "검증 생략"); otherwise the agent must not edit its own gate.
+      // Allow ONLY when a user turn ANYWHERE in this transcript states the intent (`HOOK_WORK_RE`, whose
+      // accepted shapes are `HOOK_WORK_EXAMPLES`); otherwise the agent must not edit its own gate. This
+      // branch consults HOOK_WORK_RE and nothing else — a generic verification-skip must not authorize the
+      // agent to rewrite the gate that checks it.
       let authorized = false
       try {
         const tp = input.transcript_path
@@ -193,7 +242,7 @@ function main() {
       } catch { authorized = false }
       if (authorized) { audit('pass', `self-edit-authorized:${fp}`); process.exit(0) }
       audit('deny', `self-edit:${fp}`)
-      console.log(denyJson(`#657: editing ${fp} needs explicit user authorization for hook/gate work (none found in the transcript). The user can authorize it ("work on the gate" / "#657" / "훅 작업") or say "검증 생략".`))
+      console.log(denyJson(`#657: editing ${fp} needs explicit user authorization (none found in the transcript). The user can give it by stating intent toward this gate — ${HOOK_WORK_EXAMPLES.map((p) => `"${p}"`).join(' / ')}. Naming the file or its issue number is deliberately not enough.`))
       return
     }
     process.exit(0)
@@ -236,7 +285,7 @@ function main() {
         ? `the staged UI/Edge files (${stagedUiEdge.slice(0, 3).join(', ')}${stagedUiEdge.length > 3 ? '…' : ''}) have no edit event in this session to tie a verification to`
         : `no in-browser confirmation from the USER appears after the last UI/Edge edit (${stagedUiEdge.slice(0, 3).join(', ')}${stagedUiEdge.length > 3 ? '…' : ''})`
       console.log(denyJson(
-        `#657 step-3.5 gate: ${why}. Start the right dev server, hand off, and WAIT for the user to confirm in-browser ("tests pass" ≠ verified). The user's reply lifts this gate; to skip, the user says "검증 생략하고 커밋" / "skip verify".`,
+        `#657 step-3.5 gate: ${why}. Start the right dev server, hand off, and WAIT for the user to confirm in-browser (a passing test suite is not a verification). The user's reply lifts this gate; to skip, the user says ${COMMIT_OVERRIDE_EXAMPLES.map((p) => `"${p}"`).join(' / ')}.`,
       ))
       return
     }
@@ -247,8 +296,17 @@ function main() {
     // signal, NOT an intercepted violation) so the summary can track it separately — it should trend
     // to ~0; a nonzero trend means the transcript read is breaking, not that violations are happening.
     audit('deny', 'fail-closed')
-    console.log(denyJson(`#657 step-3.5 gate: could not verify local confirmation (${err instanceof Error ? err.message : 'error'}) — failing closed. If the user has confirmed in-browser, have them reply with a confirmation; or "검증 생략" to override.`))
+    console.log(denyJson(`#657 step-3.5 gate: could not read the transcript (${err instanceof Error ? err.message : 'error'}) — failing closed. If the user has already checked the page in-browser, have them reply saying so; or ${COMMIT_OVERRIDE_EXAMPLES.map((p) => `"${p}"`).join(' / ')} to override.`))
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main()
+/** True when this file is the process entry point. `import.meta.url === \`file://${process.argv[1]}\``
+ *  is WRONG: a path containing a space or `#` percent-encodes in the URL and never compares equal, so
+ *  `main()` never runs and the process exits 0. On a HARD, fail-CLOSED gate that means it fails OPEN —
+ *  a `--no-verify` commit sails through with no audit line to say the gate was absent, and a space in
+ *  `$CLAUDE_PROJECT_DIR` is all it takes. Compare real paths instead. */
+function isEntryPoint() {
+  try { return fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1] ?? '') } catch { return false }
+}
+
+if (isEntryPoint()) main()
