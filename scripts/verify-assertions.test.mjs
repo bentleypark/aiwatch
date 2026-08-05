@@ -312,3 +312,36 @@ test('runAssertion — pass / fail / skip via injected fetch', async () => {
   assert.equal(r.status, 'skip')
   assert.equal(called, false)
 })
+
+// ── #1206: the verify-after sub-block (assert: / durable:) ──────────────────────
+// These live HERE, next to the existing pairVerifyAssertions cases, because this is the file the next
+// person editing the sub-block scan will read. verify-reminders.test.mjs covers the consumers.
+
+test('pairVerifyAssertions — durable: above assert: must not hide the assert (#1206)', () => {
+  const VA = '- [ ] **verify-after 2026-09-01** — check it'
+  const A = '      assert: GET /api/status | services[id=claude].status == "operational"'
+  const D = '      durable: archive:monthly:2026-08 (no TTL)'
+  for (const body of [`${VA}\n${D}\n${A}`, `${VA}\n${A}\n${D}`]) {
+    const [it] = pairVerifyAssertions(body)
+    assert.ok(it.assertion, `assert: found regardless of order:\n${body}`)
+    assert.equal(it.durable, 'archive:monthly:2026-08 (no TTL)')
+  }
+  // A REPEATED marker must not end the block and strand what follows — that is the same silent
+  // auto-verify loss the ordering fix exists to prevent.
+  const [dup] = pairVerifyAssertions(`${VA}\n${D}\n      durable: second one\n${A}`)
+  assert.ok(dup.assertion, 'a second durable: does not strand the assert: below it')
+  assert.equal(dup.durable, 'archive:monthly:2026-08 (no TTL)', 'first of each marker wins')
+})
+
+test('pairVerifyAssertions — the sub-block ends at the first line that is neither marker', () => {
+  const VA = '- [ ] **verify-after 2026-09-01** — check it'
+  const A = '      assert: GET /api/status | services[id=claude].status == "operational"'
+  const [it] = pairVerifyAssertions(`${VA}\nplain prose\n${A}`)
+  assert.equal(it.assertion, null, "an assert: below unrelated prose is not this line's")
+  assert.equal(it.durable, null)
+  // A MALFORMED assert: is not a marker, so it ends the block (pre-existing behaviour, kept on
+  // purpose: a broken clause must not swallow the real content underneath it).
+  const [bad] = pairVerifyAssertions(`${VA}\n      assert: nonsense with no pipe\n      durable: x`)
+  assert.equal(bad.assertion, null)
+  assert.equal(bad.durable, null)
+})

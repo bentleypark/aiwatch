@@ -28,12 +28,33 @@ integration is in `scripts/verify-reminders.mjs`. Both are unit-tested by
 
 ## Grammar
 
-An indented `assert:` line **directly under** a `verify-after` checkbox (the next non-blank line):
+Indented sub-lines **directly under** a `verify-after` checkbox — `assert:` (machine-decidable) and
+`durable:` (#1206, human-decidable). Either order, and a line may carry both; the sub-block ends at the
+first non-blank line that is neither.
 
 ```
 - [ ] verify-after 2026-07-09 — turbopuffer probe warmed
       assert: GET /api/status/cached | services[id=turbopuffer].scoreConfidence == "medium"
+
+- [ ] verify-after 2026-09-01 — confirm the August archive carries the new field
+      durable: archive:monthly:2026-08 (no TTL)
 ```
+
+### `durable:` — what will still exist on the date (#1206)
+
+`durable: <artifact>`, free-form. It answers the one question that makes a dated human check
+answerable: *when the ping arrives, what will I look at?* A line with neither marker gets the
+**`verify-undecidable`** label from the daily job while it is still pending.
+
+The content is deliberately **not** validated — a 7h-TTL KV key is a bad answer and no regex can tell
+it from a good one. The value is that writing it forces the author to name the artifact and notice
+whether it survives. Check the retention against `date − today`; a KV TTL is the usual trap.
+
+On 2026-08-05 three dated checks came due and none could be answered: `component-partial:` records had
+aged out at 7h (dedup key 24h), leaving 1 of 7 days observable; #1104's keep path writes no trace at
+all; #1103 needed an operator tweet nobody had sent. Two were closed unverified with a reopen trigger.
+Where a durable artifact genuinely does not exist, the fix is to **add the instrumentation** or to
+write no date at all — not to name something that will be gone.
 
 `assert:` `[GET]` `<source>` `|` `<selector>` `<op>` `[<expected>]`
 
@@ -105,8 +126,27 @@ Two deliberate edges, both pinned by tests:
 | `verify-blocked` | operator at merge (ship-issue step 10) | auto-verify, once no unchecked `verify-after` line remains; **or the closed-issue sweep (#1037)** |
 | `body-drift` | daily guard, when stray unchecked boxes exist | daily guard, once the body is synced (self-healing); **or the closed-issue sweep (#1037)** |
 | `verify-overdue` | daily job, on every ping | daily job, once the issue is no longer due (self-healing since #966); **or the closed-issue sweep (#1037)** |
+| `verify-undecidable` | daily guard, on a not-yet-due line carrying neither `assert:` nor `durable:` (#1206) | daily guard, once a marker is added or the date arrives (self-healing); **or the closed-issue sweep (#1037)** |
 
-**Closing an issue clears all three (#1037).** Each label describes an *open* verification obligation,
+### Escalation — an overdue item is not extended forever (#1206)
+
+Past **30 days** overdue, a human-ping line is re-bucketed out of the routine Discord list into a
+second embed: *needs a disposition*. Another ping will not decide it. The disposition is to make the
+check observable (instrument it, or name a `durable:` artifact) or to close the issue with a written
+reopen trigger — never to push the date.
+
+30 days is four unanswered weekly pings. The bound answers a **policy**, not an observed pile-up:
+#1104's body instructed "push it out rather than closing on absence of evidence", which is unbounded
+extension in writing. On the day this shipped the board was healthy (12 overdue, oldest 6 days) and
+the escalation matched nothing; it exists to keep it that way.
+
+**Report-only — it never mutates or closes.** Closure here is signalled by label removal, not
+`gh issue close`, and "nobody could observe this" is a judgement about intent, not a fact about an
+endpoint. Lines carrying an `assert:` are excluded (they wait on a signal, not a person); the accepted
+limit is that an assertion gone permanently `skip`/`fail` pings weekly forever inside the one branch
+the bound cannot reach.
+
+**Closing an issue clears them all (#1037).** Each label describes an *open* verification obligation,
 so closing is that obligation's terminal state — the daily job sweeps closed issues and strips every one
 of them, unconditionally (no date logic: closed is closed). Grouped into one edit per issue, from one
 bounded query per label. This is what makes the labels safe to filter on in triage: a hit means current

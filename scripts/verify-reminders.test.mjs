@@ -3,7 +3,8 @@
 // script, not src/worker code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates, planClosedScarRemovals, mergeClosedIssues, LIFECYCLE_LABELS, CLOSED_SCAR_LIMIT } from './verify-reminders.mjs'
+import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates, planClosedScarRemovals, mergeClosedIssues, LIFECYCLE_LABELS, CLOSED_SCAR_LIMIT, findUndecidableVerifyAfter, hasUndecidableLabel, findOverdueEscalations, OVERDUE_ESCALATION_DAYS, buildReminderEmbeds, splitEscalatedDue, reminderLineKey } from './verify-reminders.mjs'
+import { pairVerifyAssertions, parseDurableLine } from './verify-assertions.mjs'
 
 test('parseVerifyAfter — extracts date + note from a checklist line', () => {
   const body = '- [ ] **verify-after 2026-09-01** — check p95 after 3 months (#511)\nother text'
@@ -395,11 +396,271 @@ test('mergeClosedIssues — WARNS on a shape-drifted entry instead of dropping i
   assert.match(warnings[0], /shape drift/)
 })
 
-test('LIFECYCLE_LABELS — covers exactly the three labels this job applies', () => {
-  assert.deepEqual([...LIFECYCLE_LABELS].sort(), ['body-drift', 'verify-blocked', 'verify-overdue'])
+test('LIFECYCLE_LABELS — covers exactly the labels this job applies', () => {
+  assert.deepEqual([...LIFECYCLE_LABELS].sort(),
+    ['body-drift', 'verify-blocked', 'verify-overdue', 'verify-undecidable'])
 })
 
 test('CLOSED_SCAR_LIMIT — a page size the fetch can compare against to warn on truncation', () => {
   assert.equal(typeof CLOSED_SCAR_LIMIT, 'number')
   assert.ok(CLOSED_SCAR_LIMIT > 0)
+})
+
+// ── #1206: undecidable verify-after + overdue escalation ────────────────────────
+
+// Fixed clock. findUndecidableVerifyAfter is now window-scoped (not-yet-due), so a test that
+// relied on the real date would start failing the moment the calendar passed its fixtures.
+const NOW = '2026-08-05'
+const VA = (date, note = 'check the thing') => `- [ ] **verify-after ${date}** — ${note}`
+const ASSERT = '      assert: GET /api/status | services[id=claude].status == "operational"'
+const DURABLE = '      durable: incidents:monthly:2026-08 (60d retention, outlives the date)'
+
+test('parseDurableLine — reads the artifact, tolerates case/indent, rejects everything else', () => {
+  assert.equal(parseDurableLine('      durable: incidents:monthly:2026-08'), 'incidents:monthly:2026-08')
+  assert.equal(parseDurableLine('DURABLE:   Discord #ops-alerts  '), 'Discord #ops-alerts')
+  assert.equal(parseDurableLine('durable:'), null, 'a marker naming nothing is not an answer')
+  assert.equal(parseDurableLine('   durable'), null)
+  assert.equal(parseDurableLine('this line mentions durable: things in prose'), null, 'must be the whole line')
+  assert.equal(parseDurableLine(ASSERT), null)
+})
+
+test('findUndecidableVerifyAfter — an assert: OR a durable: makes a line decidable', () => {
+  assert.equal(findUndecidableVerifyAfter(VA('2026-09-01'), NOW).length, 1, 'bare dated line is undecidable')
+  assert.equal(findUndecidableVerifyAfter(`${VA('2026-09-01')}\n${ASSERT}`, NOW).length, 0, 'assert: decides it')
+  assert.equal(findUndecidableVerifyAfter(`${VA('2026-09-01')}\n${DURABLE}`, NOW).length, 0, 'durable: decides it')
+  assert.equal(findUndecidableVerifyAfter(`${VA('2026-09-01')}\n${DURABLE}\n${ASSERT}`, NOW).length, 0, 'both')
+})
+
+test('findUndecidableVerifyAfter — skips lines the reminder scan already suppresses', () => {
+  assert.equal(findUndecidableVerifyAfter(`- [x] **verify-after 2026-09-01** — done`, NOW).length, 0, 'checked box')
+  assert.equal(findUndecidableVerifyAfter(`> ${VA('2026-09-01')}`, NOW).length, 0, 'blockquote (#966)')
+  assert.equal(findUndecidableVerifyAfter('', NOW).length, 0)
+  assert.equal(findUndecidableVerifyAfter(null, NOW).length, 0)
+  // An invalid date is findInvalidVerifyAfterDates' job — flagging it twice would double-label.
+  assert.equal(findUndecidableVerifyAfter('- [ ] **verify-after 2026-02-30** — typo', NOW).length, 0)
+})
+
+test('findUndecidableVerifyAfter — reports each undecidable line, not just the first', () => {
+  const body = [VA('2026-09-01', 'first'), ASSERT, VA('2026-09-02', 'second'), VA('2026-09-03', 'third')].join('\n')
+  assert.deepEqual(findUndecidableVerifyAfter(body, NOW).map((i) => i.date), ['2026-09-02', '2026-09-03'])
+})
+
+test('hasUndecidableLabel — reads gh label objects and plain strings', () => {
+  assert.equal(hasUndecidableLabel([{ name: 'verify-undecidable' }]), true)
+  assert.equal(hasUndecidableLabel(['verify-undecidable']), true)
+  assert.equal(hasUndecidableLabel([{ name: 'verify-overdue' }]), false)
+  assert.equal(hasUndecidableLabel([]), false)
+  assert.equal(hasUndecidableLabel(undefined), false)
+})
+
+test('OVERDUE_ESCALATION_DAYS — four unanswered weekly pings, the rationale the source gives', () => {
+  // NOT "above the 27-day worst case" — that figure came from a bad grep and is retracted; the
+  // measured worst case on the board when this shipped was 6 days. The number is justified by the
+  // ping cadence instead, so pin it to that: 4 x the weekly interval.
+  assert.equal(typeof OVERDUE_ESCALATION_DAYS, 'number')
+  assert.equal(OVERDUE_ESCALATION_DAYS, 30)
+  assert.ok(OVERDUE_ESCALATION_DAYS >= 4 * 7, 'at least four weekly pings must have gone unanswered')
+})
+
+test('findOverdueEscalations — fires only past the threshold, worst line first', () => {
+  const iss = (number, date) => ({ number, title: `t${number}`, body: VA(date), labels: [] })
+  const today = '2026-08-05'
+  const out = findOverdueEscalations([
+    iss(1, '2026-07-01'), // 35d
+    iss(2, '2026-07-20'), // 16d — under the bar
+    iss(3, '2026-06-01'), // 65d
+    iss(4, '2026-09-01'), // future
+  ], today)
+  assert.deepEqual(out.map((e) => e.number), [3, 1], 'only the escalated ones, oldest first')
+  assert.equal(out[0].days, 65)
+  assert.equal(out[1].days, 35)
+})
+
+test('findOverdueEscalations — exactly AT the threshold escalates', () => {
+  const at = { number: 1, title: 't', body: VA('2026-07-06'), labels: [] } // 30d before 2026-08-05
+  assert.equal(findOverdueEscalations([at], '2026-08-05').length, 1)
+  const under = { number: 2, title: 't', body: VA('2026-07-07'), labels: [] } // 29d
+  assert.equal(findOverdueEscalations([under], '2026-08-05').length, 0)
+})
+
+test('findOverdueEscalations — an assert-carrying line never escalates', () => {
+  // It is not waiting on a human; the auto-verify pass drains it the moment the signal lands.
+  const body = `${VA('2026-06-01')}\n${ASSERT}`
+  assert.equal(findOverdueEscalations([{ number: 1, title: 't', body, labels: [] }], '2026-08-05').length, 0)
+  // ...but a durable: one DOES — a named artifact still needs a human to go and read it.
+  const durableBody = `${VA('2026-06-01')}\n${DURABLE}`
+  assert.equal(findOverdueEscalations([{ number: 2, title: 't', body: durableBody, labels: [] }], '2026-08-05').length, 1)
+})
+
+test('findOverdueEscalations — a line ticked THIS run is not escalated', () => {
+  const iss = { repo: null, number: 7, title: 't', body: VA('2026-06-01'), labels: [] }
+  assert.equal(findOverdueEscalations([iss], '2026-08-05').length, 1, 'escalates without the tick')
+  assert.equal(findOverdueEscalations([iss], '2026-08-05', new Set(['#7#0'])).length, 0, 'and not with it')
+})
+
+test('findOverdueEscalations — one row per LINE, so it can be joined against the per-line due list', () => {
+  // A per-issue rollup keyed to the worst line silently mismatched `due` (which is per line): the
+  // escalation vanished when the worst line was not the one firing that day, and the same issue
+  // appeared in BOTH embeds when two lines fired together.
+  const body = [VA('2026-07-01', 'newer'), VA('2026-06-01', 'older')].join('\n')
+  const out = findOverdueEscalations([{ number: 1, title: 't', body, labels: [] }], '2026-08-05')
+  assert.equal(out.length, 2, 'both over-threshold lines are reported')
+  assert.deepEqual(out.map((e) => e.note), ['older', 'newer'], 'oldest first')
+  assert.deepEqual(out.map((e) => e.date), ['2026-06-01', '2026-07-01'])
+})
+
+test('buildReminderEmbeds — routine and escalated are separate embeds, each omitted when empty', () => {
+  const routine = [{ ref: '#1', title: 'a', note: 'look', date: '2026-08-05', overdueDays: 0 }]
+  const esc = [{ ref: '#2', title: 'b', note: 'decide', date: '2026-06-01', overdueDays: 65 }]
+  assert.equal(buildReminderEmbeds(routine, []).length, 1)
+  assert.equal(buildReminderEmbeds([], esc).length, 1)
+  const both = buildReminderEmbeds(routine, esc)
+  assert.equal(both.length, 2)
+  assert.match(both[0].title, /verification due/)
+  assert.match(both[1].title, /needs a disposition/)
+  assert.match(both[1].description, /reopen trigger/, 'the escalation says what the disposition IS')
+  assert.match(both[1].description, new RegExp(String(OVERDUE_ESCALATION_DAYS)), 'and names the window')
+  assert.ok(!both[0].description.includes('#2'), 'an escalated item is not ALSO in the routine list')
+  assert.equal(buildReminderEmbeds([], []).length, 0)
+})
+
+// Real-shape assertion: #827's actual `## Production-gated verification` block, verbatim as it stood
+// on 2026-08-05. Synthetic fixtures pin the grammar; this pins the grammar people actually WRITE —
+// bold markers, em-dashes, backticked prose, a real indented assert:, and a mix of ticked/unticked.
+const REAL_827_BLOCK = [
+  '## Production-gated verification',
+  '',
+  '- [x] **verify-after 2026-07-14** — F2 Phase 1 RAG grounding block in the AI-analysis prompt. **Verified via `incident-history.test.ts`** — deterministic pin. _closed on test evidence 2026-07-08_',
+  '- [x] **verify-after 2026-07-07** — corpus keystone: `incident:history:{svcId}` KV created on resolution. **VERIFIED with real prod data 2026-07-08**.',
+  '- [x] **verify-after 2026-08-05** — monthly aggregate (F1 daily accuracy line + F3 precondition). Machine-checkable:',
+  '      assert: GET /api/report?month=2026-07 | predictionAccuracy.total >= 1',
+  '- [x] **verify-after 2026-07-14** — F4 predicted-vs-actual across the 6 surfaces. **Verified via `incident-history.test.ts:55`**.',
+  '- [ ] **verify-after 2026-08-05** — F3 (the one remaining, report-site + time-gated): after the July monthly archive builds (~Aug 1), build the aiwatch-reports "AI Prediction Accuracy" section from `/api/report` (worker side #840 already live).',
+].join('\n')
+
+// The open F3 line is dated 2026-08-05, so exercise the window the guard actually acts in: BEFORE
+// the date, when adding instrumentation or naming an artifact is still cheap.
+const BEFORE_827_DUE = '2026-08-01'
+
+test('real #827 block — flags the one open human-ping line and nothing else', () => {
+  const found = findUndecidableVerifyAfter(REAL_827_BLOCK, BEFORE_827_DUE)
+  assert.equal(found.length, 1, `exactly the open F3 line: ${JSON.stringify(found.map((f) => f.date))}`)
+  assert.equal(found[0].date, '2026-08-05')
+  assert.match(found[0].note, /F3/)
+  // The ticked assert-carrying line must not be flagged — it is both checked AND decidable, and
+  // double-flagging a satisfied line is how a label becomes noise nobody reads.
+  assert.ok(!found.some((f) => /Machine-checkable/.test(f.note)))
+})
+
+test('real #827 block — adding a durable: line to the open item clears the flag', () => {
+  const fixed = REAL_827_BLOCK.replace(
+    /(- \[ \] \*\*verify-after 2026-08-05\*\*[^\n]*)/,
+    '$1\n      durable: aiwatch-reports/_data/2026-07.json (committed archive snapshot, permanent)',
+  )
+  assert.equal(findUndecidableVerifyAfter(fixed, BEFORE_827_DUE).length, 0, 'naming the artifact is what clears it')
+})
+
+test('real #827 block — the flag hands off to verify-overdue once the date arrives', () => {
+  // Not a gap: past the date the item is in the ping → escalation flow, and a second permanently-lit
+  // label on the same issue is the failure mode this guard exists to avoid.
+  assert.equal(findUndecidableVerifyAfter(REAL_827_BLOCK, BEFORE_827_DUE).length, 1, 'flagged while pending')
+  assert.equal(findUndecidableVerifyAfter(REAL_827_BLOCK, '2026-08-05').length, 0, 'silent on the due date')
+  assert.equal(findUndecidableVerifyAfter(REAL_827_BLOCK, '2026-09-05').length, 0, 'and after it')
+})
+
+test('real #827 block — the assert: line still parses inside the real body', () => {
+  // Guards the sub-block scan against the real indentation/prose, not just the synthetic fixture.
+  const withAssert = pairVerifyAssertions(REAL_827_BLOCK).filter((i) => i.assertion)
+  assert.equal(withAssert.length, 0, 'the assert-carrying line is CHECKED, so the open-line scan skips it')
+  const reopened = REAL_827_BLOCK.replace('- [x] **verify-after 2026-08-05** — monthly aggregate', '- [ ] **verify-after 2026-08-05** — monthly aggregate')
+  const nowOpen = pairVerifyAssertions(reopened).filter((i) => i.assertion)
+  assert.equal(nowOpen.length, 1, 'and it is found once that line is open')
+  assert.equal(nowOpen[0].assertion.selector, 'predictionAccuracy.total')
+})
+
+// ── #1206 wiring: the join between `due` and the escalation list ────────────────
+// Extracted from main() precisely because every mutation of the inlined version survived the suite:
+// dropping the escalation argument to postDiscord, removing the firing filter, or leaving an
+// escalated line in both buckets. Pure fn green is not wiring green (feedback_mutation_test_both_directions).
+
+const DUE = (number, date, repo = null, lineIndex = 0) => ({ number, repo, ref: displayRef(repo, number, {}), title: `t${number}`, date, note: 'n', lineIndex, overdueDays: 0 })
+const ESC = (number, date, days, repo = null, lineIndex = 0) => ({ number, repo, title: `t${number}`, date, note: 'n', days, lineIndex })
+
+test('reminderLineKey — identifies a LINE, so two same-date lines do not collide', () => {
+  // Keying on the date collapsed them: if one escalated, the other was stripped from the routine
+  // bucket too and vanished from Discord, with verify-overdue still applied so nothing looked wrong.
+  assert.notEqual(
+    reminderLineKey({ repo: null, number: 9, date: '2026-06-01', lineIndex: 3 }),
+    reminderLineKey({ repo: null, number: 9, date: '2026-06-01', lineIndex: 4 }),
+  )
+  // ...and the repo still separates a sibling issue with the same number.
+  assert.notEqual(
+    reminderLineKey({ repo: 'o/aiwatch', number: 41, lineIndex: 0 }),
+    reminderLineKey({ repo: 'o/aiwatch-reports', number: 41, lineIndex: 0 }),
+  )
+  assert.equal(reminderLineKey({ repo: null, number: 41, lineIndex: 2 }), '#41#2')
+})
+
+test('splitEscalatedDue — an escalated line moves buckets, it is never in both', () => {
+  const due = [DUE(1, '2026-08-05'), DUE(2, '2026-06-01')]
+  const { routineDue, escalatedNow } = splitEscalatedDue(due, [ESC(2, '2026-06-01', 65)])
+  assert.deepEqual(routineDue.map((d) => d.number), [1], 'the escalated line leaves the routine list')
+  assert.deepEqual(escalatedNow.map((e) => e.number), [2])
+  assert.equal(escalatedNow[0].overdueDays, 65, 'and carries its age for the embed')
+  assert.equal(escalatedNow[0].ref, '#2')
+})
+
+test('splitEscalatedDue — only escalations FIRING this run are posted', () => {
+  // A standing escalation not on its weekly cadence must stay silent; posting daily is the spam the
+  // `% 7` throttle exists to prevent.
+  const { routineDue, escalatedNow } = splitEscalatedDue([DUE(1, '2026-08-05')], [ESC(2, '2026-06-01', 65)])
+  assert.equal(escalatedNow.length, 0, 'not firing → not posted')
+  assert.deepEqual(routineDue.map((d) => d.number), [1], 'and the routine list is untouched')
+})
+
+test('splitEscalatedDue — a multi-line issue splits per line, not per issue', () => {
+  // The exact shape that broke the per-issue rollup: one line escalated, one merely due, same issue.
+  const due = [DUE(7, '2026-06-03', null, 0), DUE(7, '2026-07-25', null, 1)]
+  const { routineDue, escalatedNow } = splitEscalatedDue(due, [ESC(7, '2026-06-03', 63, null, 0)])
+  assert.deepEqual(escalatedNow.map((e) => e.date), ['2026-06-03'])
+  assert.deepEqual(routineDue.map((d) => d.date), ['2026-07-25'], 'the younger line stays routine')
+})
+
+test('splitEscalatedDue — two lines sharing a DATE are still distinct (4 open issues look like this)', () => {
+  // A machine-checked part and a human-checked part dated the same day. Only the human one escalates;
+  // the assert-carrying one must stay in the routine bucket rather than disappear with it.
+  const due = [DUE(9, '2026-06-01', null, 4), DUE(9, '2026-06-01', null, 7)]
+  const { routineDue, escalatedNow } = splitEscalatedDue(due, [ESC(9, '2026-06-01', 65, null, 7)])
+  assert.deepEqual(escalatedNow.map((e) => e.lineIndex), [7])
+  assert.deepEqual(routineDue.map((d) => d.lineIndex), [4], 'the sibling line is NOT swallowed')
+})
+
+test('splitEscalatedDue — matches on repo too, so a sibling escalation is not lost', () => {
+  const due = [DUE(41, '2026-06-01', 'o/aiwatch-reports')]
+  const sameNumberOtherRepo = [ESC(41, '2026-06-01', 65, 'o/aiwatch')]
+  assert.equal(splitEscalatedDue(due, sameNumberOtherRepo).escalatedNow.length, 0, 'a different repo is a different line')
+  const matching = [ESC(41, '2026-06-01', 65, 'o/aiwatch-reports')]
+  assert.equal(splitEscalatedDue(due, matching).escalatedNow.length, 1)
+})
+
+test('splitEscalatedDue — empty / absent inputs are safe', () => {
+  assert.deepEqual(splitEscalatedDue([], []), { routineDue: [], escalatedNow: [] })
+  assert.deepEqual(splitEscalatedDue(undefined, undefined), { routineDue: [], escalatedNow: [] })
+})
+
+test('the closed-issue sweep actually strips verify-undecidable (#1037 consumer, not the constant)', () => {
+  // Asserting LIFECYCLE_LABELS' contents is a prose mirror of the constant; this pins the CONSUMER,
+  // so hardcoding the old three-label list inside planClosedScarRemovals fails.
+  const planned = planClosedScarRemovals([{ number: 9, labels: [{ name: 'verify-undecidable' }, { name: 'verify-overdue' }] }])
+  assert.equal(planned.length, 1)
+  assert.deepEqual(planned[0].labels.sort(), ['verify-overdue', 'verify-undecidable'])
+})
+
+test('findUndecidableVerifyAfter — a calendar-invalid date is never flagged, even when it rolls FORWARD', () => {
+  // 2026-02-30 rolls to 2026-03-02. At NOW that is in the past, so the not-yet-due scope hides it and
+  // the isValidIsoDate guard reads as inert; at a January clock it is in the FUTURE and only the guard
+  // stops it being double-labelled alongside findInvalidVerifyAfterDates.
+  const body = '- [ ] **verify-after 2026-02-30** — typo'
+  assert.equal(findUndecidableVerifyAfter(body, '2026-01-01').length, 0)
+  assert.equal(findInvalidVerifyAfterDates(body).length, 1, 'and it IS reported, by the scanner that owns it')
 })
