@@ -128,13 +128,32 @@ is the *procedure* — follow it top to bottom.
      `exists`); NOT GA4/GSC-CTR/consent-gated or behavioral checks — leave those as a plain human ping.
      Validate it before it ships: `node scripts/verify-assertions.mjs --issue N` (dry-run is the default; `--apply` mutates). Grammar +
      allowlist + fail-open semantics: **[docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md)**.
+   - **⚠️ Before writing the date, name what will still EXIST on it (#1206).** A dated line is worth
+     nothing if the thing it points at is gone when the ping arrives. On 2026-08-05 three came due and
+     all three were undecidable: #1179's KV records had aged out (7h/24h TTLs), #1104's code path
+     leaves no trace at all, #1103 needed an operator tweet nobody had sent. Two were closed unverified.
+     So one of these three must hold, or the line does not get a date:
+     1. an **`assert:`** sub-line (above) — a machine decides it; or
+     2. a **`durable:`** sub-line naming an artifact that outlives `date − today`, e.g.
+        `      durable: incidents:monthly:2026-08 (60d retention)` / `durable: Discord #ops-alerts`; or
+     3. neither is possible → **add the instrumentation in this PR** so a trace exists, or write **no
+        date** — just a reopen trigger in the body ("reopen when X happens, then check Y").
+     A KV key's TTL is the usual trap: check it against the date. The daily job labels
+     **`verify-undecidable`** on any not-yet-due line carrying neither marker, so this is caught within
+     a day either way — but fixing it while the context is warm is the point.
+   - **An overdue item is not extended forever.** Past **30 days** overdue the daily report escalates it
+     as *needs a disposition* rather than pinging again (#1206). The disposition is a human one: make
+     the check observable, or close the issue with a written reopen trigger. Never "push the date".
    - **Placement (canonical, #921 format):** collect EVERY `verify-after` line — each with its indented
      `assert:` sub-line, if any — under ONE dedicated heading at the **bottom of the body**:
      ```
      ## Production-gated verification
      - [ ] **verify-after YYYY-MM-DD** — what to check + where. PR #N.
            assert: GET /api/status/cached | services[id=X].field == "value"
+     - [ ] **verify-after YYYY-MM-DD** — a human check, with the artifact it will read named.
+           durable: archive:monthly:2026-08 (no TTL)
      ```
+     `assert:` and `durable:` may appear in either order under the line, and a line may carry both.
      One consistent home — NOT inline in a part's checklist, NOT a top `> Status:` callout — so the
      reminder lines are always in the same place and the body-drift guard reads cleanly. A multi-part
      issue lists one `verify-after` line per part under the same heading (keep each line's note so it's

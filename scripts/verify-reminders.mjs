@@ -79,9 +79,13 @@ export function hasBodyDriftLabel(labels) {
 /**
  * The labels this job applies to track an OPEN verification obligation (#1037). Each is only ever
  * meaningful while the issue is open: `verify-blocked` = a dated check is outstanding, `verify-overdue`
- * = that check is past due, `body-drift` = the body's boxes weren't synced at merge.
+ * = that check is past due, `body-drift` = the body's boxes weren't synced at merge,
+ * `verify-undecidable` = a dated check names no artifact that will exist on its date (#1206).
+ *
+ * Adding a label to this job MUST add it here too — the closed-scar sweep is what stops it becoming a
+ * permanent mislabel on a closed issue, which is the whole of #1037.
  */
-export const LIFECYCLE_LABELS = ['verify-overdue', 'verify-blocked', 'body-drift']
+export const LIFECYCLE_LABELS = ['verify-overdue', 'verify-blocked', 'body-drift', 'verify-undecidable']
 
 /** Page size for the per-label closed-issue query (#1037). A truncated page still drains over later
  *  runs (swept issues leave the result set), but the fetch warns so it never truncates silently. */
@@ -94,10 +98,10 @@ export const CLOSED_SCAR_LIMIT = 100
  * describing current state and becomes a scar any triage query then misreads. #966 was filed on exactly
  * this evidence (#857, closed and still overdue-labeled) but only fixed the open case.
  *
- * No date logic, deliberately: CLOSED IS the terminal state of a verification obligation, so all three
- * labels are unconditionally meaningless once the issue is closed. Nothing to re-derive.
+ * No date logic, deliberately: CLOSED IS the terminal state of a verification obligation, so every
+ * lifecycle label is unconditionally meaningless once the issue is closed. Nothing to re-derive.
  *
- * Groups every stale label of one issue into a SINGLE edit — an issue can wear all three (#547 did), and
+ * Groups every stale label of one issue into a SINGLE edit — an issue can wear several (#547 did), and
  * one `gh issue edit --remove-label a --remove-label b` is one API call instead of three.
  *
  * Pure — no I/O. `closedIssues` = gh `--json number,labels` objects, each tagged with its `repo`.
@@ -194,6 +198,127 @@ export function findStaleOverdueLabels(considered, today, tickedKeys = new Set()
  */
 export function findInvalidVerifyAfterDates(body) {
   return pairVerifyAssertions(body).filter((it) => !isValidIsoDate(it.date))
+}
+
+/**
+ * UNDECIDABLE `verify-after` lines (#1206) — open, dated, and carrying NEITHER an `assert:` (a machine
+ * decides it) NOR a `durable:` (a named artifact that will still exist on the date, so a human can).
+ *
+ * The failure this catches is not a missed ping; it is a check that CANNOT be answered when its ping
+ * arrives, because the thing it was going to look at is gone. Measured on 2026-08-05: of 29 open
+ * unchecked verify-after lines, only 2 carried an `assert:`. Three came due that day and all three
+ * failed the same way — #1179's KV records had aged out (7h/24h TTLs), leaving 1 of 7 days
+ * observable; #1104's keep path writes no trace at all; #1103 needed an operator tweet nobody had
+ * sent. Two of the three were closed unverified, with a reopen trigger written in place of the date.
+ *
+ * `feedback_verify_after_design` already states the authoring rule. It lost to the moment of writing —
+ * the #415 lesson (a written rule gets probabilistic compliance; a check at the decision moment gets
+ * deterministic compliance). This is that check, one day late instead of never.
+ *
+ * Deliberately NOT validating what `durable:` names. A KV key with a 7h TTL is a bad answer, and no
+ * regex can tell that from a good one; what the marker buys is the author being made to name the
+ * artifact and notice it will be gone.
+ *
+ * Scoped to lines that are NOT YET DUE, which is the whole actionable window: before the date there
+ * is still time to add instrumentation or name an artifact, and a newly-written verify-after is
+ * always future-dated, so nothing the guard exists for is lost. Past the date the item is already in
+ * the ping → escalation flow and a second label would only double-count it. Measured on the live
+ * board: unscoped this would have labelled 22 issues on day 1, scoped it labels 13 — still a legacy
+ * backlog to sweep, not a clean start, and the open sweep item on #1206 is what takes it to zero.
+ * The label self-heals into `verify-overdue` as the date passes; between the due date and the
+ * escalation window there is deliberately NO undecidability signal, so an operator can get an
+ * ordinary ping for a check that has nothing to look at.
+ * Pure — no I/O.
+ */
+export function findUndecidableVerifyAfter(body, today = new Date().toISOString().slice(0, 10)) {
+  return pairVerifyAssertions(body).filter(
+    (it) => isValidIsoDate(it.date) && !it.assertion && !it.durable && daysSinceDue(it.date, today) < 0,
+  )
+}
+
+/** True when the issue carries the `verify-undecidable` label (so the flag can self-heal / clear). */
+export function hasUndecidableLabel(labels) {
+  return hasLabel(labels, 'verify-undecidable')
+}
+
+/**
+ * Days past due after which an overdue verify-after stops being a routine ping and becomes a decision
+ * to make (#1206). 30 days is four unanswered weekly pings: enough that "it will resolve itself next
+ * week" has been falsified four times, and far enough above the 6-day worst case on the board when
+ * this shipped that it fires on a stuck item rather than on ordinary lag.
+ *
+ * The bound exists because of a POLICY, not because of an observed pile-up: #1104's body instructed
+ * "push it out rather than closing on absence of evidence", which is unbounded extension in writing.
+ * This is the ceiling that instruction never had.
+ */
+export const OVERDUE_ESCALATION_DAYS = 30
+
+/**
+ * Overdue verify-after items old enough to need a disposition rather than another ping (#1206).
+ * Why the bound exists: see OVERDUE_ESCALATION_DAYS above.
+ *
+ * Escalation is a REPORT, never a mutation. This job's whole design is that closure is signalled by
+ * label removal, not `gh issue close` (see the closed-scar sweep above); an issue is not the job's to
+ * destroy, and "nobody could observe this" is a judgement about intent, not a fact about an endpoint.
+ * The human disposition is to close with a written reopen trigger — what #1103/#1104 got by hand.
+ *
+ * Items carrying an `assert:` are excluded: those are not waiting on a human, they are waiting on a
+ * production signal, and the auto-verify pass drains them the moment it lands. Accepted limit: an
+ * assertion that has gone permanently `skip`/`fail` (a selector the API no longer serves) pings weekly
+ * forever inside the one branch this bound cannot reach.
+ *
+ * Emits one row PER LINE, not per issue. That is what lets `splitEscalatedDue` join it against `due`,
+ * which is also per line — a per-issue rollup keyed to the issue's worst line silently mismatched any
+ * multi-line issue: the escalation was dropped when the worst line was not the one firing that day,
+ * and the same issue appeared in BOTH embeds when two lines fired together. SKILL.md's canonical
+ * format prescribes one verify-after line per part, so multi-line issues are the normal case.
+ *
+ * Mirrors findStaleOverdueLabels: derived from the DATES (not this run's weekly-throttled `due` set),
+ * and `tickedKeys` are the lines auto-verified moments ago this run. Pure — no I/O.
+ */
+export function findOverdueEscalations(considered, today, tickedKeys = new Set(), thresholdDays = OVERDUE_ESCALATION_DAYS) {
+  const out = []
+  for (const iss of considered || []) {
+    for (const { date, note, lineIndex, assertion } of pairVerifyAssertions(iss.body)) {
+      if (assertion) continue
+      if (!isValidIsoDate(date)) continue
+      if (tickedKeys.has(`${issueKey(iss)}#${lineIndex}`)) continue
+      const days = daysSinceDue(date, today)
+      if (!Number.isInteger(days) || days < thresholdDays) continue
+      out.push({ repo: iss.repo ?? null, number: iss.number, title: iss.title, date, note, days, lineIndex })
+    }
+  }
+  return out.sort((a, b) => b.days - a.days)
+}
+
+/** Identity of one reminder LINE, shared by the `due` list and the escalation list so the two can be
+ *  joined. `lineIndex`, NOT the date: two verify-after lines on one issue may share a date (4 open
+ *  issues do today, and #827's own block had two), and keying on the date collapses them — if one
+ *  escalates, the other is stripped from the routine bucket too and disappears from Discord entirely,
+ *  with `verify-overdue` still applied so nothing looks wrong. Both producers parse the same body in
+ *  the same run, so the index is stable across them. Includes the repo: the sibling scan means bare
+ *  numbers collide (`aiwatch#41` vs `aiwatch-reports#41`). */
+export const reminderLineKey = (d) => `${d.repo || ''}#${d.number}#${d.lineIndex}`
+
+/**
+ * Split this run's `due` lines into the routine bucket and the escalated one (#1206).
+ *
+ * Escalations are restricted to what is FIRING this run, and re-bucketed rather than added: an
+ * escalated line already fires on the weekly `% 7` cadence, so riding that same post keeps the
+ * operator's message volume unchanged. Posting every standing escalation daily would be exactly the
+ * spam the weekly cadence exists to prevent.
+ *
+ * Extracted and exported because this join is where the feature can ship inert — with it inlined in
+ * main(), every wiring mutation survived the suite: dropping the escalation argument to postDiscord,
+ * removing the firing filter, or leaving the escalated line in BOTH buckets. Pure — no I/O.
+ */
+export function splitEscalatedDue(due, escalations) {
+  const firingNow = new Set((due || []).map(reminderLineKey))
+  const escalatedNow = (escalations || [])
+    .filter((e) => firingNow.has(reminderLineKey(e)))
+    .map((e) => ({ ...e, ref: displayRef(e.repo, e.number), overdueDays: e.days }))
+  const escalatedKeys = new Set(escalatedNow.map(reminderLineKey))
+  return { routineDue: (due || []).filter((d) => !escalatedKeys.has(reminderLineKey(d))), escalatedNow }
 }
 
 /** True only for a real calendar date (rejects 2026-02-30, which Date would silently roll over). */
@@ -298,19 +423,42 @@ function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8' })
 }
 
-async function postDiscord(webhook, items) {
-  const lines = items.map((it) => {
+/**
+ * Render the two Discord sections (#1206). Routine items need a LOOK; escalated ones are past
+ * OVERDUE_ESCALATION_DAYS and need a DECISION — close with a written reopen trigger, or make the
+ * thing observable. Kept apart so a decision is not filed behind a list of routine checks and
+ * skipped with them. Pure — exported for unit tests.
+ */
+export function buildReminderEmbeds(items, escalated = []) {
+  const line = (it) => {
     const when = it.overdueDays > 0 ? `due ${it.date}, ${it.overdueDays}d overdue` : 'due today'
     return `• **${it.ref || `#${it.number}`}** ${it.title}\n  → ${it.note || 'verify production data'} _(${when})_`
-  })
-  const body = {
-    embeds: [{
+  }
+  const embeds = []
+  if (items.length) {
+    embeds.push({
       title: '🔔 Production-data verification due',
-      description: `${items.length} item(s) need a production-data check now:\n\n${lines.join('\n')}`,
+      description: `${items.length} item(s) need a production-data check now:\n\n${items.map(line).join('\n')}`,
       color: 0xfee75c,
       footer: { text: 'AIWatch · verify-after reminders (#541)' },
-    }],
+    })
   }
+  if (escalated.length) {
+    embeds.push({
+      title: '⏳ Overdue past the escalation window — needs a disposition',
+      description: `${escalated.length} item(s) have been overdue ${OVERDUE_ESCALATION_DAYS}+ days. `
+        + 'Another ping will not decide these. Either make the check observable (instrument it, or name a `durable:` artifact), '
+        + 'or close the issue with a written reopen trigger.\n\n'
+        + escalated.map(line).join('\n'),
+      color: 0xed4245,
+      footer: { text: 'AIWatch · verify-after escalation (#1206)' },
+    })
+  }
+  return embeds
+}
+
+async function postDiscord(webhook, items, escalated = []) {
+  const body = { embeds: buildReminderEmbeds(items, escalated) }
   const res = await fetch(webhook, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -406,6 +554,36 @@ async function main() {
     }
   }
 
+  // ── Undecidable verify-after guard (#1206) ────────────────────────────────────
+  // Flag a dated check that names neither a machine assertion nor the durable artifact a human will
+  // read on the date. Runs against every considered issue (not just verify-blocked ones): the line is
+  // undecidable from the moment it is written, and catching it within a day of the merge is the whole
+  // point — the author still has the context to add instrumentation or drop the date. LABEL-ONLY, no
+  // Discord: this is a board signal, and the daily channel is for things due NOW. Self-healing, same
+  // as body-drift. Best-effort: a label failure must never abort the reminder run.
+  const undecidableScanned = considered.map((i) => ({ iss: i, items: findUndecidableVerifyAfter(i.body, today) }))
+  const toFlagUndecidable = undecidableScanned.filter((x) => x.items.length > 0)
+  const toClearUndecidable = undecidableScanned
+    .filter((x) => x.items.length === 0 && hasUndecidableLabel(x.iss.labels))
+    .map((x) => x.iss)
+  if (toFlagUndecidable.length) console.log(`[verify-reminders] ${today}: ${toFlagUndecidable.length} undecidable verify-after → ${toFlagUndecidable.map((x) => `${displayRef(x.iss.repo, x.iss.number)}(${x.items.length})`).join(', ')}`)
+  if (dryRun) {
+    if (toFlagUndecidable.length) console.log('[verify-reminders] --dry-run: would LABEL verify-undecidable:\n' + JSON.stringify(
+      toFlagUndecidable.map((x) => ({ ref: displayRef(x.iss.repo, x.iss.number), dates: x.items.map((i) => i.date) })), null, 2))
+    if (toClearUndecidable.length) console.log('[verify-reminders] --dry-run: would CLEAR verify-undecidable on: ' + toClearUndecidable.map((i) => displayRef(i.repo, i.number)).join(', '))
+  } else {
+    for (const { iss } of toFlagUndecidable) {
+      const a = ['issue', 'edit', String(iss.number), '--add-label', 'verify-undecidable']
+      if (iss.repo) a.push('--repo', iss.repo)
+      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not add verify-undecidable on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+    }
+    for (const iss of toClearUndecidable) {
+      const a = ['issue', 'edit', String(iss.number), '--remove-label', 'verify-undecidable']
+      if (iss.repo) a.push('--repo', iss.repo)
+      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear verify-undecidable on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+    }
+  }
+
   // ── Closed-issue label scars (#1037) ──────────────────────────────────────────
   // Clear every lifecycle label left on a CLOSED issue. The rest of this job self-heals from an OPEN
   // issue's body, and the scan is `--state open` — so a label still on at close time is stranded forever
@@ -478,11 +656,15 @@ async function main() {
           title: iss.title,
           date,
           note,
+          lineIndex,
           overdueDays: daysSinceDue(date, today),
         })
       }
     }
   }
+
+  // Escalation split (#1206) — the join lives in splitEscalatedDue so it is pure and testable.
+  const { routineDue, escalatedNow } = splitEscalatedDue(due, findOverdueEscalations(considered, today, tickedKeys))
 
   // Stale `verify-overdue` labels (#966). Derived from the verify-after DATES, not from `due` — see
   // findStaleOverdueLabels: `due` is weekly-throttled, so "not due today" ≠ "not overdue". Placed after
@@ -503,7 +685,8 @@ async function main() {
       console.log('[verify-reminders] --dry-run: would AUTO-VERIFY:\n' + JSON.stringify(
         autoVerified.map((a) => ({ ref: a.ref, pass: a.plan.passCount, dropLabel: a.plan.dropLabel, close: a.plan.close, ticked: a.plan.ticked })), null, 2))
     }
-    if (due.length) console.log('[verify-reminders] --dry-run: would PING:\n' + JSON.stringify(due, null, 2))
+    if (routineDue.length) console.log('[verify-reminders] --dry-run: would PING:\n' + JSON.stringify(routineDue, null, 2))
+    if (escalatedNow.length) console.log('[verify-reminders] --dry-run: would ESCALATE (needs a disposition):\n' + JSON.stringify(escalatedNow, null, 2))
     if (toClearOverdue.length) console.log('[verify-reminders] --dry-run: would CLEAR verify-overdue on: ' + toClearOverdue.map((i) => displayRef(i.repo, i.number)).join(', '))
     return
   }
@@ -559,7 +742,7 @@ async function main() {
     console.error('[verify-reminders] DISCORD_WEBHOOK_URL not set — cannot send. (Add it as a repo Actions secret.)')
     process.exit(1)
   }
-  await postDiscord(webhook, due)
+  await postDiscord(webhook, routineDue, escalatedNow)
   // Board visibility: label each fired issue so issue-triage sees what's past its verify date.
   // Best-effort — a label failure must not fail the run after a successful Discord send. Keyed by
   // repo+number so a sibling-repo issue is labeled in its own repo (and the label must exist there).

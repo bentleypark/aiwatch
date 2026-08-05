@@ -84,6 +84,18 @@ export function parseAssertionLine(line) {
   return { source, selector, op, expected: expected == null ? null : expected.trim() }
 }
 
+// `durable: <artifact>` (#1206) — the sibling sub-line marker. Where `assert:` says "a machine can
+// decide this", `durable:` says "a human will decide it, and HERE is the artifact that will still
+// exist on the date". Free-form on purpose: the artifact can be a KV key, an archive month, a
+// Discord channel, a dashboard — the value is the author naming one, not a parseable grammar.
+const DURABLE_RE = /^\s*durable:\s*(\S.*?)\s*$/i
+
+/** Parse a `durable:` line → the named artifact string, or null. Never throws. */
+export function parseDurableLine(line) {
+  const m = DURABLE_RE.exec(line)
+  return m ? m[1] : null
+}
+
 /** Coerce an assert-line literal: quoted → string, true/false → bool, numeric → number, else raw. */
 export function parseLiteral(raw) {
   if (raw == null) return null
@@ -202,11 +214,22 @@ export function findQuotedVerifyAfterBoxes(body) {
 }
 
 /**
- * Pair each OPEN `verify-after` line in a body with a following indented `assert:` line (the next
- * non-blank line, if it parses as an assertion). Returns [{date, note, lineIndex, assertion|null}].
- * Checked (`- [x]`) and blockquoted (`>`) verify-after lines are skipped — see
- * isSuppressedReminderLine. This is the scanner `main()` actually drives (#541 reminders + #873
- * auto-verify); `parseVerifyAfter` is the exported/unit-tested twin.
+ * Pair each OPEN `verify-after` line in a body with its following indented sub-lines. Returns
+ * [{date, note, lineIndex, assertion|null, durable|null}]. Checked (`- [x]`) and blockquoted (`>`)
+ * verify-after lines are skipped — see isSuppressedReminderLine. This is the scanner `main()`
+ * actually drives (#541 reminders + #873 auto-verify); `parseVerifyAfter` is the exported twin.
+ *
+ * The sub-block is the run of consecutive non-blank `assert:` / `durable:` lines under the
+ * verify-after, in EITHER order; the first non-blank line that is neither ends it. Order-independence
+ * is load-bearing, not a nicety (#1206): the original scan stopped at the first non-blank line, so a
+ * `durable:` written above an `assert:` would have silently disabled that issue's auto-verify — the
+ * job would fall back to pinging forever and nothing would say why.
+ *
+ * First of each marker wins, and a REPEAT does not end the block — a second `durable:` must not strand
+ * an `assert:` below it, which is the same silent-auto-verify-loss the ordering fix exists to prevent.
+ * A malformed `assert:` is not a marker (it parses to null) and so does end the block, deliberately:
+ * that is the pre-existing behaviour, and treating a broken clause as a sub-line would let it swallow
+ * the real content underneath.
  */
 export function pairVerifyAssertions(body) {
   const out = []
@@ -218,14 +241,17 @@ export function pairVerifyAssertions(body) {
     const v = VERIFY_RE.exec(line)
     if (!v) continue
     const note = v[2].replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
-    // Look at the immediately following non-blank line for an `assert:`.
     let assertion = null
+    let durable = null
     for (let j = i + 1; j < lines.length; j++) {
       if (lines[j].trim() === '') continue
-      assertion = parseAssertionLine(lines[j])
+      const a = parseAssertionLine(lines[j])
+      if (a) { assertion ??= a; continue }
+      const d = parseDurableLine(lines[j])
+      if (d) { durable ??= d; continue }
       break
     }
-    out.push({ date: v[1], note, lineIndex: i, assertion })
+    out.push({ date: v[1], note, lineIndex: i, assertion, durable })
   }
   return out
 }
