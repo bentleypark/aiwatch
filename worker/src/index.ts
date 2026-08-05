@@ -1759,7 +1759,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 import { generateBadgeSvg } from './badge'
 import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
-import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
+import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable, readRedditSourceDead } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
@@ -3064,6 +3064,8 @@ export default {
           } catch (err) {
             console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
           }
+          // #820: surface a persistent Reddit block so a silent zeroing-out is visible.
+          const redditSourceDead = await readRedditSourceDead(env.STATUS_CACHE)
 
           // #288: read the purpose-built daily counter instead of counting security:seen:*
           // keys (that prefix has 7d TTL and accumulates across the week, inflating the number).
@@ -3362,6 +3364,7 @@ export default {
             webhookCounts,
             deliveryCounts,
             redditCount,
+            redditSourceDead,
             securityCount,
             vitals: vitalsSummary,
             probeSnapshots,

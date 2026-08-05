@@ -7,6 +7,7 @@ import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
 import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
+import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts } from './api-traffic'
@@ -92,6 +93,10 @@ export interface DailySummaryData {
   webhookCounts?: { discord: number; newToday?: number | null }
   deliveryCounts?: { discord: number; failed: number } | null
   redditCount: number
+  // #820 — Reddit source health: a marker (blocked / partially blocked / unreachable streak),
+  // `'unknown'` when KV could not be read, or null/absent when healthy. Surfaces a warning so
+  // "403 → 0 posts" is never read as a quiet day.
+  redditSourceDead?: SourceHealthRead
   securityCount?: number
   vitals?: VitalsDaily | null
   probeSnapshots?: ProbeSnapshot[]
@@ -135,6 +140,16 @@ export interface DailySummaryData {
   // #575 Phase A — crowd "Report an issue" counts today (svcId → count). Internal demand signal
   // only (coverage priority); never a public "N reporting" verdict. Empty/absent → section omitted.
   reportCounts?: Record<string, number>
+}
+
+/** How long the source has been dark, for the #820 warning. Coarse on purpose — the operator needs
+ *  "an hour" vs "all day", not precision. */
+export function formatDarkFor(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return 'duration unknown'
+  const mins = Math.floor(ms / 60000)
+  if (mins < 60) return `for ${mins}m`
+  const hours = Math.floor(mins / 60)
+  return hours < 24 ? `for ${hours}h` : `for ${Math.floor(hours / 24)}d+`
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
@@ -248,7 +263,22 @@ export function buildDailySummary(data: DailySummaryData): string {
   if (webhookCounts) {
     lines.push(`🔗 **Active Discord Webhooks**: ${webhookCounts.discord}${formatSubscriberDelta(webhookCounts.newToday)}`)
   }
-  if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
+  // Health outranks the count. `reddit:seen:*` keys live 24h, so a source that dies at noon still
+  // shows a real non-zero count — and printing it would read as health on the very day detection
+  // went dark. The reason is carried through because the remediations differ: a block is Reddit
+  // refusing us (#820's endpoint swap), an unreachable streak points at our own egress.
+  const health = data.redditSourceDead
+  if (health === 'unknown') {
+    lines.push('⚠️ **Reddit source health UNKNOWN**: KV read failed — cannot confirm detection is live')
+  } else if (health) {
+    const age = formatDarkFor(Date.now() - health.at)
+    const detail = health.reason === 'partial' ? 'some subreddits blocked — detection is partly dark'
+      : health.reason === 'streak' ? 'no subreddit returned a usable response for 3+ runs — check Worker egress, or a 200 bot wall'
+      : 'search returned a block status — detection is dark'
+    lines.push(`⚠️ **Reddit source DOWN**: ${detail} (${age})`)
+  } else if (redditCount > 0) {
+    lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
+  }
   if (data.securityCount && data.securityCount > 0) lines.push(`🔒 **Security**: ${data.securityCount} alerts detected`)
 
   // Section: Web Vitals
