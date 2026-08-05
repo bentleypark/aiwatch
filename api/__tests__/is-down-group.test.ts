@@ -495,3 +495,76 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
     expect(html).toContain('No incidents reported for any Anthropic (Claude) service')
   })
 })
+
+describe('outage-audience beacon (#842-B / #1193)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  afterEach(() => {
+    fetchMock?.mockRestore()
+  })
+
+  // The operator Reddit block hands out THIS page's URL for a family-wide incident, so a group page
+  // that posts no pageview leaves every visitor arriving on a family link uncounted. `svc` must be a real service id — parsePageviewBody validates against SERVICES and
+  // drops anything else, which would look identical to no traffic. That every member id is valid is
+  // pinned in api/_is-down/__tests__/family-groups.test.ts.
+  it('posts a pageview naming a family member, flagged inactive when all are healthy', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('/api/pageview')
+    expect(html).toContain('svc: "claude"')
+    expect(html).toContain('active: false')
+  })
+
+  it('flags the view active AND names the member that is actually down', async () => {
+    // The flag separates outage-moment reach from ambient traffic, and worst-of is what the rest of
+    // the page headlines with — a beacon reading only the first member would call a claude.ai-only
+    // outage quiet. The svc must move with it: recordOutageView stores (source, active-flag, svcId)
+    // as one row, so an active flag paired with a member that was operational at render time asserts
+    // an outage view of a service that had no outage. That row is permanent and unbackfillable.
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'down' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('active: true')
+    expect(html).toContain('svc: "claudeai"')
+    expect(html).not.toContain('svc: "claude"')
+  })
+
+  it('attributes to the worst-of member, not merely to any non-operational one', async () => {
+    // down outranks degraded (STATUS_RANK), and the headline says "Down" — so the row must name the
+    // down member. Naming the degraded one would pair a `down` headline with a service that was only
+    // degraded.
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'down' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('active: true')
+    expect(html).toContain('svc: "claudecode"')
+  })
+
+  it('survives the CSP hash pass — the beacon script is not stripped or unhashed', async () => {
+    // The page hashes its own inline scripts; an added script that never made it into the policy
+    // would render but be blocked in a browser, which no HTML assertion above would notice.
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const res = await handler(makeReq('claude'))
+    const html = await res.text()
+    const csp = res.headers.get('content-security-policy') ?? ''
+    const inlineScripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+    const beaconScript = inlineScripts.find((s) => s.includes('/api/pageview'))
+    expect(beaconScript, 'no inline script carries the beacon').toBeTruthy()
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(beaconScript!))
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    expect(csp, 'the beacon script is not hashed into the page CSP').toContain(`sha256-${b64}`)
+  })
+})

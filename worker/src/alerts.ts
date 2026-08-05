@@ -1451,9 +1451,13 @@ export function appendTweetSearchSection(
 //
 // Keys are exactly TWEET_SEARCH_TERMS' keys (pinned by a scope-parity test) — the same surfaces that
 // spawn viral "is X down" posts — and the search phrase is reused from there so the two channels can
-// never drift apart. Max 3 subs per service keeps the block scannable and its share of the 4096-char
-// embed budget small; it is not related to the playbook's per-outage POSTING cap, which limits
-// actions taken, not links shown.
+// never drift apart. The per-service list is capped short to keep the block scannable and its share
+// of the 4096-char embed budget small; it is not related to the playbook's per-outage POSTING cap,
+// which limits actions taken, not links shown.
+//
+// #1193 — this is a per-SURFACE map feeding a per-PROVIDER line: buildRedditEngageTargets draws a
+// collapsed family line from every covered member's list here, so a surface's entry still matters
+// when that surface never alerts on its own.
 export const REDDIT_ENGAGE_SUBS: Record<string, readonly string[]> = {
   claude: ['ClaudeAI', 'Anthropic', 'claude'],
   claudeai: ['ClaudeAI', 'claude', 'ClaudeHomies'],
@@ -1480,6 +1484,8 @@ export function buildRedditAllSearchUrl(term: string): string {
 }
 
 export interface RedditEngageTarget {
+  /** A service id, or `family:<slug>` for a collapsed provider family (#1193) — same convention
+   *  buildTweetDrafts uses for its group draft. */
   serviceId: string
   serviceName: string
   /** The phrase searched — shared with the X block via TWEET_SEARCH_TERMS. */
@@ -1487,20 +1493,58 @@ export interface RedditEngageTarget {
   subs: { subreddit: string; url: string }[]
   allRedditUrl: string
   /** UTM-tagged is-down link to paste in the reply. NOT optional: the link is the only reason the
-   *  block exists (without it a Reddit click lands in `(direct)` and the #270 channel measures zero),
-   *  so a service with no is-down slug is SKIPPED rather than rendered link-less — #970's lesson that
-   *  an optional field on a derived record re-empties silently, made a type error instead. */
+   *  block exists. On a per-surface target a service with no is-down slug is SKIPPED rather than
+   *  rendered link-less — #970's lesson that an optional field on a derived record re-empties
+   *  silently, made a type error instead. A family target links the group page instead, which
+   *  family-group-route.test.ts covers. */
   replyLink: string
 }
 
+/** Floor for the subreddit links on one collapsed #1193 line, not a ceiling — mergeFamilySubs takes
+ *  the member count when that is larger. */
+export const REDDIT_MIN_SUBS_PER_LINE = 3
+
 /**
- * Build one engagement target per in-scope service the alert covers, mirroring buildTweetSearches'
+ * Interleave the members' sub lists round-robin, dedupe, cap. Exported for direct unit tests: the
+ * public builder can only reach the shapes today's FAMILY_GROUPS happens to produce.
+ *
+ * The output is deduped and capped at `max(REDDIT_MIN_SUBS_PER_LINE, member count)`, so a family whose
+ * members' lists union to more than that loses subs — true of both in-scope families today. Which
+ * ones survive is what reddit-engage.test.ts pins.
+ */
+export function mergeFamilySubs(memberSubs: readonly (readonly string[])[]): string[] {
+  if (memberSubs.length === 0) return []
+  const cap = Math.max(REDDIT_MIN_SUBS_PER_LINE, memberSubs.length)
+  const out: string[] = []
+  const seen = new Set<string>()
+  const depth = Math.max(...memberSubs.map((s) => s.length))
+  for (let i = 0; i < depth && out.length < cap; i++) {
+    for (const subs of memberSubs) {
+      if (out.length >= cap) break
+      const s = subs[i]
+      if (!s || seen.has(s)) continue
+      seen.add(s)
+      out.push(s)
+    }
+  }
+  return out
+}
+
+/**
+ * Build the engagement targets for the in-scope services an alert covers, mirroring buildTweetSearches'
  * svcIds resolution (#545 svcIds → merged keys → legacy key-tail). It dedupes by service id, where the sibling dedupes by URL. Empty
  * when the alert covers no in-scope service, and empty for a non-outage alert.
  *
  * The non-outage gate is the load-bearing part: handing the operator "go find the outage threads"
  * links during an advisory (#1021) or a withdrawal (#1106) invites confirming an outage that is not
- * happening. */
+ * happening.
+ *
+ * #1193 — 2+ surfaces of the SAME provider family collapse to ONE target, because one incident
+ * spanning Claude API + claude.ai + Claude Code rendered three near-duplicate lines whose reply links
+ * each pointed at a single surface's page. A Reddit reader clicking through wants the provider GROUP
+ * page. Family membership comes from FAMILY_OF_SERVICE, shared with the other group-vs-single link
+ * decisions.
+ */
 export function buildRedditEngageTargets(alert: AlertCandidate, services: ScoredService[]): RedditEngageTarget[] {
   const kind = kindFromKey(alert.key)
   if (!kind) return []
@@ -1508,14 +1552,60 @@ export function buildRedditEngageTargets(alert: AlertCandidate, services: Scored
   if (isNonOutageAlert(alert, kind)) return []
   const keys = alert._mergedKeys ?? [alert.key]
   const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
-  const out: RedditEngageTarget[] = []
+
+  // In-scope, deduped, order preserved. A service needs BOTH a sub list and a search term.
+  const inScopeIds: string[] = []
   const seen = new Set<string>()
   for (const id of svcIds) {
+    if (!REDDIT_ENGAGE_SUBS[id] || !TWEET_SEARCH_TERMS[id] || seen.has(id)) continue
+    seen.add(id)
+    inScopeIds.push(id)
+  }
+
+  // #1193 — bucket by family first, same shape as buildTweetDrafts' group-draft pass.
+  const byFamily = new Map<string, string[]>()
+  for (const id of inScopeIds) {
+    const family = FAMILY_OF_SERVICE[id]
+    if (!family) continue
+    byFamily.set(family.slug, [...(byFamily.get(family.slug) ?? []), id])
+  }
+
+  const out: RedditEngageTarget[] = []
+  const emittedFamilies = new Set<string>()
+  for (const id of inScopeIds) {
+    const family = FAMILY_OF_SERVICE[id]
+    const memberIds = family ? byFamily.get(family.slug) ?? [] : []
+    // A family line searches with the family slug's own phrase — a cross-namespace lookup
+    // (TWEET_SEARCH_TERMS is keyed by service id, family.slug is a URL slug) that a scope test pins
+    // rather than leaves to coincidence. If it stops resolving, degrade to the per-surface lines this
+    // replaced — correct and already tested — rather than search one surface's phrase on behalf of
+    // the whole provider. Warned once per family, with the alert key, so the degradation is tied to
+    // an incident in the log rather than repeated per member.
+    const familyTerm = family ? TWEET_SEARCH_TERMS[family.slug] : undefined
+    if (family && memberIds.length >= 2 && !familyTerm && !emittedFamilies.has(family.slug)) {
+      emittedFamilies.add(family.slug)
+      console.warn('[alerts] #1193 no search term for family — rendering per-surface lines:', family.slug, alert.key)
+    }
+    if (family && familyTerm && memberIds.length >= 2) {
+      if (emittedFamilies.has(family.slug)) continue // already emitted by an earlier member
+      emittedFamilies.add(family.slug)
+      out.push({
+        serviceId: `family:${family.slug}`,
+        serviceName: family.name,
+        term: familyTerm,
+        subs: mergeFamilySubs(memberIds.map((m) => REDDIT_ENGAGE_SUBS[m])).map((s) => ({
+          subreddit: s,
+          url: buildRedditSearchUrl(s, familyTerm),
+        })),
+        allRedditUrl: buildRedditAllSearchUrl(familyTerm),
+        // The provider GROUP is-down page. Its route is a hand-added vercel.json rewrite, pinned by
+        // family-group-route.test.ts.
+        replyLink: appendUtm(appendStatusHint(`https://ai-watch.dev/is-${family.slug}-down`, 'reddit'), 'reddit'),
+      })
+      continue
+    }
     const subs = REDDIT_ENGAGE_SUBS[id]
     const term = TWEET_SEARCH_TERMS[id]
-    if (!subs || !term) continue // not an in-scope service
-    if (seen.has(id)) continue
-    seen.add(id)
     const slug = SERVICE_ID_TO_SLUG[id]
     if (!slug) {
       // Scoped diagnostic rather than a half-rendered block: the scope test pins that every keyed id
@@ -1550,6 +1640,14 @@ const REDDIT_LIMIT_LINE = '⚖️ 1 link-comment per thread · 2 per sub per out
  * nothing is emitted unless it fits, so the block can never cost
  * the alert itself.
  *
+ * The reply link renders as INLINE CODE rather than a clickable link, and that is a measurement
+ * rule, not a style choice. A Discord click carries no reddit referrer host, so `utm_source=reddit`
+ * alone decides its bucket in `classifyReferrer` (outage-audience.ts) — meaning a click from the
+ * operator's OWN alert is thereafter indistinguishable from a real visitor's. Retagging is not an
+ * alternative: the string exists to be PASTED into a reply and must keep the tag. `formatRedditAlert`
+ * carries the same rule for the same reason. The subreddit links stay clickable: they navigate to
+ * Reddit, not to us.
+ *
  * Degrades once: drop the per-sub links (the all-Reddit search alone still
  * reaches the measured 82-sub tail), and if that still does not fit, drop the section. The caps line is never traded away: it is
  * what keeps the account out of Reddit's spam filters, so buying room by removing it is the wrong
@@ -1564,10 +1662,13 @@ export function appendRedditSection(description: string, targets: RedditEngageTa
   const build = (withSubs: boolean): string | null => {
     const body = targets
       .map((t) => {
-        const subLinks = withSubs ? t.subs.map((s) => `[r/${s.subreddit}](${s.url})`).join(' · ') + ' · ' : ''
+        // An empty sub list must render nothing rather than a bare ' · ' separator (reachable only
+        // if a member's configured list is emptied).
+        const subLinks =
+          withSubs && t.subs.length ? t.subs.map((s) => `[r/${s.subreddit}](${s.url})`).join(' · ') + ' · ' : ''
         // #535 — defuse a domain-shaped service name ("claude.ai") so Discord doesn't unfurl a
         // thumbnail into the operator embed.
-        return `\n→ ${defuseAutolinkDomain(t.serviceName)}: ${subLinks}[all of Reddit](${t.allRedditUrl})\n   🔗 ${t.replyLink}`
+        return `\n→ ${defuseAutolinkDomain(t.serviceName)}: ${subLinks}[all of Reddit](${t.allRedditUrl})\n   🔗 \`${t.replyLink}\``
       })
       .join('')
     const full = `${header}${body}\n${REDDIT_LIMIT_LINE}`

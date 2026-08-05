@@ -104,10 +104,10 @@ const HN_HOSTS = /(^|\.)(news\.ycombinator\.com|hn\.algolia\.com)$/
  *
  * PRECONDITION: `refHost` is a bare HOSTNAME, not a URL — every host pattern is `$`-anchored, so a
  * full `https://www.reddit.com/r/x` matches nothing and silently degrades to 'refhost'. The beacon
- * guarantees this via `new URL(document.referrer).hostname` (api/_is-down/html-template.ts). Pinned
- * on both sides: `api/__tests__/is-down-render.test.ts` asserts the template still emits that
- * expression, and this module's test "takes a bare hostname, NOT a full URL" asserts a full URL does
- * NOT classify as 'reddit'.
+ * guarantees this via `new URL(document.referrer).hostname` (api/_shared/audience-beacon.ts, inlined
+ * by both is-down surfaces since #1193). Pinned on both sides: `api/__tests__/is-down-render.test.ts`
+ * asserts the rendered page still emits that expression, and this module's test "takes a bare
+ * hostname, NOT a full URL" asserts a full URL does NOT classify as 'reddit'.
  */
 export function classifyReferrer(utmSource: string | undefined, refHost: string | undefined): AudienceSource {
   const utm = (utmSource || '').toLowerCase()

@@ -272,7 +272,12 @@ export function formatRedditAlert(alert: RedditAlert): { title: string; descript
   // "claude.ai" in it doesn't auto-link in the operator channel.
   const slug = SUBREDDIT_SLUG[alert.subreddit]
   // #548 — utm_source=reddit so GA4 attributes clicks from the promote share to the Reddit channel.
-  const shareLink = slug ? `\n🔗 ${appendUtm(appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, 'reddit'), 'reddit')}` : ''
+  // Rendered as INLINE CODE, not a clickable link, for the same reason appendRedditSection's is: a
+  // Discord click carries no reddit referrer host, so this tag alone decides its bucket, and an
+  // operator click is indistinguishable afterwards from a real visitor's. Fixing the engage block
+  // and leaving this one would have left the bucket just as unreadable while looking fixed — this
+  // alert's whole purpose is "go engage with this post", so it is the likelier click.
+  const shareLink = slug ? `\n🔗 \`${appendUtm(appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, 'reddit'), 'reddit')}\`` : ''
 
   return {
     title: `📢 Reddit: r/${alert.subreddit} [🎯 PROMOTE]`,
