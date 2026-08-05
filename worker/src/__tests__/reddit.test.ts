@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseRedditResponse, matchesKeywords, matchesSecurityKeywords, isPromotable, formatRedditAlert, formatSecurityAlert, REDDIT_TARGETS } from '../reddit'
+import { parseRedditResponse, matchesKeywords, matchesSecurityKeywords, isPromotable, formatRedditAlert, formatSecurityAlert, REDDIT_TARGETS, isDeadStatus, decideSourceHealth, transientStreakEscalates, readRedditSourceDead, isRedditListing, markRedditSourceDead } from '../reddit'
 import type { RedditAlert } from '../reddit'
 
 describe('parseRedditResponse', () => {
@@ -409,5 +409,115 @@ describe('REDDIT_TARGETS — outage-mode scan targets (#280)', () => {
         expect(specialMarkers.has(target.service)).toBe(true)
       }
     }
+  })
+})
+
+// ── #820 source-health observability ───────────────────────────────────────────
+// The bug this fixes is not "Reddit is blocked" — it is that being blocked was INVISIBLE.
+// `fetchSubreddit` returned [] on a 403 and the daily summary counts `reddit:seen:*` keys, so a
+// total block rendered identically to a quiet day. These pin the three-state fold that makes the
+// difference legible. Repairing the fetch itself is the remaining half of #820.
+describe('#820 source health', () => {
+  it('classifies only auth/block/rate statuses as source death', () => {
+    for (const s of [401, 403, 429]) expect(isDeadStatus(s)).toBe(true)
+    // A 5xx is the provider having a bad minute, not a block on us — it must not mark the source
+    // dead, because a dead marker suppresses the post count and would cry wolf on a blip.
+    for (const s of [200, 404, 500, 502, 503]) expect(isDeadStatus(s)).toBe(false)
+  })
+
+  it('some alive + some blocked is PARTIAL, not healthy', () => {
+    // The blind spot a boolean fold had: 12 of 13 blocked with one success read as fully healthy,
+    // and a partial block is a plausible shape for an IP/endpoint-scoped block spreading or healing.
+    expect(decideSourceHealth(['ok', 'dead', 'transient'])).toBe('partial')
+    expect(decideSourceHealth(['dead', 'ok'])).toBe('partial')
+  })
+
+  it('all-clear only when nothing was blocked', () => {
+    expect(decideSourceHealth(['ok'])).toBe('clear')
+    expect(decideSourceHealth(['ok', 'transient', 'ok'])).toBe('clear')
+  })
+
+  it('blocks with zero OK mark the source dead', () => {
+    expect(decideSourceHealth(['dead', 'dead'])).toBe('mark')
+    expect(decideSourceHealth(['transient', 'dead'])).toBe('mark')
+  })
+
+  it('an all-transient run bumps the streak instead of fabricating a marker', () => {
+    // No response at all proves nothing: it must neither set a marker off one blip nor wipe a
+    // real one. Only a sustained streak escalates.
+    expect(decideSourceHealth(['transient', 'transient'])).toBe('bump')
+    expect(decideSourceHealth([])).toBe('bump')
+  })
+
+  it('escalates only once the transient streak reaches the limit', () => {
+    expect(transientStreakEscalates(1)).toBe(false)
+    expect(transientStreakEscalates(2)).toBe(false)
+    expect(transientStreakEscalates(3)).toBe(true)
+    expect(transientStreakEscalates(9)).toBe(true)
+  })
+
+  it('readRedditSourceDead reports healthy only for a genuinely absent marker', async () => {
+    const kv = (value: string | null) => ({ get: async () => value }) as unknown as KVNamespace
+    expect(await readRedditSourceDead(kv(null))).toBeNull()
+    expect(await readRedditSourceDead(kv('{"reason":"block","at":123}'))).toEqual({ reason: 'block', at: 123 })
+  })
+
+  it('a KV read failure reports UNKNOWN, never healthy', async () => {
+    // The asymmetry decides it: a false alarm costs one dismissible Discord line, a false all-clear
+    // cost weeks of undetected darkness — which is this issue. A reader of unhealth must not answer
+    // "healthy" when it cannot answer at all.
+    const kv = { get: async () => { throw new Error('kv down') } } as unknown as KVNamespace
+    expect(await readRedditSourceDead(kv)).toBe('unknown')
+  })
+
+  it('a malformed marker reports UNKNOWN, not healthy', async () => {
+    // Otherwise a shape drift means the marker is written hourly and ignored forever, in silence.
+    const kv = (value: string) => ({ get: async () => value }) as unknown as KVNamespace
+    expect(await readRedditSourceDead(kv('not json'))).toBe('unknown')
+    expect(await readRedditSourceDead(kv('{"at":123}'))).toBe('unknown') // no reason → not a marker
+  })
+
+  it('re-marking the same reason preserves the ORIGINAL timestamp', async () => {
+    // The fold re-marks every hourly run while unhealthy, and the summary reads the key seconds
+    // after the scan writes it. If `at` were re-stamped, the reported age would be "for 0m"
+    // forever — reading as a fresh blip for a source dark since June. This is the production
+    // sequence, not a hand-built fixture: mark, wait, mark again.
+    const store: Record<string, string> = {}
+    const kv = {
+      get: async (k: string) => store[k] ?? null,
+      put: async (k: string, v: string) => { store[k] = v },
+      delete: async (k: string) => { delete store[k] },
+    } as unknown as KVNamespace
+
+    await markRedditSourceDead(kv, 'block')
+    const first = JSON.parse(store['reddit:source-dead']).at
+    await new Promise((r) => setTimeout(r, 15))
+    await markRedditSourceDead(kv, 'block')
+    expect(JSON.parse(store['reddit:source-dead']).at).toBe(first)
+
+    // A CHANGED reason is a new event, so the clock restarts.
+    await markRedditSourceDead(kv, 'partial')
+    expect(JSON.parse(store['reddit:source-dead']).at).toBeGreaterThan(first)
+  })
+
+  it('an unrecognised reason reports UNKNOWN rather than a confident wrong diagnosis', async () => {
+    // The summary's ternary has no default arm: anything not partial/streak renders the assertive
+    // "search returned a block status". A drifted reason must not take that branch.
+    const kv = (value: string) => ({ get: async () => value }) as unknown as KVNamespace
+    expect(await readRedditSourceDead(kv('{"reason":"token","at":123}'))).toBe('unknown')
+    expect(await readRedditSourceDead(kv('{"reason":"","at":123}'))).toBe('unknown')
+    expect(await readRedditSourceDead(kv('{"reason":"block","at":"nope"}'))).toBe('unknown')
+    expect(await readRedditSourceDead(kv('{"reason":"partial","at":9}'))).toEqual({ reason: 'partial', at: 9 })
+  })
+
+  it('only a structurally valid listing is proof of life', () => {
+    // A bot wall is commonly 200 + HTML, not 403 — old.reddit.com was observed doing exactly that.
+    // If an unparseable 200 counted as `ok` it would CLEAR a correct marker: worse than no marker.
+    expect(isRedditListing({ data: { children: [] } })).toBe(true)
+    expect(isRedditListing({ data: { children: {} } })).toBe(false)
+    expect(isRedditListing({ data: {} })).toBe(false)
+    expect(isRedditListing({})).toBe(false)
+    expect(isRedditListing(null)).toBe(false)
+    expect(isRedditListing('<html>blocked</html>')).toBe(false)
   })
 })

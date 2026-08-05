@@ -910,3 +910,66 @@ describe('formatAiUsageSection', () => {
     expect(out).not.toContain('/')
   })
 })
+
+describe('#820 Reddit source-dead warning', () => {
+  const base = {
+    services: [makeSvc({ id: 'a', name: 'Svc A' })],
+    aiUsage: null,
+    latencySnapshots: [],
+    incidentCountToday: { newCount: 0, resolvedCount: 0 },
+  }
+
+  it('replaces the post count with a DOWN warning when the source is blocked', () => {
+    const out = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'block', at: Date.now() } })
+    expect(out).toContain('Reddit source DOWN')
+    expect(out).toContain('detection is dark')
+    expect(out).not.toContain('posts detected')
+  })
+
+  it('the warning outranks a stale non-zero count', () => {
+    // `reddit:seen:*` keys live 24h, so a source that dies at noon still shows a real count.
+    // Printing it would read as health on the very day detection went dark.
+    const out = buildDailySummary({ ...base, redditCount: 3, redditSourceDead: { reason: 'block', at: Date.now() } })
+    expect(out).toContain('Reddit source DOWN')
+    expect(out).not.toContain('3 posts detected')
+  })
+
+  it('carries the reason — a block and an unreachable streak need different remediations', () => {
+    const blocked = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'block', at: Date.now() } })
+    expect(blocked).toContain('block status')
+    const streak = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'streak', at: Date.now() } })
+    // Must not assert a cause the code cannot know — a 200 bot wall also lands here.
+    expect(streak).toContain('no subreddit returned a usable response')
+    expect(streak).toContain('bot wall')
+    const partial = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'partial', at: Date.now() } })
+    expect(partial).toContain('partly dark')
+  })
+
+  it('renders the age it is given — the writer preserving the true start is pinned in reddit.test.ts', () => {
+    // `markRedditSourceDead` carries the original `at` forward across hourly re-marks, so these
+    // ages are reachable in production rather than fixture-only.
+    const hourAgo = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'block', at: Date.now() - 3600_000 } })
+    expect(hourAgo).toContain('for 1h')
+    const dayAgo = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'block', at: Date.now() - 26 * 3600_000 } })
+    expect(dayAgo).toContain('for 1d+')
+  })
+
+  it('an UNKNOWN health read warns rather than reporting health', () => {
+    // A KV failure must not render as a quiet day — that is #820 one layer up.
+    const out = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: 'unknown' })
+    expect(out).toContain('health UNKNOWN')
+    expect(out).not.toContain('posts detected')
+  })
+
+  it('a healthy source keeps the ordinary count line and never warns', () => {
+    const out = buildDailySummary({ ...base, redditCount: 4, redditSourceDead: null })
+    expect(out).toContain('4 posts detected')
+    expect(out).not.toContain('Reddit source DOWN')
+  })
+
+  it('an absent field is healthy — the warning must not fire on legacy callers', () => {
+    const out = buildDailySummary({ ...base, redditCount: 2 })
+    expect(out).toContain('2 posts detected')
+    expect(out).not.toContain('Reddit source DOWN')
+  })
+})
