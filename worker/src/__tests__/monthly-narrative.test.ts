@@ -21,6 +21,10 @@ function mkIncident(overrides: Partial<MonthlyIncidentEntry> = {}): MonthlyIncid
     resolvedAt: overrides.resolvedAt ?? '2026-05-04T11:00:00Z',
     durationMin: overrides.durationMin ?? 60,
     finalStatus: overrides.finalStatus ?? 'resolved',
+    // Field-by-field, so anything NOT listed here is silently dropped from an override — which is how a
+    // `mkIncident({ autoMonitor: true })` fixture can produce an entry without the flag and make a
+    // filtering test pass for the wrong reason. Spread last so new optional fields carry through.
+    ...overrides,
   }
 }
 
@@ -80,6 +84,69 @@ describe('selectIncidentCandidates', () => {
     const out = selectIncidentCandidates(archive, { gemini: 'Gemini API', claude: 'Claude API' })
     expect(out).toHaveLength(2)
     expect(out.map(c => c.serviceName).sort()).toEqual(['Claude API', 'Gemini API'])
+  })
+
+  it('#1210 — skips autoMonitor entries so one provider\'s hourly paperwork cannot crowd out the month', () => {
+    // The real shape: an auto-monitor opens hourly through ONE outage and bulk-closes, leaving a
+    // descending staircase of 20-to-35h durations. Ranking is by durationMin desc, so without the skip
+    // these fill the candidate list and the genuine 45-min outage never reaches the draft — inside an
+    // archive whose own downtime aggregates say those entries are not downtime.
+    const staircase = [2084, 2024, 1964, 1904, 1844].map((durationMin, i) =>
+      mkIncident({ id: `auto-${i}`, title: 'Agentic model error alert', durationMin, autoMonitor: true }))
+    const archive = mkArchive({
+      services: {
+        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 6, countedIncidents: 1, avgResolutionMin: 45, totalDowntimeMin: 45, longestIncidentMin: 45, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
+          incidentList: [...staircase, mkIncident({ id: 'real-1', title: 'Elevated search request error rate', durationMin: 45 })] },
+        claude: { uptime: 99, score: 70, grade: 'fair', incidents: 1, avgResolutionMin: 30, totalDowntimeMin: 30, longestIncidentMin: 30, avgLatencyMs: 150, officialUptime: 99, p95LatencyMs: 240, latencySpikes: 1, p50LatencyMs: null, cvCombined: null,
+          incidentList: [mkIncident({ id: 'c1', title: 'API errors', durationMin: 30 })] },
+      },
+    })
+    const out = selectIncidentCandidates(archive, { kimi: 'Kimi', claude: 'Claude API' })
+    expect(out.map(c => c.id)).toEqual(['real-1', 'c1'])
+    expect(out.some(c => c.autoMonitor)).toBe(false)
+  })
+
+  it('#1210 — KEEPS flagged entries when the aggregates counted them (the truncated branch)', () => {
+    // The keep direction of the skip above. Without it, deleting the `&& filtered` gate leaves the whole
+    // suite green: on a truncated month the archive publishes an inflated total, so dropping the
+    // responsible entries from the draft recreates the contradiction from the other side.
+    const staircase = [2084, 2024].map((durationMin, i) =>
+      mkIncident({ id: `auto-${i}`, title: 'Agentic model error alert', durationMin, autoMonitor: true }))
+    const archive = mkArchive({
+      services: {
+        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 260, countedIncidents: 260, avgResolutionMin: 143, totalDowntimeMin: 37156, longestIncidentMin: 2084, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
+          incidentList: staircase },
+      },
+    })
+    const out = selectIncidentCandidates(archive, { kimi: 'Kimi' })
+    expect(out.map(c => c.id)).toEqual(['auto-0', 'auto-1'])
+  })
+
+  it('#1210 — the prompt names the divisor instead of letting the model infer one', () => {
+    // `avgResolutionMin` is computed over `countedIncidents`, so "6 incidents, 45m avg recovery" is a
+    // reassuring claim about a month whose real event was a multi-hour outage. The prompt must say
+    // which set each number came from — this is the text the permanent archived draft is written from.
+    const archive = mkArchive({
+      services: {
+        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 6, countedIncidents: 1, avgResolutionMin: 45, totalDowntimeMin: 45, longestIncidentMin: 45, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null, incidentList: [] },
+      },
+    })
+    const prompt = buildMonthlyNarrativePrompt(archive, { kimi: 'Kimi' })
+    expect(prompt).toContain('6 incidents (1 counted toward the downtime figures')
+    expect(prompt).not.toContain('Kimi: score 80 (good), 6 incidents, 45m avg recovery')
+    // States the EFFECT, never a cause: the gap can also come from a #1021 advisory, and asserting
+    // "auto-monitor duplicates" would write a fabricated fact into a permanent archived draft.
+    expect(prompt).not.toContain('auto-monitor duplicates')
+  })
+
+  it('#1210 — a service with no exclusion keeps the plain wording', () => {
+    const archive = mkArchive({
+      services: {
+        claude: { uptime: 99, score: 70, grade: 'fair', incidents: 2, countedIncidents: 2, avgResolutionMin: 30, totalDowntimeMin: 60, longestIncidentMin: 30, avgLatencyMs: 150, officialUptime: 99, p95LatencyMs: 240, latencySpikes: 1, p50LatencyMs: null, cvCombined: null, incidentList: [] },
+      },
+    })
+    expect(buildMonthlyNarrativePrompt(archive, { claude: 'Claude API' }))
+      .toContain('Claude API: score 70 (fair), 2 incidents, 30m avg recovery')
   })
 
   it('falls back to the service id when no display name is supplied', () => {

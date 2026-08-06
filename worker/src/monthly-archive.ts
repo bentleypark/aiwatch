@@ -90,7 +90,16 @@ export interface MonthlyServiceData {
   monthlyGrade?: ScoreGrade | null
   monthlyScoreConfidence?: ScoreConfidence | null
   scoreConfidence?: ScoreConfidence | null // #951 — 'high' = the Score included the 40-pt uptime component; the report labels the uptime source from this instead of a hardcoded service list
-  incidents: number              // incident count for the month (from accumulated data)
+  incidents: number              // incident count for the month (from accumulated data) — UNFILTERED, see countedIncidents
+  /** #1210 — the divisor `avgResolutionMin` was actually computed over. ALWAYS a number: 0 for a month
+   *  with no incidents, and equal to `incidents` when no per-entry exclusion applied. It is LESS than
+   *  `incidents` exactly when one did (#1021 advisory titles, #1210 autoMonitor), which is the case
+   *  where `incidents: 40` beside `avgResolutionMin: 9` reads as "40 incidents, fast recovery" to
+   *  anything assuming one divisor — so `countedIncidents !== incidents` is the single predicate a
+   *  consumer tests before rendering the two side by side. Absent only on archives written before this
+   *  shipped. (Deliberately not a truncation signal: on that branch the accumulator counted everything,
+   *  so the two are equal and consistent — the inflation risk there is logged, not encoded.) */
+  countedIncidents?: number
   avgResolutionMin: number | null // average resolution time in minutes (null if no resolved incidents)
   totalDowntimeMin: number | null // sum of all incident durations for the month (null if no resolved incidents — unresolved durations are tracked as 0 upstream)
   longestIncidentMin: number | null // max single-incident duration for the month (null if no resolved incidents)
@@ -1259,15 +1268,21 @@ export function aggregateIncidentDurations(
   count: number,
   accumulatorTotal: number,
   accumulatorLongest: number,
-): { totalMin: number | null; longestMin: number | null; countedCount: number | null } {
+): { totalMin: number | null; longestMin: number | null; countedCount: number | null; excludedAutoMonitor: number; excludedAutoMonitorMin: number } {
   if (!incidents || incidents.length === 0 || incidents.length < count) {
-    // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source. It's a
-    // pre-summed total that can't be re-filtered per-incident, so the #1021 advisory exclusion is
-    // best-effort here; countedCount null tells the caller to keep the full-count avg-resolution divisor.
+    // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source. It is a
+    // pre-summed total that cannot be re-filtered per-incident, so NEITHER per-entry exclusion (#1021
+    // advisory titles, #1210 autoMonitor) is applied on this branch. That matters most for exactly the
+    // service class #1210 targets: an hourly auto-monitor is the profile most likely to overflow the
+    // 200-entry cap, so the inflated aggregate returns here. The caller logs it — silence would make
+    // this indistinguishable from a correctly-filtered month.
+    // countedCount null tells the caller to keep the full-count avg-resolution divisor.
     return {
       totalMin: accumulatorTotal > 0 ? accumulatorTotal : null,
       longestMin: accumulatorLongest > 0 ? accumulatorLongest : null,
       countedCount: null,
+      excludedAutoMonitor: 0,
+      excludedAutoMonitorMin: 0,
     }
   }
   // #1021 — EXCLUDE non-reliability advisories (usage-limits / quota / billing / deprecation / model-access,
@@ -1278,17 +1293,36 @@ export function aggregateIncidentDurations(
   // NOT on `impact == null`: null is also the lazy default for plain informational entries, and a REBUILD of
   // stored data may carry a pre-down-classification `minor` impact — the title is the stable signal. An
   // OUTAGE_SIGNAL term in the title always wins, so a real fault is never dropped. countedCount → avg.
+  //
+  // #1210 — ALSO exclude `autoMonitor` entries, the set `isReliabilityIncident` (score.ts) already keeps
+  // out of the Score. A provider auto-monitor that opens a fresh incident every hour through ONE outage
+  // and bulk-closes them together archives N paperwork durations for one event, so summing them states a
+  // downtime the same archive's uptime and Score contradict (Kimi 2026-07, as archived before the #1210
+  // patch: 35 of 40 entries, 619h16m beside `officialUptime: 100` / `monthlyScore: 80/high`).
+  // Read the persisted flag, do NOT re-derive it from the title — see `MonthlyIncidentEntry.autoMonitor`.
+  // Absent (pre-#989 archives) → false → counts; unlike #1021's title-keyed rule this one cannot correct
+  // history, because the flag was never written back then.
+  // NOT swapped for `isReliabilityIncident` wholesale: that predicate also tests `impact != null`, which
+  // the paragraph above rejects as a key for THIS aggregation.
   let total = 0
   let longest = 0
   let countedCount = 0
+  let excludedAutoMonitor = 0
+  let excludedAutoMonitorMin = 0
   for (const e of incidents) {
+    if (e.autoMonitor) {
+      excludedAutoMonitor++
+      // Same clamp the counted path uses — a second loop applying `|| 0` would let a negative through.
+      excludedAutoMonitorMin += typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
+      continue
+    }
     if (isNonReliabilityAdvisory(e.title ?? '')) continue
     countedCount++
     const d = typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
     total += d
     if (d > longest) longest = d
   }
-  return { totalMin: total > 0 ? total : null, longestMin: longest > 0 ? longest : null, countedCount }
+  return { totalMin: total > 0 ? total : null, longestMin: longest > 0 ? longest : null, countedCount, excludedAutoMonitor, excludedAutoMonitorMin }
 }
 
 export async function buildMonthlyArchive(
@@ -1460,9 +1494,26 @@ export async function buildMonthlyArchive(
     // shorter — Deepgram June read 176h42m/141h10m vs the real 45h33m/27h). The per-incident
     // durationMin is updated to the final value, so it's the source of truth; the accumulator is the
     // fallback only when the list was truncated (>MAX cap, no longer full-population).
-    const { totalMin, longestMin, countedCount } = aggregateIncidentDurations(
+    const { totalMin, longestMin, countedCount, excludedAutoMonitor, excludedAutoMonitorMin } = aggregateIncidentDurations(
       incidentList, incSvc?.count ?? 0, incSvc?.totalMinutes ?? 0, incSvc?.longestMinutes ?? 0,
     )
+    // #1210 — the exclusion withholds three numbers, and a fully-excluded service archives
+    // `totalDowntimeMin: null`, byte-identical to a genuinely incident-free month. Say so out loud, the
+    // way resolveArchiveOfficialUptime does when it withholds an uptime — a derived signal that fails
+    // toward "everything is fine" needs a scoped diagnostic, not just a code comment.
+    // Two DISTINCT prefixes: -EXCLUDED is the routine monthly case (kimi/twelvelabs both hit it every
+    // month), -TRUNCATED is data loss on a permanent record. One prefix for both would make the second
+    // unfilterable among the first.
+    if (excludedAutoMonitor > 0) {
+      console.warn(`[monthly-archive] #1210-EXCLUDED ${id}: excluded ${excludedAutoMonitor}/${incidentList?.length ?? 0} autoMonitor entries (${excludedAutoMonitorMin}m of paperwork duration) from the downtime aggregates (other exclusions, e.g. #1021 advisories, are not counted here)`)
+    }
+    if (countedCount == null && (incSvc?.count ?? 0) > 0) {
+      // Keyed on the BRANCH, not on flags among the surviving rows: truncation splices the OLDEST
+      // entries first (accumulateMonthlyIncidents), and an auto-monitor burst is one contiguous block —
+      // so the very case this warns about is the one whose evidence gets dropped. It also fires when
+      // there is no detail at all, where `.some()` on an empty list would silently say "fine".
+      console.warn(`[monthly-archive] #1210-TRUNCATED ${id}: ${incidentList?.length ?? 0} of ${incSvc?.count ?? 0} detail rows retained — downtime aggregates come from the UNFILTERED accumulator, so the per-entry exclusions (#1021, #1210) did NOT apply. Flag detection on the retained rows is unreliable here (oldest dropped first).`)
+    }
     const totalDowntimeMin = totalMin
     const longestIncidentMin = longestMin
     // #1021 — average over the COUNTED (non-advisory) incidents only: a quota advisory excluded from
@@ -1493,6 +1544,7 @@ export async function buildMonthlyArchive(
         return { monthlyScore: m.score, monthlyGrade: m.grade, ...(m.confidence ? { monthlyScoreConfidence: m.confidence } : {}) }
       })(),
       incidents: incSvc?.count ?? 0,
+      countedIncidents: avgDivisor, // #1210 — the divisor avgResolutionMin actually used; always a number
       avgResolutionMin,
       totalDowntimeMin,
       longestIncidentMin,

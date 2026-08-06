@@ -65,3 +65,8 @@ worker/coverage/
 
 # Local scratch handoffs (research/plan notes for a future session — the GitHub issue is the record; delete after build)
 *-handoff.md
+
+
+# #1210 — patch-archive-automonitor.mjs output + the operator's pre-write backup
+*.patched.json
+archive-before.json

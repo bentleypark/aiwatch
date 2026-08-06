@@ -40,6 +40,7 @@ import type { IncidentHistoryRecord } from '../incident-history'
 import type { MonthlySecurityEntry, MonthlySecuritySummary, MonthlyIncidents, MonthlyIncidentEntry } from '../monthly-archive'
 import type { OsvTimeline } from '../security-monitor'
 import { SERVICE_ADDED_AT, resolveSvcComponents } from '../services'
+import { isReliabilityIncident } from '../score'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
 
@@ -1150,13 +1151,13 @@ describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
   })
 
   it('returns null/null when there are no incidents', () => {
-    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, longestMin: null, countedCount: null })
-    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, longestMin: null, countedCount: null })
+    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0 })
+    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0 })
   })
 
   it('treats a full list of zero-duration incidents as null (no downtime)', () => {
     const r = aggregateIncidentDurations([entry(0), entry(0)], 2, 0, 0)
-    expect(r).toEqual({ totalMin: null, longestMin: null, countedCount: 2 })
+    expect(r).toEqual({ totalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0 })
   })
 })
 
@@ -1189,6 +1190,113 @@ describe('aggregateIncidentDurations (#1021 — usage-limits/quota advisory excl
     expect(r.totalMin).toBeNull()
     expect(r.longestMin).toBeNull()
     expect(r.countedCount).toBe(0)
+  })
+})
+
+describe('aggregateIncidentDurations (#1210 — autoMonitor exclusion)', () => {
+  // Modelled on the real Kimi 2026-07 archive: a provider auto-monitor opened a fresh incident every
+  // hour through ONE outage (2026-07-11 02:22 → 07-12 13:05 +08:00) and bulk-closed all 35 at once, so
+  // each entry's paperwork duration runs from its own open to the shared close — a 60-min descending
+  // staircase. Alongside them sit 5 genuine short blips. Real values, not invented.
+  // Real timestamps, not bare dates: the hourly open + shared bulk close IS the shape, and the
+  // integration test below feeds this same fixture through computeMonthlyScore's day-bucketing
+  // (`startedAt.slice(0,10)`) and the month-window string comparison, both of which read them.
+  const CLOSE = '2026-07-12T13:05:15.947+08:00'
+  const auto = (durationMin: number, i: number): MonthlyIncidentEntry =>
+    ({ id: `auto-${i}`, title: 'Agentic model error alert', startedAt: `2026-07-11T${String(2 + i).padStart(2, '0')}:22:14.668+08:00`, resolvedAt: CLOSE, durationMin, finalStatus: 'resolved', impact: 'critical', autoMonitor: true })
+  const real = (durationMin: number, i: number): MonthlyIncidentEntry =>
+    ({ id: `real-${i}`, title: 'Elevated search request error rate', startedAt: `2026-07-0${i + 1}T09:17:12.151+08:00`, resolvedAt: `2026-07-0${i + 1}T09:36:12.151+08:00`, durationMin, finalStatus: 'resolved', impact: 'critical' })
+
+  // The 35 archived durations verbatim (sum 37,109), not a generated approximation — the real
+  // staircase drifts off a clean 60-min step where the auto-monitor's hourly tick slipped.
+  const AUTO_DURATIONS = [
+    2084, 2024, 1964, 1904, 1844, 1784, 1724, 1664, 1604, 1542, 1481, 1421, 1361, 1301, 1241,
+    1181, 1121, 1061, 1001, 939, 879, 819, 759, 699, 637, 577, 517, 457, 397, 337, 277, 217, 157, 97, 37,
+  ]
+  const REAL_DURATIONS = [5, 5, 1, 17, 19] // the 5 genuine blips: sum 47, max 19
+
+  const julyList = [
+    ...AUTO_DURATIONS.map(auto),
+    ...REAL_DURATIONS.map(real),
+  ]
+
+  it('excludes autoMonitor entries from total/longest/count (the Kimi July case)', () => {
+    // Before the fix this returned 37156 / 2084 / 40 — i.e. 619h16m of downtime archived for a month
+    // whose officialUptime was 100 and monthlyScore 80/high, because the Score already excluded them.
+    const r = aggregateIncidentDurations(julyList, julyList.length, 0, 0)
+    expect(r.totalMin).toBe(47)
+    expect(r.longestMin).toBe(19)
+    expect(r.countedCount).toBe(5)
+  })
+
+  it('leaves a list with NO flagged entries completely unchanged', () => {
+    // The other 43 services carry no autoMonitor entries — the fix must be a no-op for them.
+    const unflagged = REAL_DURATIONS.map(real)
+    const r = aggregateIncidentDurations(unflagged, unflagged.length, 0, 0)
+    expect(r).toEqual({ totalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0 })
+  })
+
+  it('treats an ABSENT flag as false, so pre-#989 archives still count (no retroactive deflation)', () => {
+    // `autoMonitor` is optional; archives written before #989 have no such field at all. Same
+    // transition behaviour as #653/#1021 — missing means "counts", never "silently drop".
+    const legacy: MonthlyIncidentEntry[] = [{ id: 'x', title: 'Agentic model error alert', startedAt: '2026-06-01', resolvedAt: '2026-06-01', durationMin: 900, finalStatus: 'resolved', impact: 'critical' }]
+    const r = aggregateIncidentDurations(legacy, 1, 0, 0)
+    expect(r.totalMin).toBe(900)
+    expect(r.countedCount).toBe(1)
+  })
+
+  it('a month whose ONLY incidents are autoMonitor reports null downtime + 0 counted', () => {
+    const onlyAuto = AUTO_DURATIONS.map(auto)
+    const r = aggregateIncidentDurations(onlyAuto, onlyAuto.length, 0, 0)
+    expect(r.totalMin).toBeNull()
+    expect(r.longestMin).toBeNull()
+    expect(r.countedCount).toBe(0)
+  })
+
+  it('does NOT filter on the TRUNCATED branch — the known limitation, pinned so it stays known', () => {
+    // >200 entries (MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE) → the list is no longer the full population
+    // and the pre-summed accumulator is the only source, so the flagged entries still count. An hourly
+    // auto-monitor is the profile MOST likely to reach that cap, so this is not a hypothetical corner:
+    // it is where the fix silently does not apply. buildMonthlyArchive warns when it happens.
+    const truncated = AUTO_DURATIONS.map(auto) // 35 entries standing in for a capped list
+    const r = aggregateIncidentDurations(truncated, 260, 37109, 2084)
+    expect(r.totalMin).toBe(37109)      // the UNFILTERED accumulator, flagged entries included
+    expect(r.longestMin).toBe(2084)
+    expect(r.countedCount).toBeNull()
+    expect(r.excludedAutoMonitor).toBe(0) // nothing was excluded — the caller must not report otherwise
+  })
+
+  it('reports how many entries AND how many minutes it excluded, so the caller can say so out loud', () => {
+    const r = aggregateIncidentDurations(julyList, julyList.length, 0, 0)
+    expect(r.excludedAutoMonitor).toBe(35)
+    expect(r.excludedAutoMonitorMin).toBe(37109) // the paperwork sum, returned rather than re-derived
+    const clean = aggregateIncidentDurations(REAL_DURATIONS.map(real), 5, 0, 0)
+    expect(clean.excludedAutoMonitor).toBe(0)
+    expect(clean.excludedAutoMonitorMin).toBe(0)
+  })
+
+  it('excludes an entry that is BOTH autoMonitor and a #1021 advisory exactly once', () => {
+    // The two conditions are OR-ed; countedCount must not be double-decremented or the avg divisor drifts.
+    const both = [
+      { ...auto(4323, 99), title: 'Usage Limits Depleting Faster Than Expected' },
+      ...REAL_DURATIONS.map(real),
+    ]
+    const r = aggregateIncidentDurations(both, both.length, 0, 0)
+    expect(r.totalMin).toBe(47)
+    expect(r.countedCount).toBe(5)
+  })
+
+  it('agrees with the Score on the autoMonitor dimension — no counted entry is flagged', () => {
+    // Pins the ONE dimension this issue is about: `isReliabilityIncident` (score.ts) and this
+    // aggregation must never disagree about a flagged entry. They deliberately still differ on
+    // `impact == null` (informational entries count here, not in the Score) — see the loop's comment —
+    // so this asserts the shared rule, not full parity.
+    // Reconstructs only the flag-relevant half of what buildMonthlyArchive hands the Score (it also
+    // title-nulls the impact per #1021, immaterial here since the predicate short-circuits on the flag).
+    // This is the only assertion in the suite that fails if score.ts stops keying on `autoMonitor`.
+    for (const e of julyList) {
+      if (e.autoMonitor) expect(isReliabilityIncident({ impact: e.impact ?? null, autoMonitor: e.autoMonitor })).toBe(false)
+    }
   })
 })
 
@@ -1547,6 +1655,119 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.deepgram.totalDowntimeMin).toBe(2733)   // 45h 33m — not the accumulator's 10602
     expect(archive.services.deepgram.longestIncidentMin).toBe(1620) // 27h — not 8470
     expect(archive.services.deepgram.avgResolutionMin).toBe(Math.round(2733 / 6)) // 456m, from the real total
+  })
+
+  it('#1210 — the archive BUILD excludes autoMonitor entries end-to-end (not just the pure fn)', async () => {
+    // The pure-fn tests above cannot see the wiring: buildMonthlyArchive feeds `aggregateIncidentDurations`
+    // the list AFTER `stripInternalFields`, and consumes `countedCount` as the avg divisor. A strip that
+    // dropped the flag, or a divisor swapped back to `incSvc.count`, leaves every pure-fn test green while
+    // this archive silently returns to 619h16m / 1m. Real Kimi 2026-07 shape.
+    const CLOSE = '2026-07-12T13:05:15.947+08:00'
+    const autos = [
+      2084, 2024, 1964, 1904, 1844, 1784, 1724, 1664, 1604, 1542, 1481, 1421, 1361, 1301, 1241,
+      1181, 1121, 1061, 1001, 939, 879, 819, 759, 699, 637, 577, 517, 457, 397, 337, 277, 217, 157, 97, 37,
+    ].map((durationMin, i) => ({
+      id: `auto-${i}`, title: 'Agentic model error alert',
+      startedAt: `2026-07-11T${String(2 + i).padStart(2, '0')}:22:14.668+08:00`, resolvedAt: CLOSE,
+      durationMin, finalStatus: 'resolved' as const, impact: 'critical' as const, autoMonitor: true,
+    }))
+    const reals = [5, 5, 1, 17, 19].map((durationMin, i) => ({
+      id: `real-${i}`, title: 'Elevated search request error rate',
+      startedAt: `2026-07-0${i + 1}T09:17:12.151+08:00`, resolvedAt: `2026-07-0${i + 1}T09:36:12.151+08:00`,
+      durationMin, finalStatus: 'resolved' as const, impact: 'critical' as const,
+    }))
+    const detail = [...autos, ...reals]
+    const kv = {
+      get: async (key: string) => key === 'incidents:monthly:2026-07'
+        ? JSON.stringify({
+            lastUpdated: '2026-07-31T09:00:00Z',
+            services: {
+              kimi: {
+                count: 40, totalMinutes: 37156, longestMinutes: 2084,
+                dates: [], incidentIds: detail.map(e => e.id),
+                durations: Object.fromEntries(detail.map(e => [e.id, e.durationMin])),
+                incidents: detail,
+              },
+            },
+          })
+        : null,
+      put: async () => {}, delete: async () => {}, list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+    // gemini rides in via scoreData with no incident data at all — the ordinary quiet service, which is
+    // how ~40 of 45 rows look in a real month.
+    const archive = await buildMonthlyArchive(kv, 2026, 7, [{ id: 'gemini', aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high' }])
+    const kimi = archive.services.kimi
+
+    expect(kimi.totalDowntimeMin).toBe(47)      // NOT 37156
+    expect(kimi.longestIncidentMin).toBe(19)    // NOT 2084
+    expect(kimi.avgResolutionMin).toBe(9)       // 47/5 — NOT 47/40 = 1, which the wrong divisor gives
+    // The DELIBERATE asymmetry, pinned on purpose so a future reader doesn't "fix" it: the count is the
+    // full population, the downtime figures are not, and `countedIncidents` is what says so.
+    expect(kimi.incidents).toBe(40)
+    expect(kimi.countedIncidents).toBe(5)
+    // A QUIET service in the same archive must read 0, not null: `countedIncidents` is the divisor, and
+    // an overloaded null (quiet vs truncated vs no-detail) is what made the first version of this field
+    // unreadable — ~40 of 45 services are incident-free in a typical month, so the common case decides
+    // whether the field means anything at all.
+    const quiet = archive.services.gemini
+    expect(quiet.incidents).toBe(0)
+    expect(quiet.countedIncidents).toBe(0)
+    expect(quiet.totalDowntimeMin).toBeNull()
+    // The flag must survive stripInternalFields into the archived detail — that is the strip-list guard.
+    expect(kimi.incidentList!.filter(e => e.autoMonitor)).toHaveLength(35)
+  })
+
+  it('#1210 — warns EXCLUDED when it drops entries, and stays silent on a clean month', async () => {
+    // Same discipline resolveArchiveOfficialUptime's warn tests use: a diagnostic nothing asserts is a
+    // claim with no mechanism. Deleting either warn block left all 4069 tests green before this.
+    const detail = [
+      { id: 'a1', title: 'Agentic model error alert', startedAt: '2026-07-11T02:22:00.000Z', resolvedAt: '2026-07-12T13:05:00.000Z', durationMin: 2084, finalStatus: 'resolved' as const, impact: 'critical' as const, autoMonitor: true },
+      { id: 'r1', title: 'Elevated search request error rate', startedAt: '2026-07-05T09:17:00.000Z', resolvedAt: '2026-07-05T09:36:00.000Z', durationMin: 19, finalStatus: 'resolved' as const, impact: 'critical' as const },
+    ]
+    const mk = (incidents: typeof detail, count: number) => ({
+      get: async (key: string) => key === 'incidents:monthly:2026-07'
+        ? JSON.stringify({ lastUpdated: '', services: { kimi: { count, totalMinutes: 2103, longestMinutes: 2084, dates: [], incidentIds: incidents.map(e => e.id), durations: {}, incidents } } })
+        : null,
+      put: async () => {}, delete: async () => {}, list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace)
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    warn.mockClear() // earlier tests in this file spy console.warn without restoring; spyOn returns that same mock, calls and all
+    await buildMonthlyArchive(mk(detail, 2), 2026, 7)
+    const excluded = warn.mock.calls.map(c => String(c[0])).filter(m => m.includes('#1210-EXCLUDED'))
+    expect(excluded).toHaveLength(1)
+    expect(excluded[0]).toContain('excluded 1/2 autoMonitor entries (2084m of paperwork duration)')
+    warn.mockRestore()
+
+    // A month with nothing flagged must not warn at all — otherwise the signal is noise.
+    const warn2 = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    warn2.mockClear()
+    await buildMonthlyArchive(mk([detail[1]], 1), 2026, 7)
+    expect(warn2.mock.calls.map(c => String(c[0])).filter(m => m.includes('#1210-'))).toHaveLength(0)
+    warn2.mockRestore()
+  })
+
+  it('#1210 — warns TRUNCATED when the list is capped, even though no flag survives to prove it', async () => {
+    // Truncation splices OLDEST first and an auto-monitor burst is contiguous, so the retained rows can
+    // carry no flag at all. Keying the warn on surviving flags would miss exactly this case; keying it
+    // on the branch does not. The retained row here is deliberately unflagged.
+    const detail = [{ id: 'r1', title: 'Elevated search request error rate', startedAt: '2026-07-28T09:17:00.000Z', resolvedAt: '2026-07-28T09:36:00.000Z', durationMin: 19, finalStatus: 'resolved' as const, impact: 'critical' as const }]
+    const kv = {
+      get: async (key: string) => key === 'incidents:monthly:2026-07'
+        ? JSON.stringify({ lastUpdated: '', services: { kimi: { count: 260, totalMinutes: 37156, longestMinutes: 2084, dates: [], incidentIds: ['r1'], durations: {}, incidents: detail } } })
+        : null,
+      put: async () => {}, delete: async () => {}, list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    warn.mockClear()
+    const archive = await buildMonthlyArchive(kv, 2026, 7)
+    const msgs = warn.mock.calls.map(c => String(c[0])).filter(m => m.includes('#1210-TRUNCATED'))
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]).toContain('1 of 260 detail rows retained')
+    // …and the aggregates really are the unfiltered accumulator on that branch.
+    expect(archive.services.kimi.totalDowntimeMin).toBe(37156)
+    expect(archive.services.kimi.countedIncidents).toBe(260)
+    warn.mockRestore()
   })
 
   it('handles empty KV (no data)', async () => {
@@ -2353,9 +2574,14 @@ describe('accumulateMonthlyIncidents — phantom self-heal (#975)', () => {
 // ── #975 internal bookkeeping must not leak to public payloads ───────
 
 describe('stripInternalFields (#975)', () => {
+  // #1210 — `autoMonitor` MUST be in this fixture. Without it the allowlist test below passes
+  // vacuously, and its "add a field here only if the reports site may see it" comment then reads as an
+  // invitation to strip the flag — which would silently revert #1210 (buildMonthlyArchive feeds the
+  // STRIPPED list to aggregateIncidentDurations, so a stripped flag stops excluding and Kimi's July
+  // returns to 619h16m with every test still green).
   const withCounter: MonthlyIncidentEntry = {
     id: 'p1', title: 'x', startedAt: '2026-07-09T13:34:38.481Z', resolvedAt: null,
-    durationMin: 0, finalStatus: 'monitoring', impact: 'major', missedRuns: 2,
+    durationMin: 0, finalStatus: 'monitoring', impact: 'major', autoMonitor: true, missedRuns: 2,
   }
 
   it('drops missedRuns and preserves everything else', () => {
@@ -2363,15 +2589,20 @@ describe('stripInternalFields (#975)', () => {
     expect(out).not.toHaveProperty('missedRuns')
     expect(out).toEqual({
       id: 'p1', title: 'x', startedAt: '2026-07-09T13:34:38.481Z', resolvedAt: null,
-      durationMin: 0, finalStatus: 'monitoring', impact: 'major',
+      durationMin: 0, finalStatus: 'monitoring', impact: 'major', autoMonitor: true,
     })
+  })
+
+  it('#1210 — preserves autoMonitor: the downtime exclusion reads it off the STRIPPED entry', () => {
+    // The one assertion that fails if a future maintainer adds `autoMonitor` to the strip list.
+    expect(stripInternalFields(withCounter).autoMonitor).toBe(true)
   })
 
   // Guards the whole class, not just today's one field: `stripInternalFields` hard-codes the fields it
   // drops, so a future internal-only addition to MonthlyIncidentEntry would leak silently. This pins
   // the PUBLIC key set of the emitted payload — add a field here only if the reports site may see it.
   it('the emitted public entry exposes ONLY the allowlisted keys', () => {
-    const PUBLIC_KEYS = ['id', 'title', 'startedAt', 'resolvedAt', 'durationMin', 'finalStatus', 'impact']
+    const PUBLIC_KEYS = ['id', 'title', 'startedAt', 'resolvedAt', 'durationMin', 'finalStatus', 'impact', 'autoMonitor']
     const acc: MonthlyIncidents = {
       lastUpdated: '', services: { pinecone: {
         count: 1, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: ['p1'],
