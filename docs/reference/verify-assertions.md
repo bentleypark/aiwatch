@@ -95,6 +95,7 @@ both scanners — the live `pairVerifyAssertions` and its exported twin `parseVe
 |---|---|---|
 | `- [x] verify-after 2026-01-01` | ✅ | done item; ticking the box is the SSOT "verified" action (#586) |
 | `> … verify-after 2026-01-01 …` | ✅ | **blockquote = retrospective narrative, never a live action item** (#966) |
+| `` …the #1153 `verify-after 2026-01-01` box… `` | ✅ (that occurrence) | **backtick-wrapped = a citation of another issue's box** (#1215) |
 | `- [ ] verify-after 2026-01-01` | ❌ fires | the canonical open reminder |
 | `Open: verify-after 2026-01-01` | ❌ fires | non-quoted prose is a legitimate reminder (#541) |
 | `-[x] verify-after 2026-01-01` | ❌ fires | GFM renders this as literal text, not a task |
@@ -118,6 +119,75 @@ Two deliberate edges, both pinned by tests:
 - **The guard is blockquote-*line*-only.** A `verify-after <date>` token inside a fenced code block or
   a markdown table row still fires, since neither line starts with `>`. Left as-is: real issue bodies
   don't do this, and over-broadening the guard risks swallowing genuine reminders.
+
+#### Backtick-quoted citations (#1215)
+
+A second markdown convention QUOTES the token the same way a blockquote does, without `>`: wrapping it
+in inline code. #1189's own evidence section cites #1153's already-closed box in ordinary prose —
+
+```
+Found while reading the #1153 `verify-after 2026-07-30` box against production
+```
+
+— which is not a checkbox and not inside a `>`, so the blockquote rule alone let it through. #1189
+wore `verify-overdue` continuously from 2026-08-03 (its citation's own due date) until this fix, off a
+box that belongs to a different, already-closed issue. Scanned against the live board: every
+backtick-wrapped occurrence not inside a blockquote was this shape (3 found — #1189 ×2, #1089 ×1), and
+every genuine checkbox uses the canonical bold `**verify-after DATE**` form (ship-issue SKILL.md §8),
+never backticks — a clean discriminator, zero counterexamples either direction.
+
+**Unlike the blockquote rule, this is checked per *occurrence*, not per line** — `isBacktickQuotedOccurrence(line, index)`,
+not `isSuppressedReminderLine`. A checkbox line can legitimately carry its own real, bold box AND cite a
+*different* issue's date in backticks in the same sentence; the live board has exactly this shape
+(aiwatch-reports#76: `` - [ ] **verify-after 2026-08-03** — regenerate… Depends on aiwatch#1002's `verify-after 2026-08-02` archive check ``).
+Gating the whole line on "contains a backtick-quoted verify-after anywhere" — the first draft of this
+fix — would have silently dropped that box; caught only by running `--dry-run` against the live board
+before shipping, not by the unit tests written against synthetic bodies.
+
+**A second, subtler bug on top of that** (caught in PR review, by two independent agents, before
+merge): `VERIFY_RE`'s own trailing note capture (`([^\n]*)`) is greedy, so a naive `line.matchAll` on a
+clone of that pattern returns **exactly one match per line, always** — the first match's note swallows
+everything after it, including a second `verify-after` token's own text, so that second occurrence is
+never surfaced as a match of its own. On a line where the backtick-quoted citation comes **first**
+(the reverse of the aiwatch-reports#76 order), that silently dropped the real, later box entirely —
+not merely misclassified it, exactly the failure this whole system exists to prevent. The fix is
+`liveVerifyOccurrences(line)`, built on a **token-only** global regex (date only, no note capture) so
+occurrences are found regardless of order; each match's own note is then derived by slicing `line` from
+the match's end. `pairVerifyAssertions`, `parseVerifyAfter`, `countOpenVerifyAfter`,
+`findBacktickQuotedVerifyBoxes`, and the body-drift guard's verify-after exclusion are all built on this
+one function, so they cannot disagree on what counts as a live occurrence.
+
+The dangerous-shape twin (`findBacktickQuotedVerifyBoxes`, mirroring `findQuotedVerifyAfterBoxes`) warns
+a checkbox line only when it has verify-after occurrences but **none** of them are live — i.e. exactly
+the condition under which `pairVerifyAssertions` would parse nothing off that line. A checkbox that
+merely cites a different date in backticks alongside its own real (live) one still has a live occurrence
+and is correctly not flagged.
+
+**`countOpenVerifyAfter` and the body-drift guard had to move onto the same function**, not just the two
+parsers. Before this, a checkbox whose only "verify-after" text was a backtick citation still counted as
+an open verify-after line (`OPEN_BOX_RE.test(l) && VERIFY_RE.test(l)`, presence-only) — so
+`planIssueAutoVerify`'s `dropLabel` could never fire (the counter never reached zero) even after the
+real, separate box was ticked, pinning `verify-blocked` open forever with nothing left to ping or
+auto-verify. `findBodyDrift`'s verify-after exclusion had the same blind spot from the other side: it
+treated the citation-only box as "open-until-verified, not drift," so it was invisible to *both* guards
+at once — stuck and unflagged. Both now exclude/count on `liveVerifyOccurrences(line).length`.
+
+`pairVerifyAssertions` and `parseVerifyAfter` take only the FIRST live occurrence per line, both — a
+round-2 review finding: `parseVerifyAfter` originally looped over every live occurrence (the `matchAll`
+loop it already had, now correctly reachable past the greedy-capture fix above), which is a real
+divergence from its twin on a line with two genuine dates. Pinned to `[0]` on both, since
+`parseVerifyAfter` has no production caller (`pairVerifyAssertions` is what `main()` drives) and this
+was the historical behavior anyway — before #1215, the greedy capture already collapsed any such line to
+one hit in practice, so nothing that depended on multiple hits per line was ever exercised.
+
+**The backtick-closing check is deliberately loose**, not exact-adjacent: `isBacktickQuotedOccurrence`
+requires a backtick immediately BEFORE the match (that's what protects a real bold box — it is never
+preceded by a backtick, so an unrelated stray backtick earlier in the line can never falsely suppress
+it) but only requires SOME backtick later on the line, not one immediately after the date. A tighter,
+exact-adjacent close check (the first draft) misses a citation whose code span also wraps its own note
+(`` `verify-after 2026-08-02 archive check` `` — the same failure this fix exists to close, under an
+alternate spelling); the live board's three real occurrences all use the tight form, but the loose form
+covers both without reopening the false-suppression risk the open-side anchor exists to close.
 
 ### Label lifecycle
 
@@ -248,6 +318,11 @@ changed.
 - **Blockquote suppression + `verify-overdue` self-healing (#966)** — the rules and the label lifecycle are
   in [Which lines are scanned](#which-lines-are-scanned-966) and the label table above; the pure fns are
   `isSuppressedReminderLine` (shared by BOTH scanners), `findQuotedVerifyAfterBoxes`, `findStaleOverdueLabels`.
+- **Backtick-quoted citation suppression (#1215)** — the second quoting convention #966 didn't cover; see
+  [Backtick-quoted citations](#backtick-quoted-citations-1215) above. Pure fns: `isBacktickQuotedOccurrence`
+  (per-occurrence), `liveVerifyOccurrences` (the shared per-line scanner every consumer is built on — both
+  parsers, `countOpenVerifyAfter`, the body-drift guard's exclusion, and the dangerous-shape twin
+  `findBacktickQuotedVerifyBoxes`).
 
 Follow-ups tracked in #873: `ship-issue`/`issue-triage`/`adding-a-service` convention notes (done),
 an optional HTML/text-body assertion mode, and a Tier-B weekly "suggest-don't-auto-close" digest for

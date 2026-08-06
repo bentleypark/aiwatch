@@ -14,23 +14,20 @@
 import { execFileSync } from 'node:child_process'
 // #873 — Tier-A auto-verify: evaluate a machine-checkable `assert:` clause on a verify-after line and
 // close the loop (tick + comment + drop verify-blocked) instead of only pinging. See verify-assertions.mjs.
-import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate, isSuppressedReminderLine, findQuotedVerifyAfterBoxes } from './verify-assertions.mjs'
+import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate, isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, liveVerifyOccurrences } from './verify-assertions.mjs'
 
-// Matches a `verify-after 2026-09-01` token anywhere on a line; captures the date + the rest of the
-// line as a free-form note. Case-insensitive; `after` may be followed by space, `:` or `-`.
-const VERIFY_RE = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})([^\n]*)/gi
-
-// Which lines a verify-after scan must SKIP (checked box `- [x]` / blockquote `>`) now lives in
+// Which lines a verify-after scan must SKIP (checked box `- [x]` / blockquote `>`) lives in
 // verify-assertions.mjs as `isSuppressedReminderLine` — one definition shared by both scanners (#966).
-// Unchecked boxes (`- [ ]`) and non-quoted prose still fire.
+// Unchecked boxes (`- [ ]`) and non-quoted prose still fire. A backtick-quoted OCCURRENCE (#1215) is
+// deliberately NOT part of that line-level gate — it is not a whole-line property (a line can carry
+// both its own real box and a citation of a different date) — so it is filtered per-match instead, via
+// `liveVerifyOccurrences` (verify-assertions.mjs), everywhere below that used to scan with VERIFY_RE.
 
 // An UNCHECKED markdown task-list marker at the start of a line (`- [ ]` / `* [ ]` / `+ [ ]`, leading
 // indent ok). Used by the body-drift guard below. The marker→`[` space is REQUIRED (`\s+`), mirroring
 // the checked-box marker inside `isSuppressedReminderLine` (verify-assertions.mjs), so `-[ ]` (GFM
 // literal text, not a task) is not treated as a checkbox.
 const UNCHECKED_BOX_RE = /^\s*[-*+]\s+\[ \]/
-// A verify-after line is legitimately unchecked until its production signal lands, so it is NOT drift.
-const VERIFY_AFTER_LINE_RE = /verify-after[\s:-]+\d{4}-\d{2}-\d{2}/i
 
 /**
  * Body-drift guard (issue-body-sync backstop). A `verify-blocked` issue means "code shipped; only a
@@ -38,7 +35,12 @@ const VERIFY_AFTER_LINE_RE = /verify-after[\s:-]+\d{4}-\d{2}-\d{2}/i
  * the only lines still `- [ ]` should be the verify-after line(s). Any OTHER unchecked box means the
  * body was never synced at merge (the late/no-gate/other-system step) or the label is wrong. This
  * returns the count + a few samples of those stray unchecked boxes so the caller can flag the issue.
- * Pure + unit-tested. verify-after lines and checked boxes are excluded; an empty body → no drift.
+ * Pure + unit-tested. LIVE verify-after lines and checked boxes are excluded; an empty body → no drift.
+ * A box whose only "verify-after" text is a backtick-quoted citation (#1215) is NOT excluded — it has
+ * no live occurrence (`liveVerifyOccurrences` empty), so `pairVerifyAssertions` would never parse it as
+ * a reminder either, and treating it as open-until-verified would leave `verify-blocked` pinned open
+ * forever with nothing left to ping, auto-verify, or flag as drift (the exact silent-stuck state this
+ * guard exists to catch).
  * Known limitation (accepted): the scan is line-based and NOT fence-aware, so a `- [ ]` inside a
  * ```fenced``` checklist template/example counts too — tolerable here (label-only, self-heals, and the
  * verify-blocked bucket rarely embeds template checklists).
@@ -48,7 +50,7 @@ export function findBodyDrift(body) {
   const items = []
   for (const line of body.split('\n')) {
     if (!UNCHECKED_BOX_RE.test(line)) continue
-    if (VERIFY_AFTER_LINE_RE.test(line)) continue // open-until-verified, not drift
+    if (liveVerifyOccurrences(line).length > 0) continue // open-until-verified, not drift
     items.push(line.replace(UNCHECKED_BOX_RE, '').replace(/\*+/g, '').trim())
   }
   return { count: items.length, samples: items.slice(0, 5) }
@@ -327,19 +329,25 @@ export function isValidIsoDate(s) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
 }
 
-/** Extract every {date, note} pair from an issue body. Calendar-invalid dates are skipped, as are
- *  CHECKED checkbox (`- [x]`) and BLOCKQUOTE (`>`) lines — see isSuppressedReminderLine. */
+/** Extract the {date, note} pair from every LINE of an issue body that has one — one hit per line, the
+ *  first LIVE occurrence, matching `pairVerifyAssertions` on occurrence selection and note extraction
+ *  (round-2 review: they must not disagree on how many hits one line contributes, only on which
+ *  occurrence is live) — except that calendar-INVALID dates are skipped HERE but retained by
+ *  `pairVerifyAssertions`, deliberately: `findInvalidVerifyAfterDates` is built on the latter and needs
+ *  the invalid ones to warn about them. CHECKED checkbox (`- [x]`) and BLOCKQUOTE (`>`) lines are
+ *  skipped — see isSuppressedReminderLine — and a backtick-quoted first occurrence (#1215, see
+ *  liveVerifyOccurrences) — checked per match, in EITHER order, so a legitimate match earlier or later
+ *  on the same line still fires and is not swallowed by a citation preceding it. */
 export function parseVerifyAfter(body) {
   const out = []
   if (!body) return out
   // Scan line-by-line so a per-line checkbox/blockquote can suppress that line's verify-after.
   for (const line of body.split('\n')) {
     if (isSuppressedReminderLine(line)) continue
-    for (const m of line.matchAll(VERIFY_RE)) {
-      if (!isValidIsoDate(m[1])) continue
-      const note = m[2].replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
-      out.push({ date: m[1], note })
-    }
+    const m = liveVerifyOccurrences(line)[0]
+    if (!m || !isValidIsoDate(m[1])) continue
+    const note = line.slice(m.index + m[0].length).replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
+    out.push({ date: m[1], note })
   }
   return out
 }
@@ -615,6 +623,9 @@ async function main() {
   for (const iss of considered) {
     for (const q of findQuotedVerifyAfterBoxes(iss.body)) {
       console.warn(`[verify-reminders] ${displayRef(iss.repo, iss.number)}: an UNCHECKED verify-after box is nested in a blockquote (line ${q.lineIndex + 1}) — it will NEVER fire. Unquote it: ${truncate(q.text, 100)}`)
+    }
+    for (const q of findBacktickQuotedVerifyBoxes(iss.body)) {
+      console.warn(`[verify-reminders] ${displayRef(iss.repo, iss.number)}: an UNCHECKED verify-after box has its date wrapped in backticks (line ${q.lineIndex + 1}) — it will NEVER fire. Use the canonical bold form instead: ${truncate(q.text, 100)}`)
     }
     for (const bad of findInvalidVerifyAfterDates(iss.body)) {
       console.warn(`[verify-reminders] ${displayRef(iss.repo, iss.number)}: verify-after date '${bad.date}' (line ${bad.lineIndex + 1}) is not a valid calendar date — it will never ping. Fix the date.`)

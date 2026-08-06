@@ -166,10 +166,75 @@ export function evaluateAssertion(assertion, json) {
 // A CHECKED task marker — a done item is skipped.
 const CHECKED_BOX_RE = /^\s*[-*+]\s+\[[xX]\]/
 
+// An UNCHECKED task marker (`- [ ]` / `* [ ]` / `+ [ ]`) — the one open-box shape, shared by every
+// consumer that needs to anchor on it (previously two byte-identical copies, `OPEN_BOX_ANCHORED_RE` and
+// `OPEN_BOX_RE`, drifted apart in name only — round-2 review).
+const OPEN_BOX_RE = /^\s*[-*+]\s+\[ \]/
+
 // A markdown BLOCKQUOTE line (`> …`, leading indent ok).
 const BLOCKQUOTE_RE = /^\s*>/
 
-const VERIFY_RE = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})([^\n]*)/i
+// Presence-only (no capture groups needed — its one remaining use is a boolean `.test`, in
+// findQuotedVerifyAfterBoxes below). Deliberately non-global: a global regex under `.test` is
+// `lastIndex`-stateful across calls, which a module-level constant must never be.
+const VERIFY_RE = /verify-after[\s:-]+\d{4}-\d{2}-\d{2}/i
+// A TOKEN-only global regex — date captured, NO trailing note capture — so callers can enumerate every
+// occurrence on a line (matchAll) instead of only the first. The original approach (a global clone of a
+// pattern with a greedy trailing `([^\n]*)` note capture) is greedy, so on a line with a second
+// "verify-after" later, matchAll on such a clone returns exactly ONE match: the first match's note
+// swallows the rest of the line — including the second occurrence's own text — so it is never surfaced
+// as a match of its own (#1215 review finding). That silently drops a live reminder whenever a
+// backtick-quoted citation happens to come FIRST on a line that also carries a real box, not merely
+// misclassifies it. A token-only pattern has no such tail to be greedy with, so every occurrence is
+// found regardless of order; each match's own trailing note is then derived by
+// slicing `line` from the match's end, which is exactly what VERIFY_RE's group 2 was doing anyway.
+const VERIFY_TOKEN_RE_G = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})/gi
+
+/**
+ * True when the SPECIFIC `verify-after <date>` occurrence starting at `index` on `line` is wrapped in
+ * inline code (`` `verify-after 2026-09-01` ``) — a citation of another issue's box, not a live
+ * directive here (#1215). This is deliberately a PER-OCCURRENCE check, not a per-line one: a line can
+ * legitimately carry both its own real box (bold, `**verify-after DATE**`) and a backtick-quoted
+ * citation of a DIFFERENT issue's date in the same sentence — the real board has exactly this shape
+ * (aiwatch-reports#76: "Depends on aiwatch#1002's `verify-after 2026-08-02` archive check" trailing
+ * its own `- [ ] **verify-after 2026-08-03**"). Suppressing by whole-line presence would have silently
+ * dropped that box — caught only by running --dry-run against the live board before shipping, not by
+ * the unit tests, which is why the check is bound to `index`, not to `line` as a whole.
+ *
+ * Requires a backtick immediately before the match — anchoring the OPEN side is what protects a real
+ * box: a bold `**verify-after DATE**` box is never preceded by a backtick, so an unrelated stray
+ * backtick earlier in the line can never falsely suppress it, regardless of the CLOSE-side check below.
+ *
+ * The close side only requires SOME backtick later on the line, not one immediately after the date —
+ * round-2 review found the immediately-after form misses a citation whose code span also wraps its own
+ * trailing note (`` `verify-after 2026-08-02 archive check` `` — the same failure this whole check
+ * exists to close, under a plausible alternate spelling). This widening is safe SPECIFICALLY because
+ * the open-side anchor above is the one load-bearing guard against false suppression, not because
+ * loosening a check "in one direction" is inherently safe — that reasoning would equally justify
+ * loosening the open side, which is exactly the false-suppression bug this function exists to avoid
+ * (round-3 review: an early draft of this function's own test suite loosened the open side by
+ * accident and nothing caught it, because the test's only backtick was on the close side).
+ */
+export function isBacktickQuotedOccurrence(line, index) {
+  if (line[index - 1] !== '`') return false
+  return line.indexOf('`', index) !== -1
+}
+
+/**
+ * Every verify-after occurrence on a line that is NOT backtick-quoted (#1215), as raw regex match
+ * objects (`.index` absolute, `[0]` the "verify-after <date>" token). Built on the token-only global
+ * regex specifically so a citation earlier in the line can never swallow a later real occurrence — see
+ * VERIFY_TOKEN_RE_G's docstring for the greedy-capture failure this avoids. Single source of truth for
+ * "does this line still fire, and with what date" — used by `pairVerifyAssertions`, the exported
+ * `parseVerifyAfter` twin, `countOpenVerifyAfter`, `findBacktickQuotedVerifyBoxes`, and the body-drift
+ * guard's verify-after exclusion, so all five agree on what counts as live. `findQuotedVerifyAfterBoxes`
+ * (the blockquote-nested-checkbox detector) is deliberately NOT a sixth consumer — it must flag a
+ * blockquoted box whether or not its date is ALSO backtick-quoted, since the blockquote is already
+ * fatal on its own; narrowing it to "live" occurrences only would under-report. Pure — no I/O.
+ */
+export function liveVerifyOccurrences(line) {
+  return [...line.matchAll(VERIFY_TOKEN_RE_G)].filter((m) => !isBacktickQuotedOccurrence(line, m.index))
+}
 
 /**
  * True when a line must NOT be scanned for a `verify-after` reminder — a done item (`- [x]`) or a
@@ -183,6 +248,10 @@ const VERIFY_RE = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})([^\n]*)/i
  * #873 auto-verify's `tickedKeys` suppression is keyed by the *checkbox* lineIndex — it cannot reach a
  * prose line. So it re-fired daily until the issue closed. Full history: docs/reference/verify-assertions.md.
  *
+ * A backtick-quoted citation (#1215, see isBacktickQuotedOccurrence) is deliberately NOT handled here —
+ * unlike a checked box or a blockquote, it is not a whole-line property, so it is filtered per-match by
+ * the two callers instead of gating the whole line (see the aiwatch-reports#76 shape in that docstring).
+ *
  * Non-quoted prose still fires — a `verify-after` written outside a checkbox is a legitimate reminder.
  */
 export function isSuppressedReminderLine(line) {
@@ -191,7 +260,6 @@ export function isSuppressedReminderLine(line) {
 
 // Strips one or more leading `>` quote markers so the quoted line's own markdown can be inspected.
 const QUOTE_STRIP_RE = /^(\s*>)+\s?/
-const OPEN_BOX_ANCHORED_RE = /^\s*[-*+]\s+\[ \]/
 
 /**
  * The ONE dangerous shape the blockquote rule suppresses: an UNCHECKED `verify-after` checkbox nested
@@ -208,7 +276,31 @@ export function findQuotedVerifyAfterBoxes(body) {
   const out = []
   body.split('\n').forEach((line, lineIndex) => {
     if (!BLOCKQUOTE_RE.test(line) || !VERIFY_RE.test(line)) return
-    if (OPEN_BOX_ANCHORED_RE.test(line.replace(QUOTE_STRIP_RE, ''))) out.push({ lineIndex, text: line.trim() })
+    if (OPEN_BOX_RE.test(line.replace(QUOTE_STRIP_RE, ''))) out.push({ lineIndex, text: line.trim() })
+  })
+  return out
+}
+
+/**
+ * The backtick-quoting twin of findQuotedVerifyAfterBoxes (#1215): an OPEN `verify-after` checkbox
+ * whose OWN date got accidentally wrapped in inline code (`` - [ ] `verify-after 2026-09-01` — … ``)
+ * would be silently suppressed forever — the same failure #966 built a warning for on the blockquote
+ * side. Flags a checkbox line only when it has AT LEAST ONE verify-after occurrence AND NONE of them
+ * are live (`liveVerifyOccurrences` empty) — i.e. exactly the condition under which
+ * `pairVerifyAssertions` would find nothing on this line. A checkbox that merely CITES a different
+ * issue's backtick-quoted date alongside its own real (live) one — a real, legitimate shape, see
+ * isBacktickQuotedOccurrence's docstring — still has a live occurrence and is correctly not flagged.
+ * Returns [{lineIndex, text}] so it can feed the same silent-drop warning loop. Pure — no I/O.
+ */
+export function findBacktickQuotedVerifyBoxes(body) {
+  if (!body) return []
+  const out = []
+  body.split('\n').forEach((line, lineIndex) => {
+    if (!OPEN_BOX_RE.test(line)) return
+    const all = [...line.matchAll(VERIFY_TOKEN_RE_G)]
+    if (all.length > 0 && all.every((m) => isBacktickQuotedOccurrence(line, m.index))) {
+      out.push({ lineIndex, text: line.trim() })
+    }
   })
   return out
 }
@@ -238,9 +330,12 @@ export function pairVerifyAssertions(body) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (isSuppressedReminderLine(line)) continue
-    const v = VERIFY_RE.exec(line)
+    // First LIVE occurrence (#1215) — not simply the first match, since a line can legitimately carry
+    // its own real box AND cite a different date in backticks in the same sentence, in EITHER order
+    // (aiwatch-reports#76; see liveVerifyOccurrences / isBacktickQuotedOccurrence).
+    const v = liveVerifyOccurrences(line)[0]
     if (!v) continue
-    const note = v[2].replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
+    const note = line.slice(v.index + v[0].length).replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
     let assertion = null
     let durable = null
     for (let j = i + 1; j < lines.length; j++) {
@@ -269,18 +364,22 @@ export function tickBox(body, lineIndex) {
   return lines.join('\n')
 }
 
-const OPEN_BOX_RE = /^\s*[-*+]\s+\[ \]/
-
 /** Count UNCHECKED markdown task boxes (`- [ ]`) in a body — 0 means the issue is fully checked. */
 export function countOpenBoxes(body) {
   if (!body) return 0
   return body.split('\n').filter((l) => OPEN_BOX_RE.test(l)).length
 }
 
-/** Count UNCHECKED `verify-after` lines specifically (an open box whose line carries a verify-after). */
+/**
+ * Count UNCHECKED `verify-after` lines specifically (an open box whose line carries a LIVE
+ * verify-after — #1215: a box whose only occurrence is a backtick-quoted citation does not count,
+ * matching what `pairVerifyAssertions` would actually parse off that line). Load-bearing for
+ * `planIssueAutoVerify`'s `dropLabel`: counting a citation-only box here would pin `verify-blocked`
+ * open forever with nothing left to ping or auto-verify it.
+ */
 export function countOpenVerifyAfter(body) {
   if (!body) return 0
-  return body.split('\n').filter((l) => OPEN_BOX_RE.test(l) && VERIFY_RE.test(l)).length
+  return body.split('\n').filter((l) => OPEN_BOX_RE.test(l) && liveVerifyOccurrences(l).length > 0).length
 }
 
 /**

@@ -5,7 +5,8 @@ import {
   parseAssertionLine, parseLiteral, parseSelector, evalSelector, compare,
   evaluateAssertion, isAllowedUrl, resolveSource, pairVerifyAssertions, tickBox, runAssertion,
   truncate, countOpenBoxes, countOpenVerifyAfter, planIssueAutoVerify, DEFAULT_ASSERT_BASE,
-  isSuppressedReminderLine, findQuotedVerifyAfterBoxes,
+  isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, isBacktickQuotedOccurrence,
+  liveVerifyOccurrences,
 } from './verify-assertions.mjs'
 
 test('parseAssertionLine — valid GET + selector + quoted expected', () => {
@@ -197,7 +198,7 @@ test('findQuotedVerifyAfterBoxes — nested quote markers + empty bodies (#966)'
   assert.deepEqual(findQuotedVerifyAfterBoxes('> just a quote, no token'), [])
 })
 
-test('isSuppressedReminderLine — checked boxes and blockquotes only (#966)', () => {
+test('isSuppressedReminderLine — checked boxes and blockquotes only, unchanged by #1215', () => {
   assert.equal(isSuppressedReminderLine('- [x] verify-after 2026-01-01'), true)
   assert.equal(isSuppressedReminderLine('   * [X] verify-after 2026-01-01'), true)
   assert.equal(isSuppressedReminderLine('> quoted'), true)
@@ -206,6 +207,95 @@ test('isSuppressedReminderLine — checked boxes and blockquotes only (#966)', (
   assert.equal(isSuppressedReminderLine('plain prose verify-after 2026-01-01'), false)
   // GFM renders `-[x]` (no space) as literal text, not a task — must still fire (#586 edge, retained).
   assert.equal(isSuppressedReminderLine('-[x] verify-after 2026-01-01'), false)
+  // #1215 — backtick-quoting is deliberately NOT a whole-line property here; it's filtered per-match
+  // by the callers (see isBacktickQuotedOccurrence below), so this line-level gate stays untouched —
+  // a line can carry both a real box and a backtick citation of a different date (aiwatch-reports#76).
+  assert.equal(isSuppressedReminderLine('Found while reading the #1153 `verify-after 2026-07-30` box against production'), false)
+})
+
+test('isBacktickQuotedOccurrence — the exact #1189/#1089 citation shapes are wrapped, a real box is not (#1215)', () => {
+  const l1 = 'Found while reading the #1153 `verify-after 2026-07-30` box against production'
+  assert.equal(isBacktickQuotedOccurrence(l1, l1.indexOf('verify-after')), true)
+
+  const l2 = 'a **decision deferred to `verify-after 2026-08-20`** below'
+  assert.equal(isBacktickQuotedOccurrence(l2, l2.indexOf('verify-after')), true)
+
+  const l3 = '- [ ] **verify-after 2026-08-03** — regenerate. Depends on `verify-after 2026-08-02`.'
+  const firstIdx = l3.indexOf('verify-after')
+  const secondIdx = l3.indexOf('verify-after', firstIdx + 1)
+  assert.equal(isBacktickQuotedOccurrence(l3, firstIdx), false) // the bold box's own date — real
+  assert.equal(isBacktickQuotedOccurrence(l3, secondIdx), true) // the trailing citation — quoted
+
+  // A bare mention with no wrapping backticks at all.
+  const l4 = 'Open: verify-after 2026-07-02 (prose ref)'
+  assert.equal(isBacktickQuotedOccurrence(l4, l4.indexOf('verify-after')), false)
+})
+
+test('isBacktickQuotedOccurrence — the closing backtick may come after a trailing note inside the span, not just immediately after the date (#1215 round-2 finding)', () => {
+  const l = '- [ ] `verify-after 2026-08-02 archive check` cited'
+  assert.equal(isBacktickQuotedOccurrence(l, l.indexOf('verify-after')), true)
+})
+
+test('isBacktickQuotedOccurrence — an unrelated stray backtick on EITHER side does not falsely suppress a real box (open side stays anchored, #1215 round-3 finding)', () => {
+  // Must have a backtick on BOTH sides of the match, or the close-side `indexOf` check alone (not the
+  // open-side anchor) could make this pass for the wrong reason — round-3 review caught exactly that:
+  // the original version of this test had no backtick after the match, so it passed via the close side
+  // returning false, never exercising the open-side anchor it claimed to pin.
+  const l = 'stray ` then **verify-after 2026-03-03** and `code` after'
+  assert.equal(isBacktickQuotedOccurrence(l, l.indexOf('verify-after')), false)
+})
+
+test('pairVerifyAssertions — a real box still fires even when the same line cites a different date in backticks (#1215, aiwatch-reports#76 shape)', () => {
+  const body = "- [ ] **verify-after 2026-08-03** — regenerate the report. Depends on aiwatch#1002's `verify-after 2026-08-02` archive check."
+  const found = pairVerifyAssertions(body)
+  assert.equal(found.length, 1)
+  assert.equal(found[0].date, '2026-08-03')
+})
+
+test('pairVerifyAssertions — a real box still fires when the CITATION PRECEDES it on the same line (#1215 review finding)', () => {
+  // VERIFY_RE's trailing note capture is greedy, so a naive matchAll on the full pattern would let the
+  // FIRST match's note swallow the rest of the line — including a real box coming AFTER a citation —
+  // and never surface it as a match at all. This is the reverse text order from aiwatch-reports#76, and
+  // it must not silently drop the real date instead of merely skipping the citation.
+  const body = "Per #1153's `verify-after 2026-07-30` note — our own **verify-after 2026-09-09** still stands"
+  const found = pairVerifyAssertions(body)
+  assert.equal(found.length, 1)
+  assert.equal(found[0].date, '2026-09-09')
+})
+
+test('liveVerifyOccurrences — finds a live match regardless of how many backtick citations precede it (#1215)', () => {
+  const line = 'cites `verify-after 2026-01-01` and `verify-after 2026-02-02` but ours is verify-after 2026-03-03 — ok'
+  const found = liveVerifyOccurrences(line)
+  assert.equal(found.length, 1)
+  assert.equal(found[0][1], '2026-03-03')
+})
+
+test('liveVerifyOccurrences — empty when every occurrence on the line is backtick-quoted', () => {
+  const line = 'Found while reading the #1153 `verify-after 2026-07-30` box against production'
+  assert.deepEqual(liveVerifyOccurrences(line), [])
+})
+
+test('pairVerifyAssertions and parseVerifyAfter agree on a line with TWO live dates — both take only the first (#1215 round-2 finding)', () => {
+  const line = '- [ ] **verify-after 2026-03-03** then also verify-after 2026-04-04 tail'
+  assert.deepEqual(pairVerifyAssertions(line).map((f) => f.date), ['2026-03-03'])
+})
+
+test('findBacktickQuotedVerifyBoxes — flags a backtick-wrapped OPEN box, ignores a box that merely CITES another date in backticks (#1215)', () => {
+  const body = [
+    'Found while reading the #1153 `verify-after 2026-07-30` box against production.', // prose — expected, silent
+    '- [ ] `verify-after 2026-09-01` accidentally backtick-wrapped date — DANGEROUS, never fires',
+    '- [x] `verify-after 2026-09-02` already done — not a live loss',
+    '- [ ] verify-after 2026-09-03 a normal box, not backtick-wrapped',
+    "- [ ] **verify-after 2026-09-04** — real box that cites `verify-after 2026-09-05` in its own note", // aiwatch-reports#76 shape — must NOT flag
+  ].join('\n')
+  const found = findBacktickQuotedVerifyBoxes(body)
+  assert.deepEqual(found.map((f) => f.lineIndex), [1])
+})
+
+test('findBacktickQuotedVerifyBoxes — empty bodies + no token (#1215)', () => {
+  assert.deepEqual(findBacktickQuotedVerifyBoxes(''), [])
+  assert.deepEqual(findBacktickQuotedVerifyBoxes(null), [])
+  assert.deepEqual(findBacktickQuotedVerifyBoxes('- [ ] just a normal box, no token'), [])
 })
 
 test('pairVerifyAssertions — tolerates a blank line before the assert', () => {
@@ -236,6 +326,26 @@ test('countOpenBoxes / countOpenVerifyAfter', () => {
   assert.equal(countOpenVerifyAfter(body), 1)    // only the open verify-after line
   assert.equal(countOpenBoxes(''), 0)
   assert.equal(countOpenVerifyAfter(''), 0)
+})
+
+test('countOpenVerifyAfter — an open box whose only verify-after is a backtick citation does not count (#1215)', () => {
+  // Load-bearing for planIssueAutoVerify's dropLabel: counting this box would pin verify-blocked open
+  // forever, since pairVerifyAssertions would never parse a live reminder off this line either.
+  const body = [
+    '- [ ] doc note citing `verify-after 2026-07-30` for context, not a real box',
+    '- [ ] **verify-after 2026-08-20** — the actual live reminder',
+  ].join('\n')
+  assert.equal(countOpenVerifyAfter(body), 1)
+})
+
+test('planIssueAutoVerify — dropLabel fires even when a citation-only box is still unchecked (#1215)', () => {
+  const body = [
+    '- [ ] **verify-after 2026-08-03** — the real, assertable box',
+    '      assert: GET /api/status | services[id=x].ok == true',
+    '- [ ] doc note citing `verify-after 2026-07-30` for context, not a real box',
+  ].join('\n')
+  const plan = planIssueAutoVerify(body, [{ lineIndex: 0, status: 'pass' }])
+  assert.equal(plan.dropLabel, true)
 })
 
 test('planIssueAutoVerify — ticks passers; dropLabel when no open verify-after; close when no open box', () => {
