@@ -169,6 +169,23 @@ The fix widens the SERVICE scope to what the card represents, rather than annota
 
 **General rule**: when adding or updating a service with an Atlassian Statuspage, check both `{custom-domain}/api/v2/summary.json` and `{slug}.statuspage.io/api/v2/summary.json`. Use whichever responds with HTTP 200 from a non-browser client. Also confirm that the `statusComponentId` value in the service config resolves correctly against the chosen endpoint's component list — component IDs are not always identical between a custom domain and its `.statuspage.io` mirror.
 
+### Known case: Azure OpenAI — a header-less stall, not a block (2026-08, #1211)
+
+The #498 shape above is a **block**: the connection is refused fast, and the fix is a different host. Azure OpenAI's RSS feed fails a different way — the connection is accepted and then no response headers arrive, so only our own `AbortController` ends it.
+
+`azureopenai` is where that reaches the card unopposed: one source, no probe target (`probe.ts`), and `getServicePlatform` resolves to `'other'` so neither the quorum nor the metastatuspage phase covers it. Three stalls therefore crossed `trackFetchFailure`'s threshold into a `degraded` that described our connection rather than Azure.
+
+**Fix**: retry the leg (`fetchWithRetry`) with a **4s** first attempt instead of the 8s default. Budget: 4s + the helper's 1s backoff + its 3s retry cap = the 8s the leg already cost.
+
+Where 4s came from: on 2026-08-06 the `latency:24h` series (48 half-hourly samples) held 36 successful polls between 31ms and 1185ms and 12 failures at exactly the 8000ms timeout, with no sample in between. That is a sample, not a census, and those 8000ms entries were the bug writing its own abort budget into the series — after this change neither stall outcome reaches `latency:24h` at all.
+
+Two things to carry over if this is applied elsewhere:
+
+- **The published `latency` must belong to a response that actually arrived.** The retry resets the clock (`onRetry`), and a poll where nothing arrived publishes `null` rather than the elapsed abort budget. Otherwise our own timeout lands in `/api/v1/status` and `latency:24h` looking like a measurement of the provider. Other legs still charge their abandoned attempts this way — unaddressed, and worth its own issue.
+- **A rescued stall books nothing**, so `fetch-fail:daily:{svcId}` stops counting it. The stall rate is only visible in Workers Logs (`[fetchWithRetry] first attempt failed`) for as long as they are retained. There is no durable stall-rate signal; a stall regime that worsens without ever failing both attempts would not surface on its own.
+
+**Not applied to the AWS Health leg (`bedrock`)**, which has the same exposure profile. Scope call, not a claim about bedrock's health.
+
 ### Known case: DeepSeek Flashduty — grouped-section uptime is NOT worst-of the leaf components (2026-07, #1171)
 
 DeepSeek's status-page reorg (around its V4 models) replaced the single component `flashdutyPrimaryComponentId` previously pointed at with 7 named components: 2 standalone API components (V4 Pro / V4 Flash — no grouping) and 5 App/chat components (Instant/Expert/Vision Mode, File Upload, Search) that Flashduty groups under one named **section**, `"对话服务(Chat Service)"` (`active.page.sections[]`, `component.section_id`). #1171 widened `flashdutyPrimaryComponentId` from a single id to a non-empty tuple so both scopes resolve again (`worker/src/parsers/flashduty.ts`).
