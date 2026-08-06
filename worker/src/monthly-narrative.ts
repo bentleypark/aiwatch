@@ -88,7 +88,17 @@ export function selectIncidentCandidates(
 ): FlatIncident[] {
   const flat: FlatIncident[] = []
   for (const [id, svc] of Object.entries(archive.services)) {
+    // Only skip where the downtime aggregates ALSO excluded them. On the truncated branch they did not,
+    // so skipping here would recreate the contradiction from the other side: an inflated published total
+    // with nothing from the service responsible for it.
+    const filtered = svc.countedIncidents != null && svc.countedIncidents !== svc.incidents
     for (const inc of svc.incidentList ?? []) {
+      // #1210 — skip provider auto-monitor entries. They rank by `durationMin`, and an auto-monitor that
+      // opens hourly through one outage produces a descending staircase of 20-to-35h paperwork durations
+      // that crowds every genuine incident out of the top-N (Kimi 2026-07 alone would have filled 14 of
+      // 14). Ranking them here would also contradict the same archive's downtime aggregates, which
+      // exclude them (aggregateIncidentDurations) — the "two halves of one archive disagree" defect.
+      if (inc.autoMonitor && filtered) continue
       flat.push({ ...inc, serviceId: id, serviceName: serviceNames[id] ?? id })
     }
   }
@@ -149,6 +159,7 @@ export function buildMonthlyNarrativePrompt(
       score: svc.score,
       grade: svc.grade,
       incidents: svc.incidents,
+      countedIncidents: svc.countedIncidents,
       avgResolutionMin: svc.avgResolutionMin,
     }))
     .sort((a, b) => {
@@ -158,7 +169,15 @@ export function buildMonthlyNarrativePrompt(
     .slice(0, MAX_OBSERVATION_SERVICES)
     .map(s => {
       const rec = s.avgResolutionMin != null ? `${s.avgResolutionMin}m avg recovery` : 'no resolved incidents'
-      return `- ${s.name}: score ${s.score ?? 'N/A'} (${s.grade ?? 'N/A'}), ${s.incidents} incidents, ${rec}`
+      // #1210 — `avgResolutionMin` is computed over `countedIncidents`, not `incidents`, whenever an
+      // exclusion fired. Handing the model the raw pair reads as "40 incidents, 9m avg recovery" for a
+      // month whose real event was a ~35h outage, so name the divisor rather than letting it be inferred.
+      // Name the divisor, NOT a cause: the gap is either #1210 auto-monitor duplicates or a #1021
+      // non-reliability advisory, and asserting one would write a fabricated fact into a permanent draft.
+      const n = s.countedIncidents != null && s.countedIncidents !== s.incidents
+        ? `${s.incidents} incidents (${s.countedIncidents} counted toward the downtime figures; the rest are excluded as non-outage)`
+        : `${s.incidents} incidents`
+      return `- ${s.name}: score ${s.score ?? 'N/A'} (${s.grade ?? 'N/A'}), ${n}, ${rec}`
     })
 
   return `Month: ${archive.period}
