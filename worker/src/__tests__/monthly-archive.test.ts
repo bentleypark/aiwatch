@@ -28,6 +28,7 @@ import {
   normalizeDegradationMonthly,
   summarizeDegradation,
   buildMonthlyAccuracy,
+  toArchiveScoreInput,
   filterSuppressedFromMonthly,
   stripInternalFields,
   aggregateIncidentDurations,
@@ -1419,6 +1420,62 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude.incidentSourceStale).toBeUndefined()
   })
 
+  // #1006 — the archive must label WHOSE records the uptime came from: 'official' (the provider
+  // declared the incident) vs 'platform_avg' (the status-page platform's own monitors measured it).
+  // The reports generator reads this to print Official vs Platform, and its absent → 'Official'
+  // fallback means a dropped field is not a blank cell but a false provenance claim.
+  it('#1006 threads uptimeSource into the archive (only alongside an archived officialUptime)', async () => {
+    const kv = {
+      get: async (key: string) => ({
+        'history:2026-03-02': JSON.stringify({
+          together: { ok: 288, total: 288, officialUptime: 99.78 },  // Better Stack → platform_avg
+          claude: { ok: 288, total: 288, officialUptime: 99.11 },    // Atlassian → official
+          deepgram: { ok: 288, total: 288, officialUptime: null },   // publishes nothing
+        }),
+      } as Record<string, string>)[key] ?? null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [
+      { id: 'together', aiwatchScore: 73, scoreGrade: 'good' as const, scoreConfidence: 'high' as const, uptimeSource: 'platform_avg' as const },
+      { id: 'claude', aiwatchScore: 61, scoreGrade: 'fair' as const, scoreConfidence: 'high' as const, uptimeSource: 'official' as const },
+      // A no-official-uptime service: the live status carries no provenance either, so the key must
+      // stay absent rather than defaulting to 'official' — the exact conflation this issue is about.
+      { id: 'deepgram', aiwatchScore: 48, scoreGrade: 'degrading' as const, scoreConfidence: 'medium' as const, uptimeSource: undefined },
+    ])
+
+    expect(archive.services.together.uptimeSource).toBe('platform_avg')
+    expect(archive.services.claude.uptimeSource).toBe('official')
+    expect(archive.services.deepgram.uptimeSource).toBeUndefined()
+    // Provenance travels WITH the figure: deepgram has neither, the other two have both.
+    expect(archive.services.together.officialUptime).toBe(99.78)
+    expect(archive.services.deepgram.officialUptime).toBeNull()
+  })
+
+  // The other direction of the same rule. A withheld figure must not ship a dangling provenance —
+  // 'Platform' printed next to a blank uptime would claim a measurement the archive doesn't carry.
+  it('#1006 omits uptimeSource when the officialUptime itself is withheld', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {}) // the #951 withheld-value warning
+    const kv = {
+      get: async (key: string) => ({
+        'history:2026-03-02': JSON.stringify({ together: { ok: 288, total: 288, officialUptime: 99.78 } }),
+      } as Record<string, string>)[key] ?? null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    // #951 gate: build-day confidence is 'medium', so the month-end figure is withheld.
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [
+      { id: 'together', aiwatchScore: 73, scoreGrade: 'good' as const, scoreConfidence: 'medium' as const, uptimeSource: 'platform_avg' as const },
+    ])
+
+    expect(archive.services.together.officialUptime).toBeNull()
+    expect(archive.services.together.uptimeSource).toBeUndefined()
+  })
+
   it('#809 threads static addedAt into the archive for a month the service existed in', async () => {
     const recentId = Object.keys(SERVICE_ADDED_AT)[0] // a service that carries an addedAt date
     expect(recentId).toBeDefined()
@@ -2701,5 +2758,41 @@ describe('computeMonthlyScore (#993)', () => {
     const realOutage = { ...advisory, title: 'Elevated error rates on Codex' }
     const withOutage = computeMonthlyScore('x', [realOutage], 100, noProbe, WINDOW, undefined)
     expect(withOutage.score!).toBeLessThan(clean.score!)
+  })
+})
+
+// #1006 — the ONE constructor both archive writers use. It exists because the cron and
+// /api/admin/rebuild-archive each hand-rolled this literal, and both copies omitted `uptimeSource`:
+// the field was declared on ArchiveScoreInput and read by buildMonthlyArchive, but no production path
+// ever produced it. These pin the field-by-field mapping so a future field cannot be added to the
+// interface and silently left unwired again.
+describe('toArchiveScoreInput (#1006)', () => {
+  const score = { score: 73, grade: 'good' as const, confidence: 'high' as const }
+
+  it('carries uptimeSource through from the live ServiceStatus', () => {
+    expect(toArchiveScoreInput({ id: 'together', uptimeSource: 'platform_avg' }, score).uptimeSource).toBe('platform_avg')
+    expect(toArchiveScoreInput({ id: 'claude', uptimeSource: 'official' }, score).uptimeSource).toBe('official')
+  })
+
+  it('OMITS uptimeSource rather than writing null when the service has none', () => {
+    const out = toArchiveScoreInput({ id: 'deepgram' }, score)
+    // `in` not `=== undefined`: buildMonthlyArchive spreads conditionally, so a present-but-undefined
+    // key would change the archived JSON shape. Absence has to be real absence.
+    expect('uptimeSource' in out).toBe(false)
+  })
+
+  it('maps the Score triple and keeps the #591 stale flag conditional', () => {
+    expect(toArchiveScoreInput({ id: 'x' }, score)).toEqual({
+      id: 'x', aiwatchScore: 73, scoreGrade: 'good', scoreConfidence: 'high',
+    })
+    expect(toArchiveScoreInput({ id: 'x', incidentSourceStale: true }, score).incidentSourceStale).toBe(true)
+    expect('incidentSourceStale' in toArchiveScoreInput({ id: 'x', incidentSourceStale: false }, score)).toBe(false)
+  })
+
+  it('passes a withheld Score through as null rather than dropping the service', () => {
+    // #713 low-confidence: score/grade are null but the entry must still exist, or the service
+    // vanishes from the archive instead of appearing with a withheld figure.
+    const out = toArchiveScoreInput({ id: 'bedrock' }, { score: null, grade: null, confidence: 'low' })
+    expect(out).toEqual({ id: 'bedrock', aiwatchScore: null, scoreGrade: null, scoreConfidence: 'low' })
   })
 })

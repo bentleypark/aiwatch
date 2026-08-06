@@ -141,6 +141,41 @@ describe('POST /api/admin/rebuild-archive', () => {
     }
   })
 
+  // #1006 WIRING. The pure builder already had `uptimeSource` coverage and the fixture below already
+  // carried the field — but nothing asserted it survived the endpoint, and it did not: this handler
+  // built its ArchiveScoreInput by hand and dropped it. That is how the 2026-07 archive shipped with
+  // provenance missing on 44 of its 45 services while every test stayed green.
+  // Asserts the CALLED path (the HTTP handler), not the helper it delegates to.
+  it('#1006 carries uptimeSource from services:latest through to the written archive', async () => {
+    const { store, kv } = makeKV()
+    store['services:latest'] = JSON.stringify({
+      services: [
+        makeService({ id: 'together', uptimeSource: 'platform_avg', uptime30d: 99.78 }),
+        makeService({ id: 'claude', uptimeSource: 'official', uptime30d: 99.11 }),
+        // No provenance at all — must stay absent downstream, not default to 'official'.
+        makeService({ id: 'deepgram', uptimeSource: undefined, uptime30d: undefined }),
+      ],
+      cachedAt: '2026-05-01T00:00:00Z',
+    })
+    // resolveArchiveOfficialUptime gates the archived figure (and its provenance) on a month-end
+    // daily snapshot, so the month needs one or both would be withheld for reasons unrelated to this.
+    store['history:2026-04-30'] = JSON.stringify({
+      together: { ok: 288, total: 288, officialUptime: 99.78 },
+      claude: { ok: 288, total: 288, officialUptime: 99.11 },
+      deepgram: { ok: 288, total: 288, officialUptime: null },
+    })
+    const env = envWith(kv)
+    const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
+
+    const res = await workerModule.fetch(req({ month: '2026-04' }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+    expect(res.status).toBe(200)
+
+    const archive = JSON.parse(store['archive:monthly:2026-04'])
+    expect(archive.services.together.uptimeSource).toBe('platform_avg')
+    expect(archive.services.claude.uptimeSource).toBe('official')
+    expect(archive.services.deepgram.uptimeSource).toBeUndefined()
+  })
+
   it('overwrites an existing archive:monthly key (cron skips when existing; rebuild must not)', async () => {
     const { store, kv } = makeKV()
     store['services:latest'] = JSON.stringify({

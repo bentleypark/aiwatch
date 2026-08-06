@@ -10,6 +10,7 @@ import type { ProbeDailyData } from './probe-archival'
 import { summariesFromDailyData } from './probe-archival'
 import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './types'
 import { calculateAIWatchScore, classifyProbe } from './score'
+import type { AIWatchScore } from './score'
 import { resolveProbeId, PROBE_TARGETS } from './probe'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
@@ -1181,6 +1182,38 @@ export interface ArchiveScoreInput {
   // #591 — the service's incident source is known-stale (frozen feed). Threaded into the archive so
   // the report generator can exclude it from the Score ranking, parity with the live dashboard.
   incidentSourceStale?: boolean
+}
+
+/**
+ * Build an `ArchiveScoreInput` from a live `ServiceStatus` + the Score computed for it.
+ *
+ * ONE constructor, shared by BOTH archive writers (the monthly cron and `/api/admin/rebuild-archive`).
+ * It exists because the two call sites were byte-identical copies, and the copies were the bug: neither
+ * carried `uptimeSource`, so the field this interface declares (#1006) and `buildMonthlyArchive` reads
+ * below had no producer. Nothing failed loudly — `services:latest` carries the provenance, the archive
+ * writer asks for it, and the answer was always `undefined`. The 2026-07 archive carries the field on 1
+ * of its 45 services; no report has been generated from it yet, and the reports generator's
+ * absent → 'Official' fallback means the first one would print its Better Stack rows as
+ * provider-declared.
+ *
+ * So: add new archive-Score fields HERE, never at a call site. A field added to one writer and not the
+ * other silently produces two different archive shapes depending on whether the cron or an operator
+ * rebuild wrote the month.
+ */
+export function toArchiveScoreInput(
+  svc: Pick<ServiceStatus, 'id' | 'uptimeSource' | 'incidentSourceStale'>,
+  score: Pick<AIWatchScore, 'score' | 'grade' | 'confidence'>,
+): ArchiveScoreInput {
+  return {
+    id: svc.id,
+    aiwatchScore: score.score,
+    scoreGrade: score.grade,
+    scoreConfidence: score.confidence,
+    // Both are omitted rather than written null when absent: `buildMonthlyArchive` spreads them
+    // conditionally, so an explicit null would change the archived JSON shape.
+    ...(svc.uptimeSource ? { uptimeSource: svc.uptimeSource } : {}),
+    ...(svc.incidentSourceStale ? { incidentSourceStale: true } : {}),
+  }
 }
 
 /** Build monthly archive from daily KV data + accumulated incident data */

@@ -1772,7 +1772,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -2143,10 +2143,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       const p = JSON.parse(cachedRaw)
       const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
       const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'admin/rebuild-archive')
-      scoreData = services.map((s) => {
-        const r = scoreFor(s, probeSummaries)
-        return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, scoreConfidence: r.confidence, ...(s.incidentSourceStale ? { incidentSourceStale: true } : {}) }
-      })
+      scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
       for (const s of services) serviceNames[s.id] = s.name
     } catch (parseErr) {
       console.error('[admin/rebuild-archive] services:latest parse failed:',
@@ -2965,10 +2962,7 @@ export default {
               const p = JSON.parse(cachedRaw)
               const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
               const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
-              scoreData = services.map((s) => {
-                const r = scoreFor(s, probeSummaries)
-                return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, scoreConfidence: r.confidence, ...(s.incidentSourceStale ? { incidentSourceStale: true } : {}) }
-              })
+              scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
               for (const s of services) serviceNames[s.id] = s.name
             } catch (parseErr) {
               console.error('[monthly-archive] Failed to parse services:latest — archive will lack Score data:',

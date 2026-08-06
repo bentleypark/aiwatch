@@ -317,6 +317,28 @@ What is true today, per source:
 
 The **Score** does not sidestep this: its Incidents and Recovery components are 30-day (`incidents30d` + daily counters), but the **Uptime 40** component reads `uptime30d` without regard to its source or window — `score.ts` never branches on `uptimeSource` — so a blended-window `platform_avg` figure is rescaled onto the 40 points like any other, with the window stated nowhere.
 
+### Provenance in the monthly archive — absence is not neutral
+
+`uptimeSource` is archived per service so the monthly report can print **Official** vs **Platform** from
+the data. Both writers build their `ArchiveScoreInput` through **`toArchiveScoreInput`**
+(`monthly-archive.ts`) — add a new archive-Score field there, never at a call site. The two call sites
+used to hand-roll the literal and both omitted `uptimeSource`, so the declared-and-consumed field had no
+producer. `uptimeSource?:` is optional, so `tsc` could not see the omission, and neither could the test
+suite: `archive-score-input-wiring.test.ts` is what pins it now.
+
+Nothing failed loudly, because the reports generator's `uptimeSourceLabel` falls back to `'Official'`
+when the key is absent (deliberate, for pre-#1006 archives). So a dropped field is **not a blank cell —
+it is a false provenance claim**, published on the one column that exists to distinguish a provider's
+own declaration from a third party's measurement. Any future change to how provenance reaches the
+archive should assume that failure mode rather than an empty one.
+
+Backfilling a frozen month is **`scripts/patch-archive-uptimesource.mjs`** (never
+`/api/admin/rebuild-archive` — it re-snapshots from today's `services:latest`, and provenance is exactly
+what changes when a provider migrates status-page platforms). Its roster is parsed from `services.ts`
+rather than hardcoded, and a service whose Better Stack config changed at or after the month is excluded
+from the plan: today's roster cannot describe that month for it, in either direction. `51068ff` (fireworks
+→ incident.io) is a live instance, so the 2026-07 roster is not today's.
+
 ## Supply-chain correlation banner (#574, Phase 1: AWS)
 
 A LIVE banner correlating a cloud-region issue with dependent AI services — surfaced ONLY when an
