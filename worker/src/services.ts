@@ -1522,16 +1522,23 @@ export function includeUntaggedIncidents(
 
 // Retry once on failure to reduce false-positive 'down' from transient network issues
 // Retry uses shorter timeout to keep total wall-clock time under ~12s per service
-async function fetchWithRetry(url: string, timeoutMs = 8000): Promise<Response> {
+//
+// `onRetry` fires immediately before the second attempt (#1211), so a caller can restart whatever
+// clock it publishes. Only the Azure RSS leg passes one; the Atlassian callers below time both legs
+// together and have the same inflation on their own retry path, unaddressed.
+async function fetchWithRetry(url: string, timeoutMs = 8000, onRetry?: () => void): Promise<Response> {
   try {
     return await fetchWithTimeout(url, timeoutMs)
   } catch (err) {
-    console.warn(`[fetchWithRetry] first attempt failed for ${url}, retrying...`)
+    // The reason is logged, not just the fact: "aborted at the timeout" (a stall) and "connection
+    // reset in 200ms" (a block) call for different fixes, and attempt 1's reason is otherwise lost.
+    console.warn(`[fetchWithRetry] first attempt failed for ${url}, retrying:`, err instanceof Error ? `${err.name}: ${err.message}` : err)
     await new Promise((r) => setTimeout(r, 1000))
+    onRetry?.()
     try {
       return await fetchWithTimeout(url, Math.min(timeoutMs, 3000))
     } catch (retryErr) {
-      console.error(`[fetchWithRetry] retry also failed for ${url}`)
+      console.error(`[fetchWithRetry] retry also failed for ${url}:`, retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : retryErr)
       throw retryErr
     }
   }
@@ -2131,7 +2138,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
-      // Uses fetchWithTimeout (no retry) to stay within 50-subrequest budget
+      // Uses fetchWithTimeout (no retry) to stay within 50-subrequest budget — EXCEPT the Azure RSS
+      // leg below, which retries (#1211); that costs +1 subrequest only on a failed first attempt.
       // #677 — AWS Health public events JSON API (one fetch, all regions, real start+end timestamps)
       if (config.awsHealthApi) {
         const start = Date.now()
@@ -2182,8 +2190,18 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
 
       // Azure RSS — single feed, keyword-filtered (reuses AWS parser)
       if (config.azureRssUrl) {
-        const start = Date.now()
-        const rssRes = await fetchWithTimeout(config.azureRssUrl, 8000).catch((err) => {
+        // #1211 — retried, on a 4s first attempt rather than the 8s default. This leg intermittently
+        // aborts on its own timeout, and three such polls cross `trackFetchFailure`'s threshold into a
+        // `degraded` that describes our connection rather than Azure. Nothing else catches it: one
+        // source, no probe target, no cross-validation phase it qualifies for. 4s + the helper's 1s
+        // backoff + its 3s retry cap keeps the worst case at the 8s this leg already cost. The budget
+        // derivation is in docs/reference/status-determination.md — not repeated here, since it is not
+        // checkable from this file.
+        //
+        // `start` is reset before the retry so the published latency is the served response's own RTT
+        // rather than the abandoned attempt plus the backoff.
+        let start = Date.now()
+        const rssRes = await fetchWithRetry(config.azureRssUrl, 4000, () => { start = Date.now() }).catch((err) => {
           console.warn(`[fetchService] ${config.id} Azure RSS failed:`, err instanceof Error ? err.message : err)
           return null
         })
@@ -2191,7 +2209,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         if (!rssRes || !rssRes.ok) {
           if (rssRes) { console.warn(`[fetchService] ${config.id} Azure RSS HTTP ${rssRes.status}`); rssRes.body?.cancel() }
           const shouldDegrade = await trackFetchFailure(kv, config.id)
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
+          // An HTTP error still measured a response time (kept, as on the AWS Health leg above); a
+          // stall measured nothing, so publishing the elapsed abort budget would put our own timeout
+          // into `/api/v1/status` and `latency:24h` as though it were Azure's.
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: rssRes && config.category === 'api' ? latency : null }
         }
         await resetFetchFailure(kv, config.id)
         const incidents = parseAwsRssIncidents(await rssRes.text())
