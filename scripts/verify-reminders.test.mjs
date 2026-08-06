@@ -130,6 +130,16 @@ test('findBodyDrift — counts unchecked NON-verify-after boxes; excludes verify
   assert.equal(findBodyDrift(many).samples.length, 5)
 })
 
+test('findBodyDrift — a box whose only verify-after is a backtick citation IS drift, not exempt (#1215)', () => {
+  // No live occurrence on this line, so pairVerifyAssertions would never parse a reminder off it —
+  // treating it as "open-until-verified" would leave it silently unflagged forever alongside a stuck
+  // verify-blocked label (see the countOpenVerifyAfter/planIssueAutoVerify tests in verify-assertions).
+  const body = '- [x] shipped the fix\n- [ ] doc note citing `verify-after 2026-07-30` for context'
+  const d = findBodyDrift(body)
+  assert.equal(d.count, 1)
+  assert.match(d.samples[0], /verify-after 2026-07-30/)
+})
+
 test('isDriftCandidate — verify-blocked AND NOT tracking; accepts {name} or string labels', () => {
   assert.equal(isDriftCandidate([{ name: 'verify-blocked' }, { name: 'bug' }]), true)
   assert.equal(isDriftCandidate(['verify-blocked']), true)
@@ -174,6 +184,62 @@ test('parseVerifyAfter — the real aiwatch-reports#41 shape yields exactly ONE 
   assert.equal(hits.length, 1)
   assert.equal(hits[0].date, '2026-07-02')
   assert.match(hits[0].note, /2026-06 report/)
+})
+
+// ── #1215: backtick-quoted `verify-after` citations must not fire ────────────────────────────────
+test('parseVerifyAfter — the real #1189 body lines yield ZERO hits (#1215)', () => {
+  // Verbatim from #1189 — prose citing #1153's already-closed box and #1153's other still-open row,
+  // both outside a blockquote, both backtick-wrapped. Neither is #1189's own reminder.
+  assert.deepEqual(
+    parseVerifyAfter('Found while reading the #1153 `verify-after 2026-07-30` box against production'),
+    [],
+  )
+  assert.deepEqual(
+    parseVerifyAfter(
+      '- **#1153** stays open on its own remaining production observation (`mistral / b3e1006c-c3a7-4b1b-8628-3e364b2e3c71`, `verify-after 2026-08-03`). Its fix is unaffected.',
+    ),
+    [],
+  )
+})
+
+test('parseVerifyAfter — the real #1089 body line yields ZERO hits (#1215)', () => {
+  assert.deepEqual(
+    parseVerifyAfter(
+      '      shipped work but a **decision deferred to `verify-after 2026-08-20`** below — "needs a decision, not"',
+    ),
+    [],
+  )
+})
+
+test('parseVerifyAfter — backtick-quoting does not over-suppress a real box or unwrapped prose (#1215)', () => {
+  assert.equal(parseVerifyAfter('- [ ] **verify-after 2026-08-20** — read the frequency, then pick 1/2/3 above')[0].date, '2026-08-20')
+  // Same #541 fail-safe as the blockquote case: a bare mention with no backticks still fires.
+  assert.equal(parseVerifyAfter('Open: verify-after 2026-07-02 (prose ref)')[0].date, '2026-07-02')
+})
+
+test('parseVerifyAfter — a real box still fires when the same line cites a different date in backticks (#1215, aiwatch-reports#76 shape)', () => {
+  const line = "- [ ] **verify-after 2026-08-03** — regenerate the report. Depends on aiwatch#1002's `verify-after 2026-08-02` archive check."
+  const hits = parseVerifyAfter(line)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].date, '2026-08-03')
+})
+
+test('parseVerifyAfter — a real box still fires when the CITATION PRECEDES it on the line (#1215 review finding)', () => {
+  // Same greedy-capture hazard as the pairVerifyAssertions test of the same name: a naive matchAll on
+  // the full verify-after+note pattern lets the citation's match swallow the rest of the line, so the
+  // real date later on the line is never surfaced as its own match at all — silently dropped, not just
+  // skipped.
+  const line = "Per #1153's `verify-after 2026-07-30` note — our own verify-after 2026-09-09 stands"
+  const hits = parseVerifyAfter(line)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].date, '2026-09-09')
+})
+
+test('parseVerifyAfter — one hit per line even with two live dates, matching pairVerifyAssertions (#1215 round-2 finding)', () => {
+  const line = '- [ ] **verify-after 2026-03-03** then also verify-after 2026-04-04 tail'
+  const hits = parseVerifyAfter(line)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].date, '2026-03-03')
 })
 
 // ── #966: `verify-overdue` is a current-state label, so it must self-heal ─────────────────────────
