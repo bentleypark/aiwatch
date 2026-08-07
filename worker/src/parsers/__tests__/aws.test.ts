@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, awsHealthImpact, deriveAwsStatus } from '../aws'
+import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, awsHealthImpact, deriveAwsStatus } from '../aws'
 
 /** Encode a string to an ArrayBuffer in the given encoding with a BOM, to exercise decodeAwsHealthJson
  *  the way the live AWS endpoint serves it (utf-16 + BOM). */
@@ -32,6 +32,122 @@ const BEDROCK_EVENT = {
   },
 }
 
+/** #1212 — the health parser returns a verdict, not a bare list. These cases are about EVENT parsing,
+ *  so they assert the payload was readable and then work with the incidents; whether a payload is
+ *  readable at all is decided in its own cases. */
+function okHealth(json: unknown, service: string) {
+  const r = parseAwsHealthEventsResult(json, service)
+  if (!r.ok) throw new Error(`expected a readable payload, got ${r.reason}`)
+  return r.incidents
+}
+
+/**
+ * #1212 — same for the RSS parser. These cases are about ITEM parsing; whether a body is a feed at all
+ * is decided in its own block below.
+ *
+ * Most fixtures here are bare `<item>` fragments, which no real feed ever is — RSS 2.0 requires the
+ * `<channel>` wrapper and both Azure and AWS ship it. The helper supplies that envelope so each case
+ * keeps testing the one thing it was written for, rather than 20 fixtures being edited to carry
+ * boilerplate none of them is about.
+ */
+function okIncidents(xml: string) {
+  const body = /^\s*<item/.test(xml) ? `<rss version="2.0"><channel><title>t</title>${xml}</channel></rss>` : xml
+  const r = parseAwsRssIncidentsResult(body)
+  if (!r.ok) throw new Error(`expected a readable feed, got ${r.reason}`)
+  return r.incidents
+}
+
+describe('parseAwsRssIncidentsResult — is this body a feed at all? (#1212)', () => {
+  // The distinction the whole guard rests on. `[]` used to mean both "quiet feed" and "not a feed",
+  // and the caller cleared the failure streak and published `operational` on either — a false
+  // recovery, the class already fixed for Instatus (#1089) and OnlineOrNot (#1123).
+
+  it('a quiet feed is READABLE and empty — the false-positive direction', () => {
+    // If this ever flips, azureopenai/bedrock would carry a permanent "we cannot read this source"
+    // caveat on every ordinary day, which is worse than the bug being fixed.
+    const quiet = `<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:a10="http://www.w3.org/2005/Atom" version="2.0">
+  <channel>
+    <title>Azure Status</title>
+    <link>https://azure.status.microsoft/en-us/status/</link>
+    <description>Azure Status</description>
+    <lastBuildDate>Thu, 06 Aug 2026 01:09:00 Z</lastBuildDate>
+  </channel>
+</rss>`
+    const r = parseAwsRssIncidentsResult(quiet)
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.incidents).toEqual([])
+  })
+
+  it('an HTML interstitial is NOT a feed', () => {
+    // The realistic shape: a middlebox or CDN substitutes a body and still answers 200.
+    const html = '<!DOCTYPE html><html><head><title>Access denied</title></head><body>Checking your browser…</body></html>'
+    const r = parseAwsRssIncidentsResult(html)
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.reason).toBe('aws-rss-not-a-feed')
+  })
+
+  it('an empty body is NOT a feed', () => {
+    expect(parseAwsRssIncidentsResult('').ok).toBe(false)
+  })
+
+  it('an <rss> without its mandatory <channel> is NOT a feed', () => {
+    // RSS 2.0 requires <channel>; a body carrying only the outer tag is not something we can read a
+    // "no incidents" verdict out of.
+    expect(parseAwsRssIncidentsResult('<rss version="2.0"></rss>').ok).toBe(false)
+  })
+
+  it('an entry carrying attributes is PARSED, not flagged', () => {
+    // `<item foo="bar">` is legal RSS. Reporting our own regex's narrowness as upstream drift would
+    // pin the service `unreadable` over an entry we can simply read, so the extraction accepts it.
+    const d = new Date(Date.now() - 3_600_000).toUTCString()
+    const body = `<rss version="2.0"><channel><title>t</title><item xmlns:x="urn:x"><title>Azure OpenAI - Degraded</title><pubDate>${d}</pubDate></item></channel></rss>`
+    const r = parseAwsRssIncidentsResult(body)
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.incidents).toHaveLength(1)
+  })
+
+  it('an unclosed entry does not swallow the next one', () => {
+    // The regression the tempered body exists to prevent: with a plain lazy match, the unclosed
+    // sibling below anchors a match that runs THROUGH our entry and borrows its `</item>`, so the
+    // parser reports the sibling's title and ours disappears — a live incident lost behind a green
+    // badge, with the count guard seeing one match and staying quiet.
+    const d = 'Mon, 24 Mar 2026 14:00:00 GMT'
+    const body = `<rss version="2.0"><channel><title>t</title>` +
+      `<item xmlns:x="urn:x"><title>Azure Cosmos DB - Degraded</title><pubDate>${d}</pubDate>` +
+      `<item><title>Azure OpenAI - Degraded experience</title><pubDate>${d}</pubDate><guid>ours</guid></item>` +
+      `</channel></rss>`
+    const r = parseAwsRssIncidentsResult(body)
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.incidents.map((i) => i.title)).toEqual(['Azure OpenAI - Degraded experience'])
+  })
+
+  it('a feed WITH entries that yields no incidents is unreadable, not quiet', () => {
+    // Envelope intact, an entry plainly present, and it does not survive the field checks — drift.
+    const d = new Date(Date.now() - 3_600_000).toUTCString()
+    const renamed = `<rss version="2.0"><channel><title>t</title><item><title>Azure OpenAI - Degraded</title><published>${d}</published></item></channel></rss>`
+    const r = parseAwsRssIncidentsResult(renamed)
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.reason).toBe('aws-rss-items-unreadable')
+  })
+
+  it('a feed whose entries PARTLY parse is readable — only a total loss is drift', () => {
+    // Conservative on purpose: one malformed entry among good ones is normal, and flagging it would
+    // caveat a service over a single bad row.
+    const d = new Date(Date.now() - 3_600_000).toUTCString()
+    const body = `<rss version="2.0"><channel><title>t</title>` +
+      `<item><title>Good</title><pubDate>${d}</pubDate></item>` +
+      `<item><title>No date</title></item></channel></rss>`
+    const r = parseAwsRssIncidentsResult(body)
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.incidents).toHaveLength(1)
+  })
+
+  it('is not fooled by the words appearing in prose', () => {
+    expect(parseAwsRssIncidentsResult('<p>subscribe to our rss channel</p>').ok).toBe(false)
+  })
+})
+
 describe('parseAwsRssIncidents', () => {
   it('returns empty for RSS with no items (operational)', () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -42,11 +158,7 @@ describe('parseAwsRssIncidents', () => {
           <description>Service is operating normally</description>
         </channel>
       </rss>`
-    expect(parseAwsRssIncidents(xml)).toEqual([])
-  })
-
-  it('returns empty for empty string', () => {
-    expect(parseAwsRssIncidents('')).toEqual([])
+    expect(okIncidents(xml)).toEqual([])
   })
 
   it('parses active incident from RSS item', () => {
@@ -57,7 +169,7 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
         <description>We are investigating increased error rates for Amazon Bedrock in the US-EAST-1 Region.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].id).toBe('arn:aws:health:us-east-1::event/BEDROCK/issue/abc123')
     expect(result[0].title).toBe('Increased API Error Rates')
@@ -79,7 +191,7 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 16:00:00 GMT</pubDate>
         <description>The issue has been resolved.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('resolved')
     expect(result[0].resolvedAt).toBe(result[0].startedAt) // AWS RSS: single timestamp
@@ -94,7 +206,7 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 10:00:00 GMT</pubDate>
         <description>We are investigating a service disruption.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].impact).toBe('critical')
   })
@@ -107,7 +219,7 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 08:00:00 GMT</pubDate>
         <description>Scheduled maintenance window.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].impact).toBe('minor')
   })
@@ -120,7 +232,7 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 12:00:00 GMT</pubDate>
         <description>We are monitoring the situation.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('monitoring')
   })
@@ -133,7 +245,7 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 11:00:00 GMT</pubDate>
         <description>We have identified the root cause.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('identified')
     expect(result[0].impact).toBe('major')
@@ -153,21 +265,33 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 10:00:00 GMT</pubDate>
         <description>Resolved.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(2)
     expect(result[0].status).toBe('investigating')
     expect(result[1].status).toBe('resolved')
   })
 
   it('skips items with invalid dates', () => {
+    // Mixed on purpose (#1212): the skip is PER ITEM, so a good sibling must survive alongside the bad
+    // one. A single-bad-item fixture would now be classified `aws-rss-items-unreadable` instead —
+    // correctly, since a feed whose every entry is unreadable is drift, not a quiet day — and would
+    // have stopped testing the per-item skip it was written for.
     const xml = `
       <item>
         <title>Some issue</title>
         <guid>test-guid</guid>
         <pubDate>not-a-date</pubDate>
         <description>Bad date.</description>
+      </item>
+      <item>
+        <title>Readable sibling</title>
+        <guid>good-guid</guid>
+        <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
+        <description>Fine.</description>
       </item>`
-    expect(parseAwsRssIncidents(xml)).toEqual([])
+    const result = okIncidents(xml)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('good-guid')
   })
 
   it('generates fallback ID when guid is missing', () => {
@@ -177,22 +301,25 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
         <description>No guid here.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].id).toMatch(/^aws-\d+$/)
   })
 
-  it('limits to 20 incidents', () => {
+  it('parses well past 20 entries — the publish cap is the CALLER\'s, not the parser\'s (#1212)', () => {
+    // The parser used to stop at 20. On a shared firehose that counted other services' entries, so an
+    // ongoing incident of OURS sitting at position 21 was truncated away before the keyword filter ever
+    // saw it. The parser now only bounds the work; `services.ts` caps what it publishes after filtering.
     const items = Array.from({ length: 25 }, (_, i) => `
       <item>
         <title>Issue ${i}</title>
         <guid>aws-guid-${i}</guid>
-        <pubDate>Mon, 24 Mar 2026 ${String(i).padStart(2, '0')}:00:00 GMT</pubDate>
+        <pubDate>Mon, 24 Mar 2026 ${String(i % 24).padStart(2, '0')}:00:00 GMT</pubDate>
         <description>Desc ${i}</description>
       </item>
     `).join('')
-    const result = parseAwsRssIncidents(`<rss>${items}</rss>`)
-    expect(result).toHaveLength(20)
+    const result = okIncidents(`<rss version="2.0"><channel><title>t</title>${items}</channel></rss>`)
+    expect(result).toHaveLength(25)
   })
 
   it('decodes XML entities in title and description', () => {
@@ -203,7 +330,7 @@ describe('parseAwsRssIncidents', () => {
         <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
         <description>Rates &gt; threshold &amp; rising</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result[0].title).toBe('Error rates > 5% for Bedrock & related services')
     expect(result[0].timeline[0].text).toBe('Rates > threshold & rising')
   })
@@ -217,7 +344,7 @@ describe('parseAwsRssIncidents', () => {
         <description><![CDATA[Multi-line
 description with <b>HTML</b> tags]]></description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].timeline[0].text).toBe('Multi-line\ndescription with HTML tags')
   })
@@ -230,15 +357,20 @@ description with <b>HTML</b> tags]]></description>
         <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
         <description>We are investigating latency issues.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].impact).toBeNull()
   })
 
   it('handles partial/malformed XML gracefully', () => {
-    expect(parseAwsRssIncidents('<rss><channel>')).toEqual([])
-    expect(parseAwsRssIncidents('<item><title>No closing')).toEqual([])
-    expect(parseAwsRssIncidents('not xml at all')).toEqual([])
+    // The truncation case the guard deliberately does NOT detect (see the docblock): a body cut off
+    // after `<channel>` still passes the envelope test and still reads as zero incidents. Pinned as an
+    // accepted limitation, not as a desired property — a real quiet feed is a complete document.
+    expect(okIncidents('<rss><channel>')).toEqual([])
+    // #1212 — these two carry no envelope at all. They are no longer "gracefully empty": see the
+    // envelope block below, which is the whole point of the Result API.
+    expect(parseAwsRssIncidentsResult('<item><title>No closing').ok).toBe(false)
+    expect(parseAwsRssIncidentsResult('not xml at all').ok).toBe(false)
   })
 
   it('strips HTML tags from description', () => {
@@ -249,7 +381,7 @@ description with <b>HTML</b> tags]]></description>
         <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
         <description>Error in &lt;b&gt;us-east-1&lt;/b&gt; region. See &lt;a href="https://aws.amazon.com"&gt;details&lt;/a&gt;.</description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result[0].timeline[0].text).toBe('Error in us-east-1 region. See details.')
   })
 
@@ -261,7 +393,7 @@ description with <b>HTML</b> tags]]></description>
         <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
         <description></description>
       </item>`
-    const result = parseAwsRssIncidents(xml)
+    const result = okIncidents(xml)
     expect(result[0].timeline[0].text).toBe('Service disruption')
   })
 })
@@ -295,14 +427,14 @@ describe('deriveAwsStatus — multi-region scenarios', () => {
 describe('multi-region deduplication', () => {
   it('same incident ID from multiple regions should deduplicate and merge componentNames', () => {
     // Simulates the dedup+merge logic from services.ts
-    const region1 = parseAwsRssIncidents(`
+    const region1 = okIncidents(`
       <item>
         <title>Global outage</title>
         <guid>arn:aws:health:global::event/BEDROCK/issue/global1</guid>
         <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
         <description>Global impact.</description>
       </item>`)
-    const region2 = parseAwsRssIncidents(`
+    const region2 = okIncidents(`
       <item>
         <title>Global outage</title>
         <guid>arn:aws:health:global::event/BEDROCK/issue/global1</guid>
@@ -333,14 +465,14 @@ describe('multi-region deduplication', () => {
   })
 
   it('different incidents from different regions are kept', () => {
-    const region1 = parseAwsRssIncidents(`
+    const region1 = okIncidents(`
       <item>
         <title>Increased errors</title>
         <guid>arn:aws:health:us-east-1::event/BEDROCK/issue/inc1</guid>
         <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
         <description>US East issue.</description>
       </item>`)
-    const region2 = parseAwsRssIncidents(`
+    const region2 = okIncidents(`
       <item>
         <title>Elevated latency</title>
         <guid>arn:aws:health:eu-west-1::event/BEDROCK/issue/inc2</guid>
@@ -474,7 +606,7 @@ describe('awsHealthImpact (#677)', () => {
 
 describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => {
   it('derives the TRUE duration of a resolved event from startTime/endTime (no 1m floor)', () => {
-    const [inc] = parseAwsHealthEvents([BEDROCK_EVENT], 'BEDROCK')
+    const [inc] = okHealth([BEDROCK_EVENT], 'BEDROCK')
     expect(inc.status).toBe('resolved')
     expect(inc.startedAt).toBe('2026-06-13T01:26:58.000Z')
     expect(inc.resolvedAt).toBe('2026-06-15T18:13:23.000Z')
@@ -485,17 +617,17 @@ describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => 
 
   it('produces ONE record per incident (no active/resolved double-count)', () => {
     // The whole #677 win: the RSS split this into 2 records (phantom-ongoing + 1m-resolved).
-    expect(parseAwsHealthEvents([BEDROCK_EVENT], 'BEDROCK')).toHaveLength(1)
+    expect(okHealth([BEDROCK_EVENT], 'BEDROCK')).toHaveLength(1)
   })
 
   it('uses a stable id from service + region + startTime', () => {
-    const [inc] = parseAwsHealthEvents([BEDROCK_EVENT], 'BEDROCK')
+    const [inc] = okHealth([BEDROCK_EVENT], 'BEDROCK')
     expect(inc.id).toBe('aws:bedrock:us-east-1:1781314018000')
     expect(inc.componentNames).toEqual(['us-east-1'])
   })
 
   it('builds a timeline from EVENT_LOG (seconds→ISO, HTML stripped, [RESOLVED] stage)', () => {
-    const [inc] = parseAwsHealthEvents([BEDROCK_EVENT], 'BEDROCK')
+    const [inc] = okHealth([BEDROCK_EVENT], 'BEDROCK')
     expect(inc.timeline).toHaveLength(2)
     expect(inc.timeline[0].at).toBe('2026-06-13T01:26:58.000Z')
     expect(inc.timeline[0].text).toBe('Anthropic has asked us to revoke access to Claude Fable 5.') // <a> stripped
@@ -512,13 +644,13 @@ describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => 
         { summary: 'Increased error rates', message: 'Elevated error rates invoking Bedrock models in us-east-1.', timestamp: 1781314018 },
       ]) },
     }
-    const [inc] = parseAwsHealthEvents([outage], 'BEDROCK')
+    const [inc] = okHealth([outage], 'BEDROCK')
     expect(inc.impact).toBe('major')
   })
 
   it('treats an event without endTime as active (resolvedAt null, no duration)', () => {
     const active = { ...BEDROCK_EVENT, endTime: null }
-    const [inc] = parseAwsHealthEvents([active], 'BEDROCK')
+    const [inc] = okHealth([active], 'BEDROCK')
     expect(inc.status).toBe('investigating')
     expect(inc.resolvedAt).toBeNull()
     expect(inc.duration).toBeNull()
@@ -526,31 +658,62 @@ describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => 
 
   it('filters to the requested service only', () => {
     const events = [BEDROCK_EVENT, { ...BEDROCK_EVENT, service: 'EC2', region: 'us-west-2' }]
-    const out = parseAwsHealthEvents(events, 'BEDROCK')
+    const out = okHealth(events, 'BEDROCK')
     expect(out).toHaveLength(1)
     expect(out[0].componentNames).toEqual(['us-east-1'])
   })
 
-  it('returns [] for non-array / malformed input', () => {
-    expect(parseAwsHealthEvents(null, 'BEDROCK')).toEqual([])
-    expect(parseAwsHealthEvents({}, 'BEDROCK')).toEqual([])
-    expect(parseAwsHealthEvents('nope', 'BEDROCK')).toEqual([])
+  it('a non-array payload is UNREADABLE, not empty (#1212)', () => {
+    // Each of these used to collapse to `[]`, which the caller read as "no incidents" → operational
+    // with the failure streak cleared. They parse fine, so #677's decode guard never saw them.
+    for (const payload of [null, {}, 'nope', { events: [] }]) {
+      const r = parseAwsHealthEventsResult(payload, 'BEDROCK')
+      expect(r.ok, JSON.stringify(payload)).toBe(false)
+      expect(!r.ok && r.reason).toBe('aws-health-not-an-array')
+    }
   })
 
-  it('skips an event with no startTime', () => {
-    expect(parseAwsHealthEvents([{ service: 'BEDROCK', region: 'us-east-1' }], 'BEDROCK')).toEqual([])
+  it('an array whose elements carry none of our fields is UNREADABLE (#1212)', () => {
+    // What a field rename on this undocumented endpoint looks like from here.
+    const renamed = [{ serviceName: 'BEDROCK', region: 'us-east-1', startTimeMillis: Date.now() }]
+    const r = parseAwsHealthEventsResult(renamed, 'BEDROCK')
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.reason).toBe('aws-health-no-recognizable-events')
+  })
+
+  it('an EMPTY array is readable — a quiet day, not a drift', () => {
+    const r = parseAwsHealthEventsResult([], 'BEDROCK')
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.incidents).toEqual([])
+  })
+
+  it('recognizable events for OTHER services stay readable — nothing of ours is not a failure', () => {
+    // The false-positive direction: bedrock shares this endpoint with every AWS service.
+    const r = parseAwsHealthEventsResult([{ service: 'EC2', region: 'us-east-1', startTime: Date.now() }], 'BEDROCK')
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.incidents).toEqual([])
+  })
+
+  it('skips an event with no startTime while a recognizable sibling keeps the payload readable', () => {
+    const ok = { service: 'BEDROCK', region: 'us-west-2', startTime: Date.now() - 3_600_000 }
+    const r = parseAwsHealthEventsResult([{ service: 'BEDROCK', region: 'us-east-1' }, ok], 'BEDROCK')
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.incidents).toHaveLength(1)
   })
 
   it('tolerates a malformed EVENT_LOG (falls back to a single timeline entry)', () => {
     const ev = { ...BEDROCK_EVENT, metadata: { EVENT_LOG: 'not json' } }
-    const [inc] = parseAwsHealthEvents([ev], 'BEDROCK')
+    const [inc] = okHealth([ev], 'BEDROCK')
     expect(inc.timeline).toHaveLength(1)
     expect(inc.title).toBe('AWS_BEDROCK_OPERATIONAL_ISSUE') // fell back to typeCode (no EVENT_LOG summary)
   })
 
-  it('caps at 20 incidents', () => {
-    const many = Array.from({ length: 25 }, (_, i) => ({ ...BEDROCK_EVENT, startTime: 1781314018000 + i * 1000 }))
-    expect(parseAwsHealthEvents(many, 'BEDROCK')).toHaveLength(20)
+  it('parses well past 20 matched events — the publish cap is the CALLER\'s (#1212)', () => {
+    // The parser used to stop at 20 PRODUCED incidents. bedrock ids are per-region, so one
+    // multi-region event yields one entry per region: an ongoing event past the 20th matched entry
+    // fell out before `deriveAwsStatus` saw it, and the badge went green mid-outage.
+    const many = Array.from({ length: 25 }, (_, i) => ({ ...BEDROCK_EVENT, region: `r-${i}`, startTime: 1781314018000 + i * 1000 }))
+    expect(okHealth(many, 'BEDROCK')).toHaveLength(25)
   })
 })
 

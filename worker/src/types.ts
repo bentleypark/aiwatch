@@ -346,7 +346,7 @@ export interface ServiceConfig {
   // the legacy per-region RSS for Bedrock: real start/end timestamps → correct duration, one event
   // per incident (no per-update-epoch guid split / 1m floor / double-count). Plain fetch, no scrape.
   awsHealthApi?: { url: string; service: string }
-  azureRssUrl?: string // Azure OpenAI still uses the Azure status RSS (reuses parseAwsRssIncidents)
+  azureRssUrl?: string // Azure OpenAI still uses the Azure status RSS (read via parseAwsRssIncidentsResult)
   // BetterStack RSS emits "<model> — recovered" per auto-recovery blip; a single day can
   // produce 10-20 alerts per affected model. Opt-in suppression dedups by normalized title
   // in a 60-minute window. See #283 and isFlapSuppressible() in alerts.ts.

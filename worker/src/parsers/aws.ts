@@ -108,18 +108,49 @@ function parseEventLog(raw: string | undefined): AwsHealthEventLogEntry[] {
   } catch { return [] }
 }
 
+export type AwsHealthParseResult =
+  | { ok: true; incidents: Incident[] }
+  | { ok: false; reason: AwsHealthParseFailure }
+
+/**
+ * #1212 — the entry point the caller must use, for the same reason as the RSS sibling: `[]` alone
+ * cannot separate "the array was empty" from "we could not read this". Two ways that happens on an
+ * UNDOCUMENTED endpoint, and #677's guard covered neither because both parse fine:
+ *
+ *   - the payload is not the events array at all — a `{"events":[…]}` wrapper, an error object;
+ *   - it IS an array, but no element carries the fields we key on, which is what a field rename
+ *     (`startTime`→`startTimeMillis`, `service`→`serviceName`) looks like from here.
+ *
+ * The second test is "no element is recognizable", NOT "no element matched OUR service": an array of
+ * EC2-only events is a perfectly readable payload that simply has nothing of ours, and an empty array
+ * is a quiet day. Both stay readable.
+ */
+export function parseAwsHealthEventsResult(json: unknown, service: string): AwsHealthParseResult {
+  if (!Array.isArray(json)) return { ok: false, reason: 'aws-health-not-an-array' }
+  const recognizable = json.some((ev) => ev && typeof ev.service === 'string' && typeof ev.startTime === 'number')
+  if (json.length > 0 && !recognizable) return { ok: false, reason: 'aws-health-no-recognizable-events' }
+  return { ok: true, incidents: parseAwsHealthEvents(json, service) }
+}
+
 /**
  * #677 — Parse the AWS Health public events JSON (already decoded to a JS value) for ONE service
  * (e.g. 'BEDROCK') into normalized Incidents. Filters by `service`; uses the event's real
  * startTime/endTime so a resolved incident carries the TRUE duration (no 1m floor) as a single
  * record (no per-epoch-guid double-count). Active events (no endTime) → status 'investigating',
  * resolvedAt null. Stable id from service+region+startTime (startTime is fixed across updates).
+ *
+ * Not exported (#1212): `[]` from here is ambiguous, so callers go through
+ * `parseAwsHealthEventsResult`, which decides whether the payload was readable in the first place.
  */
-export function parseAwsHealthEvents(json: unknown, service: string): Incident[] {
+function parseAwsHealthEvents(json: unknown, service: string): Incident[] {
   if (!Array.isArray(json)) return []
   const incidents: Incident[] = []
+  // #1212 — NO bound here. This is the all-AWS-services firehose, so any cap applied before the
+  // per-service filter spends itself on other services' events and drops ours with no signal — the
+  // exact failure this issue closes. The only defensible bound is the caller's, applied after
+  // `filterIncidents`, where the population being counted is ours. A bound here would not even save
+  // work: `parseAwsRegionHealth` walks the same unsliced array in the same tick.
   for (const ev of json as AwsHealthEvent[]) {
-    if (incidents.length >= 20) break
     if (!ev || ev.service !== service || typeof ev.startTime !== 'number') continue
 
     const log = parseEventLog(ev.metadata?.EVENT_LOG)
@@ -212,17 +243,83 @@ export function deriveAwsStatus(incidents: Incident[]): 'operational' | 'degrade
 }
 
 /**
+ * #1212 — the reason vocabularies for a body we could not read. Member names are unique ACROSS every
+ * sibling union (Instatus, OnlineOrNot, and these two), so an operator aggregating one reason across
+ * services never sums two different parsers' failures — they take different fixes.
+ */
+export type AwsHealthParseFailure =
+  | 'aws-health-unparseable'             // the body did not decode/parse at all (#677's original case)
+  | 'aws-health-not-an-array'            // it parsed, but it is not the events array the endpoint documents
+  | 'aws-health-no-recognizable-events'  // an array whose elements carry none of the fields we key on
+
+export type AwsRssParseFailure =
+  | 'aws-rss-not-a-feed'         // 200, but the body carries no RSS envelope at all (interstitial / error page)
+  | 'aws-rss-items-unreadable'   // a feed WITH entries, none of which we could turn into an incident
+
+export type AwsRssParseResult =
+  | { ok: true; incidents: Incident[] }
+  | { ok: false; reason: AwsRssParseFailure }
+
+/** ONE pattern for both extraction and counting. `[\s>]` after the tag name accepts a legal
+ *  `<item foo="bar">` while still refusing `<items>`/`<itemx>`. Deliberately not two patterns: an
+ *  entry our own extraction could not match would otherwise be reported as upstream drift, and
+ *  pinning a service `unreadable` over a weakness in this regex is worse than parsing the entry.
+ *  The tempered body `(?:(?!<item[\s>])[\s\S])*?` is load-bearing, not defensive style: a plain lazy
+ *  `[\s\S]*?` lets an UNCLOSED entry swallow the next one and borrow its `</item>`, so a real
+ *  incident is published under the preceding entry's title — or dropped by the keyword filter with
+ *  the count guard none the wiser, since one match is still one match.
+ *  Used only with `.match()`, which resets `lastIndex` — do not switch it to `.test()`. */
+const RSS_ENTRY_RE = /<item[\s>](?:(?!<item[\s>])[\s\S])*?<\/item>/g
+
+/**
+ * #1212 — the entry point the caller must use, because `[]` alone cannot answer the only question
+ * that matters here: a quiet feed and a body that is not a feed at all both yield no `<item>`, and
+ * the second one silently reads as "no incidents" → `operational` + a cleared failure streak, which
+ * is the false-recovery class already fixed for Instatus (#1089) and OnlineOrNot (#1123).
+ *
+ * The envelope is the discriminator. Azure's feed always ships `<rss>` wrapping a `<channel>`, on a
+ * quiet day as much as a busy one (verified against the live feed 2026-08-06, which carried a
+ * `<channel>` with a title and `lastBuildDate` and zero items). An HTML interstitial or an error page
+ * has neither. Deliberately NOT a content-type check: the failure this guards against is a middlebox
+ * substituting a body, and such a response can carry any header it likes.
+ *
+ * The envelope alone is not enough, because a feed can arrive intact and still be unreadable ENTRY by
+ * entry — a renamed date element, say, makes every entry fail its field checks and produces zero
+ * incidents from a body that plainly carries some. That is the same false "no incidents" by a
+ * different route, so a body with entries that yields none is a failure too. It cannot misfire on the
+ * case that matters most here: zero entries in, zero incidents out is not the condition, and a feed
+ * whose entries only PARTLY parse stays readable.
+ *
+ * Kept narrow on purpose — it does not try to detect a TRUNCATED feed. There is no reliable marker
+ * for that in a format whose closing tags are optional-looking to a regex parser, and guessing would
+ * risk the far worse direction: flagging a healthy quiet feed as unreadable, which pins a permanent
+ * "we cannot read this source" caveat on a service that is fine. A truncation that cuts before
+ * `<channel>` is caught by the envelope test; one that cuts after it is not.
+ */
+export function parseAwsRssIncidentsResult(xml: string): AwsRssParseResult {
+  if (!/<rss[\s>]/i.test(xml) || !/<channel[\s>]/i.test(xml)) return { ok: false, reason: 'aws-rss-not-a-feed' }
+  // Match once and hand the entries down: the guard below needs the same list, and re-scanning a
+  // pathological body a second time is the case this whole bound exists for.
+  const entries = xml.match(RSS_ENTRY_RE) ?? []
+  const incidents = parseAwsRssIncidents(entries)
+  if (incidents.length === 0 && entries.length > 0) return { ok: false, reason: 'aws-rss-items-unreadable' }
+  return { ok: true, incidents }
+}
+
+/**
  * Parse AWS Health Dashboard RSS feed into normalized Incidents.
  * Empty RSS (no <item> elements) = operational (returns []).
  * Each <item> is treated as a separate incident (AWS does not use guid grouping).
+ *
+ * Not exported (#1212): `[]` from here is ambiguous, so callers go through
+ * `parseAwsRssIncidentsResult`, which decides whether the body was a feed in the first place.
  */
-export function parseAwsRssIncidents(xml: string): Incident[] {
-  const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
-  if (!items) return []
-
+function parseAwsRssIncidents(items: readonly string[]): Incident[] {
   const incidents: Incident[] = []
+  // #1212 — no bound here either, same reason as the health parser: this is the whole-Azure feed, so a
+  // parser-side cap counts other services' entries first. `xml.match` has already materialised every
+  // entry by this point, so a cap would only skip field extraction — it would not bound the scan.
   for (const item of items) {
-    if (incidents.length >= 20) break
 
     const title = decodeXmlEntities(stripCdata(item.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? ''))
     const desc = decodeXmlEntities(stripCdata(item.match(/<description>([\s\S]*?)<\/description>/)?.[1] ?? ''))

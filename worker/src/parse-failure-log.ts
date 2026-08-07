@@ -40,16 +40,17 @@
 import { kvPut, type KVLike } from './utils'
 import type { InstatusParseFailure } from './parsers/instatus'
 import type { OnlineOrNotParseFailure } from './parsers/onlineornot'
+import type { AwsRssParseFailure, AwsHealthParseFailure } from './parsers/aws'
 
 /**
  * #1123 — the persisted reason vocabulary, joined in ONE place: the module that writes it. Typing
  * `recordParseFailure` with this (rather than a bare `string`) keeps the set of buckets that can
  * appear in KV enumerable and greppable, and forces a third source added later to join the union
- * instead of silently inventing a bucket nobody can interpret. Member names are unique ACROSS the
- * two unions on purpose, so an operator aggregating one reason over several services is never
+ * instead of silently inventing a bucket nobody can interpret. Member names are unique across every
+ * source's union on purpose, so an operator aggregating one reason over several services is never
  * summing two different parsers' failures — they take different fixes.
  */
-export type SourceParseFailure = InstatusParseFailure | OnlineOrNotParseFailure
+export type SourceParseFailure = InstatusParseFailure | OnlineOrNotParseFailure | AwsRssParseFailure | AwsHealthParseFailure
 
 /** 30d — long enough that a weekly check sees the whole window, unlike `fetch-fail:daily`'s 48h. */
 export const PARSE_FAIL_TTL_S = 30 * 86400

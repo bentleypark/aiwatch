@@ -361,9 +361,11 @@ export function isNonOutageAlert(alert: { advisory?: boolean }, kind: AlertKind 
  *  single transient throw mid-dead-source fabricated a 'recovered' → next-cycle 'alert' flap. */
 export type SourceLiveness = 'dead' | 'alive' | 'unknown'
 
-/** #714 — derive the 3-state source liveness from a service's runtime flags. `sourceDead` (confirmed
- *  4xx, incl. 429) and `sourceUnknown` (throw / 5xx, and since #1089 an unreadable Instatus incident list) are set on disjoint return paths in services.ts;
- *  neither set = a clean fetch = `alive`. `dead` takes precedence defensively. Pure — unit-tested. */
+/** #714 — derive the 3-state source liveness from a service's runtime flags. `sourceDead` (the source
+ *  is gone) and `sourceUnknown` (any read we could not complete or could not interpret) are set on
+ *  disjoint return paths in services.ts; neither set = a clean fetch = `alive`. `dead` takes precedence
+ *  defensively. Which paths set each flag is deliberately not enumerated here — that copy grew three
+ *  times (#1089, #1123, #1212) and went stale every time. Pure — unit-tested. */
 export function sourceLivenessOf(svc: { sourceDead?: boolean; sourceUnknown?: boolean }): SourceLiveness {
   if (svc.sourceDead) return 'dead'
   if (svc.sourceUnknown) return 'unknown'

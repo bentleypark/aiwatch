@@ -24,7 +24,7 @@ import {
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { mergeOnlineOrNotIncidents, parseOnlineOrNotIncidentHistory, parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
-import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
+import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { mergeXaiRegionalIncidents } from './xai-regions'
 
 // #990 — OpenAI (openai/chatgpt/codex all share status.openai.com) occasionally posts a
@@ -1520,25 +1520,46 @@ export function includeUntaggedIncidents(
   )
 }
 
+/** #1212 — the 4xx codes that actually mean "this resource is gone", for the two legs that have no
+ *  probe and no cross-validation to correct a wrong verdict. `classifyStatusPageFailure` maps EVERY
+ *  4xx to dead-source, which is right for a JSON API where a 4xx is unambiguous; on these two it
+ *  would also swallow 403/429 (a WAF challenge or rate limit aimed at our egress) and 408/451 — none
+ *  of which say the URL died, and all of which would skip `trackFetchFailure` and disarm the #500
+ *  persistent-block alert. An explicit set says what the comment says. */
+const GONE_STATUSES = new Set([401, 404, 410])
+
+/** #1212 — how many of OUR incidents a leg publishes, applied after the keyword filter. Same figure
+ *  the RSS parser used to enforce internally; the difference is that it now counts only entries this
+ *  service actually owns, so a busy shared feed cannot truncate ours out of the list. */
+const PUBLISHED_INCIDENT_CAP = 20
+
 // Retry once on failure to reduce false-positive 'down' from transient network issues
 // Retry uses shorter timeout to keep total wall-clock time under ~12s per service
 //
 // `onRetry` fires immediately before the second attempt (#1211), so a caller can restart whatever
 // clock it publishes. Only the Azure RSS leg passes one; the Atlassian callers below time both legs
 // together and have the same inflation on their own retry path, unaddressed.
-async function fetchWithRetry(url: string, timeoutMs = 8000, onRetry?: () => void): Promise<Response> {
+//
+// `svcId` prefixes both log lines (#1212). Without it these were the only fetch logs in the file keyed
+// on the URL alone, so filtering Workers Logs by a service id showed the caller's outcome line but not
+// the attempt reasons above it — which is the half that says whether the source stalled or refused.
+async function fetchWithRetry(
+  url: string,
+  { timeoutMs = 8000, onRetry, svcId }: { timeoutMs?: number; onRetry?: () => void; svcId?: string } = {},
+): Promise<Response> {
+  const who = svcId ? `${svcId} ${url}` : url
   try {
     return await fetchWithTimeout(url, timeoutMs)
   } catch (err) {
     // The reason is logged, not just the fact: "aborted at the timeout" (a stall) and "connection
     // reset in 200ms" (a block) call for different fixes, and attempt 1's reason is otherwise lost.
-    console.warn(`[fetchWithRetry] first attempt failed for ${url}, retrying:`, err instanceof Error ? `${err.name}: ${err.message}` : err)
+    console.warn(`[fetchWithRetry] first attempt failed for ${who}, retrying:`, err instanceof Error ? `${err.name}: ${err.message}` : err)
     await new Promise((r) => setTimeout(r, 1000))
     onRetry?.()
     try {
       return await fetchWithTimeout(url, Math.min(timeoutMs, 3000))
     } catch (retryErr) {
-      console.error(`[fetchWithRetry] retry also failed for ${url}:`, retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : retryErr)
+      console.error(`[fetchWithRetry] retry also failed for ${who}:`, retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : retryErr)
       throw retryErr
     }
   }
@@ -1717,8 +1738,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         const baseUrl = config.apiUrl.replace('/summary.json', '')
         const start = Date.now()
         const [summaryRes, incidentsRes] = await Promise.all([
-          fetchWithRetry(config.apiUrl),
-          fetchWithRetry(`${baseUrl}/incidents.json`).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); parseErrors++; return null }),
+          fetchWithRetry(config.apiUrl, { svcId: config.id }),
+          fetchWithRetry(`${baseUrl}/incidents.json`, { svcId: config.id }).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); parseErrors++; return null }),
         ])
         latency = Date.now() - start
         if (!summaryRes.ok) {
@@ -2152,26 +2173,54 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         const latency = Date.now() - start
         if (!res || !res.ok) {
           if (res) { console.warn(`[fetchService] ${config.id} AWS Health API HTTP ${res.status}`); res.body?.cancel() }
+          // #1212 — an unambiguous gone/auth 4xx is the source being GONE, which matters most on THIS
+          // leg: the endpoint is undocumented, so its retirement is a live possibility, and without
+          // this it would publish a permanent `degraded` with liveness `unknown` — which the
+          // source-dead decision HOLDS, so nobody would ever be told the URL died.
+          //
+          // Everything else — 403/429 above all, this being an undocumented endpoint fetched with a
+          // spoofed UA from Worker egress — falls through to the transient path so the streak advances
+          // and the #500 persistent-block alert stays armed. Neither of these two services is probed,
+          // so `probeConfirmed` can never correct a wrong `sourceDead` here the way it can elsewhere.
+          if (res && GONE_STATUSES.has(res.status)) {
+            return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
+          }
           const shouldDegrade = await trackFetchFailure(kv, config.id)
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
+          // A failed read is not a verdict about the provider.
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
         // Decode the utf-16 (BOM-detected) JSON. A 200 with an unparseable body means the endpoint's
         // shape/encoding drifted \u2014 treat that like a fetch failure (degrade + trip the persistent-block
         // alert) instead of resetting the failure counter and silently showing "operational, no
         // incidents", which would hide a real outage on this undocumented endpoint (#677 review).
-        let json: unknown = null
+        // #1212 — a sentinel rather than `null`, because a body of literal `null` decodes fine and
+        // would otherwise be indistinguishable from a decode that threw. The 30d reason counter exists
+        // to outlive the logs, so it must not conflate the two: they take different fixes.
+        const DECODE_FAILED = Symbol('decode-failed')
+        let json: unknown = DECODE_FAILED
         try {
           json = decodeAwsHealthJson(await res.arrayBuffer(), res.headers.get('content-type'))
         } catch (err) {
           console.warn(`[fetchService] ${config.id} AWS Health API decode/parse failed (ct=${res.headers.get('content-type')}):`, err instanceof Error ? err.message : err)
         }
-        if (json === null) {
+        // #1212 — the same verdict-not-a-list treatment the RSS leg gets. `parseAwsHealthEvents`
+        // returns `[]` for anything it cannot read, which used to clear the streak and publish
+        // `operational` — the false recovery this issue closes.
+        const health = json === DECODE_FAILED
+          ? { ok: false, reason: 'aws-health-unparseable' } as const
+          : parseAwsHealthEventsResult(json, config.awsHealthApi.service)
+        if (!health.ok) {
+          console.warn(`[fetchService] ${config.id} AWS Health API unreadable (${health.reason}, ct=${res.headers.get('content-type')})`)
+          await recordParseFailure(kv, Date.now(), config.id, health.reason)
           const shouldDegrade = await trackFetchFailure(kv, config.id)
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
+          // `sourceUnknown` is what says "our read failed" on the badge and to the withdrawal hold,
+          // rather than only in the counter.
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
         await resetFetchFailure(kv, config.id)
-        const incidents = parseAwsHealthEvents(json, config.awsHealthApi.service)
-        const filtered = filterIncidents(incidents, config)
+        // #1212 — same split as the Azure leg: status from the unsliced list, display capped.
+        const oursHealth = filterIncidents(health.incidents, config)
+        const filtered = oursHealth.slice(0, PUBLISHED_INCIDENT_CAP)
         // #574 — derive currently-degraded AWS regions from the SAME events JSON (all AWS services),
         // attached to bedrock so the supply-chain banner can correlate without an extra fetch.
         const awsRegionHealth = config.id === 'bedrock' ? parseAwsRegionHealth(json) : undefined
@@ -2180,7 +2229,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         // on incidents + recovery only. The honest "official-first, no fabricated value" position.
         return {
           ...base,
-          status: deriveAwsStatus(filtered),
+          status: deriveAwsStatus(oursHealth),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
@@ -2201,27 +2250,58 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         // `start` is reset before the retry so the published latency is the served response's own RTT
         // rather than the abandoned attempt plus the backoff.
         let start = Date.now()
-        const rssRes = await fetchWithRetry(config.azureRssUrl, 4000, () => { start = Date.now() }).catch((err) => {
+        const rssRes = await fetchWithRetry(config.azureRssUrl, { timeoutMs: 4000, onRetry: () => { start = Date.now() }, svcId: config.id }).catch((err) => {
           console.warn(`[fetchService] ${config.id} Azure RSS failed:`, err instanceof Error ? err.message : err)
           return null
         })
         const latency = Date.now() - start
         if (!rssRes || !rssRes.ok) {
           if (rssRes) { console.warn(`[fetchService] ${config.id} Azure RSS HTTP ${rssRes.status}`); rssRes.body?.cancel() }
+          // #1212 — an unambiguous gone/auth 4xx is the source being GONE, not an indeterminate read,
+          // and `sourceUnknown`'s contract (types.ts) excludes it. Same treatment as the summary.json
+          // path: no degrade, out of rankings, and the #689 "status source inactive" operator alert
+          // rather than a permanent amber badge nobody is told about. Everything else falls through to the
+          // transient path — see the AWS Health leg above.
+          if (rssRes && GONE_STATUSES.has(rssRes.status)) {
+            return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
+          }
           const shouldDegrade = await trackFetchFailure(kv, config.id)
           // An HTTP error still measured a response time (kept, as on the AWS Health leg above); a
           // stall measured nothing, so publishing the elapsed abort budget would put our own timeout
           // into `/api/v1/status` and `latency:24h` as though it were Azure's.
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: rssRes && config.category === 'api' ? latency : null }
+          // #1212 — `sourceUnknown`: this is our read failing, not a verdict about Azure. It drives the
+          // #1004 `unknown` badge instead of a bare amber one, and holds the #1106 withdrawal notice
+          // that an empty incident list would otherwise look like grounds for.
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], sourceUnknown: true, latency: rssRes && config.category === 'api' ? latency : null }
+        }
+        // #1212 — a 200 is not a read. The body has to be a feed before its emptiness means anything;
+        // otherwise "no incidents" is our own misreading and clearing the streak publishes a recovery
+        // we have no evidence for.
+        const body = await rssRes.text()
+        const parsed = parseAwsRssIncidentsResult(body)
+        if (!parsed.ok) {
+          console.warn(`[fetchService] ${config.id} Azure RSS unreadable (${parsed.reason}, http=${rssRes.status}, ct=${rssRes.headers.get('content-type')}, chars=${body.length})`)
+          await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
+          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
         await resetFetchFailure(kv, config.id)
-        const incidents = parseAwsRssIncidents(await rssRes.text())
-        const filtered = filterIncidents(incidents, config)
+        // #1212 — cap AFTER the keyword filter, not inside the parser. This is the whole-Azure
+        // firehose and azureopenai's only scoping is `incidentKeywords`, so a parser-side cap counted
+        // every other Azure service's entries first: during a broad Azure event — exactly when ours is
+        // most likely to be affected — an ONGOING incident was pushed past the cap by newer sibling
+        // entries and silently un-published itself mid-outage.
+        const ours = filterIncidents(parsed.incidents, config)
+        // The cap is a DISPLAY bound. `deriveAwsStatus` reads the unsliced list, because the feed is
+        // newest-first and nothing sorts unresolved entries up: deriving from the slice would
+        // reintroduce the same silent un-publish, needing 20 newer incidents of our own instead of 20
+        // of anyone's.
+        const filtered = ours.slice(0, PUBLISHED_INCIDENT_CAP)
         // #713 — Azure RSS is an incident feed, not a rolling uptime %. No invented estimate: uptime
         // stays null ("No official uptime — incident-tracked"), Score computed on incidents + recovery.
         return {
           ...base,
-          status: deriveAwsStatus(filtered),
+          status: deriveAwsStatus(ours),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
