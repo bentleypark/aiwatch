@@ -152,7 +152,7 @@ function AppInner() {
             {t('footer.copyright')}
           </span>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={() => { setModal('privacy'); trackEvent('open_legal', { type: 'privacy' }) }}
             className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer"

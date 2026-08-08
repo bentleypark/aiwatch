@@ -166,11 +166,12 @@ pre,
 
 .site-footer {
   margin: 20px 24px 20px;
-  padding: 16px 24px;
+  padding: 16px 220px 16px 24px;
 }
 @media (max-width: 767px) {
-  .site-footer { margin: 14px; padding: 14px; }
+  .site-footer { margin: 14px; padding: 14px 14px 60px; }
 }
+
 
 /* ─── Scrollbar ─────────────────────────────────────────── */
 * {
