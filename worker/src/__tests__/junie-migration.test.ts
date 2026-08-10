@@ -4,6 +4,7 @@ import { attachIncidentIoComponentNames, computeIncidentIoUptime, parseIncidentI
 import { isProbeFailing, PROBE_TARGETS } from '../probe'
 import { STATUS_URL } from '../../../src/utils/statusPageUrls'
 import type { Incident } from '../types'
+import type { TrackingStateBlob } from '../utils'
 
 // #1004 — JetBrains moved their AI status page from Atlassian Statuspage (status.jetbrains.ai) to
 // incident.io (status.jetbrains.cloud). The old host now 301s to the new SITE ROOT — the redirect drops
@@ -258,15 +259,18 @@ describe('a 200 text/html status page is an unknown SOURCE, not a degraded servi
   it('stays operational under the 3-strike threshold, then degrades — flagged sourceUnknown throughout', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } })))
     const kv = countingKv()
+    // #1224 — the fetch-fail streak lives in this shared in-memory blob now, not individual KV keys,
+    // so it must be threaded through every call the same way `fetchAllServices` threads it in production.
+    const trackingStore: TrackingStateBlob = {}
 
-    const first = await fetchService(junie, undefined, kv)
+    const first = await fetchService(junie, undefined, kv, trackingStore)
     expect(first.status).toBe('operational')      // one bad read is not an outage
     expect(first.sourceUnknown).toBe(true)        // …but it is not a clean read either
 
-    const second = await fetchService(junie, undefined, kv)
+    const second = await fetchService(junie, undefined, kv, trackingStore)
     expect(second.status).toBe('operational')
 
-    const third = await fetchService(junie, undefined, kv)
+    const third = await fetchService(junie, undefined, kv, trackingStore)
     expect(third.status).toBe('degraded')         // the fallback that looked like a real outage
     expect(third.sourceUnknown).toBe(true)        // …and the flag that lets the UI say otherwise
     expect(third.uptime30d).toBeNull()            // nothing was read, so nothing is claimed

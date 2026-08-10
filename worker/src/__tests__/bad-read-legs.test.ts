@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchService, SERVICES } from '../services'
-import type { KVLike } from '../utils'
+import type { KVLike, TrackingStateBlob } from '../utils'
 
 // #1212 — the WIRING half of the bad-read guard. `parsers/__tests__/aws.test.ts` pins that the parser
 // can tell a quiet feed from a body that is not a feed; that says nothing about whether `fetchService`
@@ -9,6 +9,12 @@ import type { KVLike } from '../utils'
 //
 // Two services reach these legs, and neither has anything to contradict a bad read — one source, no
 // probe target, and no cross-validation phase they qualify for. Both are covered here.
+//
+// #1224 — the failure streak these tests pin lives in the consolidated `tracking:state` blob now, not
+// individual `fetch-fail:{id}` KV keys, so each test threads its own `trackingStore` explicitly
+// (mirroring what `fetchAllServices` does in production) instead of reading it back out of the mock
+// KV's raw store. `instatus-parse-fail:*` is unaffected by that consolidation — still a real KV key —
+// so `keysStartingWith(store, ...)` stays valid for those assertions.
 
 const azure = SERVICES.find((s) => s.id === 'azureopenai')!
 const bedrock = SERVICES.find((s) => s.id === 'bedrock')!
@@ -75,12 +81,13 @@ describe('#1212 — a 200 that is not a feed must not read as a recovery (azureo
   it('does NOT clear the failure streak when the body is not a feed', async () => {
     // The regression test proper, and the load-bearing half: clearing the streak is what turns a
     // sequence of bad reads into a permanent green badge, because the counter never reaches 3.
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(INTERSTITIAL, { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
-    expect(store['fetch-fail:azureopenai'], 'an unreadable body is a failed read, not a success').toBe('3')
+    expect(trackingStore.azureopenai?.failCount, 'an unreadable body is a failed read, not a success').toBe(3)
     expect(svc.status, 'the third consecutive bad read crosses the threshold').toBe('degraded')
     expect(svc.sourceUnknown, 'and it is flagged as OUR read failing, not a verdict about Azure').toBe(true)
     expect(svc.incidents).toEqual([])
@@ -92,7 +99,7 @@ describe('#1212 — a 200 that is not a feed must not read as a recovery (azureo
     const store: Record<string, string> = {}
     vi.stubGlobal('fetch', vi.fn(async () => new Response(INTERSTITIAL, { status: 200 })))
 
-    await fetchService(azure, undefined, mockKV(store))
+    await fetchService(azure, undefined, mockKV(store), {})
 
     const booked = keysStartingWith(store, 'instatus-parse-fail:')
     expect(booked, 'the reason must be recorded on the first bad read, not only at the threshold').toHaveLength(1)
@@ -102,14 +109,15 @@ describe('#1212 — a 200 that is not a feed must not read as a recovery (azureo
   it('a QUIET feed is not flagged — the false-positive direction', async () => {
     // If this flips, azureopenai carries a "we cannot read this source" caveat every ordinary day and
     // never clears its streak, which is a worse failure than the one being fixed.
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(QUIET_FEED, { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(svc.status).toBe('operational')
     expect(svc.sourceUnknown).toBeUndefined()
-    expect(store['fetch-fail:azureopenai'], 'a readable feed clears the streak').toBeUndefined()
+    expect(trackingStore.azureopenai, 'a readable feed clears the streak').toBeUndefined()
     expect(keysStartingWith(store, 'instatus-parse-fail:'), 'nothing unreadable happened').toEqual([])
   })
 
@@ -117,7 +125,7 @@ describe('#1212 — a 200 that is not a feed must not read as a recovery (azureo
     const store: Record<string, string> = {}
     vi.stubGlobal('fetch', vi.fn(async () => new Response(feedWithIncident(), { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), {})
 
     expect(svc.incidents).toHaveLength(1)
     expect(svc.status).toBe('degraded')
@@ -127,10 +135,11 @@ describe('#1212 — a 200 that is not a feed must not read as a recovery (azureo
   it('flags sourceUnknown when the fetch itself fails', async () => {
     // The #714 rule the two legs in this block were the last to be missing: a thrown fetch is an
     // INDETERMINATE verdict, not a recovery.
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET') }))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.status).toBe('degraded')
@@ -139,10 +148,11 @@ describe('#1212 — a 200 that is not a feed must not read as a recovery (azureo
 
 describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
   it('flags sourceUnknown on a failed fetch', async () => {
-    const store: Record<string, string> = { 'fetch-fail:bedrock': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET') }))
 
-    const svc = await fetchService(bedrock, undefined, mockKV(store))
+    const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.status).toBe('degraded')
@@ -151,14 +161,15 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
   it('flags sourceUnknown on a 200 with an unparseable body', async () => {
     // The guard for this already existed (#677) — it refused to call the body a recovery — but it
     // said so only in the counter, so the badge still read as an ordinary amber `degraded`.
-    const store: Record<string, string> = { 'fetch-fail:bedrock': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('not json at all', { status: 200 })))
 
-    const svc = await fetchService(bedrock, undefined, mockKV(store))
+    const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.status).toBe('degraded')
-    expect(store['fetch-fail:bedrock']).toBe('3')
+    expect(trackingStore.bedrock?.failCount).toBe(3)
   })
 
   it('separates a body that would not PARSE from one that parsed into the wrong thing', async () => {
@@ -174,7 +185,7 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
       const payload = typeof body === 'string' ? body : JSON.stringify(body)
       vi.stubGlobal('fetch', vi.fn(async () => new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } })))
 
-      await fetchService(bedrock, undefined, mockKV(store))
+      await fetchService(bedrock, undefined, mockKV(store), {})
 
       const booked = keysStartingWith(store, 'instatus-parse-fail:')
       expect(booked, String(payload)).toHaveLength(1)
@@ -184,14 +195,15 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
   })
 
   it('a readable events payload is not flagged', async () => {
-    const store: Record<string, string> = { 'fetch-fail:bedrock': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } })))
 
-    const svc = await fetchService(bedrock, undefined, mockKV(store))
+    const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBeUndefined()
     expect(svc.status).toBe('operational')
-    expect(store['fetch-fail:bedrock']).toBeUndefined()
+    expect(trackingStore.bedrock).toBeUndefined()
   })
 })
 
@@ -200,28 +212,30 @@ describe('#1212 — a readable source with nothing of ours is NOT an unreadable 
   // If this ever reads as unreadable, the service carries a permanent caveat on an ordinary day.
 
   it('azure: entries that all filter out still clear the streak', async () => {
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(feedWithOnlySiblings(), { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(svc.status).toBe('operational')
     expect(svc.incidents, 'the sibling is not ours').toEqual([])
     expect(svc.sourceUnknown).toBeFalsy()
-    expect(store['fetch-fail:azureopenai']).toBeUndefined()
+    expect(trackingStore.azureopenai).toBeUndefined()
     expect(keysStartingWith(store, 'instatus-parse-fail:')).toEqual([])
   })
 
   it('bedrock: an events array carrying only other AWS services still clears the streak', async () => {
-    const store: Record<string, string> = { 'fetch-fail:bedrock': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     const events = [{ service: 'EC2', region: 'us-east-1', typeCode: 'AWS_EC2_OPERATIONAL_ISSUE', startTime: Date.now() - 3_600_000, metadata: {} }]
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(events), { status: 200, headers: { 'content-type': 'application/json' } })))
 
-    const svc = await fetchService(bedrock, undefined, mockKV(store))
+    const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.status).toBe('operational')
     expect(svc.sourceUnknown).toBeFalsy()
-    expect(store['fetch-fail:bedrock']).toBeUndefined()
+    expect(trackingStore.bedrock).toBeUndefined()
   })
 })
 
@@ -234,21 +248,22 @@ describe('#1212 — a 200 that PARSES but is the wrong shape (bedrock)', () => {
     ['an error object', { message: 'Forbidden' }],
     ['a bare string', 'blocked'],
   ])('flags sourceUnknown for %s', async (_label, payload) => {
-    const store: Record<string, string> = { 'fetch-fail:bedrock': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })))
 
-    const svc = await fetchService(bedrock, undefined, mockKV(store))
+    const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown, 'a parseable body of the wrong shape is still an unread source').toBe(true)
     expect(svc.status).toBe('degraded')
-    expect(store['fetch-fail:bedrock'], 'the streak must not be cleared').toBe('3')
+    expect(trackingStore.bedrock?.failCount, 'the streak must not be cleared').toBe(3)
   })
 
   it('books the shape drift under its own reason, distinct from the parse failure', async () => {
     const store: Record<string, string> = {}
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'content-type': 'application/json' } })))
 
-    await fetchService(bedrock, undefined, mockKV(store))
+    await fetchService(bedrock, undefined, mockKV(store), {})
 
     const booked = keysStartingWith(store, 'instatus-parse-fail:')
     expect(booked).toHaveLength(1)
@@ -263,14 +278,15 @@ describe('#1212 — a feed WITH entries that yields no incidents is unreadable (
   it('flags sourceUnknown when a renamed date element makes every entry unreadable', async () => {
     const pubDate = new Date(Date.now() - 3_600_000).toUTCString()
     const body = `<rss version="2.0"><channel><title>t</title><item><title>Azure OpenAI - Degraded</title><published>${pubDate}</published><guid>g1</guid></item></channel></rss>`
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown, 'an entry was present and none survived — that is drift, not quiet').toBe(true)
     expect(svc.status).toBe('degraded')
-    expect(store['fetch-fail:azureopenai']).toBe('3')
+    expect(trackingStore.azureopenai?.failCount).toBe(3)
     const booked = keysStartingWith(store, 'instatus-parse-fail:')
     expect(JSON.parse(store[booked[0]]).counts.azureopenai).toEqual({ 'aws-rss-items-unreadable': 1 })
   })
@@ -280,14 +296,15 @@ describe('#1212 — a feed WITH entries that yields no incidents is unreadable (
     // narrowness as upstream drift and pin the service unreadable.
     const pubDate = new Date(Date.now() - 3_600_000).toUTCString()
     const body = `<rss version="2.0"><channel><title>t</title><item xmlns:x="urn:x"><title>Azure OpenAI - Degraded experience</title><pubDate>${pubDate}</pubDate><guid>g1</guid></item></channel></rss>`
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(svc.incidents).toHaveLength(1)
     expect(svc.sourceUnknown).toBeFalsy()
-    expect(store['fetch-fail:azureopenai'], 'a readable feed clears the streak').toBeUndefined()
+    expect(trackingStore.azureopenai, 'a readable feed clears the streak').toBeUndefined()
   })
 })
 
@@ -303,7 +320,7 @@ describe('#1212 — a busy shared feed must not truncate OUR incident away', () 
     const body = `<rss version="2.0"><channel><title>Azure Status</title>${siblings}${ours}</channel></rss>`
     vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV({}))
+    const svc = await fetchService(azure, undefined, mockKV({}), {})
 
     expect(svc.incidents.map((i) => i.id), 'ours is entry 25 of the feed').toEqual(['ours'])
     expect(svc.status).toBe('degraded')
@@ -316,7 +333,7 @@ describe('#1212 — a busy shared feed must not truncate OUR incident away', () 
     const body = `<rss version="2.0"><channel><title>Azure Status</title>${mine}</channel></rss>`
     vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV({}))
+    const svc = await fetchService(azure, undefined, mockKV({}), {})
 
     expect(svc.incidents).toHaveLength(20)
   })
@@ -334,7 +351,7 @@ describe('#1212 — the publish cap is a DISPLAY bound, not a status input', () 
     const body = `<rss version="2.0"><channel><title>Azure Status</title>${resolved}${ongoing}</channel></rss>`
     vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })))
 
-    const svc = await fetchService(azure, undefined, mockKV({}))
+    const svc = await fetchService(azure, undefined, mockKV({}), {})
 
     expect(svc.incidents, 'the display list is still capped').toHaveLength(20)
     expect(svc.incidents.some((i) => i.id === 'ongoing'), 'and the ongoing one is past the cap').toBe(false)
@@ -356,7 +373,7 @@ describe('#1212 — the same split on the AWS Health leg', () => {
     const ongoing = { service: 'BEDROCK', region: 'r-live', typeCode: 'AWS_BEDROCK_OPERATIONAL_ISSUE', startTime: Date.now() - 40 * hour, metadata: {} }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([...resolved, ongoing]), { status: 200, headers: { 'content-type': 'application/json' } })))
 
-    const svc = await fetchService(bedrock, undefined, mockKV({}))
+    const svc = await fetchService(bedrock, undefined, mockKV({}), {})
 
     expect(svc.incidents, 'the display list is still capped').toHaveLength(20)
     expect(svc.incidents.some((i) => i.componentNames?.includes('r-live')), 'ours is past the cap').toBe(false)
@@ -374,10 +391,10 @@ describe('#1212 — a 4xx is the source being GONE, not an indeterminate read', 
     ['azureopenai', () => azure, 410],
     ['bedrock', () => bedrock, 404],
   ])('%s: a %i marks the source dead, not degraded', async (_id, get, code) => {
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2', 'fetch-fail:bedrock': '2' }
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() }, bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('gone', { status: code })))
 
-    const svc = await fetchService(get(), undefined, mockKV(store))
+    const svc = await fetchService(get(), undefined, mockKV({}), trackingStore)
 
     expect(svc.sourceDead, 'a 4xx is a confirmed dead source').toBe(true)
     expect(svc.sourceUnknown, 'and therefore NOT the indeterminate flag').toBeFalsy()
@@ -396,25 +413,25 @@ describe('#1212 — a 4xx is the source being GONE, not an indeterminate read', 
     // retirement. Reading it as dead would publish a green badge at poll rate with no streak, and
     // would skip `trackFetchFailure`, disarming the #500 persistent-block alert that describes a
     // block correctly. Neither service is probed, so nothing could correct a wrong `sourceDead`.
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2', 'fetch-fail:bedrock': '2' }
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() }, bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('blocked', { status: code })))
 
-    const svc = await fetchService(get(), undefined, mockKV(store))
+    const svc = await fetchService(get(), undefined, mockKV({}), trackingStore)
 
     expect(svc.sourceDead, 'a block is not a confirmed dead source').toBeFalsy()
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.status).toBe('degraded')
-    expect(store[`fetch-fail:${svc.id}`], 'the streak must advance so #500 can still fire').toBe('3')
+    expect(trackingStore[svc.id]?.failCount, 'the streak must advance so #500 can still fire').toBe(3)
   })
 
   it.each([
     ['azureopenai', () => azure],
     ['bedrock', () => bedrock],
   ])('%s: a 5xx stays indeterminate', async (_id, get) => {
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2', 'fetch-fail:bedrock': '2' }
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() }, bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('oops', { status: 503 })))
 
-    const svc = await fetchService(get(), undefined, mockKV(store))
+    const svc = await fetchService(get(), undefined, mockKV({}), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.sourceDead).toBeFalsy()
@@ -430,7 +447,7 @@ describe('#1212 — fetchWithRetry log lines carry the service id', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET') }))
 
-    await fetchService(azure, undefined, mockKV({}))
+    await fetchService(azure, undefined, mockKV({}), {})
 
     const lines = [...warn.mock.calls, ...error.mock.calls].map((c) => String(c[0]))
     // Asserts the CONTRACT (filterable by service id, and still says which URL) rather than the exact

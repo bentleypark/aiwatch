@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchService, SERVICES } from '../services'
-import type { KVLike } from '../utils'
+import type { KVLike, TrackingStateBlob } from '../utils'
 
 // #1211 — the Azure RSS leg intermittently returns no response headers at all, and three such stalls
 // cross `trackFetchFailure`'s threshold into a `degraded` that describes our connection rather than
@@ -80,7 +80,8 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
   it('recovers the incident when the first attempt stalls and the retry succeeds', async () => {
     // The regression test proper. Pre-fix this branch called `fetchWithTimeout` directly, so the abort
     // collapsed to `null` → `incidents: []` and the ongoing incident vanished from the card.
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2 } }
     let calls = 0
     vi.stubGlobal('fetch', vi.fn(async () => {
       calls++
@@ -88,7 +89,7 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
       return new Response(feedWithIncident(), { status: 200 })
     }))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(calls, 'the stalled attempt must be retried on a fresh connection').toBe(2)
     expect(svc.incidents.length, 'ours reaches the card; the sibling Azure service is filtered out').toBe(1)
@@ -98,22 +99,23 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
 
     // The failure episode must be un-booked, not merely out-voted — the crossing counter is what
     // turned into the published `degraded`.
-    expect(store['fetch-fail:azureopenai'], 'a success clears the streak').toBeUndefined()
+    expect(trackingStore.azureopenai, 'a success clears the streak').toBeUndefined()
     expect(keysStartingWith(store, 'fetch-fail:daily:'), 'no crossing may be booked when the retry rescued it').toEqual([])
   })
 
   it('still degrades when BOTH attempts stall — the retry must not swallow a dead source', async () => {
     // The other direction. A retry that hid a genuinely unreachable source would trade a false
     // `degraded` for a false `operational`, which is the worse failure for this product.
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2 } }
     let calls = 0
     vi.stubGlobal('fetch', vi.fn(async () => { calls++; throw abortError() }))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(calls, 'it must fail AFTER retrying, not instead of retrying').toBe(2)
     expect(svc.incidents, 'no feed was read, so no incidents').toEqual([])
-    expect(store['fetch-fail:azureopenai'], 'the failure must still be booked').toBe('3')
+    expect(trackingStore.azureopenai?.failCount, 'the failure must still be booked').toBe(3)
     expect(svc.status, 'the third consecutive failure crosses the threshold').toBe('degraded')
     // No response was measured, so no response time may be published — reporting the elapsed abort
     // budget would put our own timeout into /api/v1/status and the latency:24h series as Azure's.
@@ -127,7 +129,7 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
     const fetchMock = vi.fn(async () => new Response(feedWithIncident(), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), {})
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(svc.incidents.length).toBe(1)
@@ -136,7 +138,8 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
   it('an empty feed read on the retry is a clean operational, not a rescue with no effect', async () => {
     // The modal case: the live feed carries no <item> most of the time, so this — not the incident
     // fixture above — is what a real rescue usually produces.
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2 } }
     let calls = 0
     vi.stubGlobal('fetch', vi.fn(async () => {
       calls++
@@ -144,35 +147,36 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
       return new Response(EMPTY_FEED, { status: 200 })
     }))
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(svc.status, 'a reachable feed with no incidents is operational').toBe('operational')
     expect(svc.incidents).toEqual([])
-    expect(store['fetch-fail:azureopenai']).toBeUndefined()
+    expect(trackingStore.azureopenai).toBeUndefined()
   })
 
   it('an HTTP error response is NOT retried — only a stall is', async () => {
     // Documents the boundary. `fetchWithRetry` retries a THROW, not a `!res.ok`, so a 5xx still books
     // a failure on the first response. Pinned so a later change does not silently assume otherwise.
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2 } }
     const fetchMock = vi.fn(async () => new Response('upstream error', { status: 503 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const svc = await fetchService(azure, undefined, mockKV(store))
+    const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(store['fetch-fail:azureopenai']).toBe('3')
+    expect(trackingStore.azureopenai?.failCount).toBe(3)
     expect(svc.status).toBe('degraded')
     expect(svc.latency, 'an HTTP error still measured a real round trip — that one is kept').toBeTypeOf('number')
   })
 
   it('clears the #500 persistent-block marker too, once a retry recovers the source', async () => {
-    // The episode that matters: the streak already crossed, so `fetch-fail:since` is armed and the 1h
+    // The episode that matters: the streak already crossed, so `failSince` is armed and the 1h
     // structural-block alert is counting. A rescue that cleared only the streak would leave that clock
     // running and eventually page the operator about a source that recovered.
-    const store: Record<string, string> = {
-      'fetch-fail:azureopenai': '3',
-      'fetch-fail:since:azureopenai': new Date(Date.now() - 600_000).toISOString(),
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = {
+      azureopenai: { failCount: 3, failSince: new Date(Date.now() - 600_000).toISOString() },
     }
     let calls = 0
     vi.stubGlobal('fetch', vi.fn(async () => {
@@ -181,10 +185,9 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
       return new Response(EMPTY_FEED, { status: 200 })
     }))
 
-    await fetchService(azure, undefined, mockKV(store))
+    await fetchService(azure, undefined, mockKV(store), trackingStore)
 
-    expect(store['fetch-fail:azureopenai']).toBeUndefined()
-    expect(store['fetch-fail:since:azureopenai'], 'the persistent-block clock must be disarmed too').toBeUndefined()
+    expect(trackingStore.azureopenai, 'the persistent-block clock must be disarmed too').toBeUndefined()
   })
 })
 
@@ -210,7 +213,7 @@ describe('#1211 — the timing the fix is actually about', () => {
       return Promise.resolve(new Response(EMPTY_FEED, { status: 200 }))
     }))
 
-    const pending = fetchService(azure, undefined, mockKV({}))
+    const pending = fetchService(azure, undefined, mockKV({}), {})
 
     await vi.advanceTimersByTimeAsync(3_900)
     expect(calls, 'the first attempt is still in flight just under the budget').toBe(1)
@@ -233,8 +236,8 @@ describe('#1211 — the timing the fix is actually about', () => {
     let calls = 0
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => { calls++; return hangUntilAborted(init) }))
 
-    const store: Record<string, string> = { 'fetch-fail:azureopenai': '2' }
-    const pending = fetchService(azure, undefined, mockKV(store))
+    const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2 } }
+    const pending = fetchService(azure, undefined, mockKV({}), trackingStore)
 
     await vi.advanceTimersByTimeAsync(4_000)  // first attempt abandoned
     await vi.advanceTimersByTimeAsync(1_000)  // backoff

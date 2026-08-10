@@ -279,7 +279,7 @@ describe('#1047 fetchService — the REAL production call path', () => {
       summary: summary as never,
       incidents: { incidents: [unlinkedAtResolve()] } as never,
       latency: 120,
-    } as never)
+    } as never, undefined, {})
   }
 
   // The two services #1047 actually restores. Both FAIL without the fix on this path — which is the
@@ -352,7 +352,7 @@ describe('#1090 fetchService — sibling-component incident while OUR component 
       summary: summary as never,
       incidents: { incidents: [fable5Incident, opusIncident] } as never,
       latency: 120,
-    } as never)
+    } as never, undefined, {})
   }
 
   it('claude does NOT carry the Claude-Code-only incident — on the path /api/status uses', async () => {
@@ -540,7 +540,7 @@ describe('#1104 fetchService — the REAL production call path, with a CLOSED im
 
   const fetchOpenai = (uptimeHtml?: string) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
-    return fetchService(cfg('openai'), { summary: summary as never, incidents: null, latency: 120, uptimeHtml } as never)
+    return fetchService(cfg('openai'), { summary: summary as never, incidents: null, latency: 120, uptimeHtml } as never, undefined, {})
   }
 
   it('openai keeps the incident while its own badge reads operational — the #1104 bug, end to end', async () => {

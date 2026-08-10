@@ -41,14 +41,14 @@ describe('#1089 — an unreadable Instatus payload must not publish a recovery',
     // The regression test proper. Pre-fix this returned `status: 'operational'` with no marker, and the
     // plugin monitor turned that into "✅ Mistral API has recovered".
     stubFetch('<html><body>we redesigned the status page</body></html>')
-    const svc = await fetchService(mistral, undefined, undefined)
+    const svc = await fetchService(mistral, undefined, undefined, {})
     expect(svc.sourceUnknown, 'an unreadable source must be flagged, not silently trusted').toBe(true)
   })
 
   it('flags sourceUnknown even though the page returned HTTP 200', async () => {
     // Guards against "just check res.ok" — the page is fine, our read of it is not.
     stubFetch('<script id="__NUXT_DATA__" type="application/json">{oops</script>')
-    const svc = await fetchService(mistral, undefined, undefined)
+    const svc = await fetchService(mistral, undefined, undefined, {})
     expect(svc.sourceUnknown).toBe(true)
   })
 
@@ -56,7 +56,7 @@ describe('#1089 — an unreadable Instatus payload must not publish a recovery',
     // The false-positive direction. If this ever flips, every Mistral poll would claim an unreadable
     // source and the badge would be permanently caveated — worse than the bug being fixed.
     stubFetch(healthyNuxtHtml())
-    const svc = await fetchService(mistral, undefined, undefined)
+    const svc = await fetchService(mistral, undefined, undefined, {})
     expect(svc.sourceUnknown).toBeUndefined()
     expect(svc.incidents.some((i) => i.status !== 'resolved'), 'the ongoing incident should survive').toBe(true)
   })
@@ -65,7 +65,7 @@ describe('#1089 — an unreadable Instatus payload must not publish a recovery',
     // The distinction the whole change rests on, asserted at the wiring level rather than the parser.
     const arr: unknown[] = ['x', 'y', 'z', 0, 'MEDIUM', 'id', [], [], {}, [], { incidents: 9 }, { 'incidents-by-date-2026': 10 }]
     stubFetch(`<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`)
-    const svc = await fetchService(mistral, undefined, undefined)
+    const svc = await fetchService(mistral, undefined, undefined, {})
     expect(svc.sourceUnknown).toBeUndefined()
   })
 })
@@ -79,7 +79,7 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
   it('a 404 scrape does not read as "no incidents"', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) =>
       String(url).includes('/activity/') ? new Response('nope', { status: 404 }) : new Response('<html></html>', { status: 200 })))
-    const svc = await fetchService(mistral, undefined, undefined)
+    const svc = await fetchService(mistral, undefined, undefined, {})
     expect(svc.sourceUnknown, 'a 404 scrape must flag the source, not publish operational').toBe(true)
   })
 
@@ -88,7 +88,7 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
       if (String(url).includes('/activity/')) throw new Error('ECONNRESET')
       return new Response('<html></html>', { status: 200 })
     }))
-    const svc = await fetchService(mistral, undefined, undefined)
+    const svc = await fetchService(mistral, undefined, undefined, {})
     expect(svc.sourceUnknown).toBe(true)
   })
 
@@ -96,7 +96,7 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
     // Review round 1 (Important 3): the early return dropped `latency` — all three Instatus services
     // are category:'api', so this was real data loss on every parse failure.
     stubFetch('<html><body>redesigned</body></html>')
-    const svc = await fetchService(mistral, undefined, undefined)
+    const svc = await fetchService(mistral, undefined, undefined, {})
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.latency, 'latency is measured independently of the scrape').not.toBeNull()
   })
@@ -123,7 +123,7 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
     // Main page parses (uptime present); the scrape is unreadable.
     vi.stubGlobal('fetch', vi.fn(async (url: string) =>
       String(url).includes('/activity/') ? new Response('broken', { status: 404 }) : new Response(mainPage, { status: 200 })))
-    const svc = await fetchService(mistral, undefined, undefined)
+    const svc = await fetchService(mistral, undefined, undefined, {})
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.uptime30d, 'fixture must actually yield an uptime, else this test is vacuous').not.toBeNull()
     expect(svc.uptimeSource, 'uptime must travel with its provenance').toBe('official')
