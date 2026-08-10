@@ -193,7 +193,7 @@ describe('fetchService applies tag AND titleMap in the right order (#989 — rea
       ],
     }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
-    return fetchService(kimi, { summary: summary as never, incidents: null, latency: 120 })
+    return fetchService(kimi, { summary: summary as never, incidents: null, latency: 120 }, undefined, {})
   }
 
   it('tags the machine alarm as autoMonitor=true AND renders its title in English', async () => {

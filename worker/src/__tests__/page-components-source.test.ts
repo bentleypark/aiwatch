@@ -312,7 +312,7 @@ describe('fetchService reuses the prefetched components (#1125)', () => {
 
   it('does NOT re-fetch components.json when the prefetch already read it', async () => {
     const spy = stubFetch()
-    const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, latency: 100, componentsFetch: ok(COMPONENTS_SUPERSET) })
+    const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, latency: 100, componentsFetch: ok(COMPONENTS_SUPERSET) }, undefined, {})
     expect(componentsCalls(spy)).toHaveLength(0)
     // …and the breakdown still resolves off the superset, so the saved fetch cost nothing.
     expect(svc.components?.map((c) => c.id)).toContain(SORA)
@@ -320,14 +320,14 @@ describe('fetchService reuses the prefetched components (#1125)', () => {
 
   it('re-fetches when the prefetch could not read it — the badge must never ride the narrow list', async () => {
     const spy = stubFetch(COMPONENTS_SUPERSET)
-    const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, latency: 100, componentsFetch: { ok: false } })
+    const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, latency: 100, componentsFetch: { ok: false } }, undefined, {})
     expect(componentsCalls(spy)).toHaveLength(1)
     expect(svc.components?.map((c) => c.id)).toContain(SORA)
   })
 
   it('re-fetches when there is no prefetch entry for the page at all', async () => {
     const spy = stubFetch(COMPONENTS_SUPERSET)
-    await fetchService(OPENAI, undefined)
+    await fetchService(OPENAI, undefined, undefined, {})
     expect(componentsCalls(spy)).toHaveLength(1)
   })
 
@@ -373,12 +373,12 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
   })
 
   it('reddens the card', async () => {
-    const svc = await fetchService(CHATGPT, prefetched())
+    const svc = await fetchService(CHATGPT, prefetched(), undefined, {})
     expect(svc.status).toBe('down')
   })
 
   it('and appears in the breakdown, and the per-cycle drift warns go silent', async () => {
-    const svc = await fetchService(CHATGPT, prefetched())
+    const svc = await fetchService(CHATGPT, prefetched(), undefined, {})
     expect(svc.components?.map((c) => c.id)).toEqual(CHATGPT.displayComponentIds)
     expect(svc.components).toContainEqual(expect.objectContaining({ id: VOICE, status: 'down' }))
     // The other half of the live evidence for this fix: pre-fix chatgpt emitted BOTH of these every
@@ -389,7 +389,7 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
   })
 
   it('reaches the superset by REUSING the page prefetch, not by fetching components.json itself', async () => {
-    const svc = await fetchService(CHATGPT, prefetched())
+    const svc = await fetchService(CHATGPT, prefetched(), undefined, {})
     // Without the second assertion this passes VACUOUSLY under the config mutation: strip componentsUrl
     // and the fetch branch is never entered, so "0 fetches" is trivially true. The second pins that the
     // 0 was reached by REUSING the prefetch rather than by skipping the superset.
@@ -407,7 +407,7 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
     // resolve, the card would read `down` and the bug would have been masked. With `indicator: 'none'`
     // no test can tell the two apart.
     const outageSummary = { ...summary, status: { indicator: 'major', description: 'Partial outage' } }
-    const svc = await fetchService({ ...CHATGPT, componentsUrl: undefined }, { ...prefetched(), summary: outageSummary as never })
+    const svc = await fetchService({ ...CHATGPT, componentsUrl: undefined }, { ...prefetched(), summary: outageSummary as never }, undefined, {})
     expect(svc.status).toBe('operational')
     expect(svc.components?.map((c) => c.id)).not.toContain(VOICE)
   })
@@ -419,7 +419,7 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
     // asserted in both directions below. #1179 added the operator path this case lacked (a durable
     // `component-partial:` record → Discord after 6h); it is covered in partial-component-resolve.test.ts,
     // and this test still pins that the #135 path is not the one that fires.
-    const svc = await fetchService(CHATGPT, { ...prefetched(), componentsFetch: { ok: false } })
+    const svc = await fetchService(CHATGPT, { ...prefetched(), componentsFetch: { ok: false } }, undefined, {})
     expect(svc.status).toBe('operational')
     // Scoped to the ONE warn: the display-drift warn below it names the same ids, so a joined-text match
     // would still pass if this warn stopped enumerating them.
@@ -435,7 +435,7 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
   it('…and the miss-check DOES fire when the PRIMARY is the one out of window — anchors the negative above', async () => {
     // Without this, renaming that warn string turns the assertion above into a vacuous pass with no test
     // failing: a negative string match defaults to true, so it needs a positive control on the same string.
-    await fetchService({ ...CHATGPT, statusComponentId: VOICE }, { ...prefetched(), componentsFetch: { ok: false } })
+    await fetchService({ ...CHATGPT, statusComponentId: VOICE }, { ...prefetched(), componentsFetch: { ok: false } }, undefined, {})
     expect(warnText()).toContain('Component ID not found: chatgpt')
   })
 })
@@ -478,7 +478,7 @@ describe('an official ChatGPT-group component absent from the config (#1010)', (
   })
 
   it.each(ADDED)('an outage on %s reddens the ChatGPT card', async (_name, id) => {
-    const svc = await fetchService(CHATGPT, prefetched(page(id)))
+    const svc = await fetchService(CHATGPT, prefetched(page(id)), undefined, {})
     expect(svc.status).toBe('down')
   })
 
@@ -491,7 +491,7 @@ describe('an official ChatGPT-group component absent from the config (#1010)', (
       statusComponentIds: CHATGPT.statusComponentIds!.filter((c) => c !== id),
       displayComponentIds: CHATGPT.displayComponentIds!.filter((c) => c !== id),
     }
-    const svc = await fetchService(cfg, prefetched(page(id)))
+    const svc = await fetchService(cfg, prefetched(page(id)), undefined, {})
     expect(svc.status).toBe('operational')
   })
 })
@@ -545,7 +545,7 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
     // Control on the SAME html: scoped to the primary alone the page reads a spotless 100, so the
     // figure below can only have come from the wider scope.
     expect(computeIncidentIoUptime(html, PRIMARY, now)!.pct).toBe(100)
-    const svc = await fetchService(CHATGPT, withUptimeHtml(html))
+    const svc = await fetchService(CHATGPT, withUptimeHtml(html), undefined, {})
     expect(svc.uptime30d).toBe(96.66)
   })
 
@@ -553,7 +553,7 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
     // Exactly the shape `Sites` / `ChatGPT Work` would create: one young member, every other one old.
     const html = rsc([], CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, id === COMPLIANCE ? 20 : 400)))
     expect(computeIncidentIoUptime(html, PRIMARY, now)!.days).toBe(30) // control: the primary alone is whole
-    const svc = await fetchService(CHATGPT, withUptimeHtml(html))
+    const svc = await fetchService(CHATGPT, withUptimeHtml(html), undefined, {})
     expect(svc.uptimeWindowDays).toBe(20)
   })
 
@@ -574,7 +574,7 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
       incidents: null,
       latency: 100,
       uptimeHtml: html,
-    })
+    }, undefined, {})
     expect(svc.uptime30d).toBe(96.66)
   })
 
@@ -599,7 +599,7 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
         incidents: null,
         latency: 100,
         uptimeHtml: html,
-      })
+      }, undefined, {})
       expect(svc.uptime30d).toBe(100)
     },
   )

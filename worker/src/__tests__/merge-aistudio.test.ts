@@ -317,7 +317,7 @@ describe('#1012 — gemini fetchService wires the synthesized component breakdow
       throw new Error(`unexpected fetch: ${url}`)
     }))
 
-    const result = await fetchService(gemini, undefined, undefined)
+    const result = await fetchService(gemini, undefined, undefined, {})
 
     expect(result.components).toEqual([
       { id: 'aistudio-api', name: 'API', status: 'operational' },
@@ -334,7 +334,7 @@ describe('#1012 — gemini fetchService wires the synthesized component breakdow
       throw new Error(`unexpected fetch: ${url}`)
     }))
 
-    const result = await fetchService(gemini, undefined, undefined)
+    const result = await fetchService(gemini, undefined, undefined, {})
 
     expect(result.components).toEqual([
       { id: 'aistudio-api', name: 'API', status: 'operational' },
@@ -361,7 +361,7 @@ describe('#1012 — gemini fetchService wires the synthesized component breakdow
       throw new Error(`unexpected fetch: ${url}`)
     }))
 
-    const result = await fetchService(gemini, undefined, undefined)
+    const result = await fetchService(gemini, undefined, undefined, {})
 
     expect(result.components).toEqual([
       { id: 'aistudio-api', name: 'API', status: 'operational' },
@@ -388,7 +388,7 @@ describe('#1012 — gemini fetchService wires the synthesized component breakdow
       throw new Error(`unexpected fetch: ${url}`)
     }))
 
-    const result = await fetchService(gemini, undefined, kv)
+    const result = await fetchService(gemini, undefined, kv, {})
 
     expect(result.components).toEqual([
       { id: 'aistudio-api', name: 'API', status: 'operational' },

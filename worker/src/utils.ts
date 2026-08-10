@@ -116,42 +116,209 @@ export async function kvDel(kv: KVLike | KVNamespace, key: string): Promise<void
   }
 }
 
+// ── #1224 — consolidated per-service tracking state ─────────────────────────────────────────────
+//
+// `trackFetchFailure`/`resetFetchFailure`/`trackComponentMiss`/`resetComponentMiss` sit on the hot
+// per-service path (`fetchServiceUntagged`, `services.ts`), reached on every live `/api/status`
+// request (60s browser polling). Cron rarely reaches it independently — `cronAlertCheck` only
+// re-runs `fetchAllServices` when the cache is >10min stale, and the live handler's throttled
+// `cacheWrite` refreshes that cache every ~10min whenever there is any traffic at all — so the live
+// path is effectively the primary driver. Previously each of the 45 services read up to 3 separate
+// KV keys per invocation (`fetch-fail:{id}`, `fetch-fail:since:{id}`, `component-missing:{id}`) — an
+// estimated dominant share of the account's ~1.9M KV reads/day (measured via Cloudflare's GraphQL
+// Analytics API at the namespace level, not per call site; #1224's issue body has the derivation).
+//
+// An isolate-local read cache (an earlier version of this fix) cuts *repeated* reads within a warm
+// isolate, but its ceiling still scales with distinct-keys × concurrently-warm-isolates — Cloudflare
+// can spread this account's modest traffic (~11-14k requests/day) across many colos, each with its
+// own cold isolate, so the achievable reduction is traffic-topology-dependent and not something this
+// code can guarantee to land under a target. This design removes the dependency instead of mitigating
+// it: ALL services' tracking state lives in ONE aggregate KV value (`TRACKING_STATE_KEY`, mirroring
+// how `services:latest` already aggregates all services into one key), read ONCE and written AT MOST
+// once per `fetchAllServices` invocation — 1 read + ≤1 write per request, regardless of isolate
+// residency or service count. `readTrackingState`/`writeTrackingStateIfChanged` are the only two real
+// KV operations; every function below operates purely on the in-memory object passed through them.
+//
+// The daily crossing-counter (`fetch-fail:daily:{id}:{date}`) stays a SEPARATE, un-consolidated KV
+// key — it's written only on the rare threshold-crossing edge (once per failure episode, not once
+// per request), so it was never part of the read-volume problem, and folding a per-DATE key into an
+// evergreen blob would tangle two different expiry semantics for no benefit.
+//
+// A lost update under two concurrent writers is possible (isolate A and B each read the blob, each
+// mutates its own copy, whichever writes LAST wins) — and unlike the pre-#1224 per-key design, this
+// is not merely "narrower blast radius, same risk": a per-key write only ever touched keys IT
+// mutated, so two invocations touching different services never interfered. Here the loser's write
+// carries whatever it read at its OWN read time — so any service A recorded that B's read predates
+// is silently ERASED by B's write, not just left stale. Given `/api/status` runs `fetchAllServices`
+// per request and invocations regularly overlap, this is the common case, not an edge case. The
+// practical cost stays bounded — a climbing streak is retried on the next overlapping cycle, so the
+// visible effect is a delayed (not wrong) escalation — but it is a real behavioral difference from
+// the old design, not just a relabeling of the same risk.
+export interface ServiceTrackingState {
+  failCount?: number
+  // ISO timestamp of the last `failCount` write. Mirrors the pre-#1224 `fetch-fail:{id}` key's 30-min
+  // `expirationTtl` — see `TRACKING_COUNT_DECAY_MS` below for why this exists. Doubles as the ONLY
+  // liveness signal for `failSince`, which otherwise has no expiry of its own — see
+  // `TRACKING_ALERT_STALE_MS` and its callers (`checkPersistentFetchFailures`).
+  failCountAt?: string
+  failSince?: string
+  componentMissCount?: number
+  // Same role as `failCountAt`, for `componentMissCount` — mirrors the pre-#1224
+  // `component-missing:{id}` key's own 30-min `expirationTtl`, and is what `detectComponentMismatches`
+  // checks so a miss count frozen by a dead source doesn't re-alert forever either.
+  componentMissAt?: string
+}
+export type TrackingStateBlob = Record<string, ServiceTrackingState>
+
+const TRACKING_STATE_KEY = 'tracking:state'
+
+/** A stored value that parses as an object but carries the wrong field TYPES (a hand-edited KV
+ *  value, a future field rename, `wrangler kv put` typo) must not silently corrupt arithmetic —
+ *  `"3" + 1 === "31"` would cross any threshold instantly and never self-heal, since a value that
+ *  never gets a numeric write back stays a string forever. Coerces per-entry; an entry that fails
+ *  entirely becomes `{}` rather than dropping the whole blob (mirrors `parsePartialResolve`'s
+ *  per-record tolerance). */
+function sanitizeTrackingState(parsed: Record<string, unknown>): TrackingStateBlob {
+  const clean: TrackingStateBlob = {}
+  for (const [svcId, value] of Object.entries(parsed)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const v = value as Record<string, unknown>
+    const entry: ServiceTrackingState = {}
+    // failCount and failCountAt are written together by trackFetchFailure and cleared together by
+    // resetFetchFailure — in normal operation they can never appear separately, so a stored value
+    // carrying one without the other is itself evidence of corruption. Reject BOTH rather than keep
+    // the numeric half: a `failCount` with no `failCountAt` would read as never-decaying (trusted
+    // forever) instead of self-healing on the next write, reintroducing the sticky-count bug this
+    // sanitizer exists to prevent. Same reasoning for componentMissCount/componentMissAt.
+    if (typeof v.failCount === 'number' && Number.isFinite(v.failCount) && typeof v.failCountAt === 'string') {
+      entry.failCount = v.failCount
+      entry.failCountAt = v.failCountAt
+    }
+    if (typeof v.failSince === 'string') entry.failSince = v.failSince
+    if (typeof v.componentMissCount === 'number' && Number.isFinite(v.componentMissCount) && typeof v.componentMissAt === 'string') {
+      entry.componentMissCount = v.componentMissCount
+      entry.componentMissAt = v.componentMissAt
+    }
+    if (Object.keys(entry).length > 0) clean[svcId] = entry
+  }
+  return clean
+}
+
+/** Reads the aggregate tracking blob. Fail-open to `{}` on a missing/corrupt/unreadable value — the
+ *  worst case is every service's streak restarting at 0, the same fail-open posture the pre-#1224
+ *  per-key reads already had (a failed `kv.get` there also defaulted to count=0 via `?? '0'`). */
+export async function readTrackingState(kv: KVLike | undefined): Promise<TrackingStateBlob> {
+  if (!kv) return {}
+  try {
+    const raw = await kv.get(TRACKING_STATE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? sanitizeTrackingState(parsed) : {}
+  } catch (err) {
+    console.warn('[kv] tracking state read failed, starting fresh:', err instanceof Error ? err.message : err)
+    return {}
+  }
+}
+
+/** Writes the blob back ONLY if it changed since `before` — the common case (every service already
+ *  healthy) costs zero writes. No TTL on the KEY itself: `failCount`/`componentMissCount` decay
+ *  in-value against their own `*At` timestamp (see `TRACKING_COUNT_DECAY_MS`), `failSince` is bounded
+ *  by the same `*At` field going stale (see `TRACKING_ALERT_STALE_MS`), and an orphaned per-service
+ *  entry (a retired/renamed service id) is pruned by the caller before this ever sees it — see
+ *  `fetchAllServices`'s `currentIds` filter. */
+export async function writeTrackingStateIfChanged(kv: KVLike | undefined, before: TrackingStateBlob, after: TrackingStateBlob): Promise<void> {
+  if (!kv) return
+  if (JSON.stringify(before) === JSON.stringify(after)) return
+  await kvPut(kv, TRACKING_STATE_KEY, JSON.stringify(after))
+}
+
+function entryFor(store: TrackingStateBlob, svcId: string): ServiceTrackingState {
+  return store[svcId] ?? (store[svcId] = {})
+}
+
+/** A service with no fail/miss state left is dropped from the blob entirely, so a long-healthy
+ *  service costs nothing in the serialized size. */
+function pruneIfEmpty(store: TrackingStateBlob, svcId: string): void {
+  const entry = store[svcId]
+  if (entry && Object.keys(entry).length === 0) delete store[svcId]
+}
+
+/** Mirrors the pre-#1224 `fetch-fail:{id}`/`component-missing:{id}` KV keys' `expirationTtl: 1800`
+ *  (30 min): the old keys stopped being refreshed once their tracker stopped writing (past
+ *  threshold, `next <= threshold` goes false), so each expired ~30 min after its crossing write, and
+ *  the NEXT failure restarted the climb at 1 — which is what makes `fetch-fail:daily` count distinct
+ *  EPISODES ("structural: 10+ crossings/day, one per ~45-min cycle",
+ *  `docs/reference/status-determination.md`) instead of one permanent crossing. Losing this silently
+ *  would make a day-2+ structural block invisible to the daily summary (`daily-summary.ts` only lists
+ *  a service `if (failCount > 0)`, and a sticky sub-threshold-of-1 sitting at the cap is
+ *  indistinguishable from a single blip). */
+export const TRACKING_COUNT_DECAY_MS = 1_800_000 // 30 min
+
+/** Has a COUNT (`failCount`/`componentMissCount`) decayed relative to `nowMs`? A MISSING `at` counts
+ *  as NOT decayed — trust the stored count as-is. This is deliberately permissive: `failCount` and
+ *  `failCountAt` are always written together by `trackFetchFailure` and always cleared together by
+ *  `resetFetchFailure` (same for the component-miss pair), and `sanitizeTrackingState` rejects a count
+ *  read from KV whose paired timestamp didn't survive — so in normal operation this function is never
+ *  actually asked to judge a genuinely orphaned count. Only an unparseable (corrupt) timestamp counts
+ *  as decayed. */
+function isCountDecayed(at: string | undefined, nowMs: number, maxAgeMs: number): boolean {
+  if (at === undefined) return false
+  const t = new Date(at).getTime()
+  return isNaN(t) || nowMs - t > maxAgeMs
+}
+
+/** Is a TIMESTAMP-ONLY signal (no paired count to fall back on) still fresh? Used only for the
+ *  alert-liveness gates (`isFailSinceLive`, `detectComponentMismatches`'s miss-count gate) — there, a
+ *  MISSING `at` must count as stale (fail toward NOT alerting), the opposite bias from
+ *  `isCountDecayed` above: an absent corroborating timestamp is not evidence an alert should fire. */
+function isTimestampStale(at: string | undefined, nowMs: number, maxAgeMs: number): boolean {
+  if (at === undefined) return true
+  const t = new Date(at).getTime()
+  return isNaN(t) || nowMs - t > maxAgeMs
+}
+
 /**
  * Track consecutive RSS fetch failures per service.
  * Returns true if failure count has reached the threshold (service should be degraded).
  * Returns false if still below threshold (treat as operational / no data).
  */
-export async function trackFetchFailure(kv: KVLike | undefined, svcId: string, threshold = 3): Promise<boolean> {
-  if (!kv) return false
-  const failKey = `fetch-fail:${svcId}`
-  const count = parseInt(await kv.get(failKey).catch(() => null) ?? '0', 10) || 0
+export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | undefined, svcId: string, threshold = 3, nowMs = Date.now()): Promise<boolean> {
+  const entry = entryFor(store, svcId)
+  const decayed = isCountDecayed(entry.failCountAt, nowMs, TRACKING_COUNT_DECAY_MS)
+  const count = decayed ? 0 : (entry.failCount ?? 0)
   const next = count + 1
   if (next <= threshold) {
-    await kvPut(kv, failKey, String(next), { expirationTtl: 1800 })
+    entry.failCount = next
+    entry.failCountAt = new Date(nowMs).toISOString()
   }
   const shouldDegrade = next >= threshold
   if (next === threshold) {
     // Daily accumulator: counts threshold *crossings* (distinct failure episodes), not polling cycles.
-    // Fires only on the rising edge (count going from threshold-1 → threshold) so each 30-min
-    // fetch-fail TTL cycle contributes exactly one crossing. Expected scale:
+    // Fires only on the rising edge (count going from threshold-1 → threshold) — the TRACKING_COUNT_DECAY_MS
+    // comment above is what keeps that true now that the counter lives in a TTL-less blob. Expected scale:
     //   transient: 1–3 crossings/day  (occasional blips that recover quickly)
     //   structural: 10+ crossings/day (URL blocked — one crossing per ~45-min cycle all day)
-    const date = new Date().toISOString().split('T')[0]
-    const dailyKey = `fetch-fail:daily:${svcId}:${date}`
-    const dailyCount = parseInt(await kv.get(dailyKey).catch(() => null) ?? '0', 10) || 0
-    await kvPut(kv, dailyKey, String(dailyCount + 1), { expirationTtl: 172800 }) // 48h
+    // Deliberately NOT part of the consolidated blob above — rare enough that a direct KV
+    // read/write here was never the read-volume problem.
+    if (kv) {
+      const date = new Date(nowMs).toISOString().split('T')[0]
+      const dailyKey = `fetch-fail:daily:${svcId}:${date}`
+      const dailyCount = parseInt(await kv.get(dailyKey).catch(() => null) ?? '0', 10) || 0
+      await kvPut(kv, dailyKey, String(dailyCount + 1), { expirationTtl: 172800 }) // 48h
+    }
 
     // #500: record the FIRST-failure timestamp for the persistent (1h+) structural-block alert.
-    // Set only if absent so it survives the short fetch-fail key's 30-min expiry + re-climb cycles
-    // (and is immune to call frequency — trackFetchFailure also runs on every /api/status request,
-    // not just the 5-min cron, so a count-of-cycles would alert well under an hour). resetFetchFailure
-    // clears it on recovery. 25h TTL > the alert's 24h dedup window so it can't lapse mid-incident.
-    const sinceKey = `fetch-fail:since:${svcId}`
-    const existingSince = await kv.get(sinceKey).catch(() => null)
-    if (existingSince === null) {
-      await kvPut(kv, sinceKey, new Date().toISOString(), { expirationTtl: 90_000 }) // 25h
-    }
+    // Set only if absent so it survives re-climb cycles — immune to call frequency by construction,
+    // since it's a wall-clock timestamp, not a cycle count. resetFetchFailure clears it on recovery.
+    // Unlike the pre-#1224 key, `failSince` itself has no expiry — `checkPersistentFetchFailures`
+    // (persistent-failure.ts) is what bounds its lifetime, by requiring `failCountAt` to still be
+    // fresh (TRACKING_ALERT_STALE_MS below) before trusting this timestamp at all.
+    if (!entry.failSince) entry.failSince = new Date(nowMs).toISOString()
   }
+  // A threshold <= 0 (no production call site does this) writes nothing above, so `entryFor` could
+  // otherwise leave a bare `{}` behind — a spurious diff against `trackingBefore` that forces a write
+  // for a service nothing actually happened to.
+  pruneIfEmpty(store, svcId)
   return shouldDegrade
 }
 
@@ -159,14 +326,32 @@ export async function trackFetchFailure(kv: KVLike | undefined, svcId: string, t
  * Reset fetch failure counter on successful fetch. Also clears the #500 persistent
  * first-failure timestamp so a later failure episode times its own fresh hour.
  */
-export async function resetFetchFailure(kv: KVLike | undefined, svcId: string): Promise<void> {
-  if (!kv) return
-  const key = `fetch-fail:${svcId}`
-  const existing = await kv.get(key).catch(() => null)
-  if (existing !== null) await kvDel(kv, key)
-  const sinceKey = `fetch-fail:since:${svcId}`
-  const sinceExisting = await kv.get(sinceKey).catch(() => null)
-  if (sinceExisting !== null) await kvDel(kv, sinceKey)
+export function resetFetchFailure(store: TrackingStateBlob, svcId: string): void {
+  const entry = store[svcId]
+  if (!entry) return
+  delete entry.failCount
+  delete entry.failCountAt
+  delete entry.failSince
+  pruneIfEmpty(store, svcId)
+}
+
+/** Bounds how long a frozen `failSince`/`componentMissCount` may still trigger an alert once its
+ *  paired `*At` timestamp stops being refreshed — the case a dead/unreachable source produces, since
+ *  neither `trackFetchFailure`/`resetFetchFailure` nor `trackComponentMiss`/`resetComponentMiss` is
+ *  called again for it (`services.ts`'s #689 dead-source and flashduty-feed early-return paths).
+ *  Sized at 2× `TRACKING_COUNT_DECAY_MS`, not 1×: a service that is GENUINELY still failing every
+ *  cycle only refreshes its `*At` field on writes at-or-below threshold, so `*At` can legitimately sit
+ *  up to ~`TRACKING_COUNT_DECAY_MS` old mid-way through its own decay-and-reclimb cycle — gating on
+ *  exactly that window would flicker the #500 alert off during an unbroken outage. The 2x margin
+ *  covers one full decay window plus the reclimb back to threshold. */
+export const TRACKING_ALERT_STALE_MS = 2 * TRACKING_COUNT_DECAY_MS // 60 min
+
+/** Is `entry`'s `failSince` still corroborated by a recently-refreshed `failCountAt`? A `failSince`
+ *  with no supporting recent write is not evidence of an ONGOING block — it's a frozen leftover from
+ *  a path (dead source, feed failure) that stopped calling `trackFetchFailure` entirely. */
+export function isFailSinceLive(entry: ServiceTrackingState | undefined, nowMs: number): boolean {
+  if (!entry?.failSince) return false
+  return !isTimestampStale(entry.failCountAt, nowMs, TRACKING_ALERT_STALE_MS)
 }
 
 /** Threshold for the #500 persistent structural-block alert: a status page unreachable this long
@@ -216,39 +401,52 @@ export function formatPersistentFailureAlert(serviceName: string, sinceIso: stri
  * Track consecutive component ID misses per service.
  * Returns true if miss count has reached the threshold (alert should fire).
  */
-export async function trackComponentMiss(kv: KVLike | undefined, svcId: string, threshold = 3): Promise<boolean> {
-  if (!kv) return false
-  const key = `component-missing:${svcId}`
-  const count = parseInt(await kv.get(key).catch(() => null) ?? '0', 10) || 0
+export function trackComponentMiss(store: TrackingStateBlob, svcId: string, threshold = 3, nowMs = Date.now()): boolean {
+  const entry = entryFor(store, svcId)
+  const decayed = isCountDecayed(entry.componentMissAt, nowMs, TRACKING_COUNT_DECAY_MS)
+  const count = decayed ? 0 : (entry.componentMissCount ?? 0)
   const next = count + 1
   if (next <= threshold) {
-    await kvPut(kv, key, String(next), { expirationTtl: 1800 })
+    entry.componentMissCount = next
+    entry.componentMissAt = new Date(nowMs).toISOString()
   }
+  pruneIfEmpty(store, svcId) // see trackFetchFailure's identical guard — threshold <= 0 only
   return next >= threshold
 }
 
 /**
  * Reset component miss counter on successful component lookup.
  */
-export async function resetComponentMiss(kv: KVLike | undefined, svcId: string): Promise<void> {
-  if (!kv) return
-  const key = `component-missing:${svcId}`
-  const existing = await kv.get(key).catch(() => null)
-  if (existing !== null) await kvDel(kv, key)
+export function resetComponentMiss(store: TrackingStateBlob, svcId: string): void {
+  const entry = store[svcId]
+  if (!entry) return
+  delete entry.componentMissCount
+  delete entry.componentMissAt
+  pruneIfEmpty(store, svcId)
 }
 
 /**
  * Detect component ID mismatches that need alerting.
  * Returns list of services that have reached the miss threshold and haven't been alerted yet.
+ * Reads the consolidated tracking blob directly (ground truth, #1224) plus the separate per-service
+ * alert-dedup key (`alerted:component-missing:{id}`, unaffected by the consolidation) — this runs
+ * once per cron cycle, not per service per invocation, so a fresh `readTrackingState` call here costs
+ * one extra KV read per cron cycle, not per service. A miss count whose `componentMissAt` has gone
+ * stale (TRACKING_ALERT_STALE_MS — the dead-source path stops calling trackComponentMiss/
+ * resetComponentMiss entirely, so nothing else would ever clear it) is treated as 0, the same
+ * liveness gate `checkPersistentFetchFailures` applies to `failSince`.
  */
 export async function detectComponentMismatches(
   services: { id: string; name: string; statusComponentId: string }[],
   kv: KVLike,
   threshold = 3,
+  nowMs = Date.now(),
 ): Promise<{ id: string; name: string; statusComponentId: string; missCount: number; alertKey: string }[]> {
+  const store = await readTrackingState(kv)
   const results: { id: string; name: string; statusComponentId: string; missCount: number; alertKey: string }[] = []
   for (const svc of services) {
-    const missCount = parseInt(await kv.get(`component-missing:${svc.id}`).catch(() => null) ?? '0', 10) || 0
+    const entry = store[svc.id]
+    const missCount = isTimestampStale(entry?.componentMissAt, nowMs, TRACKING_ALERT_STALE_MS) ? 0 : (entry?.componentMissCount ?? 0)
     if (missCount < threshold) continue
     const alertKey = `alerted:component-missing:${svc.id}`
     const alreadyAlerted = await kv.get(alertKey).catch(() => null)

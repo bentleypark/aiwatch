@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { COMPONENT_ID_SERVICES, SERVICES } from '../services'
-import { detectComponentMismatches, type KVLike } from '../utils'
+import { detectComponentMismatches, TRACKING_ALERT_STALE_MS, TRACKING_COUNT_DECAY_MS, type KVLike } from '../utils'
 
 function mockKV(store: Record<string, string> = {}): KVLike {
   return {
@@ -56,8 +56,20 @@ describe('detectComponentMismatches (#135)', () => {
     { id: 'gemini', name: 'Gemini API', statusComponentId: 'comp-gemini' },
   ]
 
+  // #1224 — miss counts now live in the consolidated `tracking:state` blob, not individual
+  // `component-missing:{id}` keys. `alerted:component-missing:{id}` (the alert dedup marker) is
+  // unaffected by the consolidation and still reads/writes its own key.
+  // #1224 round 4 — componentMissCount only counts while its paired componentMissAt is fresh
+  // (TRACKING_ALERT_STALE_MS), so every entry gets a default fresh timestamp unless the test
+  // overrides it (e.g. to exercise the staleness gate itself).
+  const trackingKV = (blob: Record<string, { componentMissCount?: number; componentMissAt?: string }>, extra: Record<string, string> = {}) => {
+    const now = new Date().toISOString()
+    const stamped = Object.fromEntries(Object.entries(blob).map(([id, entry]) => [id, { componentMissAt: now, ...entry }]))
+    return mockKV({ 'tracking:state': JSON.stringify(stamped), ...extra })
+  }
+
   it('returns service when miss count reaches threshold (3)', async () => {
-    const kv = mockKV({ 'component-missing:claude': '3' })
+    const kv = trackingKV({ claude: { componentMissCount: 3 } })
     const results = await detectComponentMismatches(services, kv)
     expect(results).toHaveLength(1)
     expect(results[0].id).toBe('claude')
@@ -67,7 +79,7 @@ describe('detectComponentMismatches (#135)', () => {
   })
 
   it('returns service when miss count exceeds threshold', async () => {
-    const kv = mockKV({ 'component-missing:openai': '10' })
+    const kv = trackingKV({ openai: { componentMissCount: 10 } })
     const results = await detectComponentMismatches(services, kv)
     expect(results).toHaveLength(1)
     expect(results[0].id).toBe('openai')
@@ -75,7 +87,7 @@ describe('detectComponentMismatches (#135)', () => {
   })
 
   it('does not return when miss count below threshold', async () => {
-    const kv = mockKV({ 'component-missing:claude': '2' })
+    const kv = trackingKV({ claude: { componentMissCount: 2 } })
     const results = await detectComponentMismatches(services, kv)
     expect(results).toHaveLength(0)
   })
@@ -87,50 +99,71 @@ describe('detectComponentMismatches (#135)', () => {
   })
 
   it('deduplicates: skips if already alerted (24h TTL)', async () => {
-    const kv = mockKV({
-      'component-missing:claude': '5',
-      'alerted:component-missing:claude': '1',
-    })
+    const kv = trackingKV({ claude: { componentMissCount: 5 } }, { 'alerted:component-missing:claude': '1' })
     const results = await detectComponentMismatches(services, kv)
     expect(results).toHaveLength(0)
   })
 
   it('returns multiple services simultaneously', async () => {
-    const kv = mockKV({
-      'component-missing:claude': '3',
-      'component-missing:openai': '4',
-      'component-missing:gemini': '1', // below threshold
+    const kv = trackingKV({
+      claude: { componentMissCount: 3 },
+      openai: { componentMissCount: 4 },
+      gemini: { componentMissCount: 1 }, // below threshold
     })
     const results = await detectComponentMismatches(services, kv)
     expect(results).toHaveLength(2)
     expect(results.map((r) => r.id)).toEqual(['claude', 'openai'])
   })
 
-  it('handles corrupted (non-numeric) KV value gracefully', async () => {
-    const kv = mockKV({ 'component-missing:claude': 'invalid' })
+  it('treats a corrupt tracking:state blob as empty (fails open — #1224)', async () => {
+    const kv = mockKV({ 'tracking:state': 'not json{' })
     const results = await detectComponentMismatches(services, kv)
-    expect(results).toHaveLength(0) // parseInt('invalid') → NaN → || 0 → below threshold
+    expect(results).toHaveLength(0)
   })
 
   it('supports custom threshold', async () => {
-    const kv = mockKV({ 'component-missing:claude': '4' })
+    const kv = trackingKV({ claude: { componentMissCount: 4 } })
     expect(await detectComponentMismatches(services, kv, 5)).toHaveLength(0) // 4 < 5
     expect(await detectComponentMismatches(services, kv, 4)).toHaveLength(1) // 4 >= 4
   })
 
-  it('continues processing when KV read throws for one service', async () => {
-    const kv = mockKV({ 'component-missing:openai': '5' })
-    // Override get to throw for claude, return normally for others
+  it('fails open (empty results) when the blob read throws — #1224: one read now covers every service, so a throw can no longer spare unaffected services the way a per-key read could', async () => {
+    const kv = mockKV({ 'tracking:state': JSON.stringify({ openai: { componentMissCount: 5 } }) })
     kv.get = vi.fn(async (key: string) => {
-      if (key === 'component-missing:claude') throw new Error('KV read error')
-      if (key === 'component-missing:openai') return '5'
-      if (key === 'alerted:component-missing:openai') return null
+      if (key === 'tracking:state') throw new Error('KV read error')
       return null
     })
-    // claude throws (caught by .catch(() => null) → count 0 → skipped)
-    // openai has count 5 → returned
+    const results = await detectComponentMismatches(services, kv)
+    expect(results).toHaveLength(0)
+  })
+
+  // #1224 round 4 (I1) — the mirror of C1: a dead source stops calling trackComponentMiss/
+  // resetComponentMiss entirely, so a frozen componentMissCount would otherwise re-alert every 24h
+  // forever with no automatic recovery.
+  it('does NOT return a service whose componentMissAt has gone stale — a frozen count from a source that stopped resolving components entirely', async () => {
+    const staleAt = new Date(Date.now() - (TRACKING_ALERT_STALE_MS + 5 * 60_000)).toISOString() // past the stale gate
+    const kv = trackingKV({ claude: { componentMissCount: 5, componentMissAt: staleAt } })
+    const results = await detectComponentMismatches(services, kv)
+    expect(results).toHaveLength(0)
+  })
+
+  it('DOES still return a service whose componentMissAt is fresh — the genuinely-still-drifting case', async () => {
+    const kv = trackingKV({ claude: { componentMissCount: 5, componentMissAt: new Date(Date.now() - 5 * 60_000).toISOString() } })
     const results = await detectComponentMismatches(services, kv)
     expect(results).toHaveLength(1)
-    expect(results[0].id).toBe('openai')
+    expect(results[0].id).toBe('claude')
+  })
+
+  // Pins the 2x margin itself (round 5, Important #1), mirroring the same test on the failCountAt
+  // side: a componentMissAt this old is past the raw TRACKING_COUNT_DECAY_MS window but still within
+  // TRACKING_ALERT_STALE_MS — the legitimate mid-reclimb staleness a genuinely still-drifting service
+  // produces. A regression to a 1x margin would wrongly suppress this.
+  it('DOES still return a service whose componentMissAt is older than the raw decay window but still within the 2x alert margin', async () => {
+    const midReclimbAt = new Date(Date.now() - (TRACKING_COUNT_DECAY_MS + 10 * 60_000)).toISOString()
+    expect(TRACKING_ALERT_STALE_MS).toBeGreaterThan(TRACKING_COUNT_DECAY_MS + 10 * 60_000)
+    const kv = trackingKV({ claude: { componentMissCount: 5, componentMissAt: midReclimbAt } })
+    const results = await detectComponentMismatches(services, kv)
+    expect(results).toHaveLength(1)
+    expect(results[0].id).toBe('claude')
   })
 })

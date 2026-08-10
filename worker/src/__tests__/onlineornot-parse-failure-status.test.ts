@@ -56,7 +56,7 @@ describe('#1123 — a clean OnlineOrNot page publishes real uptime', () => {
     // The regression proper. Pre-fix this returned `uptime30d: null` and no `uptimeSource`, which
     // dropped the Score's entire 40-point Uptime component and knocked confidence to `medium`.
     stubFetch(fixture('openrouter-onlineornot-clean-2026-07-22.html'))
-    const svc = await fetchService(openrouter, undefined, undefined)
+    const svc = await fetchService(openrouter, undefined, undefined, {})
     expect(svc.sourceUnknown).toBeUndefined()
     expect(svc.uptime30d, 'a clean window is 100%, not "no official uptime"').toBe(100)
     expect(svc.uptimeSource, 'uptime must travel with its provenance').toBe('official')
@@ -69,7 +69,7 @@ describe('#1123 — a clean OnlineOrNot page publishes real uptime', () => {
     // `incidents` map AND the per-component daily buckets, and used to be published twice — two
     // Discord alerts and a doubled incident count for one event.
     stubFetch(fixture('openrouter-onlineornot-incidents-2025-12-06.html'))
-    const svc = await fetchService(openrouter, undefined, undefined)
+    const svc = await fetchService(openrouter, undefined, undefined, {})
     expect(svc.sourceUnknown).toBeUndefined()
     expect(svc.incidents.map((i) => i.id)).toEqual(['LB6mQvzYAkoz', 'wn6mpXyB9WoP'])
     expect(svc.incidents.every((i) => i.impact === 'major')).toBe(true)
@@ -83,7 +83,7 @@ describe('#1123 — a clean OnlineOrNot page publishes real uptime', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const svc = await fetchService(openrouter, undefined, undefined)
+    const svc = await fetchService(openrouter, undefined, undefined, {})
     expect(svc.sourceUnknown).toBeUndefined()
     expect(svc.uptime30d).toBe(100)
     expect(svc.incidents).toEqual([])
@@ -107,7 +107,7 @@ describe('#1123 — a clean OnlineOrNot page publishes real uptime', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const svc = await fetchService(openrouter, undefined, undefined)
+    const svc = await fetchService(openrouter, undefined, undefined, {})
     const ids = svc.incidents.map((i) => i.id)
     expect(ids).toContain('lrkj1G0wmMoe') // Clerk auth — recovered from /incidents, absent from home
     expect(ids).toContain('opJAdRNJ-dlR') // Bedrock upstream — recovered
@@ -121,7 +121,7 @@ describe('#1123 — a clean OnlineOrNot page publishes real uptime', () => {
 describe('#1123 — an unreadable OnlineOrNot page must not publish "operational, no incidents"', () => {
   it('flags sourceUnknown when the SSR envelope is gone, even on HTTP 200', async () => {
     stubFetch('<html><body>we redesigned the status page</body></html>')
-    const svc = await fetchService(openrouter, undefined, undefined)
+    const svc = await fetchService(openrouter, undefined, undefined, {})
     expect(svc.sourceUnknown, 'an unreadable source must be flagged, not silently trusted').toBe(true)
   })
 
@@ -129,14 +129,14 @@ describe('#1123 — an unreadable OnlineOrNot page must not publish "operational
     const arr = ['loaderData', 'somethingElse', {}]
     const escaped = JSON.stringify(arr).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
     stubFetch(`<html><script>streamController.enqueue("${escaped}")</script></html>`)
-    const svc = await fetchService(openrouter, undefined, undefined)
+    const svc = await fetchService(openrouter, undefined, undefined, {})
     expect(svc.sourceUnknown).toBe(true)
   })
 
   it('does not fabricate an uptime figure on an unreadable page', async () => {
     // The inverse of the fix above: "clean → 100" must not become "unreadable → 100".
     stubFetch('<html><body>redesigned</body></html>')
-    const svc = await fetchService(openrouter, undefined, undefined)
+    const svc = await fetchService(openrouter, undefined, undefined, {})
     expect(svc.uptime30d ?? null).toBeNull()
     expect(svc.uptimeSource ?? null).toBeNull()
   })
@@ -146,7 +146,7 @@ describe('#1123 — an unreadable OnlineOrNot page must not publish "operational
   it('books the specific failure reason into the parse-failure counter', async () => {
     const { kv, store } = mockKV()
     stubFetch('<html><body>redesigned</body></html>')
-    await fetchService(openrouter, undefined, kv)
+    await fetchService(openrouter, undefined, kv, {})
     expect(recordedReasons(store, 'openrouter')).toEqual({ 'no-payload': 1 })
   })
 
@@ -161,7 +161,7 @@ describe('#1123 — an unreadable OnlineOrNot page must not publish "operational
     arr.push({ _2: 5, _3: 6, _4: 7 })        // 8 — the container holding all three
     const escaped = JSON.stringify(arr).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
     stubFetch(`<html><script>streamController.enqueue("${escaped}")</script></html>`)
-    const svc = await fetchService(openrouter, undefined, kv)
+    const svc = await fetchService(openrouter, undefined, kv, {})
     expect(svc.sourceUnknown).toBe(true)
     expect(recordedReasons(store, 'openrouter')).toEqual({ 'incidents-unreadable': 1 })
   })
@@ -178,7 +178,7 @@ describe('#1123 — the page FETCH failing, not just the parse', () => {
     // in and out of the rankings at poll rate) — it is an unreadable read, booked for diagnosis.
     const { kv, store } = mockKV()
     stubFetch('<html>Just a moment…</html>', 403)
-    const svc = await fetchService(openrouter, undefined, kv)
+    const svc = await fetchService(openrouter, undefined, kv, {})
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.sourceDead ?? false).toBe(false)
     expect(recordedReasons(store, 'openrouter')).toEqual({ 'fetch-unreadable': 1 })
@@ -186,7 +186,7 @@ describe('#1123 — the page FETCH failing, not just the parse', () => {
 
   it('a 404 IS a dead source (the page is gone, not blocked)', async () => {
     stubFetch('nope', 404)
-    const svc = await fetchService(openrouter, undefined, undefined)
+    const svc = await fetchService(openrouter, undefined, undefined, {})
     expect(svc.sourceDead).toBe(true)
     expect(svc.incidentSourceStale).toBe(true)
     expect(svc.status).toBe('operational')
@@ -195,7 +195,7 @@ describe('#1123 — the page FETCH failing, not just the parse', () => {
   it('a 503 is an indeterminate read — sourceUnknown, booked as fetch-unreadable', async () => {
     const { kv, store } = mockKV()
     stubFetch('upstream down', 503)
-    const svc = await fetchService(openrouter, undefined, kv)
+    const svc = await fetchService(openrouter, undefined, kv, {})
     expect(svc.sourceUnknown).toBe(true)
     expect(recordedReasons(store, 'openrouter')).toEqual({ 'fetch-unreadable': 1 })
   })
