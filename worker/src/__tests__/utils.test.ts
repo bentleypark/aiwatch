@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob } from '../utils'
 import type { Incident } from '../types'
 
 describe('appendStatusHint (#539)', () => {
@@ -151,123 +151,173 @@ describe('formatDuration', () => {
   })
 })
 
-describe('trackFetchFailure', () => {
+describe('trackFetchFailure (#1224 — blob-based)', () => {
   it('returns false on first failure (count=1, threshold=3)', async () => {
-    const kv = mockKV()
-    expect(await trackFetchFailure(kv, 'azure')).toBe(false)
-    expect(kv.put).toHaveBeenCalledWith('fetch-fail:azure', '1', { expirationTtl: 1800 })
+    const store: TrackingStateBlob = {}
+    expect(await trackFetchFailure(store, undefined, 'azure')).toBe(false)
+    expect(store.azure?.failCount).toBe(1)
   })
 
   it('returns false on second failure (count=2, threshold=3)', async () => {
-    const kv = mockKV({ 'fetch-fail:azure': '1' })
-    expect(await trackFetchFailure(kv, 'azure')).toBe(false)
+    const store: TrackingStateBlob = { azure: { failCount: 1 } }
+    expect(await trackFetchFailure(store, undefined, 'azure')).toBe(false)
   })
 
   it('returns true on third failure (count=3, threshold=3)', async () => {
-    const kv = mockKV({ 'fetch-fail:azure': '2' })
-    expect(await trackFetchFailure(kv, 'azure')).toBe(true)
+    const store: TrackingStateBlob = { azure: { failCount: 2 } }
+    expect(await trackFetchFailure(store, undefined, 'azure')).toBe(true)
   })
 
-  it('increments daily accumulator when threshold is reached', async () => {
-    const store: Record<string, string> = { 'fetch-fail:azure': '2' }
-    const kv = mockKV(store)
-    expect(await trackFetchFailure(kv, 'azure')).toBe(true)
+  it('writes the daily accumulator via KV when threshold is reached (still a real key — #1224 kept this one out of the blob)', async () => {
+    const dailyStore: Record<string, string> = {}
+    const kv = mockKV(dailyStore)
+    const store: TrackingStateBlob = { azure: { failCount: 2 } }
+    expect(await trackFetchFailure(store, kv, 'azure')).toBe(true)
     const today = new Date().toISOString().split('T')[0]
-    expect(store[`fetch-fail:daily:azure:${today}`]).toBe('1')
+    expect(dailyStore[`fetch-fail:daily:azure:${today}`]).toBe('1')
   })
 
-  it('accumulates daily counter across multiple threshold hits', async () => {
+  it('accumulates the daily counter across multiple threshold hits', async () => {
     const today = new Date().toISOString().split('T')[0]
-    const store: Record<string, string> = {
-      'fetch-fail:azure': '2',
-      [`fetch-fail:daily:azure:${today}`]: '3',
-    }
-    const kv = mockKV(store)
-    await trackFetchFailure(kv, 'azure')
-    expect(store[`fetch-fail:daily:azure:${today}`]).toBe('4')
+    const dailyStore: Record<string, string> = { [`fetch-fail:daily:azure:${today}`]: '3' }
+    const kv = mockKV(dailyStore)
+    const store: TrackingStateBlob = { azure: { failCount: 2 } }
+    await trackFetchFailure(store, kv, 'azure')
+    expect(dailyStore[`fetch-fail:daily:azure:${today}`]).toBe('4')
   })
 
-  it('does not increment daily accumulator when threshold is not yet reached', async () => {
-    const store: Record<string, string> = { 'fetch-fail:azure': '1' }
-    const kv = mockKV(store)
-    expect(await trackFetchFailure(kv, 'azure')).toBe(false) // count=2, below threshold
+  it('does not write the daily accumulator when threshold is not yet reached', async () => {
+    const dailyStore: Record<string, string> = {}
+    const kv = mockKV(dailyStore)
+    const store: TrackingStateBlob = { azure: { failCount: 1 } }
+    expect(await trackFetchFailure(store, kv, 'azure')).toBe(false) // count=2, below threshold
     const today = new Date().toISOString().split('T')[0]
-    expect(store[`fetch-fail:daily:azure:${today}`]).toBeUndefined()
+    expect(dailyStore[`fetch-fail:daily:azure:${today}`]).toBeUndefined()
   })
 
-  it('returns true when already above threshold, but does NOT write daily key (not a rising edge)', async () => {
+  it('returns true when already above threshold, but does NOT write the daily key again (not a rising edge)', async () => {
     // count=5 → next=6 ≥ threshold, so shouldDegrade=true, but 6 ≠ threshold(3) → no daily write.
     // This prevents double-counting cycles where the failure is sustained above threshold.
-    const kv = mockKV({ 'fetch-fail:azure': '5' })
-    expect(await trackFetchFailure(kv, 'azure')).toBe(true)
+    const kv = mockKV()
+    const store: TrackingStateBlob = { azure: { failCount: 5 } }
+    expect(await trackFetchFailure(store, kv, 'azure')).toBe(true)
     expect(kv.put).not.toHaveBeenCalled()
   })
 
-  it('handles corrupted (non-numeric) KV value gracefully', async () => {
-    const kv = mockKV({ 'fetch-fail:azure': 'NaN' })
-    expect(await trackFetchFailure(kv, 'azure')).toBe(false) // treats as 0+1=1 < 3
+  it('treats a missing failCount as 0', async () => {
+    const store: TrackingStateBlob = { azure: {} }
+    expect(await trackFetchFailure(store, undefined, 'azure')).toBe(false)
+    expect(store.azure?.failCount).toBe(1)
   })
 
-  it('returns false when kv is undefined', async () => {
-    expect(await trackFetchFailure(undefined, 'azure')).toBe(false)
+  it('works with no KV at all — the daily accumulator write is simply skipped', async () => {
+    const store: TrackingStateBlob = { azure: { failCount: 2 } }
+    expect(await trackFetchFailure(store, undefined, 'azure')).toBe(true)
   })
 
   it('supports custom threshold', async () => {
-    const kv = mockKV({ 'fetch-fail:azure': '3' })
-    expect(await trackFetchFailure(kv, 'azure', 5)).toBe(false) // 3+1=4 < 5
-    const kv2 = mockKV({ 'fetch-fail:azure': '4' })
-    expect(await trackFetchFailure(kv2, 'azure', 5)).toBe(true) // 4+1=5 >= 5
+    const store: TrackingStateBlob = { azure: { failCount: 3 } }
+    expect(await trackFetchFailure(store, undefined, 'azure', 5)).toBe(false) // 3+1=4 < 5
+    const store2: TrackingStateBlob = { azure: { failCount: 4 } }
+    expect(await trackFetchFailure(store2, undefined, 'azure', 5)).toBe(true) // 4+1=5 >= 5
   })
 
-  it('sets fetch-fail:since on the rising edge when absent (#500)', async () => {
-    const store: Record<string, string> = { 'fetch-fail:azure': '2' }
-    const kv = mockKV(store)
-    await trackFetchFailure(kv, 'azure') // next=3 = threshold → rising edge
-    expect(store['fetch-fail:since:azure']).toBeDefined()
-    expect(Number.isNaN(Date.parse(store['fetch-fail:since:azure']))).toBe(false) // valid ISO
+  it('sets failSince on the rising edge when absent (#500)', async () => {
+    const store: TrackingStateBlob = { azure: { failCount: 2 } }
+    await trackFetchFailure(store, undefined, 'azure') // next=3 = threshold → rising edge
+    expect(store.azure?.failSince).toBeDefined()
+    expect(Number.isNaN(Date.parse(store.azure!.failSince!))).toBe(false) // valid ISO
   })
 
-  it('does NOT overwrite an existing fetch-fail:since (preserves first-failure time across re-climbs)', async () => {
+  it('does NOT overwrite an existing failSince (preserves first-failure time across re-climbs)', async () => {
     const original = '2026-06-01T00:00:00.000Z'
-    const store: Record<string, string> = { 'fetch-fail:azure': '2', 'fetch-fail:since:azure': original }
-    const kv = mockKV(store)
-    await trackFetchFailure(kv, 'azure') // rising edge again, but since already set
-    expect(store['fetch-fail:since:azure']).toBe(original)
+    const store: TrackingStateBlob = { azure: { failCount: 2, failSince: original } }
+    await trackFetchFailure(store, undefined, 'azure') // rising edge again, but since already set
+    expect(store.azure?.failSince).toBe(original)
   })
 
-  it('does not set fetch-fail:since below the rising edge', async () => {
-    const store: Record<string, string> = { 'fetch-fail:azure': '0' }
-    const kv = mockKV(store)
-    await trackFetchFailure(kv, 'azure') // next=1, below threshold
-    expect(store['fetch-fail:since:azure']).toBeUndefined()
+  it('does not set failSince below the rising edge', async () => {
+    const store: TrackingStateBlob = { azure: { failCount: 0 } }
+    await trackFetchFailure(store, undefined, 'azure') // next=1, below threshold
+    expect(store.azure?.failSince).toBeUndefined()
+  })
+
+  describe('30-min decay (#1224 — mirrors the pre-consolidation fetch-fail:{id} KV key\'s expirationTtl)', () => {
+    it('does NOT decay a count refreshed less than 30 min ago', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store: TrackingStateBlob = { azure: { failCount: 1, failCountAt: new Date(t0).toISOString() } }
+      const next = t0 + 29 * 60_000 // 29 min later — still within the window
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, next)).toBe(false) // 1+1=2, not decayed
+      expect(store.azure?.failCount).toBe(2)
+    })
+
+    it('decays a count last refreshed 30+ min ago back to 0 before incrementing', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store: TrackingStateBlob = { azure: { failCount: 3, failCountAt: new Date(t0).toISOString() } }
+      const next = t0 + 31 * 60_000 // 31 min later — decay window elapsed
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, next)).toBe(false) // restarts at 0+1=1
+      expect(store.azure?.failCount).toBe(1)
+    })
+
+    it('a decayed-then-restarted streak reaches the threshold again after 3 more failures, recreating the ~45-min re-climb cadence', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store: TrackingStateBlob = { azure: { failCount: 3, failCountAt: new Date(t0).toISOString() } }
+      let t = t0 + 31 * 60_000
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, t)).toBe(false) // restarts at 1
+      t += 60_000
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, t)).toBe(false) // 2
+      t += 60_000
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, t)).toBe(true) // 3 — crosses again
+    })
+
+    it('treats an unparseable failCountAt as decayed (fails open rather than sticking forever)', async () => {
+      const store: TrackingStateBlob = { azure: { failCount: 5, failCountAt: 'not-a-date' } }
+      expect(await trackFetchFailure(store, undefined, 'azure')).toBe(false) // restarts at 0+1=1
+      expect(store.azure?.failCount).toBe(1)
+    })
+
+    it('does not decay an entry with no failCountAt at all (trusts the stored count as-is)', async () => {
+      // failCount/failCountAt are always written together by trackFetchFailure and always cleared
+      // together by resetFetchFailure, and sanitizeTrackingState now rejects a failCount read from KV
+      // whose paired failCountAt didn't survive — so a bare `{failCount: N}` with no timestamp can
+      // only arise from a directly-constructed in-memory object (as in this test), never a real KV
+      // round trip. Trusting the count here is what keeps that constructor-shorthand usable elsewhere
+      // in this file without every fixture needing a timestamp.
+      const store: TrackingStateBlob = { azure: { failCount: 2 } }
+      expect(await trackFetchFailure(store, undefined, 'azure')).toBe(true) // 2+1=3, uses the stored count as-is
+    })
   })
 })
 
-describe('resetFetchFailure', () => {
-  it('deletes the fail counter key when it exists', async () => {
-    const store: Record<string, string> = { 'fetch-fail:azure': '3' }
-    const kv = mockKV(store)
-    await resetFetchFailure(kv, 'azure')
-    expect(store['fetch-fail:azure']).toBeUndefined()
-    expect(kv.delete).toHaveBeenCalled()
+describe('resetFetchFailure (#1224 — blob-based, synchronous)', () => {
+  it('clears the fail counter and failSince, pruning the now-empty entry', () => {
+    const store: TrackingStateBlob = { azure: { failCount: 3 } }
+    resetFetchFailure(store, 'azure')
+    expect(store.azure).toBeUndefined()
   })
 
-  it('skips delete when key does not exist (saves KV write)', async () => {
-    const kv = mockKV()
-    await resetFetchFailure(kv, 'azure')
-    expect(kv.delete).not.toHaveBeenCalled()
+  it('does nothing when the service has no entry', () => {
+    const store: TrackingStateBlob = {}
+    resetFetchFailure(store, 'azure') // no throw
+    expect(store.azure).toBeUndefined()
   })
 
-  it('does nothing when kv is undefined', async () => {
-    await resetFetchFailure(undefined, 'azure') // no throw
+  it('also clears failSince on recovery (#500)', () => {
+    const store: TrackingStateBlob = { azure: { failCount: 3, failSince: '2026-06-01T00:00:00.000Z' } }
+    resetFetchFailure(store, 'azure')
+    expect(store.azure).toBeUndefined()
   })
 
-  it('also clears fetch-fail:since on recovery (#500)', async () => {
-    const store: Record<string, string> = { 'fetch-fail:azure': '3', 'fetch-fail:since:azure': '2026-06-01T00:00:00.000Z' }
-    const kv = mockKV(store)
-    await resetFetchFailure(kv, 'azure')
-    expect(store['fetch-fail:azure']).toBeUndefined()
-    expect(store['fetch-fail:since:azure']).toBeUndefined()
+  it('preserves a sibling componentMissCount instead of deleting the whole entry', () => {
+    const store: TrackingStateBlob = { azure: { failCount: 3, componentMissCount: 2 } }
+    resetFetchFailure(store, 'azure')
+    expect(store.azure).toEqual({ componentMissCount: 2 })
+  })
+
+  it('also clears failCountAt — a recovery must not leave a decay timestamp with no count behind', () => {
+    const store: TrackingStateBlob = { azure: { failCount: 3, failCountAt: '2026-06-01T00:00:00.000Z', componentMissCount: 1 } }
+    resetFetchFailure(store, 'azure')
+    expect(store.azure).toEqual({ componentMissCount: 1 })
   })
 })
 
@@ -315,63 +365,162 @@ describe('formatPersistentFailureAlert (#500)', () => {
   })
 })
 
-describe('trackComponentMiss', () => {
-  it('returns false on first miss (count=1, threshold=3)', async () => {
-    const kv = mockKV()
-    expect(await trackComponentMiss(kv, 'openai')).toBe(false)
-    expect(kv.put).toHaveBeenCalledWith('component-missing:openai', '1', { expirationTtl: 1800 })
+describe('trackComponentMiss (#1224 — blob-based, synchronous)', () => {
+  it('returns false on first miss (count=1, threshold=3)', () => {
+    const store: TrackingStateBlob = {}
+    expect(trackComponentMiss(store, 'openai')).toBe(false)
+    expect(store.openai?.componentMissCount).toBe(1)
   })
 
-  it('returns false on second miss (count=2, threshold=3)', async () => {
-    const kv = mockKV({ 'component-missing:openai': '1' })
-    expect(await trackComponentMiss(kv, 'openai')).toBe(false)
+  it('returns false on second miss (count=2, threshold=3)', () => {
+    const store: TrackingStateBlob = { openai: { componentMissCount: 1 } }
+    expect(trackComponentMiss(store, 'openai')).toBe(false)
   })
 
-  it('returns true on third miss (count=3, threshold=3)', async () => {
-    const kv = mockKV({ 'component-missing:openai': '2' })
-    expect(await trackComponentMiss(kv, 'openai')).toBe(true)
+  it('returns true on third miss (count=3, threshold=3)', () => {
+    const store: TrackingStateBlob = { openai: { componentMissCount: 2 } }
+    expect(trackComponentMiss(store, 'openai')).toBe(true)
   })
 
-  it('returns true when already above threshold and skips write', async () => {
-    const kv = mockKV({ 'component-missing:openai': '5' })
-    expect(await trackComponentMiss(kv, 'openai')).toBe(true)
-    expect(kv.put).not.toHaveBeenCalled()
+  it('returns true when already above threshold and does not increment further', () => {
+    const store: TrackingStateBlob = { openai: { componentMissCount: 5 } }
+    expect(trackComponentMiss(store, 'openai')).toBe(true)
+    expect(store.openai?.componentMissCount).toBe(5)
   })
 
-  it('handles corrupted (non-numeric) KV value gracefully', async () => {
-    const kv = mockKV({ 'component-missing:openai': 'NaN' })
-    expect(await trackComponentMiss(kv, 'openai')).toBe(false) // treats as 0+1=1 < 3
+  it('treats a missing componentMissCount as 0', () => {
+    const store: TrackingStateBlob = { openai: {} }
+    expect(trackComponentMiss(store, 'openai')).toBe(false)
+    expect(store.openai?.componentMissCount).toBe(1)
   })
 
-  it('returns false when kv is undefined', async () => {
-    expect(await trackComponentMiss(undefined, 'openai')).toBe(false)
-  })
-
-  it('supports custom threshold', async () => {
-    const kv = mockKV({ 'component-missing:openai': '3' })
-    expect(await trackComponentMiss(kv, 'openai', 5)).toBe(false) // 3+1=4 < 5
-    const kv2 = mockKV({ 'component-missing:openai': '4' })
-    expect(await trackComponentMiss(kv2, 'openai', 5)).toBe(true) // 4+1=5 >= 5
+  it('supports custom threshold', () => {
+    const store: TrackingStateBlob = { openai: { componentMissCount: 3 } }
+    expect(trackComponentMiss(store, 'openai', 5)).toBe(false) // 3+1=4 < 5
+    const store2: TrackingStateBlob = { openai: { componentMissCount: 4 } }
+    expect(trackComponentMiss(store2, 'openai', 5)).toBe(true) // 4+1=5 >= 5
   })
 })
 
-describe('resetComponentMiss', () => {
-  it('deletes the miss counter key when it exists', async () => {
-    const store: Record<string, string> = { 'component-missing:openai': '3' }
-    const kv = mockKV(store)
-    await resetComponentMiss(kv, 'openai')
-    expect(store['component-missing:openai']).toBeUndefined()
-    expect(kv.delete).toHaveBeenCalled()
+describe('resetComponentMiss (#1224 — blob-based, synchronous)', () => {
+  it('clears the miss counter, pruning the now-empty entry', () => {
+    const store: TrackingStateBlob = { openai: { componentMissCount: 3 } }
+    resetComponentMiss(store, 'openai')
+    expect(store.openai).toBeUndefined()
   })
 
-  it('skips delete when key does not exist (saves KV write)', async () => {
+  it('does nothing when the service has no entry', () => {
+    const store: TrackingStateBlob = {}
+    resetComponentMiss(store, 'openai') // no throw
+  })
+
+  it('preserves a sibling failCount instead of deleting the whole entry', () => {
+    const store: TrackingStateBlob = { openai: { componentMissCount: 3, failCount: 1 } }
+    resetComponentMiss(store, 'openai')
+    expect(store.openai).toEqual({ failCount: 1 })
+  })
+})
+
+describe('readTrackingState / writeTrackingStateIfChanged (#1224 — the consolidated blob\'s only 2 real KV ops)', () => {
+  it('returns {} when kv is undefined', async () => {
+    expect(await readTrackingState(undefined)).toEqual({})
+  })
+
+  it('returns {} when the key is absent', async () => {
     const kv = mockKV()
-    await resetComponentMiss(kv, 'openai')
-    expect(kv.delete).not.toHaveBeenCalled()
+    expect(await readTrackingState(kv)).toEqual({})
+  })
+
+  it('parses a stored blob', async () => {
+    const stored: TrackingStateBlob = { azure: { failCount: 2, failCountAt: '2026-08-01T00:00:00.000Z' } }
+    const kv = mockKV({ 'tracking:state': JSON.stringify(stored) })
+    expect(await readTrackingState(kv)).toEqual(stored)
+  })
+
+  it('fails open to {} on corrupt JSON', async () => {
+    const kv = mockKV({ 'tracking:state': 'not json{' })
+    expect(await readTrackingState(kv)).toEqual({})
+  })
+
+  it('fails open to {} on a wrong-shape value (e.g. an array)', async () => {
+    const kv = mockKV({ 'tracking:state': '[1,2,3]' })
+    expect(await readTrackingState(kv)).toEqual({})
+  })
+
+  it('fails open to {} when kv.get throws', async () => {
+    const kv = mockKV()
+    ;(kv.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('KV unavailable'))
+    expect(await readTrackingState(kv)).toEqual({})
+  })
+
+  describe('per-entry field sanitization (#1224 — a wrong TYPE must not silently corrupt arithmetic)', () => {
+    const AT = '2026-08-01T00:00:00.000Z'
+
+    it('drops a non-numeric failCount instead of letting it string-concatenate ("3"+1="31")', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: '3', failCountAt: AT } }) })
+      expect(await readTrackingState(kv)).toEqual({})
+    })
+
+    it('drops a non-numeric componentMissCount the same way', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ openai: { componentMissCount: 'five', componentMissAt: AT } }) })
+      expect(await readTrackingState(kv)).toEqual({})
+    })
+
+    it('drops failCount when its paired failCountAt is missing — the pair is written/cleared together, so a mismatch is itself evidence of corruption', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 3 } }) })
+      expect(await readTrackingState(kv)).toEqual({})
+    })
+
+    it('drops failCount when its paired failCountAt has the wrong type', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 3, failCountAt: 12345 } }) })
+      expect(await readTrackingState(kv)).toEqual({})
+    })
+
+    it('drops componentMissCount when its paired componentMissAt is missing', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ openai: { componentMissCount: 3 } }) })
+      expect(await readTrackingState(kv)).toEqual({})
+    })
+
+    it('keeps a valid (count, *At) pair alongside a rejected sibling field on the SAME entry', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 2, failCountAt: AT, componentMissCount: 'bad' } }) })
+      expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 2, failCountAt: AT } })
+    })
+
+    it('drops a non-string failSince', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, failSince: 12345 } }) })
+      expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
+    })
+
+    it('drops a non-object entry (e.g. a service id mapped straight to a number)', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: 3, openai: { failCount: 1, failCountAt: AT } }) })
+      expect(await readTrackingState(kv)).toEqual({ openai: { failCount: 1, failCountAt: AT } })
+    })
+
+    it('keeps other services intact when one entry is entirely malformed', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 'bad' }, openai: { componentMissCount: 3, componentMissAt: AT } }) })
+      expect(await readTrackingState(kv)).toEqual({ openai: { componentMissCount: 3, componentMissAt: AT } })
+    })
+  })
+
+  it('skips the write when nothing changed', async () => {
+    const kv = mockKV()
+    const before: TrackingStateBlob = { azure: { failCount: 1 } }
+    const after: TrackingStateBlob = { azure: { failCount: 1 } }
+    await writeTrackingStateIfChanged(kv, before, after)
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('writes when the blob changed', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    const before: TrackingStateBlob = { azure: { failCount: 1 } }
+    const after: TrackingStateBlob = { azure: { failCount: 2 } }
+    await writeTrackingStateIfChanged(kv, before, after)
+    expect(store['tracking:state']).toBe(JSON.stringify(after))
   })
 
   it('does nothing when kv is undefined', async () => {
-    await resetComponentMiss(undefined, 'openai') // no throw
+    await writeTrackingStateIfChanged(undefined, {}, { azure: { failCount: 1 } }) // no throw
   })
 })
 

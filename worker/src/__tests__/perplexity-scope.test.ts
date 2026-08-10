@@ -230,14 +230,14 @@ describe('#1177 wiring — the Computer outage reaches BOTH the incident list an
 
   it('publishes the Computer incident in incidents (it was dropped before)', async () => {
     stub()
-    const svc = await fetchService(perplexity, undefined, undefined)
+    const svc = await fetchService(perplexity, undefined, undefined, {})
     expect(svc.incidents.map((i) => i.title)).toContain('Computer sandbox issues')
   })
 
   it('uptime30d follows the Computer outage instead of the API component 100%', async () => {
     // The half-fix guard: widening incidents alone leaves "1 incident listed, uptime 100%".
     stub()
-    const svc = await fetchService(perplexity, undefined, undefined)
+    const svc = await fetchService(perplexity, undefined, undefined, {})
     expect(svc.uptime30d).toBeLessThan(100)
     expect(svc.uptimeSource).toBe('official')
   })
@@ -247,7 +247,7 @@ describe('#1177 wiring — the Computer outage reaches BOTH the incident list an
     // render as "status page shows 99.9%" beside our own worst-of — a number the page never published
     // for this card, and not necessarily even the same component. Nothing is the honest answer.
     stub()
-    const svc = await fetchService(perplexity, undefined, undefined)
+    const svc = await fetchService(perplexity, undefined, undefined, {})
     expect(svc.uptimeReported).toBeUndefined()
     expect(svc.uptimeReportedDays).toBeUndefined()
   })
@@ -257,14 +257,14 @@ describe('#1177 wiring — the Computer outage reaches BOTH the incident list an
     // drives /is-perplexity-down, the Discord alert and the RSS entry. Pre-#1177 this read
     // `operational` with an empty incident list.
     stub({ ongoing: true, onWebsite: true })
-    const svc = await fetchService(perplexity, undefined, undefined)
+    const svc = await fetchService(perplexity, undefined, undefined, {})
     expect(svc.incidents.some((i) => i.status !== 'resolved')).toBe(true)
     expect(svc.status).toBe('degraded')
   })
 
   it('a resolved-only page stays operational — the badge follows OPEN incidents, not the list', async () => {
     stub()
-    const svc = await fetchService(perplexity, undefined, undefined)
+    const svc = await fetchService(perplexity, undefined, undefined, {})
     expect(svc.status).toBe('operational')
   })
 
@@ -279,7 +279,7 @@ describe('#1177 wiring — the Computer outage reaches BOTH the incident list an
     vi.stubGlobal('fetch', vi.fn(async () => new Response(rotated(), { status: 200 })))
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const svc = await fetchService(perplexity, undefined, undefined)
+      const svc = await fetchService(perplexity, undefined, undefined, {})
       expect(warn.mock.calls.flat().join(' ')).toContain('falling back to statusComponent')
       // 'API' still resolves by name in the rotated payload, so the single-component figure survives.
       expect(svc.uptime30d).toBe(100)
@@ -290,7 +290,7 @@ describe('#1177 wiring — the Computer outage reaches BOTH the incident list an
 
   it('still renders all three components in the breakdown', async () => {
     stub()
-    const svc = await fetchService(perplexity, undefined, undefined)
+    const svc = await fetchService(perplexity, undefined, undefined, {})
     expect(svc.components?.map((c) => c.name)).toEqual(['API', 'Website', 'Computer'])
   })
 })

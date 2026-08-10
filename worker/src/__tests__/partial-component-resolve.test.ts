@@ -498,7 +498,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
 
   it('an unreadable components.json leaves a durable record naming every dropped id', async () => {
     const kv = mockKV()
-    const svc = await fetchService(CHATGPT, prefetched({ ok: false }), kv as never)
+    const svc = await fetchService(CHATGPT, prefetched({ ok: false }), kv as never, {})
     expect(svc.status).toBe('operational') // still the honest degraded outcome — the badge DID narrow
     const e = stored(kv)
     expect(e).not.toBeNull()
@@ -512,7 +512,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
     // false here, and this is the only fixture that can prove the flag is an observation.
     const kv = mockKV()
     const deleted = SUPERSET.filter((c) => c.id !== VOICE)
-    await fetchService(CHATGPT, prefetched({ ok: true, components: deleted }), kv as never)
+    await fetchService(CHATGPT, prefetched({ ok: true, components: deleted }), kv as never, {})
     const e = stored(kv)
     expect(e!.missing).toEqual([VOICE])
     expect(e!.viaSummary).toBe(false)
@@ -530,7 +530,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
     await fetchService(CURSOR, {
       summary: { status: { indicator: 'none', description: 'x' }, components: kept, incidents: [] } as never,
       incidents: null, latency: 100,
-    }, kv as never)
+    }, kv as never, {})
     const e = stored(kv, 'cursor')
     expect(e!.missing).toEqual(CURSOR.statusComponentIds!.slice(2).sort())
     expect(e!.viaSummary).toBe(false)
@@ -540,7 +540,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
     const kv = mockKV()
     const windowWithoutPrimary = WINDOW.filter((c) => c.id !== PRIMARY)
     expect(windowWithoutPrimary.length).toBeLessThan(WINDOW.length) // the fixture really drops it
-    await fetchService(CHATGPT, prefetched({ ok: false }, windowWithoutPrimary), kv as never)
+    await fetchService(CHATGPT, prefetched({ ok: false }, windowWithoutPrimary), kv as never, {})
     expect(stored(kv)!.missing).not.toContain(PRIMARY)
   })
 
@@ -549,7 +549,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
     // reads as "nothing resolved" here and skips the report — silencing the single worst case: a
     // badge standing on one component while 11 are invisible.
     const kv = mockKV()
-    await fetchService(CHATGPT, prefetched({ ok: false }, [comp(PRIMARY)]), kv as never)
+    await fetchService(CHATGPT, prefetched({ ok: false }, [comp(PRIMARY)]), kv as never, {})
     expect(stored(kv)!.missing).toHaveLength(CHATGPT.statusComponentIds!.length - 1)
   })
 
@@ -557,7 +557,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
     // A mass id migration: resolveSvcStatus matches nothing and returns the page indicator, so there
     // is no narrowed badge to describe. Alerting would page a second time with a false description.
     const kv = mockKV()
-    const svc = await fetchService(CHATGPT, prefetched({ ok: false }, [comp('zz-foreign-id')], 'major'), kv as never)
+    const svc = await fetchService(CHATGPT, prefetched({ ok: false }, [comp('zz-foreign-id')], 'major'), kv as never, {})
     expect(svc.status).toBe('down')  // the safe overall-indicator fallback really was taken
     expect(kv.store['component-partial:chatgpt']).toBeUndefined()
     // …but the WARN still enumerates them. The alert gate must not swallow the log: for most of the
@@ -573,15 +573,15 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
 
   it('…and nothing when the page serves no components at all, or an empty array', async () => {
     const kv = mockKV()
-    await fetchService(CHATGPT, prefetched({ ok: false }, null), kv as never)
-    await fetchService(CHATGPT, prefetched({ ok: false }, []), kv as never)
+    await fetchService(CHATGPT, prefetched({ ok: false }, null), kv as never, {})
+    await fetchService(CHATGPT, prefetched({ ok: false }, []), kv as never, {})
     expect(kv.store['component-partial:chatgpt']).toBeUndefined()
     expect(partialWrites(kv)).toHaveLength(0)
   })
 
   it('a fully-resolved cycle writes nothing and leaves no record', async () => {
     const kv = mockKV()
-    await fetchService(CHATGPT, prefetched({ ok: true, components: SUPERSET }), kv as never)
+    await fetchService(CHATGPT, prefetched({ ok: true, components: SUPERSET }), kv as never, {})
     expect(kv.store['component-partial:chatgpt']).toBeUndefined()
     expect(partialWrites(kv)).toHaveLength(0)
   })
@@ -593,12 +593,12 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
     // intermittent drift unalertable, because each clean poll destroys the clock the drifting polls
     // are accumulating.
     const kv = mockKV()
-    await fetchService(CHATGPT, prefetched({ ok: false }), kv as never)
+    await fetchService(CHATGPT, prefetched({ ok: false }), kv as never, {})
     const first = stored(kv)!
-    await fetchService(CHATGPT, prefetched({ ok: true, components: SUPERSET }), kv as never) // recovered
+    await fetchService(CHATGPT, prefetched({ ok: true, components: SUPERSET }), kv as never, {}) // recovered
     expect(kv.store['component-partial:chatgpt']).toBeDefined()
     expect(kv.delete.mock.calls.map((c) => String(c[0]))).not.toContain('component-partial:chatgpt')
-    await fetchService(CHATGPT, prefetched({ ok: false }), kv as never)                      // drifting again
+    await fetchService(CHATGPT, prefetched({ ok: false }), kv as never, {})                      // drifting again
     expect(stored(kv)!.since).toBe(first.since) // the clock survived the clean cycle in between
   })
 
@@ -608,7 +608,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
     // now, so the fresh record must not alert; ageing only `since` is exactly the shape 6h of
     // repeated reports produces.
     const kv = mockKV()
-    await fetchService(CHATGPT, prefetched({ ok: false }), kv as never)
+    await fetchService(CHATGPT, prefetched({ ok: false }), kv as never, {})
     const live = stored(kv)!
     const at = Date.parse(live.updatedAt)
     expect(await detectPartialResolves(PARTIAL_COMPONENT_SERVICES, kv, at)).toHaveLength(0)

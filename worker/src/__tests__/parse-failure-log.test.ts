@@ -136,7 +136,7 @@ describe('#1089 follow-up — the guard books into the counter, once per cycle',
     // Drives the production entry point, so parse → flag → guard → counter runs end to end.
     failStub()
     const store: Record<string, string> = {}
-    const svc = await fetchService(mistral, undefined, mockKV(store) as never)
+    const svc = await fetchService(mistral, undefined, mockKV(store) as never, {})
     expect(svc.sourceUnknown, 'precondition: the guard must have fired').toBe(true)
 
     const key = Object.keys(store).find((k) => k.startsWith('instatus-parse-fail:'))
@@ -154,7 +154,7 @@ describe('#1089 follow-up — the guard books into the counter, once per cycle',
     failStub()
     const store: Record<string, string> = {}, meta = { puts: 0, ttls: {} as Record<string, number | undefined> }
     const kv = mockKV(store, meta)
-    for (let i = 0; i < 10; i++) await fetchService(mistral, undefined, kv as never)
+    for (let i = 0; i < 10; i++) await fetchService(mistral, undefined, kv as never, {})
 
     const key = Object.keys(store).find((k) => k.startsWith('instatus-parse-fail:'))!
     expect(totalFor(parseParseFailDay(store[key]), 'mistral'), '10 invocations in one slot = 1 cycle').toBe(1)
@@ -174,7 +174,7 @@ describe('#1089 follow-up — the guard books into the counter, once per cycle',
     ]
     vi.stubGlobal('fetch', vi.fn(async () => new Response(`<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`, { status: 200 })))
     const store: Record<string, string> = {}
-    const svc = await fetchService(mistral, undefined, mockKV(store) as never)
+    const svc = await fetchService(mistral, undefined, mockKV(store) as never, {})
     expect(svc.sourceUnknown).toBeUndefined()
     expect(Object.keys(store).filter((k) => k.startsWith('instatus-parse-fail:'))).toEqual([])
   })

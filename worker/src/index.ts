@@ -1628,7 +1628,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   }
 
   // #500 — persistent (1h+) status-page block alert. Independent of the status-alert path above:
-  // sweeps the fetch-fail:since markers and warns the operator once per blocked service per 24h.
+  // sweeps the tracking:state blob's failSince fields (#1224) and warns the operator once per blocked service per 24h.
   // #800 — skip the daily persistent-failure warning for KNOWN-deactivated sources (operator-acknowledged).
   const deactivatedSourceIds = new Set(SERVICES.filter(c => c.statusSourceDeactivated).map(c => c.id))
   await checkPersistentFetchFailures(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, services, Date.now(), sendDiscordAlert, deactivatedSourceIds)

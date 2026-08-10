@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure } from './parse-failure-log'
-import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, kvPut, isNonReliabilityAdvisory } from './utils'
+import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type TrackingStateBlob } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
@@ -1653,14 +1653,22 @@ export function classifyStatusPageFailure(httpStatus: number): 'dead-source' | '
 // wrapper unguarded: drop a call here, or swap the tag/map order, and every pure test stays green while
 // the tag never reaches /api/status (the #966 / #940 "tested twin" failure class — a swapped tag/map
 // order was caught in local verification before this shipped).
-export async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
-  const svc = await fetchServiceUntagged(config, prefetched, kv)
+// #1224 — `trackingStore` is required, not optional-with-a-default: a missing argument here would
+// silently hand every call its own throwaway `{}`, so a streak could never persist and the fetch-fail
+// degrade path + #500 alert would quietly stop firing with no type error (the #970 "optional param
+// re-empties the derived set" shape). Callers with nothing to track pass `{}` explicitly.
+export async function fetchService(config: ServiceConfig, prefetched: PrefetchedData | undefined, kv: KVNamespace | undefined, trackingStore: TrackingStateBlob): Promise<ServiceStatus> {
+  const svc = await fetchServiceUntagged(config, prefetched, kv, trackingStore)
   const tagged = tagAutoMonitorIncidents(svc.incidents, config)  // matches ORIGINAL (e.g. Chinese) titles
   const incidents = applyTitleMap(tagged, config)                // THEN rewrite to English
   return incidents === svc.incidents ? svc : { ...svc, incidents }
 }
 
-async function fetchServiceUntagged(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
+// #1224 — `trackingStore` is the in-memory blob `trackFetchFailure`/etc. mutate directly (see
+// utils.ts's tracking-state block); `fetchAllServices` reads it once and writes it back once, so
+// every call site below is a synchronous in-memory op except `trackFetchFailure`'s own rare daily-
+// counter write, which still needs `kv`.
+async function fetchServiceUntagged(config: ServiceConfig, prefetched: PrefetchedData | undefined, kv: KVNamespace | undefined, trackingStore: TrackingStateBlob): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
   // #1089 — set when the Instatus incident parse failed STRUCTURALLY (payload shape moved), as
@@ -1738,7 +1746,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           // the source-inactive alert HOLDS a prior dead state this cycle instead of misreading the
           // non-4xx outcome as "source recovered" (the Inactive/Recovered flap). (A 4xx — incl. 429 —
           // is classified `dead-source` above, NOT unknown.)
-          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
         }
         summaryData = await summaryRes.json()
@@ -1778,7 +1786,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           // above — so the badge withholds (→ `unknown` after the strike threshold, the #1004 display
           // rule) rather than inventing operational (#713). Auto-recovers the moment the RSC parses again.
           console.warn(`[fetchService] ${config.id}: incidentIoGlobalPage RSC unreadable (HTML ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — withholding status this cycle`)
-          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
         }
       }
@@ -2053,9 +2061,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         if (!compFound) {
           const available = breakdownComponents.map((c) => `${c.id}:${c.name}`).join(', ')
           console.warn(`[fetchService] Component ID not found: ${config.id} (${config.statusComponentId}). Available: ${available}`)
-          await trackComponentMiss(kv, config.id)
+          trackComponentMiss(trackingStore, config.id)
         } else {
-          await resetComponentMiss(kv, config.id)
+          resetComponentMiss(trackingStore, config.id)
         }
       }
       // #1179 — the SECONDARY ids get their own operator path, because a partial resolve is exactly
@@ -2113,9 +2121,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       // Successful fetch — reset or track based on parse errors
       if (parseErrors > 0) {
         console.warn(`[fetchService] ${config.id} completed with ${parseErrors} parse error(s)`)
-        await trackFetchFailure(kv, config.id)
+        await trackFetchFailure(trackingStore, kv, config.id)
       } else {
-        await resetFetchFailure(kv, config.id)
+        resetFetchFailure(trackingStore, config.id)
       }
 
       // #604 — preserve the curated per-component snapshot for the breakdown UI (source picked above).
@@ -2152,7 +2160,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         const latency = Date.now() - start
         if (!res || !res.ok) {
           if (res) { console.warn(`[fetchService] ${config.id} AWS Health API HTTP ${res.status}`); res.body?.cancel() }
-          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
         }
         // Decode the utf-16 (BOM-detected) JSON. A 200 with an unparseable body means the endpoint's
@@ -2166,10 +2174,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           console.warn(`[fetchService] ${config.id} AWS Health API decode/parse failed (ct=${res.headers.get('content-type')}):`, err instanceof Error ? err.message : err)
         }
         if (json === null) {
-          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
         }
-        await resetFetchFailure(kv, config.id)
+        resetFetchFailure(trackingStore, config.id)
         const incidents = parseAwsHealthEvents(json, config.awsHealthApi.service)
         const filtered = filterIncidents(incidents, config)
         // #574 — derive currently-degraded AWS regions from the SAME events JSON (all AWS services),
@@ -2208,13 +2216,13 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         const latency = Date.now() - start
         if (!rssRes || !rssRes.ok) {
           if (rssRes) { console.warn(`[fetchService] ${config.id} Azure RSS HTTP ${rssRes.status}`); rssRes.body?.cancel() }
-          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           // An HTTP error still measured a response time (kept, as on the AWS Health leg above); a
           // stall measured nothing, so publishing the elapsed abort budget would put our own timeout
           // into `/api/v1/status` and `latency:24h` as though it were Azure's.
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: rssRes && config.category === 'api' ? latency : null }
         }
-        await resetFetchFailure(kv, config.id)
+        resetFetchFailure(trackingStore, config.id)
         const incidents = parseAwsRssIncidents(await rssRes.text())
         const filtered = filterIncidents(incidents, config)
         // #713 — Azure RSS is an incident feed, not a rolling uptime %. No invented estimate: uptime
@@ -2597,7 +2605,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         // makes the plugin monitor emit a false "✅ recovered", so the rising-edge counter is blind to
         // the metric the remaining decision needs. 30d retention, so a weekly check sees the window.
         await recordParseFailure(kv, Date.now(), config.id, sourceParseFailure)
-        const shouldDegrade = await trackFetchFailure(kv, config.id)
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
         return {
           ...base,
           status: shouldDegrade ? 'degraded' : 'operational',
@@ -2623,9 +2631,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       // Successful fetch — reset or track based on parse errors
       if (parseErrors > 0) {
         console.warn(`[fetchService] ${config.id} completed with ${parseErrors} parse error(s)`)
-        await trackFetchFailure(kv, config.id)
+        await trackFetchFailure(trackingStore, kv, config.id)
       } else {
-        await resetFetchFailure(kv, config.id)
+        resetFetchFailure(trackingStore, config.id)
       }
 
       // aistudio has no uptime/impact RPC — derive dailyImpact from the
@@ -2702,7 +2710,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
     // throwing from CF egress) is an INDETERMINATE verdict, NOT a recovery. Flag `sourceUnknown` so the
     // source-inactive alert holds a prior dead state instead of misreading the throw as "recovered"
     // (the #714 flap reproduced only from CF egress, where the redirect intermittently throws).
-    const shouldDegrade = await trackFetchFailure(kv, config.id)
+    const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
     return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
   }
 }
@@ -2824,6 +2832,23 @@ export function downclassifyAdvisoryIncidents(services: ServiceStatus[]): Servic
 }
 
 export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>>; upstreamFeeds: UpstreamCandidate[] }> {
+  // #1224 — read the consolidated per-service tracking blob ONCE for this whole invocation (1 KV
+  // read regardless of service count), thread the SAME mutable object through every batched
+  // `fetchService` call below, then write it back AT MOST once (only if something actually changed)
+  // after all batches resolve. See utils.ts's tracking-state block for why this replaced up to 3
+  // separate KV reads PER SERVICE.
+  const trackingBefore = await readTrackingState(kv)
+  const trackingStore = JSON.parse(JSON.stringify(trackingBefore)) as typeof trackingBefore
+  // #1224 — drop entries for ids no longer in SERVICES. Nothing else ever touches a retired/renamed
+  // service's entry again (no track/reset call names it), so without this an orphaned `failSince`
+  // would page the #500 persistent-failure alert once every 24h forever. Pruned on the WORKING copy
+  // only — `trackingBefore` stays the untouched read, so the removal itself registers as a change and
+  // gets written back below even on a cycle where no real service's tracking state otherwise moved.
+  const currentIds = new Set(SERVICES.map((s) => s.id))
+  for (const svcId of Object.keys(trackingStore)) {
+    if (!currentIds.has(svcId)) delete trackingStore[svcId]
+  }
+
   // Pre-fetch unique Atlassian status API endpoints once.
   // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
   // the same URLs independently. Deduplicating saves 6 subrequests, freeing budget for enrichment.
@@ -2901,7 +2926,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     for (let i = 0; i < SERVICES.length; i += BATCH_SIZE) {
       const batch = SERVICES.slice(i, i + BATCH_SIZE)
       const batchResults = await Promise.allSettled(
-        batch.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv))
+        batch.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv, trackingStore))
       )
       results.push(...batchResults)
     }
@@ -3054,6 +3079,11 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // suppression drops incidents, this only reclassifies survivors' impact) so the live Score + go-forward
   // accumulator never count a quota notice as downtime. Applied in the same one place as #904, for the same
   // "every downstream consumer, once" reason.
+
+  // #1224 — write the tracking blob back once, only if any service actually changed state this cycle
+  // (the common all-healthy case costs zero writes).
+  await writeTrackingStateIfChanged(kv, trackingBefore, trackingStore)
+
   return {
     raw: applySuppressions(downclassifyAdvisoryIncidents(raw), suppressions),
     enriched: applySuppressions(downclassifyAdvisoryIncidents(enriched), suppressions),

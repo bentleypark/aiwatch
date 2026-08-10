@@ -153,7 +153,7 @@ describe('fetchService applies the tag on the real call path (#983)', () => {
     // Any incidental fetch (uptime HTML) resolves to something harmless — the incident path is
     // fully served from `prefetched`, which is exactly how fetchAllServices calls it.
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
-    return fetchService(config, { summary: summary as never, incidents: null, latency: 120 })
+    return fetchService(config, { summary: summary as never, incidents: null, latency: 120 }, undefined, {})
   }
 
   it('stamps autoMonitor on every machine-emitted incident that survives filterIncidents', async () => {
@@ -187,7 +187,7 @@ describe('fetchService applies the tag on the real call path (#983)', () => {
   it('a service with no autoMonitorTitles comes back entirely untagged', async () => {
     const claude = SERVICES.find((s) => s.id === 'claude')!
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
-    const svc = await fetchService(claude, { summary: summary as never, incidents: null, latency: 120 })
+    const svc = await fetchService(claude, { summary: summary as never, incidents: null, latency: 120 }, undefined, {})
     expect(svc.incidents.every((i) => i.autoMonitor === undefined)).toBe(true)
   })
 })
