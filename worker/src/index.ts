@@ -2541,7 +2541,11 @@ export default {
     if (!env.DISCORD_WEBHOOK_URL) return
 
     // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
-    // KV budget: max 5 writes/hour = 120/day (trivial against the Workers Paid 1M/month inclusion)
+    // KV budget (#820 round 2 — the old "max 5 writes/hour" cap is gone, see the outageAlerts loop
+    // below): worst case is REDDIT_TARGETS' 9 outage-mode subs × limit=25 posts = 225 dedup writes/
+    // hour, 5400/day — still trivial against the Workers Paid 1M/month inclusion. Real volume is far
+    // lower in practice (most posts don't match `matchesKeywords`, and #820's measured ~85% 429 rate
+    // on the fetch itself further caps how many subreddits even return posts to write keys for).
     const now = scheduledNow
     if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
       try {
@@ -2550,8 +2554,27 @@ export default {
         const outageAlerts = redditAlerts.filter(a => a.type === 'outage')
         const competitiveAlerts = redditAlerts.filter(a => a.type === 'competitive')
         const redditSecurityAlerts = redditAlerts.filter(a => a.type === 'security')
-        // Mark all detected posts as seen (prevents re-checking), but only notify promotable ones
-        for (const alert of outageAlerts.slice(0, 5)) {
+        // Mark EVERY detected post as seen (prevents re-checking next run), but only notify
+        // promotable ones. #820's endpoint swap raised the per-subreddit fetch limit 5 → 25, so a
+        // cap here would now routinely leave outage-matching posts beyond the cap un-marked —
+        // `promotable` below is filtered from the FULL `outageAlerts` list, so an unmarked post
+        // that got promoted this run would be re-detected (and re-promoted to Discord) every run
+        // until it aged out 6h later. Each write is cheap (dedup only, 24h TTL) and volume is
+        // naturally bounded by how many distinct outage-keyword posts actually appear across all
+        // outage-mode subreddits in an hour — capping it traded a real duplicate-alert bug for a
+        // KV-budget saving that was never the bottleneck.
+        //
+        // Tradeoff this creates, stated rather than hidden: `promotable` below is still capped at
+        // `.slice(0, 3)` (the Discord-send limit), but now that every outageAlert gets marked seen
+        // regardless of whether it was sent, a 4th+ promotable post this run is marked seen WITHOUT
+        // ever being sent — it will not become eligible on a later run either, since dedup already
+        // covers it. Before this change such a post would have stayed unmarked (if beyond the old
+        // 5-cap) and could resurface; now it's a clean, permanent skip instead. Silence over
+        // duplication is the right tradeoff here — REDDIT_TARGETS' outage-mode subs order determines
+        // which posts win the 3 slots each run, not recency or severity, but that ordering question
+        // is unrelated to this PR's scope (Reddit is bot-walled far more often than it produces 4+
+        // simultaneous promotable posts in one run in the first place).
+        for (const alert of outageAlerts) {
           await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
         }
         const nowSec = Date.now() / 1000
@@ -2560,11 +2583,23 @@ export default {
           .slice(0, 3)
         for (const alert of promotable) {
           const formatted = formatRedditAlert(alert)
-          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+          const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: formatted.title,
             description: `${formatted.description}\n[View Post](${formatted.url})`,
             color: formatted.color,
           })
+          // #1202 — the only durable trace that a PROMOTE alert (as opposed to the #1182 engagement
+          // block, which leaves no KV trace either) has ever actually fired. Gated on `sent` — round
+          // 7 caught that an earlier version discarded sendDiscordAlert's return value and wrote the
+          // marker unconditionally, so a failed webhook POST would still read as "delivered" to
+          // anyone checking `reddit:promote:last` (including #1202's own verify-after, whose whole
+          // point is confirming this alert actually reached Discord). Mirrors the #800/#714
+          // source-dead-alert path a few hundred lines up, which gates its KV write on `sent` the
+          // same way. `kvPut` itself never throws (see worker/src/utils.ts) — it returns false on
+          // failure — so the write-failure branch checks the return value rather than catching.
+          if (sent && !(await kvPut(env.STATUS_CACHE, 'reddit:promote:last', JSON.stringify({
+            postId: alert.post.id, subreddit: alert.subreddit, sentAt: now.toISOString(),
+          })))) console.error('[reddit] promote-marker write failed')
         }
         // Competitive alerts — mark seen + notify (max 2 per hour)
         for (const alert of competitiveAlerts.slice(0, 2)) {

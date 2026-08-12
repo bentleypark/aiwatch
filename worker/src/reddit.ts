@@ -1,15 +1,23 @@
 // Reddit community monitoring — detect "is X down?" posts in target subreddits.
-// Uses Reddit's public JSON search endpoint, which currently 403s from Cloudflare egress (#820).
+// Fetches the public `/new/.rss` Atom listing feed (#820) — the JSON `search.json` endpoint this
+// used until 2026-08 is bot-walled with a HARD 403; verified 2026-08-12 from both Cloudflare egress
+// and a non-Cloudflare machine, so this isn't datacenter-IP-specific. The listing feed returns real
+// data instead. It is NOT immune to rate limiting, though: live
+// testing against Cloudflare's own egress (2026-08-12) found only ~2 of 13 subreddits succeed per
+// run, the rest 429, REGARDLESS of request spacing (tested 0ms and 3000ms between requests — same
+// ~15% pass rate either way). This points at Reddit throttling the shared Cloudflare egress-IP
+// pool's aggregate traffic, not our own request pattern — no amount of pacing in this file fixes
+// that. So `dead` (401/403 — the endpoint itself is refusing us) and `throttled` (429 — the
+// endpoint works, Reddit is just rate-limiting right now) are tracked as separate reasons; see
+// `SourceDeadReason`. Coverage is real but partial and will fluctuate run to run.
 
 import { defuseAutolinkDomain } from './alerts'
 import { appendStatusHint, appendUtm } from './utils'
 
-// #820 observability. The fetch path itself is unchanged and currently BROKEN — Reddit 403s
-// `search.json` from datacenter IPs — but the failure has been invisible: `fetchSubreddit` warned
-// to a log nobody reads and returned `[]`, and the daily summary counts `reddit:seen:*` keys, so
-// "403 → 0 posts" renders identically to a quiet day — the source has been dark since at least
-// 2026-06-29 (#820's first live 403) and the daily summary never said so. These markers make the
-// difference legible; repairing the fetch is #820's remaining half.
+// #820 observability, still load-bearing after the endpoint swap: `fetchSubreddit` only warns to a
+// log nobody reads on a failed response, and the daily summary counts `reddit:seen:*` keys, so a
+// renewed block would again render identically to a quiet day. These markers keep that difference
+// legible regardless of which endpoint is behind them.
 export const REDDIT_SOURCE_DEAD_KEY = 'reddit:source-dead'
 export const REDDIT_TRANSIENT_STREAK_KEY = 'reddit:transient-streak'
 // 26h: long enough to survive to the next daily-summary read, short enough that the marker
@@ -25,7 +33,10 @@ export interface RedditPost {
   title: string
   author: string
   subreddit: string
-  score: number
+  // #820 — the `/new/.rss` Atom feed does not carry vote counts. `undefined`, never a fabricated 0:
+  // the three Discord embed builders drop the "N upvotes" clause entirely when this is absent
+  // instead of printing a wrong number.
+  score?: number
   url: string
   createdUtc: number
 }
@@ -39,7 +50,9 @@ export interface RedditAlert {
   type: RedditAlertType
 }
 
-// Subreddit → search keywords mapping.
+// Subreddit → scan-mode mapping (#820 round 7: no server-side search exists anymore — `service`
+// only selects which client-side keyword matcher `detectRedditPosts` applies to that subreddit's
+// fetched posts).
 // service value semantics: '_competitive' / '_security' → those modes; anything else → outage mode.
 // Exported for tests — presence/mode assertions pin the named subs in outage mode (#280). They do
 // NOT read the playbook: #1182 removed the playbook's per-sub cron column (a prose mirror of this
@@ -83,33 +96,93 @@ const PROMOTABLE_STRONG = /\b(down|outage|broken|offline|unavailable|degraded)\b
 // or off-topic, and re-promoting them would surface stale content.
 const MEGATHREAD_MAX_AGE_SEC = 7200
 
-/**
- * Parse Reddit JSON search response into RedditPost[]
- */
-export function parseRedditResponse(json: unknown): RedditPost[] {
-  if (!json || typeof json !== 'object') return []
-  const data = (json as Record<string, unknown>).data
-  if (!data || typeof data !== 'object') return []
-  const children = (data as Record<string, unknown>).children
-  if (!Array.isArray(children)) return []
+/** Decode the five predefined XML entities. Atom text nodes are XML-escaped, not HTML-escaped, so
+ *  this is deliberately not a general HTML-entity decoder — Reddit's `/new/.rss` titles need nothing
+ *  more than this. */
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+}
 
-  return children
-    .map((child: unknown) => {
-      if (!child || typeof child !== 'object') return null
-      const d = (child as Record<string, unknown>).data
-      if (!d || typeof d !== 'object') return null
-      const post = d as Record<string, unknown>
-      return {
-        id: String(post.id ?? ''),
-        title: String(post.title ?? ''),
-        author: String(post.author ?? '[deleted]'),
-        subreddit: String(post.subreddit ?? ''),
-        score: Number(post.score ?? 0),
-        url: `https://www.reddit.com${String(post.permalink ?? '')}`,
-        createdUtc: Number(post.created_utc ?? 0),
-      }
+/**
+ * Parse Reddit's `/new/.rss` Atom feed into RedditPost[] (#820). `subreddit` is passed in rather
+ * than read per-entry — the caller already knows it, since the feed is fetched per-subreddit.
+ * `score` is left undefined (the feed does not carry it); id keeps Reddit's own `t3_…` prefix,
+ * which only needs to stay unique for the `reddit:seen:*` dedup key, not match the old bare-hash
+ * shape the JSON endpoint produced.
+ */
+export function parseRedditAtomResponse(xml: string, subreddit: string): RedditPost[] {
+  // `<entry\b[^>]*>` tolerates attributes on the tag itself (e.g. `<entry xml:lang="en">`) —
+  // the same attribute-order/shape hazard the <link> regex below already accounts for, applied one
+  // level up. A total match failure here is worse than any single-entry drop below: `fetchSubreddit`
+  // still reports `outcome: 'ok'` on a structurally-valid empty result, `decideSourceHealth` returns
+  // `'clear'`, and the source-dead marker is DELETED — a quiet day with zero log trace anywhere,
+  // strictly worse than the per-entry case (round 8) where at least a warning is logged. #820 round 9.
+  const entries = xml.match(/<entry\b[^>]*>[\s\S]*?<\/entry>/g)
+  if (!entries) {
+    // Only log when the raw body actually contains an `<entry` substring the regex failed to
+    // consume — that's the real shape-drift signal. A genuinely empty feed (no `<entry` at all,
+    // e.g. a quiet subreddit) contains no such substring and logging on it would be noise, not signal.
+    if (xml.includes('<entry')) {
+      console.error(`[reddit] r/${subreddit} has <entry markup but ZERO elements parsed — feed shape changed?`)
+    }
+    return []
+  }
+  const out: RedditPost[] = []
+  for (const entry of entries) {
+    const id = entry.match(/<id>([^<]+)<\/id>/)?.[1]
+    const title = entry.match(/<title>([^<]*)<\/title>/)?.[1]
+    // `[^>]*` tolerates attribute order WITHIN the <link> tag itself (e.g. `rel="alternate"` or
+    // `type="text/html"` before `href`) rather than assuming href is first/only — pinned by
+    // reddit.test.ts's dedicated attribute-order test. It does NOT need to (and cannot) account for
+    // a preceding sibling tag like <media:thumbnail>, which real entries also carry but which is a
+    // different tag entirely and can never match `<link\b`.
+    const url = entry.match(/<link\b[^>]*\shref="([^"]*)"/)?.[1]
+    const author = entry.match(/<name>([^<]*)<\/name>/)?.[1]
+    const published = entry.match(/<published>([^<]*)<\/published>/)?.[1]
+    if (!id || !title || !url) {
+      // #820 round 8 — logged for the same reason the non-reddit.com link check and the unparseable
+      // <published> check two blocks below both log: a silent drop here would let a feed-shape
+      // change (a tag rename, a promoted-post entry with a different structure) zero out affected
+      // entries with `fetchSubreddit` still reporting `outcome: 'ok'` — a parsing regression hiding
+      // as a quiet day, exactly what this file's observability exists to prevent.
+      console.warn(`[reddit] r/${subreddit} entry dropped (missing id/title/link):`, entry.slice(0, 150))
+      continue
+    }
+    // A permalink must actually point at reddit.com — the old JSON parser could only ever produce
+    // that (it built the URL itself from a bare permalink path); this one takes the href verbatim,
+    // so a feed shape change / cache-confused proxy response could otherwise mint a `RedditPost`
+    // whose url is attacker- or proxy-controlled and gets posted straight into operator Discord as
+    // a clickable "View Post" link.
+    if (!url.startsWith('https://www.reddit.com/r/')) {
+      console.warn(`[reddit] r/${subreddit} entry ${id} had a non-reddit.com link, dropping:`, url.slice(0, 120))
+      continue
+    }
+    const createdMs = published ? new Date(published).getTime() : NaN
+    if (!Number.isFinite(createdMs)) {
+      // Silently falling back to 0 would make the post vanish into the >6h age filter in
+      // `detectRedditPosts` with `outcome: 'ok'` still reported — a parsing regression hiding as a
+      // quiet day, the exact blind spot this whole file exists to make legible. Logs whether
+      // <published> was malformed OR entirely absent — a real Atom entry always carries one, so a
+      // missing tag is itself evidence of a feed-shape change (a more likely drift than a malformed
+      // date), not something to pass through quietly.
+      console.error(`[reddit] r/${subreddit} entry ${id} had a missing or unparseable <published>:`, published ?? '(absent)')
+    }
+    out.push({
+      id,
+      title: decodeXmlEntities(title),
+      author: author ? decodeXmlEntities(author).replace(/^\/u\//, '') : '[deleted]',
+      subreddit,
+      url,
+      createdUtc: Number.isFinite(createdMs) ? Math.floor(createdMs / 1000) : 0,
     })
-    .filter((p): p is RedditPost => p !== null && p.id !== '' && p.title !== '')
+  }
+  return out
 }
 
 /**
@@ -183,20 +256,29 @@ export function matchesSecurityKeywords(title: string): boolean {
   return SECURITY_STRONG.test(title) && AI_ADJACENT.test(title)
 }
 
-// Statuses that mean the SOURCE is blocked rather than one subreddit being odd: 401 (auth),
-// 403 (IP/UA block — what Reddit returns today), 429 (rate limited).
+// A status that means the ENDPOINT itself is refusing us (an actual block, not a rate limit) —
+// 401 (auth) or 403 (IP/UA block, what `search.json` returns). Distinct from `isThrottledStatus`
+// (429): the remediation differs (a real block needs a code/endpoint change; a rate limit doesn't).
 export function isDeadStatus(status: number): boolean {
-  return status === 401 || status === 403 || status === 429
+  return status === 401 || status === 403
+}
+
+// 429 specifically — the endpoint is alive and responding, Reddit is just rate-limiting this
+// request right now. See the file header for why pacing our own requests doesn't reliably avoid
+// this (empirically tied to shared Cloudflare egress-IP traffic, not our request pattern).
+export function isThrottledStatus(status: number): boolean {
+  return status === 429
 }
 
 /**
- * A subreddit fetch resolves to one of THREE states, not two. Folding "no response at all" into
- * "no posts" is the #820 root cause — it makes a total block indistinguishable from a quiet day.
+ * A subreddit fetch resolves to one of FOUR states. Folding "no response at all" into "no posts"
+ * is the #820 root cause — it makes a total block indistinguishable from a quiet day.
  *   ok        — a 2xx came back (proof the source is alive), whatever the post count
- *   dead      — an auth/block/rate status: the SOURCE is blocked
+ *   dead      — 401/403: the ENDPOINT is refusing us, a real block
+ *   throttled — 429: Reddit rate-limiting, not a block — usually self-heals next run
  *   transient — no response (network throw/timeout) or a non-auth error (5xx): proves nothing
  */
-export type FetchOutcome = 'ok' | 'dead' | 'transient'
+export type FetchOutcome = 'ok' | 'dead' | 'throttled' | 'transient'
 
 export interface FetchResult {
   posts: RedditPost[]
@@ -204,15 +286,18 @@ export interface FetchResult {
 }
 
 /**
- * Fetch recent posts from a subreddit matching outage keywords.
+ * Fetch the 25 newest posts from a subreddit (#820). No server-side search/query — the listing
+ * feed doesn't support one, so keyword matching moves entirely to the caller (`detectRedditPosts`,
+ * unchanged: `matchesKeywords` et al. read the title only). At the current HOURLY cron cadence
+ * (`worker/src/index.ts` gates this to minute<5 of each hour) 25 posts is real headroom against a
+ * subreddit's normal per-hour volume (~6/hour, measured live on r/ChatGPT 2026-08-12) — but not an unconditional
+ * "more coverage than before" claim: a subreddit posting >25 items within the hour, which is
+ * plausible during exactly the kind of high-volume outage this feature exists to catch, could still
+ * drop one. Fetches run in parallel (`Promise.allSettled` below) — serializing them was tested and
+ * did not change the pass rate (see file header), so parallel is kept for lower total latency.
  */
-async function fetchSubreddit(subreddit: string, mode: 'outage' | 'competitive' | 'security' = 'outage'): Promise<FetchResult> {
-  const query = mode === 'competitive'
-    ? encodeURIComponent('"status monitor" OR "uptime dashboard" OR "api status" OR "is down" OR "status page"')
-    : mode === 'security'
-    ? encodeURIComponent('breach OR leak OR hacked OR vulnerability OR CVE OR "unauthorized access" OR exploit OR "security incident"')
-    : encodeURIComponent('down OR "not working" OR outage OR issues OR error')
-  const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${query}&sort=new&restrict_sr=on&t=day&limit=5`
+async function fetchSubreddit(subreddit: string): Promise<FetchResult> {
+  const url = `https://www.reddit.com/r/${subreddit}/new/.rss?limit=25`
 
   let res: Response
   try {
@@ -230,11 +315,12 @@ async function fetchSubreddit(subreddit: string, mode: 'outage' | 'competitive' 
   if (!res.ok) {
     console.warn(`[reddit] r/${subreddit} returned HTTP ${res.status}`)
     void res.body?.cancel().catch(() => {})
-    return { posts: [], outcome: isDeadStatus(res.status) ? 'dead' : 'transient' }
+    const outcome = isThrottledStatus(res.status) ? 'throttled' : isDeadStatus(res.status) ? 'dead' : 'transient'
+    return { posts: [], outcome }
   }
 
-  // Only a STRUCTURALLY VALID listing counts as proof of life. A bot wall is commonly served as
-  // 200 with an HTML interstitial, not 403 — `old.reddit.com` was observed doing exactly that on
+  // Only a STRUCTURALLY VALID feed counts as proof of life. A bot wall is commonly served as 200
+  // with an HTML interstitial, not 403 — `old.reddit.com` was observed doing exactly that on
   // 2026-07-28. Treating an unparseable 200 as `ok` would let the sneakier form of this very block
   // CLEAR a correct marker and print a quiet day: worse than not having the marker at all.
   const text = await res.text().catch(() => null)
@@ -242,26 +328,17 @@ async function fetchSubreddit(subreddit: string, mode: 'outage' | 'competitive' 
     console.error(`[reddit] r/${subreddit} 200 but the body could not be read`)
     return { posts: [], outcome: 'transient' }
   }
-  let json: unknown
-  try {
-    json = JSON.parse(text)
-  } catch {
-    console.error(`[reddit] r/${subreddit} 200 with a non-JSON body (bot wall?): ${text.slice(0, 120)}`)
+  if (!isRedditAtomFeed(text)) {
+    console.error(`[reddit] r/${subreddit} 200 with an unexpected body (bot wall?): ${text.slice(0, 120)}`)
     return { posts: [], outcome: 'transient' }
   }
-  if (!isRedditListing(json)) {
-    console.error(`[reddit] r/${subreddit} 200 with an unexpected JSON shape: ${text.slice(0, 120)}`)
-    return { posts: [], outcome: 'transient' }
-  }
-  return { posts: parseRedditResponse(json), outcome: 'ok' }
+  return { posts: parseRedditAtomResponse(text, subreddit), outcome: 'ok' }
 }
 
-/** A body is proof of life only if it has the listing shape Reddit actually returns. */
-export function isRedditListing(json: unknown): boolean {
-  if (!json || typeof json !== 'object') return false
-  const data = (json as Record<string, unknown>).data
-  if (!data || typeof data !== 'object') return false
-  return Array.isArray((data as Record<string, unknown>).children)
+/** A body is proof of life only if it is a structurally valid Atom feed — the same "only a
+ *  structurally valid response counts as ok" discipline the old JSON-endpoint parser applied. */
+export function isRedditAtomFeed(text: string): boolean {
+  return /<feed[\s>]/.test(text) && /<\/feed>/.test(text) && !/<html[\s>]/i.test(text)
 }
 
 /**
@@ -323,14 +400,15 @@ async function resetTransientStreak(kv: KVNamespace): Promise<void> {
   await deleteIfPresent(kv, REDDIT_TRANSIENT_STREAK_KEY, 'transient-streak')
 }
 
-/** Why the source was marked: a block observed THIS run, a streak of unreachable runs, or a
- *  partial block (some targets answered, some were blocked). The distinction survives to the
- *  operator because the remediations differ. */
-export type SourceDeadReason = 'block' | 'streak' | 'partial'
+/** Why the source was marked: a block observed THIS run, a streak of unreachable runs, a partial
+ *  block (some targets answered, some were blocked), or a rate-limit (some/all targets 429'd, but
+ *  the endpoint itself isn't refusing us). The distinction survives to the operator because the
+ *  remediations differ — `throttled` in particular usually needs no action at all. */
+export type SourceDeadReason = 'block' | 'streak' | 'partial' | 'throttled'
 
 export interface RedditSourceDead { reason: SourceDeadReason; at: number }
 
-const SOURCE_DEAD_REASONS: readonly string[] = ['block', 'partial', 'streak']
+const SOURCE_DEAD_REASONS: readonly string[] = ['block', 'partial', 'streak', 'throttled']
 
 /** What the daily summary knows about source health: a marker, `null` (healthy), or `'unknown'`
  *  when KV could not be read. */
@@ -356,8 +434,9 @@ export async function readRedditSourceDead(kv: KVNamespace): Promise<SourceHealt
   try {
     const parsed = JSON.parse(raw) as RedditSourceDead
     // Validated against the union, not merely `typeof string`: an unrecognised reason would fall
-    // through the summary's ternary to the assertive "search returned a block status" sentence —
-    // a confident, wrong diagnosis. Anything unknown must take the honest 'unknown' path instead.
+    // through the summary's ternary to the assertive "the listing feed returned a block status"
+    // sentence — a confident, wrong diagnosis. Anything unknown must take the honest 'unknown' path
+    // instead.
     if (SOURCE_DEAD_REASONS.includes(parsed?.reason) && typeof parsed?.at === 'number') return parsed
   } catch { /* fall through to the shape warning */ }
   // A marker written every hour and silently ignored forever is the same blind spot; say so.
@@ -367,24 +446,41 @@ export async function readRedditSourceDead(kv: KVNamespace): Promise<SourceHealt
 
 /**
  * Fold per-subreddit outcomes into the source-health marker. Pure decision, exported for tests:
- *   • any OK  → the source is provably alive → self-heal. A lone 403 from ONE private or banned
- *     subreddit alongside real successes is per-subreddit noise, not a source-wide block, so a
- *     genuine success outweighs it.
- *   • else any DEAD (and zero OK) → the whole source is blocked → mark dead; the streak resets
- *     because this is a definite signal, not an accumulating suspicion.
- *   • else (all transient) → this run learned nothing, so do not fabricate a marker off one blip
- *     and do NOT wipe an existing one. Escalate only once the streak crosses the limit.
+ *   • any OK + any DEAD → 'partial': a genuine block coexists with real successes — actionable,
+ *     since a private/banned subreddit alongside real successes would be per-subreddit noise, but
+ *     `dead` here means 401/403, not 429, so this is never just rate-limiting.
+ *   • any OK + any THROTTLED (no DEAD) → 'throttled': the source is alive AND we have real evidence
+ *     of it (at least one ok this run) — safe to mark immediately with the quiet tone.
+ *   • any OK, nothing else → 'clear'.
+ *   • zero OK, any DEAD → 'mark': with zero evidence of life, "one odd subreddit" is not an
+ *     available reading — the streak resets because this is a definite signal, not a suspicion.
+ *   • zero OK, zero DEAD, any THROTTLED → 'bump', NOT an immediate 'throttled' marker (#820 round
+ *     2 fix). A total 429 blackout has EXACTLY the same zero-evidence-of-life shape as all-transient
+ *     — the two are indistinguishable from this run alone, and Reddit's shared-egress throttling
+ *     was measured at ~85% (file header), so this is not a rare edge case, it is close to the
+ *     modal outcome. Marking it 'throttled' immediately every run would apply the quiet 🐢 tone to
+ *     what could be a genuine sustained detection outage, resetting the transient streak on every
+ *     occurrence so the escalation path could never fire — reintroducing the exact "a real problem
+ *     renders identically to a quiet day" blind spot this whole file exists to prevent, one layer
+ *     down. Folding it into 'bump' means it goes through the SAME streak-based escalation transient
+ *     outcomes do: silent for a blip, an alarm only once sustained, as plain 'streak' (round 3: an
+ *     earlier version tried to distinguish the escalated reason as throttle- vs transient-flavored
+ *     based on which run tipped the streak, but that broke `markRedditSourceDead`'s `at`-preservation
+ *     -- a streak whose flavor flips between runs would re-stamp `at` to "now" on every flip,
+ *     understating a genuinely long-running outage's duration. One terminal reason keeps that
+ *     timestamp correct; `streak`'s message stays honest about the throttling possibility without a
+ *     second reason value to flip between).
+ *   • all transient (no throttled either) → 'bump': this run learned nothing, so do not fabricate a
+ *     marker off one blip and do NOT wipe an existing one. Escalate only once the streak crosses
+ *     the limit.
  */
-export function decideSourceHealth(outcomes: FetchOutcome[]): 'clear' | 'partial' | 'mark' | 'bump' {
+export function decideSourceHealth(outcomes: FetchOutcome[]): 'clear' | 'partial' | 'mark' | 'bump' | 'throttled' {
   const ok = outcomes.filter((o) => o === 'ok').length
   const dead = outcomes.filter((o) => o === 'dead').length
-  // Some alive, some blocked. Booleans hid this: `ok > 0 → clear` meant 12 of 13 subreddits
-  // blocked read as perfectly healthy, and a partial block is a very plausible shape for how an
-  // IP/endpoint-scoped block spreads or partially heals — exactly what this feature must see.
+  const throttled = outcomes.filter((o) => o === 'throttled').length
   if (ok > 0 && dead > 0) return 'partial'
+  if (ok > 0 && throttled > 0) return 'throttled'
   if (ok > 0) return 'clear'
-  // No success anywhere. A lone `dead` among transients still marks: with zero evidence of life,
-  // "one odd subreddit" is not an available reading.
   if (dead > 0) return 'mark'
   return 'bump'
 }
@@ -409,7 +505,7 @@ export async function detectRedditPosts(
     REDDIT_TARGETS.map(async (target) => {
       const mode: RedditAlertType = target.service === '_competitive' ? 'competitive'
         : target.service === '_security' ? 'security' : 'outage'
-      const { posts, outcome } = await fetchSubreddit(target.subreddit, mode)
+      const { posts, outcome } = await fetchSubreddit(target.subreddit)
       return { target, posts, mode, outcome }
     }),
   )
@@ -427,7 +523,9 @@ export async function detectRedditPosts(
     outcomes.push(outcome)
 
     for (const post of posts) {
-      // Double-check keywords (Reddit search can be fuzzy)
+      // #820 round 7 — this is NOT a double-check against an upstream search anymore: `/new/.rss`
+      // does no filtering at all, so this keyword match is the ONLY filter over every post in the
+      // fetched subreddit. Removing it would let every post in every scanned subreddit through.
       const matched = mode === 'competitive' ? matchesCompetitiveKeywords(post.title)
         : mode === 'security' ? matchesSecurityKeywords(post.title)
         : matchesKeywords(post.title)
@@ -465,7 +563,19 @@ export async function detectRedditPosts(
       await markRedditSourceDead(kv, 'block')
       await resetTransientStreak(kv)
       break
+    case 'throttled':
+      await markRedditSourceDead(kv, 'throttled')
+      await resetTransientStreak(kv)  // we DID hear from the source (429 is a real response)
+      break
     case 'bump': {
+      // #820 round 2/3 — zero-ok all-transient and zero-ok all-throttled fold into the same 'bump'
+      // path (see decideSourceHealth) and escalate to the SAME 'streak' reason. An earlier version
+      // tried to pick a throttle-vs-transient-flavored reason here based on which run tipped the
+      // streak, but a streak whose flavor flips between runs kept re-stamping `at` to "now" via
+      // markRedditSourceDead's reason-changed-is-a-new-event rule — understating a genuinely
+      // long-running outage's duration. One terminal reason avoids that; see 'streak''s message in
+      // daily-summary.ts for how it stays honest about the throttling possibility without a second
+      // reason value to flip between.
       const streak = await bumpTransientStreak(kv)
       if (transientStreakEscalates(streak)) await markRedditSourceDead(kv, 'streak')
       break
@@ -507,10 +617,13 @@ export function formatRedditAlert(alert: RedditAlert): { title: string; descript
   // and leaving this one would have left the bucket just as unreadable while looking fixed — this
   // alert's whole purpose is "go engage with this post", so it is the likelier click.
   const shareLink = slug ? `\n🔗 \`${appendUtm(appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, 'reddit'), 'reddit')}\`` : ''
+  // #820 — the `/new/.rss` feed carries no vote count. Drop the clause rather than print "0
+  // upvotes", which would read as a real (and wrong) measurement.
+  const scoreClause = alert.post.score != null ? ` · ${alert.post.score} upvotes` : ''
 
   return {
     title: `📢 Reddit: r/${alert.subreddit} [🎯 PROMOTE]`,
-    description: `"${defuseAutolinkDomain(alert.post.title)}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}${shareLink}`,
+    description: `"${defuseAutolinkDomain(alert.post.title)}"\nby u/${alert.post.author}${scoreClause} · ${agoText}${shareLink}`,
     color: 0x3fb950, // green
     url: alert.post.url,
   }
@@ -522,9 +635,10 @@ export function formatCompetitiveAlert(alert: RedditAlert): { title: string; des
     : ago < 3600 ? `${Math.floor(ago / 60)}m ago`
     : `${Math.floor(ago / 3600)}h ago`
 
+  const scoreClause = alert.post.score != null ? ` · ${alert.post.score} upvotes` : ''
   return {
     title: `🔍 Competitive: r/${alert.subreddit}`,
-    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}`,
+    description: `"${alert.post.title}"\nby u/${alert.post.author}${scoreClause} · ${agoText}`,
     color: 0x8b949e, // gray
     url: alert.post.url,
   }
@@ -536,9 +650,10 @@ export function formatSecurityAlert(alert: RedditAlert): { title: string; descri
     : ago < 3600 ? `${Math.floor(ago / 60)}m ago`
     : `${Math.floor(ago / 3600)}h ago`
 
+  const scoreClause = alert.post.score != null ? ` · ${alert.post.score} upvotes` : ''
   return {
     title: `🔒 Security: r/${alert.subreddit}`,
-    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}`,
+    description: `"${alert.post.title}"\nby u/${alert.post.author}${scoreClause} · ${agoText}`,
     color: 0xf85149, // red — security alerts are high-priority
     url: alert.post.url,
   }

@@ -938,11 +938,32 @@ describe('#820 Reddit source-dead warning', () => {
     const blocked = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'block', at: Date.now() } })
     expect(blocked).toContain('block status')
     const streak = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'streak', at: Date.now() } })
-    // Must not assert a cause the code cannot know — a 200 bot wall also lands here.
+    // Must not assert a single confident cause — a real egress problem, a 200 bot wall, and
+    // sustained Reddit rate-limiting (#820 round 3) all land on this same reason.
     expect(streak).toContain('no subreddit returned a usable response')
-    expect(streak).toContain('bot wall')
+    expect(streak).toContain('rate-limiting')
     const partial = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'partial', at: Date.now() } })
     expect(partial).toContain('partly dark')
+  })
+
+  it('#820 round 1 — throttled gets a distinct, quieter line, not the "source DOWN" alarm', () => {
+    // Reddit rate-limits ~85% of requests against the shared Cloudflare egress-IP pool as a matter
+    // of course (measured live) — alarming on that every run trains the operator to stop reading
+    // this line, exactly the failure #820 exists to prevent one layer up.
+    const out = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'throttled', at: Date.now() } })
+    expect(out).toContain('rate-limited')
+    expect(out).toContain('429')
+    expect(out).not.toContain('Reddit source DOWN')
+  })
+
+  it('throttled with a non-zero redditCount appends the "still detected today" count — round 5 coverage', () => {
+    // Every prior throttled test used redditCount: 0. A plausible, even common, production
+    // combination — a daily-accumulated reddit:seen:* count from an earlier successful run
+    // coexisting with a later throttled run — had no test proving the count suffix actually renders.
+    const withCount = buildDailySummary({ ...base, redditCount: 7, redditSourceDead: { reason: 'throttled', at: Date.now() } })
+    expect(withCount).toContain('7 posts still detected today')
+    const withoutCount = buildDailySummary({ ...base, redditCount: 0, redditSourceDead: { reason: 'throttled', at: Date.now() } })
+    expect(withoutCount).not.toContain('posts still detected today')
   })
 
   it('renders the age it is given — the writer preserving the true start is pinned in reddit.test.ts', () => {
