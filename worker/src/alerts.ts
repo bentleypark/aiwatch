@@ -1434,7 +1434,10 @@ export function appendTweetSearchSection(
 // per-IP 429 and `search.json` is a flat 403. The Worker's egress IP is shared with other Cloudflare
 // tenants, so the limit is not ours to back off from. A link the OPERATOR opens in a browser is
 // subject to none of this, so this block is pure string-building: no fetch, no auth, no rate limit,
-// unaffected by #820's Data API approval.
+// unaffected by #820 (whose OAuth path — the Reddit Data API application — was rejected 2026-07-30;
+// PR #1136 closed unmerged as a result on 2026-08-05. #820 shipped instead as
+// an unauthenticated /new/.rss endpoint swap that still only reaches ~15% of subreddits per run —
+// nowhere near enough to replace this block with a Worker-run search).
 //
 // The subreddits below were measured, not assumed, and two high-volume BOT MIRRORS are deliberately
 // excluded — ranking by raw hit count would have put a zero-human mirror first (pinned in

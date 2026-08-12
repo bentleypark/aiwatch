@@ -265,16 +265,35 @@ export function buildDailySummary(data: DailySummaryData): string {
   }
   // Health outranks the count. `reddit:seen:*` keys live 24h, so a source that dies at noon still
   // shows a real non-zero count — and printing it would read as health on the very day detection
-  // went dark. The reason is carried through because the remediations differ: a block is Reddit
-  // refusing us (#820's endpoint swap), an unreachable streak points at our own egress.
+  // went dark. The reason is carried through because the remediations differ: `block` is the
+  // listing feed itself refusing us (401/403 — a real endpoint problem), `streak` points at our own
+  // egress, `partial` mixes a real block with real successes.
+  //
+  // `throttled` (429, quiet tone) is deliberately narrow (#820 round 2/3): it only fires alongside
+  // real evidence this run got SOME posts through (`decideSourceHealth`'s ok>0 branch) — live
+  // testing found Reddit rate-limits ~85% of requests against the shared Cloudflare egress-IP pool
+  // as a matter of course, REGARDLESS of our own request pacing, so a single run with partial
+  // coverage is expected, usually self-healing noise, not an operator action item; alarming on every
+  // such run would be the "cry wolf" pattern that trains the operator to stop reading this line. But
+  // a run with ZERO evidence of life is indistinguishable from a real outage on its own — that case
+  // does NOT take this quiet branch; it accumulates via the same streak mechanism plain-transient
+  // failures use and only reaches this function as `streak` once sustained, which is why `streak`'s
+  // message below names all three possible causes rather than assuming it's an egress problem (round 2
+  // tried a separate `throttled-streak` reason for the throttle-flavored case, but a streak whose
+  // flavor flips between runs kept re-stamping the marker's `at` to "now" on every flip via
+  // `markRedditSourceDead`'s reason-changed-is-a-new-event rule, understating how long a genuinely
+  // sustained outage had been running — one terminal reason avoids that).
   const health = data.redditSourceDead
   if (health === 'unknown') {
     lines.push('⚠️ **Reddit source health UNKNOWN**: KV read failed — cannot confirm detection is live')
+  } else if (health?.reason === 'throttled') {
+    const countSuffix = redditCount > 0 ? ` — ${redditCount} posts still detected today` : ''
+    lines.push(`🐢 **Reddit rate-limited**: HTTP 429 on some subreddits this run (shared egress IP, not a code issue — usually self-heals)${countSuffix}`)
   } else if (health) {
     const age = formatDarkFor(Date.now() - health.at)
-    const detail = health.reason === 'partial' ? 'some subreddits blocked — detection is partly dark'
-      : health.reason === 'streak' ? 'no subreddit returned a usable response for 3+ runs — check Worker egress, or a 200 bot wall'
-      : 'search returned a block status — detection is dark'
+    const detail = health.reason === 'partial' ? 'some subreddits blocked (401/403) — detection is partly dark'
+      : health.reason === 'streak' ? 'no subreddit returned a usable response for 3+ runs — could be an egress/connectivity issue, a 200 bot wall (body present but not a valid Atom feed), or sustained Reddit rate-limiting (429) on the shared Cloudflare egress IP; check recent Worker logs for the per-run status codes AND bodies'
+      : 'the listing feed returned a block status (401/403) — detection is dark'
     lines.push(`⚠️ **Reddit source DOWN**: ${detail} (${age})`)
   } else if (redditCount > 0) {
     lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
