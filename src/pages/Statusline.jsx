@@ -26,8 +26,8 @@ const STATUSLINE_API = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/statuslin
 // adoption measurement — no query string, no user identifier.
 const presetUrl = (slug) => `${STATUSLINE_API}/${slug}`
 
-// Slug constants are the join key between (a) the URL `?src=statusline-<slug>`
-// query tag in Cloudflare request logs and (b) the GA4 `copy_statusline_snippet`
+// Slug constants are the join key between (a) the `/api/statusline/<slug>` request
+// PATH the Worker tags adoption on and (b) the GA4 `copy_statusline_snippet`
 // event's `preset` parameter. Extracted to single source so a rename can't
 // silently desynchronize one side from the other — that drift would invalidate
 // the cross-system analytics correlation the gating measurement depends on.
