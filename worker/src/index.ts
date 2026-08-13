@@ -27,9 +27,9 @@ import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge } from './cach
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders, matchOrigin } from './cors'
-import { buildStatuslinePayload, isStatuslineRequest, renderStatuslinePreset, isStatuslinePreset, renderStatuslineBrief, renderStatuslineDownList } from './statusline'
+import { buildStatuslinePayload, isStatuslineRequest, isStatuslinePreset, renderStatuslineBrief, buildStatuslineDownResponse, buildStatuslinePresetResponse, STATUSLINE_BRIEF_UNKNOWN } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
+import { recordCacheReadOutcome, recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -211,12 +211,25 @@ export async function restoreArchivedCalendars(kv: KVNamespace, services: Servic
   }))
 }
 
-// Returns true when this call PASSED the 10-min throttle and issued the writes (counters + CACHE_KEY),
-// false when the throttle skipped it. (The write itself is best-effort — the Promise.all `.catch`
-// below swallows a KV failure — so `true` means "attempted", not "guaranteed persisted".) #1057 — the
-// /api/status handler reads this boolean: a `false` means CACHE_KEY still holds the previous snapshot,
-// so a status edge on this poll must be force-refreshed (throttle bypassed).
+// Returns true when this call issued the writes (counters + CACHE_KEY). `false` means this call
+// wrote nothing — CACHE_KEY still holds the previous snapshot — which is the half #1057 reads: the
+// /api/status handler force-refreshes on a status edge when it sees `false`. (The write itself is
+// best-effort — the Promise.all `.catch` below swallows a KV failure — so `true` means "attempted",
+// not "guaranteed persisted".)
+// #1227 — a fixed roster can never legitimately produce zero services, and persisting one would make
+// every read surface fail closed (cacheRead collapses a zero-services snapshot to `null`) until the
+// next throttled write. Defence in depth rather than a live hole: `fetchAllServices` pads its results
+// to `SERVICES.length` even when a batch throws, so no writer produces an empty array today.
+// `cacheWrite` consults this BEFORE the throttle, so refusing costs no write slot.
+export function shouldPersistSnapshot(services: ServiceStatus[]): boolean {
+  return services.length > 0
+}
+
 async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFeeds: UpstreamCandidate[], discordUrl?: string): Promise<boolean> {
+  if (!shouldPersistSnapshot(services)) {
+    console.error('[kv] refusing to write an EMPTY services snapshot to CACHE_KEY')
+    return false
+  }
   const now = Date.now()
   if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return false
   lastKvWrite = now
@@ -407,10 +420,73 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
 // key, and the worker deploy is manual + batched (CLAUDE.md), so for hours after merge every read hits
 // a feed-less snapshot. Modelling it as required would be a type that lies about the bytes in KV.
 // Absence means "no feeds known" → the link stays quiet, which is the correct fail-closed answer.
-async function cacheRead(kv: KVNamespace): Promise<{ services: ServiceStatus[]; upstreamFeeds?: UpstreamCandidate[]; cachedAt: string } | null> {
-  const raw = await kv.get(CACHE_KEY).catch(() => null)
-  if (!raw) return null
-  try { return JSON.parse(raw) } catch (err) { console.warn('[kv] cache parse failed:', err instanceof Error ? err.message : err); return null }
+// #1227 — the reader is where "we have no usable snapshot" is decided, ONCE, for all ~11 callers.
+//
+// It returns `null` for every such state, including a snapshot that parses but carries zero
+// services. That last case is the important one: AIWatch monitors a fixed roster, so zero services
+// is never a legitimate answer, only a missing one — and every downstream surface renders it
+// identically to a miss (an empty down-list, a green statusline, an empty `/api/v1/status`).
+// Returning it as a truthy snapshot would have required each caller to remember a second guard,
+// which is precisely the caller-discipline this bug is an instance of. One `!cached` at the call
+// site covers every such state; they remain distinguishable in WAE, where the diagnosis needs them,
+// rather than in a return type nobody checks twice.
+//
+// `kv` is accepted as possibly-absent so the BINDING check lives here too — an absent binding is a
+// config fault with the widest blast radius (a renamed or unprovisioned namespace), and it needs to
+// reach the same log and the same WAE index as every other unusable-snapshot state.
+//
+// `analytics` is REQUIRED rather than optional so a new call site cannot omit it by accident. That
+// buys the enumeration once, at this signature change; it does not stop a future caller passing
+// `undefined`, which is why a source scan pins the call sites instead.
+async function cacheRead(
+  kv: KVNamespace | undefined,
+  analytics: AnalyticsEngineDataset | undefined,
+): Promise<{ services: ServiceStatus[]; upstreamFeeds?: UpstreamCandidate[]; cachedAt: string } | null> {
+  if (!kv) {
+    console.error('[kv] STATUS_CACHE binding is ABSENT — no snapshot can be read')
+    recordCacheReadOutcome(analytics, 'no-binding')
+    return null
+  }
+  let raw: string | null
+  try {
+    raw = await kv.get(CACHE_KEY)
+  } catch (err) {
+    console.error('[kv] CACHE_KEY read FAILED:', err instanceof Error ? err.message : err)
+    recordCacheReadOutcome(analytics, 'threw')
+    return null
+  }
+  if (!raw) {
+    // Severity is deliberately below the others: the key can expire legitimately (TTL 900s, and the
+    // only unconditional writer is the traffic-throttled /api/status handler), so a quiet period can
+    // produce this. How OFTEN is unmeasured — the `cache-read` index exists to answer that, and the
+    // answer decides whether this stays a warn or the cron starts re-seeding the key.
+    console.warn('[kv] CACHE_KEY read returned NO VALUE — the key is absent or expired')
+    recordCacheReadOutcome(analytics, 'miss')
+    return null
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    console.error('[kv] CACHE_KEY parse failed:', err instanceof Error ? err.message : err)
+    recordCacheReadOutcome(analytics, 'unparsed')
+    return null
+  }
+  // `JSON.parse` succeeds on `null`, `42`, `"str"` and `[]` — none of which is a snapshot. Without
+  // this check a scalar would escape as a truthy "snapshot" and the first `cached.services.find(…)`
+  // downstream would throw a TypeError (a 500), not degrade.
+  const snapshot = parsed as { services?: unknown; upstreamFeeds?: UpstreamCandidate[]; cachedAt: string } | null
+  if (typeof snapshot !== 'object' || snapshot === null || !Array.isArray(snapshot.services)) {
+    console.error('[kv] CACHE_KEY parsed to a non-snapshot shape (no services array)')
+    recordCacheReadOutcome(analytics, 'unparsed')
+    return null
+  }
+  if (snapshot.services.length === 0) {
+    console.error('[kv] CACHE_KEY holds ZERO services — a written-but-empty snapshot')
+    recordCacheReadOutcome(analytics, 'empty')
+    return null
+  }
+  return snapshot as { services: ServiceStatus[]; upstreamFeeds?: UpstreamCandidate[]; cachedAt: string }
 }
 
 // Read uptime history for last N days (includes today's live counter + archived days)
@@ -4036,7 +4112,7 @@ export default {
         url.pathname === '/feed.xml'
           ? { scope: 'all' }
           : { scope: 'service', segment: url.pathname.split('/')[2] ?? '' }
-      const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
       // #724 — align the Slack /feed item with the Discord embed: (a) attach aiwatchScore to the
       // cached services so the "Try instead" fallback ranks identically to Discord (services:latest
       // has no score; getFallbacks needs it), and (b) read the per-incident AI analysis so the item
@@ -4222,12 +4298,20 @@ export default {
       const customLabel = url.searchParams.get('label')
 
       // Read cached services from KV
-      let service: { name: string; status: string; uptime30d?: number | null } | null = null
-      if (env.STATUS_CACHE) {
-        const cached = await cacheRead(env.STATUS_CACHE)
-        if (cached) {
-          service = cached.services.find((s) => s.id === serviceId) ?? null
-        }
+      const badgeCache = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+      const service: { name: string; status: string; uptime30d?: number | null } | null =
+        badgeCache ? badgeCache.services.find((s) => s.id === serviceId) ?? null : null
+
+      // #1227 — "we cannot read the snapshot" is not "this service does not exist". The old code
+      // collapsed both into a 404 `not found` badge, which is a confident wrong answer about a
+      // service we do monitor, and it booked the read failure as a BADGE_UNKNOWN_SERVICE embed —
+      // polluting the #1157 unknown-id signal with our own KV faults. Same grey badge, honest word,
+      // 503 so a cache is not built on it, and no traffic record (there is no embed to attribute).
+      if (!badgeCache) {
+        return new Response(generateBadgeSvg(customLabel ?? serviceId, 'unknown', '#9e9e9e', style), {
+          status: 503,
+          headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' },
+        })
       }
 
       if (!service) {
@@ -4297,7 +4381,7 @@ export default {
       recordV1Traffic(env.ANALYTICS, url.pathname)
 
       // Read cached services
-      const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
       if (!cached) {
         return new Response(JSON.stringify({ error: 'Service data not available' }), {
           status: 503, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
@@ -4375,6 +4459,8 @@ export default {
     // Distinct from the capped emoji presets; consumed only by bin/aiwatch-monitor.sh. Must precede
     // the generic /api/statusline/:preset route ('down' is not a preset). WAE-tagged 'aiwatch-monitor'
     // (NOT statusline-*, so continuous monitor polling doesn't pollute the #918 preset-adoption metric).
+    // #1227 — an unreadable snapshot returns 503, NOT the empty 200 that means "all clear"; the
+    // status/body/cache-control decision is `buildStatuslineDownResponse` (see its comment).
     if (request.method === 'GET' && url.pathname === '/api/statusline/down') {
       if (env.ANALYTICS) {
         try {
@@ -4383,13 +4469,14 @@ export default {
           console.warn('[wae] aiwatch-monitor writeDataPoint failed:', err instanceof Error ? err.message : err)
         }
       }
-      const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
-      const { services } = buildStatuslinePayload(liteCache)
-      return new Response(renderStatuslineDownList(services), {
+      const liteCache = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+      const down = buildStatuslineDownResponse(liteCache)
+      return new Response(down.body, {
+        status: down.status,
         headers: {
           'Content-Type': 'text/plain; charset=utf-8',
           'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'public, max-age=30',
+          'Cache-Control': down.cacheControl,
         },
       })
     }
@@ -4412,10 +4499,23 @@ export default {
           console.warn('[wae] aiwatch-brief writeDataPoint failed:', err instanceof Error ? err.message : err)
         }
       }
-      const cacheData = await cacheRead(env.STATUS_CACHE)
+      const cacheData = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+      // #1227 — no snapshot ⇒ say "unknown", never the "all operational ✅" that an empty list
+      // renders. Served 200 (not 503) so the plugin prints THIS line rather than its own
+      // "(network error)" fallback, which would misattribute our own fault to the user's network.
+      if (!cacheData) {
+        console.warn('[statusline/brief] no status snapshot (KV miss or read failure) — serving the unknown briefing')
+        return new Response(STATUSLINE_BRIEF_UNKNOWN, {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'no-store',
+          },
+        })
+      }
       const summaries = await readProbeSummaries(env.STATUS_CACHE, 'statusline-brief')
       // Score the FULL set — getFallbacks needs the candidate pool — then narrow in the renderer.
-      const scoredAll = (cacheData?.services ?? []).map((svc) => {
+      const scoredAll = cacheData.services.map((svc) => {
         const s = scoreFor(svc, summaries)
         return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
       })
@@ -4469,15 +4569,18 @@ export default {
           console.warn('[wae] statusline writeDataPoint failed:', err instanceof Error ? err.message : err)
         }
       }
-      const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
-      const { services } = buildStatuslinePayload(liteCache)
-      // Empty body on cache miss (renderStatuslinePreset over []): degraded presets show nothing,
-      // branded shows "AIWatch 🟢" — same fail-silent contract as the legacy lite endpoint.
-      return new Response(renderStatuslinePreset(preset, services), {
+      const liteCache = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+      // #1227 — this replaces the old fail-silent contract ("empty body on cache miss; branded
+      // shows AIWatch 🟢"). Rendering the healthy string from a missing snapshot asserted health
+      // we could not see; the preset now shows a neutral ⚪ unknown marker instead, matching the
+      // dashboard's #689/#1004 Unknown pill. See renderStatuslinePresetUnknown.
+      const rendered = buildStatuslinePresetResponse(preset, liteCache)
+      return new Response(rendered.body, {
+        status: rendered.status,
         headers: {
           'Content-Type': 'text/plain; charset=utf-8',
           'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'public, max-age=30',
+          'Cache-Control': rendered.cacheControl,
         },
       })
     }
@@ -4511,12 +4614,26 @@ export default {
         const hit = await cache.match(cacheKey)
         if (hit) return hit
 
-        const cacheData = await cacheRead(env.STATUS_CACHE)
+        const cacheData = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+        // #1227 — no snapshot ⇒ 503 + `no-store`, and NOT written into caches.default. The payload
+        // itself was already safe (the extension maps an empty projection to a grey `unknown`, not
+        // green — extension/lib/render.js), but the 60s edge cache is not: one unlucky poll pinned
+        // that no-evidence answer per-PoP for a minute after the snapshot came back, and the
+        // `cache.match` short-circuit above returns it without re-reading.
+        if (!cacheData) {
+          return new Response(JSON.stringify({ error: 'no status snapshot available' }), {
+            status: 503,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+              'Cache-Control': 'no-store',
+            },
+          })
+        }
         const summaries = await readProbeSummaries(env.STATUS_CACHE, 'ext-claude')
         // Score the FULL set — getFallbacks needs the candidate pool — but emit only
-        // the three Claude surfaces (buildExtClaudePayload narrows). Empty cache → 200
-        // with empty services (statusline-style fail-silent), not a 503.
-        const scoredAll = (cacheData?.services ?? []).map((svc) => {
+        // the three Claude surfaces (buildExtClaudePayload narrows).
+        const scoredAll = cacheData.services.map((svc) => {
           const s = scoreFor(svc, summaries)
           return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
         })
@@ -4526,7 +4643,7 @@ export default {
         // (2) the AI summary of any ACTIVE Claude incident (bounded: 3 services, usually 0 active).
         // .catch parity with the ai:analysis reads below — a report-feed KV failure degrades
         // to "no crowd reports", never 500s the whole projection response.
-        const extReportFeed = await buildReportFeedMap(env.STATUS_CACHE, cacheData?.services ?? []).catch((err) => {
+        const extReportFeed = await buildReportFeedMap(env.STATUS_CACHE, cacheData.services).catch((err) => {
           console.warn('[ext-claude] reportFeed map failed:', err instanceof Error ? err.message : err)
           return {}
         })
@@ -4545,7 +4662,7 @@ export default {
                 console.warn('[ext-claude] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
               }
             })))
-        const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData?.cachedAt ?? null, { reportFeedMap: extReportFeed, aiSummaryMap: extAiSummary })), {
+        const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData.cachedAt, { reportFeedMap: extReportFeed, aiSummaryMap: extAiSummary })), {
           headers: {
             'Content-Type': 'application/json',
             // Public, unauthenticated GET — extension fetches bypass CORS via MV3
@@ -4563,7 +4680,7 @@ export default {
       // copied snippets hit the Worker domain directly (off Vercel); legacy installs
       // still using ai-watch.dev get the small payload here via the rewrite.
       if (isStatuslineRequest(url.searchParams)) {
-        const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+        const liteCache = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
         // Record per-preset statusline request count in WAE (#494) so we can
         // isolate ?src=statusline-* traffic from regular cached-endpoint traffic
         // when evaluating #400 Phase 1 distribution gates. writeDataPoint is
@@ -4583,10 +4700,24 @@ export default {
             console.warn('[wae] writeDataPoint failed:', err instanceof Error ? err.message : err)
           }
         }
-        // Intentional: 200 with empty services when the cache is missing (fail-silent
-        // — the jq over an empty array shows a clean statusline) rather than the
-        // non-lite branch's 503; CORS `*` since this is public, unauthenticated,
-        // GET-only status data hit by curl from any host.
+        // #1227 — 503, NOT the old "intentional 200 with empty services". That fail-silent contract
+        // was written on the belief that an empty array renders as "a clean statusline". It does not
+        // for a jq program of the shape `if ($d | length) == 0 then "🟢"` — an empty projection
+        // renders the green.
+        //
+        // This branch serves every apex `/api/status/cached` caller (vercel.json rewrites them here
+        // with `?src=statusline-proxy`), including jq snippets living in a user's settings.json that
+        // no deploy of ours can reach — so the status code is the only server-side lever. `curl -sf`
+        // drops a 503, jq then receives empty stdin and emits nothing. A blank statusline is honest;
+        // a green one is not. (The server-rendered presets get a ⚪ marker instead — they can,
+        // because #918 owns their rendering. See renderStatuslinePresetUnknown.)
+        if (!liteCache) {
+          return new Response('', {
+            status: 503,
+            headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' },
+          })
+        }
+        // CORS `*` since this is public, unauthenticated, GET-only status data hit by curl from any host.
         return new Response(JSON.stringify(buildStatuslinePayload(liteCache)), {
           headers: {
             'Content-Type': 'application/json',
@@ -4595,7 +4726,7 @@ export default {
           },
         })
       }
-      const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
       if (cached) {
         // Read latency + probe data first (needed for Mistral noise filtering before AI analysis)
         let latency24h: Array<{ t: string; data: Record<string, number> }> = []
@@ -4869,7 +5000,7 @@ export default {
         // budgeted resource; the WRITE is, and it fires only on a rare status edge (self-silencing: the
         // next poll reads the fresh snapshot → no edge). Counters stay with cacheWrite (the #488 rule).
         ctx.waitUntil(
-          refreshStatusCacheOnLiveEdge(env.STATUS_CACHE, wrote, raw, upstreamFeeds, CACHE_KEY, CACHE_TTL_SECONDS, cacheRead).then((outcome) => {
+          refreshStatusCacheOnLiveEdge(env.STATUS_CACHE, wrote, raw, upstreamFeeds, CACHE_KEY, CACHE_TTL_SECONDS, (kv) => cacheRead(kv, env.ANALYTICS)).then((outcome) => {
             if (outcome === 'refreshed') console.log('[api/status] #1057 status edge while throttled — forced CACHE_KEY refresh so OG/SSR reflect it now')
             else if (outcome === 'refresh-failed') console.error('[api/status] #1057 status edge while throttled but forced CACHE_KEY refresh FAILED — OG/SSR may show pre-edge state until the next throttled write or the cron #488 refresh')
           // Defensive: the helper's reader/writer both swallow (never reject) today, so this can't fire
@@ -4991,7 +5122,7 @@ export default {
       ctx.waitUntil(alertWorkerError(env, message))
 
       // Total failure — try returning cached data
-      const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
       if (cached) {
         return new Response(JSON.stringify({
           services: cached.services,
