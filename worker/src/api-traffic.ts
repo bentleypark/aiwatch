@@ -538,6 +538,50 @@ export async function countNewFeedItems(kv: KVNamespace, now: Date = new Date())
   }
 }
 
+// ── Status-snapshot read outcomes (#1227) ─────────────────────────────────
+//
+// `cacheRead` returns `null` for every unusable snapshot, which is the right answer for CALLERS
+// but erases the one thing an investigation needs: which failure it was. #1227 could prove the
+// down-list served an empty body while the live path was healthy, and still could not name the
+// cause, because the reader kept no record. This is that record.
+//
+// WAE rather than a KV counter: a cache-backed request performs a cacheRead, so this is
+// traffic-proportional, and the standing decision is WAE for those / KV only for bounded writes
+// (#518/#548 — a KV counter here would also consume the very write budget whose exhaustion is one
+// of the candidate causes, #1227). Recorded on FAILURE paths only, so a healthy worker writes
+// nothing; correspondingly, volume rises with the breadth of the failure, whatever its layer.
+//
+// Schema (dataset: aiwatch_statusline, binding env.ANALYTICS):
+//   index1  = constant 'cache-read'   → all snapshot-read failures behind one index filter
+//   blob1   = the outcome            → which failure it was
+//   double1 = 1                       → counter (SUM)
+export const CACHE_READ_INDEX = 'cache-read' as const
+
+/** The mutually-exclusive ways a status-snapshot read fails to yield a usable snapshot. Every one
+ *  of them makes `cacheRead` return `null`; they differ only in what the operator should go fix. */
+export type CacheReadOutcome =
+  | 'no-binding' // env.STATUS_CACHE is absent — a config fault, not a data one
+  | 'threw'      // kv.get() rejected
+  | 'miss'       // kv.get() resolved null or empty — the key is absent or expired
+  | 'unparsed'   // not valid JSON, or parsed to something with no services array
+  | 'empty'      // parsed, but holds zero services — a written-but-empty snapshot
+
+export function recordCacheReadOutcome(
+  analytics: AnalyticsEngineDataset | undefined,
+  outcome: CacheReadOutcome,
+): void {
+  if (!analytics) return
+  try {
+    analytics.writeDataPoint({
+      blobs: [outcome],
+      doubles: [1],
+      indexes: [CACHE_READ_INDEX],
+    })
+  } catch (err) {
+    console.warn('[wae] cache-read writeDataPoint failed:', err instanceof Error ? err.message : err)
+  }
+}
+
 /** The WAE dataset name (matches wrangler.toml [[analytics_engine_datasets]].dataset). */
 export const V1_DATASET = 'aiwatch_statusline'
 

@@ -2,6 +2,9 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   v1Variant,
   recordV1Traffic,
+  recordCacheReadOutcome,
+  CACHE_READ_INDEX,
+  type CacheReadOutcome,
   buildV1TrafficSql,
   parseV1TrafficResponse,
   queryV1Traffic,
@@ -529,5 +532,41 @@ describe('plugin traffic (#920)', () => {
       { tag: 'aiwatch-brief', requests: 5 },
     ] }) })
     expect(await queryPluginTraffic('acc', 'tok', ok as unknown as typeof fetch)).toEqual({ monitor: 720, brief: 5 })
+  })
+})
+
+// #1227 — the instrument that exists so the NEXT unusable-snapshot incident can name its own
+// cause. `cacheRead` returns `null` for every one of them, which is right for callers and useless for
+// diagnosis; this is where the difference is kept. Which outcome each branch records is a wiring
+// question, covered in statusline-wiring.test.ts.
+describe('recordCacheReadOutcome (#1227)', () => {
+  const OUTCOMES = Object.keys({
+    'no-binding': 0, threw: 0, miss: 0, unparsed: 0, empty: 0,
+  } satisfies Record<CacheReadOutcome, 0>) as CacheReadOutcome[]
+
+  it('writes one data point per outcome with the pinned blob/double/index shape', () => {
+    for (const outcome of OUTCOMES) {
+      const wae = { writeDataPoint: vi.fn() }
+      recordCacheReadOutcome(wae as unknown as AnalyticsEngineDataset, outcome)
+      expect(wae.writeDataPoint).toHaveBeenCalledOnce()
+      expect(wae.writeDataPoint).toHaveBeenCalledWith({
+        blobs: [outcome],
+        doubles: [1],
+        indexes: [CACHE_READ_INDEX],
+      })
+    }
+  })
+
+  it('shares ONE index so every snapshot-read failure is queryable in a single filter', () => {
+    expect(CACHE_READ_INDEX).toBe('cache-read')
+  })
+
+  it('is a no-op without a binding (local dev / tests) rather than throwing', () => {
+    expect(() => recordCacheReadOutcome(undefined, 'miss')).not.toThrow()
+  })
+
+  it('never lets a WAE failure escape into the read path it instruments', () => {
+    const wae = { writeDataPoint: vi.fn(() => { throw new Error('WAE down') }) }
+    expect(() => recordCacheReadOutcome(wae as unknown as AnalyticsEngineDataset, 'threw')).not.toThrow()
   })
 })

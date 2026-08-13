@@ -140,6 +140,37 @@ export function renderStatuslinePreset(preset: string, services: StatuslineServi
   }
 }
 
+// #1227 — what a preset renders when there is NO snapshot to render from.
+//
+// The old behaviour ran the renderer over `[]`, which is the service list of a healthy world:
+// `branded` printed "AIWatch 🟢" and the rest printed nothing. Both are claims we cannot support
+// with no snapshot — the dashboard settled this same question in #689/#1004, where an unreadable
+// source shows a neutral "Unknown" pill *"rather than a misleading green 'Operational'"*
+// (StatusPill.jsx); the statusline surfaces were the last ones still answering green.
+//
+// A 503 is wrong HERE (unlike the machine-read down-list): the snippet is `curl -sf … || true`,
+// so a non-2xx blanks the line, and a blank line is indistinguishable from a broken snippet. This
+// is a DISPLAY surface — it should say "unknown", not disappear. Costs no client change because
+// #918 moved all rendering server-side: whatever string we return is what the terminal shows.
+//
+// Every preset gets a marker, including the ones that are silent when healthy: silence there
+// reads as "nothing wrong", which is the very claim we cannot make. Each stays in its own idiom.
+export function renderStatuslinePresetUnknown(preset: StatuslinePreset): string {
+  switch (preset) {
+    case 'branded':
+      return `${osc8(HOME_URL, 'AIWatch')} ⚪`
+    case 'clickable':
+      return osc8(HOME_URL, '⚪ AIWatch status unknown')
+    case 'degraded_only':
+    case 'scoped':
+      return '⚪ AIWatch status unknown'
+    case 'compact_badge':
+      return '⚪ AI status unknown'
+    case 'full_list':
+      return '⚪ status unknown'
+  }
+}
+
 // ── Monitor down-list (#920) ──────────────────────────────────────────────
 //
 // The plugin's background monitor needs a PARSEABLE, UNCAPPED list of the currently
@@ -152,6 +183,60 @@ export function renderStatuslineDownList(services: StatuslineService[]): string 
     .filter((s) => s.status !== 'operational')
     .map((s) => `${s.status}\t${s.name}`)
     .join('\n')
+}
+
+// #1227 — "there is no roster to report on". Zero services counts because AIWatch monitors a fixed
+// roster, so an empty list is never an answer, only a missing one. Redundant in production since
+// `cacheRead` already collapses that case to `null`; kept because both builders are exported and
+// `cacheWrite`'s own guard is the only other thing standing between here and a persisted empty.
+export function hasNoSnapshot(cached: { services?: readonly unknown[] } | null): boolean {
+  return !cached || !cached.services || cached.services.length === 0
+}
+
+// Only two status codes and two cache policies are ever correct here, and the pairing is not free:
+// `no-store` belongs to the no-snapshot answers (a 30s-cached failure would outlive the condition
+// that caused it). Literal types rather than `number`/`string` because the bug being fixed WAS a
+// wire value that failed to distinguish unknown from healthy — the type carrying those values
+// should not be the loosest thing in the file.
+export type StatuslineCacheControl = 'no-store' | 'public, max-age=30'
+
+/** A rendered text response for a statusline surface. Named for the surfaces, not for `down`:
+ *  both the down-list and the preset builders return it, and their status invariants differ
+ *  (the down-list may 503; the preset never does — see renderStatuslinePresetUnknown). */
+export interface StatuslineTextResponse {
+  status: 200 | 503
+  body: string
+  cacheControl: StatuslineCacheControl
+}
+
+// The down-list FAILS CLOSED: an empty body is the wire encoding of "everything is operational",
+// so with no snapshot the old code served that same empty body at 200 and the plugin monitor read
+// it as every affected service recovering. A 503 fails the monitor's `curl -sf`, which takes its
+// existing fail-silent path and keeps the previous set. Fixing it server-side is what reaches
+// already-installed plugins — the script lives in the user's plugin cache (the #918 rationale).
+//
+// An empty 200 stays meaningful: a snapshot that HAS services, none affected, is a real all-clear
+// and keeps returning zero bytes. The two are distinguishable by status code.
+export function buildStatuslineDownResponse(
+  cached: { services: ServiceStatus[]; cachedAt?: string } | null,
+): StatuslineTextResponse {
+  // `no-store` on the failure: a 30s-cached 503 would outlive the condition that caused it.
+  if (hasNoSnapshot(cached)) return { status: 503, body: 'no status snapshot available\n', cacheControl: 'no-store' }
+  const { services } = buildStatuslinePayload(cached)
+  return { status: 200, body: renderStatuslineDownList(services), cacheControl: 'public, max-age=30' }
+}
+
+// The preset surface's equivalent — a 200 either way (see renderStatuslinePresetUnknown for why a
+// display surface must not 503), differing only in WHAT it says. Kept as a builder rather than an
+// `if` in the handler so the no-snapshot decision itself is unit-testable: a pure renderer can be
+// green while nothing proves the handler ever reaches it.
+export function buildStatuslinePresetResponse(
+  preset: StatuslinePreset,
+  cached: { services: ServiceStatus[]; cachedAt?: string } | null,
+): StatuslineTextResponse {
+  if (hasNoSnapshot(cached)) return { status: 200, body: renderStatuslinePresetUnknown(preset), cacheControl: 'no-store' }
+  const { services } = buildStatuslinePayload(cached)
+  return { status: 200, body: renderStatuslinePreset(preset, services), cacheControl: 'public, max-age=30' }
 }
 
 // ── Incident briefing (#920) ──────────────────────────────────────────────
@@ -197,6 +282,17 @@ const IMPACT_PHRASE: Record<NonNullable<Incident['impact']>, string> = {
   major: 'major impact',
   minor: 'minor impact',
 }
+
+// #1227 — the briefing's answer when there is no snapshot to brief from.
+//
+// This surface was the worst of the three: over an empty list `renderStatuslineBrief` returned
+// "all monitored AI services operational ✅" — not an omission but an ASSERTION, checkmark and
+// all, made from zero evidence. A 503 would technically avoid it (aiwatch-status.sh prints its
+// own failure line) but that line blames "(network error)", misattributing our own unreadable
+// cache to the user's connection. So the honest answer is served as a 200 and says what is
+// actually true: we cannot see, and that is not the same as all-clear.
+export const STATUSLINE_BRIEF_UNKNOWN =
+  'AIWatch: status unknown — the current snapshot could not be read, so this is NOT an all-clear. Try again shortly · https://ai-watch.dev'
 
 export function renderStatuslineBrief(
   scoredAll: BriefService[],

@@ -7,6 +7,11 @@ import {
   STATUSLINE_PRESETS,
   renderStatuslineBrief,
   renderStatuslineDownList,
+  buildStatuslineDownResponse,
+  buildStatuslinePresetResponse,
+  hasNoSnapshot,
+  renderStatuslinePresetUnknown,
+  STATUSLINE_BRIEF_UNKNOWN,
   type StatuslineService,
   type BriefService,
 } from '../statusline'
@@ -244,6 +249,133 @@ describe('renderStatuslineDownList (#920)', () => {
   it('is uncapped (unlike the 3-cap presets) — all affected services listed', () => {
     const many = Array.from({ length: 6 }, (_, i) => svc(`s${i}`, `Service ${i}`, 'down'))
     expect(renderStatuslineDownList(many).split('\n')).toHaveLength(6)
+  })
+})
+
+// #1227 — the pure decision layer: a surface must never render "everything is fine" from a
+// snapshot it could not read. The no-snapshot cases below fail against the pre-#1227 code; the
+// populated-snapshot cases pin that the healthy behaviour did NOT change. Wiring — that the routes
+// actually reach these builders — is covered separately in statusline-wiring.test.ts.
+describe('no-snapshot handling (#1227)', () => {
+  const cached = (services: ServiceStatus[]) => ({ cachedAt: '2026-08-13T02:52:50Z', upstreamFeeds: [], services })
+  // Positional helper — the top-level `svc()` takes an overrides object, and these cases only care
+  // about the three projected fields.
+  const s = (id: string, name: string, status: ServiceStatus['status']): ServiceStatus =>
+    svc({ id, name, status })
+
+  describe('buildStatuslineDownResponse — the monitor down-list', () => {
+    it('503s when there is no snapshot, so `curl -sf` fails and the monitor holds its previous set', () => {
+      const r = buildStatuslineDownResponse(null)
+      // The bug: a 200 here is read as "all clear" and fires a false `✅ recovered`.
+      expect(r.status).toBe(503)
+      expect(r.cacheControl).toBe('no-store')
+    })
+
+    it('keeps the empty 200 MEANINGFUL — a real all-operational snapshot still returns zero bytes', () => {
+      const r = buildStatuslineDownResponse(cached([s('openai', 'OpenAI', 'operational')]))
+      expect(r.status).toBe(200)
+      expect(r.body).toBe('')
+      expect(r.cacheControl).toBe('public, max-age=30')
+    })
+
+    it('renders the affected list unchanged on a populated snapshot', () => {
+      const r = buildStatuslineDownResponse(cached([
+        s('mistral', 'Mistral API', 'degraded'),
+        s('fireworks', 'Fireworks AI', 'degraded'),
+      ]))
+      expect(r.status).toBe(200)
+      expect(r.body).toBe('degraded\tMistral API\ndegraded\tFireworks AI')
+    })
+  })
+
+  // The predicate the builders share. Zero services counts as "no snapshot": redundant in
+  // production (cacheRead collapses it to null before any builder sees it), kept as depth.
+  describe('hasNoSnapshot — the shared predicate', () => {
+    it('is true for a null snapshot', () => {
+      expect(hasNoSnapshot(null)).toBe(true)
+    })
+
+    it('is ALSO true for a snapshot that parsed but carries zero services', () => {
+      expect(hasNoSnapshot({ services: [] })).toBe(true)
+      expect(hasNoSnapshot({} as { services?: ServiceStatus[] })).toBe(true)
+    })
+
+    it('is false whenever there is a roster to report on, however healthy', () => {
+      expect(hasNoSnapshot({ services: [s('openai', 'OpenAI', 'operational')] })).toBe(false)
+      expect(hasNoSnapshot({ services: [s('mistral', 'Mistral API', 'degraded')] })).toBe(false)
+    })
+
+    it('drives the down-list: an empty-services snapshot 503s just like a null one', () => {
+      expect(buildStatuslineDownResponse(cached([])).status).toBe(503)
+      expect(buildStatuslinePresetResponse('branded', cached([])).body)
+        .toBe(renderStatuslinePresetUnknown('branded'))
+    })
+  })
+
+  describe('STATUSLINE_BRIEF_UNKNOWN — the /aiwatch briefing', () => {
+    it('never claims all-clear', () => {
+      expect(STATUSLINE_BRIEF_UNKNOWN).not.toContain('all monitored AI services operational')
+      expect(STATUSLINE_BRIEF_UNKNOWN).not.toContain('✅')
+      expect(STATUSLINE_BRIEF_UNKNOWN).toContain('unknown')
+    })
+
+    it('is distinct from the healthy briefing (the string the empty list used to produce)', () => {
+      expect(renderStatuslineBrief([])).toBe('AIWatch: all monitored AI services operational ✅')
+      expect(STATUSLINE_BRIEF_UNKNOWN).not.toBe(renderStatuslineBrief([]))
+    })
+  })
+
+  describe('renderStatuslinePresetUnknown — the statusline snippets', () => {
+    it('marks EVERY preset as unknown — including the ones that are silent when healthy', () => {
+      for (const preset of STATUSLINE_PRESETS) {
+        const out = renderStatuslinePresetUnknown(preset)
+        expect(out, `${preset} must render an unknown marker`).not.toBe('')
+        expect(out, `${preset} must carry the neutral marker`).toContain('⚪')
+      }
+    })
+
+    it('never renders the healthy green — branded showed "AIWatch 🟢" on a cache miss before', () => {
+      for (const preset of STATUSLINE_PRESETS) {
+        expect(renderStatuslinePresetUnknown(preset)).not.toContain('🟢')
+        expect(renderStatuslinePresetUnknown(preset)).not.toContain('🔴')
+      }
+      expect(renderStatuslinePreset('branded', [])).toContain('🟢')       // the healthy string…
+      expect(renderStatuslinePresetUnknown('branded')).not.toBe(renderStatuslinePreset('branded', []))  // …is not what we serve
+    })
+
+    it('differs from the healthy render for every preset, so the two states are distinguishable', () => {
+      for (const preset of STATUSLINE_PRESETS) {
+        expect(renderStatuslinePresetUnknown(preset), preset).not.toBe(renderStatuslinePreset(preset, []))
+      }
+    })
+  })
+
+  // The renderers above can all be correct while the handler never reaches them, so pin the
+  // DECISION too — this is the function the route actually spreads into its Response.
+  describe('buildStatuslinePresetResponse — the decision the preset route runs', () => {
+    it('serves the unknown marker (not the healthy render) when there is no snapshot', () => {
+      for (const preset of STATUSLINE_PRESETS) {
+        const r = buildStatuslinePresetResponse(preset, null)
+        expect(r.body, preset).toBe(renderStatuslinePresetUnknown(preset))
+        expect(r.body, preset).not.toBe(renderStatuslinePreset(preset, []))
+        expect(r.cacheControl, preset).toBe('no-store')
+      }
+      // The specific regression: branded used to answer "AIWatch 🟢" here.
+      expect(buildStatuslinePresetResponse('branded', null).body).not.toContain('🟢')
+    })
+
+    it('renders normally from a populated snapshot', () => {
+      const snap = cached([s('mistral', 'Mistral API', 'degraded')])
+      const r = buildStatuslinePresetResponse('degraded_only', snap)
+      expect(r.body).toBe('🔴 Mistral API')
+      expect(r.cacheControl).toBe('public, max-age=30')
+    })
+
+    it('still says "all clear" when the snapshot really is all-operational', () => {
+      const r = buildStatuslinePresetResponse('branded', cached([s('openai', 'OpenAI', 'operational')]))
+      expect(r.body).toContain('🟢')
+      expect(r.cacheControl).toBe('public, max-age=30')
+    })
   })
 })
 

@@ -360,7 +360,7 @@ Claude API, OpenAI, Gemini, GitHub Copilot 등 45개 AI 서비스의 장애 여�
 {
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 https://aiwatch-worker.p2c2kbf.workers.dev/api/status/cached?src=statusline-branded | jq -r '([.services[] | select(.status != \"operational\")]) as $d | \"\\u001b]8;;https://ai-watch.dev\\u001b\\\\AIWatch\\u001b]8;;\\u001b\\\\ \" + (if ($d | length) == 0 then \"🟢\" else ([$d[] | \"\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\\"] | .[0:3] | join(\" \")) end)' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 https://aiwatch-worker.p2c2kbf.workers.dev/api/statusline/branded ) 2>/dev/null || true"
   }
 }
 ```
@@ -369,7 +369,7 @@ Claude API, OpenAI, Gemini, GitHub Copilot 등 45개 AI 서비스의 장애 여�
 
 프리셋 모음 — **minimalist**(정상 시 빈 출력), 컴팩트 배지, 전체 목록, 특정 프로바이더만, 서비스별 clickable 링크: **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
 
-특성: 렌더링당 단일 GET, Cloudflare edge에 5분 KV 캐시, 2초 타임아웃, 네트워크 에러 시 silent fail, Anthropic API 호출 없음, 클라이언트 식별자 미수집. `?src=statusline-<preset>` 쿼리 태그는 요청 로그에서 statusline 트래픽을 일반 cached-endpoint 호출과 구분하기 위한 용도일 뿐이며, Worker는 경로만 매칭하므로 캐시/응답 속도에 영향이 없고 사용자 식별자도 포함하지 않습니다. shell 명령 출력을 지원하는 모든 statusline 도구와 호환 (`ccstatusline`의 Custom Command 위젯 포함).
+특성: 렌더링당 단일 GET, Cloudflare edge에 5분 KV 캐시, 2초 타임아웃, `jq` 의존성 없음, Anthropic API 호출 없음, 클라이언트 식별자 미수집. 네트워크 에러 시에는 줄이 비고, AIWatch가 자체 상태 스냅샷을 읽지 못할 때는 근거 없는 초록 대신 `AIWatch ⚪`(unknown)를 표시합니다. `?src=statusline-<preset>` 쿼리 태그는 요청 로그에서 statusline 트래픽을 일반 cached-endpoint 호출과 구분하기 위한 용도일 뿐이며, Worker는 경로만 매칭하므로 캐시/응답 속도에 영향이 없고 사용자 식별자도 포함하지 않습니다. shell 명령 출력을 지원하는 모든 statusline 도구와 호환 (`ccstatusline`의 Custom Command 위젯 포함).
 
 ## Claude Code 플러그인 (Beta)
 
