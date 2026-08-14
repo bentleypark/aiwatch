@@ -186,15 +186,28 @@ export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string):
 // `computeMedianRtt` is still exported below — it's used by the probe-spike degradation logic
 // in alerts.ts, independently of the removed corroboration path.
 
-/**
- * Check if a service's recent probe data indicates it is healthy.
- * Used to cross-validate status page fetch failures — if the API responds normally
- * but the status page is down, the service is likely operational (false positive).
+/** Absolute floor under the `median × 3` slow-sample bar in `isProbeFailing` below. That bar has no
+ *  lower bound, so the faster a service is the tighter its own outage bar becomes — on 2026-08-13
+ *  `claude` ran bimodal, the daily archive recording 119 spikes across its 288 samples while its
+ *  non-spike p95 was 131ms. Same shape and same reasoning as `P50_FLOOR_MS` (`score.ts`): a fast
+ *  service should not be punished by its own baseline.
  *
- * Returns true if recent probes show normal RTT (service is healthy).
- * Returns false if probes show spikes/failures or no recent data exists.
- * Conservative: returns false (don't override) when data is insufficient.
- */
+ *  Reach is exact — `Math.max` is inert for a service whose median is at or above a third of this
+ *  floor, and binding only below it. The value is a judgement, not a measurement: a probe that
+ *  returned an HTTP response inside a second is not on its own evidence of an outage, least of all as
+ *  grounds to overturn "we could not read this source" into an outage claim. It is deliberately NOT
+ *  derived from the daily archive's `max` (`probe-archival.ts`).
+ *
+ *  The cost is the part worth knowing: under that median the slow clause becomes effectively a flat
+ *  1s absolute, so a degradation that still answers inside a second stops corroborating and the badge
+ *  stays neutral rather than going amber. `rtt <= 0` is what stays sensitive for those services.
+ *
+ *  NOT applied to `isProbeHealthy`, and the asymmetry is deliberate: raising THIS bar can only
+ *  withdraw an outage claim, while raising THAT one hands out all-clears — a healthy verdict forces a
+ *  fetch-failed service back to `operational` (`services.ts`). When the source is unreadable, the bar
+ *  to CLAIM an outage and the bar to CLEAR one should not be the same number. */
+export const PROBE_FAILING_FLOOR_MS = 1000
+
 /** #1004 — does our own probe INDEPENDENTLY corroborate an outage? A fetch-failure `degraded` renders as
  *  a neutral "unknown" badge ("we can't read the source") — but that would be a false reassurance when
  *  the service is probed and the probe is failing, so this is the flag that keeps such a case amber.
@@ -203,9 +216,8 @@ export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string):
  *  (one recent sample, no median), so a perfectly healthy service with a single sample would have been
  *  read as contradicting and the #1004 fix would silently not apply to it. Mirrors `isProbeHealthy`'s
  *  evidence bar — ≥2 recent samples, majority rule — and requires the samples to be actually BAD:
- *  a failed probe (`rtt <= 0`, written by `failedProbe()`) or a >3× median spike. The three predicates
- *  therefore partition the probed set into healthy / failing / not-enough-evidence, and only the middle
- *  one suppresses the neutral badge. */
+ *  a failed probe (`rtt <= 0`, written by `failedProbe()`) or a spike past the bar that
+ *  `PROBE_FAILING_FLOOR_MS` floors. Only this verdict suppresses the neutral badge. */
 export function isProbeFailing(
   snapshots: ProbeSnapshot[],
   serviceId: string,
@@ -220,7 +232,7 @@ export function isProbeFailing(
 
   const median = computeMedianRtt(snapshots, serviceId)
   // No usable median (every sample failed) → the probe is unambiguously failing.
-  const threshold = median !== null && median > 0 ? median * 3 : Infinity
+  const threshold = median !== null && median > 0 ? Math.max(median * 3, PROBE_FAILING_FLOOR_MS) : Infinity
   const failing = recent.filter((s) => {
     const probe = s.data[serviceId]
     return probe.rtt <= 0 || probe.rtt > threshold
@@ -228,6 +240,15 @@ export function isProbeFailing(
   return failing >= Math.ceil(recent.length * 2 / 3)
 }
 
+/**
+ * Check if a service's recent probe data indicates it is healthy.
+ * Used to cross-validate status page fetch failures — if the API responds normally
+ * but the status page is down, the service is likely operational (false positive).
+ *
+ * Returns true if recent probes show normal RTT (service is healthy).
+ * Returns false if probes show spikes/failures or no recent data exists.
+ * Conservative: returns false (don't override) when data is insufficient.
+ */
 export function isProbeHealthy(
   snapshots: ProbeSnapshot[],
   serviceId: string,

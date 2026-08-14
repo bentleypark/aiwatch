@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { SERVICES, filterIncidents, fetchService } from '../services'
 import { attachIncidentIoComponentNames, computeIncidentIoUptime, parseIncidentIoIncidentComponentIds } from '../parsers/incident-io'
-import { isProbeFailing, PROBE_TARGETS } from '../probe'
+import { isProbeFailing, PROBE_TARGETS, PROBE_FAILING_FLOOR_MS } from '../probe'
 import { STATUS_URL } from '../../../src/utils/statusPageUrls'
 import type { Incident } from '../types'
 import type { TrackingStateBlob } from '../utils'
@@ -279,9 +279,10 @@ describe('a 200 text/html status page is an unknown SOURCE, not a degraded servi
 
 // ── The producer of `probeContradicted` (the guard that keeps a REAL outage amber) ──
 
-// Without this, `svc.probeContradicted = true` could be deleted from the cross-validation and every
-// consumer test (src/utils/statusDisplay.test.js) would still pass — while a probe-corroborated outage
-// got neutralised into "we can't tell". The `debugging_fix_the_called_path_not_the_tested_twin` shape.
+// These cover the PURE predicate only. Deleting `svc.probeContradicted = true` from the
+// cross-validation leaves every case below green — proven by mutation in review — so the wired half
+// lives in `probe-contradicted-wiring.test.ts`, which drives `fetchAllServices`. Both are needed:
+// this file pins what the predicate decides, that one pins that the decision is still read.
 describe('isProbeFailing — only ACTUAL failure contradicts an unreadable source (#1004)', () => {
   const at = (minsAgo: number) => new Date(Date.now() - minsAgo * 60_000).toISOString()
   const snap = (minsAgo: number, rtt: number) => ({ t: at(minsAgo), data: { cohere: { status: rtt > 0 ? 200 : 0, rtt } } })
@@ -292,10 +293,13 @@ describe('isProbeFailing — only ACTUAL failure contradicts an unreadable sourc
 
   it('a >3x median spike majority contradicts', () => {
     // The median is computed over ALL snapshots (not just recent ones), so a realistic set needs a
-    // healthy baseline: 6 old samples at ~100ms → median 100 → threshold 300 → the two recent 4000ms
+    // healthy baseline: 6 old samples at 500ms → median 500 → threshold 1500 → the two recent 4000ms
     // samples are spikes. (Feeding only spiked samples would drag the median up with them — which is
     // why the rtt<=0 case above, not the spike case, is what a real outage usually looks like.)
-    const baseline = [20, 25, 30, 35, 40, 45].map((m) => snap(m, 100))
+    const baseline = [20, 25, 30, 35, 40, 45].map((m) => snap(m, 500))
+    // Keeps this case on the multiplicative bar: raise the floor past 1500 and the assertion below
+    // would be satisfied by the floor instead, while the test's name still claimed the spike rule.
+    expect(PROBE_FAILING_FLOOR_MS).toBeLessThan(500 * 3)
     expect(isProbeFailing([snap(2, 4000), snap(7, 4000), ...baseline], 'cohere')).toBe(true)
   })
 
