@@ -152,14 +152,16 @@ export async function kvDel(kv: KVLike | KVNamespace, key: string): Promise<void
 // is silently ERASED by B's write, not just left stale. Given `/api/status` runs `fetchAllServices`
 // per request and invocations regularly overlap, this is the common case, not an edge case. The
 // practical cost stays bounded — a climbing streak is retried on the next overlapping cycle, so the
-// visible effect is a delayed (not wrong) escalation — but it is a real behavioral difference from
-// the old design, not just a relabeling of the same risk.
+// visible effect is a delayed escalation — and, since #1232, a `degraded` that was already published
+// can be withdrawn to `operational` for the cycles the streak takes to re-climb (the clobbered write
+// loses `failSince` with the count). A real behavioral difference from the old design, not just a
+// relabeling of the same risk.
 export interface ServiceTrackingState {
   failCount?: number
   // ISO timestamp of the last `failCount` write. Mirrors the pre-#1224 `fetch-fail:{id}` key's 30-min
   // `expirationTtl` — see `TRACKING_COUNT_DECAY_MS` below for why this exists. Doubles as the ONLY
   // liveness signal for `failSince`, which otherwise has no expiry of its own — see
-  // `TRACKING_ALERT_STALE_MS` and its callers (`checkPersistentFetchFailures`).
+  // `TRACKING_ALERT_STALE_MS` and its callers.
   failCountAt?: string
   failSince?: string
   componentMissCount?: number
@@ -204,9 +206,12 @@ function sanitizeTrackingState(parsed: Record<string, unknown>): TrackingStateBl
   return clean
 }
 
-/** Reads the aggregate tracking blob. Fail-open to `{}` on a missing/corrupt/unreadable value — the
- *  worst case is every service's streak restarting at 0, the same fail-open posture the pre-#1224
- *  per-key reads already had (a failed `kv.get` there also defaulted to count=0 via `?? '0'`). */
+/** Reads the aggregate tracking blob. Fail-open to `{}` on a missing/corrupt/unreadable value — every
+ *  service's streak restarts at 0, the same fail-open posture the pre-#1224 per-key reads already had
+ *  (a failed `kv.get` there also defaulted to count=0 via `?? '0'`). Since #1232 that also drops
+ *  `failSince`, and the blob is written back without it — so a mid-outage read hiccup publishes
+ *  `operational` + `sourceUnknown` for the cycles the streak takes to re-climb. It withdraws the
+ *  verdict; it does not just delay an escalation. */
 export async function readTrackingState(kv: KVLike | undefined): Promise<TrackingStateBlob> {
   if (!kv) return {}
   try {
@@ -278,12 +283,41 @@ function isTimestampStale(at: string | undefined, nowMs: number, maxAgeMs: numbe
 }
 
 /**
- * Track consecutive RSS fetch failures per service.
- * Returns true if failure count has reached the threshold (service should be degraded).
- * Returns false if still below threshold (treat as operational / no data).
+ * Track consecutive fetch failures per service.
+ * Returns true if the service should be degraded — either this call reached the threshold, or an
+ * earlier crossing's `failSince` is still live (`isFailSinceLive`).
+ * Returns false while still climbing toward the first crossing (treat as operational / no data).
  */
 export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | undefined, svcId: string, threshold = 3, nowMs = Date.now()): Promise<boolean> {
   const entry = entryFor(store, svcId)
+  // #1232 — the published verdict follows `failSince`, not the decaying count below. The count cannot
+  // answer "is this source still unread?": its `failCountAt` stops being refreshed once the count
+  // reaches the threshold (`next <= threshold`) while the decay clock keeps running from that frozen
+  // stamp, so ~30 min later the count resets to 0 and `next` is 1 again — which published
+  // `operational` with `sourceUnknown` still set, in a loop, for a source that never came back
+  // (2026-08-14, `status.claude.com`; #1232). The count keeps its exact decay behaviour because a
+  // SECOND consumer depends on it — `fetch-fail:daily` counts distinct EPISODES, which is what the
+  // TRACKING_COUNT_DECAY_MS comment above protects — so this splits the two consumers rather than
+  // retuning one number for both.
+  //
+  // Read BEFORE the crossing block below sets it, and gated by `isFailSinceLive` — the SAME rule the
+  // #500 alert already applies to this field, reused rather than duplicated. A bare
+  // `failSince !== undefined` would inherit what that gate exists to exclude: the field has no expiry
+  // of its own, and the paths that stop calling `trackFetchFailure`/`resetFetchFailure` altogether (the
+  // #689 dead-source and flashduty-feed early returns) leave it frozen, so a single later failure would
+  // degrade on strike 1 for the rest of that source's life. During a genuine ongoing outage
+  // `failCountAt` is rewritten at least every ~31 min (the decay → `next = 1` write), inside
+  // TRACKING_ALERT_STALE_MS.
+  //
+  // KNOWN RESIDUAL, deliberately not paid for here: `failSince` is shared with the #500 alert, and any
+  // crossing arms it — including one reached only by a failing SECONDARY leg (`services.ts`'
+  // `parseErrors > 0` sites, whose verdict is discarded). A service whose secondary leg fails every
+  // cycle therefore keeps `failSince` armed and `failCountAt` fresh without `resetFetchFailure` ever
+  // running, so its next primary failure degrades earlier than the third strike. That errs toward the
+  // neutral "we cannot read this source" badge, never toward a green one. Separating the two consumers
+  // needs a second timestamp written on the per-request path, which would cost a `tracking:state` write
+  // per request for the whole outage and break #1224's steady-state-zero invariant.
+  const stillUnrecovered = isFailSinceLive(entry, nowMs)
   const decayed = isCountDecayed(entry.failCountAt, nowMs, TRACKING_COUNT_DECAY_MS)
   const count = decayed ? 0 : (entry.failCount ?? 0)
   const next = count + 1
@@ -291,7 +325,7 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
     entry.failCount = next
     entry.failCountAt = new Date(nowMs).toISOString()
   }
-  const shouldDegrade = next >= threshold
+  const shouldDegrade = next >= threshold || stillUnrecovered
   if (next === threshold) {
     // Daily accumulator: counts threshold *crossings* (distinct failure episodes), not polling cycles.
     // Fires only on the rising edge (count going from threshold-1 → threshold) — the TRACKING_COUNT_DECAY_MS
@@ -311,8 +345,9 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
     // Set only if absent so it survives re-climb cycles — immune to call frequency by construction,
     // since it's a wall-clock timestamp, not a cycle count. resetFetchFailure clears it on recovery.
     // Unlike the pre-#1224 key, `failSince` itself has no expiry — `checkPersistentFetchFailures`
-    // (persistent-failure.ts) is what bounds its lifetime, by requiring `failCountAt` to still be
-    // fresh (TRACKING_ALERT_STALE_MS below) before trusting this timestamp at all.
+    // (persistent-failure.ts) and, since #1232, the degraded verdict above are what bound its
+    // lifetime — both through `isFailSinceLive`, i.e. by requiring `failCountAt` to still be fresh
+    // (TRACKING_ALERT_STALE_MS below) before trusting this timestamp at all.
     if (!entry.failSince) entry.failSince = new Date(nowMs).toISOString()
   }
   // A threshold <= 0 (no production call site does this) writes nothing above, so `entryFor` could
@@ -335,7 +370,8 @@ export function resetFetchFailure(store: TrackingStateBlob, svcId: string): void
   pruneIfEmpty(store, svcId)
 }
 
-/** Bounds how long a frozen `failSince`/`componentMissCount` may still trigger an alert once its
+/** Bounds how long a frozen `failSince`/`componentMissCount` may still trigger an alert — and, since
+ *  #1232, a published `degraded` — once its
  *  paired `*At` timestamp stops being refreshed — the case a dead/unreachable source produces, since
  *  neither `trackFetchFailure`/`resetFetchFailure` nor `trackComponentMiss`/`resetComponentMiss` is
  *  called again for it (`services.ts`'s #689 dead-source and flashduty-feed early-return paths).

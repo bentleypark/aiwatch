@@ -287,6 +287,80 @@ describe('trackFetchFailure (#1224 — blob-based)', () => {
       expect(await trackFetchFailure(store, undefined, 'azure')).toBe(true) // 2+1=3, uses the stored count as-is
     })
   })
+
+  describe('#1232 — the decayed count no longer withdraws the degraded verdict', () => {
+    // The decay tests above seed a count at or past the threshold with no `failSince` — a shape a
+    // crossing cannot leave behind, since every crossing sets it. Seeded as it really looks mid-outage,
+    // the same decayed count must NOT read as a first failure.
+    const midOutage = (t0: number): TrackingStateBlob => ({
+      azure: {
+        failCount: 3,
+        failCountAt: new Date(t0).toISOString(),
+        failSince: new Date(t0 - 3_600_000).toISOString(),
+      },
+    })
+
+    it('stays degraded across the decay boundary while failSince is still set', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store = midOutage(t0)
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, t0 + 31 * 60_000)).toBe(true)
+    })
+
+    it('still decays the COUNT itself, so fetch-fail:daily keeps counting episodes', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store = midOutage(t0)
+      const kv = mockKV()
+      await trackFetchFailure(store, kv, 'azure', 3, t0 + 31 * 60_000)
+      expect(store.azure?.failCount).toBe(1) // restarted — the episode accounting is untouched
+      expect(kv.put).not.toHaveBeenCalled() // next=1 is not a rising edge
+    })
+
+    it('does not degrade a service that has never crossed (failSince absent → three-strike ramp intact)', async () => {
+      const store: TrackingStateBlob = {}
+      expect(await trackFetchFailure(store, undefined, 'azure')).toBe(false)
+    })
+
+    it('goes back to ramping after resetFetchFailure clears failSince', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store = midOutage(t0)
+      resetFetchFailure(store, 'azure')
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, t0 + 31 * 60_000)).toBe(false)
+    })
+
+    // The liveness gate. `failSince` has no expiry of its own, and the paths that stop calling
+    // trackFetchFailure/resetFetchFailure entirely (#689 dead-source, the flashduty early return)
+    // freeze it — so presence alone would disarm the three-strike ramp for the rest of that source's
+    // life. `isFailSinceLive` is the rule the #500 alert already applies to this same field.
+    it('ramps again when failCountAt has gone stale — a frozen failSince is not an ongoing block', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store = midOutage(t0)
+      // 61 min: past TRACKING_ALERT_STALE_MS (60 min), i.e. no write for longer than one full
+      // decay-and-reclimb cycle, which is what a source that stopped being polled at all looks like.
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, t0 + 61 * 60_000)).toBe(false)
+    })
+
+    it('stays degraded at the last minute inside the liveness window (59 min)', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store = midOutage(t0)
+      expect(await trackFetchFailure(store, undefined, 'azure', 3, t0 + 59 * 60_000)).toBe(true)
+    })
+
+    it('re-crossing still books exactly one fetch-fail:daily episode, and keeps the original failSince', async () => {
+      const t0 = Date.parse('2026-08-01T00:00:00.000Z')
+      const store = midOutage(t0)
+      const originalSince = store.azure!.failSince
+      const kv = mockKV()
+      let t = t0 + 31 * 60_000
+      // The verdict must hold through the whole decay-and-reclimb cycle, not just at its edges — this
+      // is the loop the issue is named for, driven by the function rather than hand-seeded.
+      expect(await trackFetchFailure(store, kv, 'azure', 3, t)).toBe(true)                // decayed → 1
+      expect(await trackFetchFailure(store, kv, 'azure', 3, t += 60_000)).toBe(true)      // 2
+      expect(await trackFetchFailure(store, kv, 'azure', 3, t += 60_000)).toBe(true)      // 3 — crosses
+      expect(kv.put).toHaveBeenCalledTimes(1)
+      expect(store.azure?.failSince).toBe(originalSince)
+    })
+  })
+
 })
 
 describe('resetFetchFailure (#1224 — blob-based, synchronous)', () => {

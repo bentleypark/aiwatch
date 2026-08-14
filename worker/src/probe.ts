@@ -245,9 +245,16 @@ export function isProbeFailing(
  * Used to cross-validate status page fetch failures — if the API responds normally
  * but the status page is down, the service is likely operational (false positive).
  *
- * Returns true if recent probes show normal RTT (service is healthy).
- * Returns false if probes show spikes/failures or no recent data exists.
+ * Returns true if recent probes answered without a server error, at a normal RTT.
+ * Returns false if probes show spikes/failures/5xx or no recent data exists.
  * Conservative: returns false (don't override) when data is insufficient.
+ *
+ * Three call sites, all moving in the same direction as this predicate tightens (`services.ts`):
+ * Phase-1 cross-validation (forces `operational`), the Phase-3 metastatuspage gate (blocks that
+ * override), and the #689 `probeConfirmed` mark for dead-source services.
+ *
+ * Note the resulting third state, which the #1232 tests rest on: a fast 5xx is neither healthy here
+ * nor failing per `isProbeFailing`, which reads RTT only.
  */
 export function isProbeHealthy(
   snapshots: ProbeSnapshot[],
@@ -277,9 +284,14 @@ export function isProbeHealthy(
   // every cron cycle; one probe blip prevented cross-validation from overriding to operational).
   // A single outlier probe in 3 cycles is network noise; a genuine degradation spikes
   // multiple consecutive probes, which majority correctly identifies as unhealthy.
+  // #1232 — RTT alone is not health. A verdict here FORCES a fetch-failed service back to
+  // `operational` (`services.ts`' probe cross-validation runs this first), so a service answering a
+  // prompt 5xx while its status page is unreadable was published green, backed by an error response.
+  // The bar is `>= 500`, not non-2xx: most targets are hit WITHOUT credentials (see PROBE_TARGETS
+  // above), so an unauthenticated 4xx is a healthy server and only a server error is unambiguous.
   const healthyCount = recent.filter(s => {
     const probe = s.data[serviceId]
-    return probe.rtt > 0 && probe.rtt <= threshold
+    return probe.rtt > 0 && probe.rtt <= threshold && probe.status < 500
   }).length
   return healthyCount >= Math.ceil(recent.length * 2 / 3)
 }

@@ -3101,6 +3101,12 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
           // this `degraded` is backed by evidence. Mark it so the display keeps it amber. A service with
           // no probe (junie) or with too few samples to judge stays neutral, which is the honest default.
           svc.probeContradicted = true
+        } else if (svc.id in (probeSnapshots[probeSnapshots.length - 1]?.data ?? {})) {
+          // #1232 — a probe answering 5xx fast is no longer healthy (it used to force `operational`
+          // here, and logged that it had), but it is not `isProbeFailing` either, since that predicate
+          // reads only RTT. Without this the branch is silent. It records that a probed service landed
+          // in the middle verdict; WHICH reason (5xx, too few samples, jitter) is still not separated.
+          console.log(`[cross-validation] ${svc.id}: probe neither healthy nor failing — keeping degraded + sourceUnknown (neutral badge)`)
         }
       }
     }
@@ -3109,12 +3115,19 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // #689 — for status-source-dead services (4xx → `sourceDead`, already `operational`), mark whether
   // a healthy direct probe INDEPENDENTLY confirms reachability. The 2nd case: a PROBED service whose
   // status PAGE died but whose API still responds → `probeConfirmed` → the UI keeps the operational
-  // badge (probe-backed). The un-probed case (e.g. Character.AI, an app) gets no probe → stays
+  // badge (probe-backed). A dead-source service with no probe target at all gets no mark → stays
   // `sourceDead` only → the UI shows a neutral "Unknown". Runs outside the degraded block above since
   // sourceDead services are operational, not in `degradedFromFetch`.
   if (probeSnapshots && probeSnapshots.length > 0) {
+    const probedNow = probeSnapshots[probeSnapshots.length - 1]?.data ?? {}
     for (const svc of raw) {
-      if (svc.sourceDead && isProbeHealthy(probeSnapshots, svc.id)) svc.probeConfirmed = true
+      if (!svc.sourceDead) continue
+      if (isProbeHealthy(probeSnapshots, svc.id)) svc.probeConfirmed = true
+      // #1232 — the second consumer of the stricter predicate: a dead-source service whose own probe
+      // answers 5xx no longer gets the probe-backed operational badge, it falls to neutral Unknown.
+      // Logged only for services we actually probed this cycle, so an un-probed dead source does not
+      // emit a line every cron.
+      else if (svc.id in probedNow) console.log(`[cross-validation] ${svc.id}: source dead and probe does not confirm reachability — no probeConfirmed`)
     }
   }
 

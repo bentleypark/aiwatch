@@ -391,6 +391,37 @@ describe('isProbeHealthy', () => {
     ]
     expect(isProbeHealthy(snapshots, 'claude', 900_000)).toBe(false) // 15min max age
   })
+
+  // #1232 — a healthy verdict FORCES a fetch-failed service back to `operational`, so what counts as
+  // a healthy sample has to survive the response code, not just the clock.
+  it('returns false when the majority of recent probes answer 5xx, however fast', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { claude: { status: 503, rtt: 80 } } },
+      { t: recentTime(5), data: { claude: { status: 500, rtt: 75 } } },
+      { t: recentTime(10), data: { claude: { status: 200, rtt: 80 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(false)
+  })
+
+  it('keeps the majority rule: a single 5xx among three is still noise', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { claude: { status: 503, rtt: 80 } } },
+      { t: recentTime(5), data: { claude: { status: 200, rtt: 80 } } },
+      { t: recentTime(10), data: { claude: { status: 200, rtt: 75 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(true)
+  })
+
+  it('counts unauthenticated 4xx answers as healthy — the bar is >= 500, not non-2xx', () => {
+    // Why the bar is not "non-2xx": most probe targets are hit without credentials.
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { claude: { status: 401, rtt: 80 } } },
+      { t: recentTime(5), data: { claude: { status: 403, rtt: 75 } } },
+      { t: recentTime(10), data: { claude: { status: 405, rtt: 80 } } },
+      { t: recentTime(12), data: { claude: { status: 422, rtt: 78 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(true)
+  })
 })
 
 describe('isProbeFailing — the absolute floor under the slow-sample bar', () => {
