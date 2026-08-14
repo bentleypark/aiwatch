@@ -1,7 +1,7 @@
 // #500 — persistent structural-block alert.
 //
-// Sweeps the consolidated tracking blob's `failSince` fields (written by trackFetchFailure on first
-// failure, cleared by resetFetchFailure on recovery — see utils.ts's #1224 tracking-state block) and
+// Sweeps the consolidated tracking blob's `failSince` fields (written by trackFetchFailure at a
+// threshold crossing, cleared by resetFetchFailure on recovery — see utils.ts's #1224 tracking-state block) and
 // fires ONE operator Discord warning per service whose status page has been continuously unreachable
 // >= 1h. Operator-only ops signal: it never builds a feed entry or touches the per-user relay.
 // Deduped 24h. Best-effort — the whole sweep is wrapped so a failure can't affect the cron's main
