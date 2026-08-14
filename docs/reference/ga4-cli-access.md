@@ -46,6 +46,22 @@ node scripts/ga4-report.mjs --dimensions hostName,testDataFilterName --metrics s
 # and a truncated table silently drops the LOW-count days first (the "steady drip" signal)
 node scripts/ga4-report.mjs --dimensions date,hostName --metrics sessions --start 2026-07-14 --end today --limit 200
 
+# Event-level check, e.g. re-running the 2026-07-15 outage-CTA-channel decision's CTA read over ITS
+# OWN window (2026-06-18 → 2026-07-15 — a fresh window gives different numbers, see below): which
+# is-down button gets used (copy_slack_feed / copy_rss / click_cta_alerts, see
+# api/_is-down/html-template.ts). No --filter flag exists, so scope with a second dimension and read
+# the relevant rows off the table — an unscoped global total is not comparable to the baseline here
+# (property-wide copy_rss matches exactly, 24 vs 24 — that's the scoping lesson this reproduces).
+# **The is-down-scoped digits do NOT reproduce exactly**: the decision page recorded 13+5=18 vs 1
+# (18:1); re-running this same command on 2026-08-13 got 14+6=20 vs 1 (20:1) — close, not identical,
+# most likely GA4 processing/attribution drift between the original pull and the re-run, not a bug in
+# this command. Treat the ratio and the scoping lesson as what's reproducible, not the exact digits.
+# The target rows are typically the LOW end of the count (click_cta_alerts was 1) — raise --limit and
+# check formatTable's "(showing N of M rows)" line; a truncated read silently drops exactly these rows
+# first (runReport orders by the first metric descending; 103 rows returned for this query on
+# 2026-08-13, so the default --limit 50 would have truncated it).
+node scripts/ga4-report.mjs --dimensions eventName,pagePath --metrics eventCount --start 2026-06-18 --end 2026-07-15 --limit 300
+
 # Raw API response instead of a table
 node scripts/ga4-report.mjs --json
 ```
@@ -54,6 +70,49 @@ Any [GA4 Data API dimension/metric `apiName`](https://developers.google.com/anal
 works — the property's actual available names are queryable at
 `GET https://analyticsdata.googleapis.com/v1beta/properties/{id}/metadata` (same auth) if a name is
 unclear or property-specific (custom dimensions, `testDataFilterName`/`testDataFilterId`, etc.).
+
+## `growth:daily` — a different data source, for a different question
+
+`growth:daily` (KV) is **not** queryable through this CLI or GA4 — it's AIWatch's own consent-free
+pipeline: an `audienceBeaconScript` beacon on the **is-down pages only**
+(`api/_is-down/html-template.ts`, `api/is-down-group.ts` — no other surface emits it) posts
+cross-origin to the worker's `/api/pageview`, `worker/src/outage-audience.ts`'s `classifyReferrer()` buckets each view by
+referrer/UTM (`direct`/`reddit`/`hn`/…) into Analytics Engine, and `worker/src/growth-series.ts` rolls
+that up into **one `growth:daily:{YYYY-MM}` KV key per month, holding one row per day** — not one key
+per day. Each row carries `audienceBySource` (the channel-mix field) alongside `subscribers`,
+`referralTotal`, `audienceActiveTotal` (the sponsor-evidence axis), and `incidentsStartedInWindow` — it
+isn't only channel mix. Read it directly:
+
+```bash
+npx wrangler kv key get "growth:daily:$(date -u +%Y-%m)" --namespace-id e49508d80bb144e9a7ff872f2be771a4 --remote
+```
+
+**`--remote` is required.** Omit it and wrangler reads local Miniflare state instead of production:
+`Value not found`, exit code 0, no error — or a stale value if a `wrangler dev` session left local
+state behind. Seeing `Value not found` here means a missing `--remote` far more often than a missing
+key.
+
+**Verified 2026-08-13 to actually work** — both this command and the GA4 CLI example above were run
+for real, not just read. One false trail worth recording: a first attempt at this exact command 401'd,
+and simply re-running it — same token, same namespace, no changes — succeeded immediately.
+`wrangler kv key list` on the same namespace had worked throughout, and `wrangler whoami` showed
+`workers_kv (write)` (wrangler's only KV scope; there's no separate read scope to be missing). The
+cause of that single 401 was never isolated. **Retry once before diagnosing a 401 here as a
+permissions gap.**
+
+**GA4 and `growth:daily` answer different questions and must not be swapped.** `growth:daily` is
+**where is-down-page traffic came from** (referrer/UTM channel mix) — this is what
+`initiative_growth`'s `direct`/`reddit`/`hn` numbers already cite, and it covers is-down views only,
+not the whole site. GA4 *can* also report source dimensions (`sessionSource`,
+`sessionDefaultChannelGroup` — it isn't incapable of this), but on the is-down surface its sample is
+far smaller than the beacon's (measured 2026-08-13: GA4 `page_view` on `-down` paths over
+2026-08-01→08-12 was **69**; the beacon's `audienceTotal` over the same 12 days was **1806**) and the
+mechanism behind that gap has not been isolated — don't assume a cause. Neither side is a clean
+population either: GA4 drops traffic it classifies as bots, and the beacon (`recordOutageView` in
+`worker/src/outage-audience.ts`) does no bot filtering at all, so a GA4 number and a `growth:daily`
+number are not comparable in either direction. Use GA4 for what `growth:daily` can't answer instead:
+**what a visitor did on a page** (which button they clicked, per-event counts) — the question behind
+the `eventName`/`pagePath` example above.
 
 ## What this can't do — and why
 
