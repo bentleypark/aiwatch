@@ -23,7 +23,16 @@ analyze_modal       # GA4 event name
 withExtUtm          # GA4 helper name documented, defined in aiwatch-reports
 report_month        # GA4 param name
 
+# — GA4 Admin/Data API fields (ga4-cli-access.md) — Google's own resource/field names, not ours —
+propertyType               # GA4 Admin API accountSummaries field
+testDataFilterId           # GA4 Data API dimension apiName
+internalTrafficRules       # GA4 Admin API resource name (confirmed absent from the live discovery doc)
+dataFilters                # GA4 Admin API resource name (confirmed absent from the live discovery doc)
+sessionSource               # GA4 Data API dimension apiName
+sessionDefaultChannelGroup  # GA4 Data API dimension apiName
+
 # — external vocab / cross-repo / data —
 SpecialAnnouncement # schema.org JSON-LD type (Edge SSR), external vocabulary
 _templates          # Jekyll dir in the sibling aiwatch-reports repo, not this tree
 kv_limit_alert      # KV key name in the kv-schema table (data key column, not a code identifier)
+workers_kv          # Cloudflare wrangler OAuth token scope name (whoami output), not ours

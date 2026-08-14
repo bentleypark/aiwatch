@@ -26,6 +26,7 @@ Read this index first, then load only the pages you need.
 - [KV Key Schema](kv-schema.md) — STATUS_CACHE keys: pattern/value/TTL/writes-per-day + monthly budget.
 - [Fallback Tier Priority](fallback-tiers.md) — tier membership + candidate eligibility rules.
 - [GA4 Analytics & Consent Flow](ga4-events.md) — cross-surface consent + event catalog.
+- [GA4 CLI access (#998)](ga4-cli-access.md) — querying GA4 reports from the command line via a service account + the Data API, what's provisioned, what's UI-only.
 - [Content-Security-Policy (CSP) — #482](reference-csp.md) — per-surface enforcement (nonce vs content-hash) + SPA policy.
 - [Workflow-gate hooks (#415/#657)](workflow-hooks.md) — the seven workflow hooks, hard vs soft, the audit log + how to tune the step-3.5 hard gate.
 - [Reference Tooling](reference-tooling.md) — chub vs modern-web-guidance trigger map + the PreToolUse backstop.
