@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeMedianRtt, detectConsecutiveSpikes, isProbeHealthy } from '../probe'
+import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeMedianRtt, detectConsecutiveSpikes, isProbeHealthy, isProbeFailing, PROBE_FAILING_FLOOR_MS } from '../probe'
 import type { ProbeSnapshot } from '../probe'
 
 describe('computeProbeSlot', () => {
@@ -390,6 +390,155 @@ describe('isProbeHealthy', () => {
       { t: recentTime(25), data: { claude: { status: 200, rtt: 210 } } },
     ]
     expect(isProbeHealthy(snapshots, 'claude', 900_000)).toBe(false) // 15min max age
+  })
+})
+
+describe('isProbeFailing — the absolute floor under the slow-sample bar', () => {
+  const now = Date.now()
+  const at = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString()
+
+  // A synthetic FAST service: 6 historical samples (outside the 15-min recent window) at 67ms, so the
+  // bare `median × 3` bar alone would sit at 201ms and the floor governs instead. Deliberately not
+  // presented as a production median — `isProbeFailing` medians raw snapshots, while the figures in
+  // `probe:daily` are trimmed (`probe-archival.ts`), so the two are not the same quantity.
+  const fastBaseline: ProbeSnapshot[] = Array.from({ length: 6 }, (_, i) => ({
+    t: at(20 + i * 5),
+    data: { claude: { status: 200, rtt: 67 } },
+  }))
+
+  it('ordinary jitter on a fast service no longer contradicts an unreadable source', () => {
+    // Against the bare 201ms bar both of these count as failures, set `probeContradicted`, and
+    // suppress the neutral unknown badge — while the service answered every probe successfully in
+    // under a quarter-second. This is the regression the floor exists to stop.
+    const recent: ProbeSnapshot[] = [
+      { t: at(0), data: { claude: { status: 200, rtt: 230 } } },
+      { t: at(5), data: { claude: { status: 200, rtt: 210 } } },
+    ]
+    expect(isProbeFailing([...recent, ...fastBaseline], 'claude')).toBe(false)
+  })
+
+  it('still contradicts when a fast service is genuinely slow (past the floor)', () => {
+    const recent: ProbeSnapshot[] = [
+      { t: at(0), data: { claude: { status: 200, rtt: 4000 } } },
+      { t: at(5), data: { claude: { status: 200, rtt: 3500 } } },
+    ]
+    expect(isProbeFailing([...recent, ...fastBaseline], 'claude')).toBe(true)
+  })
+
+  it('the floor is exclusive: a sample exactly at it is not a failure, one over it is', () => {
+    // The docstring's contract is that a response inside a second is not evidence, so `>` (not `>=`)
+    // is load-bearing. Without this the comparison can be loosened with the suite still green.
+    const atFloor: ProbeSnapshot[] = [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 200, rtt: PROBE_FAILING_FLOOR_MS } } }))
+    const overFloor: ProbeSnapshot[] = [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 200, rtt: PROBE_FAILING_FLOOR_MS + 1 } } }))
+    expect(isProbeFailing([...atFloor, ...fastBaseline], 'claude')).toBe(false)
+    expect(isProbeFailing([...overFloor, ...fastBaseline], 'claude')).toBe(true)
+  })
+
+  it('999ms on a fast service is not a failure — the literal "inside a second" contract', () => {
+    // The boundary case above is built out of the constant itself, so it holds for ANY value. This one
+    // is a literal: it fails if the floor is lowered (a 300ms floor was verified to pass the whole
+    // suite otherwise), which is what stops the docstring's "inside a second" wording drifting away
+    // from the number it describes.
+    const justUnder: ProbeSnapshot[] = [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 200, rtt: 999 } } }))
+    // The literal only means anything while the fixture's own multiplicative bar stays under it —
+    // otherwise a deleted floor would leave this green. Tie the two together rather than trusting a
+    // baseline defined 30 lines away.
+    expect((computeMedianRtt([...justUnder, ...fastBaseline], 'claude') ?? 0) * 3).toBeLessThan(999)
+    expect(isProbeFailing([...justUnder, ...fastBaseline], 'claude')).toBe(false)
+  })
+
+  it('no input is ever BOTH an all-clear and an outage claim', () => {
+    // `services.ts` resolves the two predicates as `if (healthy) … else if (failing)`, so an input
+    // that satisfied both would be settled silently in favour of the all-clear — the one direction
+    // this floor exists to argue against. A round-2 attempt to add a `status >= 500` clause here DID
+    // create such an input (a fast 5xx read as healthy AND failing), which is what this pins against.
+    // Both regimes are covered deliberately: the floor binds on a fast service, and `median × 3`
+    // governs on a slow one.
+    const fastCases: ProbeSnapshot[][] = [
+      [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 200, rtt: 230 } } })),   // jitter
+      [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 503, rtt: 80 } } })),    // fast 5xx
+      [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 200, rtt: 4000 } } })),  // real spike
+      [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 0, rtt: -1 } } })),      // hard failure
+      [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 401, rtt: 80 } } })),    // normal 4xx
+      [0, 5].map((m) => ({ t: at(m), data: { claude: { status: 200, rtt: PROBE_FAILING_FLOOR_MS } } })),
+    ]
+    for (const recent of fastCases) {
+      const snaps = [...recent, ...fastBaseline]
+      expect(isProbeHealthy(snaps, 'claude') && isProbeFailing(snaps, 'claude')).toBe(false)
+    }
+
+    // Slow regime: median 500 → `median × 3` = 1500, above the floor, and 1200ms sits in the gap
+    // between the two bars. Inverting the floor (`Math.max` → `Math.min`) makes this input BOTH —
+    // the fast cases above stay green through that mutation, so without this row the comment's claim
+    // has no test behind it in the one regime where it can fail.
+    const slowBaseline: ProbeSnapshot[] = Array.from({ length: 6 }, (_, i) => ({
+      t: at(20 + i * 5),
+      data: { slowsvc: { status: 200, rtt: 500 } },
+    }))
+    const slowRecent: ProbeSnapshot[] = [0, 5].map((m) => ({ t: at(m), data: { slowsvc: { status: 200, rtt: 1200 } } }))
+    const slowSnaps = [...slowRecent, ...slowBaseline]
+    expect(isProbeHealthy(slowSnaps, 'slowsvc') && isProbeFailing(slowSnaps, 'slowsvc')).toBe(false)
+  })
+
+  it('an all-failed probe is unaffected — the floor gates only the slow-but-SUCCEEDED clause', () => {
+    // `rtt <= 0` (what failedProbe() writes) is a separate predicate, so a service we cannot reach at
+    // all still contradicts however fast it normally is. Losing this would gut the #1004 guard.
+    const recent: ProbeSnapshot[] = [
+      { t: at(0), data: { claude: { status: 0, rtt: -1 } } },
+      { t: at(5), data: { claude: { status: 0, rtt: -1 } } },
+    ]
+    expect(isProbeFailing([...recent, ...fastBaseline], 'claude')).toBe(true)
+  })
+
+  it('MIXED hard-failure + jitter no longer contradicts on a fast service — the accepted cost', () => {
+    // A real behaviour change, pinned so it is a decision rather than a surprise: one hard failure
+    // alongside successful-but-jittery samples used to clear the 2/3 majority only because those
+    // samples were themselves miscounted as failures against the 201ms bar. With the floor they are
+    // not, so a single failure no longer carries the verdict alone. A genuine majority still does.
+    // Both sets are 3 recent samples so the ONLY thing varying is how many of them actually failed.
+    const oneFailure: ProbeSnapshot[] = [
+      { t: at(0), data: { claude: { status: 0, rtt: -1 } } },
+      { t: at(5), data: { claude: { status: 200, rtt: 230 } } },
+      { t: at(10), data: { claude: { status: 200, rtt: 210 } } },
+    ]
+    const failureMajority: ProbeSnapshot[] = [
+      { t: at(0), data: { claude: { status: 0, rtt: -1 } } },
+      { t: at(5), data: { claude: { status: 0, rtt: -1 } } },
+      { t: at(10), data: { claude: { status: 200, rtt: 230 } } },
+    ]
+    expect(isProbeFailing([...oneFailure, ...fastBaseline], 'claude')).toBe(false)
+    expect(isProbeFailing([...failureMajority, ...fastBaseline], 'claude')).toBe(true)
+  })
+
+  it('the floor RAISES the bar and never lowers it — a slow service keeps its multiplicative bar', () => {
+    // A synthetic SLOW service: median 500 → `median × 3` = 1500, already above the floor, so the
+    // floor must be inert and 1200ms must still read as normal. A `Math.min` would call this failing
+    // and manufacture outages on the slowest services. Pins the direction, not the value.
+    const slowBaseline: ProbeSnapshot[] = Array.from({ length: 6 }, (_, i) => ({
+      t: at(20 + i * 5),
+      data: { slowsvc: { status: 200, rtt: 500 } },
+    }))
+    const recent: ProbeSnapshot[] = [
+      { t: at(0), data: { slowsvc: { status: 200, rtt: 1200 } } },
+      { t: at(5), data: { slowsvc: { status: 200, rtt: 1200 } } },
+    ]
+    expect(PROBE_FAILING_FLOOR_MS).toBeLessThan(500 * 3)
+    expect(isProbeFailing([...recent, ...slowBaseline], 'slowsvc')).toBe(false)
+  })
+
+  it('isProbeHealthy is deliberately NOT floored — the band between the two bars is the point', () => {
+    // The same samples are neither an all-clear nor an outage claim. `isProbeHealthy` forces a
+    // fetch-failed service back to `operational` (services.ts), so floor it too and a 230ms sample on
+    // a 67ms service would publish GREEN off a status source we admittedly could not read. Leaving it
+    // unfloored keeps that verdict at "not enough evidence" → the neutral unknown badge (#1004).
+    // A future refactor that "makes them symmetric" has to delete this test to do it.
+    const recent: ProbeSnapshot[] = [
+      { t: at(0), data: { claude: { status: 200, rtt: 230 } } },
+      { t: at(5), data: { claude: { status: 200, rtt: 210 } } },
+    ]
+    const snaps = [...recent, ...fastBaseline]
+    expect(isProbeHealthy(snaps, 'claude')).toBe(false)
+    expect(isProbeFailing(snaps, 'claude')).toBe(false)
   })
 })
 
