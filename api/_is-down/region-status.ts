@@ -197,7 +197,10 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
 
   // Gated by service status (#1149): if service.status === 'operational', do not trip
   // the global-incident fallback for a region-less incident.
-  if (!hasRegionSpecific && ongoing.length > 0 && service.status !== 'operational') {
+  // #1233 — an unreadable source (`unknown`) must not trip this: it is not a verdict about the
+  // service, and here it would paint EVERY region row `incident`. The `src/utils/regionStatus.js` twin
+  // carries the same guard; the two are hand-copies and must stay in step.
+  if (!hasRegionSpecific && ongoing.length > 0 && service.status !== 'operational' && service.status !== 'unknown') {
     const globalType = classifyIncident((ongoing[0] as IncidentLike).title)
     for (const r of regionDefs) {
       status[r.key] = { status: 'incident', type: globalType }

@@ -182,7 +182,10 @@ export function withdrawalHold(
   // (`prunePhantomIncidents` treats those identically). Either way we cannot evaluate the tests
   // below, which is exactly case 3.
   if (!svc) return 'source-unreadable'
-  if (svc.sourceDead || svc.sourceUnknown) return 'source-unreadable'
+  // #1233 — `unknown` is now the STATUS of an unreadable source, so test it directly instead of relying
+  // on the `sourceUnknown` flag alone travelling beside it. The flags stay: they also cover `sourceDead`,
+  // and a cached payload written before #1233 carries only the flag.
+  if (svc.status === 'unknown' || svc.sourceDead || svc.sourceUnknown) return 'source-unreadable'
   const live = svc.incidents ?? []
   if (live.some((i) => i.status !== 'resolved')) return 'incident-running'
   if (svc.status !== 'operational') return 'incident-running'

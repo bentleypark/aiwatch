@@ -27,21 +27,44 @@ export function orderServicesForTicker(rawServices) {
   )
 }
 
+// #1233 — `unknown` (AIWatch could not read the source) needs its own entry in BOTH maps. Without one
+// it fell through the `?? operational` default below and rendered a GREEN dot on the always-visible
+// ticker — asserting health nobody had checked. The neutral tokens match StatusPill's `unknown` pill.
+//
+// The `??` default is what makes an omission silent here, so these two maps are the shape to check
+// whenever the status union grows: the lookup is by key, not a comparison, so it is invisible to both
+// the type checker and a `.status === '...'` grep.
 const STATUS_DOT_CLASS = {
   operational: 'bg-[var(--green)]',
   degraded: 'bg-[var(--amber)]',
   down: 'bg-[var(--red)]',
+  unknown: 'bg-[var(--text2)]',
 }
 
 const STATUS_TEXT_CLASS = {
   operational: 'text-[var(--text1)]',
   degraded: 'text-[var(--amber)]',
   down: 'text-[var(--red)]',
+  unknown: 'text-[var(--text2)]',
+}
+
+/** #1233 — the ticker's classes for a status, exported so the mapping is unit-testable. `TickerItem`
+ *  is an internal component, so before this the two maps below had no test at all and an omission was
+ *  invisible: a missing key falls through the default, and a LOOKUP is reachable by neither the type
+ *  checker nor a `.status === '...'` grep — which is how `unknown` came to render green here.
+ *
+ *  The default is the NEUTRAL entry, not the operational one. An unrecognised status is a state we
+ *  cannot interpret, and painting it green claims health nobody checked — the same fail-safe direction
+ *  `statusVerdict` and `badgeStatusColor` take on the worker side. */
+export function tickerClassesFor(status) {
+  return {
+    dot: STATUS_DOT_CLASS[status] ?? STATUS_DOT_CLASS.unknown,
+    text: STATUS_TEXT_CLASS[status] ?? STATUS_TEXT_CLASS.unknown,
+  }
 }
 
 function TickerItem({ name, status }) {
-  const dotCls = STATUS_DOT_CLASS[status] ?? STATUS_DOT_CLASS.operational
-  const textCls = STATUS_TEXT_CLASS[status] ?? STATUS_TEXT_CLASS.operational
+  const { dot: dotCls, text: textCls } = tickerClassesFor(status)
   return (
     <span className={`inline-flex items-center gap-[5px] whitespace-nowrap mono text-[11px] ${textCls}`}>
       <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${dotCls}`} aria-hidden="true" />

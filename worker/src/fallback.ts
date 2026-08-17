@@ -1,6 +1,7 @@
 // Fallback recommendation logic for incident alerts
 
 import { isNonReliabilityAdvisory } from './utils'
+import { isAffectedStatus, asServiceStatus } from './status-verdict'
 
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 // #756 — stability un-excluded now that the image category has ≥2 members (Stability + FLUX recommend
@@ -91,6 +92,12 @@ interface FallbackCandidate {
   id: string
   category: string
   name: string
+  /** Still a bare `string`, deliberately. Narrowing it to `ServiceStatus['status']` is correct and was
+   *  tried for #1233 — every production caller already passes a real `ServiceStatus` — but this file's
+   *  ~50 hand-rolled test fixtures infer `status: string`, so the narrowing is a test-fixture migration
+   *  (>100 diagnostics) orthogonal to making `unknown` first-class. The verdict is still applied: the
+   *  eligibility test below goes through `statusVerdict` via `asServiceStatus`, whose runtime default
+   *  handles an unrecognised value. What is deferred is only the COMPILE-time exhaustiveness here. */
   status: string
   /** #550 — used to exclude candidates with an unresolved incident (operational-but-incident).
    *  #811 — `title` lets `hasActiveIncident` ignore a non-reliability ADVISORY (access suspension /
@@ -629,7 +636,12 @@ export function getGroupedFallbacks(
   const eligible = affectedServiceIds
     .map(id => services.find(s => s.id === id))
     .filter((s): s is FallbackCandidate =>
-      !!s && !EXCLUDE_FALLBACK.includes(s.id) && (s.status !== 'operational' || hasActiveIncident(s)))
+      // #1233 — `isAffectedStatus`, not `!== 'operational'`: a service whose status source we could not
+      // read must never ANCHOR a fallback group. That is the reported defect in its most user-visible
+      // form — on 2026-08-14 the extension told users to switch off Claude to ChatGPT / Grok / Junie /
+      // Codex because `status.claude.com` was unreachable. An `unknown` service with a genuine active
+      // incident still anchors, via `hasActiveIncident`.
+      !!s && !EXCLUDE_FALLBACK.includes(s.id) && (isAffectedStatus(asServiceStatus(s.status)) || hasActiveIncident(s)))
   // #1062 facet B — resolve each anchor's candidates FIRST, keeping only groups that will actually
   // render. A routed service that SUPPRESSES (Realtime/embeddings) yields no candidates, and its
   // `effectiveTierFor` falls back to its own (LLM) tier — so if it reserved the `api:LLM` key (as a

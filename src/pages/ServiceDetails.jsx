@@ -883,10 +883,13 @@ export default function ServiceDetails({ serviceId }) {
       )}
 
       {/* #1004 — AIWatch could not READ the status source (throw / 5xx, #714 — a moved page, a timeout,
-          an upstream error). The worker's fallback then marks the service degraded after 3 consecutive
-          failures, which a reader cannot tell apart from a real outage. Say plainly that this is OUR
-          read failing, not the provider's service. `sourceDead` (a 4xx) wins if somehow both are set. */}
-      {sourceUnknown && !service.sourceDead && service.status === 'degraded' && (
+          an upstream error). Say plainly that this is OUR read failing, not the provider's service.
+          `sourceDead` (a 4xx) wins if somehow both are set.
+          #1233 — the status alone is enough for the current shape: an `unknown` badge with no
+          explanation beside it is the worst version of this card, so the note must not depend on the
+          flag still travelling with the status. The `sourceUnknown` + `degraded` arm is the transitional
+          read of a payload cached before that change. */}
+      {!service.sourceDead && (service.status === 'unknown' || (sourceUnknown && service.status === 'degraded')) && (
         <div className="rounded-lg border" style={{ borderColor: 'var(--border-hi)', background: 'var(--bg2)', padding: '12px 16px' }}>
           <div className="text-[13px] font-medium text-[var(--text0)]">{t('svc.sourceUnknown.title')}</div>
           <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '5px', lineHeight: 1.5 }}>{t('svc.sourceUnknown.body')}</div>

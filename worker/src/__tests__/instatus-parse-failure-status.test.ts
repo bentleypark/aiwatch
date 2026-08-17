@@ -45,6 +45,28 @@ describe('#1089 — an unreadable Instatus payload must not publish a recovery',
     expect(svc.sourceUnknown, 'an unreadable source must be flagged, not silently trusted').toBe(true)
   })
 
+  // #1233 — these cases assert the FLAG. Past the three-strike threshold the leg also publishes a
+  // VERDICT, and nothing pinned which one: mutating this return to `degraded` was green across the whole
+  // suite, because every test here observes the pre-threshold `operational` state. The tracking blob is
+  // seeded with two prior failures so this call is the crossing.
+  it('past the threshold it publishes `unknown`, not a fabricated `degraded`', async () => {
+    stubFetch('<html><body>we redesigned the status page</body></html>')
+    const store = { mistral: { failCount: 2, failCountAt: new Date().toISOString() } }
+    const svc = await fetchService(mistral, undefined, undefined, store)
+    expect({ status: svc.status, sourceUnknown: svc.sourceUnknown })
+      .toEqual({ status: 'unknown', sourceUnknown: true })
+    // #1233 invariant — an unreadable source carries NO incident. Several modules omit an `unknown`
+    // branch because of this (the X drafts, the feed's fallback line, the region/calendar fallbacks).
+    expect(svc.incidents).toEqual([])
+  })
+
+  it('control: below the threshold it still publishes operational — the ramp is unchanged', async () => {
+    stubFetch('<html><body>we redesigned the status page</body></html>')
+    const svc = await fetchService(mistral, undefined, undefined, {})
+    expect(svc.status).toBe('operational')
+    expect(svc.sourceUnknown).toBe(true)
+  })
+
   it('flags sourceUnknown even though the page returned HTTP 200', async () => {
     // Guards against "just check res.ok" — the page is fine, our read of it is not.
     stubFetch('<script id="__NUXT_DATA__" type="application/json">{oops</script>')

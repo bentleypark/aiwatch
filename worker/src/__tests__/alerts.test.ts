@@ -712,6 +712,25 @@ describe('buildServiceAlerts', () => {
     expect(alerts[0].color).toBe(0xE86235) // amber
   })
 
+  // #1233 — the decision that an unreadable source fires NO status-edge alert existed only as an
+  // 11-line comment; the degraded arm could be rewritten as `!isHealthyStatus(svc.status)` — which
+  // reads as a tidy-up — and start Discord-paging Tier 1 off a status page we failed to fetch.
+  it('fires NO alert for an unreadable source — we alert on what we KNOW', () => {
+    expect(buildServiceAlerts([mockService({ status: 'unknown' })], new Map(), new Map())).toEqual([])
+  })
+
+  it('stays ARMED through an unreadable spell: no 🟢 recovery until we can read `operational` again', () => {
+    const armed = new Map([['openai', new Date().toISOString()]])
+    // Losing sight of a service is not evidence it came back, so the down marker must survive and
+    // no recovery may fire. This is the #1232 flap in the opposite direction.
+    expect(buildServiceAlerts([mockService({ status: 'unknown' })], armed, new Map())).toEqual([])
+
+    // Control: an actual `operational` read DOES fire the recovery the line above withholds.
+    const recovered = buildServiceAlerts([mockService({ status: 'operational' })], armed, new Map())
+    expect(recovered).toHaveLength(1)
+    expect(recovered[0].key).toBe('alerted:recovered:openai')
+  })
+
   it('suppresses status alert when ongoing incidents exist', () => {
     const svc = mockService({
       status: 'degraded',

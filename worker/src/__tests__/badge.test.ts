@@ -103,6 +103,51 @@ describe('/badge/:serviceId records WAE traffic on the real handler (#1157)', ()
     }
   }
 
+  // #1233 — the badge's COLOUR, through the real route. `badgeStatusColor`'s unit test passes whether
+  // or not `index.ts` actually calls it, so reverting the wiring to the old inline ternary chain — whose
+  // final `else` was RED — was green everywhere. A badge is copied into READMEs and third-party status
+  // pages, so a false red there outlives any dashboard view and is seen by people who never visit us.
+  function envWith(status: ServiceStatus['status']) {
+    const store = new Map<string, string>()
+    store.set(CACHE_KEY, JSON.stringify({ services: [{ ...svc('claude'), status }], cachedAt: '2026-07-19T00:00:00Z' }))
+    const kv = {
+      get: async (k: string) => store.get(k) ?? null,
+      put: async () => {}, delete: async () => {},
+    } as unknown as KVNamespace
+    return { STATUS_CACHE: kv, ANALYTICS: { writeDataPoint: vi.fn() } } as unknown as Parameters<typeof workerModule.fetch>[1]
+  }
+
+  it('paints an unreadable source NEUTRAL GREY through the real route, never red', async () => {
+    const res = await workerModule.fetch(new Request('https://ai-watch.dev/badge/claude'), envWith('unknown'), {} as ExecutionContext)
+    const svgText = await res.text()
+    expect(svgText).toContain('#8b949e')
+    expect(svgText).not.toContain('#f85149')
+    expect(svgText).toContain('unknown')
+  })
+
+  it('control: a real outage still paints red, and a healthy service green', async () => {
+    const down = await (await workerModule.fetch(new Request('https://ai-watch.dev/badge/claude'), envWith('down'), {} as ExecutionContext)).text()
+    expect(down).toContain('#f85149')
+    const ok = await (await workerModule.fetch(new Request('https://ai-watch.dev/badge/claude'), envWith('operational'), {} as ExecutionContext)).text()
+    expect(ok).toContain('#3fb950')
+  })
+
+  // #1233 — the transitional decode, through the real route. A snapshot written by the PREVIOUS deploy
+  // encodes an unreadable source as `degraded` + `sourceUnknown`; without `normalizeCachedServices` in
+  // `cacheRead`, every worker surface republishes the defect for the life of that cache entry.
+  it('normalises a LEGACY cached record (degraded + sourceUnknown) to the neutral badge', async () => {
+    const store = new Map<string, string>()
+    store.set(CACHE_KEY, JSON.stringify({
+      services: [{ ...svc('claude'), status: 'degraded', sourceUnknown: true }],
+      cachedAt: '2026-07-19T00:00:00Z',
+    }))
+    const kv = { get: async (k: string) => store.get(k) ?? null, put: async () => {}, delete: async () => {} } as unknown as KVNamespace
+    const env = { STATUS_CACHE: kv, ANALYTICS: { writeDataPoint: vi.fn() } } as unknown as Parameters<typeof workerModule.fetch>[1]
+    const svgText = await (await workerModule.fetch(new Request('https://ai-watch.dev/badge/claude'), env, {} as ExecutionContext)).text()
+    expect(svgText).toContain('#8b949e')
+    expect(svgText).not.toContain('#d29922')
+  })
+
   it('records the real serviceId on a 200 (known service)', async () => {
     const { env, writeDataPoint } = makeEnv()
     const res = await workerModule.fetch(new Request('https://ai-watch.dev/badge/claude'), env, {} as ExecutionContext)

@@ -103,7 +103,10 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   // GATED on the live badge: only when the service is actually non-operational. A service can stay
   // `operational` with an open informational/minor incident (e.g. claude); painting the calendar for
   // those is noise (mirrors the old worker-augment `svcStatus !== 'operational'` guard, #662).
-  if (currentStatus && currentStatus !== 'operational') {
+  // #1233 — an unreadable source (`unknown`) must not trip this. It is not a verdict about the
+  // service, so treating it as one would forward-fill today's calendar cell (and the Overview 30-bar
+  // strip) as an outage day, from an incident list we could not refresh.
+  if (currentStatus && currentStatus !== 'operational' && currentStatus !== 'unknown') {
     const todayKey = toLocalDateKey(today)
     const windowStart = new Date(today.getTime() - (days - 1) * 86_400_000)
     ;(incidents ?? []).forEach((inc) => {

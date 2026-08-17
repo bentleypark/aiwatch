@@ -271,7 +271,7 @@ describe('a 200 text/html status page is an unknown SOURCE, not a degraded servi
     expect(second.status).toBe('operational')
 
     const third = await fetchService(junie, undefined, kv, trackingStore)
-    expect(third.status).toBe('degraded')         // the fallback that looked like a real outage
+    expect(third.status).toBe('unknown')         // the fallback that looked like a real outage
     expect(third.sourceUnknown).toBe(true)        // …and the flag that lets the UI say otherwise
     expect(third.uptime30d).toBeNull()            // nothing was read, so nothing is claimed
   })

@@ -486,7 +486,14 @@ export default async function handler(req: Request) {
     // When the official status is operational with no signal we skip the fetch entirely, so the
     // public report list can NEVER contradict an `operational` page (the load-bearing constraint).
     let reports: Array<{ cat: string; desc: string; ts: number }> = []
-    if (serviceData && (serviceData.status !== 'operational' || (serviceData.partialCount ?? 0) > 0)) {
+    // #1233 — an unreadable source (`unknown`) is NOT that independent signal; it is the absence of one,
+    // so it must not open this gate. Matches `shouldSurfaceReports` in worker/src/report.ts, which makes
+    // an `unknown` service earn its report display with a probe spike instead of waving it through for
+    // merely being non-operational. Spelled out here rather than imported: worker/ and api/ are separate
+    // deploy targets and this repo imports only api → worker (slug-map.ts), never the reverse — the same
+    // call is-down-group.ts documents for RESOLVED_ANALYSIS_WINDOW_MS.
+    const officialSignal = serviceData?.status === 'degraded' || serviceData?.status === 'down'
+    if (serviceData && (officialSignal || (serviceData.partialCount ?? 0) > 0)) {
       try {
         const r = await fetch(`${WORKER_API}/api/report-feed?svc=${encodeURIComponent(entry.id)}`, { signal: AbortSignal.timeout(2000) })
         if (r.ok) reports = ((await r.json()) as { reports?: Array<{ cat: string; desc: string; ts: number }> }).reports ?? []

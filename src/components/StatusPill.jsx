@@ -1,6 +1,9 @@
 // StatusPill — compact badge showing service operational status
 // Colors use CSS token pairs: --status-bg-* (background) + --green/amber/red (text)
-// Unknown status values fall back silently to 'operational'
+// #1233 — an UNRECOGNISED status value falls back to the NEUTRAL 'unknown' pill, not to 'operational'.
+// (`unknown` itself is a real status with its own entry.) Painting a value we cannot interpret green
+// claims health nobody checked — the same fail-safe direction `statusVerdict` and `badgeStatusColor`
+// take server-side, and the shape that made `unknown` render green in TickerBar.
 
 import { useLang } from '../hooks/useLang'
 import { resolveStatusDisplay } from '../utils/statusDisplay'
@@ -34,7 +37,7 @@ export default function StatusPill({ status = 'operational', partialCount = 0, s
   // badge on exactly that confusion, while JetBrains reported all-green.
   const effective = resolveStatusDisplay(status, partialCount, sourceDead, sourceUnknown)
   const isPartial = effective === 'partial'
-  const cls = PILL_CLASS[effective] ?? PILL_CLASS.operational
+  const cls = PILL_CLASS[effective] ?? PILL_CLASS.unknown
 
   // #744 — single chip for partial: the "Partial" pill already conveys the state, so fold the count
   // into it (`⚠ Partial · N`) instead of a redundant second `⚠ N affected` chip.

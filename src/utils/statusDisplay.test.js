@@ -122,6 +122,38 @@ describe('isDisplayOperational (#1034 — the predicate the filter e2e cannot ca
     expect(isDisplayOperational({ status: 'degraded', sourceUnknown: true, probeContradicted: true })).toBe(false)
   })
 
+  // #1233 — the raw `unknown` status. Everything above drives the LEGACY encoding (`degraded` +
+  // `sourceUnknown`), which is what a payload cached before the change still carries; production now
+  // sends `unknown` directly and nothing here asserted it. These cases are what three comments in this
+  // change claimed were already pinned — they were not, and `resolveStatusDisplay` could have been
+  // mutated to map `unknown` back to `degraded` with the whole suite green.
+  describe('raw unknown status (#1233)', () => {
+    it('passes straight through the resolver — no mapping needed', () => {
+      expect(resolveStatusDisplay('unknown')).toBe('unknown')
+      expect(displayStatusOf({ status: 'unknown', sourceUnknown: true })).toBe('unknown')
+    })
+
+    it('is neither affected nor operational — the distinction the two-valued reading collapsed', () => {
+      expect(isDisplayAffected({ status: 'unknown' })).toBe(false)
+      expect(isDisplayOperational({ status: 'unknown' })).toBe(false)
+    })
+
+    it('a real outage is still affected, and a healthy service still operational', () => {
+      expect(isDisplayAffected({ status: 'down' })).toBe(true)
+      expect(isDisplayAffected({ status: 'degraded' })).toBe(true)
+      expect(isDisplayOperational({ status: 'operational' })).toBe(true)
+    })
+
+    it('agrees with the worker\'s transitional decoder on the legacy pair', () => {
+      // `normalizeCachedService` (worker/src/status-verdict.ts) maps `degraded` + `sourceUnknown` →
+      // `unknown` unless a probe corroborates. This module hand-copies that rule for the SPA bundle;
+      // the two must answer the same, which is the claim the comment in statusDisplay.js makes.
+      expect(displayStatusOf({ status: 'degraded', sourceUnknown: true })).toBe('unknown')
+      expect(displayStatusOf({ status: 'degraded', sourceUnknown: true, probeContradicted: true })).toBe('degraded')
+      expect(displayStatusOf({ status: 'down', sourceUnknown: true })).toBe('down')
+    })
+  })
+
   it('never reports a service as both operational and affected (the tabs must not double-count)', () => {
     const cases = [
       { status: 'operational' }, { status: 'operational', partialCount: 2 },
@@ -129,6 +161,8 @@ describe('isDisplayOperational (#1034 — the predicate the filter e2e cannot ca
       { status: 'operational', sourceDead: true }, { status: 'degraded', sourceUnknown: true },
       { status: 'operational', sourceDead: true, probeConfirmed: true },
       { status: 'degraded', sourceUnknown: true, probeContradicted: true },
+      // #1233 — the raw value the worker now publishes.
+      { status: 'unknown' }, { status: 'unknown', sourceUnknown: true },
     ]
     for (const s of cases) {
       expect(isDisplayOperational(s) && isDisplayAffected(s), JSON.stringify(s)).toBe(false)

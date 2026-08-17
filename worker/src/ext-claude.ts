@@ -1,4 +1,5 @@
 import type { ServiceStatus, Incident } from './types'
+import { isUnreadableStatus } from './status-verdict'
 import { getFallbacks } from './fallback'
 
 // Lite projection for the Claude-only Chrome extension (#837).
@@ -92,7 +93,8 @@ function activeIncidents(svc: ScoredService): Incident[] {
 
 // Build the projection: filter to the three Anthropic surfaces (preserving
 // EXT_CLAUDE_IDS order), attach Score/grade, a per-category fallback (getFallbacks
-// recommends within the SAME category, operational + incident-free + non-excluded),
+// recommends within the SAME category, operational + incident-free + non-excluded; WITHHELD entirely
+// for an unreadable source since #1233 — see the gate below),
 // active official incidents (+ AI summary when present), and the gated crowd-report
 // signal. Pure: no KV/network. `scoredAll` is the full scored set (fallback pool).
 export function buildExtClaudePayload(
@@ -121,7 +123,13 @@ export function buildExtClaudePayload(
       uptime30d: svc.uptime30d ?? null,
       score: svc.aiwatchScore ?? null,
       grade: svc.scoreGrade ?? null,
-      fallback: getFallbacks(svc.id, svc.category, scoredAll),
+      // #1233 — an unreadable source ships NO recommendation, and the gate has to be here rather than
+      // only in the extension's `shouldShowFallback`. An already-installed extension keeps its old code
+      // until Chrome updates it, so a client-side fix reaches nobody who is running the version that
+      // produced the reported behaviour (2026-08-14: "switch to ChatGPT / Grok / Junie / Codex" while
+      // status.claude.com was unreadable). Withholding the list server-side reaches every installed copy
+      // on the next worker deploy, because an empty array renders nothing in every version.
+      fallback: isUnreadableStatus(svc.status) ? [] : getFallbacks(svc.id, svc.category, scoredAll),
       incidents,
       reports,
     })

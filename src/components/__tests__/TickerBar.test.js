@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { orderServicesForTicker } from '../TickerBar'
+import { orderServicesForTicker, tickerClassesFor } from '../TickerBar'
 import { SERVICE_CATEGORIES } from '../../utils/constants'
 
 // #658 — the header ticker scrolls services in the dev-audience category order
@@ -43,5 +43,32 @@ describe('orderServicesForTicker', () => {
     expect(out[out.length - 1].id).toBe('mystery')
     expect(orderServicesForTicker(null)).toEqual([])
     expect(orderServicesForTicker(undefined)).toEqual([])
+  })
+})
+
+// #1233 — the ticker is the dashboard's always-visible status strip, and its two class maps had no
+// `unknown` entry. A missing key fell through `?? operational`, so a service whose status source
+// AIWatch could not read rendered a GREEN dot — worse than the amber it replaced, because it asserts
+// health rather than an outage. The maps are keyed lookups, so nothing else could have caught this:
+// not the type checker (plain JS), not the `.status === '...'` sweep this refactor was built around.
+describe('tickerClassesFor (#1233)', () => {
+  it('gives an unreadable source the NEUTRAL classes — never the operational ones', () => {
+    const unknown = tickerClassesFor('unknown')
+    const operational = tickerClassesFor('operational')
+    expect(unknown.dot).not.toBe(operational.dot)
+    expect(unknown.dot).toContain('--text2')
+    expect(unknown.text).toContain('--text2')
+  })
+
+  it('an UNRECOGNISED status also falls to neutral, not to green', () => {
+    // The fail-safe direction: a value we cannot interpret must not claim health.
+    expect(tickerClassesFor('maintenance').dot).toBe(tickerClassesFor('unknown').dot)
+    expect(tickerClassesFor(undefined).dot).toBe(tickerClassesFor('unknown').dot)
+  })
+
+  it('controls: the three known verdicts keep their own colours', () => {
+    expect(tickerClassesFor('operational').dot).toContain('--green')
+    expect(tickerClassesFor('degraded').dot).toContain('--amber')
+    expect(tickerClassesFor('down').dot).toContain('--red')
   })
 })

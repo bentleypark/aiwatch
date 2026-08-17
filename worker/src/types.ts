@@ -66,7 +66,16 @@ export interface ServiceStatus {
   name: string
   provider: string
   category: 'api' | 'app' | 'agent'
-  status: 'operational' | 'degraded' | 'down'
+  /** #1233 — `unknown` means AIWatch could not READ this service's status source; it is NOT a verdict
+   *  about the service. It is the value the fetch-failure paths publish once `trackFetchFailure` crosses
+   *  its threshold (they used to publish `degraded` + `sourceUnknown`, leaving every consumer to apply
+   *  the correction itself — and the ones that didn't know the flag existed published a false outage).
+   *
+   *  Treat it as NEITHER up nor down: it must not be counted as an outage (no alert, no fallback
+   *  recommendation, no "N services affected"), and it must not be counted as healthy either. A
+   *  consumer that only asks `!== 'operational'` is the bug this member exists to make visible.
+   *  `statusVerdict()` in `status-verdict.ts` is the one place that mapping is written down. */
+  status: 'operational' | 'degraded' | 'down' | 'unknown'
   latency: number | null
   uptime30d: number | null
   lastChecked: string
@@ -185,11 +194,16 @@ export interface ServiceStatus {
    *  Then the badge stays operational (probe-backed) instead of "Unknown"; the un-probed case
    *  (sourceDead without this) shows "Unknown". Set by the cross-validation in `fetchAllServices`. */
   probeConfirmed?: boolean
-  /** #1004 — set when a fetch-failure `degraded` is CORROBORATED by our own probe (the service is
-   *  probed, and the probe is not healthy). The UI neutralises an unreadable-source `degraded` into an
-   *  "unknown" badge; this flag says "don't — independent evidence backs this outage", so it stays
-   *  amber. Distinct from `probeConfirmed` (which is about `sourceDead` + a HEALTHY probe). Set by the
-   *  cross-validation in `fetchAllServices`. */
+  /** #1004 — set when an unreadable-source verdict is CORROBORATED by our own probe (the service is
+   *  probed, and the probe is not healthy). Distinct from `probeConfirmed` (which is about `sourceDead`
+   *  + a HEALTHY probe). Set by the cross-validation in `fetchAllServices`.
+   *
+   *  #1233 — PROVENANCE ONLY. It used to be the correction token: the value on the wire was `degraded`
+   *  either way, and each surface had to read this flag to tell a real outage from an unreadable source
+   *  — which is exactly what several surfaces never did. The cross-validation now resolves the question
+   *  into `status` itself (a corroborating probe publishes `degraded`, an uncorroborated one `unknown`),
+   *  so no verdict reads this field; it records WHY the status is `degraded` despite an unreadable
+   *  source. */
   probeContradicted?: boolean
 }
 

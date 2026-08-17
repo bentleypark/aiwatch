@@ -9,6 +9,9 @@
 //
 // Pure helpers here (keys, validation, IP hash) are unit-tested; the KV I/O lives in index.ts.
 
+import type { ServiceStatus } from './types'
+import { isAffectedStatus } from './status-verdict'
+
 // Daily counters kept ~5 weeks so the internal demand signal has a short trend window.
 export const REPORT_COUNT_TTL_SECONDS = 35 * 86_400
 // One counted report per IP per service per UTC day (paired with the client-side localStorage guard).
@@ -204,13 +207,17 @@ export function formatReportCountsSection(
 export const REPORT_DISPLAY_MIN = 3
 
 export function shouldSurfaceReports(opts: {
-  status: string
+  status: ServiceStatus['status']
   partialCount?: number
   probeSpike?: boolean
   reportCount: number
 }): boolean {
   if (opts.reportCount <= 0) return false
-  const officialProblem = opts.status !== 'operational' || (opts.partialCount ?? 0) > 0
+  // #1233 — `isAffectedStatus`: an unreadable source is not an "official problem", it is the ABSENCE of
+  // an official signal. Such a service now falls through to the corroboration branch below and has to
+  // earn its display with an independent probe spike + baseline volume — the stricter of the two paths,
+  // not the looser one it used to take for free by merely being `!== 'operational'`.
+  const officialProblem = isAffectedStatus(opts.status) || (opts.partialCount ?? 0) > 0
   if (officialProblem) return true
   // operational page → require an independent probe spike AND baseline crowd volume.
   return !!opts.probeSpike && opts.reportCount >= REPORT_DISPLAY_MIN

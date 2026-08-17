@@ -34,7 +34,7 @@ describe('probeContradicted is set from fetchAllServices, and the floor governs 
     const claude = raw.find((s) => s.id === 'claude')
 
     // The premise: we genuinely could not read the page, so this IS the fetch-failure fallback.
-    expect(claude?.status).toBe('degraded')
+    expect(claude?.status).toBe('unknown')
     expect(claude?.sourceUnknown).toBe(true)
     // The behaviour under test: nothing corroborates an outage, so the neutral badge is NOT suppressed.
     expect(claude?.probeContradicted).toBeFalsy()
@@ -51,6 +51,11 @@ describe('probeContradicted is set from fetchAllServices, and the floor governs 
     const { raw } = await fetchAllServices(kv as unknown as KVNamespace, failing)
     const claude = raw.find((s) => s.id === 'claude')
 
+    // #1233 — this assertion now carries weight it did not before. The unreadable-source verdict is
+    // `unknown`; a failing probe is what PROMOTES it back to a real `degraded`, in the worker, so no
+    // surface has to read `probeContradicted` to reach the same conclusion. Before #1233 the value was
+    // `degraded` either way and only the flag distinguished the two cases — which is exactly why three
+    // surfaces got it wrong. The pair above/below is the both-directions pin on that promotion.
     expect(claude?.status).toBe('degraded')
     expect(claude?.probeContradicted).toBe(true)
   }, TEST_TIMEOUT_MS)

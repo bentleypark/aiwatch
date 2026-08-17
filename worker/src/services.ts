@@ -1768,7 +1768,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // non-4xx outcome as "source recovered" (the Inactive/Recovered flap). (A 4xx — incl. 429 —
           // is classified `dead-source` above, NOT unknown.)
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
         }
         summaryData = await summaryRes.json()
         if (incidentsRes?.ok) {
@@ -1808,7 +1808,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // rule) rather than inventing operational (#713). Auto-recovers the moment the RSC parses again.
           console.warn(`[fetchService] ${config.id}: incidentIoGlobalPage RSC unreadable (HTML ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — withholding status this cycle`)
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
         }
       }
 
@@ -2195,7 +2195,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           }
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           // A failed read is not a verdict about the provider.
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
         // Decode the utf-16 (BOM-detected) JSON. A 200 with an unparseable body means the endpoint's
         // shape/encoding drifted \u2014 treat that like a fetch failure (degrade + trip the persistent-block
@@ -2223,7 +2223,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           // `sourceUnknown` is what says "our read failed" on the badge and to the withdrawal hold,
           // rather than only in the counter.
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
         resetFetchFailure(trackingStore, config.id)
         // #1212 — same split as the Azure leg: status from the unsliced list, display capped.
@@ -2280,7 +2280,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // #1212 — `sourceUnknown`: this is our read failing, not a verdict about Azure. It drives the
           // #1004 `unknown` badge instead of a bare amber one, and holds the #1106 withdrawal notice
           // that an empty incident list would otherwise look like grounds for.
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], sourceUnknown: true, latency: rssRes && config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: rssRes && config.category === 'api' ? latency : null }
         }
         // #1212 — a 200 is not a read. The body has to be a feed before its emptiness means anything;
         // otherwise "no incidents" is our own misreading and clearing the streak publishes a recovery
@@ -2291,7 +2291,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           console.warn(`[fetchService] ${config.id} Azure RSS unreadable (${parsed.reason}, http=${rssRes.status}, ct=${rssRes.headers.get('content-type')}, chars=${body.length})`)
           await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
         resetFetchFailure(trackingStore, config.id)
         // #1212 — cap AFTER the keyword filter, not inside the parser. This is the whole-Azure
@@ -2688,7 +2688,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
         return {
           ...base,
-          status: shouldDegrade ? 'degraded' : 'operational',
+          status: shouldDegrade ? 'unknown' : 'operational',
           sourceUnknown: true,
           // Carry what WAS measured successfully. The main-page fetch is independent of the scrape, so
           // uptime + components usually survive a scrape/parse failure — dropping them would turn one
@@ -2791,7 +2791,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
     // source-inactive alert holds a prior dead state instead of misreading the throw as "recovered"
     // (the #714 flap reproduced only from CF egress, where the redirect intermittently throws).
     const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-    return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
+    return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
   }
 }
 
@@ -2826,6 +2826,26 @@ function getServicePlatform(config: ServiceConfig): StatusPlatform {
   return 'other'
 }
 
+/** #1233 — "this verdict may be OUR read failing rather than the service": a status that is not
+ *  `operational`, with no incident named to back it up.
+ *
+ *  `unknown` is the fetch-failure verdict since #1233; `degraded` with an empty incident list is kept
+ *  because that is what the same test caught BEFORE the split (a page reporting degraded while naming
+ *  no incident), and every caller here asks the same "is our read the problem?" question. Dropping the
+ *  `degraded` arm would silently shrink what platform-outage quorum and cross-validation consider.
+ *
+ *  Shared by `detectPlatformOutage`'s quorum count, the `degradedFromFetch` set, and the three
+ *  cross-validation phase guards in `fetchAllServices` — previously separate copies of the same inline
+ *  test. The quorum copy is the one that would have broken SILENTLY when the fetch-failure verdict
+ *  changed value: its comment said "degraded with no incidents = likely fetch failure" while no fetch
+ *  failure produces `degraded` any more, so it would have stopped counting the population it exists to
+ *  detect — under-counting, not counting zero, since a page reporting degraded while naming no incident
+ *  still lands in the set — with nothing failing to say so. `platform-outage.test.ts` now pins both
+ *  arms. */
+export function isReadSuspect(s: Pick<ServiceStatus, 'status' | 'incidents'>): boolean {
+  return (s.status === 'unknown' || s.status === 'degraded') && s.incidents.length === 0
+}
+
 /** Detect platform-level outage: 70%+ simultaneous fetch failures on a platform.
  *  Returns set of service IDs affected by platform outage. */
 export function detectPlatformOutage(
@@ -2846,8 +2866,8 @@ export function detectPlatformOutage(
     const group = platformGroups.get(platform)!
     group.total++
     group.ids.push(services[i].id)
-    if (services[i].status === 'degraded' && services[i].incidents.length === 0) {
-      // degraded with no incidents = likely fetch failure, not real incident
+    if (isReadSuspect(services[i])) {
+      // status with no incidents named = likely fetch failure, not real incident
       group.degraded++
     }
   }
@@ -3026,7 +3046,13 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       name: SERVICES[i].name,
       provider: SERVICES[i].provider,
       category: SERVICES[i].category,
-      status: 'degraded' as const,
+      // #1233 — this is a fetch failure like any other and must publish the same verdict. It used to say
+      // `degraded` with NO source flag at all, so it was the one unreadable-source path that neither the
+      // display guards nor `normalizeCachedService` could neutralise — and it is the widest one: it fills
+      // in for EVERY service left when the batch loop itself throws, so up to the full roster could
+      // publish a fabricated outage at once.
+      status: 'unknown' as const,
+      sourceUnknown: true,
       latency: null,
       uptime30d: null,
       lastChecked: new Date().toISOString(),
@@ -3040,7 +3066,9 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // Cross-validate: override false-positive degraded status when probe RTT confirms service is healthy.
   // Order: Phase 3 (metastatuspage) → Phase 2 (quorum) → Phase 1 (probe)
   // Earlier phases see original degraded counts before later phases mutate them.
-  const degradedFromFetch = raw.filter(s => s.status === 'degraded' && s.incidents.length === 0)
+  // #1233 — `isReadSuspect` (see its docstring) replaces the inline `degraded && no incidents` test that
+  // used to be repeated here and in each phase guard below, so the set and the guards cannot drift.
+  const degradedFromFetch = raw.filter(isReadSuspect)
   if (degradedFromFetch.length > 0) {
     // Phase 3: Metastatuspage preemptive signal (if platform status was cached by cron)
     // Only overrides services where probe also confirms healthy (or no probe data exists).
@@ -3052,7 +3080,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
           const platformStatus: PlatformStatus = JSON.parse(atlassianRaw)
           if (platformStatus.status !== 'operational') {
             for (const svc of raw) {
-              if (svc.status !== 'degraded' || svc.incidents.length > 0) continue
+              if (!isReadSuspect(svc)) continue
               const config = SERVICES.find(c => c.id === svc.id)
               if (!config || getServicePlatform(config) !== 'atlassian') continue
               // If probe data shows spike, this is a real outage — don't override
@@ -3077,7 +3105,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     const platformAffected = detectPlatformOutage(raw, SERVICES)
     if (platformAffected.size > 0) {
       for (const svc of raw) {
-        if (svc.status === 'degraded' && svc.incidents.length === 0 && platformAffected.has(svc.id)) {
+        if (isReadSuspect(svc) && platformAffected.has(svc.id)) {
           console.log(`[cross-validation] ${svc.id}: platform outage detected — holding operational`)
           svc.status = 'operational'
         }
@@ -3088,7 +3116,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     if (probeSnapshots && probeSnapshots.length > 0) {
       const date = new Date().toISOString().split('T')[0]
       for (const svc of degradedFromFetch) {
-        if (svc.status !== 'degraded') continue
+        if (!isReadSuspect(svc)) continue
         if (isProbeHealthy(probeSnapshots, svc.id)) {
           console.log(`[cross-validation] ${svc.id}: status page down but probe RTT normal — holding operational`)
           svc.status = 'operational'
@@ -3096,17 +3124,22 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
           if (kv) await recordProbeSuppression(kv, svc.id, date)
         } else if (isProbeFailing(probeSnapshots, svc.id)) {
           // #1004 — the probe INDEPENDENTLY corroborates the outage: the status page is unreadable AND
-          // our direct call to the service is failing. The UI neutralises a fetch-failure `degraded` into
-          // an "unknown" badge ("we can't read the source"), which would be a false reassurance here —
-          // this `degraded` is backed by evidence. Mark it so the display keeps it amber. A service with
-          // no probe (junie) or with too few samples to judge stays neutral, which is the honest default.
+          // our direct call to the service is failing. A neutral "we can't read the source" badge would
+          // be a false reassurance here — this outage is backed by evidence.
+          //
+          // #1233 — that promotion now happens HERE, in the value itself, instead of being published as
+          // `unknown` + a flag for each surface to correct. `probeContradicted` used to be the correction
+          // token, and three surfaces never applied it. The worker holds the probe data and already runs
+          // this pass, so it is the one place that can resolve the question once; the flag survives only
+          // as provenance (why this is `degraded` despite an unreadable source), read by no verdict.
+          svc.status = 'degraded'
           svc.probeContradicted = true
         } else if (svc.id in (probeSnapshots[probeSnapshots.length - 1]?.data ?? {})) {
           // #1232 — a probe answering 5xx fast is no longer healthy (it used to force `operational`
           // here, and logged that it had), but it is not `isProbeFailing` either, since that predicate
           // reads only RTT. Without this the branch is silent. It records that a probed service landed
           // in the middle verdict; WHICH reason (5xx, too few samples, jitter) is still not separated.
-          console.log(`[cross-validation] ${svc.id}: probe neither healthy nor failing — keeping degraded + sourceUnknown (neutral badge)`)
+          console.log(`[cross-validation] ${svc.id}: probe neither healthy nor failing — keeping ${svc.status} (neutral badge)`)
         }
       }
     }
@@ -3137,11 +3170,26 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   if (needsFallback && kv) {
     const cached = await kv.get(CACHE_KEY).catch(() => null)
     if (cached) {
+      // NOT normalised (#1233): the only thing read from this snapshot is `prev.status === 'operational'`
+      // below, and the transitional decode only ever rewrites `degraded` → `unknown` — both of which fail
+      // that test identically. A decode here would be a provable no-op, so it is left out rather than
+      // added as reassurance. The read-side decode that matters is in `cacheRead` and `cronAlertCheck`.
       try { cachedServices = JSON.parse(cached).services } catch { console.warn('[fetchAllServices] corrupt services cache in KV — fallback not available') }
     }
   }
 
   // Enriched results (with cache fallback for degraded services)
+  //
+  // #1233 — `unknown` is deliberately NOT smoothed here, and the `=== 'degraded'` test is what keeps it
+  // out. Substituting the last cached snapshot means republishing a stale `operational` in place of a
+  // verdict we no longer have — claiming health with no evidence, the defect class #1232 closed. Before
+  // this refactor an unreadable source WAS `degraded`, so it fell into this branch and got replaced by
+  // `prev` wholesale, which also dropped its `sourceUnknown` flag for that poll (#1235). Routing the
+  // unreadable case to its own value takes it out of the branch rather than adding a guard to it.
+  //
+  // NOT a claim that #1235 is closed: a probe-CORROBORATED unreadable source is promoted to `degraded`
+  // by the cross-validation above, before this runs, so that case still enters the branch and still
+  // loses `probeContradicted` with the rest of the record. That is #1235's scope, unchanged here.
   const enriched: ServiceStatus[] = raw.map((svc) => {
     if (svc.status === 'degraded' && cachedServices) {
       const prev = cachedServices.find((s) => s.id === svc.id)

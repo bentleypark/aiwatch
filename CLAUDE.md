@@ -279,6 +279,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   index.ts           # Entry: CORS, routing, /api/*, /badge, /feed, Cron scheduled handler
   services.ts        # Service configs + fetch orchestrator + status determination
   types.ts utils.ts  # Shared types (ServiceStatus, Incident) + shared utils (formatDuration, fetchWithTimeout, sanitize)
+  status-verdict.ts  # The one raw-status → affected/healthy/unreadable mapping (#1233) — `unknown` is neither an outage nor an all-clear
   score.ts           # AIWatch Score (Uptime 40 / Incidents 25 / Recovery 15 / Responsiveness 20)
   alerts.ts          # Incident + status-edge alert detection, holds, merges, tweet/reply drafts
   ai-analysis.ts     # Hybrid incident analysis — Gemma 4 26B primary, Claude Sonnet fallback

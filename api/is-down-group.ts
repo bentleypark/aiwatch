@@ -82,9 +82,17 @@ function esc(s: string): string {
 }
 
 /** Narrows an arbitrary Worker status string to the 4 values this page renders — anything else
- *  (a typo, a future status value the Worker adds) collapses to 'unknown' rather than being trusted. */
+ *  (a typo, a future status value the Worker adds) collapses to 'unknown' rather than being trusted.
+ *
+ *  #1233 — `'unknown'` is listed explicitly now that the Worker publishes it for a source it could not
+ *  read. It already arrived at the right answer through the fall-through, which is why this page needed
+ *  no fix to stop rendering "Degraded Performance" for all three Anthropic surfaces once the Worker
+ *  stopped calling an unreadable source `degraded`: the rendering support has been here since #1164
+ *  (STATUS_RANK / STATUS_EMOJI / STATUS_LABEL / worstStatus), it was the VALUE that never arrived.
+ *  Spelling it out separates "we recognise this status" from "we did not recognise this status", which
+ *  the fall-through conflates — they deserve the same rendering but not the same silence. */
 function normalizeStatus(raw: string | undefined): MemberStatus['status'] {
-  return raw === 'operational' || raw === 'degraded' || raw === 'down' ? raw : 'unknown'
+  return raw === 'operational' || raw === 'degraded' || raw === 'down' || raw === 'unknown' ? raw : 'unknown'
 }
 
 /** Worst-of across a set of statuses: down > degraded > unknown > operational — an unconfirmed member
@@ -129,9 +137,16 @@ function renderGroupPage(
   // path — that case resolves to the first member through `find` like any other.
   const beaconSvcId = members.find((m) => m.status === headline)?.id ?? family.members[0]
   const title = `Is ${family.name} Down? ${STATUS_LABEL[headline]} | AIWatch`
+  // #1233 — three-way. The old two-valued form put `unknown` in the else branch, so the meta/og/twitter
+  // descriptions AND the visible headline read "Unknown — see which service IS AFFECTED", asserting a
+  // confirmed outage under a headline that says the status could not be confirmed. This page is served
+  // 200 and cached, so that sentence is what crawlers and unfurls carry — and an unreadable Anthropic
+  // source is #1233's originating scenario, i.e. the common path rather than an edge case.
   const desc = headline === 'operational'
     ? `No — every ${family.name} service AIWatch monitors is currently operational.`
-    : `${STATUS_LABEL[headline]} — see which ${family.name} service is affected and its live status.`
+    : headline === 'unknown'
+      ? `Unknown — AIWatch could not read the official status source for ${family.name}, so it cannot confirm the status either way.`
+      : `${STATUS_LABEL[headline]} — see which ${family.name} service is affected and its live status.`
   const canonical = `https://ai-watch.dev/is-${family.slug}-down`
   // #1164 follow-up — the group page originally used the static site-wide og-intro.png, unlike every
   // individual is-down page (which draws a live status card via the worker's /api/og). Reuses that
