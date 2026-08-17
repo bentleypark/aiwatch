@@ -28,6 +28,15 @@ describe('worstStatus (#837)', () => {
     expect(worstStatus([{ status: 'operational' }, { status: 'weird' }])).toBe('operational')
     expect(worstStatus([{ status: 'down' }, { status: 'weird' }])).toBe('down')
   })
+
+  // #1233 — `unknown` had no STATUS_RANK entry, so `worstStatus` skipped those services outright and an
+  // all-unreadable board painted a GREEN toolbar badge. Ordering mirrors is-down-group.ts (#1164).
+  it('ranks unknown above operational but below a CONFIRMED problem', () => {
+    expect(worstStatus([{ status: 'operational' }, { status: 'unknown' }])).toBe('unknown')
+    expect(worstStatus([{ status: 'unknown' }, { status: 'unknown' }])).toBe('unknown')
+    expect(worstStatus([{ status: 'unknown' }, { status: 'degraded' }])).toBe('degraded')
+    expect(worstStatus([{ status: 'unknown' }, { status: 'down' }])).toBe('down')
+  })
 })
 
 describe('badgeFor (#837)', () => {
@@ -123,6 +132,12 @@ describe('shouldShowFallback (status-gated, mirrors dashboard)', () => {
     expect(shouldShowFallback('operational')).toBe(false)
     expect(shouldShowFallback(null)).toBe(false)
     expect(shouldShowFallback(undefined)).toBe(false)
+  })
+
+  // #1233 — the reported defect, in the surface users actually hit. With status.claude.com unreadable
+  // on 2026-08-14 the extension recommended switching off Claude to ChatGPT / Grok / Junie / Codex.
+  it('false for unknown — an unreadable source is not grounds to recommend abandoning the service', () => {
+    expect(shouldShowFallback('unknown')).toBe(false)
   })
 })
 

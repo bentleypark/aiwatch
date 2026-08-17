@@ -1,5 +1,6 @@
 // AI Analysis Modal — shows incident analysis results from Claude
 import { useLang } from '../hooks/useLang'
+import { isDisplayAffected, displayStatusOf } from '../utils/statusDisplay'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
 import { computePredictionOutcome, verdictLabel, estimateExceeded, exceededRecoveryText } from '../utils/predictionAccuracy'
 import { hasLiveIncident, readsResolved } from '../utils/liveIncident'
@@ -11,6 +12,21 @@ function timeAgo(date, lang) {
   if (mins < 60) return lang === 'ko' ? `${mins}분 전` : `${mins}m ago`
   const hrs = Math.floor(mins / 60)
   return lang === 'ko' ? `${hrs}시간 전` : `${hrs}h ago`
+}
+
+/** #1233 — the worst DISPLAY state across a grouped incident's services.
+ *
+ *  Three outcomes, not two. The old form asked `some(s => s.status !== 'operational') ? 'degraded'`,
+ *  which labelled an unreadable source as an outage; replacing that test alone left an all-unreadable
+ *  group falling through to `'operational'` and rendering GREEN — trading a false outage for a false
+ *  all-clear. Every arm reads the DISPLAY state, so this cannot disagree with the pill beside it.
+ *
+ *  Exported because it was previously an inline ternary inside the render, which no test could reach. */
+export function groupWorstStatus(svcs) {
+  if (svcs.some(s => displayStatusOf(s) === 'down')) return 'down'
+  if (svcs.some(isDisplayAffected)) return 'degraded'
+  if (svcs.some(s => displayStatusOf(s) === 'unknown')) return 'unknown'
+  return 'operational'
 }
 
 export default function AnalysisModal({ aiAnalysis, services, onClose }) {
@@ -113,8 +129,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
           {groups.map(({ svcIds, analyses }) => {
             const svcs = svcIds.map(id => services.find(s => s.id === id)).filter(Boolean)
             if (svcs.length === 0) return null
-            const worstStatus = svcs.some(s => s.status === 'down') ? 'down'
-              : svcs.some(s => s.status !== 'operational') ? 'degraded' : 'operational'
+            const worstStatus = groupWorstStatus(svcs)
             const isAllResolved = svcs.every(s => s.status === 'operational')
             // #1104 — the shared primitive, not a fourth hand-inlined copy of the same predicate.
             // Its guard shape (`Array.isArray`) also differs from the `?? []` this line used to carry,
@@ -158,7 +173,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
               <div key={svcIds.join(',')} className="bg-[var(--bg2)] rounded-lg" style={{ padding: '12px 14px', marginBottom: '10px', opacity: isAllResolved && !hasActiveInc && !allRecovered ? 0.6 : 1 }}>
                 {/* Service header */}
                 <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: analyses.length > 1 ? '6px' : '8px' }}>
-                  <span className="w-[6px] h-[6px] rounded-full" style={{ background: worstStatus === 'operational' ? 'var(--green)' : worstStatus === 'down' ? 'var(--red)' : 'var(--amber)' }} />
+                  <span className="w-[6px] h-[6px] rounded-full" style={{ background: worstStatus === 'operational' ? 'var(--green)' : worstStatus === 'down' ? 'var(--red)' : worstStatus === 'unknown' ? 'var(--text2)' : 'var(--amber)' }} />
                   <span className="text-[13px] font-medium text-[var(--text0)]">{svcs.map(s => s.name).join(', ')}</span>
                   {analyses.length > 1 && (
                     <span className="mono text-[9px] text-[var(--text2)]">({analyses.length} {lang === 'ko' ? '건' : 'incidents'})</span>

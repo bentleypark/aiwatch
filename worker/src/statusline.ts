@@ -1,6 +1,7 @@
 import type { ServiceStatus, Incident } from './types'
 import { getFallbacks } from './fallback'
 import { appendUtm } from './utils'
+import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
 import { SERVICE_ID_TO_SLUG } from '../../api/_is-down/slug-map'
 
 // Minimal status-only projection for terminal statusline integrations (#438).
@@ -104,35 +105,56 @@ function capWithOverflow(down: StatuslineService[], render: (s: StatuslineServic
 }
 
 // Pure: render the final statusline string for a preset from the lite service list.
-// Preserves the incoming service order (the cache order), matching the old jq behaviour.
-// Returns '' (empty statusline) when nothing is degraded, EXCEPT `branded` which keeps
-// an always-on "AIWatch 🟢" label. Unknown preset → '' (caller should 404 first).
+// Returns '' (empty statusline) when there is nothing to list, EXCEPT `branded` which keeps an
+// always-on "AIWatch 🟢" label. Unknown preset → '' (caller should 404 first).
+//
+// Ordering is affected-first, then unreadable, each keeping its incoming (cache) order — it no longer
+// preserves cache order across the whole list the way the old jq behaviour did, because the 3-item cap
+// belongs to confirmed outages before unread sources.
+//
+// #1233 — a service is listed here for one of TWO reasons now, and they render differently.
+//
+// `isAffectedStatus` is an outage AIWatch can vouch for → 🔴, the claim this line has always made.
+// `unknown` is a source AIWatch could not read → ⚪, borrowing the exact idiom #1227 chose below for
+// the no-snapshot case, and for the same reason it gives: dropping these services instead would make
+// the line say 🟢/nothing, and "silence reads as 'nothing wrong', which is the very claim we cannot
+// make". Without the split an unreadable source would render 🔴 here, asserting an outage off a page we
+// failed to fetch.
+const statusMarker = (s: StatuslineService): string => (isAffectedStatus(s.status) ? '🔴' : '⚪')
+
 export function renderStatuslinePreset(preset: string, services: StatuslineService[]): string {
-  const down = services.filter((s) => s.status !== 'operational')
+  const affected = services.filter((s) => isAffectedStatus(s.status))
+  const unreadable = services.filter((s) => isUnreadableStatus(s.status))
+  // Affected first: a confirmed outage outranks an unread source for the 3-item cap.
+  const listed = [...affected, ...unreadable]
   switch (preset) {
     case 'branded': {
       const label = osc8(HOME_URL, 'AIWatch')
-      if (down.length === 0) return `${label} 🟢`
-      return `${label} ${capWithOverflow(down, (s) => osc8(detailUrl(s.id), `🔴 ${s.name}`))}`
+      if (listed.length === 0) return `${label} 🟢`
+      return `${label} ${capWithOverflow(listed, (s) => osc8(detailUrl(s.id), `${statusMarker(s)} ${s.name}`))}`
     }
     case 'clickable': {
-      if (down.length === 0) return ''
-      return capWithOverflow(down, (s) => osc8(detailUrl(s.id), `🔴 ${s.name}`))
+      if (listed.length === 0) return ''
+      return capWithOverflow(listed, (s) => osc8(detailUrl(s.id), `${statusMarker(s)} ${s.name}`))
     }
     case 'degraded_only': {
-      if (down.length === 0) return ''
-      return capWithOverflow(down, (s) => `🔴 ${s.name}`)
+      if (listed.length === 0) return ''
+      return capWithOverflow(listed, (s) => `${statusMarker(s)} ${s.name}`)
     }
     case 'compact_badge': {
-      return down.length === 0 ? '' : `🔴 ${down.length} AI services`
+      // Two counts, never summed into one: they are different claims.
+      const parts: string[] = []
+      if (affected.length > 0) parts.push(`🔴 ${affected.length} AI services`)
+      if (unreadable.length > 0) parts.push(`⚪ ${unreadable.length} unknown`)
+      return parts.join(' · ')
     }
     case 'full_list': {
-      return down.map((s) => `${s.status === 'down' ? 'X' : '!'}·${s.name}`).join(' | ')
+      return listed.map((s) => `${s.status === 'down' ? 'X' : s.status === 'unknown' ? '?' : '!'}·${s.name}`).join(' | ')
     }
     case 'scoped': {
-      return down
+      return listed
         .filter((s) => SCOPED_IDS.has(s.id))
-        .map((s) => `🔴 ${s.name}`)
+        .map((s) => `${statusMarker(s)} ${s.name}`)
         .join(' ')
     }
     default:
@@ -173,15 +195,38 @@ export function renderStatuslinePresetUnknown(preset: StatuslinePreset): string 
 
 // ── Monitor down-list (#920) ──────────────────────────────────────────────
 //
-// The plugin's background monitor needs a PARSEABLE, UNCAPPED list of the currently
-// non-operational services so it can diff poll-over-poll and emit explicit "X is down"
-// / "Y has recovered" lines (the display presets are capped at 3 + are emoji strings,
-// unsuitable for a diff). One `\t`-separated `status<TAB>name` line per non-operational
-// service, in cache order; empty body when all operational. Consumed only by the monitor.
+// The plugin's background monitor needs a PARSEABLE, UNCAPPED list so it can diff poll-over-poll and
+// emit explicit transition lines (the display presets are capped at 3 + are emoji strings, unsuitable
+// for a diff). This endpoint — not the presets — is what the monitor polls. One `\t`-separated `status<TAB>name` line per LISTED service, in
+// cache order; empty body when there is nothing to say. Consumed only by the monitor.
+//
+// #1233 — CARVE-OUT, and the one surface in this change that keeps the OLD encoding. An unreadable
+// source is listed here as `degraded`, byte-identical to what this endpoint emitted before #1233.
+//
+// Not an oversight, and not the right answer either — it is a scope decision. The honest value on this
+// wire is `unknown`, but the consumer is `plugin/aiwatch/bin/aiwatch-monitor.sh`, which infers RECOVERY
+// FROM ABSENCE (`comm -23 prev cur` → `✅ … has recovered`). Absence therefore means two different
+// things — "recovered" and "we stopped being able to see it" — and no encoding on this endpoint alone
+// fixes that: dropping an unreadable service announces a false recovery for a service that is still
+// down, while emitting a new status word silently changes a contract that installed plugin copies
+// parse. Both were tried during this change's review and both produced defects worse than the one they
+// replaced, in a script that has no automated test of any kind.
+//
+//
+// One consequence to state plainly, because "unchanged from today" understates it: the OTHER surface of
+// the same plugin bundle DID change. `/aiwatch` reads `/statusline/brief`, which now says "Status source
+// unreadable … not an outage", while the background monitor reading this endpoint still says
+// "🔴 … is degraded" — about the same service, in the same terminal, at the same moment. Before this
+// change both said `degraded`. The briefing is the surface to trust until the monitor follow-up lands.
+// So this endpoint stays exactly as it is until the monitor's absence-inference is fixed with a test
+// harness in place FIRST — tracked as a follow-up. The cost is stated plainly: the plugin monitor keeps
+// calling an unreadable source `degraded`, unchanged from today. Every other surface (`:preset`
+// displays, the extension, is-down, the dashboard, Discord) publishes the neutral state.
 export function renderStatuslineDownList(services: StatuslineService[]): string {
   return services
-    .filter((s) => s.status !== 'operational')
-    .map((s) => `${s.status}\t${s.name}`)
+    .filter((s) => isAffectedStatus(s.status) || isUnreadableStatus(s.status))
+    // The legacy word for an unreadable source, so the emitted bytes match the pre-#1233 endpoint.
+    .map((s) => `${isUnreadableStatus(s.status) ? 'degraded' : s.status}\t${s.name}`)
     .join('\n')
 }
 
@@ -298,8 +343,21 @@ export function renderStatuslineBrief(
   scoredAll: BriefService[],
   aiSummaryMap: Record<string, string> = {},
 ): string {
-  const down = scoredAll.filter((s) => s.status !== 'operational')
-  if (down.length === 0) return 'AIWatch: all monitored AI services operational ✅'
+  const down = scoredAll.filter((s) => isAffectedStatus(s.status))
+  // #1233 — services whose status source AIWatch could not read. They are NOT listed as issues below
+  // (there is no incident to brief and no outage to claim), but they do disqualify the all-clear: the
+  // ✅ sentence asserts something about EVERY monitored service, and we have nothing to say about these.
+  // Same judgement #1227 applied one line up for the no-snapshot case — with a snapshot we can be
+  // precise about which services are unread instead of blanking the whole briefing.
+  const unreadable = scoredAll.filter((s) => isUnreadableStatus(s.status))
+  const unreadNote = unreadable.length > 0
+    ? `⚪ Status source unreadable for ${unreadable.map((s) => s.name).join(', ')} — not an outage, but not confirmed operational either.`
+    : ''
+  if (down.length === 0) {
+    return unreadable.length === 0
+      ? 'AIWatch: all monitored AI services operational ✅'
+      : `AIWatch: no confirmed AI service issues. ${unreadNote}\nMore: https://ai-watch.dev`
+  }
 
   const lines: string[] = ['AIWatch — active AI service issues:']
   for (const svc of down) {
@@ -319,6 +377,7 @@ export function renderStatuslineBrief(
     const slug = SERVICE_ID_TO_SLUG[svc.id]
     if (slug) lines.push(`   ↳ https://ai-watch.dev/p/${slug}`)
   }
+  if (unreadNote) lines.push(unreadNote)
   lines.push('More: https://ai-watch.dev')
   return lines.join('\n')
 }

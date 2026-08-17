@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchAllServices } from '../services'
 import type { ServiceStatus } from '../types'
-import { TEST_TIMEOUT_MS, HEALTHY_SUMMARY, mockKV, seededTracking, decayedTracking, stubFetchFailingClaudePage, stubFetchDeadClaudePage, probeFixture } from './helpers/unreadable-source'
+import { TEST_TIMEOUT_MS, HEALTHY_SUMMARY, mockKV, seededTracking, decayedTracking, stubFetchFailingClaudePage, stubFetch5xxClaudePage, stubFetchDeadClaudePage, probeFixture } from './helpers/unreadable-source'
 
 // #1232 — ONE invariant, two independent paths that broke it:
 //
@@ -9,8 +9,10 @@ import { TEST_TIMEOUT_MS, HEALTHY_SUMMARY, mockKV, seededTracking, decayedTracki
 //   failure alone.
 //
 // Asserted on `raw` — what `CACHE_KEY` (is-down, badge, statusline) is written from. `/api/status`
-// serves `enriched`, where a pre-existing one-poll cache smoothing can still substitute a cached
-// operational record; that path is out of this issue's scope and is not pinned here either way.
+// serves `enriched`, where a pre-existing one-poll cache smoothing can substitute a cached operational
+// record (#1235). Since #1233 that smoothing keys on `degraded`, so an unreadable source no longer
+// enters it — but a probe-CORROBORATED one still does, because the cross-validation promotes it to
+// `degraded` before the smoothing runs. #1235 is unchanged by this file either way; it pins `raw`.
 //
 // Part 1: `trackFetchFailure`'s count decays 30 min after the crossing that froze its timestamp, so a
 // still-unreadable source re-published `operational` in a loop.
@@ -36,7 +38,7 @@ async function claudeAfterFetch(kv: ReturnType<typeof mockKV>, probes?: ReturnTy
 }
 
 describe('#1232 Part 1 — a sustained fetch failure does not decay back to green', () => {
-  it('stays degraded one decay window past the crossing, while the source is still unreadable', async () => {
+  it('stays unknown one decay window past the crossing, while the source is still unreadable', async () => {
     stubFetchFailingClaudePage()
     // Mid-outage: crossed hours ago, `failCountAt` frozen at the crossing and now past the 30-min
     // decay window. The count therefore reads as "first failure" this cycle — which is exactly what
@@ -45,11 +47,13 @@ describe('#1232 Part 1 — a sustained fetch failure does not decay back to gree
 
     const claude = await claudeAfterFetch(kv)
 
-    // `sourceUnknown` is the premise (our read failed); `degraded` is the behaviour under test.
-    expect({ status: claude?.status, sourceUnknown: claude?.sourceUnknown }).toEqual({ status: 'degraded', sourceUnknown: true })
+    // `sourceUnknown` is the premise (our read failed); the published verdict is the behaviour under
+    // test. #1233 moved that verdict from `degraded` to `unknown` — the invariant is unchanged (neither
+    // is `operational`), and `unknown` states it without asserting an outage we cannot evidence.
+    expect({ status: claude?.status, sourceUnknown: claude?.sourceUnknown }).toEqual({ status: 'unknown', sourceUnknown: true })
   }, TEST_TIMEOUT_MS)
 
-  it('still ramps: a first failed read is NOT degraded on its own (the three-strike gate is intact)', async () => {
+  it('still ramps: a first failed read does NOT publish a verdict on its own (three-strike gate intact)', async () => {
     stubFetchFailingClaudePage()
     const kv = mockKV() // no prior state — this is strike 1
 
@@ -59,10 +63,10 @@ describe('#1232 Part 1 — a sustained fetch failure does not decay back to gree
     expect(claude?.status).toBe('operational')
   }, TEST_TIMEOUT_MS)
 
-  it('recovers: a successful read clears the pin, so the NEXT failure ramps again instead of degrading', async () => {
+  it('recovers: a successful read clears the pin, so the NEXT failure ramps again instead of publishing', async () => {
     stubFetchFailingClaudePage()
     const kv = mockKV(decayedTracking(['claude']))
-    expect((await claudeAfterFetch(kv))?.status).toBe('degraded')
+    expect((await claudeAfterFetch(kv))?.status).toBe('unknown')
 
     // Same KV throughout — each call reads the tracking blob the previous one wrote back.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(HEALTHY_SUMMARY), { status: 200, headers: { 'Content-Type': 'application/json' } })))
@@ -104,6 +108,29 @@ describe('#1232 Part 1 — a sustained fetch failure does not decay back to gree
   }, TEST_TIMEOUT_MS)
 })
 
+// #1233 — the SUMMARY-5xx leg, which every test above misses. `stubFetchFailingClaudePage` throws, so
+// the whole #1232/#1233 claude corpus exercises `fetchService`'s outer catch; the 5xx branch is its own
+// return path and is the way a provider under load actually fails. Mutating that line back to
+// `degraded` was green across all 4350 tests before this case existed.
+describe('#1233 — a status page answering 5xx publishes the same unreadable verdict', () => {
+  it('crosses to unknown, not degraded', async () => {
+    stubFetch5xxClaudePage()
+    const claude = await claudeAfterFetch(mockKV(seededTracking(['claude'])))
+    expect({ status: claude?.status, sourceUnknown: claude?.sourceUnknown })
+      .toEqual({ status: 'unknown', sourceUnknown: true })
+    // #1233 invariant — an unreadable source carries NO incident. Several modules omit an `unknown`
+    // branch because of this (the X drafts, the feed's fallback line, the region/calendar fallbacks).
+    expect(claude?.incidents).toEqual([])
+  }, TEST_TIMEOUT_MS)
+
+  it('control: under the threshold it still ramps rather than publishing a verdict', async () => {
+    stubFetch5xxClaudePage()
+    const claude = await claudeAfterFetch(mockKV())
+    expect(claude?.status).toBe('operational')
+    expect(claude?.sourceUnknown).toBe(true)
+  }, TEST_TIMEOUT_MS)
+})
+
 describe('#1232 Part 2 — a fast 5xx probe is not an all-clear', () => {
   it('does not force operational when the probe answers 503 inside the RTT bar', async () => {
     stubFetchFailingClaudePage()
@@ -120,7 +147,7 @@ describe('#1232 Part 2 — a fast 5xx probe is not an all-clear', () => {
     // floor. Whether an error response should instead raise the badge to amber is the open follow-up
     // on #1232; this change only stops it counting as an all-clear.
     expect({ status: claude?.status, sourceUnknown: claude?.sourceUnknown, probeContradicted: claude?.probeContradicted })
-      .toEqual({ status: 'degraded', sourceUnknown: true, probeContradicted: undefined })
+      .toEqual({ status: 'unknown', sourceUnknown: true, probeContradicted: undefined })
   }, TEST_TIMEOUT_MS)
 
   it('still cross-validates: a fast 2xx probe holds the service operational (#507 unchanged)', async () => {

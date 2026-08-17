@@ -14,9 +14,12 @@ const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }>
 }
 
 export function generateOgSvg(service: string, status: string, score: string, uptime: string): string {
+  // #1233 — an unrecognised value falls to UNKNOWN, not to operational. The old default made the one
+  // case we cannot interpret render as a confident green "Operational", and an OG card is cached by
+  // social platforms for days — the same reasoning `badgeStatusColor` gives, on a more durable artifact.
   const s = STATUS_STYLE[status]
-  if (!s) console.warn(`[og] Unrecognized status "${status}", defaulting to operational`)
-  const style = s ?? STATUS_STYLE.operational
+  if (!s) console.warn(`[og] Unrecognized status "${status}", defaulting to unknown`)
+  const style = s ?? STATUS_STYLE.unknown
   const safeName = escapeXml(service.slice(0, 50))
   const safeScore = escapeXml(score.slice(0, 5))
   const safeUptime = escapeXml(uptime.slice(0, 6))

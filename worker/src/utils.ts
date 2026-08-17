@@ -26,8 +26,12 @@ export function worstUnresolvedImpact(
  * `operational` → up; `down` → down. A `degraded` snapshot counts as DOWN only when a
  * **major/critical** unresolved incident backs it. A `degraded` from a minor/partial-scope
  * incident (e.g. OpenAI's FedRAMP "degraded performance", Deepgram's Voice-Agent downstream
- * component) — or from a transient no-incident fetch hiccup — is NOT a real service-wide
- * outage, so it counts as up. This mirrors the official rolling-uptime weighting (minor impact
+ * component) — or from a transient no-incident fetch hiccup — is NOT a real service-wide outage, so it
+ * counts as up. #1233 — that includes the `unknown` an unreadable source now publishes: it takes the
+ * same path a no-incident `degraded` used to, and counts as up. Not because that is right (the poll
+ * observed nothing, so neither answer is), but because the alternative — recording no sample — makes
+ * `total === 0` reachable, and `computeMonthlyUptime` publishes that as 0%. See the note in `cacheWrite`
+ * (`index.ts`), where the counter is written. This mirrors the official rolling-uptime weighting (minor impact
  * barely dents uptime) and stops a single sticky minor incident from cratering weekly uptime to
  * ~50% while the status page's own uptime reads ~100%. The counter feeds /api/uptime, the weekly
  * Stability Trend, AND the AIWatch Score's uptime component, so all three align with official.
@@ -284,8 +288,10 @@ function isTimestampStale(at: string | undefined, nowMs: number, maxAgeMs: numbe
 
 /**
  * Track consecutive fetch failures per service.
- * Returns true if the service should be degraded — either this call reached the threshold, or an
- * earlier crossing's `failSince` is still live (`isFailSinceLive`).
+ * Returns true when the service should publish the UNREADABLE verdict (`status: 'unknown'` since
+ * #1233 — this used to be `degraded`, and the local `shouldDegrade` variable names at the call sites
+ * still carry the old word) — either this call reached the threshold, or an earlier crossing's
+ * `failSince` is still live (`isFailSinceLive`).
  * Returns false while still climbing toward the first crossing (treat as operational / no data).
  */
 export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | undefined, svcId: string, threshold = 3, nowMs = Date.now()): Promise<boolean> {

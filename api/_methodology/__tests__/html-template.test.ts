@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { renderMethodologyPage } from '../html-template'
 import { PROBE_TARGETS } from '../../../worker/src/probe' // #678 — lockstep source of truth
 import { SERVICES } from '../../../worker/src/services' // #1110 — Better Stack roster lockstep
@@ -178,7 +180,7 @@ describe('renderMethodologyPage', () => {
   it('uses the UI-facing status labels, not the raw internal names (#674 — badge ≠ impact axis)', () => {
     // §2 must match the dashboard service BADGE (availability axis): Operational / Partial / Degraded
     // / Down (status.* labels; Partial added #722), and the worst-of priority is stated in those terms.
-    expect(html).toContain('Operational · Partial · Degraded · Down')
+    expect(html).toContain('Operational · Partial · Degraded · Down · Unknown')
     expect(html).toContain('Down &gt; Degraded &gt; Operational')
     // #674 — the badge axis must NOT carry the calendar's impact-scale words ("Partial Outage" /
     // "Major Outage" are the OLD colliding labels; the calendar impact axis is now Minor/Major/Critical).
@@ -202,6 +204,47 @@ describe('renderMethodologyPage', () => {
     // the old duplicate landing-style top-bar section anchors are gone — the top nav is site-level only
     expect(html).not.toContain('<div class="toc">')
     expect(html).not.toContain('class="hero-outer"')
+  })
+
+  // #1233 — the fetch-failure card states the gate that decides whether an unreadable source gets
+  // judged at all, and it states it as a DERIVATION: "최근 3회 probe(5분 간격이므로 15분)". Three
+  // numbers, none of them free — the cadence is the cron schedule, the window is `maxAgeMs`, and the
+  // cycle count is the quotient. That is why the copy reads the way it does: 15 minutes was never
+  // chosen as a duration, it is 3 probe cycles (the reason recorded at introduction, #187/#188).
+  //
+  // So this pins the ARITHMETIC, not the strings: change `crons` to `*/10` and 3 cycles becomes wrong
+  // even though `maxAgeMs` never moved. Both inputs are read from their own source of truth.
+  it('keeps the probe-judgement gate in LOCKSTEP with probe.ts + the cron schedule (#1233)', () => {
+    const repoRoot = process.cwd()
+    const probeSrc = readFileSync(join(repoRoot, 'worker', 'src', 'probe.ts'), 'utf8')
+    const servicesSrc = readFileSync(join(repoRoot, 'worker', 'src', 'services.ts'), 'utf8')
+    const wranglerSrc = readFileSync(join(repoRoot, 'worker', 'wrangler.toml'), 'utf8')
+
+    const windowMs = Number(probeSrc.match(/maxAgeMs = (\d[\d_]*)/)?.[1].replace(/_/g, ''))
+    expect(windowMs, 'maxAgeMs default not found in probe.ts').toBeGreaterThan(0)
+    const cadenceMin = Number(wranglerSrc.match(/crons\s*=\s*\["\*\/(\d+) /)?.[1])
+    expect(cadenceMin, 'cron cadence not found in wrangler.toml').toBeGreaterThan(0)
+
+    const windowMin = windowMs / 60_000
+    const cycles = windowMin / cadenceMin
+    expect(Number.isInteger(cycles), 'the window is no longer a whole number of probe cycles').toBe(true)
+
+    // The minimum-sample gate, read from BOTH predicates so a change to either is caught.
+    const gates = probeSrc.match(/recent\.length < (\d+)/g) ?? []
+    expect(gates.length, 'expected the min-sample gate in both predicates').toBe(2)
+    expect(new Set(gates).size, 'the two predicates disagree on the minimum').toBe(1)
+    const minSamples = Number(gates[0].match(/(\d+)/)![1])
+
+    expect(html).toContain(`최근 ${cycles}회 probe(${cadenceMin}분 간격이므로 ${windowMin}분)`)
+    expect(html).toContain(`${minSamples}회 이상일 때 그 기록으로 판정합니다`)
+    expect(html).toContain(`기록이 ${minSamples}회 미만일 때도`)
+    expect(html).toContain(`at least ${minSamples} of the last ${cycles} probes`)
+    expect(html).toContain(`every ${cadenceMin} minutes, so a ${windowMin}-minute window`)
+
+    // The published window is only true if the cross-validation uses the DEFAULT `maxAgeMs`; a call
+    // site passing its own would silently make every number above wrong.
+    const overrides = servicesSrc.match(/isProbe(?:Healthy|Failing)\([^)]*,[^)]*,[^)]*\)/g) ?? []
+    expect(overrides, 'a call site overrides maxAgeMs — the published window is no longer accurate').toEqual([])
   })
 
   it('keeps the probe count + non-probed set in LOCKSTEP with PROBE_TARGETS (#678)', () => {

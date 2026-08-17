@@ -2,6 +2,7 @@
 // Used by cronAlertCheck in index.ts
 
 import { buildGroupedFallbackText, API_TIER } from './fallback'
+import { isAffectedStatus } from './status-verdict'
 import { sanitize, formatDuration, appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 import { XAI_REGION_RE } from './xai-regions'
@@ -598,7 +599,11 @@ export function buildIncidentAlerts(
     // #781 — grouped per-category fallbacks across ALL affected surfaces of the incident (not just the
     // primary's category), matching the dashboard: a multi-surface Anthropic incident now recommends
     // an LLM + an App + a Coding-Agent alternative, not just two LLMs.
-    const fallbackText = (!isAdvisory && firstSvc.status !== 'operational' && !regionText)
+    // #1233 — `isAffectedStatus`, not `!== 'operational'`. Behaviour-neutral today: this path only runs
+    // for a service that HAS an incident, and every `unknown` return carries an empty incident list, so
+    // `firstSvc.status === 'unknown'` is not currently reachable here. Spelled correctly so it stays
+    // that way — the same posture as the sibling gate in `index.ts`'s brief-summary builder.
+    const fallbackText = (!isAdvisory && isAffectedStatus(firstSvc.status) && !regionText)
       ? buildGroupedFallbackText(ids, services)
       : ''
     alerts.push({
@@ -883,6 +888,23 @@ export function buildServiceAlerts(
       return now - resolvedMs < RESOLVED_RACE_WINDOW_MS
     })
 
+    // #1233 — the decision for `unknown`, stated because "nothing happens" is a choice here, not an
+    // omission. An unreadable status source fires NO status-edge alert: it matches neither the `down`
+    // nor the `degraded` arm below, and it does not satisfy the `operational` recovery arm either.
+    //
+    // All three follow from the same rule — we alert on what we KNOW. A degraded alert off a page we
+    // failed to fetch is a false page; and a recovery alert is equally unearned, since losing sight of a
+    // service is not evidence it came back. A service that goes `down` → `unknown` therefore fires its
+    // 🟢 recovery only once we can actually read `operational` again.
+    //
+    // Bounded, not permanent: `alerted:down:` / `alerted:degraded:` are written with a 2h TTL and are
+    // only refreshed while the arm keeps re-firing, which `unknown` does not. An unreadable spell longer
+    // than that TTL therefore DROPS the eventual recovery alert rather than deferring it. Accepted here
+    // — a missing recovery is quieter than a false one — but it is a real gap, and the #1232 episode was
+    // multi-hour, so it is the likely case rather than the edge case.
+    //
+    // Scope: `buildServiceAlerts` runs for Tier-1 only (`API_TIER === 1`), so this governs
+    // claude/openai/gemini; the other services have no status-edge alert at all.
     if (svc.status === 'down' && !hasOngoingIncident) {
       alerts.push({
         key: `alerted:down:${svc.id}`,
@@ -1114,11 +1136,30 @@ function buildGroupTweetDraft(
   const names = members.map((s) => defuseAutolinkDomain(s.name)).join(', ')
   // Worst-of across the affected members — mirrors api/is-down-group.ts's own STATUS_RANK/worstStatus,
   // hand-copied for the same reason (no shared-import path between worker/ and api/ for this shape).
-  const STATUS_RANK: Record<string, number> = { operational: 0, degraded: 1, down: 2 }
-  const worst = members.reduce((w, s) => ((STATUS_RANK[s.status] ?? 0) > (STATUS_RANK[w] ?? 0) ? s.status : w), 'operational')
+  // #1233 — `unknown` ranked, and the default is no longer `0`. Both halves matter: the map is
+  // `Record<string, …>` so the type checker applies no pressure at all, and `?? 0` made an unrecognised
+  // status rank identically to `operational` — the opposite of the fail-to-neutral posture the rest of
+  // this change adopts. Ordering matches the map this mirrors (`api/is-down-group.ts`): an unconfirmed
+  // member must not be masked by a confirmed-healthy one, but a CONFIRMED problem still outranks it.
+  const STATUS_RANK: Record<string, number> = { operational: 0, unknown: 1, degraded: 2, down: 3 }
+  const worst = members.reduce((w, s) => ((STATUS_RANK[s.status] ?? 1) > (STATUS_RANK[w] ?? 1) ? s.status : w), 'operational')
   // Hint vocab mirrors buildTweetForService below: 'active' is the fallback for "known live incident,
   // but the worst member status hasn't flipped off 'operational' yet" — never emit ?e=operational on
   // an outage share.
+  // #1233 — the tweet/reply drafts deliberately carry NO `unknown` arm. An unreadable source cannot
+  // reach them: every path that publishes `unknown` yields `incidents: []` (see `base` in services.ts),
+  // and all three drafts run only for a service attached to an incident. That invariant is pinned by a
+  // test rather than defended here — `unknown-not-an-outage.test.ts` drives the real `fetchAllServices`
+  // and asserts it, so if a future leg ever preserves incidents on an unreadable read, the test fails
+  // and these drafts become that change's problem to handle, deliberately rather than by accident.
+  //
+  // An earlier pass added the arms anyway, justified by a reachability claim that was false and that
+  // contradicted the comment in `buildIncidentAlerts` above. The group version of it was also wrong on
+  // its own terms: it read the PRIMARY member's status while speaking for the whole family, so an
+  // unreadable primary beside a confirmed-down sibling would have published "we cannot confirm" about
+  // an outage we had read perfectly well.
+  // Hint vocab mirrors buildTweetForService: 'active' is the fallback for "known live incident, but the
+  // worst member status hasn't flipped off 'operational' yet" — never emit ?e=operational on an outage.
   const hint = isRecovery ? 'resolved' : worst === 'operational' ? 'active' : worst
   const token = incidentTokenForAlert(alert)
   const url = `${appendStatusHint(`https://ai-watch.dev/is-${family.slug}-down`, hint)}&${X_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`

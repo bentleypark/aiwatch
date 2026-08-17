@@ -234,7 +234,15 @@ export function regionStatusOf(service, opts = {}) {
   // own capability is unaffected (e.g. OpenAI dropped the 'api' component from an
   // open incident). Do not trip the pessimistic global fallback when the badge says
   // operational.
-  if (!hasRegionSpecific && ongoing.length > 0 && service.status !== 'operational') {
+  // #1233 — an unreadable source (`unknown`) must not trip this: it is not a verdict about the service,
+  // and here it would paint EVERY region row `incident` — a global multi-region outage claim — directly
+  // beside the neutral "status source unreadable" note on the same page.
+  //
+  // Excluded by name rather than via `isDisplayAffected`, deliberately. That helper resolves a MISSING
+  // status to `operational`, which would silently drop the pre-existing pessimistic behaviour for a
+  // record with no status at all (caught by `regionStatus.test.js`). Mirrors the guard in the
+  // `api/_is-down/region-status.ts` hand-copy.
+  if (!hasRegionSpecific && ongoing.length > 0 && service.status !== 'operational' && service.status !== 'unknown') {
     const globalType = classifyIncident(ongoing[0].title)
     for (const r of regionDefs) {
       status[r.key] = { status: 'incident', type: globalType }

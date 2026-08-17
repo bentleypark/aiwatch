@@ -116,7 +116,10 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
     expect(calls, 'it must fail AFTER retrying, not instead of retrying').toBe(2)
     expect(svc.incidents, 'no feed was read, so no incidents').toEqual([])
     expect(trackingStore.azureopenai?.failCount, 'the failure must still be booked').toBe(3)
-    expect(svc.status, 'the third consecutive failure crosses the threshold').toBe('degraded')
+    expect(svc.status, 'the third consecutive failure crosses the threshold').toBe('unknown')
+    // #1233 invariant — an unreadable source carries NO incident. Several modules omit an `unknown`
+    // branch because of this (the X drafts, the feed's fallback line, the region/calendar fallbacks).
+    expect(svc.incidents).toEqual([])
     // No response was measured, so no response time may be published — reporting the elapsed abort
     // budget would put our own timeout into /api/v1/status and the latency:24h series as Azure's.
     expect(svc.latency, 'a poll that got nothing publishes no latency').toBeNull()
@@ -166,7 +169,7 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(trackingStore.azureopenai?.failCount).toBe(3)
-    expect(svc.status).toBe('degraded')
+    expect(svc.status).toBe('unknown')
     expect(svc.latency, 'an HTTP error still measured a real round trip — that one is kept').toBeTypeOf('number')
   })
 
@@ -251,6 +254,6 @@ describe('#1211 — the timing the fix is actually about', () => {
 
     await vi.advanceTimersByTimeAsync(200)    // 4s + 1s + 3s = 8s, the pre-change budget
     const svc = await pending
-    expect(svc.status, 'both attempts stalled on an already-crossing streak').toBe('degraded')
+    expect(svc.status, 'both attempts stalled on an already-crossing streak').toBe('unknown')
   })
 })

@@ -210,14 +210,16 @@ export const PROBE_FAILING_FLOOR_MS = 1000
 
 /** #1004 — does our own probe INDEPENDENTLY corroborate an outage? A fetch-failure `degraded` renders as
  *  a neutral "unknown" badge ("we can't read the source") — but that would be a false reassurance when
- *  the service is probed and the probe is failing, so this is the flag that keeps such a case amber.
+ *  the service is probed and the probe is failing. #1233 — that correction is no longer applied by the
+ *  display: `fetchAllServices` PROMOTES such a case to `degraded` in the value itself, and this
+ *  predicate is what decides the promotion.
  *
  *  Deliberately a POSITIVE test, not `!isProbeHealthy`: that negation also swallows "not enough data"
  *  (one recent sample, no median), so a perfectly healthy service with a single sample would have been
  *  read as contradicting and the #1004 fix would silently not apply to it. Mirrors `isProbeHealthy`'s
  *  evidence bar — ≥2 recent samples, majority rule — and requires the samples to be actually BAD:
  *  a failed probe (`rtt <= 0`, written by `failedProbe()`) or a spike past the bar that
- *  `PROBE_FAILING_FLOOR_MS` floors. Only this verdict suppresses the neutral badge. */
+ *  `PROBE_FAILING_FLOOR_MS` floors. Only this verdict promotes an unreadable source to a real outage. */
 export function isProbeFailing(
   snapshots: ProbeSnapshot[],
   serviceId: string,

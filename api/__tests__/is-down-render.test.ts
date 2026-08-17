@@ -195,12 +195,69 @@ describe('the whole is-down page agrees when the source is unreadable (#1004)', 
     expect(html).not.toContain('status=degraded')
   })
 
+  // #1233 — the SAME invariant against the shape the worker actually sends now. The case above drives
+  // the LEGACY pair (`degraded` + `sourceUnknown`) and is kept as the transitional control, because a
+  // payload cached before the change still looks like that for the life of the cache. Production is now
+  // `status: 'unknown'`, and nothing asserted that until this case: `isStatusUnknown`'s new first clause
+  // could be deleted with the whole suite green.
+  it('...and the same holds for the raw `unknown` status the worker now publishes', () => {
+    const html = render({ ...base, status: 'unknown', sourceUnknown: true })
+    expect(html).toContain('Status Unknown')
+    expect(html).toContain('status page right now')
+    expect(html).not.toContain('is having problems right now')
+    expect(html).not.toContain('is having issues right now')
+    expect(html).not.toContain('Degraded Performance')
+    expect(html).toContain('status=unknown')
+    expect(html).not.toContain('status=degraded')
+  })
+
+  // #1233 — the "🔄 Alternatives" block gated on `serviceStatus !== 'operational'`, a two-valued test
+  // that `'unknown'` passes. The page then recommended switching away from a service whose own headline
+  // says the status could not be confirmed. Reachable because the AI card renders from `ai:analysis:*`
+  // KV, which outlives the wire incident list an unreadable payload no longer carries.
+  it('publishes NO alternatives block for an unreadable source, even with an analysed incident', () => {
+    const insight = {
+      summary: 'Investigating elevated errors.', estimatedRecovery: '~1h',
+      affectedScope: ['API'], analyzedAt: new Date().toISOString(), needsFallback: true,
+    }
+    const fallbacks = [{ id: 'cursor', name: 'Cursor', score: 88, status: 'operational' }]
+    // Asserted on the AI card's own "🔄 Alternatives" marker, NOT on the candidate's name: the page
+    // also carries a permanent, status-independent Alternatives SEO section, so `not.toContain('Cursor')`
+    // would fail on content that is correct.
+    const html = renderPage('junie', { ...base, status: 'unknown', sourceUnknown: true } as never, seo, fallbacks, insight as never)
+    expect(html).not.toContain('🔄 Alternatives')
+
+    // Control: the identical payload with a CONFIRMED outage still recommends.
+    const confirmed = renderPage('junie', { ...base, status: 'down' } as never, seo, fallbacks, insight as never)
+    expect(confirmed).toContain('🔄 Alternatives')
+  })
+
   it('a probe-corroborated outage still publishes the outage everywhere', () => {
     const html = render({ ...base, status: 'degraded', sourceUnknown: true, probeContradicted: true })
     expect(html).toContain('Having Issues')                          // <title>
     expect(html).toContain('is having issues right now')             // CTA
     expect(html).toContain('status=degraded')                        // og:image
     expect(html).not.toContain('Status Unknown')
+  })
+
+  // #1233 round-3 review — every status lookup in this template ended on the red/"Down" arm, so a value
+  // the file does not recognise (an older cached payload, a future union member) published a fabricated
+  // outage into the <title>, the meta description, og:title and the H1 — the highest-reach surface
+  // AIWatch has, and the last one still failing dangerous after `statusVerdict` and `og.ts` were fixed.
+  it('an UNRECOGNISED status publishes the neutral non-answer, never a fabricated outage', () => {
+    const html = render({ ...base, status: 'maintenance' })
+    expect(html).toContain('Status Unknown')
+    expect(html).not.toContain('Down Right Now')
+    expect(html).not.toContain('is down right now')
+    expect(html).toContain('#8b949e')   // the neutral status colour
+    // Not asserted: the absence of `#f85149` — that token also appears in static page CSS unrelated to
+    // the status verdict, so a blanket check would fail on content that is correct.
+  })
+
+  it('control: a genuine `down` still publishes the outage', () => {
+    const html = render({ ...base, status: 'down' })
+    expect(html).toContain('Down Right Now')
+    expect(html).toContain('is down right now')
   })
 
   it('an ordinary operational page is untouched', () => {

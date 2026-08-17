@@ -171,6 +171,71 @@ describe('is-down-group.ts', () => {
     expect(html).not.toContain('Is Anthropic (Claude) Down? Operational')
   })
 
+  // #1233 — the defect this page was named for in the issue: on 2026-08-14, with status.claude.com
+  // unreadable, it rendered "Degraded Performance" for all three Anthropic surfaces. The page could
+  // already express `unknown` (#1164's STATUS_RANK / STATUS_EMOJI / STATUS_LABEL) — the VALUE never
+  // arrived, because the worker published `degraded` + a flag this page never read. These cases pin the
+  // value now that the worker sends it; the ones above only ever reach `unknown` via a MISSING member,
+  // which is a different route into the same state and would not have caught a `normalizeStatus` that
+  // dropped the new word.
+  it('a member the worker reports as `unknown` renders Unknown — never Degraded Performance', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'unknown' },
+      { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
+      { id: 'claudecode', name: 'Claude Code', status: 'unknown' },
+    ]))
+    const res = await handler(makeReq('claude'))
+    const html = await res.text()
+    expect(html).toContain('Is Anthropic (Claude) Down? Unknown')
+    expect(html).not.toContain('Degraded Performance')
+  })
+
+  // #1233 round-3 review — the DESCRIPTION, not just the title. The two-valued form put `unknown` in the
+  // else branch, so meta/og/twitter/JSON-LD and the visible headline all read "see which service IS
+  // AFFECTED" under an "Unknown" title. Served 200 and cached, so that sentence is what crawlers carry.
+  it('does not assert a confirmed outage in the description under an Unknown headline', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'unknown' },
+      { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
+      { id: 'claudecode', name: 'Claude Code', status: 'unknown' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('service is affected and its live status')
+    expect(html).toContain('could not read the official status source')
+  })
+
+  it('control: a real outage still says which service is affected', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'down' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('service is affected and its live status')
+  })
+
+  it('a CONFIRMED down member still outranks a worker-reported unknown sibling', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'down' },
+      { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const res = await handler(makeReq('claude'))
+    const html = await res.text()
+    expect(html).toContain('Is Anthropic (Claude) Down? Down')
+  })
+
+  it('...and an unknown member is not masked by an operational sibling either', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'unknown' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const res = await handler(makeReq('claude'))
+    const html = await res.text()
+    expect(html).toContain('Is Anthropic (Claude) Down? Unknown')
+  })
+
   it('a CONFIRMED down member still wins over an unknown sibling (unknown does not mask a real outage)', async () => {
     fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'down' },

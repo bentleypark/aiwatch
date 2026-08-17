@@ -27,10 +27,20 @@ describe('generateOgSvg', () => {
     expect(svg).toContain('#f85149') // red
   })
 
-  it('falls back to operational for unknown status', () => {
+  // #1233 — an UNRECOGNISED status word (not the `unknown` member, which has its own entry) now falls
+  // to the neutral Unknown style instead of a confident green "Operational". An OG card is cached by
+  // social platforms for days, so a wrong verdict there outlives the condition that produced it.
+  it('falls back to Unknown, not Operational, for an unrecognised status', () => {
     const svg = generateOgSvg('Test', 'maintenance', '', '')
-    expect(svg).toContain('Operational')
-    expect(svg).toContain('#3fb950')
+    expect(svg).toContain('Unknown')
+    expect(svg).toContain('#8b949e')
+    expect(svg).not.toContain('#3fb950')
+  })
+
+  it('control: the real `unknown` member still renders the same neutral style', () => {
+    const svg = generateOgSvg('Test', 'unknown', '', '')
+    expect(svg).toContain('Unknown')
+    expect(svg).toContain('#8b949e')
   })
 
   it('omits metrics when score and uptime are empty', () => {

@@ -149,7 +149,7 @@ function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   // #1004 — the DISPLAY state, so a service whose status source we can't read shows a neutral dot
   // instead of the amber "degraded" one the card next to it has already stopped showing.
   const display = displayStatusOf(svc)
-  const dotClass = STATUS_DOT_CLASS[display] ?? STATUS_DOT_CLASS.operational
+  const dotClass = STATUS_DOT_CLASS[display] ?? STATUS_DOT_CLASS.unknown  /* #1233 — fail neutral, never green */
   const hasUptime = svc.uptime30d != null && !isUnreliableUptime(svc) // #591 — hide frozen stale uptime too
   const badgeCls = hasUptime ? uptimeBadgeCls(svc.uptime30d) : 'bg-[var(--bg3)] text-[var(--text2)]'
   const statusTextCls = display === 'degraded' ? 'text-[var(--amber)]'

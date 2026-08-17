@@ -3,6 +3,7 @@
 // Uses KV cache to serve last-known-good data on fetch failures
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
+import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, readSuppressionsFreshOrNull, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
@@ -116,7 +117,12 @@ const REPORTABLE_IDS = new Set(SERVICES.map((s) => s.id))                       
  *  small bounded set, usually empty — so a public list can never contradict an operational page and
  *  the read cost stays low. Centralizes the gating used by the dashboard (Overview + ServiceDetails). */
 async function buildReportFeedMap(kv: KVNamespace, services: ServiceStatus[]): Promise<Record<string, ReportFeedEntry[]>> {
-  const candidates = services.filter((s) => s.status !== 'operational' || (s.partialCount ?? 0) > 0 || s.probeSpike)
+  // #1233 — `!isHealthyStatus`, i.e. "not confirmed healthy", is the intent here and it deliberately
+  // KEEPS `unknown` in the candidate set: this only decides whose crowd-report feed is worth READING,
+  // and an unreadable source is exactly where independent crowd signal is most useful. Whether those
+  // reports are then SHOWN is `shouldSurfaceReports`' call, and that gate now makes an `unknown`
+  // service earn it with a probe spike instead of waving it through as an "official problem".
+  const candidates = services.filter((s) => !isHealthyStatus(s.status) || (s.partialCount ?? 0) > 0 || s.probeSpike)
   const out: Record<string, ReportFeedEntry[]> = {}
   await Promise.all(candidates.map(async (s) => {
     let feed: ReportFeedEntry[] = []
@@ -253,6 +259,18 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
     // unresolved incident backs it; a minor/partial-scope or no-incident degraded counts as up
     // (mirrors official rolling-uptime weighting — prevents a sticky minor incident from cratering
     // uptime/Stability/Score while the status page reads ~100%).
+    //
+    // #1233 — an unreadable poll still books an `ok` sample here, and that is DELIBERATELY UNCHANGED.
+    // The honest treatment is a third outcome (record no sample at all — the poll observed nothing),
+    // and it was implemented and then reverted during this change's review: making `total === 0`
+    // reachable turned out to be unsafe: the three consumers of this counter DISAGREE about what a
+    // zero-sample service means. `computeMonthlyUptime` publishes **0%** into the permanent monthly
+    // archive, `computeUptime` (the live `/api/uptime` path) answers **100%**, and
+    // `computeMonthlyComponentUptime` correctly DROPS the row — with a comment naming the first one as
+    // the asymmetry it is avoiding. Of those, 0% is the one that ships: it prints a provider whose page
+    // we never read as that month's worst performer, moving the fabrication from silence to a public
+    // accusation. Correcting this properly means making those three agree on a "no data" path first,
+    // which is its own change. Tracked as a follow-up.
     if (countsAsUptimeOk(s.status, s.incidents)) counters[s.id].ok++
     // #586 — snapshot the live status-page rolling-30d uptime each cycle (last-write-wins = the
     // day's most-recent value). The monthly archive reads the month-end day's value as the
@@ -486,7 +504,13 @@ async function cacheRead(
     recordCacheReadOutcome(analytics, 'empty')
     return null
   }
-  return snapshot as { services: ServiceStatus[]; upstreamFeeds?: UpstreamCandidate[]; cachedAt: string }
+  // #1233 — the one point a stored payload re-enters the worker, so it is where the transitional decode
+  // belongs: a snapshot written by the PREVIOUS deploy encodes an unreadable source as `degraded` +
+  // `sourceUnknown`, and every consumer downstream of here (badge, statusline, down-list, ext-claude,
+  // daily summary) now reads `degraded` as a real outage. Without this, the rollout window republishes
+  // the exact defect this change removes. A no-op on any payload the current worker wrote.
+  const normalized = snapshot as { services: ServiceStatus[]; upstreamFeeds?: UpstreamCandidate[]; cachedAt: string }
+  return { ...normalized, services: normalizeCachedServices(normalized.services) }
 }
 
 // Read uptime history for last N days (includes today's live counter + archived days)
@@ -681,6 +705,9 @@ interface CronResult {
   total: number
   operational: number
   issues: number
+  /** #1233 — services whose status source could not be read this cycle. Its own field because it is
+   *  neither `operational` nor an `issue`; before the split it was folded into `issues` by subtraction. */
+  unreadable: number
   sent: number
   newCount: number
   resolvedCount: number
@@ -693,14 +720,22 @@ interface CronResult {
 // takes 60+ seconds, otherwise a slow tick skips its slot for the whole hour. Defaults to `Date.now()`
 // for the rare direct caller / test. (Same convention `scheduled()` states for its own `scheduledNow`.)
 async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): Promise<CronResult> {
-  const empty: CronResult = { total: 0, operational: 0, issues: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0 }
+  const empty: CronResult = { total: 0, operational: 0, issues: 0, unreadable: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0 }
   if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return empty
 
   // Read cached service data — fetch live if cache is stale or missing
   const raw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
   const STALE_THRESHOLD_MS = 10 * 60 * 1000
   const { stale, services: cachedServices, upstreamFeeds: cachedFeeds } = isCacheStale(raw, STALE_THRESHOLD_MS)
-  let services = cachedServices as ServiceStatus[]
+  // #1233 — this path reads CACHE_KEY directly rather than through `cacheRead`, so it needs its own
+  // transitional decode. It is the one that matters most: on a fresh cache (<10 min) the entire alert
+  // pipeline runs on this array, so a snapshot written by the PREVIOUS deploy — where an unreadable
+  // source is `degraded` + `sourceUnknown` — would fire a real 🟠 Discord alert for a Tier-1 service and
+  // arm `alerted:degraded:`. Once the payload rolls over to `unknown` the degraded arm stops re-firing
+  // and the recovery arm needs a genuine `operational` read, so that alert never gets its 🟢 and the
+  // operator is left believing an outage that never existed. `refreshStatusCacheOnChange` below also
+  // writes this array back with a fresh `cachedAt`, which would extend the legacy encoding past its TTL.
+  let services = normalizeCachedServices(cachedServices as ServiceStatus[])
   // #1072 — mirrors `services` exactly: the cached snapshot's feeds, replaced by fresh ones only when
   // this cycle actually live-fetched. The #488 refresh below rewrites the snapshot, so carrying the
   // cached value forward is what stops a fresh-cache cron from erasing the feeds.
@@ -981,8 +1016,17 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 
   // Record detection timestamps for non-operational services (Detection Lead feature)
   // Uses detection.ts helpers — resets when incident ID changes to prevent inflated leads (#189)
+  // #1233 — this is a THREE-way decision now, and the third arm is the whole point. The old two-way
+  // form (`!== 'operational'` → stamp, else DELETE) put an unreadable source in the `else`, destroying
+  // the detection anchor of an outage that is very likely still running: losing sight of a service is
+  // not evidence it recovered. That would forward-date the incident when the source becomes readable
+  // again, understating its duration in `detectedAt`, in #677's AWS anchor, and downstream in MTTR /
+  // Recovery / the monthly report. `unknown` therefore does NOTHING here — it neither stamps (which
+  // would backdate the detection of whatever the source reveals later) nor clears.
   for (const svc of scored) {
-    if (svc.status !== 'operational') {
+    const verdict = statusVerdict(svc.status)
+    if (verdict.unreadable) continue
+    if (verdict.affected) {
       const detectKey = `detected:${svc.id}`
       const existingRaw = await env.STATUS_CACHE.get(detectKey).catch(() => null)
       const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
@@ -1816,10 +1860,15 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   }
 
   const operational = scored.filter(s => s.status === 'operational').length
+  // #1233 — `issues` used to be `total − operational`, which silently counted an unreadable source as
+  // an issue. Count the affected directly and report the unreadable separately, so the three numbers
+  // stay independently meaningful rather than one being the arithmetic residue of the other.
+  const unreadable = scored.filter(s => isUnreadableStatus(s.status)).length
   return {
     total: scored.length,
     operational,
-    issues: scored.length - operational,
+    issues: scored.filter(s => isAffectedStatus(s.status)).length,
+    unreadable,
     sent: sent.length,
     // #882 — exclude alerts HELD this cycle (they weren't sent); matches the alert:count KV tally so
     // the daily-summary `incidentCountToday` doesn't over-count a held incident that lands next cycle.
@@ -1832,7 +1881,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
-import { generateBadgeSvg } from './badge'
+import { generateBadgeSvg, badgeStatusColor } from './badge'
 import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable, readRedditSourceDead } from './reddit'
@@ -2533,6 +2582,13 @@ export default {
             // #464 — rising edge of a spike streak: count this RTT degradation. If the service's
             // official status is still operational, the degradation isn't on the status page → the
             // `nostatus` figure. Best-effort, mirrors the fetch-fail:daily counter (48h TTL).
+            // #1233 KNOWN LIMITATION — `classifyDegradation` is a two-way boolean, so an `unknown` service
+            // answers `false` and its RTT degradation is booked as "already on the status page" when in fact
+            // we could not read that page. Reachable: `detectConsecutiveSpikes` has a lower bar than
+            // `isProbeFailing`, so a spiking service can stay `unknown` through cross-validation and land
+            // here. Left as-is deliberately — the honest fix is a third outcome, and changing a second durable
+            // counter in this PR is what the uptime-sampling revert (see `cacheWrite`'s #1233 note) exists to
+            // avoid. Tracked as a follow-up.
             const svcOperational = statusByService.get(spike.serviceId) === 'operational'
             const outcome = classifyDegradation(svcOperational)
             const isNoStatus = outcome === 'degradation_nostatus'
@@ -3136,7 +3192,11 @@ export default {
           if (cachedRaw) {
             try {
               const p = JSON.parse(cachedRaw)
-              dailyServices = Array.isArray(p) ? p : p.services ?? []
+              // #1233 — this path reads CACHE_KEY directly rather than through `cacheRead`, so it needs
+              // its own transitional decode. `buildDailySummary` now asks `isAffectedStatus` /
+              // `isUnreadableStatus`, so a snapshot written by the PREVIOUS deploy would list an
+              // unreadable source under **Active Issues** while the new "source unreadable" tally read 0.
+              dailyServices = normalizeCachedServices(Array.isArray(p) ? p : p.services ?? [])
             } catch (err) {
               console.error('[daily-summary] Failed to parse cached services:', err instanceof Error ? err.message : err)
             }
@@ -3630,7 +3690,10 @@ export default {
           try {
             await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
               title: '📊 Daily Summary',
-              description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues`,
+              // #1233 — the unreadable count is printed here for the same reason `buildDailySummary`
+              // prints it: without it these numbers stop summing to `total` and the reader cannot tell
+              // whether the missing services were fine or unread. Omitted when zero, like the others.
+              description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues${result.unreadable > 0 ? ` · ${result.unreadable} source unreadable` : ''}`,
               color: 0x9B59B6,
             })
           } catch (discordErr) {
@@ -4299,7 +4362,10 @@ export default {
 
       // Read cached services from KV
       const badgeCache = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
-      const service: { name: string; status: string; uptime30d?: number | null } | null =
+      // #1233 — `status` is the real union, not a bare `string`. The widened annotation was what let the
+      // badge's color chain fall through to red for `unknown` with nothing to flag it: `badgeStatusColor`
+      // is exhaustive, but only if what reaches it is typed.
+      const service: { name: string; status: ServiceStatus['status']; uptime30d?: number | null } | null =
         badgeCache ? badgeCache.services.find((s) => s.id === serviceId) ?? null : null
 
       // #1227 — "we cannot read the snapshot" is not "this service does not exist". The old code
@@ -4333,11 +4399,14 @@ export default {
       recordBadgeTraffic(env.ANALYTICS, { known: true, serviceId })
 
       const label = customLabel ?? service.name
-      const statusColor = service.status === 'operational' ? '#3fb950'
-        : service.status === 'degraded' ? '#d29922'
-        : '#f85149'
-      let statusText = service.status
-      if (showUptime && service.uptime30d != null) {
+      const statusColor = badgeStatusColor(service.status)
+      // Widened deliberately: the badge's TEXT may be replaced by an uptime percentage below.
+      let statusText: string = service.status
+      // #1233 — but NOT for an unreadable source. Some fetch-failure legs deliberately carry the last
+      // measured `uptime30d` forward, so `?uptime=true` would render a grey badge whose text reads
+      // "99.98%" — the word "unknown" gone, and the only remaining signal a colour most readers will not
+      // decode. The colour and the text have to say the same thing.
+      if (showUptime && service.uptime30d != null && !isUnreadableStatus(service.status)) {
         statusText = `${service.uptime30d.toFixed(2)}%`
       }
 
@@ -4524,7 +4593,9 @@ export default {
       // never a 500 (mirrors the ext-claude reads).
       const briefAiSummary: Record<string, string> = {}
       await Promise.all(scoredAll
-        .filter((svc) => svc.status !== 'operational')
+        // #1233 — `isAffectedStatus`. An `unknown` service carries no incidents (the fetch is what
+        // failed), so this is behaviour-neutral today; it is spelled correctly so it stays that way.
+        .filter((svc) => isAffectedStatus(svc.status))
         .flatMap((svc) => (svc.incidents ?? [])
           .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
           .map(async (inc) => {
@@ -5017,7 +5088,9 @@ export default {
       const detectionMap = new Map<string, string>()
       if (env.STATUS_CACHE) {
         await Promise.all(enriched.map(async (svc) => {
-          if (svc.status !== 'operational') {
+          // #1233 — pairs with the write side above: read a detection timestamp only for a service we
+          // are actually calling affected.
+          if (isAffectedStatus(svc.status)) {
             const raw = await env.STATUS_CACHE!.get(`detected:${svc.id}`).catch(() => null)
             const ts = getDetectionTimestamp(raw)
             if (ts) detectionMap.set(svc.id, ts)

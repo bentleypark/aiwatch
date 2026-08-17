@@ -2,8 +2,22 @@
 // NO chrome.* dependencies — imported by both the service worker (badge) and the
 // popup (DOM), and unit-tested in isolation (lib/render.test.js). Keep it pure.
 
-// Worst-of ordering for the toolbar badge: down beats degraded beats operational.
-const STATUS_RANK = { operational: 0, degraded: 1, down: 2 }
+// Worst-of ordering for the toolbar badge: down beats degraded beats UNKNOWN beats operational.
+//
+// #1233 — `unknown` (AIWatch could not read the provider's status source) has no rank without this
+// entry, and `worstStatus`' `STATUS_RANK[st] != null` guard would SKIP those services entirely: a board
+// where every service is unreadable would report `operational` — a green toolbar badge asserting health
+// nobody checked. Written in the conditional deliberately: the worker did not publish this value before
+// #1233, so this is a hole the new value would open, not a bug that already shipped.
+//
+// Ranked above `operational` and below `degraded` for the reason is-down-group.ts gives for the
+// identical ordering (#1164): an unconfirmed status must not be masked by a confirmed-healthy one, but
+// a CONFIRMED problem is still worse than an unconfirmed one.
+//
+// Unlike the fallback list — which `worker/src/ext-claude.ts` withholds server-side so the fix reaches
+// every installed copy on a worker deploy — this one ships ONLY with an extension update. Until a user's
+// Chrome updates them, an installed copy reads `unknown` as green here.
+const STATUS_RANK = { operational: 0, unknown: 1, degraded: 2, down: 3 }
 
 // Badge colors (standalone — the extension is not part of the SPA design system).
 const BADGE_COLORS = {
@@ -94,7 +108,11 @@ export function fallbackText(fallback) {
 // Show a fallback recommendation only when the surface is actually degraded/down —
 // mirrors the dashboard's status-gated recommendation (no alternatives when all is well).
 export function shouldShowFallback(status) {
-  return status != null && status !== 'operational'
+  // #1233 — `unknown` must NOT show alternatives. This is the defect in the form users actually hit: on
+  // 2026-08-14, with status.claude.com unreadable, the extension told people to switch off Claude to
+  // ChatGPT / Grok / Junie / Codex — a recommendation to abandon a service AIWatch had just admitted it
+  // could not read. Recommending a switch is a claim about the current service, and there is none here.
+  return status != null && status !== 'operational' && status !== 'unknown'
 }
 
 // Per-surface "Is X Down?" page path. Each Anthropic surface has its own SEO page

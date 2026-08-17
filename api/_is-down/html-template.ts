@@ -180,16 +180,30 @@ function statusEmoji(status: string): string {
   if (status === 'partial') return '&#x1F7E1;'   // #722/#744 — yellow (visible header only)
   if (status === 'degraded') return '&#x1F7E1;'
   if (status === 'unknown') return '&#x26AA;'    // #1004 — white circle: source unreadable, no verdict
-  return '&#x1F534;'
+  if (status === 'down') return '&#x1F534;'
+  // #1233 — an UNRECOGNISED value falls to the neutral circle, not to red. These chains all ended on the
+  // red/'Down' arm, so a value this file does not know about published a fabricated outage on the SERP
+  // answer. Fails the same way `statusVerdict` and `og.ts` do: never invent an outage, never claim health.
+  return '&#x26AA;'
 }
 
 // #1004 — AIWatch could not READ the provider's status page, so it has no verdict to publish. This is
 // the highest-reach surface AIWatch has (the SERP answer), and it was answering "Issues — X is having
 // problems right now" off a `degraded` that only ever meant "our fetch failed 3 times" — which is what
 // JetBrains' status-page migration did to Junie. `sourceDead` (4xx) already had this hole too.
-// A healthy probe (`probeConfirmed`, #689) or a failing one (`probeContradicted`, #1004) means we DO
-// have independent evidence — then the raw status stands.
+//
+// #1233 — the fetch-failure case is now carried by the STATUS, so the first clause below is the whole
+// rule for a current payload. Two further clauses survive:
+//   - `sourceDead` (#689) is still flag-only — a 4xx page publishes `operational`, a false GREEN rather
+//     than a false outage. That is the other defect class, filed as #1234, and moving it is that issue's
+//     change to make, not a silent rider on this one.
+//   - the `sourceUnknown` + `degraded` pair is a transitional read of a payload cached before #1233,
+//     not the rule (mirrors `normalizeCachedService` in `worker/src/status-verdict.ts`). Its window is
+//     NOT a cache TTL: `/api/status/cached` decodes on read, so once the worker is deployed this page can
+//     never see the legacy pair again. The window is "until the worker deploy happens" — open-ended,
+//     because Vercel auto-deploys `api/` on merge while the worker deploy is manual.
 function isStatusUnknown(service: ServiceData): boolean {
+  if (service.status === 'unknown') return true
   if (service.sourceDead && !service.probeConfirmed) return true
   if (service.sourceUnknown && !service.probeContradicted && service.status === 'degraded') return true
   return false
@@ -206,7 +220,8 @@ function statusLabel(status: string): string {
   if (status === 'operational') return 'Operational'
   if (status === 'degraded') return 'Degraded Performance'
   if (status === 'unknown') return 'Unknown'
-  return 'Down'
+  if (status === 'down') return 'Down'
+  return 'Unknown'   // #1233 — unrecognised → neutral, not a fabricated outage
 }
 
 // #566 — SERP CTR. Answer the "Is X Down?" query directly in the <title>, <meta
@@ -220,7 +235,8 @@ function statusTitleLabel(status: string): string {
   if (status === 'operational') return 'Operational'
   if (status === 'degraded') return 'Having Issues'
   if (status === 'unknown') return 'Status Unknown'  // #1004 — we can't read the source; don't guess
-  return 'Down Right Now'
+  if (status === 'down') return 'Down Right Now'
+  return 'Status Unknown'   // #1233 — unrecognised → neutral, not a fabricated outage
 }
 
 // Direct answer word + sentence fragment. yesno answers "Is it down?"; phrase completes
@@ -231,7 +247,9 @@ function statusAnswer(status: string): { yesno: string; phrase: string } {
   // #1004 — an honest non-answer beats a confident wrong one. Say WHY, so a panicking visitor can tell
   // "AIWatch is blind" apart from "the service is broken".
   if (status === 'unknown') return { yesno: 'Unknown', phrase: "status can't be confirmed — AIWatch can't read the provider's status page right now" }
-  return { yesno: 'Yes', phrase: 'is down right now' }
+  if (status === 'down') return { yesno: 'Yes', phrase: 'is down right now' }
+  // #1233 — unrecognised → the same honest non-answer, never a "Yes … is down right now" we cannot back.
+  return { yesno: 'Unknown', phrase: "status can't be confirmed — AIWatch can't read the provider's status page right now" }
 }
 
 // #572: the is-down header links the monthly reports. Was hardcoded to /reports/2026-03/
@@ -263,7 +281,8 @@ function statusColor(status: string): string {
   if (status === 'partial') return '#d29922'   // #722/#744 — yellow (visible header only)
   if (status === 'degraded') return '#e86235'
   if (status === 'unknown') return '#8b949e'   // #1004 — neutral grey: no verdict
-  return '#f85149'
+  if (status === 'down') return '#f85149'
+  return '#8b949e'   // #1233 — unrecognised → neutral grey, not red
 }
 
 function timeAgo(iso: string): string {
@@ -811,7 +830,14 @@ function renderAIInsight(insight: AIInsight | AIInsight[] | null | undefined, se
   // reporting as operational would contradict the answer at the top of the page. So the #1104 state
   // (green badge + ongoing incident) keeps this hidden, exactly as before that change.
   const anyNeedsFallback = list.some(i => i.needsFallback)
-  const fallbackHtml = anyNeedsFallback && serviceStatus !== 'operational' && fallbacks && fallbacks.length > 0
+  // #1233 — `unknown` must be excluded explicitly. `serviceStatus !== 'operational'` is a two-valued
+  // test and `'unknown' !== 'operational'` is true, so the page recommended switching away from a
+  // service whose own headline says the status could not be confirmed. Reachable even though an
+  // unreadable payload carries no incidents, because the AI card renders from `ai:analysis:*` KV, which
+  // outlives the wire incident list. Gated on the STATUS, not on the service record: `serviceStatus` is
+  // already `assertableStatus(service)` (it resolves the unreadable case for the caller), and this
+  // function never receives the record itself.
+  const fallbackHtml = anyNeedsFallback && serviceStatus !== 'operational' && serviceStatus !== 'unknown' && fallbacks && fallbacks.length > 0
     ? `<div style="margin-top:8px;padding:8px 10px;background:#0d1117;border-radius:6px;border-left:3px solid #d29922">
 <span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives${capabilityLabel ? ` for ${esc(capabilityLabel.toLowerCase())}` : ''}</span>
 ${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')}

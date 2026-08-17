@@ -4,34 +4,23 @@
 // alerts all read the raw `status`). It only decides which visual state to render:
 //   - sourceDead       → 'unknown'  (#689 — the status source is inactive; component counts
 //                                     aren't trustworthy when AIWatch can't confirm the service)
-//   - sourceUnknown + degraded → 'unknown' (#1004 — see below)
 //   - operational + partialCount>0 → 'partial' (#722 — BetterStack sub-threshold partial outage:
 //                                     the provider page shows "Some services are down" while the
 //                                     overall service reads operational; an intermediate yellow
 //                                     state mirrors StatusGator/IsDown "warn" instead of full green)
-//   - otherwise        → the raw status ('operational' | 'degraded' | 'down')
+//   - otherwise        → the raw status ('operational' | 'degraded' | 'down' | 'unknown')
 //
-// #1004 — why `sourceUnknown` + `degraded` is not a real outage. That `degraded` is what
-// `trackFetchFailure` returns after 3 consecutive failures on the Statuspage fetch path — a statement
-// about OUR read (throw / 5xx, #714), not about the service. JetBrains moved Junie's status page and
-// 301'd the old host to the new site ROOT, so our fetch got HTML where it expected JSON, `res.json()`
-// threw, and Junie showed a false amber `degraded` badge while JetBrains reported all-green. Note the
-// asymmetry that hid it: a page DELETION (4xx) is `sourceDead` → neutral badge; a page MIGRATION
-// (301 → a 200 HTML body) is `sourceUnknown` → had no display path at all.
-//
-// Three guards on that mapping:
-//   - `sourceUnknown` + `operational` (under the 3-strike threshold) stays operational — a transient
-//     blip is not worth a scary badge, and no news is not bad news yet.
-//   - `probeContradicted` (#1004) — if the service is probed and the probe is FAILING, the outage is
-//     independently corroborated: keep it amber. Neutralising it would be a false reassurance.
-//     (A probe that is HEALTHY already flipped the service back to operational server-side, in
-//     fetchAllServices' cross-validation — it never reaches this function as `degraded`.)
-//   - `down` is never masked: it can only come from a source we actually read.
-// Which fetch paths set `sourceUnknown` is deliberately NOT listed here. That list was wrong twice —
-// it went stale as paths were added (#1089, #1123, #1212), and the correction was wrong in the other
-// direction. `services.ts` owns it; grep the flag there.
+// #1233 — `unknown` is now a raw status value, published by the worker for a source it could not read,
+// so it needs no mapping at all: it falls through and renders the neutral pill directly. The rule this
+// module used to carry for that case (`sourceUnknown` + `degraded` → 'unknown') was one of two
+// hand-written copies of the same correction — the other lived in `api/_is-down/html-template.ts`, and
+// the surfaces that never wrote a third copy (is-down group, statusline, plugin, extension) published a
+// false outage. Deriving the state in the worker instead of correcting it per surface is what removes
+// that class; the one line left below is a transitional read of pre-#1233 payloads, not the rule.
 export function resolveStatusDisplay(status = 'operational', partialCount = 0, sourceDead = false, sourceUnknown = false) {
   if (sourceDead) return 'unknown'
+  // #1233 transitional — a cached payload written before the change encodes an unreadable source as
+  // `degraded` + `sourceUnknown`. A no-op on any current payload.
   if (sourceUnknown && status === 'degraded') return 'unknown'
   if (status === 'operational' && partialCount > 0) return 'partial'
   return status
@@ -42,8 +31,9 @@ export function resolveStatusDisplay(status = 'operational', partialCount = 0, s
  *  said "Degraded — switch to X"). Spread into the resolver: `resolveStatusDisplay(s.status, s.partialCount, ...sourceFlagsOf(s))`.
  *  - `sourceDead` is suppressed by `probeConfirmed` (#689: the page died but our probe still reaches
  *    the API → we DO know it's up, so keep the operational badge).
- *  - `sourceUnknown` is suppressed by `probeContradicted` (#1004: the probe says the service is
- *    genuinely failing → the `degraded` is real). */
+ *  - `sourceUnknown` is suppressed by `probeContradicted` — which since #1233 matters only for the
+ *    transitional legacy payload above. On a current payload the worker has already resolved that
+ *    question into the status itself (a corroborating probe publishes `degraded`, not `unknown`). */
 export function sourceFlagsOf(service) {
   return [
     !!service.sourceDead && !service.probeConfirmed,

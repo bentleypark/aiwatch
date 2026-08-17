@@ -83,6 +83,18 @@ export function stubFetchFailingClaudePage() {
   }))
 }
 
+/** The Anthropic status page answers 5xx (the provider is having a bad day) — everything else healthy.
+ *  Distinct from `stubFetchFailingClaudePage`, which THROWS and therefore only ever reaches
+ *  `fetchService`'s outer catch. The 5xx branch is a separate return path (#714) and, being the way a
+ *  struggling provider actually fails, the more likely one in production. */
+export function stubFetch5xxClaudePage() {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    if (url.includes('status.claude.com')) return new Response('upstream error', { status: 503 })
+    return new Response(JSON.stringify(HEALTHY_SUMMARY), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }))
+}
+
 // Timestamps are built INSIDE each test, so a sample's age cannot depend on collection order or on
 // how long the suite ran before reaching this file. (Reviewers saw intermittent reds here during a
 // session in which other agents were mutating this tree; that is NOT established as the cause, and

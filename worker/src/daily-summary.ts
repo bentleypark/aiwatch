@@ -1,6 +1,7 @@
 // Daily Summary — expanded Discord report at UTC 09:00 (KST 18:00)
 
 import type { ServiceStatus } from './types'
+import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
 import type { ProbeSnapshot } from './probe'
 import type { VitalsDaily } from './vitals'
 import { formatVitalsSection } from './vitals'
@@ -158,6 +159,10 @@ export function buildDailySummary(data: DailySummaryData): string {
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
   const down = services.filter(s => s.status === 'down').length
+  // #1233 — services whose status source AIWatch could not read. Counted separately and printed, not
+  // folded into any of the three above: without its own part the four counts silently stop summing to
+  // `total`, and the reader has no way to tell whether the missing services were fine.
+  const unreadable = services.filter(s => isUnreadableStatus(s.status)).length
 
   const lines: string[] = []
 
@@ -165,10 +170,13 @@ export function buildDailySummary(data: DailySummaryData): string {
   const statusParts = [`${operational} operational`]
   if (degraded > 0) statusParts.push(`${degraded} degraded`)
   if (down > 0) statusParts.push(`${down} down`)
+  if (unreadable > 0) statusParts.push(`${unreadable} source unreadable`)
   lines.push(`📡 **Services**: ${total} monitored · ${statusParts.join(' · ')}`)
 
   // Section 2: Active issues
-  const activeIssues = services.filter(s => s.status !== 'operational')
+  // #1233 — `isAffectedStatus`: an unreadable source is not an active issue. It is disclosed by the
+  // count in Section 1 instead, where it makes no claim about the service.
+  const activeIssues = services.filter(s => isAffectedStatus(s.status))
   if (activeIssues.length > 0) {
     const issueList = activeIssues.map(s => {
       const activeInc = (s.incidents ?? []).find(i => i.status !== 'resolved')

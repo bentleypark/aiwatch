@@ -5,7 +5,7 @@
 
 ## Identity
 - **Name (store + `manifest.name`):** AIWatch — Claude Status & Down Detector  — keyword-rich for CWS search ("claude down detector" / "is claude down"). The in-app title stays clean: `action.default_title` (toolbar tooltip) + the popup header are "AIWatch — Claude Status", not the long store name.
-- **Version:** 1.0.1 (`extension/manifest.json`)
+- **Version:** 1.0.2 (`extension/manifest.json`)
 - **Category:** Developer Tools
 - **Primary purpose:** Show the live operational status of Anthropic's Claude surfaces
   (Claude API, claude.ai, Claude Code) in the toolbar, with a one-click issue report.
@@ -83,6 +83,12 @@ No `tabs`, no `<all_urls>`, no content scripts, no `scripting`, no remote code.
 - [ ] `manifest.json` version bumped if re-submitting.
 
 ## Version history
+- **1.0.2** (#1233) — Reads the new `unknown` status ("AIWatch could not read this provider's status
+  source"). The toolbar badge paints it NEUTRAL instead of skipping it, and the popup no longer
+  recommends switching away from a service whose status could not be confirmed. No permission /
+  data-handling change. **Why the release matters:** the recommendation half is also withheld
+  server-side, so it reaches every installed copy on a worker deploy — but the BADGE fix is
+  client-side only. Until a copy updates, an all-unreadable board paints the toolbar badge green.
 - **1.0.1** (2026-07-08, #936) — Deep links now carry `utm_source=extension` (click attribution);
   footer shows the installed version. No permission / data-handling change.
 - **1.0.0** (2026-06-30) — Initial release. Badge + popup for Claude API / claude.ai /

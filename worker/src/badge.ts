@@ -1,3 +1,30 @@
+import type { ServiceStatus } from './types'
+
+/** #1233 — the badge's status color, extracted from the inline ternary chain in `index.ts` so it can be
+ *  unit-tested. It was a chain whose final `else` was RED, so `unknown` would have rendered a red
+ *  "down" badge for a source AIWatch could not read — a hole the new union member opens, not a bug that
+ *  already shipped (the worker did not publish this value before #1233). Worth closing at the source
+ *  because a badge is the most durable thing AIWatch publishes: it is copied into READMEs and
+ *  third-party status pages, so a false red there outlives any dashboard view and is seen by people who
+ *  never visit the site.
+ *
+ *  Grey `#8b949e` is the neutral already used for `unknown` in the OG card palette (`og.ts`). */
+export function badgeStatusColor(status: ServiceStatus['status']): string {
+  switch (status) {
+    case 'operational': return '#3fb950'
+    case 'degraded': return '#d29922'
+    case 'unknown': return '#8b949e'
+    case 'down': return '#f85149'
+    default: {
+      // A new union member fails `typecheck:worker` here; an unrecognised value from an older cached
+      // payload falls to the neutral grey rather than to red.
+      const exhaustive: never = status
+      console.warn('[badge] unrecognised status, painting neutral:', exhaustive)
+      return '#8b949e'
+    }
+  }
+}
+
 // SVG Badge Generator (shields.io style)
 
 export function escapeXml(s: string): string {

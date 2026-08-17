@@ -88,7 +88,10 @@ describe('#1212 — a 200 that is not a feed must not read as a recovery (azureo
     const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(trackingStore.azureopenai?.failCount, 'an unreadable body is a failed read, not a success').toBe(3)
-    expect(svc.status, 'the third consecutive bad read crosses the threshold').toBe('degraded')
+    expect(svc.status, 'the third consecutive bad read crosses the threshold').toBe('unknown')
+    // #1233 invariant — an unreadable source carries NO incident. Several modules omit an `unknown`
+    // branch because of this (the X drafts, the feed's fallback line, the region/calendar fallbacks).
+    expect(svc.incidents).toEqual([])
     expect(svc.sourceUnknown, 'and it is flagged as OUR read failing, not a verdict about Azure').toBe(true)
     expect(svc.incidents).toEqual([])
   })
@@ -142,7 +145,7 @@ describe('#1212 — a 200 that is not a feed must not read as a recovery (azureo
     const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
-    expect(svc.status).toBe('degraded')
+    expect(svc.status).toBe('unknown')
   })
 })
 
@@ -155,7 +158,7 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
     const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
-    expect(svc.status).toBe('degraded')
+    expect(svc.status).toBe('unknown')
   })
 
   it('flags sourceUnknown on a 200 with an unparseable body', async () => {
@@ -168,7 +171,7 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
     const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
-    expect(svc.status).toBe('degraded')
+    expect(svc.status).toBe('unknown')
     expect(trackingStore.bedrock?.failCount).toBe(3)
   })
 
@@ -255,7 +258,7 @@ describe('#1212 — a 200 that PARSES but is the wrong shape (bedrock)', () => {
     const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown, 'a parseable body of the wrong shape is still an unread source').toBe(true)
-    expect(svc.status).toBe('degraded')
+    expect(svc.status).toBe('unknown')
     expect(trackingStore.bedrock?.failCount, 'the streak must not be cleared').toBe(3)
   })
 
@@ -285,7 +288,7 @@ describe('#1212 — a feed WITH entries that yields no incidents is unreadable (
     const svc = await fetchService(azure, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown, 'an entry was present and none survived — that is drift, not quiet').toBe(true)
-    expect(svc.status).toBe('degraded')
+    expect(svc.status).toBe('unknown')
     expect(trackingStore.azureopenai?.failCount).toBe(3)
     const booked = keysStartingWith(store, 'instatus-parse-fail:')
     expect(JSON.parse(store[booked[0]]).counts.azureopenai).toEqual({ 'aws-rss-items-unreadable': 1 })
@@ -420,7 +423,7 @@ describe('#1212 — a 4xx is the source being GONE, not an indeterminate read', 
 
     expect(svc.sourceDead, 'a block is not a confirmed dead source').toBeFalsy()
     expect(svc.sourceUnknown).toBe(true)
-    expect(svc.status).toBe('degraded')
+    expect(svc.status).toBe('unknown')
     expect(trackingStore[svc.id]?.failCount, 'the streak must advance so #500 can still fire').toBe(3)
   })
 
@@ -435,7 +438,7 @@ describe('#1212 — a 4xx is the source being GONE, not an indeterminate read', 
 
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.sourceDead).toBeFalsy()
-    expect(svc.status).toBe('degraded')
+    expect(svc.status).toBe('unknown')
   })
 })
 

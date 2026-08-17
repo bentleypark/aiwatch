@@ -3,6 +3,7 @@
 // `services:latest` from KV and pass the service list straight in.
 
 import type { ServiceStatus, Incident } from './types'
+import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
 import { escapeXml } from './badge'
 import { getGroupedFallbacks } from './fallback'
 import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE } from './alerts'
@@ -329,7 +330,11 @@ type ItemKind = 'active' | 'resolved' | 'withdrawn'
 // so the ordering is tier-distance-first (intra-tier order arbitrary) and names are shown
 // without scores — enough to point a subscriber somewhere useful.
 function fallbackLine(svc: ServiceStatus, inc: Incident, services: ServiceStatus[]): string | undefined {
-  if (svc.status === 'operational') return undefined
+  // #1233 — `!isAffectedStatus`, not `=== 'operational'`. This is the inverse spelling of the same
+  // two-valued question, so an unreadable source passed it and the feed attached "try X instead" to a
+  // service AIWatch had just failed to read. The feed is a PUSH surface (Slack re-notifies), so a wrong
+  // item here is not merely displayed, it is delivered.
+  if (!isAffectedStatus(svc.status)) return undefined
   // #781 — grouped per-category fallbacks across ALL surfaces of THIS incident (matching the dashboard
   // + Discord), not just the primary service's category. A single-category incident keeps the flat
   // "A · B" top-2; a multi-category one lists one alternative per category ("LLM → OpenAI · App → ChatGPT").
@@ -367,6 +372,10 @@ function severityEmoji(svc: ServiceStatus, inc: Incident, kind: ItemKind): strin
   if (isNonReliabilityAdvisory(inc.title)) return 'ℹ️'
   if (isResolved) return '🟢'
   if (inc.impact === 'critical' || inc.impact === 'major' || svc.status === 'down') return '🔴'
+  // #1233 — an unreadable source falls to ⚪, not to the 🟡 degradation claim. The feed is a PUSH
+  // surface (Slack re-notifies), so a wrong severity here is delivered, not merely displayed. ⚪ is
+  // already this file's neutral marker for a withdrawn item.
+  if (isUnreadableStatus(svc.status)) return '⚪'
   return '🟡'
 }
 
@@ -431,7 +440,12 @@ function descHtml(
     // (and should): an impact escalation (major→critical), a surface joining the provider-grouped title, an AI
     // re-analysis rewriting the summary, or a fallback recommendation flip. Stability holds *given*
     // stable impact / co-affected / AI / fallback — which is the common case across investigating→identified.
-    const label = inc.impact ? cap(inc.impact) : service.status === 'down' ? 'Down' : 'Degraded'
+    // #1233 — without the `unknown` arm this renders the literal word "Degraded" for a source we could
+    // not read, in a feed item that is pushed to subscribers.
+    const label = inc.impact ? cap(inc.impact)
+      : service.status === 'down' ? 'Down'
+      : isUnreadableStatus(service.status) ? 'Status unknown'
+      : 'Degraded'
     lines.push(`<p>${severityEmoji(service, inc, 'active')} <strong>${escHtml(label)}</strong></p>`)
   }
   // #760 — no "Also affecting" line: it only ever appeared when coAffected.length>0, which is EXACTLY

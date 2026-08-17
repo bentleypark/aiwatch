@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { detectPlatformOutage } from '../services'
 import type { ServiceStatus, ServiceConfig } from '../types'
 
-function makeSvc(id: string, status: 'operational' | 'degraded', incidents: number = 0): ServiceStatus {
+function makeSvc(id: string, status: 'operational' | 'degraded' | 'unknown', incidents: number = 0): ServiceStatus {
   return {
     id, name: id, provider: '', category: 'api', status, latency: null, uptime30d: null,
     lastChecked: '', incidents: Array.from({ length: incidents }, (_, i) => ({
@@ -20,6 +20,28 @@ function makeConfig(id: string, opts: Partial<ServiceConfig> = {}): ServiceConfi
 }
 
 describe('detectPlatformOutage', () => {
+  // #1233 — the quorum's input is `isReadSuspect`, not an inline `degraded && no incidents`. This is the
+  // site that would have broken SILENTLY: its comment said "degraded with no incidents = likely fetch
+  // failure" while, after the split, no fetch failure produces `degraded` any more — so it would have
+  // counted zero forever with every test still green. Both arms of the predicate are pinned here.
+  it('counts UNREADABLE sources toward the quorum (the post-#1233 fetch-failure verdict)', () => {
+    const services = Array.from({ length: 10 }, (_, i) => makeSvc(`s${i}`, i < 8 ? 'unknown' : 'operational'))
+    const configs = services.map((s) => makeConfig(s.id, { apiUrl: 'https://x/api/v2/summary.json' }))
+    expect(detectPlatformOutage(services, configs).size).toBe(10)
+  })
+
+  it('still counts a `degraded` page that names no incident — the pre-#1233 meaning is kept', () => {
+    const services = Array.from({ length: 10 }, (_, i) => makeSvc(`s${i}`, i < 8 ? 'degraded' : 'operational'))
+    const configs = services.map((s) => makeConfig(s.id, { apiUrl: 'https://x/api/v2/summary.json' }))
+    expect(detectPlatformOutage(services, configs).size).toBe(10)
+  })
+
+  it('control: a status backed by a named incident is NOT a read-suspect and does not reach quorum', () => {
+    const services = Array.from({ length: 10 }, (_, i) => makeSvc(`s${i}`, i < 8 ? 'degraded' : 'operational', i < 8 ? 1 : 0))
+    const configs = services.map((s) => makeConfig(s.id, { apiUrl: 'https://x/api/v2/summary.json' }))
+    expect(detectPlatformOutage(services, configs).size).toBe(0)
+  })
+
   it('detects Atlassian platform outage when 70%+ services fail', () => {
     // 10 Atlassian services, 8 degraded with no incidents = 80% failure
     const services = [

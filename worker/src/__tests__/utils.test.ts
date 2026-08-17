@@ -623,6 +623,23 @@ describe('worstUnresolvedImpact (#733)', () => {
 })
 
 describe('countsAsUptimeOk (#733)', () => {
+  // #1233 — LOAD-BEARING, and it reads like an oversight, so it is pinned with its reason.
+  //
+  // An unreadable source books an `ok` uptime sample. That is not because it is right — the poll
+  // observed nothing, so neither answer is — but because the alternative was implemented during this
+  // change's review and had to be reverted: recording no sample makes `total === 0` reachable, and
+  // `computeMonthlyUptime` publishes a zero-sample service as **0%** into the permanent monthly
+  // archive. Trading an invented 100% for an invented 0% moves the fabrication from silence to a
+  // public accusation about a provider whose page we never read.
+  //
+  // `countsAsUptimeOk` contains no `'unknown'` literal — it reaches `true` by falling through the
+  // `degraded` path, and its signature is `status: string`, so it gets no exhaustiveness pressure from
+  // `status-verdict.ts`. Without this case, re-introducing the revert is green across the whole suite.
+  it('an unreadable source counts as an UP sample — deliberate; see the note at cacheWrite', () => {
+    expect(countsAsUptimeOk('unknown', [])).toBe(true)
+    expect(countsAsUptimeOk('unknown', undefined)).toBe(true)
+  })
+
   const inc = (impact: Incident['impact']): Incident =>
     ({ id: 'x', title: 't', status: 'investigating', impact, startedAt: '2026-06-17T00:00:00Z', resolvedAt: null, duration: null, timeline: [] }) as Incident
 
