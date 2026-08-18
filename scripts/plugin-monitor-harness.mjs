@@ -77,8 +77,9 @@ export const httpError = (body) => httpStatus(503, body)
  *  else's.
  *
  *  It does NOT vary the UTILITIES the script calls (awk, sort, comm, curl): all three shells here
- *  reach the same binaries, so a BSD-only or GNU-only assumption is caught only by the suite running
- *  on macOS locally AND on Linux in CI, not by this matrix.
+ *  reach the same binaries. For `awk` — the one the script leans on hardest — that axis is covered
+ *  by the `awk-matrix` job in .github/workflows/test.yml, not by this loop. The other three are
+ *  covered only by the suite running on macOS locally AND on Linux in CI.
  *
  *  This looks for exactly `/bin/sh`, `dash` and `bash` — not "every shell on the machine". */
 export function availableShells() {
