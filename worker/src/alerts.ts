@@ -209,6 +209,64 @@ export function pendingNewKey(incId: string): string {
   return `${PENDING_NEW_PREFIX}${incId}`
 }
 
+/**
+ * #1224 — the age past which `cronAlertCheck`'s per-incident marker reads cannot change any alert.
+ *
+ * `buildIncidentAlerts` drops every incident older than this, on BOTH its new and resolved branches
+ * (the `incAge` cutoff below), so an incident past it cannot produce an alert for the roster read to
+ * dedup.
+ *
+ * Deliberately ONE constant shared by the gate and the cutoff it is reasoning about, rather than two
+ * numbers that happen to agree: the gate is safe exactly while it skips no more than the build already
+ * skips, so a widened cutoff (the #1134 class of window change) must widen the gate in the same edit or
+ * not at all. The gate and the build also share ONE clock (`runNowMs`), so neither can be evaluated at
+ * an instant the other was not — pinned in `incidents-past-alert-age.test.ts`.
+ *
+ * One behaviour DOES change past the bound: such an incident is no longer added to `heldNewIncIds`, so
+ * `refreshOrReanalyze` no longer defers its analysis. Accepted — a 24h-old incident is not the sub-10min
+ * flap that deferral exists for (`ai-analysis.ts`).
+ *
+ * NOT the `alerted:new:` 7d TTL, which was this gate's first form and is unsound: that key's TTL runs
+ * from the SEND, up to this bound after `startedAt`, so it outlives `startedAt+7d` and a live marker
+ * would have been skipped; and `pending:new:`'s 30 min runs from the first SIGHT, which is unrelated to
+ * `startedAt` (an ongoing 8-day-old incident has a live one).
+ */
+export const INCIDENT_ALERT_MAX_AGE_MS = 86_400_000
+
+/**
+ * True while `inc` is young enough for `buildIncidentAlerts` to still emit for it — i.e. while the
+ * cron's per-incident marker reads and hold decision can still affect an alert.
+ *
+ * Fails OPEN on an unparseable or absent `startedAt`: an incident we cannot date must be treated as
+ * live, so a malformed provider timestamp can never suppress a marker read (which would drop a New
+ * alert or re-fire one already sent) or skip a hold. The reads this saves are worth strictly less
+ * than either. Reachable despite `startedAt: string` — the parsers pass the provider's field straight
+ * through.
+ */
+export function canIncidentStillAlert(inc: Incident, nowMs: number): boolean {
+  const startedMs = Date.parse(inc.startedAt)
+  if (!Number.isFinite(startedMs)) return true
+  return nowMs - startedMs <= INCIDENT_ALERT_MAX_AGE_MS
+}
+
+/**
+ * #1224 — which per-incident markers `cronAlertCheck` needs to read for `inc`, and whether it needs to
+ * evaluate the hold at all. The ONE place that decision is made.
+ *
+ * It is a function, not three conditions spelled out at the call site, because the call site is source
+ * text: three rounds of review found gates that read correctly and decided something else (a status
+ * check smuggled into a nested ternary, an extra operand on a continuation line). A decision that lives
+ * here can be table-tested over the age × status grid instead of pattern-matched.
+ *
+ * `alertable` is false once `buildIncidentAlerts` would drop the incident by age, so nothing gated on it
+ * can reach an alert. `readPending` additionally requires the incident to be unresolved, where
+ * `shouldHoldNewIncident` provably never consults the marker.
+ */
+export function markerReadPlan(inc: Incident, nowMs: number): { alertable: boolean; readPending: boolean } {
+  const alertable = canIncidentStillAlert(inc, nowMs)
+  return { alertable, readPending: alertable && inc.status !== 'resolved' }
+}
+
 // #792 — generalized short-incident hold. Where isFlapSuppressible targets the BetterStack
 // "<model> — down/recovered" flap title shape, this holds ANY new non-major incident on a
 // `holdShortIncidents` service. Such services (e.g. Langfuse) fire frequent short `minor`
@@ -532,7 +590,9 @@ export function buildIncidentAlerts(
     for (const inc of svc.incidents ?? []) {
       if (suppressedIncIds.has(inc.id)) continue // #283 flap suppression — skip both new + resolved
       const incAge = now - new Date(inc.startedAt).getTime()
-      if (incAge > 86_400_000) continue
+      // #1224 — the cron's per-incident loop gates its marker reads + hold on this SAME constant
+      // (`canIncidentStillAlert`). Widening it here widens that gate too, by construction.
+      if (incAge > INCIDENT_ALERT_MAX_AGE_MS) continue
 
       // #545: per-service (not per-incident) — only services NOT yet alerted for this incident.
       // A service joining an already-alerted incident later still produces its own alert.
