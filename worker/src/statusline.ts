@@ -195,38 +195,56 @@ export function renderStatuslinePresetUnknown(preset: StatuslinePreset): string 
 
 // ── Monitor down-list (#920) ──────────────────────────────────────────────
 //
-// The plugin's background monitor needs a PARSEABLE, UNCAPPED list so it can diff poll-over-poll and
-// emit explicit transition lines (the display presets are capped at 3 + are emoji strings, unsuitable
-// for a diff). This endpoint — not the presets — is what the monitor polls. One `\t`-separated `status<TAB>name` line per LISTED service, in
-// cache order; empty body when there is nothing to say. Consumed only by the monitor.
+// The plugin's background monitor needs a PARSEABLE, UNCAPPED list so it can track state across polls
+// and emit explicit transition lines; the display presets are emoji strings, unsuitable for that. This
+// endpoint — not the presets — is what the monitor polls. One `\t`-separated `status<TAB>name` line
+// per LISTED service, in cache order; empty body when there is nothing to say. Consumed only by the
+// monitor.
 //
-// #1233 — CARVE-OUT, and the one surface in this change that keeps the OLD encoding. An unreadable
-// source is listed here as `degraded`, byte-identical to what this endpoint emitted before #1233.
+// #1238 — this wire publishes the honest status word, `unknown` included. It is the surface #1233
+// deliberately left behind, still emitting `degraded` for an unreadable source, which made one plugin
+// bundle contradict itself (the monitor said "🔴 … is degraded" while `/aiwatch` said "⚪ Status source
+// unreadable" about the same service in the same terminal).
 //
-// Not an oversight, and not the right answer either — it is a scope decision. The honest value on this
-// wire is `unknown`, but the consumer is `plugin/aiwatch/bin/aiwatch-monitor.sh`, which infers RECOVERY
-// FROM ABSENCE (`comm -23 prev cur` → `✅ … has recovered`). Absence therefore means two different
-// things — "recovered" and "we stopped being able to see it" — and no encoding on this endpoint alone
-// fixes that: dropping an unreadable service announces a false recovery for a service that is still
-// down, while emitting a new status word silently changes a contract that installed plugin copies
-// parse. Both were tried during this change's review and both produced defects worse than the one they
-// replaced, in a script that has no automated test of any kind.
+// What changed here is the WORD, not the filter — an unreadable source was already listed, as
+// `degraded`. It could not move before because the monitor inferred recovery from ABSENCE, so the
+// only two encodings available were both wrong: `degraded` claims an outage, and dropping the
+// service announces a recovery for one that is still down. The safety property is not "it is
+// listed"; it is that `aiwatch-monitor.sh` now keeps the set of outages it still owes a ✅ for, so a
+// service that never got a 🔴 can never produce one. Pinned by `scripts/plugin-monitor.test.mjs`.
 //
+// Three things this endpoint therefore owes that consumer:
 //
-// One consequence to state plainly, because "unchanged from today" understates it: the OTHER surface of
-// the same plugin bundle DID change. `/aiwatch` reads `/statusline/brief`, which now says "Status source
-// unreadable … not an outage", while the background monitor reading this endpoint still says
-// "🔴 … is degraded" — about the same service, in the same terminal, at the same moment. Before this
-// change both said `degraded`. The briefing is the surface to trust until the monitor follow-up lands.
-// So this endpoint stays exactly as it is until the monitor's absence-inference is fixed with a test
-// harness in place FIRST — tracked as a follow-up. The cost is stated plainly: the plugin monitor keeps
-// calling an unreadable source `degraded`, unchanged from today. Every other surface (`:preset`
-// displays, the extension, is-down, the dashboard, Discord) publishes the neutral state.
+//  1. Every listed service is one AIWatch cannot call healthy, and a service's ABSENCE is the only
+//     claim of health published here.
+//  2. `unknown` ⇔ unreadable, TOTALLY. Adding another affected word is safe (the monitor announces an
+//     unfamiliar word rather than discarding it); adding a second UNREADABLE one is not — the script
+//     special-cases the literal `unknown` and would announce anything else as an outage. That is why
+//     the map below normalises through `isUnreadableStatus` rather than passing `s.status` through:
+//     `statusVerdict` answers `unreadable` for any value outside the union too (a payload written by
+//     another deploy), and such a service is admitted by the filter. Emitting its raw word here would
+//     put a 🔴 on a source we could not read — the #1233 defect, on the one surface that exists to
+//     avoid it.
+//  3. One service, one row, and every row names a service. The monitor rejects a body it cannot
+//     read, so a `\t`, `\r` or `\n` in one name costs every OTHER service its transitions too, for
+//     as long as that name is published. `SERVICES` is pinned clean by a test, but the names on this
+//     path come from a CACHED payload, so they get the same treatment as the status: normalised
+//     here rather than trusted. Folded to a space rather than stripped, so the name keeps its word
+//     boundary.
+//
+// An already-installed plugin copy prints `🔴 <name> is unknown` until it is updated — the same
+// false-outage class it already emitted with `degraded`.
 export function renderStatuslineDownList(services: StatuslineService[]): string {
   return services
     .filter((s) => isAffectedStatus(s.status) || isUnreadableStatus(s.status))
-    // The legacy word for an unreadable source, so the emitted bytes match the pre-#1233 endpoint.
-    .map((s) => `${isUnreadableStatus(s.status) ? 'degraded' : s.status}\t${s.name}`)
+    .map((s) => {
+      // `|| s.id` and not a drop: a service with no usable name still has to be LISTED, because
+      // absence from this list is the all-clear that settles its debt. A blank `$2` rejects the
+      // whole body at the monitor (every poll, total silence); a whitespace-only one passes its
+      // guard and announces a line naming no service.
+      const name = (s.name ?? '').replace(/[\t\r\n]+/g, ' ').trim() || s.id
+      return `${isUnreadableStatus(s.status) ? 'unknown' : s.status}\t${name}`
+    })
     .join('\n')
 }
 

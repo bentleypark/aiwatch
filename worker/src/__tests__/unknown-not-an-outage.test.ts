@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedService } from '../status-verdict'
 import { renderStatuslinePreset, renderStatuslineDownList, renderStatuslineBrief, STATUSLINE_PRESETS, type BriefService } from '../statusline'
 import { buildDailySummary } from '../daily-summary'
@@ -81,26 +82,51 @@ describe('#1233 transitional — a payload cached before the change', () => {
   })
 })
 
-describe('#1233 statusline — the surface the plugin monitor diffs every 60s', () => {
+describe('#1233 statusline — the surface the plugin monitor polls', () => {
   const services = [
     { id: 'claude', name: 'Claude API', status: 'unknown' as const },
     { id: 'openai', name: 'OpenAI API', status: 'operational' as const },
   ]
 
-  // #1233 CARVE-OUT — the ONE surface that keeps the pre-#1233 encoding, pinned so the exception stays
-  // deliberate rather than becoming an accident. Its consumer (the plugin outage monitor) infers
-  // recovery from ABSENCE, so neither dropping an unreadable service nor introducing a new status word
-  // is safe from this endpoint alone; both were tried in review and both produced worse defects, in a
-  // script with no automated test. The wire therefore stays byte-identical to production until the
-  // monitor is fixed with a harness in place first (follow-up).
-  it('lists an unreadable source with the LEGACY `degraded` word — byte-identical to pre-#1233', () => {
-    expect(renderStatuslineDownList(services)).toBe('degraded\tClaude API')
+  // #1238 — the #1233 carve-out is gone: this wire now publishes `unknown` like every other surface.
+  // The monitor's transitions off it are pinned against the real script in scripts/plugin-monitor.test.mjs.
+  it('lists an unreadable source as `unknown`, not as an outage word', () => {
+    expect(renderStatuslineDownList(services)).toBe('unknown\tClaude API')
   })
 
   it('control: a real outage and a healthy board are unchanged', () => {
     expect(renderStatuslineDownList([{ id: 'claude', name: 'Claude API', status: 'down' }]))
       .toBe('down\tClaude API')
     expect(renderStatuslineDownList([{ id: 'openai', name: 'OpenAI API', status: 'operational' }])).toBe('')
+  })
+
+  // #1238 — a value OUTSIDE the union reaches this renderer from a payload written by another
+  // deploy, and `statusVerdict` answers `unreadable` for it, so the filter admits it. Emitted raw it
+  // would become `🔴 Claude API is something-we-shipped-later` in the plugin monitor: a false outage
+  // off a source we could not read, which is the whole defect class. The mapping is what makes the
+  // wire contract `unknown` ⇔ unreadable TOTAL rather than true of the four known members.
+  it('normalises any unreadable status — including one outside the union — to `unknown`', () => {
+    const future = [{ id: 'claude', name: 'Claude API', status: 'something-we-shipped-later' as ServiceStatus['status'] }]
+    expect(renderStatuslineDownList(future)).toBe('unknown\tClaude API')
+  })
+
+  // #1238 — the consumer hand-copies this word across a boundary nothing else crosses: the shell
+  // monitor ships in its own bundle, is not type-checked, and imports nothing from here. If the wire
+  // word for an unreadable source ever changes, the script's `awk` falls through to its "anything
+  // else is an outage" branch and starts announcing 🔴 off a source we could not read — the exact
+  // defect this issue fixed, reintroduced silently. So take the word from the renderer, not from a
+  // literal, and require the script to be matching THAT.
+  it('the shell monitor special-cases exactly the word this endpoint emits for an unreadable source', () => {
+    // Its own fixture, not the shared `services`: prepending an affected service to that array — an
+    // ordinary edit for the sibling tests — would silently make `word` `'down'` and fail here with a
+    // message about a string that was never meant to be in the script.
+    const [word] = renderStatuslineDownList([{ id: 'claude', name: 'Claude API', status: 'unknown' }]).split('\t')
+    const script = readFileSync(new URL('../../../plugin/aiwatch/bin/aiwatch-monitor.sh', import.meta.url), 'utf8')
+    // Comments stripped first — the script's header DISCUSSES `unknown` at length, so a substring
+    // search over the whole file would be satisfied by prose after the code stopped matching.
+    const code = script.split('\n').map((l) => l.replace(/^\s*#.*$/, '')).join('\n')
+    expect(code).toContain(`$1 != "${word}"`)
+    expect(code).toContain(`$1 == "${word}"`)
   })
 
   it('no preset paints an unreadable source as an outage, or as all-clear', () => {
