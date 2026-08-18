@@ -4584,7 +4584,7 @@ export default {
     }
 
     // GET /api/statusline/down — parseable UNCAPPED down-list (#920) for the plugin monitor's
-    // poll-over-poll diff (`status<TAB>name` per non-operational service, empty when all clear).
+    // transition tracking (`status<TAB>name` per non-operational service, empty when all clear).
     // Distinct from the capped emoji presets; consumed only by bin/aiwatch-monitor.sh. Must precede
     // the generic /api/statusline/:preset route ('down' is not a preset). WAE-tagged 'aiwatch-monitor'
     // (NOT statusline-*, so continuous monitor polling doesn't pollute the #918 preset-adoption metric).

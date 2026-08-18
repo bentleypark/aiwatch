@@ -6,7 +6,7 @@ Know the moment an upstream AI provider breaks, right inside Claude Code.
 
 ## What you get
 
-- **Outage monitor (background)** — a passive watcher that notifies Claude the moment a monitored provider goes **down** (`🔴 Claude API is down`) and again when it **recovers** (`✅ Claude API has recovered`), naming each service explicitly. It diffs each poll against the last, so it only speaks up on a real transition — never spams. This is the headline feature: you find out an outage is upstream *before* you burn time debugging your own code.
+- **Outage monitor (background)** — a passive watcher that notifies Claude the moment a monitored provider goes **down** (`🔴 Claude API is down`) and again when it **recovers** (`✅ Claude API has recovered`), naming each service explicitly. It tracks which outages it has already announced, so it only speaks up on a real transition — never spams. This is the headline feature: you find out an outage is upstream *before* you burn time debugging your own code.
 - **`/aiwatch` command** — on demand, briefs which AI services are degraded/down right now, each with its **active incident** (title + impact), an **AI summary** when available, and a **fallback** suggestion (or confirms all-clear). The briefing is rendered server-side, so the command stays a thin fetch.
 
 The plugin **reads no code and collects no data** — it only polls AIWatch's public status endpoint. It is informational (Claude Code is Claude-only, so it can't switch providers for you), not a fallback router.
@@ -35,6 +35,7 @@ The background monitor requires Claude Code v2.1.105 or later and an interactive
 ## Usage
 
 - The **monitor** starts automatically when the plugin is enabled — no action needed. When a provider goes down you'll see `🔴 Claude API is down (AIWatch)`, and on recovery `✅ Claude API has recovered (AIWatch)` — one line per service, only on a real state change (never on an unchanged poll).
+- Once AIWatch has **confirmed it cannot read** a provider's status source, the monitor stays quiet rather than guessing: it will not call that an outage, and — if the service was already down — it will not call it a recovery either. The `✅` still arrives once the source is readable again and the service is back. Run **`/aiwatch`** to see which sources are currently unreadable.
 - Run **`/aiwatch`** any time for the current status.
 
 ## Configuration

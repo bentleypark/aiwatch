@@ -15,6 +15,7 @@ import {
   type StatuslineService,
   type BriefService,
 } from '../statusline'
+import { SERVICES } from '../services'
 import type { ServiceStatus } from '../types'
 
 const ESC = ''
@@ -228,7 +229,7 @@ describe('renderStatuslinePreset (#918)', () => {
   })
 })
 
-// #920 — the parseable down-list behind the plugin monitor's poll-over-poll diff.
+// #920 — the parseable down-list the plugin monitor tracks transitions from.
 describe('renderStatuslineDownList (#920)', () => {
   const svc = (id: string, name: string, status: StatuslineService['status']): StatuslineService => ({ id, name, status })
 
@@ -249,6 +250,34 @@ describe('renderStatuslineDownList (#920)', () => {
   it('is uncapped (unlike the 3-cap presets) — all affected services listed', () => {
     const many = Array.from({ length: 6 }, (_, i) => svc(`s${i}`, `Service ${i}`, 'down'))
     expect(renderStatuslineDownList(many).split('\n')).toHaveLength(6)
+  })
+
+  // #1238 — the format is one row per service, and the monitor reads a service's ABSENCE from it as
+  // the only published claim of health. The monitor rejects a body it cannot read, so one name
+  // carrying such a character costs EVERY service its transitions for as long as it is published.
+  // Pinned on the configured roster, over the REAL `SERVICES`.
+  it('no configured service name can break a row apart', () => {
+    expect(SERVICES.length).toBeGreaterThan(40) // or an empty roster would satisfy the next line
+    const offenders = SERVICES.filter((s) => /[\t\r\n]/.test(s.name)).map((s) => s.id)
+    expect(offenders).toEqual([])
+  })
+
+  it('falls back to the id when a CACHED name is blank or only control characters', () => {
+    // Both shapes reach the monitor's `$2` and both are worse than a wrong-looking name: an empty
+    // `$2` rejects the WHOLE body on every poll (the monitor goes silent for as long as the record
+    // is cached), and a whitespace-only one passes that guard and announces `🔴   is down`, a
+    // notification naming no service. Dropping the row instead would be an all-clear.
+    expect(renderStatuslineDownList([{ id: 'claude', name: '', status: 'down' }])).toBe('down\tclaude')
+    expect(renderStatuslineDownList([{ id: 'claude', name: '\t', status: 'down' }])).toBe('down\tclaude')
+    expect(renderStatuslineDownList([{ id: 'claude', name: '  ', status: 'unknown' }])).toBe('unknown\tclaude')
+  })
+
+  it('folds a control character in a CACHED name rather than emitting a row it would split', () => {
+    // The roster above is pinned clean, but this renderer reads a cached payload — the same
+    // "written by another deploy" reasoning that makes the status normalisation necessary.
+    const out = renderStatuslineDownList([{ id: 'claude', name: 'Claude\nAPI', status: 'down' }])
+    expect(out).toBe('down\tClaude API')
+    expect(out.split('\n')).toHaveLength(1)
   })
 })
 
