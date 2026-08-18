@@ -11,7 +11,7 @@ import { serviceGroupOf } from './service-groups'
 import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
-import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
@@ -835,18 +835,56 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // #633/#835 — first-seen confirmation gate. A flap-shaped/short NEW incident on a monitor-flap or
   // short-incident-hold service is HELD until it has survived ~2 cron cycles (FLAP_HOLD_MS, #835 — was
   // one cycle), so a sub-~10min blip fires NEITHER a phantom New nor a Resolved (the Modal "Storage
-  // degraded" 1m double-alert). heldNewIncIds → suppressedIncIds (buildIncidentAlerts skips both new +
-  // res) AND passed to refreshOrReanalyze (analysis deferred too). pendingNewToWrite stamps the
+  // degraded" 1m double-alert). heldNewIncIds is passed to refreshOrReanalyze (analysis deferred too);
+  // suppressedIncIds is what buildIncidentAlerts skips on. pendingNewToWrite stamps the
   // pending:new marker with the first-seen ts so a LATER cycle confirms + fires once the window passes.
   const heldNewIncIds = new Set<string>()
   const pendingNewToWrite = new Map<string, number>()  // incId → first-seen epoch ms (#835, write-once)
+  // #1224 — ONE line per cron run, never per incident. Without it the gate is unfalsifiable in
+  // production: a skipped read and a missing key are the same `null`, so the saving could only be
+  // inferred from the KV dashboard. Counted in (service, incident) PAIRS, which is what the loop
+  // iterates. The two error counters are separate because their consequences are: a failed roster read
+  // makes the #545 dedup bypass re-emit a 🔴 New alert every 5 min (and for a resolved incident drops
+  // its Resolved notice), while a failed pending read only fails open to "no hold".
+  let rosterReads = 0
+  let rosterSkips = 0
+  let pendingReads = 0
+  let flapReads = 0
+  let rosterReadErrors = 0
+  let pendingReadErrors = 0
+  // #1224 — ONE clock for the age gate and for `buildIncidentAlerts`. The gate is safe only while it
+  // skips no more than the build does; sharing the clock makes that hold BY CONSTRUCTION instead of by
+  // program order, so no later refactor can put the build on an earlier clock and leave the gate
+  // skipping incidents the build still emits for. The per-incident `nowMs` below stays as it is — the
+  // flap escape and the hold window are a different invariant (#983).
+  const runNowMs = Date.now()
   for (const svc of scored) {
     const config = SERVICES.find(c => c.id === svc.id)
     for (const inc of svc.incidents ?? []) {
       // One clock per incident: the flap-escape (#983) and the first-seen hold window (#835) must
       // agree on "now", and re-reading Date.now() between them would let them disagree by ms.
       const nowMs = Date.now()
-      const wasAlerted = await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch(() => null)
+      // #1224 — this loop ran a KV read per marker for every incident-service pair /api/status carries,
+      // on every */5 run, while `buildIncidentAlerts` drops everything older than
+      // INCIDENT_ALERT_MAX_AGE_MS from BOTH its branches. Past that bound nothing computed below can
+      // reach an alert, so all three reads and the hold are skipped together — gated on the same
+      // constant the build uses, so the two cannot drift apart. `markerReadPlan` is the one place that
+      // decision is made, and it is DESTRUCTURED so neither flag can be reassigned further down.
+      const { alertable, readPending } = markerReadPlan(inc, runNowMs)
+      if (alertable) rosterReads++
+      else rosterSkips++
+      // A read ERROR is not a skip: it means `alertedNewMap` misses an incident that WAS alerted, and
+      // the #545 dedup bypass below re-emits its 🔴 New alert every 5 min until a read succeeds. The
+      // sibling pending:new read has always logged this; staying silent here made the one consequential
+      // failure on the New-alert dedup path indistinguishable from an ordinary miss (#970 forensics).
+      const wasAlerted = alertable
+        ? await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch((err) => {
+          // Capped: the fail-open on an undateable startedAt means a parser regression can push every
+          // incident back onto this path. Past the cap the run's accounting line carries the rest.
+          if (++rosterReadErrors <= 5) console.warn('[cron] #545 alerted:new read failed — incident may re-alert this cycle:', inc.id, err instanceof Error ? err.message : err)
+          return null
+        })
+        : null
       if (wasAlerted) {
         let set = alertedNewMap.get(inc.id)
         if (!set) { set = new Set<string>(); alertedNewMap.set(inc.id, set) }
@@ -854,7 +892,12 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         if (corrupt) console.warn('[cron] #545 corrupt alerted:new roster, treating as legacy:', inc.id, wasAlerted.slice(0, 80))
         for (const id of ids) set.add(id)
       }
-      if (config && isFlapSuppressible(svc.id, config, inc, nowMs)) {
+      // #1224 — measured 2026-08-17, this read ran 29×/run and EVERY one was for an incident past the
+      // bound: `isFlapSuppressible` bounds on the incident's RUN time, so an old short resolved flap
+      // still qualifies. Gated with the rest — its suppression only subtracts from the same capped
+      // build, and its key is written only for a resolved alert that actually SENT.
+      if (config && alertable && isFlapSuppressible(svc.id, config, inc, nowMs)) {
+        flapReads++
         const flapKey = flapSuppressionKey(svc.id, inc)
         const flapActive = await env.STATUS_CACHE.get(flapKey).catch(() => null)
         if (flapActive) {
@@ -870,7 +913,11 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       // #633 — hold a flap-shaped new incident on its first sight (no pending marker from a prior
       // cycle); confirm + fire once it survives a cycle. alreadyAlerted is read from alertedNewMap
       // above, so a re-fire of an already-sent incident is never held.
-      if (config) {
+      // #1224 — gated with the read above: a hold only ever subtracts from `buildIncidentAlerts`, so
+      // past the bound it has nothing left to gate. Leaving it ungated while the read above was gated
+      // would be WORSE than either: `alreadyAlerted` would read false for an already-announced old
+      // incident, so the hold would newly apply to it.
+      if (config && alertable) {
         const alreadyAlerted = alertedNewMap.get(inc.id)?.has(svc.id) ?? false
         // #835 — the pending:new marker stores the FIRST-SEEN epoch ms (not a bare '1'); shouldHold
         // confirms only once the incident has been first-seen ≥ FLAP_HOLD_MS (~2 cron cycles).
@@ -878,10 +925,21 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         // is worse than one phantom on a transient KV blip (preserves the prior fail-not-hold).
         // A legacy '1' marker (pre-#835) parses to 1 → age huge → fires immediately — a safe one-time
         // transition (no in-flight incident gets stuck held across the deploy).
-        const pendingRaw = await env.STATUS_CACHE.get(pendingNewKey(inc.id)).catch((err) => {
-          console.warn('[cron] #835 pending:new read failed — failing open (will not hold):', inc.id, err instanceof Error ? err.message : err)
-          return '0'
-        })
+        // #1224 — `readPending` is false for a RESOLVED incident, where the value is provably
+        // unused: shouldHoldNewIncident returns false on `status === 'resolved'` before it reads
+        // firstSeenMs, and the only other consumer (the stamp below) is inside that same branch. The
+        // key's own 30-min TTL is NOT part of that decision — it runs from the first SIGHT, not
+        // `startedAt`, so an ongoing long incident has a LIVE marker.
+        // The skip value is `null`, NOT the '0' read-error sentinel: `null` means "no marker" (first
+        // sight), while '0' parses to firstSeenMs=0 and would claim a marker had existed.
+        if (readPending) pendingReads++
+        const pendingRaw = readPending
+          ? await env.STATUS_CACHE.get(pendingNewKey(inc.id)).catch((err) => {
+            pendingReadErrors++
+            console.warn('[cron] #835 pending:new read failed — failing open (will not hold):', inc.id, err instanceof Error ? err.message : err)
+            return '0'
+          })
+          : null
         const firstSeenMs = pendingRaw === null ? null : (Number.parseInt(pendingRaw, 10) || 0)
         if (shouldHoldNewIncident(svc.id, config, inc, { alreadyAlerted, firstSeenMs, nowMs })) {
           console.log('[cron] #633/#792/#835 holding new incident until it survives ~2 cycles (flap / short-blip gate):', svc.id, inc.id)
@@ -897,6 +955,8 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     const wasDegraded = await env.STATUS_CACHE.get(`alerted:degraded:${svc.id}`).catch(() => null)
     if (wasDegraded) alertedDegradedMap.set(svc.id, wasDegraded)
   }
+
+  console.log('[cron] #1224 per-incident marker reads —', `pairs=${rosterReads + rosterSkips}`, `alerted:new read=${rosterReads}`, `skipped=${rosterSkips}`, `pending:new read=${pendingReads}`, `alerted:flap read=${flapReads}`, `rosterReadErrors=${rosterReadErrors}`, `pendingReadErrors=${pendingReadErrors}`, `heldNewIds=${heldNewIncIds.size}`)
 
   // Anti-flapping: read pending state BEFORE building alerts.
   // Degraded alerts require consecutive detection (2 cron cycles ≈ 10min).
@@ -968,7 +1028,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   }
 
   // Build alerts using pure functions
-  const incidentAlerts = buildIncidentAlerts(scored, alertedNewMap, Date.now(), suppressedIncIds)
+  const incidentAlerts = buildIncidentAlerts(scored, alertedNewMap, runNowMs, suppressedIncIds)
   const serviceAlerts = buildServiceAlerts(scored, alertedDownMap, alertedDegradedMap)
   // #1106 — withdrawals go LAST. `sent` is capped at 5 per cycle, so ordering is a priority: a
   // retraction of a days-old incident must never evict a live `down`/`degraded` alert. A withdrawal
