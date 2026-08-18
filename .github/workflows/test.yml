@@ -72,7 +72,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ${{ matrix.awk }}
+      # Only when missing. `mawk` IS ubuntu's default awk, and re-installing the package that owns
+      # /usr/bin/awk drops apt into a debconf prompt that `-y` does not answer — the job then hangs
+      # until the runner times out, with the suite never reached (observed on the first run of this
+      # matrix). DEBIAN_FRONTEND is belt-and-braces for the two that do need installing.
+      - name: Ensure ${{ matrix.awk }} is present
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -eu
+          command -v ${{ matrix.awk }} >/dev/null && exit 0
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ${{ matrix.awk }}
       # Shimmed onto PATH rather than via update-alternatives, so this job pins WHICH
       # implementation ran instead of inheriting whatever the image's `awk` currently points at.
       - name: Shim ${{ matrix.awk }} as `awk`
