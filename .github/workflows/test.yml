@@ -29,6 +29,7 @@ jobs:
   unit:
     name: Worker Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # #1253 — never inherit the 6h default
     if: >-
       github.event_name == 'push' ||
       contains(toJSON(github.event.pull_request.labels.*.name), 'ci:all') ||
@@ -62,6 +63,9 @@ jobs:
   awk-matrix:
     name: Monitor Suite (${{ matrix.awk }})
     runs-on: ubuntu-latest
+    # #1253 — this job's apt step hit the same stall class as the Playwright install (~22m with no
+    # output, then a manual cancel); the legs that find their awk already installed skip apt entirely.
+    timeout-minutes: 10
     strategy:
       # Not fail-fast: which awks disagree is the whole signal, so one red must not hide the rest.
       fail-fast: false
@@ -84,6 +88,7 @@ jobs:
           command -v ${{ matrix.awk }} >/dev/null && exit 0
           sudo apt-get update -qq
           sudo apt-get install -y -qq ${{ matrix.awk }}
+        timeout-minutes: 5   # #1253 — the apt stall must fail this step, not hold the job
       # Shimmed onto PATH rather than via update-alternatives, so this job pins WHICH
       # implementation ran instead of inheriting whatever the image's `awk` currently points at.
       - name: Shim ${{ matrix.awk }} as `awk`
@@ -97,6 +102,7 @@ jobs:
   src-unit:
     name: Frontend Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # #1253 — never inherit the 6h default
     # #877: gate the frontend vitest suite (~750 tests incl. the CSP drift pin
     # api/__tests__/csp-headers.test.ts, which caught PR #871's vercel.json script-src
     # hash drift). ALWAYS-ON, no path gate: the CSP pin can break from vercel.json /
@@ -113,6 +119,7 @@ jobs:
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15   # #1253 — a stalled browser install must fail, not hang on the 6h default
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -138,9 +145,22 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+      # #1253 — bound the apt phase, then install the browser without apt; rationale in edge-e2e.yml.
       - name: Install Playwright
         if: steps.changes.outputs.frontend == 'true'
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 5
+        run: |
+          rc=0
+          timeout 120 npx playwright install --with-deps chromium || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            case $rc in
+              124) why="apt stalled and the bound fired (#1253)" ;;
+              127) why="\`timeout\` not found — THE BOUND DID NOT RUN" ;;
+              *)   why="a non-timeout apt failure (mirror / dpkg lock / disk)" ;;
+            esac
+            echo "::warning title=Playwright deps degraded::--with-deps exited $rc: $why. Installing the browser without apt; font packages will be missing."
+            npx playwright install chromium
+          fi
       - name: Run E2E tests
         if: steps.changes.outputs.frontend == 'true'
         run: npm test
@@ -151,6 +171,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # #1253 — never inherit the 6h default
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

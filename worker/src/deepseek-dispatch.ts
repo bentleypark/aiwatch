@@ -6,8 +6,10 @@
 // 5 min — so the worker dispatches the workflow each cycle (workflow_dispatch API), making DeepSeek a
 // first-class */5 service. A short KV cooldown spaces dispatches to ~one per cron cycle; because KV
 // reads are only eventually consistent (so the cooldown can't be a hard guarantee), the workflow's
-// own `concurrency` group is the LOAD-BEARING guard against pile-up (overlapping dispatches queue,
-// they don't double-push) alongside its 6-min timeout. The GitHub `schedule` stays as a backup.
+// own `concurrency` group is the LOAD-BEARING guard against pile-up, alongside the workflow's job
+// timeout. Overlapping dispatches do NOT queue: a concurrency group holds at most one running and one
+// pending run, and a new arrival CANCELS the pending one — so a held run sheds the dispatches behind
+// it as zero-job `cancelled` runs (#1253 measured 11 of 26). The GitHub `schedule` stays as a backup.
 
 export const DISPATCH_COOLDOWN_KEY = 'deepseek:dispatch:cooldown'
 // Just under the */5 cron interval (300s) so each cycle normally dispatches once while a same-cycle

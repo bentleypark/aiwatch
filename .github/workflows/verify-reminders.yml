@@ -28,6 +28,7 @@ jobs:
   remind:
     name: Verify-after reminders
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # #1253 — never inherit the 6h default
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

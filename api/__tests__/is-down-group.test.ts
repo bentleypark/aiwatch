@@ -247,7 +247,7 @@ describe('is-down-group.ts', () => {
   })
 })
 
-// <NEW> — this page never got the #1063/#804 og:url pin the individual is-down pages (api/is-down.ts)
+// #1194 — this page never got the #1063/#804 og:url pin the individual is-down pages (api/is-down.ts)
 // and buildTweetForService got: og:url was ALWAYS the bare canonical, so a social platform's
 // og:url-keyed card cache reused whatever it first fetched no matter how many real outages were
 // shared afterward. Reproduced live 2026-08-02 via the operator's "Anthropic (Claude)" group tweet
@@ -628,8 +628,603 @@ describe('outage-audience beacon (#842-B / #1193)', () => {
     const inlineScripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
     const beaconScript = inlineScripts.find((s) => s.includes('/api/pageview'))
     expect(beaconScript, 'no inline script carries the beacon').toBeTruthy()
+    // #1243 — the executed harnesses below each parse their own slice; this covers the beacon region and
+    // the text between slices. An unbalanced `})` anywhere in the block used to render fine, hash fine,
+    // and ship a page whose copy handler, GA4 hook and audience beacon were all dead. `new Function`
+    // parses without running, so no beacon fires.
+    expect(() => new Function(beaconScript!), 'the page inline script does not parse').not.toThrow()
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(beaconScript!))
     const b64 = btoa(String.fromCharCode(...new Uint8Array(digest)))
     expect(csp, 'the beacon script is not hashed into the page CSP').toContain(`sha256-${b64}`)
+  })
+})
+
+// #1243 — the page's PUBLIC share bar shared the BARE canonical (URL interpolated into the tweet text,
+// no `?e=`/`&i=` pin, no UTM), so X — which keys its unfurl cache on `og:url` — re-served the card it
+// crawled while the family was operational. #1194 above fixed this file's pin-CONSUMING side and the
+// operator draft, but not the bar, so the page parsed a pin it never produced. Reproduced live
+// 2026-08-19 during Anthropic incident `q7txxvbsftgq`. These cases pin the EMITTING side.
+describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  afterEach(() => { fetchMock?.mockRestore() })
+
+  const ongoing: MockIncident = {
+    id: 'q7txxvbsftgq', title: 'Degraded performance for multiple models',
+    status: 'investigating', startedAt: new Date(Date.now() - 3_600_000).toISOString(), duration: null,
+  }
+
+  function degradedFamily(incidents: MockIncident[] = [ongoing]) {
+    return statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded', incidents },
+      { id: 'claudeai', name: 'claude.ai', status: 'degraded', incidents },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ])
+  }
+
+  it('X share URL carries the status pin, the x UTM and the active incident token', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    const html = await (await handler(makeReq('claude'))).text()
+    const shared = 'https://ai-watch.dev/is-claude-down?e=degraded'
+      + '&utm_source=x&utm_medium=social&utm_campaign=outage&i=q7txxvbsftgq'
+    expect(html).toContain(`&amp;url=${encodeURIComponent(shared)}"`)
+  })
+
+  it('does NOT share the bare canonical during an outage — the defect this pins', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    const html = await (await handler(makeReq('claude'))).text()
+    // The old bar interpolated the unpinned URL into the tweet TEXT, where it renders as the shared
+    // link. Both `text=` and `url=` are encodeURIComponent'd, so match that form.
+    expect(html).not.toContain(encodeURIComponent('Live status → https://ai-watch.dev/is-claude-down'))
+    expect(html).not.toContain(`&amp;url=${encodeURIComponent('https://ai-watch.dev/is-claude-down')}"`)
+  })
+
+  it('copy-link shares the same pin under its own UTM (copy-link/share), not the bare URL', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('data-url="https://ai-watch.dev/is-claude-down?e=degraded'
+      + '&amp;utm_source=copy-link&amp;utm_medium=share&amp;utm_campaign=outage&amp;i=q7txxvbsftgq"')
+    expect(html).not.toContain('data-url="https://ai-watch.dev/is-claude-down"')
+  })
+
+  it('pins to the WORST-OF status, so one member down outranks another merely degraded', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [ongoing] },
+      { id: 'claudeai', name: 'claude.ai', status: 'down', incidents: [ongoing] },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-down?e=down'))
+  })
+
+  it('uses the ONGOING incident as the token, not a more-recently-resolved one', async () => {
+    const resolvedLater: MockIncident = {
+      id: 'resolved-newer', title: 'Elevated errors', status: 'resolved',
+      startedAt: new Date(Date.now() - 1_800_000).toISOString(),
+      resolvedAt: new Date(Date.now() - 600_000).toISOString(), duration: '20m',
+    }
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily([resolvedLater, ongoing]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(encodeURIComponent('&i=q7txxvbsftgq'))
+    expect(html).not.toContain(encodeURIComponent('&i=resolved-newer'))
+  })
+
+  // The case above passes on `incidents[0]` alone, because the display sort already ranks ongoing
+  // first — it pins the ORDER, not the predicate. This one varies the real input: a still-degraded
+  // headline with nothing but resolved incidents. Picking one would hand a NEW outage the OLD
+  // incident's card identity, which is the #804 collision inverted.
+  it('emits NO &i= when every incident is resolved, even under a still-degraded headline', async () => {
+    const resolvedOnly: MockIncident = {
+      id: 'old-resolved-1', title: 'Elevated errors', status: 'resolved',
+      startedAt: new Date(Date.now() - 7_200_000).toISOString(),
+      resolvedAt: new Date(Date.now() - 3_600_000).toISOString(), duration: '1h',
+    }
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily([resolvedOnly]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-down?e=degraded'))
+    expect(html).not.toContain(encodeURIComponent('&i='))
+  })
+
+  // The token is taken from the RAW worker payload, before the 7-day display window prunes the
+  // incident list — deriving it from the rendered list would drop the token for a long-running outage.
+  it('still emits &i= for an ongoing incident older than the 7-day display window', async () => {
+    const ancient: MockIncident = {
+      id: 'long-running', title: 'Sustained degradation', status: 'monitoring',
+      startedAt: new Date(Date.now() - 12 * 86_400_000).toISOString(), duration: null,
+    }
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily([ancient]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(encodeURIComponent('&i=long-running'))
+    // The incident itself is correctly absent from the rendered list — only the token outlives the window.
+    expect(html).toContain('No incidents reported')
+  })
+
+  // The INBOUND `?e=`/`?i=` a visitor arrived on pins THIS page's card; it must never leak into the
+  // URL the page hands out, or a recovered outage's card re-propagates through every fresh share.
+  it('ignores the inbound ?e=/&i= pin when building the outbound share URL', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude', { e: 'down', i: 'stale-incident' }))).text()
+    expect(html).toContain(`&amp;url=${encodeURIComponent('https://ai-watch.dev/is-claude-down')}"`)
+    expect(html).not.toContain(encodeURIComponent('?e=down&utm_source=x'))
+    expect(html).not.toContain(encodeURIComponent('&i=stale-incident'))
+  })
+
+  it('an operational family still shares the plain canonical — no pin, no UTM', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    // Anchored on the attribute's closing quote: the ENCODED bare URL is a prefix of the encoded
+    // pinned one (`…is-claude-down` vs `…is-claude-down%3Fe%3D…`), so an unanchored `toContain` would
+    // pass on a pinned URL too and this case would assert nothing.
+    expect(html).toContain(`&amp;url=${encodeURIComponent('https://ai-watch.dev/is-claude-down')}"`)
+    expect(html).toContain('data-url="https://ai-watch.dev/is-claude-down"')
+    expect(html).not.toContain('utm_source=x')
+  })
+
+  it('an UNREADABLE family (unknown) also shares the plain canonical — unknown is not an outage pin', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'unknown' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(`&amp;url=${encodeURIComponent('https://ai-watch.dev/is-claude-down')}"`)
+    expect(html).toContain('data-url="https://ai-watch.dev/is-claude-down"')
+    // No pin of ANY value — not merely no `e=unknown`. `buildShareUrl` early-returns the canonical for
+    // any status other than `down`/`degraded`, rather than inventing an outage hint.
+    expect(html).not.toContain(encodeURIComponent('?e='))
+    expect(html).not.toContain('utm_campaign=outage')
+  })
+})
+
+// #1243 — the Copy-link button was broken in two independent ways, both reported from the live page
+// on 2026-08-19: it copied only the URL (the individual pages copy a MESSAGE via `data-text`), and it
+// never showed its '✓ Copied' confirmation because the handler read `e.currentTarget` inside the async
+// clipboard callback, where the DOM has already reset it to null.
+describe('is-down-group.ts — Copy link parity with the individual pages (#1243)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  afterEach(() => { fetchMock?.mockRestore() })
+
+  const ongoing = {
+    id: 'q7txxvbsftgq', title: 'Degraded performance for multiple models',
+    status: 'investigating' as const, startedAt: new Date(Date.now() - 3_600_000).toISOString(), duration: null,
+  }
+
+  function degraded() {
+    return statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [ongoing] },
+      { id: 'claudeai', name: 'claude.ai', status: 'degraded', incidents: [ongoing] },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ])
+  }
+
+  it('copies a MESSAGE (data-text), not just the URL', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degraded())
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('data-text="🟡 Is Anthropic (Claude) down? Degraded Performance. Live status →\n'
+      + 'https://ai-watch.dev/is-claude-down?e=degraded'
+      + '&amp;utm_source=copy-link&amp;utm_medium=share&amp;utm_campaign=outage&amp;i=q7txxvbsftgq"')
+  })
+
+  it('keeps data-url as the fallback the handler reads when data-text is absent', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degraded())
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('data-url="https://ai-watch.dev/is-claude-down?e=degraded')
+  })
+
+  it('tags the X link for GA4 so the delegated listener has something to forward', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degraded())
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('data-ga="share" data-ga-method="x" data-ga-item="Anthropic (Claude)"')
+  })
+
+  // The copy button must NOT carry data-ga: the delegated listener fires on click while the handler
+  // fires on successful copy, so one copy would emit two `share` events — and the click-side one would
+  // count a copy that failed.
+  it('does not double-count copy: the copy button carries no data-ga', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degraded())
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toMatch(/data-action="copy-link"[^>]*data-ga=/)
+    expect(html).not.toMatch(/data-ga=[^>]*data-action="copy-link"/)
+  })
+})
+
+// #1243 — the cases above are all assertions about RENDERED TEXT, and every one of them was
+// green while the Copy button was broken in a way a user hits on the second click. So the handler gets
+// executed here instead: `vitest.config.js` already runs `api/**` under happy-dom, and slicing the
+// handler out of the page script runs it without the audience beacon (a separate statement region of
+// the same block) ever firing.
+describe('is-down-group.ts — Copy link handler, executed (#1243)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  // Teardown belongs here, not at the end of each test body: an assertion that fails mid-test would
+  // otherwise leak a throwing `gtag`, a spy `prompt` and a stubbed `clipboard` into the next case.
+  const realClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  afterEach(() => {
+    fetchMock?.mockRestore()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    if (realClipboard) Object.defineProperty(navigator, 'clipboard', realClipboard)
+    else delete (navigator as { clipboard?: unknown }).clipboard
+    document.body.innerHTML = ''
+  })
+
+  const ongoing = {
+    id: 'q7txxvbsftgq', title: 'Degraded performance for multiple models',
+    status: 'investigating' as const, startedAt: new Date(Date.now() - 3_600_000).toISOString(), duration: null,
+  }
+
+  /** Render the page, mount its share bar, and run ONLY the copy-link handler against it.
+   *  `clipboard` shapes: a function → a working clipboard; `{}` → the API present but `writeText`
+   *  missing (non-secure context); `null` → no clipboard object at all. */
+  async function mountCopyHandler(clipboard: ((t: string) => Promise<void>) | Record<string, never> | null) {
+    const writeText = typeof clipboard === 'function' ? clipboard : undefined
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [ongoing] },
+      { id: 'claudeai', name: 'claude.ai', status: 'degraded', incidents: [ongoing] },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    const shareRow = html.match(/<div class="share-row">[\s\S]*?<\/div>/)
+    const script = html.match(/var copyBtn = document\.querySelector[\s\S]*?\n\}\)\n/)
+    expect(shareRow, 'share bar markup not found — the harness selector needs updating').toBeTruthy()
+    expect(script, 'copy handler not found — the harness selector needs updating').toBeTruthy()
+    // The slice is non-greedy, so a new `})`-terminated statement inserted between the declarations and
+    // the click listener would cut it short — and the cases below would then fail with product-shaped
+    // messages instead of naming the harness. Assert the slice reached the clipboard call.
+    expect(script![0], 'the slice is not the whole handler').toContain('navigator.clipboard.writeText(text).then(')
+    document.body.innerHTML = shareRow![0]
+    const value = writeText ? { writeText } : clipboard === null ? undefined : clipboard
+    Object.defineProperty(navigator, 'clipboard', { value, configurable: true })
+    new Function(script![0])()
+    return document.querySelector('[data-action="copy-link"]') as HTMLButtonElement
+  }
+
+  it('puts the MESSAGE on the clipboard and confirms, then restores the label', async () => {
+    vi.useFakeTimers()
+    const written: string[] = []
+    const btn = await mountCopyHandler((t) => { written.push(t); return Promise.resolve() })
+    const original = btn.textContent
+
+    btn.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(written).toHaveLength(1)
+    expect(written[0]).toContain('Is Anthropic (Claude) down? Degraded Performance')
+    expect(written[0]).toContain('?e=degraded')
+    expect(written[0]).toContain('&i=q7txxvbsftgq')
+    expect(btn.textContent).toBe('✓ Copied')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(btn.textContent).toBe(original)
+  })
+
+  // The regression the rendered-text assertions could not see: re-reading the label per click made
+  // the second click capture the CONFIRMATION as the "original", sticking the button on it forever.
+  it('a DOUBLE click inside the restore window still returns to the original label', async () => {
+    vi.useFakeTimers()
+    const btn = await mountCopyHandler(() => Promise.resolve())
+    const original = btn.textContent
+
+    btn.click()
+    await vi.advanceTimersByTimeAsync(1000)
+    btn.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(btn.textContent).toBe('✓ Copied')
+
+    // The FIRST click's timer must not restore the label under the second click: without the
+    // clearTimeout the confirmation would vanish here, 1s into the second click's own window.
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(btn.textContent).toBe('✓ Copied')
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(btn.textContent).toBe(original)
+  })
+
+  it('shows a failure state on the button when the clipboard rejects — not just a prompt', async () => {
+    vi.useFakeTimers()
+    const prompt = vi.fn()
+    vi.stubGlobal('prompt', prompt)
+    const btn = await mountCopyHandler(() => Promise.reject(new Error('denied')))
+
+    btn.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(btn.textContent).toBe('⚠ Copy failed')
+    expect(prompt).toHaveBeenCalledOnce()
+  })
+
+  // Pins the OUTCOME, not either mechanism: the try/catch around the analytics call and the
+  // two-callback .then(done, fail) each guarantee it alone, so no test can separate them.
+  it('a successful copy is never reported as a failure, even if the analytics call throws', async () => {
+    vi.useFakeTimers()
+    const prompt = vi.fn()
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('gtag', () => { throw new Error('gtag blew up') })
+    const btn = await mountCopyHandler(() => Promise.resolve())
+
+    btn.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(btn.textContent).toBe('✓ Copied')
+    expect(prompt).not.toHaveBeenCalled()
+  })
+
+  it('fires exactly one share event, with the family as item_id', async () => {
+    vi.useFakeTimers()
+    const gtag = vi.fn()
+    vi.stubGlobal('gtag', gtag)
+    const btn = await mountCopyHandler(() => Promise.resolve())
+
+    btn.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(gtag).toHaveBeenCalledOnce()
+    // Exact object, not objectContaining: `content_type` is the param this diff adds to the `share`
+    // row in ga4-events.md on the rationale that the event keeps ONE shape across surfaces, so leaving
+    // it free to drift would unpin the very claim the doc makes.
+    expect(gtag).toHaveBeenCalledWith('event', 'share', {
+      method: 'copy', content_type: 'is_x_down', item_id: 'Anthropic (Claude)',
+    })
+  })
+
+  it('falls back to a prompt when the browser has no clipboard API at all', async () => {
+    vi.useFakeTimers()
+    const prompt = vi.fn()
+    vi.stubGlobal('prompt', prompt)
+    const btn = await mountCopyHandler(null)
+
+    btn.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(prompt).toHaveBeenCalledOnce()
+    expect(btn.textContent).toBe('⚠ Copy failed')
+  })
+
+  // The guard checks the METHOD, not just the namespace — a non-secure context exposes `clipboard`
+  // without `writeText`, and only the whole-object-missing case above was exercised.
+  it('falls back when clipboard exists but writeText does not', async () => {
+    vi.useFakeTimers()
+    const prompt = vi.fn()
+    vi.stubGlobal('prompt', prompt)
+    const btn = await mountCopyHandler({})
+
+    btn.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(prompt).toHaveBeenCalledOnce()
+    expect(btn.textContent).toBe('⚠ Copy failed')
+  })
+
+  // Both attributes are always rendered today, so this is a floor, not a live path: without it a
+  // server-render bug would copy the literal string "undefined" AND count it as a successful share.
+  it('refuses to copy — and does not report a share — when the button carries no URL', async () => {
+    vi.useFakeTimers()
+    const gtag = vi.fn()
+    vi.stubGlobal('gtag', gtag)
+    const written: string[] = []
+    const btn = await mountCopyHandler((t) => { written.push(t); return Promise.resolve() })
+    btn.removeAttribute('data-text')
+    btn.removeAttribute('data-url')
+
+    btn.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(written).toHaveLength(0)
+    expect(gtag).not.toHaveBeenCalled()
+    expect(btn.textContent).toBe('⚠ Nothing to copy')
+  })
+})
+
+// #1243 round 2 — the delegated [data-ga] listener was asserted as SOURCE TEXT, which turned out to be
+// inverted: disabling it (`closest('[data-ga-DISABLED]')`) left every assertion green while every GA4
+// event on the page silently stopped firing, and merely reordering two assignments went red. Executed
+// instead, with the same slice-and-run harness as the copy handler above.
+describe('is-down-group.ts — delegated [data-ga] listener, executed (#1243)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  // This listener binds to `document`, so clearing document.body does not remove it — without this the
+  // next mount would leave two live listeners and "one click fires once" could not be asserted at all.
+  let mounted: EventListener | null = null
+  afterEach(() => {
+    fetchMock?.mockRestore()
+    vi.unstubAllGlobals()
+    if (mounted) document.removeEventListener('click', mounted)
+    mounted = null
+    document.body.innerHTML = ''
+  })
+
+  async function mountListener() {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded' },
+      { id: 'claudeai', name: 'claude.ai', status: 'degraded' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    const shareRow = html.match(/<div class="share-row">[\s\S]*?<\/div>/)
+    const alertCta = html.match(/<p class="alert-cta">[\s\S]*?<\/p>/)
+    const listener = html.match(/document\.addEventListener\('click', function\(e\)\{[\s\S]*?\n\}\)\n/)
+    expect(shareRow, 'share bar markup not found — the harness selector needs updating').toBeTruthy()
+    expect(alertCta, 'alerts CTA markup not found — the harness selector needs updating').toBeTruthy()
+    expect(listener, 'delegated listener not found — the harness selector needs updating').toBeTruthy()
+    expect(listener![0], 'the slice is not the whole listener').toContain("gtag('event', g.dataset.ga, p)")
+    document.body.innerHTML = shareRow![0] + alertCta![0]
+    // Capture the registered handler so afterEach can unbind it; `new Function` gives us no reference.
+    const realAdd = document.addEventListener.bind(document)
+    const spy = vi.spyOn(document, 'addEventListener').mockImplementation((type, fn, opts) => {
+      if (type === 'click') mounted = fn as EventListener
+      realAdd(type, fn as EventListener, opts)
+    })
+    new Function(listener![0])()
+    spy.mockRestore()
+    expect(mounted, 'the sliced listener did not register on document').toBeTruthy()
+  }
+
+  it('forwards the X link\'s method/content_type/item_id when clicked', async () => {
+    const gtag = vi.fn()
+    vi.stubGlobal('gtag', gtag)
+    await mountListener()
+
+    ;(document.querySelector('.share-x') as HTMLAnchorElement).click()
+    expect(gtag).toHaveBeenCalledOnce()
+    expect(gtag).toHaveBeenCalledWith('event', 'share', {
+      method: 'x', content_type: 'is_x_down', item_id: 'Anthropic (Claude)',
+    })
+  })
+
+  // `location` is the only param mapping that predates #1243, and it is what every non-share CTA on the
+  // page reports through — the alerts CTA here, and the extension-install strip when that URL is set.
+  it('forwards a non-share CTA\'s location', async () => {
+    const gtag = vi.fn()
+    vi.stubGlobal('gtag', gtag)
+    await mountListener()
+
+    ;(document.querySelector('[data-ga="click_cta_alerts"]') as HTMLAnchorElement).click()
+    expect(gtag).toHaveBeenCalledWith('event', 'click_cta_alerts', { location: 'is_down_group_page' })
+  })
+
+  it('stays silent on the copy button, which reports from its own success path', async () => {
+    const gtag = vi.fn()
+    vi.stubGlobal('gtag', gtag)
+    await mountListener()
+
+    ;(document.querySelector('[data-action="copy-link"]') as HTMLButtonElement).click()
+    expect(gtag).not.toHaveBeenCalled()
+  })
+})
+
+// #1243 round 2 — the token half of the share URL, executed against the render. Two agents reproduced
+// the same defect here independently: picking the FIRST unresolved incident in member-declaration order
+// hands the card identity to the ordinary post-recovery `monitoring` tail of an older incident on an
+// earlier-declared member (worker/src/services.ts keeps those on purpose), so two successive outages
+// under one tail emit the same `&i=` — the #804 collision the token exists to prevent.
+describe('is-down-group.ts — which incident becomes the card identity (#1243)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  afterEach(() => { fetchMock?.mockRestore() })
+
+  const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString()
+
+  it('picks the NEWEST unresolved incident, not the first member that has one', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      // openai is declared first in FAMILY_GROUPS and carries a recovering `monitoring` tail…
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidents: [
+        { id: 'monitoring-tail', title: 'Elevated errors', status: 'monitoring', startedAt: iso(3 * 3_600_000), duration: null },
+      ] },
+      // …while the live outage the page is actually about is on codex.
+      { id: 'codex', name: 'Codex', status: 'down', incidents: [
+        { id: 'fresh-outage', title: 'API errors', status: 'investigating', startedAt: iso(10 * 60_000), duration: null },
+      ] },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).toContain(encodeURIComponent('&i=fresh-outage'))
+    expect(html).not.toContain(encodeURIComponent('&i=monitoring-tail'))
+  })
+
+  it('an unparseable startedAt never wins the rank', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [
+        { id: 'garbage-date', title: 'Malformed', status: 'investigating', startedAt: 'not-a-date', duration: null },
+        { id: 'real-outage', title: 'Degraded performance', status: 'investigating', startedAt: iso(20 * 60_000), duration: null },
+      ] },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(encodeURIComponent('&i=real-outage'))
+    expect(html).not.toContain(encodeURIComponent('&i=garbage-date'))
+  })
+
+  // The case above always supplies a well-dated sibling, so it cannot see the FIRST-candidate path: a
+  // seed that accepts anything lets a NaN-dated incident become the token, and the display filter then
+  // drops that same incident — a card identity naming something the page refuses to show.
+  it('emits NO &i= when the only unresolved incident has an unparseable date', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [
+        { id: 'garbage-only', title: 'Malformed', status: 'investigating', startedAt: 'not-a-date', duration: null },
+      ] },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(encodeURIComponent('?e=degraded'))
+    expect(html).not.toContain(encodeURIComponent('&i='))
+    // Confirms the two paths agree: the incident the token declined is also absent from the page.
+    expect(html).toContain('No incidents reported')
+  })
+
+  // The inbound-pin case in the block above uses an OPERATIONAL family, where buildShareUrl early-returns
+  // before it ever reads a token — so its `&i=stale` negative cannot fail on that input. This is the
+  // path that matters: a visitor arrives on a stale pin while the family is degraded for a NEW reason.
+  it('a stale inbound ?i= never becomes the outbound token during a new outage', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [
+        { id: 'q7txxvbsftgq', title: 'Degraded performance', status: 'investigating', startedAt: iso(3_600_000), duration: null },
+      ] },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude', { e: 'down', i: 'stale-incident' }))).text()
+    expect(html).toContain(encodeURIComponent('&i=q7txxvbsftgq'))
+    expect(html).not.toContain(encodeURIComponent('&i=stale-incident'))
+    // The status pin follows the LIVE headline too, not the inbound hint.
+    expect(html).toContain(encodeURIComponent('?e=degraded'))
+    expect(html).not.toContain(encodeURIComponent('?e=down&utm_source=x'))
+  })
+})
+
+// #1243 round 3 — three surviving mutations from the round-2 suite, each closed by executing the path
+// rather than asserting the rendered text that describes it.
+describe('is-down-group.ts — share paths the rendered assertions could not reach (#1243)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  afterEach(() => {
+    fetchMock?.mockRestore()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  const ongoing = {
+    id: 'q7txxvbsftgq', title: 'Degraded performance for multiple models',
+    status: 'investigating' as const, startedAt: new Date(Date.now() - 3_600_000).toISOString(), duration: null,
+  }
+
+  function degradedFamily() {
+    return statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [ongoing] },
+      { id: 'claudeai', name: 'claude.ai', status: 'degraded', incidents: [ongoing] },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ])
+  }
+
+  // The X intent takes two params and only `url=` was ever asserted, so shipping an empty tweet body
+  // stayed green.
+  it('sends BOTH intent params — a share with an empty tweet body is not a share', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    const html = await (await handler(makeReq('claude'))).text()
+    const text = encodeURIComponent('🟡 Is Anthropic (Claude) down? Degraded Performance. Live status →')
+    expect(html).toContain(`tweet?text=${text}&amp;url=`)
+  })
+
+  // The handler reads `data-text || data-url`, but every executed case either has both or neither, so
+  // dropping the fallback survived. Removing ONLY data-text exercises it.
+  it('falls back to data-url when only data-text is missing', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    const html = await (await handler(makeReq('claude'))).text()
+    const shareRow = html.match(/<div class="share-row">[\s\S]*?<\/div>/)
+    const script = html.match(/var copyBtn = document\.querySelector[\s\S]*?\n\}\)\n/)
+    expect(shareRow, 'share bar markup not found — the harness selector needs updating').toBeTruthy()
+    expect(script, 'copy handler not found — the harness selector needs updating').toBeTruthy()
+    document.body.innerHTML = shareRow![0]
+    const btn = document.querySelector('[data-action="copy-link"]') as HTMLButtonElement
+    const expected = btn.dataset.url
+    btn.removeAttribute('data-text')
+    const written: string[] = []
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: (t: string) => { written.push(t); return Promise.resolve() } }, configurable: true,
+    })
+    new Function(script![0])()
+
+    btn.click()
+    await Promise.resolve()
+    expect(written).toEqual([expected])
+    expect(expected).toContain('?e=degraded')
   })
 })
