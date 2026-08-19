@@ -11,6 +11,7 @@
 // empty, especially on the (common) all-operational day.
 
 import { FAMILY_GROUPS, SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, type ServiceFamily } from './_is-down/slug-map'
+import { buildShareUrl } from './_is-down/share-url'
 import { audienceBeaconScript } from './_shared/audience-beacon'
 import { cspForHtml } from './_shared/csp-hash'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
@@ -129,6 +130,11 @@ function renderGroupPage(
   otherFamilies: Array<{ slug: string; name: string; status: MemberStatus['status'] }>,
   ogStatusHint?: string | null,
   ogIncidentToken?: string | null,
+  /** #1243 — the OUTBOUND share card's `&i=` identity token: the newest unresolved incident across the
+   *  family, chosen before the display filters and not scoped to any one member's status. Distinct from
+   *  `ogIncidentToken`, the INBOUND `?i=` a visitor arrived on: that one pins what this page's own card
+   *  shows, this one is what the page hands out. */
+  shareIncidentToken?: string | null,
 ): string {
   const headline = worstStatus(members)
   // #1193 — the member the audience beacon attributes a view to: the one carrying the headline
@@ -154,7 +160,7 @@ function renderGroupPage(
   // worker/src/og.ts), `score`/`uptime` are optional and simply omitted since there's no
   // family-level analog for either.
   //
-  // #1103 (diagnosed on the individual pages) / <NEW> (this file never got the fix) — og:url
+  // #1103 (diagnosed on the individual pages) / #1194 (this file never got the fix) — og:url
   // ("canonical" below) used to NEVER change for this page (no `?e=`/`?i=` pin like the individual
   // pages and buildTweetForService got in #1063/#804), so a social platform's og:url-keyed card cache
   // reused whatever it first fetched — usually the routine "operational" card — no matter how many
@@ -233,10 +239,39 @@ function renderGroupPage(
 
   // #1164 review — a share affordance, matching the individual is-down pages (X + copy link). Kept
   // deliberately simple (no Threads/Kakao) for the v1 group page.
-  const shareText = `${STATUS_EMOJI[headline]} Is ${family.name} down? ${STATUS_LABEL[headline]}. Live status → ${canonical}`
+  //
+  // #1243 — the shared URL carries the `?e=`/`&i=` OG pin + per-channel UTM, via the SAME
+  // `buildShareUrl` primitive the individual pages use (api/_is-down/share-url.ts) rather than a second
+  // copy of the rule. Without it this bar shared the BARE canonical, which never varies by status —
+  // and X keys its unfurl cache on `og:url`, so a share posted during an outage re-served the card X
+  // had crawled while the family was operational (#1063's symptom, reproduced live on this page
+  // 2026-08-19 during Anthropic incident `q7txxvbsftgq`). Note where the gap came from: #1194 gave THIS
+  // file the pin-CONSUMING side (`pinnedHint`/`ogUrlPinned` above) and taught the operator draft
+  // (`buildGroupTweetDraft`) to emit one, but not this share bar — so the page could parse a pin it
+  // never produced.
+  //
+  // `buildShareUrl` early-returns `canonical` for any status other than `down`/`degraded`
+  // (share-url.ts), so a clean- or unreadable-status share stays the plain page URL.
+  //
+  // Known limit, shared with the individual pages: a component- or probe-derived outage has no
+  // incident id, so the share omits `&i=` and every share of that status pools onto one og:url.
+  // Synthesising a token would trade that visible limit for an invisible one — `&i=` has to be stable
+  // within one outage, and any synthesised value breaks that half to satisfy the other.
+  const xShareUrl = buildShareUrl(canonical, headline, 'x', shareIncidentToken)
+  const copyShareUrl = buildShareUrl(canonical, headline, 'copy', shareIncidentToken)
+  // The URL moves OUT of the tweet text into X's `url=` intent param. `text` + `url` render as one
+  // string, so the reader still sees "Live status → <link>", but the link is now the pinned one;
+  // interpolating it into `text` instead would ship the pin as literal text. Unlike the individual
+  // pages, which drop `url=` entirely on operational, this bar always sends one — the pre-#1243 bar
+  // always put a link in the text, and `buildShareUrl` returns the untagged canonical there anyway.
+  const shareText = `${STATUS_EMOJI[headline]} Is ${family.name} down? ${STATUS_LABEL[headline]}. Live status →`
+  // #1243 — Copy link put only the URL on the clipboard, while the individual pages copy a MESSAGE
+  // (`data-text`, falling back to `data-url`). Same shape here, built from this page's own wording so
+  // a pasted copy reads like the X share rather than a naked link.
+  const copyText = `${shareText}\n${copyShareUrl}`
   const shareSection = `<div class="share-row">
-  <a class="share-btn share-x" href="https://x.com/intent/tweet?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg> Post</a>
-  <button class="share-btn share-copy" data-url="${esc(canonical)}" data-action="copy-link">🔗 Copy link</button>
+  <a class="share-btn share-x" href="https://x.com/intent/tweet?text=${encodeURIComponent(shareText)}&amp;url=${encodeURIComponent(xShareUrl)}" target="_blank" rel="noopener" data-ga="share" data-ga-method="x" data-ga-item="${esc(family.name)}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg> Post</a>
+  <button class="share-btn share-copy" data-url="${esc(copyShareUrl)}" data-text="${esc(copyText)}" data-action="copy-link">🔗 Copy link</button>
 </div>`
 
   // #1164 review — cross-links to the OTHER provider-family pages. Someone checking one provider is
@@ -346,19 +381,57 @@ ${otherFamiliesSection}
 // service that had no outage.
 // (No backticks in this comment: it sits inside a template literal — see #842-B.)
 ${audienceBeaconScript(beaconSvcId, headline === 'down' || headline === 'degraded')}
-document.querySelector('[data-action="copy-link"]')?.addEventListener('click', function(e){
-  navigator.clipboard.writeText(e.currentTarget.dataset.url).then(function(){
-    e.currentTarget.textContent = '✓ Copied'
-    setTimeout(function(){ e.currentTarget.textContent = '🔗 Copy link' }, 2000)
-  })
+// #1243 — hold the BUTTON in a variable instead of reading e.currentTarget inside the async callback.
+// The DOM resets currentTarget to null once dispatch finishes, and the clipboard promise resolves
+// after that, so the old code threw a TypeError in .then(): the copy succeeded but the confirmation
+// never rendered (reported from the live page). The individual pages never hit this because copyLink()
+// takes the element as an argument.
+//
+// The original label is captured ONCE here, not per click. Re-reading it inside the listener made a
+// second click within the restore window capture the CONFIRMATION as the original, so the button
+// stuck on it permanently — the same "click does nothing visible" symptom, by another route.
+var copyBtn = document.querySelector('[data-action="copy-link"]')
+var copyOrig = copyBtn ? copyBtn.textContent : ''
+var copyTimer
+function copyRestore(){ copyBtn.textContent = copyOrig }
+function copyFlash(label, ms){ copyBtn.textContent = label; clearTimeout(copyTimer); copyTimer = setTimeout(copyRestore, ms) }
+if (copyBtn) copyBtn.addEventListener('click', function(){
+  var text = copyBtn.dataset.text || copyBtn.dataset.url
+  // Without this floor a server-render bug becomes a confirmed success: writeText(undefined) RESOLVES,
+  // so the user pastes the literal string "undefined" and it counts as a share.
+  if (!text) { copyFlash('⚠ Nothing to copy', 3000); return }
+  function done(){
+    // Restore is scheduled BEFORE the analytics call so nothing thrown there can strand the label.
+    copyFlash('✓ Copied', 2000)
+    try { if (typeof gtag === 'function') gtag('event', 'share', { method: 'copy', content_type: 'is_x_down', item_id: ${JSON.stringify(family.name)} }) }
+    catch (err) { console.warn('[AIWatch] share event failed:', err) }
+  }
+  // The button label is the one surface that cannot be suppressed: prompt() is a silent no-op in a
+  // sandboxed iframe without allow-modals and after Chrome's "prevent additional dialogs", so a
+  // failure that only prompts is invisible exactly where it is hardest to debug.
+  function fail(err){
+    console.warn('[AIWatch] copy failed:', err)
+    copyFlash('⚠ Copy failed', 3000)
+    prompt('Copy this:', text)
+  }
+  if (!navigator.clipboard || !navigator.clipboard.writeText) { fail('clipboard API unavailable'); return }
+  // Two-callback form, so fail() only ever sees a clipboard rejection and never a throw from done().
+  navigator.clipboard.writeText(text).then(done, fail)
 })
-// #482-style delegated GA4 hook — CSP-clean (no inline handlers). Mirrors the individual is-down
-// pages' [data-ga] listener, minimal subset (location only) — every CTA on this page (alerts,
-// extension install, share, cross-links) already carries data-ga/data-ga-loc attributes from the
-// section builders above, so this listener now actually fires once gtag exists (below).
+// #482-style delegated GA4 hook — CSP-clean (no inline handlers). Maps the subset of data-ga-*
+// attributes this page emits; the individual pages' listener (html-template.ts) maps more, so an
+// attribute copied from there would be dropped here without one added below.
 document.addEventListener('click', function(e){
   var g = e.target.closest('[data-ga]')
-  if (g && typeof gtag === 'function') gtag('event', g.dataset.ga, { location: g.dataset.gaLoc })
+  if (!g || typeof gtag !== 'function') return
+  var p = {}
+  if (g.dataset.gaLoc) p.location = g.dataset.gaLoc
+  // #1243 — the X Post link carried no data-ga, so its clicks were never counted. item_id is the
+  // family name. The copy button deliberately has no data-ga: it reports from its own success path
+  // instead, since a click that fails to copy is not a share (two would also double-count).
+  if (g.dataset.gaMethod) { p.method = g.dataset.gaMethod; p.content_type = 'is_x_down' }
+  if (g.dataset.gaItem) p.item_id = g.dataset.gaItem
+  gtag('event', g.dataset.ga, p)
 })
 </script>
 ${cookieBannerHtml()}
@@ -401,6 +474,11 @@ export default async function handler(req: Request) {
       return { id, name: resolvedName(id, slug), slug, status: 'unknown' as const }
     })
     let incidents: FamilyIncident[] = []
+    // #1243 — the NEWEST unresolved incident id across the family, taken from the RAW worker payload
+    // rather than from `incidents` (which the display filters below prune). See the comment at the
+    // assignment site. Stays null on a fetch failure: never fabricate a card identity.
+    let shareIncidentToken: string | null = null
+    let shareIncidentStartedMs = -Infinity
     let isFallback = true
     try {
       const res = await fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(5000) })
@@ -463,6 +541,20 @@ export default async function handler(req: Request) {
           const slug = SERVICE_ID_TO_SLUG[id] ?? id
           const memberName = s ? s.name : resolvedName(id, slug)
           for (const inc of s?.incidents ?? []) {
+            // #1243 — the share card's `&i=` identity token: NEWEST unresolved, taken before the
+            // display filters below so a long-running outage still gets one. Ranking by date rather
+            // than by encounter order matters because this loop runs in `family.members` declaration
+            // order while `filterByComponentStatus` keeps a `monitoring` incident after that member's
+            // badge recovers (worker/src/services.ts), so "first" would pick a recovering tail.
+            // An unparseable date never wins, so the token can only name an incident the page could
+            // also display — same fail-closed posture as the filter below.
+            if (inc.status !== 'resolved') {
+              const ms = new Date(inc.startedAt).getTime()
+              if (!Number.isNaN(ms) && ms > shareIncidentStartedMs) {
+                shareIncidentToken = inc.id
+                shareIncidentStartedMs = ms
+              }
+            }
             // #1164 round-3 review (silent-failure-hunter) — `new Date(inc.startedAt).getTime()` is
             // NaN for a missing/malformed date, and `NaN < cutoff` is always false — the old bare
             // inequality let a garbage-dated incident fail OPEN (never filtered, kept forever) instead
@@ -509,7 +601,7 @@ export default async function handler(req: Request) {
       console.warn(`[is-down-group/${familyKey}] status fetch failed:`, err instanceof Error ? err.message : err)
     }
 
-    const html = renderGroupPage(family, members, incidents, otherFamilies, ogStatusHint, ogIncidentToken)
+    const html = renderGroupPage(family, members, incidents, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken)
     const csp = await cspForHtml(html, { enforce: true })
     // Mirrors is-down.ts's fallback semantics: a fetch failure renders "unknown" for every member
     // (never a fabricated status), and the 503 + no-store tells caches/crawlers not to trust or cache

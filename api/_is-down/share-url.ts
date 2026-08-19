@@ -19,12 +19,9 @@
 // (operational) card X had cached from a routine crawl. `?e=` pins the card's status to the share
 // moment; `&i=` (the active incident id) makes each outage a distinct og:url identity so the platform
 // re-scrapes a fresh card (#804). We reuse `appendStatusHint` (the SAME `?e=` primitive the worker
-// path uses) so the `?e=` PIN can't drift between the two surfaces; the `&i=` token is computed
-// independently on each (here: first-unresolved incident id; worker: `incidentTokenForAlert`) and
-// resolves to the SAME incident id for a `new`/`resolved` incident alert (so those two surfaces'
-// cards pool) — a worker status-EDGE alert carries no `&i=`, so in that window only same-surface
-// shares pool. Either way every share of one outage on a given surface pools onto one card, and a
-// new outage gets a fresh one. `status` is only ever 'down'/'degraded' here
+// path uses) so the `?e=` PIN can't drift between the two surfaces. The `&i=` token is chosen by each
+// CALLER, not here, and the rules differ — so two surfaces sharing one outage pool onto one card only
+// when their callers happen to pick the same incident (#1243). `status` is only ever 'down'/'degraded' here
 // (the early return below), both valid HINT_TO_OG_STATUS keys — no operational/unknown hint ever ships.
 
 import { appendStatusHint } from '../../worker/src/utils'

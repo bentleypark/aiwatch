@@ -34,6 +34,10 @@ jobs:
       && github.event.deployment_status.environment_url != ''
       && github.event.deployment_status.environment == 'Preview'
     runs-on: ubuntu-latest
+    # #1253 — this job had no timeout, so a stalled step hung on GitHub's 6-hour default. A job timeout
+    # ends the run as `cancelled`, which this repo produces routinely via cancel-in-progress; the step
+    # timeouts below are what a stall should hit first.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,7 +47,28 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # #1253 — `--with-deps` runs apt first, and that phase intermittently stops returning. Bound it,
+      # then install the browser without apt. On this image apt adds only font packages (every
+      # Playwright shared library reports `already the newest version`), so the degraded path costs
+      # fonts, not the ability to launch.
+      #
+      # The fallback is ANNOTATED rather than silent: it triggers on any non-zero exit, not just a
+      # timeout, so without this a genuine apt failure — or a missing `timeout` binary, which means the
+      # bound never ran at all — would ship as a green step. Full evidence: #1253.
+      - name: Install Chromium
+        timeout-minutes: 5
+        run: |
+          rc=0
+          timeout 120 npx playwright install --with-deps chromium || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            case $rc in
+              124) why="apt stalled and the bound fired (#1253)" ;;
+              127) why="\`timeout\` not found — THE BOUND DID NOT RUN" ;;
+              *)   why="a non-timeout apt failure (mirror / dpkg lock / disk)" ;;
+            esac
+            echo "::warning title=Playwright deps degraded::--with-deps exited $rc: $why. Installing the browser without apt; font packages will be missing."
+            npx playwright install chromium
+          fi
       - name: Wait for the deployment to be reachable (cold-start guard)
         env:
           EDGE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
@@ -52,10 +77,13 @@ jobs:
           # fans out cross-origin); Playwright uses a cookie instead (edge-bypass-setup.js).
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
+          # #1253 — curl has no default TOTAL timeout (only `--connect-timeout`, 300s), so a connected
+          # but silent origin can outlast the loop and it never reaches its own `::error::` exit.
+          # `-sS` keeps curl's error text, which plain `-s` suppresses.
           for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" \
+            code=$(curl -sS --max-time 15 --connect-timeout 5 -o /dev/null -w "%{http_code}" \
               -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-              "$EDGE_BASE_URL/intro" || echo 000)
+              "$EDGE_BASE_URL/intro") || true
             echo "attempt $i: GET /intro -> HTTP $code"
             [ "$code" = "200" ] && exit 0
             sleep 6
@@ -69,10 +97,14 @@ jobs:
           # Consumed by globalSetup to mint a preview-scoped bypass cookie (#570).
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: npm run test:edge
+      # #1253 — `failure()` is false for a cancelled run, so a job timeout dropped the one diagnostic
+      # artifact. `if-no-files-found: ignore` keeps a superseded run (cancel-in-progress) from warning
+      # about the report directory it never created.
       - name: Upload Playwright report on failure
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: edge-e2e-report
           path: playwright-report/
+          if-no-files-found: ignore
           retention-days: 7

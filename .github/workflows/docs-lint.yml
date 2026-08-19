@@ -66,6 +66,7 @@ jobs:
   okf-lint:
     name: OKF Bundle Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # #1253 — never inherit the 6h default
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -78,6 +79,7 @@ jobs:
   count-lockstep:
     name: Service Count Lockstep
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # #1253 — never inherit the 6h default
     # #1081 — #1074's guard pins the service count / category breakdown / probe count / OSV package
     # count across six files, THREE of which are README.md, README.ko.md and CLAUDE.md. It only ran
     # inside test.yml's `Frontend Unit Tests` job, and test.yml paths-ignores exactly those files at
@@ -108,6 +110,7 @@ jobs:
   doc-symbols:
     name: Doc Symbol Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # #1253 — never inherit the 6h default
     # #1100 — a symbol cited in CLAUDE.md / docs/reference that is absent from source — the #1076
     # invented-symbol shape, a doc citing a renamed/nonexistent function — fails here. Lives in docs-lint (not just test.yml's
     # test:scripts) because the invented-symbol case is introduced by a DOCS edit, which test.yml
