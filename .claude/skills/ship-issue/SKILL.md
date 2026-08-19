@@ -68,7 +68,10 @@ is the *procedure* — follow it top to bottom.
    - Worker (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker`.
    - New worker logic → extract to an exported fn + unit-test it. New `src/utils/` → Vitest test.
    - **Every bug fix ships a test that would have caught the bug.**
-5. **PR review** — gate #2: `/pr-review-toolkit:review-pr`.
+5. **PR review** — gate #2: `/pr-review-toolkit:review-pr`. **How to invoke it and how to read what it
+   returns** — which agent by domain, why only `code-reviewer` carries a severity floor, and why the
+   suggested rewrites in a report are not to be adopted — is
+   [docs/reference/code-review-policy.md](../../../docs/reference/code-review-policy.md) (#1245).
    - **Carry the round number, the RUNNING Critical total, and the prior round's findings into the next
      review prompt (#1097/#1124).** The review agents are spawned fresh each round and cannot see how many
      rounds have run or what the last one found — *you* are the only place that history lives, so state it:
