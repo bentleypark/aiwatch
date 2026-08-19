@@ -136,8 +136,10 @@ test('the 🔁 section parses notes the REAL hook wrote — the two cannot drift
   const dir = mkdtempSync(join(tmpdir(), 'noteshape-'))
   const log = join(dir, 'audit.jsonl')
   const rv = (prompt) => ({ subagent_type: 'pr-review-toolkit:code-reviewer', description: 'Review', prompt })
+  // `cwd` matters: without it the hook records the `no-cwd` sentinel, which the reader deliberately keeps
+  // OUT of the branch table — so a cwd-less fixture would stop exercising the very section this pins.
   const fire = (toolInput, transcript_path) => execFileSync('node', [HOOK], {
-    input: JSON.stringify({ tool_name: 'Agent', tool_input: toolInput, transcript_path }),
+    input: JSON.stringify({ tool_name: 'Agent', tool_input: toolInput, transcript_path, cwd: REPO }),
     encoding: 'utf8', env: { ...process.env, HOOK_AUDIT_LOG: log },
   })
 
@@ -147,7 +149,9 @@ test('the 🔁 section parses notes the REAL hook wrote — the two cannot drift
 
   const written = readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
   assert.equal(written.length, 3, 'the hook must have written one line per fire')
-  assert.equal(written[0].note, 'round-7:s=sess9999')
+  // Shape, not the literal branch: this suite runs from whatever branch the checkout is on. The `:b=`
+  // field must be present and non-empty, which is what the reader's branch grouping keys on (#1245).
+  assert.match(written[0].note, /^round-7:s=sess9999:b=\S+$/)
 
   const out = execFileSync('node', ['scripts/hook-audit-summary.mjs', '--days', '30'], {
     encoding: 'utf8', env: { ...process.env, HOOK_AUDIT_LOG: log },
@@ -157,6 +161,63 @@ test('the 🔁 section parses notes the REAL hook wrote — the two cannot drift
   assert.match(out, /❗ fail-open=1[^\n]*no-prompt-field=1/)
   assert.match(out, /2 reviewer spawn\(s\) recorded across 1 session\(s\) · busiest session 2 spawn\(s\)/)
   assert.match(out, /Violations intercepted[\s\S]*?\n\s+0 total/)
+  // The session field must survive the appended branch. A greedy `\S+` does not zero the count — it
+  // captures `sess9999:b=<branch>` as the KEY, which only shows up when one session spans two branches.
+  // That case is covered by the session-key test below; here the shape assertion is the guard.
+  // Both spawns are one branch, and the deeper of the two rounds is the one reported for it.
+  assert.match(out, /per branch \(#1245\), busiest first:/)
+  assert.match(out, /maxRound 7 · 2 spawn\(s\), 1 undeclared/)
+})
+
+test('the per-branch view separates branches and does not fold in pre-#1245 lines (#1245)', () => {
+  const out = runSummary([
+    line('review-loop-gate', 'pass', 'round-3:s=aaaa1111:b=fix/1-alpha'),
+    line('review-loop-gate', 'pass', 'round-8:s=bbbb2222:b=fix/1-alpha'), // same branch, another session
+    line('review-loop-gate', 'pass', 'round-2:s=cccc3333:b=docs/2-beta'),
+    line('review-loop-gate', 'pass', 'round-4:s=dddd4444'),               // pre-#1245: no branch
+  ])
+  // A loop split across two sessions reports the depth of the whole loop — the question session-keyed
+  // grouping could not answer. (Ordering here follows spawn count; the ranking itself is pinned below.)
+  assert.match(out, /fix\/1-alpha: maxRound 8 · 2 spawn\(s\)/)
+  assert.match(out, /docs\/2-beta: maxRound 2 · 1 spawn\(s\)/)
+  assert.ok(out.indexOf('fix/1-alpha') < out.indexOf('docs/2-beta'), 'busiest branch must be listed first')
+  // The unbranched line is counted, not guessed into a bucket — a stalled rollout must stay visible.
+  assert.match(out, /1 spawn\(s\) predate the branch field/)
+  assert.doesNotMatch(out, /unknown: maxRound 4/)
+})
+
+test('unattributed spawns are health, not branches, and an undeclared loop is not buried (#1245)', () => {
+  const many = Array.from({ length: 12 }, (_, i) => line('review-loop-gate', 'pass', `round-1:s=s${i}:b=fix/${i}-small`))
+  const out = runSummary([
+    ...many,
+    // No declared round at all — maxRound 0. Ranking on maxRound sorted this BELOW every one-round
+    // branch above, so the runaway case fell past the row cap and vanished from the report.
+    ...Array.from({ length: 9 }, (_, i) => line('review-loop-gate', 'pass', `round-none:s=deep:b=fix/99-runaway`)),
+    line('review-loop-gate', 'pass', 'round-4:s=x:b=no-repo'),
+    line('review-loop-gate', 'pass', 'round-2:s=y:b=no-cwd'),
+    line('review-loop-gate', 'pass', 'round-3:s=z:b=detached'),
+  ])
+  assert.match(out, /fix\/99-runaway: maxRound \? · 9 spawn\(s\), 9 undeclared/)
+  assert.ok(out.indexOf('fix/99-runaway') < out.indexOf('fix/0-small'), 'the undeclared-but-busy branch must not be buried')
+  // Sentinels are instrument health, reported apart from the branches.
+  assert.match(out, /⚑ 2 spawn\(s\) could not be attributed to a branch \(no-repo=1, no-cwd=1\)/)
+  assert.doesNotMatch(out, /no-repo: maxRound/)
+  assert.doesNotMatch(out, /no-cwd: maxRound/)
+  // `detached` is a real checkout state, so it stays a row.
+  assert.match(out, /detached: maxRound 3/)
+  // The cap is announced rather than silently dropping rows.
+  assert.match(out, /… \d+ more branch\(es\)/)
+})
+
+test('the session key is bounded at `:`, so one session spanning two branches stays ONE session (#1245)', () => {
+  // The failure this pins: a greedy `/:s=(\S+)/` captures `sess:b=<branch>` as the session key, so the
+  // same session working two branches reports as two sessions and the busiest-session depth proxy is
+  // understated. It does NOT zero any count, which is why a "session count > 0" assertion cannot see it.
+  const out = runSummary([
+    line('review-loop-gate', 'pass', 'round-1:s=samesess:b=fix/1-alpha'),
+    line('review-loop-gate', 'pass', 'round-2:s=samesess:b=docs/2-beta'),
+  ])
+  assert.match(out, /2 reviewer spawn\(s\) recorded across 1 session\(s\) · busiest session 2 spawn\(s\)/)
 })
 
 test('per-day trend includes a deny column', () => {
