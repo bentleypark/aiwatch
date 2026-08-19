@@ -35,10 +35,12 @@ account, not something CI should hold).
 ## Usage
 
 ```bash
-# Default: sessions by hostname, last 30 days — "how much non-production traffic hit prod GA4"
+# Default: sessions by hostname, last 30 days. An internal-traffic data filter is in play — read
+# "Internal-traffic filtering" below before reading anything into the localhost rows.
 node scripts/ga4-report.mjs
 
-# #998's actual check: hostname × the Testing-filter dimension, since #999
+# #998's check: hostName × testDataFilterName, over the window since #999.
+# That dimension labels data while a filter is in Testing state.
 node scripts/ga4-report.mjs --dimensions hostName,testDataFilterName --metrics sessions,screenPageViews --start 2026-07-14 --end today
 
 # Per-day breakdown, to see whether pollution is a steady drip or a few bad sessions — raise --limit
@@ -118,38 +120,61 @@ the `eventName`/`pagePath` example above.
 
 **Read-only is a real ceiling, not a "not implemented yet."** `runReport` only queries. Writing GA4
 config — creating/editing a Data Filter, defining an Internal Traffic Rule's IP list, changing a
-filter's state (Testing/Active/Inactive) — has **no API surface at all**. Checked 2026-08-13 against
-the live discovery document (`https://analyticsadmin.googleapis.com/$discovery/rest?version=v1alpha`,
-the broadest version GA4's Admin API shipped as of that check) — an external, evolving surface owned
+filter's state (Testing/Active/Inactive) — has **no API surface at all**. Checked 2026-08-13 and
+re-checked 2026-08-19 against the live discovery document (`https://analyticsadmin.googleapis.com/$discovery/rest?version=v1alpha`,
+the broadest version GA4's Admin API shipped as of 2026-08-19) — an external, evolving surface owned
 by Google, not something this repo controls: neither `internalTrafficRules` nor `dataFilters` appeared
-as a resource in it. As of that check, these are GA4 Console-only settings — re-run the same
-discovery-doc fetch before assuming this is still true; don't build a write path on faith alone. Point
-the user at GA4 Admin → Data Filters in the meantime.
+as a resource in it on either date. As of 2026-08-19, these are GA4 Console-only settings — re-run the
+same discovery-doc fetch before assuming this is still true; don't build a write path on faith alone.
+Point the user at GA4 Admin → Data Filters in the meantime.
 
-## Known gap as of 2026-08-13 (context for #998)
+`GET https://analyticsadmin.googleapis.com/v1beta/properties/529375750` with the same service-account
+token returns the property's `timeZone`. Reach for a direct read like that before inferring a config
+value from report data.
 
-Everything in this section is a snapshot, not a live fact — re-run the commands below for current
-numbers/state before relying on anything here past the date in the heading.
+## Internal-traffic filtering (#998)
 
-An Internal Traffic **Data Filter** already exists on the property and is in **Testing** state — but
-its underlying **Internal Traffic Rule has no IP address registered**. Confirmed by querying
-`testDataFilterName` alongside `hostName`: every row (including real `ai-watch.dev` production
-traffic) comes back `(not set)`, meaning the filter currently evaluates against zero traffic. Testing
-state with an empty IP rule is a no-op, not a lighter version of Active — nothing gets tagged until an
-IP (or CIDR range, for a non-static connection) is added under the data stream's "Define internal
-traffic" setting, which is also GA4 Console-only (see above). This could change independently of any
-code change in this repo (e.g. someone adds the IP in the console) — re-check with the
-`testDataFilterName` query above rather than assuming this is still the state.
+**Where the state lives.** The filter's configuration — existence, name, targeting, state — is
+Console-only: the Admin API exposes neither resource (above), so GA4 Admin → Data Filters is the only
+place to read it. The rule's IP list is a **different** screen — nothing gets tagged until an IP (or a
+CIDR range, for a non-static connection) is added under the data stream's "Define internal traffic"
+setting. Current status and pending checks live in **#998**.
 
-Measured **2026-07-14 → 2026-08-13** (a clean window starting the day after #999 landed, queried on
-2026-08-13 — re-run for current numbers): `ai-watch.dev` 236 sessions vs. `localhost` **141** sessions
-— a ~37% contamination rate, concentrated on a handful of specific days (`07-15`: 4, `07-18`: 26,
-`07-26`: 1, `07-31`: 59, `08-04`: 51) rather than a steady drip (re-verified with `--limit 200`, well
-above the default 50, to rule out the per-day breakdown itself having been silently truncated — the
-shape held). That shape reads as a few local/MCP screen-check sessions where consent got granted by
-mistake, not a systemic remaining code gap — see `docs/reference/ga4-events.md`'s #998 section for the
-cookieless-Edge-ping gap this was originally measuring, which is a separate, smaller concern from this
-session-level leakage.
+**The two halves need different instruments.**
+
+- **Rule half** — does the stamp go out? Read `tt=internal` off the outgoing `g/collect` URL in the
+  browser. Immediate, and needs no consent grant: a denied ping carries the stamp too.
+- **Filter half** — does the filter read that stamp? Needs a row in a standard report, so a
+  **consent-granted** `localhost` session. Observed: a session on property-date 2026-08-18 came back
+  with `testDataFilterName = Internal Traffic`. That establishes **matching**. It does not establish
+  that an Active filter **discards** — a separate observation, tracked in #998.
+
+**Do not try to verify the filter half with a consent-denied hit.** The denied ping fired on
+2026-08-17 KST produced no row at all — which is consistent with Google's
+description of cookieless pings as feeding
+[behavioral and conversion modeling](https://support.google.com/analytics/answer/9976101). A check
+written against such a hit returns nothing, and "nothing" is indistinguishable from "the filter is
+Active and discarding it", so it decides neither. #998's `verify-after 2026-08-18` was written that
+way and had to be redone with a granted session. **Do not generalize this into a rule about which hits
+reach standard reports**: it is one observation, and #998's Step-1 comment reads a larger sample the
+opposite way (142 `is-*-down` sessions at `sessions == pageviews` 1:1, which it attributes to
+cookieless pings). That tension is unresolved.
+
+**The rule matches by IP.** Measured 2026-08-18/19 by holding surface and consent state fixed and varying only the
+network: Edge + denied + registered IP → stamped; SPA + granted + registered IP → stamped; SPA +
+granted + unregistered IP → **not** stamped. Only the SPA surface was tested off-IP.
+
+**The property's timezone is `America/Los_Angeles`** (read 2026-08-19 from `properties/529375750`; it
+is a Console setting, so re-read rather than trust this line). It is neither KST nor UTC, and the
+offset is DST-dependent — convert the date you mean into property-time before choosing
+`--start`/`--end`, or query a ±1-day range.
+
+Historical baseline for **2026-07-14 → 2026-08-13** (starting the day after #999 landed), **as queried
+on 2026-08-13**: `ai-watch.dev` 236 sessions vs `localhost` **141** — ~37%, concentrated on a handful
+of days (`07-15`: 4, `07-18`: 26, `07-26`: 1, `07-31`: 59, `08-04`: 51) rather than a steady drip
+(re-verified with `--limit 200`, well above the default 50, to rule out the per-day breakdown having
+been silently truncated — the shape held). #998 records 249 / 149 for a read on 2026-08-17. Quote the query date
+**and** an explicit `--end` beside any figure taken from here.
 
 ## Security
 
