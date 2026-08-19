@@ -79,10 +79,18 @@ is the *procedure* — follow it top to bottom.
      attribute anything, and on #1110 the causality was volunteered only from round 5 on. The cumulative
      total is what makes *not converging* visible while each individual round still looks healthy.
 6. **Fix review findings — auto-loop** to 0 Critical/Important (Suggestions-only = converged).
-   - **Keep going while each round finds a defect that was already there — never cap the rounds.** Several
-     rounds is normal and legitimate (#1052/#1049), and rounds deep into a loop have caught real defects:
-     on #1110 round 3 found an unescaped apostrophe that broke `/methodology`'s inline i18n script, and
-     round 5's chain surfaced #1123.
+   - **Ask one question of fact about each finding before acting on it: did it arrive with a reproduction,
+     a failing check, or a mutation that goes red? (#1245)** Per finding, not per round: a round mixes
+     both kinds, and one adjudicable finding must not carry its siblings into the next round on its
+     reproduction.
+     - **Yes → work it, and never cap the rounds.** Several rounds is normal and legitimate: on #1052
+       four rounds each found a guard that reported green while guarding nothing, all via real mutations;
+       on #1110 round 3 found an unescaped apostrophe that broke `/methodology`'s inline i18n script.
+     - **No → do not carry it into another round.** Build the thing that would adjudicate it first, or —
+       when nothing could — drop the claim instead of rewording it. #1237 hit this and named the remedy
+       itself: two fixes attempted during review "produced worse defects" in a script with "no automated
+       test", so it deferred that piece — "Follow-up, harness first". #1241 built the harness first, and
+       its rounds then reproduced seven defects before fixing each.
    - **STOP when the previous round's fix INTRODUCED this round's finding, twice in a row (#1124).** This
      trigger is causal, not a label — it needs no self-classification. It replaces the old "same finding *category* 3 rounds
      running" trigger, which was self-assigned and therefore evadable: on #1110 rounds were labelled by

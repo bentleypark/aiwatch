@@ -26,8 +26,9 @@ Every fire is logged to `.claude/hook-audit.jsonl` (gitignored). `npm run hook-a
 The PR-review auto-loop (`ship-issue` step 6, "loop until 0 Critical/Important") can fail to converge
 when each round's fix reseeds the next round's finding — the rewrites tracked in #1091 and #1110 both ran
 well past round 4, which a stop rule is meant to cut short. The stop rule
-(`ship-issue` steps 5-6, #1097/#1124) is still the **source of record** for *how* to converge (change
-the class of fix, delete the construct, weaken the conclusion). But as skill-text alone it fails the way
+(`ship-issue` steps 5-6, #1097/#1124/#1245) is still the **source of record** for *how* to converge
+(gate each finding on whether it arrived with a reproduction or failing check, change the class of
+fix, delete the construct, weaken the conclusion). But as skill-text alone it fails the way
 #1110 documented: the trigger is something the agent has to notice and apply, and it gets evaded by
 re-labelling per file or topic.
 
