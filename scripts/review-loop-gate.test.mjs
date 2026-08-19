@@ -8,23 +8,24 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, existsSync, mkdirSync, cpSync, realpathSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  isPrReviewSpawn, REVIEW_AGENT_PREFIX, declaredRound, sessionId, noteFor, auditLine,
+  isPrReviewSpawn, REVIEW_AGENT_PREFIX, declaredRound, sessionId, noteFor, auditLine, branchName, repoRootFrom,
 } from '../.claude/hooks/review-loop-gate.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
 const HOOK = join(REPO, '.claude', 'hooks', 'review-loop-gate.mjs')
 
 /** Drive the real CLI with a stdin payload, HOOK_AUDIT_LOG sandboxed. */
-function runHook(toolInput, { transcript = 'abcdef12.jsonl' } = {}) {
+function runHook(toolInput, { transcript = 'abcdef12.jsonl', cwd = REPO } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'revloop-'))
   const log = join(dir, 'audit.jsonl')
   const payload = { tool_name: 'Agent', tool_input: toolInput }
   if (transcript) payload.transcript_path = join(dir, transcript)
+  if (cwd) payload.cwd = cwd
   const stdout = execFileSync('node', [HOOK], { input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, HOOK_AUDIT_LOG: log } })
   const audit = existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []
   return { stdout, audit }
@@ -86,10 +87,134 @@ test('sessionId — the first 8 chars of the transcript filename, or unknown', (
 })
 
 test('noteFor — the note shape the summary parses, incl. round-none as a first-class outcome', () => {
-  assert.equal(noteFor('This is ROUND 4.', '/x/sess1234.jsonl'), 'round-4:s=sess1234')
-  assert.equal(noteFor('review this PR', '/x/sess1234.jsonl'), 'round-none:s=sess1234')
-  assert.equal(noteFor('ROUND 12 review', '/x/sess1234.jsonl'), 'round-12:s=sess1234') // two digits survive
-  assert.equal(noteFor('This is ROUND 4.', undefined), 'round-4:s=unknown')
+  const b = 'fix/9-x'
+  assert.equal(noteFor('This is ROUND 4.', '/x/sess1234.jsonl', b), 'round-4:s=sess1234:b=fix/9-x')
+  assert.equal(noteFor('review this PR', '/x/sess1234.jsonl', b), 'round-none:s=sess1234:b=fix/9-x')
+  assert.equal(noteFor('ROUND 12 review', '/x/sess1234.jsonl', b), 'round-12:s=sess1234:b=fix/9-x') // two digits survive
+  assert.equal(noteFor('This is ROUND 4.', undefined, b), 'round-4:s=unknown:b=fix/9-x')
+  // The branch is LAST and the session keeps its own field, so a pre-#1245 reader bounding the session
+  // at `:` still reads it. A branch that lost its value must say so rather than vanish (#1245).
+  assert.equal(noteFor('ROUND 1', '/x/sess1234.jsonl', ''), 'round-1:s=sess1234:b=unknown')
+  // Git forbids `:` and whitespace in a ref name; this only covers a HEAD corrupted past what git allows,
+  // and it must not be able to split the session field.
+  assert.equal(noteFor('ROUND 1', '/x/sess1234.jsonl', 'we: ird'), 'round-1:s=sess1234:b=we_ird')
+})
+
+test('branchName — reads BOTH git layouts, because issue work happens in worktrees (#1245)', () => {
+  // A normal checkout: `.git` is a directory.
+  const plain = mkdtempSync(join(tmpdir(), 'revloop-git-'))
+  mkdirSync(join(plain, '.git'), { recursive: true })
+  writeFileSync(join(plain, '.git', 'HEAD'), 'ref: refs/heads/fix/1245-thing\n')
+  assert.equal(branchName(plain), 'fix/1245-thing')
+
+  // A worktree: `.git` is a FILE pointing at the real gitdir. Reading only the directory layout would
+  // report `unknown` for exactly the sessions this telemetry exists to attribute.
+  const wt = mkdtempSync(join(tmpdir(), 'revloop-wt-'))
+  const gitdir = join(wt, 'realgitdir')
+  mkdirSync(gitdir, { recursive: true })
+  writeFileSync(join(gitdir, 'HEAD'), 'ref: refs/heads/chore/1245-branch\n')
+  writeFileSync(join(wt, '.git'), `gitdir: ${gitdir}\n`)
+  assert.equal(branchName(wt), 'chore/1245-branch')
+
+  // A RELATIVE gitdir, which is what `git worktree add` actually writes on some layouts.
+  const rel = mkdtempSync(join(tmpdir(), 'revloop-rel-'))
+  mkdirSync(join(rel, 'gd'), { recursive: true })
+  writeFileSync(join(rel, 'gd', 'HEAD'), 'ref: refs/heads/feat/rel\n')
+  writeFileSync(join(rel, '.git'), 'gitdir: gd\n')
+  assert.equal(branchName(rel), 'feat/rel')
+})
+
+test('CLI — the branch comes from the session cwd, NOT from where the hook file sits (#1245)', () => {
+  // The defect this pins, found in review round 1 and confirmed against the real log: settings runs the
+  // hook as `$CLAUDE_PROJECT_DIR/.claude/hooks/…`, and that resolves to the MAIN checkout even for a
+  // worktree-isolated session. A script-relative anchor therefore reported the MAIN branch for every
+  // worktree loop — silently, and indistinguishable from real main-checkout work. Every other assertion
+  // in this file accepts any `b=` value, so the whole suite stayed green while the feature was inert.
+  //
+  // The fixture is a miniature WORKTREE (`.git` as a `gitdir:` FILE), which is also what makes that
+  // branch of `branchName` live code rather than something only the unit tests reach.
+  const wt = mkdtempSync(join(tmpdir(), 'revloop-cwd-'))
+  const gitdir = join(wt, 'gd')
+  mkdirSync(join(wt, 'sub', 'deeper'), { recursive: true }) // cwd may be BELOW the root
+  mkdirSync(gitdir, { recursive: true })
+  writeFileSync(join(gitdir, 'HEAD'), 'ref: refs/heads/fix/9-from-cwd\n')
+  writeFileSync(join(wt, '.git'), `gitdir: ${gitdir}\n`)
+
+  const log = join(wt, 'audit.jsonl')
+  execFileSync('node', [HOOK], {
+    input: JSON.stringify({ tool_name: 'Agent', tool_input: review('ROUND 2 review'), transcript_path: '/x/cwdsess1.jsonl', cwd: join(wt, 'sub', 'deeper') }),
+    encoding: 'utf8',
+    env: { ...process.env, HOOK_AUDIT_LOG: log },
+  })
+  const note = JSON.parse(readFileSync(log, 'utf8').trim()).note
+  assert.equal(note, 'round-2:s=cwdsess1:b=fix/9-from-cwd')
+
+  // No cwd on the payload → the branch NAMES the gap. Falling back to the hook's own checkout would
+  // record whatever main is on, which is indistinguishable from a real main-checkout loop.
+  const log2 = join(wt, 'audit2.jsonl')
+  execFileSync('node', [HOOK], {
+    input: JSON.stringify({ tool_name: 'Agent', tool_input: review('ROUND 2 review'), transcript_path: '/x/cwdsess1.jsonl' }),
+    encoding: 'utf8',
+    env: { ...process.env, HOOK_AUDIT_LOG: log2 },
+  })
+  assert.equal(JSON.parse(readFileSync(log2, 'utf8').trim()).note, 'round-2:s=cwdsess1:b=no-cwd')
+
+  // cwd present but with no repo above it — the branch that actually fires in production, since a
+  // PreToolUse payload does carry cwd. It must NOT reuse the absent-field name.
+  const noRepo = mkdtempSync(join(tmpdir(), 'revloop-norepo-'))
+  const log4 = join(wt, 'audit4.jsonl')
+  execFileSync('node', [HOOK], {
+    input: JSON.stringify({ tool_name: 'Agent', tool_input: review('ROUND 2 review'), transcript_path: '/x/cwdsess1.jsonl', cwd: noRepo }),
+    encoding: 'utf8',
+    env: { ...process.env, HOOK_AUDIT_LOG: log4 },
+  })
+  assert.equal(JSON.parse(readFileSync(log4, 'utf8').trim()).note, 'round-2:s=cwdsess1:b=no-repo')
+
+  // A cwd inside a repository this project does not own is NOT guarded against: hook wiring is
+  // project-scoped, so a spawn reaching this code already belongs to this project. Recorded here as the
+  // known limit rather than left to be rediscovered — its branch would be reported as if it were ours.
+  const foreign = mkdtempSync(join(tmpdir(), 'revloop-foreign-'))
+  mkdirSync(join(foreign, '.git'), { recursive: true })
+  writeFileSync(join(foreign, '.git', 'HEAD'), 'ref: refs/heads/somebody-elses-branch\n')
+  const log3 = join(wt, 'audit3.jsonl')
+  execFileSync('node', [HOOK], {
+    input: JSON.stringify({ tool_name: 'Agent', tool_input: review('ROUND 2 review'), transcript_path: '/x/cwdsess1.jsonl', cwd: foreign }),
+    encoding: 'utf8',
+    env: { ...process.env, HOOK_AUDIT_LOG: log3 },
+  })
+  assert.equal(JSON.parse(readFileSync(log3, 'utf8').trim()).note, 'round-2:s=cwdsess1:b=somebody-elses-branch')
+})
+
+test('repoRootFrom — walks up to the nearest .git, and returns null rather than guessing (#1245)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'revloop-root-'))
+  mkdirSync(join(root, '.git'), { recursive: true })
+  mkdirSync(join(root, 'a', 'b'), { recursive: true })
+  assert.equal(repoRootFrom(join(root, 'a', 'b')), root)
+  assert.equal(repoRootFrom(root), root)
+  // Nothing on the path has a `.git` — the caller falls back explicitly instead of being handed a root
+  // that merely happens to exist.
+  assert.equal(repoRootFrom(mkdtempSync(join(tmpdir(), 'revloop-bare-'))), null)
+  // Any repo above cwd wins — the walk-up does not check ownership. See the CLI test for why that is
+  // an accepted limit rather than a guard.
+  const foreign = mkdtempSync(join(tmpdir(), 'revloop-notours-'))
+  mkdirSync(join(foreign, '.git'), { recursive: true })
+  assert.equal(repoRootFrom(foreign), foreign)
+  assert.equal(repoRootFrom(''), null)
+  assert.equal(repoRootFrom(undefined), null)
+})
+
+test('branchName — never throws, and names the failure instead of returning empty (#1245)', () => {
+  // Detached HEAD: a sha, not a ref. Reported as its own value, not as a branch named after the sha.
+  const det = mkdtempSync(join(tmpdir(), 'revloop-det-'))
+  mkdirSync(join(det, '.git'), { recursive: true })
+  writeFileSync(join(det, '.git', 'HEAD'), '9f1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c\n')
+  assert.equal(branchName(det), 'detached')
+
+  // No repo at all, and a `.git` file that is not a gitdir pointer.
+  assert.equal(branchName(mkdtempSync(join(tmpdir(), 'revloop-none-'))), 'unknown')
+  const bad = mkdtempSync(join(tmpdir(), 'revloop-bad-'))
+  writeFileSync(join(bad, '.git'), 'not a gitdir pointer\n')
+  assert.equal(branchName(bad), 'unknown')
 })
 
 // ── CLI integration ──
@@ -107,13 +232,16 @@ test('CLI — a review spawn records exactly one pass line, and NEVER blocks', (
     assert.equal(stdout.trim(), '', `must emit no decision for: ${prompt}`)
     assert.equal(audit.length, 1)
     assert.equal(audit[0].decision, 'pass')
-    assert.equal(audit[0].note, noteFor(prompt, 'abcdef12.jsonl'))
+    // Pins the note SHAPE against a stated value. It cannot see a wrong anchor — `runHook`'s cwd is this
+    // same checkout, so every spelling of the anchor agrees here; the anchor is pinned by the cwd test
+    // above, whose temp worktree carries a branch no other path can produce.
+    assert.equal(audit[0].note, `round-${declaredRound(prompt) || 'none'}:s=abcdef12:b=${branchName(REPO)}`)
   }
 })
 
 test('CLI — an undeclared round is RECORDED, not skipped (it is the signal, not an error)', () => {
   const { audit } = runHook(review('review this PR'))
-  assert.match(audit[0].note, /^round-none:s=abcdef12$/)
+  assert.match(audit[0].note, /^round-none:s=abcdef12:b=\S+$/)
 })
 
 test('CLI — every fail-open path still records, and names itself', () => {
@@ -135,7 +263,7 @@ test('CLI — every fail-open path still records, and names itself', () => {
   assert.equal(drift.stdout.trim(), '')
   assert.match(drift.audit.at(-1).note, /fail-open:no-prompt-field/)
   // control: the same payload WITH a prompt records a round, so the guard is not always-fail-open
-  assert.match(call(`{"tool_input":{${RV},"prompt":"This is ROUND 5."}}`).audit.at(-1).note, /^round-5:s=unknown$/)
+  assert.match(call(`{"tool_input":{${RV},"prompt":"This is ROUND 5."}}`).audit.at(-1).note, /^round-5:s=unknown:b=\S+$/)
   // A payload with no `tool_input` — `null`, or a renamed harness key — must be RECORDED as a drift, not
   // fall through to the silent not-a-review-spawn exit. Otherwise the instrument goes blind and the log
   // looks exactly like a quiet week.
@@ -169,7 +297,7 @@ test('CLI — a failed audit write warns on stderr instead of vanishing', () => 
 test('CLI — a missing transcript_path still records the round (only the session is unknown)', () => {
   const { audit } = runHook(review('This is ROUND 6.'), { transcript: null })
   assert.equal(audit.length, 1)
-  assert.equal(audit[0].note, 'round-6:s=unknown')
+  assert.match(audit[0].note, /^round-6:s=unknown:b=\S+$/)
 })
 
 test('the hook is WIRED in .claude/settings.json, at the path settings actually names', () => {
@@ -237,6 +365,6 @@ test('the hook still runs from a path a URL would escape (space, #) (#1150)', ()
       encoding: 'utf8', env: { ...process.env, HOOK_AUDIT_LOG: log },
     })
     assert.ok(existsSync(log), `the hook recorded nothing when run from "${dirName}"`)
-    assert.match(readFileSync(log, 'utf8'), /"note":"round-4:s=unknown"/, dirName)
+    assert.match(readFileSync(log, 'utf8'), /"note":"round-4:s=unknown:b=[^"]+"/, dirName)
   }
 })

@@ -5,7 +5,7 @@
 //   - last-7-days totals + a per-day trend over the last 14 days
 //   - the most recent N entries
 //
-// Run:  node scripts/hook-audit-summary.mjs [--last N] [--days D]
+// Run:  node scripts/hook-audit-summary.mjs [--last N] [--days D] [--branches N]
 // Defaults: --last 15, --days 14. The log is gitignored; absent log = "nothing
 // logged yet" (not an error).
 
@@ -27,6 +27,9 @@ const intArg = (flag, def) => {
 }
 const LAST_N = intArg('--last', 15)
 const DAYS = intArg('--days', 14)
+// #1245 — the per-branch rows shown. Truncation is announced in the output: a dropped row here would
+// read as "that branch ran no reviews".
+const BRANCH_ROWS = intArg('--branches', 10)
 
 if (!existsSync(LOG)) {
   console.log(`No hook audit log yet (${LOG}).`)
@@ -159,6 +162,12 @@ const revloop = entries.filter((e) => e.hook === 'review-loop-gate')
 const revloopFailOpen = {}
 const revloopRounds = {}
 const revloopBySession = {}
+const revloopByBranch = {}
+// Values the hook writes when it could not attribute a spawn to a branch. `detached` is deliberately NOT
+// here: a detached HEAD is a real state of a real checkout, and that loop still happened somewhere.
+const REVLOOP_UNATTRIBUTED = new Set(['no-cwd', 'no-repo', 'unknown'])
+const revloopUnattributed = {}
+let revloopNoBranch = 0
 let revloopUndeclared = 0
 for (const e of revloop) {
   const n = String(e.note ?? '')
@@ -169,11 +178,34 @@ for (const e of revloop) {
     revloopFailOpen[why] = (revloopFailOpen[why] ?? 0) + 1
     continue
   }
-  const s = /:s=(\S+)/.exec(n)?.[1]
+  // Bounded at `:` so the branch field #1245 appends after the session cannot be swallowed. Git forbids
+  // `:` in a ref name, so this cannot truncate a real branch either; a pre-#1245 line has nothing after
+  // the session and parses unchanged.
+  const s = /:s=([^:\s]+)/.exec(n)?.[1]
   if (s) revloopBySession[s] = (revloopBySession[s] ?? 0) + 1
   const m = /^round-(\d+)/.exec(n)
   if (m) revloopRounds[m[1]] = (revloopRounds[m[1]] ?? 0) + 1
   else revloopUndeclared++ // `round-none` — the prompt tracked no round
+  // #1245 — per BRANCH, which is the unit a review loop actually belongs to. Session-keyed depth could
+  // not answer "how many rounds did this PR take": #1237's loop shows as maxRound 7 in one session and 3
+  // in another, #1241's as 8 and 3, because a loop spans sessions. Lines predating #1245 carry no branch
+  // and are counted separately rather than bucketed under a guess.
+  // `[^:\s]+` matches the session capture above for symmetry, not because it fixes anything observable:
+  // `:b=` is the LAST field, so a greedy `\S+` behaves identically today and no test can tell them apart.
+  // It is written this way so the next appended field does not reintroduce the swallowing defect that
+  // one line above exists to fix.
+  const b = /:b=([^:\s]+)/.exec(n)?.[1]
+  if (b && REVLOOP_UNATTRIBUTED.has(b)) {
+    // Not a branch — an instrument outcome. Kept OUT of the branch table for the same reason `fail-open`
+    // has its own line: a health failure sitting among real branches reads as a PR that ran a loop.
+    revloopUnattributed[b] = (revloopUnattributed[b] ?? 0) + 1
+  } else if (b) {
+    const cur = revloopByBranch[b] ?? { spawns: 0, maxRound: 0, undeclared: 0 }
+    cur.spawns++
+    if (m) cur.maxRound = Math.max(cur.maxRound, Number(m[1]))
+    else cur.undeclared++
+    revloopByBranch[b] = cur
+  } else revloopNoBranch++
 }
 // Spawns per session is the depth proxy that needs NO cooperation from the prompt. It matters because the
 // declared round is entirely self-reported, and `/pr-review-toolkit:review-pr` — the entry point CLAUDE.md
@@ -239,6 +271,26 @@ if (revloop.length) {
   // if it dwarfs the histogram, the loop ran without tracking rounds at all — the condition under which
   // every runaway loop before this hook had to be reconstructed from memory afterwards.
   if (revloopUndeclared) out.push(`  ⚑ no round declared=${revloopUndeclared} spawn(s) — the loop was not tracking rounds in those spawns, so nothing here describes their depth.`)
+  // #1245 — the per-branch view.
+  // Sorted by SPAWNS first. Ranking on maxRound buried the one case this section calls blind: a branch
+  // whose prompts declared no rounds has maxRound 0, so it sorted below every branch with a single
+  // declared round and could fall past the row cap — the runaway loop, truncated. Spawn count
+  // is the depth proxy that needs no cooperation from the prompt, which is why it leads here too.
+  const branches = Object.entries(revloopByBranch).sort((a, b) => b[1].spawns - a[1].spawns || b[1].maxRound - a[1].maxRound)
+  if (branches.length) {
+    out.push(`  per branch (#1245), busiest first:`)
+    for (const [b, v] of branches.slice(0, BRANCH_ROWS)) {
+      const blind = v.undeclared ? `, ${v.undeclared} undeclared` : ''
+      out.push(`    ${b}: maxRound ${v.maxRound || '?'} · ${v.spawns} spawn(s)${blind}`)
+    }
+    if (branches.length > BRANCH_ROWS) out.push(`    … ${branches.length - BRANCH_ROWS} more branch(es)`)
+  }
+  const unattr = Object.entries(revloopUnattributed).sort((a, b) => b[1] - a[1])
+  if (unattr.length) {
+    const total = unattr.reduce((t, [, v]) => t + v, 0)
+    out.push(`  ⚑ ${total} spawn(s) could not be attributed to a branch (${unattr.map(([k, v]) => `${k}=${v}`).join(', ')}) — instrument health, not a branch that ran a loop.`)
+  }
+  if (revloopNoBranch) out.push(`  ${revloopNoBranch} spawn(s) predate the branch field (#1245) and are not in the per-branch view.`)
   if (revloopFailOpenTotal) {
     const fo = Object.entries(revloopFailOpen).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`)
     out.push(`  ❗ fail-open=${revloopFailOpenTotal} — instrument health, not a finding: the hook recorded nothing for that spawn (${fo.join(', ')}). Should be ~0; a rising count means the telemetry is blind, not that the loop is healthy.`)

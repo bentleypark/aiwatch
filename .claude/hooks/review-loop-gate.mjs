@@ -2,7 +2,8 @@
 // #1150 — review-loop telemetry (PreToolUse, matcher `Task|Agent`).
 //
 // WHAT IT DOES. On every `pr-review-toolkit:*` subagent spawn it records one audit line: the round the
-// prompt declares (or that it declared none) plus the session. Nothing else. It never blocks.
+// prompt declares (or that it declared none), the session, and the branch (#1245). Nothing else. It
+// never blocks.
 // `npm run hook-audit`'s 🔁 section turns those lines into a round histogram and an
 // undeclared-round count, so a review loop that ran long — or that stopped tracking rounds at all — is
 // visible after the fact instead of being reconstructed from memory.
@@ -26,13 +27,13 @@ import { fileURLToPath } from 'node:url'
 // ── Audit logging (read by `npm run hook-audit`'s 🔁 review-loop section) ─────
 // Same JSONL schema as _audit.sh / step35 ({ts,hook,decision,note}).
 // Resolved relative to this file, exactly like every other hook and like `hook-audit-summary.mjs`'s
-// reader — so a session rooted at a worktree writes to that worktree's log and `npm run hook-audit` run
-// there shows it. Redirecting only this hook to the main checkout would make the record outlive
-// `git worktree remove`, but it would also leave the operator IN the worktree — where CLAUDE.md says issue
-// work happens — reading a telemetry section that is silently empty while the data sits elsewhere, which
-// is the exact all-clear-by-omission failure this telemetry exists to prevent. One inconsistent writer is
-// worse than a shared limitation, and the limitation is not new: every hook's lines have always lived and
-// died with their checkout.
+// reader. In practice that means ONE log, in the main checkout: settings invokes the hook through
+// `$CLAUDE_PROJECT_DIR`, which resolves to the main checkout even for a worktree-isolated session, so a
+// worktree session's lines land there too. (#1245 measured this — no worktree has ever held a
+// `hook-audit.jsonl`. An earlier version of this comment claimed the opposite.) A single log is the
+// right outcome for a record that has to span sessions and outlive `git worktree remove`; what it costs
+// is that the log's location says nothing about WHICH branch a line came from, which is why the branch
+// is derived from the session's cwd instead.
 const AUDIT_FILE = process.env.HOOK_AUDIT_LOG
   ? path.resolve(process.env.HOOK_AUDIT_LOG)
   : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'hook-audit.jsonl')
@@ -88,11 +89,67 @@ export function sessionId(transcriptPath) {
   return path.basename(String(transcriptPath ?? ''), '.jsonl').slice(0, 8) || 'unknown'
 }
 
+/** The repo root for `cwd` — the nearest ancestor holding a `.git`. The session's cwd is the only thing
+ *  in the payload that tracks WHICH checkout the work is in (`step35-verify-gate.mjs` reads it for the
+ *  same reason), and cwd can be a subdirectory, so this walks up rather than testing one level.
+ *  Returns null when nothing on the path has a `.git`, so the caller can fall back rather than guess. */
+export function repoRootFrom(cwd) {
+  // An absent cwd must NOT fall through to `path.resolve('')` → `process.cwd()`: the hook's own working
+  // directory is whatever launched it, so that would report a branch nobody chose while looking correct.
+  // Returning null hands the decision back to the caller's explicit fallback.
+  if (typeof cwd !== 'string' || cwd === '') return null
+  try {
+    let dir = path.resolve(cwd)
+    for (let i = 0; i < 64; i++) {
+      if (fs.existsSync(path.join(dir, '.git'))) return dir
+      const up = path.dirname(dir)
+      if (up === dir) return null
+      dir = up
+    }
+  } catch { /* fall through */ }
+  return null
+}
+
+/** The branch of the checkout at `root`, read from git's own files rather than by spawning git — this
+ *  hook runs on every matching tool call, and a subprocess per spawn is a cost the record does not need.
+ *
+ *  Two layouts, because issue work happens in worktrees (CLAUDE.md "Parallel sessions"): a normal
+ *  checkout has `.git/` as a DIRECTORY, a worktree has `.git` as a FILE holding `gitdir: <path>`.
+ *  Reading only the first would report `unknown` for exactly the sessions this telemetry is about.
+ *
+ *  Never throws, and never returns empty: an unreadable HEAD becomes `unknown`, a detached one
+ *  `detached`. An omitted value would be indistinguishable from a pre-#1245 line, so it names itself. */
+export function branchName(root) {
+  try {
+    const dotGit = path.join(root, '.git')
+    let gitDir = dotGit
+    if (fs.statSync(dotGit).isFile()) {
+      const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, 'utf8'))
+      if (!m) return 'unknown'
+      gitDir = path.resolve(root, m[1].trim())
+    }
+    const ref = /^ref:\s*refs\/heads\/(.+)$/m.exec(fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8'))
+    return ref ? ref[1].trim() : 'detached'
+  } catch {
+    return 'unknown'
+  }
+}
+
 /** The audit note for a spawn. `round-none` is a first-class outcome, not an error: it means the prompt
- *  tracked no round, which is exactly what the 🔁 section reports. */
-export function noteFor(prompt, transcriptPath) {
+ *  tracked no round, which is exactly what the 🔁 section reports.
+ *
+ *  The branch (#1245) goes LAST, after the session, so every pre-#1245 line keeps parsing unchanged.
+ *  Git forbids `:` and whitespace in a ref name, so a reader may bound the session field at `:` without
+ *  a branch ever splitting it; the substitution below covers only a HEAD corrupted into a shape git
+ *  itself would reject. Session-keyed grouping alone could not answer "how many rounds did this PR
+ *  take" — loops span sessions, which is what #1245 measured.
+ *
+ *  `branch` is REQUIRED. A default of `branchName()` would hand every caller the branch of the checkout
+ *  the hook was LOADED from, which is never the one being worked in — the round-1 defect. */
+export function noteFor(prompt, transcriptPath, branch) {
   const round = declaredRound(prompt)
-  return `round-${round || 'none'}:s=${sessionId(transcriptPath)}`
+  const b = String(branch || 'unknown').replace(/[\s:]+/g, '_')
+  return `round-${round || 'none'}:s=${sessionId(transcriptPath)}:b=${b}`
 }
 
 // ── CLI (hook entry) ─────────────────────────────────────────────────────────
@@ -118,7 +175,14 @@ function main() {
     // `description`: that is a required Agent-tool param present on every real spawn, so a fallback would
     // silently record the round of a 3-5 word summary and report a drift as data.
     if (typeof ti.prompt !== 'string') failOpen('no-prompt-field')
-    audit('pass', noteFor(ti.prompt, input.transcript_path))
+    // Two ways to have no branch, named apart because they fail differently: the payload carried no cwd
+    // at all, or it carried one with no git repo above it. Neither may borrow a real branch name —
+    // falling back to this checkout's would record whatever MAIN happens to be on, indistinguishable
+    // from a genuine main-checkout loop, which is the round-1 defect through a side door.
+    const cwd = input.cwd
+    const root = repoRootFrom(cwd)
+    const branch = root ? branchName(root) : (typeof cwd === 'string' && cwd !== '' ? 'no-repo' : 'no-cwd')
+    audit('pass', noteFor(ti.prompt, input.transcript_path, branch))
     process.exit(0)
   } catch { failOpen('record-error') }
 }
