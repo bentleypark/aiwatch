@@ -1367,15 +1367,17 @@ export async function buildMonthlyArchive(
   // narrative draft and bake it into the archive (#426). Omitted/empty → archive
   // builds with `narrative: null`; the report falls back to its placeholder.
   narrativeOpts?: NarrativeAiOptions,
+  // #1260 — pass the list the caller already read (fail-closed) rather than re-reading it fail-open.
+  suppressionsOverride?: SuppressionEntry[],
 ): Promise<MonthlyArchive> {
   const mm = String(month).padStart(2, '0')
   const period = `${year}-${mm}`
   const dates = getMonthDates(year, month)
 
   // Read daily uptime counters (history:{date} for past days)
-  const uptimeResults = await Promise.all(
-    dates.map(d => kv.get(`history:${d}`).catch(() => null)),
-  )
+  // #1260 — a fault and an expired key both yield null, but they need opposite operator actions
+  // (retry vs accept the loss), and a destructive caller must be able to tell them apart.
+  const uptimeResults = await Promise.all(dates.map(d => kv.get(`history:${d}`).catch(() => null)))
   const dailyData: Record<string, DailyCounters> = {}
   let daysCollected = 0
   let parseErrors = 0
@@ -1423,7 +1425,11 @@ export async function buildMonthlyArchive(
   if (incidentData) {
     // Fresh read (bypass the isolate cache used on the hot /api/status path) — a rebuild is a rare,
     // manual, correctness-critical one-shot, so it must see a just-added suppression immediately.
-    const suppressions = await readSuppressionsFresh(kv)
+    // #1260 — the CALLER may already have read this list, fail-closed. Reading it again here with the
+    // fail-open sibling meant a KV blip applied NO suppressions while the caller's own read succeeded,
+    // so nothing shrank, nothing objected, and the operator's entire reason for the rebuild silently
+    // did not happen. Prefer what the caller consumed.
+    const suppressions = suppressionsOverride ?? await readSuppressionsFresh(kv)
     if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
     // #1019 — build-time duration overrides: pin a paperwork-inflated incident's duration to the
     // operator value, recomputing downtime/longest from the survivors (rebuild-safe, no KV surgery).
@@ -1476,7 +1482,7 @@ export async function buildMonthlyArchive(
 
   // Guard: 0 days with data is almost certainly a KV failure
   if (daysCollected === 0) {
-    console.error(`[monthly-archive] No daily data found for ${period} — possible KV read failure (checked ${dates.length} days)`)
+    console.error(`[monthly-archive] No daily data found for ${period} (checked ${dates.length} days)`)
   }
 
   // Build per-service archive
@@ -1629,6 +1635,132 @@ export async function buildMonthlyArchive(
   }
 
   return archive
+}
+
+/**
+ * How many days of `month` (YYYY-MM) can no longer be read back from `history:{date}` (#1260).
+ *
+ * `buildMonthlyArchive` sources every day of uptime from those keys, and they expire. A rebuild of a
+ * month with expired days therefore produces an archive that is *worse* than the one already stored —
+ * and `archive:monthly` is TTL-less, so the write is not recoverable. `0` means a full rebuild.
+ *
+ * `retentionDays` is passed in rather than imported so this stays pure and free of a cycle back to
+ * the writer. Deliberately conservative: a day is counted expired at exactly `retentionDays` old,
+ * one day before the key's own expiry, because the caller is guarding a destructive write.
+ */
+export function expiredDaysInMonth(month: string, retentionDays: number, nowMs: number): number {
+  const [year, monthNum] = month.split('-').map(Number)
+  // -1, not 0: 0 is the value that means "full rebuild, proceed", so an unparseable month must not
+  // report the safest possible answer. The caller 400s on a negative.
+  if (!year || !monthNum) return -1
+  const now = new Date(nowMs)
+  const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  // A month that has not happened is not "0 expired days, proceed" — it is not a rebuildable month.
+  if (Date.UTC(year, monthNum - 1, 1) > todayMs) return -1
+  const daysInMonth = new Date(Date.UTC(year, monthNum, 0)).getUTCDate()
+  let expired = 0
+  for (let day = 1; day <= daysInMonth; day++) {
+    const ageDays = Math.floor((todayMs - Date.UTC(year, monthNum - 1, day)) / 86_400_000)
+    if (ageDays >= retentionDays) expired++
+  }
+  return expired
+}
+
+/**
+ * What a stored archive actually holds (#1260). A rebuild must not hold less.
+ *
+ * Counted structurally rather than field-by-field: every optional top-level section and every
+ * per-service measurement comes from a KV source with its own TTL — `history:` 90d, `incidents:` /
+ * `security:` / `probe-degradation:` 60d, `probe:daily:` 90d — so any of them can drop to null
+ * without the two counters named in the bug report moving. Enumerating the ones we happen to know
+ * about is how the first version of this guard missed four of six sources.
+ *
+ * `incidentIds` is a set rather than a count because a shrink is not always a loss: suppressing an
+ * incident is the documented reason to rebuild a past month at all, and it necessarily removes ids.
+ * The caller subtracts the ids it can explain; whatever is left vanished for a reason nobody chose.
+ */
+export interface ArchiveCensus {
+  daysCollected: number
+  services: number
+  servicesWithUptime: number
+  servicesWithScore: number
+  servicesWithLatency: number
+  sectionKeys: string[]
+  incidentIds: string[]
+}
+
+export function archiveContentCensus(raw: unknown): ArchiveCensus | null {
+  // Not a plausible archive object → `null`, which the caller treats as UNREADABLE rather than as an
+  // empty census. An array, a string, or `null` itself must not census as "holds nothing".
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const archive = raw as {
+    daysCollected?: unknown
+    services?: Record<string, Record<string, unknown>>
+    [k: string]: unknown
+  }
+  if (typeof archive.services !== 'object' || archive.services === null || Array.isArray(archive.services)) return null
+  // A wrong-typed required scalar is "not a plausible archive", not "held nothing" — coercing it to 0
+  // is the same fail-open the null return exists to prevent.
+  if (typeof archive.daysCollected !== 'number') return null
+
+  const entries = Object.values(archive.services)
+  const incidentIds: string[] = []
+  let servicesWithUptime = 0
+  let servicesWithScore = 0
+  let servicesWithLatency = 0
+  for (const svc of entries) {
+    if (svc?.uptime != null) servicesWithUptime++
+    if (svc?.score != null) servicesWithScore++
+    if (svc?.avgLatencyMs != null) servicesWithLatency++
+    const list = svc?.incidentList
+    if (Array.isArray(list)) {
+      for (const inc of list) {
+        const id = (inc as { id?: unknown } | null)?.id
+        if (typeof id === 'string') incidentIds.push(id)
+      }
+    }
+  }
+  // Optional top-level sections, collected generically so a section added later is covered without
+  // anyone remembering to widen this. Compared as a KEY SET rather than a count: a count lets a
+  // gained section mask a lost one, which is reachable on any rebuild (the narrative regenerates and
+  // predictionAccuracy may newly resolve). `narrative` is excluded outright — it is a regenerable AI
+  // draft that returns null on any gateway blip, so guarding it refuses rebuilds that lose nothing.
+  const NOT_A_SECTION = new Set(['period', 'generatedAt', 'daysCollected', 'services', 'narrative'])
+  const sectionKeys = Object.entries(archive)
+    .filter(([k, v]) => !NOT_A_SECTION.has(k) && v != null)
+    .map(([k]) => k)
+    .sort()
+
+  return {
+    daysCollected: archive.daysCollected,
+    services: entries.length,
+    servicesWithUptime,
+    servicesWithScore,
+    servicesWithLatency,
+    sectionKeys,
+    incidentIds,
+  }
+}
+
+/**
+ * Which census entries a rebuild would shrink, ignoring incident ids the caller can account for.
+ * Empty = the rebuild is not a downgrade.
+ */
+export function censusRegressions(
+  prior: ArchiveCensus,
+  next: ArchiveCensus,
+  explainedMissingIds: Set<string> = new Set(),
+): string[] {
+  const out: string[] = []
+  for (const key of ['daysCollected', 'services', 'servicesWithUptime', 'servicesWithScore', 'servicesWithLatency'] as const) {
+    if (next[key] < prior[key]) out.push(key)
+  }
+  const lostSections = prior.sectionKeys.filter((k) => !next.sectionKeys.includes(k))
+  if (lostSections.length > 0) out.push(`sections:${lostSections.join('+')}`)
+  const nextIds = new Set(next.incidentIds)
+  const unexplained = prior.incidentIds.filter((id) => !nextIds.has(id) && !explainedMissingIds.has(id))
+  if (unexplained.length > 0) out.push('incidents')
+  return out
 }
 
 /** Check if we should run monthly archive (1st of month, UTC 00:00-00:14 or catch-up 01:00-01:14) */

@@ -77,7 +77,35 @@ Score inputs).
 
 **After adding a suppression for a past month**, run `POST /api/admin/rebuild-archive` for that month so the
 archive + dashboard 90-day history reflect it. (The CURRENT month's 90-day view + weekly briefing filter the
-raw accumulator live — no rebuild needed there.)
+raw accumulator live — no rebuild needed there.) The rebuild reads the suppression list, so this shrink is
+expected and passes the guard below without a `force`.
+
+### The rebuild refuses when it would hold less than what is stored (#1260)
+
+`archive:monthly:{YYYY-MM}` has no TTL because nothing else holds a month's per-service figures — but every
+source the rebuild reads *does* expire: `history:` at 90 days, `incidents:` / `security:` /
+`probe-degradation:` at **60**. So a rebuild of an older month can produce an archive that is strictly worse
+than the one it replaces, and before #1260 it wrote it and answered `200`.
+
+The endpoint now builds first (the build performs no writes), compares the result against the stored
+archive, and answers:
+
+| | when |
+|---|---|
+| **`503` `retryable:true`** | one of the three reads taken BEFORE the build failed — the stored archive, `services:latest`, or the suppression list. Retry; `force` does not override these. A fault in the month's own sources is NOT distinguished from expiry (the helpers below the build swallow their own reads), so it lands in the `409` below. |
+| **`500` `retryable:false`** | the suppression list is present but malformed. Retrying never clears it — repair the KV value by hand. |
+| **`409`** | the rebuild measurably holds less than what is stored — `regressed` names what, alongside `prior` and `rebuilt`. Incidents the suppression list accounts for are NOT a loss, so the suppress-then-rebuild flow above passes without a `force`. |
+| **`409`** | the stored archive is unparseable, so the comparison could not be made at all. |
+| **`400`** | the month is not a real calendar month, or has not happened yet. |
+| **`200`** | otherwise — including a first-ever build of an old month, where nothing is stored and so nothing can be lost. |
+
+`{"force": true}` overrides the `409`s. **Every** overwrite of an existing archive — forced or not —
+first copies the prior bytes to `archive:monthly:{period}:prev:{ts}` (90d) and is refused outright if
+that copy fails. The comparison counts presence rather than value (it cannot see a real 99.97%
+replaced by a computed 100%), so the copy, not the comparison, is what makes a mistake recoverable.
+A forced overwrite also returns `forcedOver` / `priorUnreadable` and logs what it lost. The `409` states
+no cause on purpose: this endpoint cannot tell an aged-out key from a KV blip, and guessing points at
+`force` when a retry would have done.
 
 **Caveats:**
 - **Effect latency**: the live `/api/status` reflects a new suppression within ≤60s (isolate cache); the
