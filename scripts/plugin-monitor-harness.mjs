@@ -15,8 +15,18 @@ import { spawn, spawnSync } from 'node:child_process'
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const MONITOR_SH = join(HERE, '..', 'plugin', 'aiwatch', 'bin', 'aiwatch-monitor.sh')
 
-// Long enough to absorb a contended CI runner, short enough that a script broken into never polling
-// still reports rather than hanging.
+// Two deadlines, because the two waits fail for different reasons.
+//
+// STARTUP bounds getting the FIRST poll served — process creation under load, which says nothing
+// about the monitor's logic. #1254 tripped this: adding one more process-heavy suite to
+// `test:scripts` starved this file's first test into a flat 20s deadline (`0/1 polls`, empty
+// stdout) while the same two files alone pass.
+//
+// POLL bounds NO FURTHER PROGRESS once polling has begun, and it must stay SMALL: the long-interval
+// SIGTERM test runs at `pollSeconds: '30'` and catches a deferred trap handler precisely by that
+// handler being unable to answer before this fires. Raise it past 30s and the bug ships green.
+// Separating the two is what lets startup absorb contention without lengthening that silence.
+const STARTUP_DEADLINE_MS = 60_000
 const POLL_DEADLINE_MS = 20_000
 
 // Serves fixture N on the Nth invocation, and records the argv it was called with so a test can pin
@@ -236,15 +246,20 @@ exec /usr/bin/comm "$@"
     // poll N's transition lines have been printed and flushed, so it is the completion signal —
     // no output-quiescence guessing.
     // A process that is already gone will never serve another poll, so stop waiting for it — that
-    // turns a 20s deadline into an immediate result both for a mid-run signal and for a crash.
+    // turns either deadline into an immediate result both for a mid-run signal and for a crash.
     let dead = false
     closed.then(() => { dead = true })
 
     const count = () => Number(readFileSync(join(dir, 'count'), 'utf8') || 0)
-    const deadline = Date.now() + POLL_DEADLINE_MS
+    let seen = 0
+    let deadline = Date.now() + STARTUP_DEADLINE_MS
     let pending = opts.midRunSignal ?? null
     let closeAt = opts.closeStdoutAfter ?? null
     while (!dead && count() < polls.length + 1 && Date.now() < deadline) {
+      if (count() > seen) {          // progress: from here on, silence is the monitor's, not the machine's
+        seen = count()
+        deadline = Date.now() + POLL_DEADLINE_MS
+      }
       if (closeAt !== null && count() >= closeAt) {
         closeAt = null
         child.stdout.destroy()
