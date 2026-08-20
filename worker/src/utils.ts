@@ -792,6 +792,35 @@ export function formatNewComponentAlert(
   return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${action}`
 }
 
+/** Parse a stored `{ snapshots: [...] }` rolling window (#1256).
+ *
+ * `null` = the value is present but unusable; the caller MUST skip its write, which replaces the
+ * whole value. `[]` = the key is absent, so bootstrapping is safe.
+ *
+ * Elements are validated too, not just the container: the pre-#1256 code re-persisted junk it
+ * could not use, and every reader dereferences `.data`.
+ *
+ * Shared by the two writers of this envelope (`probe:24h`, `latency:24h`) — the only part of their
+ * read-modify-write that is genuinely identical. */
+export function parseSnapshotWindow<T>(raw: string | null): T[] | null {
+  if (raw === null) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const snapshots = (parsed as { snapshots?: unknown } | null)?.snapshots
+  // An object without a `snapshots` array is malformed, not empty — these writers only ever emit
+  // `{ snapshots: [...] }`, so `?? []` here would silently reset the window.
+  if (!Array.isArray(snapshots)) return null
+  const wellFormed = snapshots.every((s) => {
+    const e = s as { t?: unknown; data?: unknown } | null
+    return typeof e?.t === 'string' && typeof e.data === 'object' && e.data !== null
+  })
+  return wellFormed ? (snapshots as T[]) : null
+}
+
 /** Check if cached data is stale (strictly older than threshold, or missing cachedAt).
  *
  *  Also returns the snapshot's `upstreamFeeds` (#1072). This function is the cron's ONLY parser of the
