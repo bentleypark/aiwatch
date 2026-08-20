@@ -316,7 +316,7 @@ function parseUptimeDataSingle(html: string, componentId: string, windowDays = 3
     // #1017 — the LAST scored day is USUALLY today's (same "tail = trailing window ending today"
     // assumption `trailing` above relies on for windowDays), but verified rather than assumed: if the
     // provider hasn't published today's bucket yet this cycle, the last entry is yesterday's, and
-    // silently mislabeling it as today's would bake a stale figure into the permanent `history:{date}`
+    // silently mislabeling it as today's would bake a stale figure into the `history:{date}`
     // archive (index.ts `cacheWrite`). `weighted()` is the exact per-day figure already computed for
     // the pct sum, just read off the single most-recent entry instead of summed over the window.
     const latest = scored[scored.length - 1]

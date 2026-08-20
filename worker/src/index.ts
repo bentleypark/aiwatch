@@ -95,6 +95,8 @@ interface Env {
 // ── KV Cache + Daily Counters ──
 
 const CACHE_TTL_SECONDS = 900 // 15 min — must exceed KV_WRITE_INTERVAL_MS (10 min) to avoid cache gaps
+// `history:<date>` retention: the TTL on the write, and the `?days=` clamp on /api/uptime.
+export const HISTORY_RETENTION_DAYS = 90
 let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day (cost hygiene on Workers Paid 1M/month inclusion)
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
@@ -319,13 +321,17 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
     }
   })
 
-  // Archive yesterday's counters to permanent history (once per day per isolate)
+  // Archive yesterday's counters to `history:<date>` (once per day per isolate). It EXPIRES
+  // (HISTORY_RETENTION_DAYS), it is not permanent, so a day past the window is unrecoverable rather
+  // than merely unqueried. `archive:monthly` is TTL-less but holds monthly aggregates, so it is not a
+  // deeper source to widen a window against (#988; reading the clamp as a query limit over durable
+  // data cost a wrong fix in aiwatch-reports#77).
   const yesterday = new Date(now - 86_400_000).toISOString().split('T')[0]
   if (lastArchivedDate !== yesterday) {
     const yesterdayKey = `daily:${yesterday}`
     const yesterdayData = await kv.get(yesterdayKey).catch(() => null)
     if (yesterdayData) {
-      await kvPut(kv, `history:${yesterday}`, yesterdayData, { expirationTtl: 90 * 86400 })
+      await kvPut(kv, `history:${yesterday}`, yesterdayData, { expirationTtl: HISTORY_RETENTION_DAYS * 86400 })
       lastArchivedDate = yesterday
     }
   }
@@ -5138,7 +5144,7 @@ export default {
     // GET /api/uptime — return daily uptime history
     if (url.pathname === '/api/uptime') {
       const rawDays = Number(url.searchParams.get('days') ?? 30)
-      const days = Math.min(Number.isNaN(rawDays) ? 30 : rawDays, 90)
+      const days = Math.min(Number.isNaN(rawDays) ? 30 : rawDays, HISTORY_RETENTION_DAYS)
       const history = env.STATUS_CACHE ? await readUptimeHistory(env.STATUS_CACHE, days) : {}
       return new Response(JSON.stringify({ history, days }), {
         status: 200,
