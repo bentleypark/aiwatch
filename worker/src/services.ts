@@ -390,14 +390,23 @@ export const SERVICES: ServiceConfig[] = [
   //   primary is in the window" was the wrong criterion: it says nothing about the other ids the badge
   //   reads. It also widened the breakdown, which the #1062 capability routing reads
   //   (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
-  // #1010 — `Compliance API` is a ChatGPT-group member; it joins the badge scope here.
-  //   Two group members are held out (named in `status-determination.test.ts`): badge scope is also
-  //   uptime scope (see #1006 above), and `computeIncidentIoUptime` reports the SHORTEST covered window
-  //   across that scope, so adopting a component whose `data_available_since` is recent drops this
-  //   whole service's uptime window below 30 days. Re-check that field before adopting them. Same trade
-  //   junie declines, for the same reason — see its config comment below; it keeps its young component
-  //   in the breakdown, which the `statusComponentIds` ≡ `displayComponentIds` invariant forbids here.
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4'] },
+  // #1010 — `Compliance API`, `Sites` and `ChatGPT Work` are ChatGPT-group members in the badge scope.
+  //   The last two were held out on first pass: badge scope is also uptime scope (see #1006 above), and
+  //   `computeIncidentIoUptime` takes the SHORTEST covered window across that scope
+  //   (`covered = Math.min(windowDays, now - data_available_since)`), so adopting a component created
+  //   less than 30 days ago drops this WHOLE service's uptime window below 30 and lights the #1004
+  //   short-history disclosure. Both were created `2026-07-09T19:25:56Z`; re-read from the page RSC on
+  //   2026-08-20 that is 42 days, so `covered` clamps to the full 30 and the window is unmoved.
+  //   **Re-check that field against today before adopting any further group member.** Same trade junie
+  //   declines — see its config comment below; it keeps its young component in the breakdown, which the
+  //   `statusComponentIds` ≡ `displayComponentIds` invariant forbids here.
+  //   Two consequences every adoption carries, neither specific to these two: it WIDENS the #1032
+  //   id-bypass, so a `fedramp` advisory tagged on the new id now survives `incidentExclude`
+  //   (`openai-login-attribution.test.ts` carries the ChatGPT Work case) — the #990 firewall is the
+  //   FedRAMP component id specifically, never the environment scope; and a component matching no
+  //   `COMPONENT_CAPABILITY` regex classifies `llm`, so co-degrading it with a routed capability
+  //   widens `degraded` and #1062 returns null (a missed reroute, the fail-safe direction).
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P'] },
   // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
   // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +

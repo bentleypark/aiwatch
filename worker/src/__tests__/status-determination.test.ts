@@ -703,9 +703,9 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   // #606 Category B — shared status.openai.com page split across 3 services by the official groups.
   // #1008: "Codex in ChatGPT Desktop" moved from codex (5→4) to its official ChatGPT group (11→12).
-  // #1010: `Compliance API` joined chatgpt's badge scope (12→13). Two members are deliberately still
-  // out — see the chatgpt config comment in services.ts.
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 13, codex: 4 }
+  // #1010: `Compliance API` joined chatgpt's badge scope (12→13), then `Sites` + `ChatGPT Work` once
+  // their `data_available_since` cleared 30 days (13→15) — see the chatgpt config comment in services.ts.
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 15, codex: 4 }
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
@@ -805,7 +805,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(12 + 13 + 4) // #1008: codex(5→4) → chatgpt(11→12); #1010: chatgpt(12→13)
+    expect(all.length).toBe(12 + 15 + 4) // #1008: codex(5→4) → chatgpt(11→12); #1010: chatgpt(12→13→15)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
@@ -888,15 +888,16 @@ describe('displayComponentIds config sanity (#606)', () => {
     // it is likewise a non-ChatGPT Platform surface. The status page files it inside the official
     // ChatGPT group — the same group `incidentIoGroupId` names and the badge scope is drawn from.
     expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API → chatgpt').toBe(true)
-    // #1010 — `Sites` and `ChatGPT Work` are held out
-    // deliberately, for the reason on the chatgpt config comment in services.ts. Asserted on BOTH id lists:
-    // the harm is specific to `statusComponentIds` (badge scope is uptime scope), and `has` reads
-    // `displayComponentIds`, so checking only that would leave the harmful edit to be caught by an
-    // unrelated failure message elsewhere. Failing here is the intended outcome of adopting them.
+    // #1010 — `Sites` and `ChatGPT Work` are ChatGPT-group members that were held out on first pass
+    // while their `data_available_since` was under 30 days, and adopted once it cleared (see the
+    // chatgpt config comment in services.ts for the uptime-window mechanism, whose shortest-wins rule
+    // `junie-migration.test.ts` pins). Asserted on BOTH id lists rather than through `has`, which reads
+    // only `displayComponentIds`: the invariant here is `statusComponentIds` ≡ `displayComponentIds`,
+    // so a one-sided edit has to fail with a message that names which side went missing.
     for (const [name, id] of [['Sites', '01KX45G1SHQQ9DTAX9S4W7FV8G'], ['ChatGPT Work', '01KX45G1SH21AX5DT93D4HMF0P']] as const) {
       const chatgpt = SERVICES.find((s) => s.id === 'chatgpt')!
-      expect(chatgpt.statusComponentIds, `${name} held out of the badge scope`).not.toContain(id)
-      expect(chatgpt.displayComponentIds, `${name} held out of the breakdown`).not.toContain(id)
+      expect(chatgpt.statusComponentIds, `${name} in the badge scope`).toContain(id)
+      expect(chatgpt.displayComponentIds, `${name} in the breakdown`).toContain(id)
     }
     // #1008 — "Codex in ChatGPT Desktop" is a ChatGPT-group surface (Codex inside the ChatGPT
     // desktop app), NOT a Codex-product component. It was mis-attributed to codex; now under chatgpt.

@@ -367,7 +367,7 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
   it('is one chatgpt badges but summary.json omitted — otherwise the fixture proves nothing', () => {
     expect(CHATGPT.statusComponentIds).toContain(VOICE)
     expect(WINDOW.map((c) => c.id)).not.toContain(VOICE)
-    // Relational, not a headcount: adding a 13th component must not fail this on an unrelated change.
+    // Relational, not a headcount: adding another component must not fail this on an unrelated change.
     expect(WINDOW.length).toBeGreaterThan(0)
     expect(WINDOW.length).toBeLessThan(SUPERSET.length)
   })
@@ -447,11 +447,14 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
 // outage leaves it operational — so a revert of the config line fails here rather than going quiet.
 describe('an official ChatGPT-group component absent from the config (#1010)', () => {
   const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
-  // Only the member actually adopted by #1010. Two group members are deliberately still
-  // out (see the chatgpt config comment in services.ts); their absence is pinned in
-  // status-determination.test.ts, which is where flipping them has to be noticed.
+  // Every member #1010 adopted into the badge scope. `Sites` and `ChatGPT Work` joined on a second
+  // pass, once their `data_available_since` cleared 30 days (see the chatgpt config comment in
+  // services.ts). Adding a row here is the point of adopting a component — membership in
+  // status-determination.test.ts says the config lists it; these three cases say the code acts on it.
   const ADDED: [string, string][] = [
     ['Compliance API', '01JNKS9D9S72PMP1938PVFFQN4'],
+    ['Sites', '01KX45G1SHQQ9DTAX9S4W7FV8G'],
+    ['ChatGPT Work', '01KX45G1SH21AX5DT93D4HMF0P'],
   ]
   // Names are irrelevant to every assertion here (all are on ids and statuses), so each component
   // carries its id as its name — same convention as the #1175 fixture above.
@@ -496,11 +499,12 @@ describe('an official ChatGPT-group component absent from the config (#1010)', (
   })
 })
 
-// #1010 — the hold-out rationale, made executable. The chatgpt config declines two group members
-// because badge scope IS uptime scope: `uptimeScope` (`services.ts`) reads `statusComponentIds`, and
-// `computeIncidentIoUptime` worst-ofs the percentage and takes the SHORTEST covered window across it.
-// Each `it` carries its own control on the SAME html, so neither
-// can pass just because the fixture is clean.
+// #1010 — the rule that governs WHEN a group member may be adopted, made executable. Badge scope IS
+// uptime scope: `uptimeScope` (`services.ts`) reads `statusComponentIds`, and `computeIncidentIoUptime`
+// worst-ofs the percentage and takes the SHORTEST covered window across it — so adopting a component
+// created less than 30 days ago shortens the WHOLE service's window. This is the test to re-read
+// before adopting the next one. Each `it` carries its own control on the SAME html, so neither can
+// pass just because the fixture is clean.
 describe('uptime is computed over the badge scope, not the primary alone (#1010/#1006)', () => {
   const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
   const PRIMARY = CHATGPT.incidentIoComponentId as string // "Conversations"
@@ -549,8 +553,9 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
     expect(svc.uptime30d).toBe(96.66)
   })
 
-  it('a badge component with a short record shortens the disclosed window — the cost the hold-out declines', async () => {
-    // Exactly the shape `Sites` / `ChatGPT Work` would create: one young member, every other one old.
+  it('a badge component with a short record shortens the disclosed window — the cost of adopting too early', async () => {
+    // The shape a premature adoption creates: one young member, every other one old. `Sites` /
+    // `ChatGPT Work` were held out until their record cleared 30 days precisely to avoid it.
     const html = rsc([], CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, id === COMPLIANCE ? 20 : 400)))
     expect(computeIncidentIoUptime(html, PRIMARY, now)!.days).toBe(30) // control: the primary alone is whole
     const svc = await fetchService(CHATGPT, withUptimeHtml(html), undefined, {})

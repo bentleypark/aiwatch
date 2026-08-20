@@ -547,7 +547,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
   it('reports when ONLY the primary resolved — the worst partial resolve there is', async () => {
     // The `anyResolved` gate has to be over the FULL id list. Computing it over the secondaries alone
     // reads as "nothing resolved" here and skips the report — silencing the single worst case: a
-    // badge standing on one component while 11 are invisible.
+    // badge standing on one component while the rest are invisible.
     const kv = mockKV()
     await fetchService(CHATGPT, prefetched({ ok: false }, [comp(PRIMARY)]), kv as never, {})
     expect(stored(kv)!.missing).toHaveLength(CHATGPT.statusComponentIds!.length - 1)

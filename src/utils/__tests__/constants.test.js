@@ -720,8 +720,9 @@ describe('#1119 — frontend mirror: a ROUTED outage crosses the category bounda
     op('gemini', 'api', 'Gemini API', 90),
     op('cursor', 'agent', 'Cursor', 88),
   ]
-  // ChatGPT's component names as its status page published them on 2026-07-22 (8 of the 12 ids
-  // services.ts configures were present in the live payload).
+  // ChatGPT's component names as its status page published them on 2026-07-22 — deliberately a SUBSET
+  // of the ids services.ts configures, because that is what the page served that day. These cases
+  // exercise capability routing over whatever names arrive, so the subset never needs to be resynced.
   const CHATGPT_COMPONENTS = ['Conversations', 'Connectors/Apps', 'Search', 'GPTs', 'Image Generation', 'Login', 'Agent', 'Codex in ChatGPT Desktop']
   const chatgpt = (degradedNames) => ({
     id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'degraded', aiwatchScore: 57, incidents: [],
