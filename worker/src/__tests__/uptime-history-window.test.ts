@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import workerModule, { readUptimeHistory, HISTORY_RETENTION_DAYS } from '../index'
+import workerModule, { readUptimeHistory } from '../index'
+import { HISTORY_RETENTION_DAYS } from '../utils'
 
 // #988 — `history:{date}` carries a TTL, and `/api/uptime` clamps `?days=` to the same retention
 // because a request past it returns nothing. Extracting one constant made the two sites easy to

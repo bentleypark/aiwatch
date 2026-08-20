@@ -528,6 +528,18 @@ export const PARTIAL_RESOLVE_STALE_MS = 40 * 60_000
 export const PARTIAL_RESOLVE_TTL_S = 7 * 3600
 
 /**
+ * `history:<date>` retention (#988). Three consumers in `index.ts`, which must not drift apart: the
+ * `expirationTtl` on the write, the `expiredDaysInMonth` bound the archive rebuild reads (#1260), and
+ * the `?days=` clamp on /api/uptime.
+ *
+ * Lives outside `index.ts` for a runtime reason, not a stylistic one — a value export from the entry
+ * module stops `wrangler dev` starting. The rule and its history are on
+ * `worker/src/__tests__/entrypoint-exports.test.ts` (#1264), which guards it (#416 first hit it and
+ * `edge-fallback-alert-keys.ts` carries the original note).
+ */
+export const HISTORY_RETENTION_DAYS = 90
+
+/**
  * `since` — when the service was FIRST seen resolving incompletely, preserved across every refresh.
  * `updatedAt` — the most recent cycle that observed it, which is what makes "still happening"
  * decidable. `missing` — the union of every id seen unresolved since `since` (a union, not the
