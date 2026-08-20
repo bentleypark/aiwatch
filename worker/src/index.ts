@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
-import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, readSuppressionsFreshOrNull, type SuppressionEntry } from './suppression'
+import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
@@ -2019,7 +2019,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -2353,6 +2353,7 @@ export async function handleDeepseekFeed(request: Request, env: Env, cors: Recor
 // the archived month's reality.
 interface AdminRebuildArchiveRequest {
   month?: unknown
+  force?: unknown
 }
 
 async function handleAdminRebuildArchive(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
@@ -2379,12 +2380,67 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
   const year = Number(yearStr)
   const monthNum = Number(monthStr)
 
+  const expiredDays = expiredDaysInMonth(month, HISTORY_RETENTION_DAYS, Date.now())
+  if (expiredDays < 0) {
+    return json(400, { ok: false, error: 'month is not a real calendar month' })
+  }
+
+  // #1260 — read what we are about to overwrite BEFORE building, and fail closed. `archive:monthly`
+  // is TTL-less and the only durable copy; a read fault here is "I could not find out", not "there
+  // is nothing there", and taking the second reading is the same fail-open shape as the bug itself.
+  const archiveKey = `archive:monthly:${month}`
+  let priorRaw: string | null
+  try {
+    priorRaw = await env.STATUS_CACHE.get(archiveKey)
+  } catch (err) {
+    return json(503, {
+      ok: false,
+      error: 'could not read the stored archive to compare against',
+      retryable: true,
+      detail: err instanceof Error ? err.message : String(err),
+    })
+  }
+  let priorCensus: ArchiveCensus | null = null
+  let priorParsed: { services?: Record<string, unknown> } | null = null
+  if (priorRaw !== null) {
+    try {
+      priorParsed = JSON.parse(priorRaw)
+      priorCensus = archiveContentCensus(priorParsed)
+    } catch {
+      priorCensus = null
+    }
+    // An unparseable value in the only durable copy is where a human should look BEFORE anything
+    // overwrites it — the bytes may be salvageable, and a rebuild makes that moot.
+    if (priorCensus === null && body.force !== true) {
+      console.error(`[admin/rebuild-archive] stored archive for ${month} is unreadable — refusing to overwrite it`)
+      return json(409, {
+        ok: false,
+        error: 'the stored archive is unparseable',
+        hint: 'inspect the stored value before replacing it; pass force:true to overwrite it regardless',
+      })
+    }
+  }
+
   // Compute scoreData via the same path the (fixed) cron now uses.
   let scoreData: ArchiveScoreInput[] = []
   // service id → display name, for the AI narrative prompt (#426). Populated
   // from the same services:latest read as scoreData.
   const serviceNames: Record<string, string> = {}
-  const cachedRaw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
+  // #1260 — a fault here is not "no cache": with empty scoreData the rebuild writes a null score for
+  // every service, which is the corruption operators invoke this endpoint to REPAIR. The relative
+  // census cannot catch it (null before, null after), so it has to fail closed at the read.
+  let cachedRaw: string | null
+  try {
+    cachedRaw = await env.STATUS_CACHE.get(CACHE_KEY)
+  } catch (err) {
+    console.error(`[admin/rebuild-archive] services:latest unreadable — refusing ${month}`)
+    return json(503, {
+      ok: false,
+      error: 'could not read services:latest to compute scores',
+      retryable: true,
+      detail: err instanceof Error ? err.message : String(err),
+    })
+  }
   if (cachedRaw) {
     try {
       const p = JSON.parse(cachedRaw)
@@ -2393,12 +2449,33 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
       for (const s of services) serviceNames[s.id] = s.name
     } catch (parseErr) {
+      // Same key, same policy as the read above (#1260): continuing here writes a null score for
+      // every service, which is the corruption this endpoint exists to repair — and the census
+      // cannot see it, since null before and null after is not a regression.
       console.error('[admin/rebuild-archive] services:latest parse failed:',
         parseErr instanceof Error ? parseErr.message : parseErr)
-      // Continue with empty scoreData rather than fail — caller may want to rebuild
-      // even when the cache is unreadable, and uptime/incident data is still useful.
+      return json(503, {
+        ok: false,
+        error: 'services:latest is unreadable, so scores cannot be computed',
+        retryable: true,
+        detail: parseErr instanceof Error ? parseErr.message : String(parseErr),
+      })
     }
   }
+
+  // Read the suppression list ONCE, fail-closed, and hand it to the build — suppression.ts states
+  // that a destructive caller must not use the fail-open sibling, and the build's own read is the
+  // one that decides what gets written.
+  const suppressionRead = await readSuppressionsFreshResult(env.STATUS_CACHE)
+  if (suppressionRead.state !== 'ok') {
+    console.error(`[admin/rebuild-archive] suppression list ${suppressionRead.state} — refusing ${month}`)
+    // Retrying a malformed value never succeeds, and this read gates every month — saying
+    // "retryable" would leave the endpoint bricked with the operator waiting (#1260 r3).
+    return suppressionRead.state === 'malformed'
+      ? json(500, { ok: false, error: 'the suppression list is malformed', retryable: false, hint: 'repair the incident:suppressions KV value by hand' })
+      : json(503, { ok: false, error: 'could not read the suppression list', retryable: true })
+  }
+  const suppressions = suppressionRead.list
 
   let archive
   try {
@@ -2408,21 +2485,94 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       ai: env.AI,
       apiKey: env.ANTHROPIC_API_KEY,
       serviceNames,
-    })
+    }, suppressions)
   } catch (err) {
     return json(502, { ok: false, error: 'archive build failed', detail: err instanceof Error ? err.message : String(err) })
   }
 
-  const archiveKey = `archive:monthly:${month}`
+  // #1260 — ONE decision, taken after the (read-only) build so the operator sees what they would be
+  // trading. The age check is only a proxy for "are the days still there"; this is the real question,
+  // and they diverge — archival runs inside the traffic-driven `cacheWrite`, not the cron (#988), and
+  // `incidents:`/`security:`/`probe-degradation:` expire at 60d, before `history:` does at 90d.
+  const nextCensus = archiveContentCensus(archive)
+  // Suppressing an incident is the documented reason to rebuild a past month (operator-tools.md), and
+  // it necessarily removes ids — so a shrink the current suppression list accounts for is not a loss.
+  // Decided with the same predicate the build filters by, over the PRIOR archive's own entries, since
+  // a pattern suppression matches on title+service rather than on an id.
+  // `readSuppressionsFresh` collapses "could not read" into `[]`, which suppression.ts itself flags as
+  // dangerous for a caller that DESTROYS rather than hides: an unreadable list would make a
+  // legitimate suppression-driven shrink look unexplained. Fail closed and let the operator retry.
+
+  const explained = new Set<string>()
+  if (priorParsed && suppressions.length) {
+    for (const [svcId, svc] of Object.entries(priorParsed.services ?? {})) {
+      for (const inc of (svc as { incidentList?: { id?: unknown; title?: unknown }[] })?.incidentList ?? []) {
+        if (typeof inc?.id === 'string' && typeof inc?.title === 'string'
+          && isSuppressedByIdTitle(inc.id, inc.title, svcId, suppressions)) explained.add(inc.id)
+      }
+    }
+  }
+  // "could not compare" is NOT "nothing is being lost" — collapsing the two is the fail-open shape
+  // this whole issue is about, and it was the root of every gap round 2 found.
+  const comparable = priorCensus !== null && nextCensus !== null
+  const unmeasurable = priorRaw !== null && !comparable
+  const regressions = priorCensus !== null && nextCensus !== null ? censusRegressions(priorCensus, nextCensus, explained) : []
+  // `expiredDays` is diagnostic, not a trip-wire: with nothing stored there is nothing to lose, and
+  // refusing a first-ever build of an old month only teaches the operator to keep `force` typed.
+  if (regressions.length > 0 && body.force !== true) {
+    return json(409, {
+      ok: false,
+      error: 'rebuild would hold less than the stored archive',
+      expiredDays,
+      regressed: regressions,
+      prior: priorCensus,
+      rebuilt: nextCensus,
+      // Deliberately no cause: this handler cannot tell an expired key from a KV blip — every helper
+      // below `buildMonthlyArchive` swallows its own reads — and a guessed cause is worse than none,
+      // because "the data is gone" points at `force` when a retry would have fixed it (#1260 r3).
+      hint: 'retry first; if it still refuses, the source data is gone and force:true overwrites anyway',
+    })
+  }
+
+  // #1260 — keep the bytes we are about to replace, on EVERY overwrite. `archive:monthly` is TTL-less
+  // precisely because it is irreplaceable, and the census counts presence rather than value, so it
+  // cannot see a real 99.97% replaced by a computed 100%. Gating the copy on what the census managed
+  // to measure would skip exactly the cases it could not — including an unreadable prior, the one
+  // time the bytes are the only copy. One extra write on a rare manual operation makes every gap in
+  // the comparison recoverable instead of permanent.
+  let backupKey: string | null = null
+  if (priorRaw !== null) {
+    backupKey = `${archiveKey}:prev:${new Date().toISOString().replace(/[:.]/g, '-')}`
+    // 90d: long enough to notice and restore, short enough not to accumulate forever under the
+    // free-tier budget. `kv-schema.md` says the operator may delete it sooner.
+    const backedUp = await kvPut(env.STATUS_CACHE, backupKey, priorRaw, { expirationTtl: 90 * 86400 })
+    if (!backedUp) {
+      return json(502, {
+        ok: false,
+        error: 'could not back up the archive before overwriting it',
+        hint: 'the forced overwrite was NOT performed',
+      })
+    }
+    console.error(`[admin/rebuild-archive] overwriting ${archiveKey} — ${unmeasurable ? 'prior UNREADABLE, losses unmeasurable' : regressions.length ? `losing ${regressions.join(', ')}` : 'no measured regression'} — prior value saved to ${backupKey}`)
+  }
+
   try {
     await env.STATUS_CACHE.put(archiveKey, JSON.stringify(archive))
   } catch (err) {
+    // The archive was NOT replaced, so the copy taken above is not a record of anything — leaving it
+    // would tell the next operator an overwrite happened when none did.
+    if (backupKey) await kvDel(env.STATUS_CACHE, backupKey)
     return json(502, { ok: false, error: 'KV write failed', detail: err instanceof Error ? err.message : String(err) })
   }
 
   return json(200, {
     ok: true,
     wrote: archiveKey,
+    // #1260 — a forced rebuild knowingly discards material the stored archive held. Say what, or the
+    // override is as silent as the bug: the operator sees 200 and no sign the month got smaller.
+    ...(backupKey ? { backupKey, prior: priorCensus, rebuilt: nextCensus } : {}),
+    ...(regressions.length > 0 ? { forcedOver: regressions } : {}),
+    ...(unmeasurable ? { priorUnreadable: true } : {}),
     period: archive.period,
     services: Object.keys(archive.services).length,
     daysCollected: archive.daysCollected,

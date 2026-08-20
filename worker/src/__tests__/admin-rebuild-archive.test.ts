@@ -20,6 +20,23 @@ function makeKV(initial: Record<string, string> = {}) {
   }
 }
 
+/** KV whose `get` throws for keys matching `faultOn` — the fault/absence distinction #1260 turns on. */
+function makeFaultyKV(initial: Record<string, string>, faultOn: RegExp) {
+  const store = { ...initial }
+  return {
+    store,
+    kv: {
+      get: vi.fn(async (k: string) => {
+        if (faultOn.test(k)) throw new Error('KV unavailable')
+        return store[k] ?? null
+      }),
+      put: vi.fn(async (k: string, v: string) => { store[k] = v }),
+      delete: vi.fn(async () => {}),
+      list: vi.fn(async () => ({ keys: [], list_complete: true, cacheStatus: null })),
+    } as unknown as KVNamespace,
+  }
+}
+
 function makeService(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
   return {
     id: 'claude',
@@ -52,6 +69,11 @@ function req(body: unknown, headers: Record<string, string> = {}): Request {
   })
 }
 
+const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
+
+// The write-path cases below pin a fixed month (2026-04) and seed its `history:` days, so they are
+// out of the retention window by construction and pass `force: true` (#1260). They exercise the
+// build/overwrite behaviour; the guard itself is covered separately at the bottom of this file.
 describe('POST /api/admin/rebuild-archive', () => {
   it('returns 401 when ADMIN_API_KEY is not configured', async () => {
     const { kv } = makeKV()
@@ -116,7 +138,7 @@ describe('POST /api/admin/rebuild-archive', () => {
     const env = envWith(kv)
     const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
 
-    const res = await workerModule.fetch(req({ month: '2026-04' }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+    const res = await workerModule.fetch(req({ month: '2026-04', force: true }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
     expect(res.status).toBe(200)
     const body = await res.json() as { ok: boolean; wrote: string; period: string; servicesWithScore: number }
     expect(body.ok).toBe(true)
@@ -167,7 +189,7 @@ describe('POST /api/admin/rebuild-archive', () => {
     const env = envWith(kv)
     const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
 
-    const res = await workerModule.fetch(req({ month: '2026-04' }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+    const res = await workerModule.fetch(req({ month: '2026-04', force: true }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
     expect(res.status).toBe(200)
 
     const archive = JSON.parse(store['archive:monthly:2026-04'])
@@ -193,11 +215,338 @@ describe('POST /api/admin/rebuild-archive', () => {
     const env = envWith(kv)
     const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
 
-    const res = await workerModule.fetch(req({ month: '2026-04' }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+    const res = await workerModule.fetch(req({ month: '2026-04', force: true }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
     expect(res.status).toBe(200)
 
     // Re-parse the freshly-written value — generatedAt must be later than the original.
     const written = JSON.parse(store['archive:monthly:2026-04'])
     expect(new Date(written.generatedAt).getTime()).toBeGreaterThan(new Date('2026-05-01T00:00:00Z').getTime())
+  })
+
+  // #1260 — the destructive path. `buildMonthlyArchive` reads every day of uptime from `history:{date}`,
+  // which expires; `archive:monthly` is TTL-less and the only durable copy. Before the guard, rebuilding
+  // an aged-out month replaced a good archive with `uptime: null` for every service and returned 200 —
+  // and operator-tools.md instructs exactly that after suppressing an incident in a past month.
+  function monthsAgo(n: number): string {
+    const d = new Date()
+    d.setUTCDate(1)
+    d.setUTCMonth(d.getUTCMonth() - n)
+    return d.toISOString().slice(0, 7)
+  }
+
+  it('refuses to rebuild a month whose history: days have expired, and writes nothing', async () => {
+    const month = monthsAgo(6)
+    const { kv } = makeKV({
+      [`archive:monthly:${month}`]: JSON.stringify({ period: month, daysCollected: 28, services: { claude: { uptime: 99.9 } } }),
+    })
+    const env = envWith(kv)
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(409)
+    const body = await res.json() as { ok: boolean; expiredDays: number; regressed: string[] }
+    expect(body.ok).toBe(false)
+    // The refusal is driven by measured loss, not by the age proxy — `expiredDays` rides along as
+    // diagnosis. A month with nothing stored is not refused just for being old.
+    expect(body.regressed).toContain('daysCollected')
+    expect(body.expiredDays).toBeGreaterThan(0)
+    // Nothing is written on a refusal — not the archive, and not a backup.
+    expect((kv.put as unknown as { mock: { calls: string[][] } }).mock.calls).toHaveLength(0)
+  })
+
+  it('builds a first-ever archive for an old month instead of refusing it', async () => {
+    // Nothing is stored, so nothing can be lost. Refusing here taught operators to keep `force`
+    // typed, which disarmed every other guard (#1260 round 2).
+    const { kv } = makeKV()
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(6) }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+  })
+
+  it('still rebuilds a month fully inside the retention window', async () => {
+    const { kv } = makeKV()
+    const env = envWith(kv)
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(1) }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(200)
+  })
+
+  it('honours force:true on an expired month (the operator overrides knowingly)', async () => {
+    const { kv } = makeKV()
+    const env = envWith(kv)
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(6), force: true }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(200)
+    const wroteArchive = (kv.put as unknown as { mock: { calls: string[][] } }).mock.calls
+      .some((c) => c[0].startsWith('archive:monthly:'))
+    expect(wroteArchive).toBe(true)
+  })
+
+  // #1260 — the age guard is a proxy; this is the real invariant. A month INSIDE the window can still
+  // be missing days (archival is traffic-driven, not cron — #988), and every `history:` read in the
+  // build is `.catch(() => null)`, so a KV fault degrades it the same way. Neither is visible to an
+  // age check, and both would overwrite a good archive with a worse one.
+  it('refuses when the rebuild collected fewer days than the stored archive', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      [`archive:monthly:${month}`]: JSON.stringify({ period: month, daysCollected: 30, services: {} }),
+    })
+    const env = envWith(kv)
+
+    // No `history:` keys seeded, so the rebuild collects 0 — inside the window, yet strictly worse.
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(409)
+    const body = await res.json() as { regressed: string[]; prior: { daysCollected: number }; rebuilt: { daysCollected: number } }
+    expect(body.regressed).toContain('daysCollected')
+    expect(body.prior.daysCollected).toBe(30)
+    expect(body.rebuilt.daysCollected).toBe(0)
+    const wroteArchive = (kv.put as unknown as { mock: { calls: string[][] } }).mock.calls
+      .some((c) => c[0].startsWith('archive:monthly:'))
+    expect(wroteArchive).toBe(false)
+  })
+
+  it('allows a rebuild that collects at least as many days as the stored archive', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      [`archive:monthly:${month}`]: JSON.stringify({ period: month, daysCollected: 0, services: {} }),
+    })
+    const env = envWith(kv)
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(200)
+  })
+
+  it('refuses when the rebuild loses incidents even though the uptime days are intact', async () => {
+    // `incidents:monthly` expires at 60d, `history:` at 90d, so this is reachable for a month older
+    // than two months: the uptime rebuilds fine and the incident list silently empties.
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      [`archive:monthly:${month}`]: JSON.stringify({
+        period: month,
+        daysCollected: 0,
+        services: { claude: { incidentList: [{ id: 'a' }, { id: 'b' }] } },
+      }),
+    })
+    const env = envWith(kv)
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(409)
+    const body = await res.json() as { regressed: string[] }
+    expect(body.regressed).toContain('incidents')
+    const wroteArchive = (kv.put as unknown as { mock: { calls: string[][] } }).mock.calls
+      .some((c) => c[0].startsWith('archive:monthly:'))
+    expect(wroteArchive).toBe(false)
+  })
+
+  it('honours force:true when the rebuild would collect fewer days', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      [`archive:monthly:${month}`]: JSON.stringify({ period: month, daysCollected: 30, services: {} }),
+    })
+    const env = envWith(kv)
+
+    const res = await workerModule.fetch(req({ month, force: true }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(200)
+    // The override must not be silent — it discards material the stored archive held.
+    const body = await res.json() as { forcedOver?: string[]; backupKey?: string }
+    expect(body.forcedOver).toContain('daysCollected')
+    // …and it must be recoverable: the bytes it replaced are kept, since nothing else holds them.
+    expect(body.backupKey).toMatch(/^archive:monthly:.*:prev:/)
+    expect((kv.put as unknown as { mock: { calls: string[][] } }).mock.calls
+      .some((c) => c[0] === body.backupKey)).toBe(true)
+    const wroteArchive = (kv.put as unknown as { mock: { calls: string[][] } }).mock.calls
+      .some((c) => c[0].startsWith('archive:monthly:'))
+    expect(wroteArchive).toBe(true)
+  })
+
+  it('writes when no archive is stored yet, with nothing to compare against', async () => {
+    const { kv } = makeKV()
+    const env = envWith(kv)
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(1) }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(200)
+  })
+
+  // THE critical one. operator-tools.md tells operators to suppress an incident in a past month and
+  // then rebuild it; `filterSuppressedFromMonthly` necessarily removes that id, so a count-based
+  // guard 409s the documented flow — and an operator who learns the normal path needs `force` will
+  // use it every time, disarming every other guard along with it.
+  it('allows a rebuild whose only shrink is explained by the suppression list', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      // A realistic rebuild still emits the service entry — only the suppressed incident goes.
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      [`archive:monthly:${month}`]: JSON.stringify({
+        period: month,
+        daysCollected: 0,
+        services: { claude: { incidentList: [{ id: 'inc-1', title: 'Elevated errors' }] } },
+      }),
+      'incident:suppressions': JSON.stringify([{ scope: 'incident', incId: 'inc-1', reason: 'not a real outage' }]),
+    })
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+  })
+
+  it('fails closed with 503 when the stored archive cannot be read, and force does not override it', async () => {
+    // `null` from a failed read would mean "nothing stored" — the fail-open shape of the bug itself.
+    const { kv } = makeFaultyKV({}, /^archive:monthly:/)
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(1), force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(503)
+    expect((await res.json() as { retryable: boolean }).retryable).toBe(true)
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
+  })
+
+  it('refuses to overwrite an unparseable stored archive, but force may', async () => {
+    const month = monthsAgo(1)
+    const seed = () => ({ [`archive:monthly:${month}`]: '{not json' })
+
+    const refused = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(makeKV(seed()).kv), ctx)
+    expect(refused.status).toBe(409)
+
+    const forced = await workerModule.fetch(req({ month, force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(makeKV(seed()).kv), ctx)
+    expect(forced.status).toBe(200)
+  })
+
+
+  it('counts sections and per-service measurements, not just days and incidents', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      [`archive:monthly:${month}`]: JSON.stringify({
+        period: month,
+        daysCollected: 0,
+        services: { claude: { uptime: 99.9, score: 91, avgLatencyMs: 200 } },
+        security: { totalAlerts: 12 },
+        degradation: { total: 40 },
+      }),
+    })
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(409)
+    const regressed = (await res.json() as { regressed: string[] }).regressed
+    expect(regressed).toContain('services')
+    // Sections are named, not tallied — a count would let a gained section mask a lost one.
+    expect(regressed).toContain('sections:degradation+security')
+  })
+
+  it('rejects a month string that parses to no real calendar month', async () => {
+    const res = await workerModule.fetch(req({ month: '0000-01' }, { 'X-Admin-Key': 'test-admin-key' }), envWith(makeKV().kv), ctx)
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a month that has not happened yet', async () => {
+    const d = new Date()
+    d.setUTCFullYear(d.getUTCFullYear() + 1)
+    const future = d.toISOString().slice(0, 7)
+    const res = await workerModule.fetch(req({ month: future }, { 'X-Admin-Key': 'test-admin-key' }), envWith(makeKV().kv), ctx)
+    expect(res.status).toBe(400)
+  })
+
+  // The backup used to be gated on what the census managed to MEASURE, so the one case where the
+  // bytes are the only copy — an unreadable prior — was the one case it skipped.
+  it('backs up an unreadable prior archive before force overwrites it', async () => {
+    const month = monthsAgo(1)
+    const { store, kv } = makeKV({ [`archive:monthly:${month}`]: '{not json' })
+
+    const res = await workerModule.fetch(req({ month, force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { backupKey?: string; priorUnreadable?: boolean }
+    expect(body.priorUnreadable).toBe(true)
+    expect(body.backupKey).toMatch(/:prev:/)
+    expect(store[body.backupKey!]).toBe('{not json')
+  })
+
+
+  // Two tests pinning a 503-on-source-fault branch were removed with the branch itself (#1260 r3).
+  // It covered 5 of 7 read paths, sat inside the `force` gate so `force` skipped it, and never
+  // appeared on a 200 — so on the paths it missed it answered "the source data is gone, force it"
+  // for a blip a retry would have fixed. A partial cause is worse than none; the 409 now states no
+  // cause and the unconditional backup is what makes a wrong call recoverable.
+  it('refuses when services:latest cannot be read, rather than rebuilding the null scores', async () => {
+    // Empty scoreData writes a null score for every service — the corruption this endpoint exists to
+    // repair. A relative census cannot see it (null before, null after), so the read must fail closed.
+    const { kv } = makeFaultyKV({}, /^services:latest$/)
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(1) }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(503)
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
+  })
+
+  it('hands the suppression list to the build instead of letting it re-read fail-open', async () => {
+    // `readSuppressionsFresh` collapses a fault to `[]`. When the build did its own read, a blip
+    // meant it applied NO suppressions while the handler thought it had — nothing shrank, nothing
+    // objected, `ok: true`, and the operator's whole reason for the rebuild silently did not happen.
+    // Pinning the read COUNT is the direct statement of the fix and does not depend on fixture shape.
+    const month = monthsAgo(1)
+    const store: Record<string, string> = {
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      'incident:suppressions': JSON.stringify([{ scope: 'incident', incId: 'inc-1' }]),
+      // The build only consults the suppression list when there IS an accumulator to filter.
+      [`incidents:monthly:${month}`]: JSON.stringify({
+        lastUpdated: '2026-07-31T00:00:00Z',
+        services: {
+          claude: {
+            count: 1, totalMinutes: 60, longestMinutes: 60,
+            dates: ['2026-07-02'], incidentIds: ['inc-1'], durations: { 'inc-1': 60 },
+            incidents: [{ id: 'inc-1', title: 'FedRAMP paperwork', startedAt: '2026-07-02T00:00:00Z', resolvedAt: '2026-07-02T01:00:00Z', durationMin: 60, status: 'resolved' }],
+          },
+        },
+      }),
+    }
+    let suppressionReads = 0
+    const kv = {
+      get: vi.fn(async (k: string) => {
+        if (k === 'incident:suppressions') suppressionReads++
+        return store[k] ?? null
+      }),
+      put: vi.fn(async (k: string, v: string) => { store[k] = v }),
+      delete: vi.fn(async () => {}),
+      list: vi.fn(async () => ({ keys: [], list_complete: true, cacheStatus: null })),
+    } as unknown as KVNamespace
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+    expect(suppressionReads).toBe(1)
+    // And the list actually took effect: the suppressed incident is not in the written archive.
+    const written = JSON.parse(store[`archive:monthly:${month}`])
+    expect(written.services?.claude?.incidentList ?? []).toHaveLength(0)
+  })
+
+  it('answers 500 retryable:false when the suppression list is malformed, not a forever-retry 503', async () => {
+    // Round 2 made this read a hard gate on every month. Collapsing "unreadable" and "malformed" into
+    // one `null` then bricked the endpoint permanently while telling the operator to retry (#1260 r3).
+    const { kv } = makeKV({ 'incident:suppressions': '{ not json' })
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(1) }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(500)
+    expect((await res.json() as { retryable: boolean }).retryable).toBe(false)
+  })
+
+  it('refuses when the suppression list cannot be read, so the build never runs unfiltered', async () => {
+    // The build used to re-read this list fail-open: a blip applied NO suppressions while the
+    // handler's own read succeeded, so nothing shrank, nothing objected, and `ok: true` came back
+    // with the operator's entire reason for the rebuild silently skipped.
+    const { kv } = makeFaultyKV({}, /^incident:suppressions$/)
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(1) }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(503)
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
   })
 })

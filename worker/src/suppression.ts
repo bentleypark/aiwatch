@@ -201,6 +201,28 @@ export async function readSuppressionsFresh(kv?: KVNamespace): Promise<Suppressi
  *  that merely HIDES incidents (fail-open shows one too many) and dangerous for one that DELETES them:
  *  the phantom prune must never mistake a KV blip for "no incident is hidden" and erase a suppressed
  *  entry. Callers that destroy data fail CLOSED on `null`. */
+/** #1260 — like `readSuppressionsFreshOrNull`, but tells a KV fault apart from a value that is
+ *  simply broken. A destructive caller has to fail closed on both, and then say opposite things: a
+ *  fault clears on its own, a malformed value never does, so answering "retryable" to the second
+ *  leaves the caller retrying forever against something only hand-repair fixes. */
+export async function readSuppressionsFreshResult(kv?: KVNamespace): Promise<
+  { state: 'ok'; list: SuppressionEntry[] } | { state: 'unreadable' } | { state: 'malformed' }
+> {
+  if (!kv) return { state: 'unreadable' }
+  let raw: string | null
+  try {
+    raw = await kv.get(SUPPRESSIONS_KEY)
+  } catch {
+    return { state: 'unreadable' }
+  }
+  if (raw === null) return { state: 'ok', list: [] }
+  try {
+    return { state: 'ok', list: normalizeSuppressions(JSON.parse(raw)) }
+  } catch {
+    return { state: 'malformed' }
+  }
+}
+
 export async function readSuppressionsFreshOrNull(kv?: KVNamespace): Promise<SuppressionEntry[] | null> {
   if (!kv) return null
   try {
