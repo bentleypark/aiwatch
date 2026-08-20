@@ -14,7 +14,7 @@ import type { AlertCandidate } from './alerts'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow } from './utils'
 import { restoreArchivedCalendar } from './uptime-archive'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved } from './recovery-mark'
@@ -333,20 +333,56 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
   return true
 }
 
+// In-memory throttle for the #1256 latency skip, mirroring `lastKvLimitAlert`: this writer runs
+// once per inbound request, so an unthrottled skip log scales with traffic, not with the fault.
+let lastLatencyWindowWarn = 0
+const LATENCY_WINDOW_WARN_INTERVAL_MS = 600_000 // 10 min
+function warnLatencyWindow(what: string, detail: string): void {
+  const now = Date.now()
+  if (now - lastLatencyWindowWarn < LATENCY_WINDOW_WARN_INTERVAL_MS) return
+  lastLatencyWindowWarn = now
+  console.warn(`[kv] latency ${what}:`, detail)
+}
+
 // 30-min latency snapshot — independent of cacheWrite throttle (+48 writes/day)
-async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]): Promise<void> {
+// Exported for the same reason as writeProbeSnapshot — only the wiring shows that an unreadable
+// window never reaches the kv.put below.
+export async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]): Promise<void> {
   const now = new Date()
   const currentSlot = `${now.toISOString().slice(0, 14)}${now.getUTCMinutes() < 30 ? '00' : '30'}` // "2026-03-22T03:00" or "2026-03-22T03:30"
   if (lastLatencySlot === currentSlot) return
 
   const latencyData: Record<string, number> = {}
   services.forEach((s) => { if (s.latency != null) latencyData[s.id] = s.latency })
+  // Writing an empty payload would claim the slot, and the dedup below then rejects the healthy
+  // poll seconds later, leaving the 30 minutes blank. Recorded rather than skipped silently: no
+  // service measured is a statement about our own polling, not about the providers.
+  if (Object.keys(latencyData).length === 0) {
+    warnLatencyWindow('measured nothing', `${services.length} services, zero latencies — skipping the slot`)
+    return
+  }
 
   try {
     const LATENCY_KEY = 'latency:24h'
     const MAX_SNAPSHOTS = 48 // 24h × 2 per hour
-    const existing = await kv.get(LATENCY_KEY).catch(() => null)
-    const snapshots = existing ? (JSON.parse(existing).snapshots ?? []) : []
+    // Fail CLOSED on an unreadable window (#1256) — same defect, same shape as writeProbeSnapshot
+    // below: the kv.put replaces the WHOLE value, so a window we could not read must not be
+    // treated as "no history". The read failure here was silent as well.
+    //
+    // The skip deliberately does not set `lastLatencySlot` — a retry inside the slot must stay
+    // possible.
+    let readFailed = false
+    const existing = await kv.get(LATENCY_KEY).catch((err) => {
+      readFailed = true
+      warnLatencyWindow('read failed', err instanceof Error ? err.message : String(err))
+      return null
+    })
+    if (readFailed) return
+    const snapshots = parseSnapshotWindow<{ t: string; data: Record<string, number> }>(existing)
+    if (snapshots === null) {
+      warnLatencyWindow('stored window is unreadable', 'skipping the write so it is not overwritten')
+      return
+    }
     // Deduplicate: skip if this slot already exists (another isolate wrote it)
     const slotTs = `${currentSlot}:00Z`
     if (snapshots.some((s: { t: string }) => s.t === slotTs)) { lastLatencySlot = currentSlot; return }
@@ -357,7 +393,7 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
     })
     lastLatencySlot = currentSlot // set after successful write
   } catch (err) {
-    console.warn('[kv] latency snapshot write failed:', err instanceof Error ? err.message : err)
+    console.warn('[kv] latency snapshot write rejected:', err instanceof Error ? err.message : err)
   }
 }
 
@@ -394,9 +430,31 @@ export async function readProbeSummaries(kv: KVNamespace, callsite: string): Pro
 let lastProbeSlot = ''
 let lastProbeSummaryCacheSlot = ''
 
-async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
+// Exported for direct testing of the #1256 fail-closed guard — only the wiring shows that an
+// unreadable window never reaches the kv.put below.
+export async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
   const currentSlot = computeProbeSlot(new Date())
   if (lastProbeSlot === currentSlot) return
+
+  // Fail CLOSED on an unreadable window (#1256): the kv.put below replaces the WHOLE value, so a
+  // window we could not read must not be treated as "no history". Read before probing so a skipped
+  // cycle spends no outbound requests on results it will discard. `console.error`, not warn: a
+  // stalled window silently degrades the Responsiveness component of every probed Score — see
+  // `classifyProbe`. Clearing a value that stays unreadable is manual.
+  const PROBE_KEY = 'probe:24h' // key name kept for backwards compat; actual retention is 7d
+  const MAX_SNAPSHOTS = 2016 // 7d × 12 per hour (every 5 min)
+  let readFailed = false
+  const existing = await kv.get(PROBE_KEY).catch((err) => {
+    readFailed = true
+    console.error('[probe] KV read failed — skipping this slot:', err instanceof Error ? err.message : err)
+    return null
+  })
+  if (readFailed) return
+  const snapshots = parseSnapshotWindow<ProbeSnapshot>(existing)
+  if (snapshots === null) {
+    console.error('[probe] stored window is unreadable — skipping the write so it is not overwritten')
+    return
+  }
 
   const data: Record<string, ProbeResult> = {}
   await Promise.all(PROBE_TARGETS.map(async ({ id, url }) => {
@@ -416,10 +474,6 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
   }))
 
   try {
-    const PROBE_KEY = 'probe:24h' // key name kept for backwards compat; actual retention is 7d
-    const MAX_SNAPSHOTS = 2016 // 7d × 12 per hour (every 5 min)
-    const existing = await kv.get(PROBE_KEY).catch((err) => { console.warn('[probe] KV read failed:', err instanceof Error ? err.message : err); return null })
-    const snapshots: ProbeSnapshot[] = existing ? (JSON.parse(existing).snapshots ?? []) : []
     const slotTs = slotToTimestamp(currentSlot)
     if (hasSlot(snapshots, slotTs)) { lastProbeSlot = currentSlot; return }
     snapshots.push({ t: slotTs, data })
@@ -429,7 +483,9 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
     })
     lastProbeSlot = currentSlot
   } catch (err) {
-    console.warn('[probe] snapshot write failed:', err instanceof Error ? err.message : err)
+    // Reached only by the append/put itself now that the read and parse are guarded above, so this
+    // no longer conflates "the stored window is corrupt" with "KV rejected the write".
+    console.warn('[probe] snapshot write rejected:', err instanceof Error ? err.message : err)
   }
 }
 

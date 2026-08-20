@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, parseSnapshotWindow, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob } from '../utils'
 import type { Incident } from '../types'
 
 describe('appendStatusHint (#539)', () => {
@@ -762,5 +762,44 @@ describe('formatNewComponentAlert (#992)', () => {
     const two = formatNewComponentAlert(['X'], [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], false)
     expect(one).toContain('1 new component:')
     expect(two).toContain('2 new components:')
+  })
+})
+
+describe('parseSnapshotWindow (#1256)', () => {
+  it('returns [] for an absent key, so the window bootstraps', () => {
+    expect(parseSnapshotWindow(null)).toEqual([])
+  })
+
+  it('returns the stored snapshots when the value is well-formed', () => {
+    const snapshots = [{ t: '2026-08-19T00:00:00Z', data: {} }]
+    expect(parseSnapshotWindow(JSON.stringify({ snapshots }))).toEqual(snapshots)
+  })
+
+  it('returns [] for a stored-but-empty window, which is usable', () => {
+    expect(parseSnapshotWindow('{"snapshots":[]}')).toEqual([])
+  })
+
+  it('returns null for unparseable JSON', () => {
+    expect(parseSnapshotWindow('{"snapshots":[{"t":"2026-08')).toBeNull()
+    expect(parseSnapshotWindow('not json at all')).toBeNull()
+    // An empty stored value is present-and-unusable, not absent.
+    expect(parseSnapshotWindow('')).toBeNull()
+  })
+
+  it('returns null when an element is not a snapshot', () => {
+    expect(parseSnapshotWindow('{"snapshots":["garbage"]}')).toBeNull()
+    expect(parseSnapshotWindow('{"snapshots":[1,2,3]}')).toBeNull()
+    expect(parseSnapshotWindow('{"snapshots":[null]}')).toBeNull()
+    expect(parseSnapshotWindow('{"snapshots":[{"t":"ok"},{"data":{}}]}')).toBeNull()
+    // `t` alone is not enough — every reader dereferences `.data`.
+    expect(parseSnapshotWindow('{"snapshots":[{"t":"2026-08-19T00:00:00Z"}]}')).toBeNull()
+    expect(parseSnapshotWindow('{"snapshots":[{"t":"a","data":"garbage"}]}')).toBeNull()
+  })
+
+  it('returns null when the value parses but carries no snapshots array', () => {
+    expect(parseSnapshotWindow('{}')).toBeNull()
+    expect(parseSnapshotWindow('{"snapshots":null}')).toBeNull()
+    expect(parseSnapshotWindow('{"snapshots":{"t":"x"}}')).toBeNull()
+    expect(parseSnapshotWindow('null')).toBeNull()
   })
 })
