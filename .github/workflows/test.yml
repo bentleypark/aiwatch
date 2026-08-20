@@ -16,13 +16,17 @@ on:
       - 'docs/**'
       - '.github/**/*.md'
 
-# Bound CI quota usage per branch / PR — a new push on the same head_ref
-# cancels the previous run instead of stacking. Mitigates abuse surface
-# after Vercel Git Fork Protection is disabled (#365). For push events,
-# github.head_ref is empty, so the fallback to github.ref keeps each main
-# push in its own group rather than collapsing them all together.
+# Bound CI quota usage per PR — a new push on the same head_ref cancels the previous run instead of
+# stacking. Mitigates abuse surface after Vercel Git Fork Protection is disabled (#365).
+#
+# #1254 — a push to main must never be cancelled: its run is the only post-merge verdict that commit
+# gets, and no later push's diff range reaches back to cover it. `github.head_ref` is empty on a
+# push, so falling back to `run_id` puts every main push in a group of ONE — it can neither cancel,
+# be cancelled, nor queue behind another. Conditioning `cancel-in-progress` instead would only save a
+# RUNNING run: GitHub cancels a PENDING one when the next arrives, so a burst still loses its middle
+# (4 pushes in 19s on 2026-05-31, 3 cancelled; same shape on 2026-06-01 and 2026-06-21).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -122,29 +126,28 @@ jobs:
     timeout-minutes: 15   # #1253 — a stalled browser install must fail, not hang on the 6h default
     steps:
       - uses: actions/checkout@v4
+        with:
+          # #1254 — the push base can be any distance back; see scripts/ci-detect-frontend.sh.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm ci
       - name: Check for frontend changes
         id: changes
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            DIFF=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-          else
-            DIFF=$(gh pr diff ${{ github.event.pull_request.number }} --name-only 2>/dev/null || echo "")
-          fi
-          # #998 — `tests/` + `playwright` MUST be here: without them a tests-only PR (e.g. one
-          # that rewrites the e2e suite) skips the E2E job entirely, so the very code it changes
-          # never runs in CI and a broken fixture merges green. The `build` job below deliberately
-          # does NOT match them — a spec change needs no production build.
-          if echo "$DIFF" | grep -qE '^(src/|tests/|playwright|public/|index\.html|vite\.config|package\.json)'; then
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "frontend=false" >> "$GITHUB_OUTPUT"
-          fi
+        # #998 — `tests/` + `playwright` MUST be here: without them a tests-only PR (e.g. one that
+        # rewrites the e2e suite) skips the E2E job entirely, so the very code it changes never runs
+        # in CI and a broken fixture merges green. #1253/#1254 — `.github/workflows/` too: this job's
+        # own browser-install step lives there.
+        #
+        # Two asymmetries this buys, both deliberate and neither free:
+        #  - the `build` job matches none of the three, so a change to ITS OWN `Verify bundle
+        #    splitting` step below does not run it — including this commit;
+        #  - the term is `.github/workflows/`, not `…/test\.yml`, so editing docs-lint.yml or
+        #    edge-e2e.yml also pays a full Playwright install and run.
+        run: bash scripts/ci-detect-frontend.sh '^(src/|tests/|playwright|public/|index\.html|vite\.config|package\.json|\.github/workflows/)'
         env:
-          GH_TOKEN: ${{ github.token }}
+          PUSH_BASE: ${{ github.event.before }}
       # #1253 — bound the apt phase, then install the browser without apt; rationale in edge-e2e.yml.
       - name: Install Playwright
         if: steps.changes.outputs.frontend == 'true'
@@ -174,25 +177,18 @@ jobs:
     timeout-minutes: 10   # #1253 — never inherit the 6h default
     steps:
       - uses: actions/checkout@v4
+        with:
+          # #1254 — the push base can be any distance back; see scripts/ci-detect-frontend.sh.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm ci
       - name: Check for frontend changes
         id: changes
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            DIFF=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-          else
-            DIFF=$(gh pr diff ${{ github.event.pull_request.number }} --name-only 2>/dev/null || echo "")
-          fi
-          if echo "$DIFF" | grep -qE '^(src/|public/|index\.html|vite\.config|package\.json)'; then
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "frontend=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: bash scripts/ci-detect-frontend.sh '^(src/|public/|index\.html|vite\.config|package\.json)'
         env:
-          GH_TOKEN: ${{ github.token }}
+          PUSH_BASE: ${{ github.event.before }}
       - name: Build
         if: steps.changes.outputs.frontend == 'true'
         run: npm run build
