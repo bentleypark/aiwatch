@@ -1133,6 +1133,7 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
     'Conversations', 'Connectors/Apps', 'Search', 'GPTs', 'Image Generation', 'Login', 'Agent',
     'Codex in ChatGPT Desktop', 'Voice mode', 'Deep Research', 'File uploads', 'ChatGPT Atlas',
     'Compliance API', // #1010
+    'Sites', 'ChatGPT Work', // #1010 second pass — routing consequence pinned below
   ]
   const chatgpt = (degradedNames: string[]) => ({
     id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'degraded', aiwatchScore: 57,
@@ -1144,6 +1145,15 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
     expect(routingTier(src)).toBe(CAPABILITY_TIER.image)
     expect(getFallbacks('chatgpt', 'app', [src, ...pool]).map(f => f.name))
       .toEqual(['Stability AI', 'Black Forest Labs (FLUX)'])
+  })
+
+  it('a component matching no capability regex co-degrading with a routed one suppresses the reroute (#1010)', () => {
+    // The cost every adoption carries: `Sites` matches no COMPONENT_CAPABILITY regex, so it classifies
+    // `llm`, widening `degraded` to {image, llm} — and routingTier only fires on a single capability.
+    // Fail-safe (a missed reroute, never a wrong one), but real, so it is pinned rather than described.
+    // The control on the same fixture is what makes this about `Sites` and not about the outage.
+    expect(routingTier(chatgpt(['Image Generation', 'Sites']))).toBeNull()
+    expect(routingTier(chatgpt(['Image Generation']))).toBe(CAPABILITY_TIER.image)
   })
 
   it('ChatGPT Voice-mode-only outage reaches the api Voice tier, crossing the app→api filter (#1175)', () => {
