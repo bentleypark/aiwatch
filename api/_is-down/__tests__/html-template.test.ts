@@ -397,7 +397,11 @@ describe('renderPage — partial-outage header (#722/#744)', () => {
 })
 
 // #591 — a stale-source service (frozen feed; is-down.ts never sets a rank for it) must not surface
-// its frozen uptime/score, and must show the honest "source moved/can't reach" note instead.
+// its frozen uptime/score, and must show the honest "we can't read the source" note instead.
+// #1268 — the note no longer names a CAUSE. It said the status page had "moved to a source AIWatch
+// can't reach", which described the one service that reached this branch when #591 shipped; the flag
+// itself carries no cause, and the case that motivated #1268 is a status page that was DELETED, which
+// moved nowhere.
 describe('renderPage — stale incident source (#591)', () => {
   const stale = () => mkService({
     status: 'operational',
@@ -415,8 +419,27 @@ describe('renderPage — stale incident source (#591)', () => {
   })
 
   it('renders the honest stale-source note', () => {
+    // Scoped to this note's OWN tail. `renderPage` embeds `renderIncidents`, whose stale branch now
+    // opens with the same "AIWatch can't currently read X's status source" clause — so the shared
+    // prefix alone stopped discriminating when the two strings were unified, and deleting the header
+    // note entirely left this green. The distinct tails are what each assertion has to name.
     const html = renderPage('deepseek', stale(), mkSeo(), [])
-    expect(html).toMatch(/status page moved to a source AIWatch can't reach/i)
+    expect(html).toMatch(/status source, so its incident feed is frozen/i)
+  })
+
+  it('renders the incident-history note too, and it is a SEPARATE string', () => {
+    const html = renderPage('deepseek', stale(), mkSeo(), [])
+    expect(html).toMatch(/status source, so recent incidents can't be retrieved/i)
+  })
+
+  it('#1268 — the note claims no CAUSE, and no direct measurement it cannot make', () => {
+    // Both clauses were false for a deleted page: nothing moved, and a service lands here precisely
+    // because its source was unreadable, so the badge above the note is a default, not a measurement.
+    const html = renderPage('deepseek', stale(), mkSeo(), [])
+    // Positive anchor first: two bare negatives would both pass on an empty render.
+    expect(html).toMatch(/can't currently read/i)
+    expect(html).not.toMatch(/moved to a/i)
+    expect(html).not.toMatch(/measured directly/i)
   })
 
   it('omits the frozen uptime from the SERP meta description', () => {
@@ -424,11 +447,65 @@ describe('renderPage — stale incident source (#591)', () => {
     expect(desc).not.toContain('Uptime: 99.92%')
   })
 
+  it('#1268 — a stale source asserts NEITHER "No recent incidents" nor a frozen "Last incident"', () => {
+    // The header's own copy of the defect this issue is about: an unread feed rendered as a quiet one,
+    // on the SEO answer, directly above a note saying we cannot read the feed.
+    const html = renderPage('deepseek', stale(), mkSeo(), [])
+    expect(html).not.toContain('No recent incidents')
+    // A readable service still gets the line — this is a withholding, not a deletion.
+    expect(renderPage('deepseek', mkService({ status: 'operational' }), mkSeo(), [])).toContain('No recent incidents')
+  })
+
+  it('#1268 — but a stale service that DOES carry incidents still names them', () => {
+    // The aging-Flashduty band: `deepseek` past the 1h soft-stale window but inside the 3h TTL keeps the
+    // flag while still serving a live badge and live incidents. Withholding on bare `stale` left a page
+    // answering "Yes — down" with nothing on it describing the outage, since `renderIncidents` and the
+    // #1104 note are both stale-gated too. The previous version of the test above asserted
+    // `not.toContain('Last incident:')` against a fixture whose `incidents` array was empty, so that
+    // branch was unreachable and the assertion could not fail either way.
+    const live = { id: 'i1', title: 'API errors', status: 'investigating', startedAt: new Date().toISOString(), duration: null }
+    const html = renderPage('deepseek', mkService({ status: 'down', incidentSourceStale: true, incidents: [live] }), mkSeo(), [])
+    expect(html).toContain('Last incident:')
+    expect(html).toContain('API errors')
+    // …and the note directly above it must not call that feed frozen. The two lines sat two apart.
+    expect(html).not.toMatch(/incident feed is frozen/i)
+    expect(html).toMatch(/from the last reading AIWatch could take/i)
+  })
+
+  it('#1268 — the note renders ABOVE the ranking line, not at the foot of the header', () => {
+    // Position is the finding: it used to render last, so the first thing a reader took from the page
+    // was a flat verdict about a service whose source we cannot read.
+    // Sliced to the header block first — `indexOf` over the whole document would anchor on whichever
+    // placeholder copy happens to contain the substring elsewhere on the page.
+    const full = renderPage('deepseek', stale(), mkSeo(), [])
+    const header = full.slice(full.indexOf('<div class="header">'), full.indexOf('Monthly Reports'))
+    const answer = header.indexOf('is operational')
+    const note = header.indexOf("can't")
+    expect(answer, 'premise: the answer line is inside the header slice').toBeGreaterThan(-1)
+    expect(note, 'premise: the note is inside the header slice').toBeGreaterThan(-1)
+    expect(note).toBeGreaterThan(answer)
+  })
+
+  it('#1268 — a probe-backed stale service says whose measurement the answer is', () => {
+    // The Character.AI shape: source unreadable, our own probe reaches the service, so the verdict above
+    // is green and real — but it is OURS. The dashboard says so; this surface did not.
+    const html = renderPage('deepseek', mkService({ ...stale(), probeConfirmed: true }), mkSeo(), [])
+    expect(html).toMatch(/answers AIWatch's own direct checks/i)
+    expect(html).toMatch(/our measurement, not the provider's/i)
+    expect(html).not.toMatch(/incident feed is frozen/i)
+  })
+
+  it('#1268 — WITHOUT a probe it claims no measurement at all', () => {
+    const html = renderPage('deepseek', stale(), mkSeo(), [])
+    expect(html).toMatch(/incident feed is frozen/i)
+    expect(html).not.toMatch(/direct checks/i)
+  })
+
   it('a NON-stale service still shows uptime + score (no over-suppression)', () => {
     const html = renderPage('deepseek', mkService({ status: 'operational', uptime30d: 99.92, aiwatchScore: 88, scoreGrade: 'good' }), mkSeo(), [])
     expect(html).toContain('Uptime: 99.92%')
     expect(html).toContain('AIWatch Score: 88')
-    expect(html).not.toMatch(/can't reach/i)
+    expect(html).not.toMatch(/can't currently read/i)
   })
 })
 

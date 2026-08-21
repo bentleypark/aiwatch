@@ -320,7 +320,11 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
   // `parseErrors > 0` sites, whose verdict is discarded). A service whose secondary leg fails every
   // cycle therefore keeps `failSince` armed and `failCountAt` fresh without `resetFetchFailure` ever
   // running, so its next primary failure degrades earlier than the third strike. That errs toward the
-  // neutral "we cannot read this source" badge, never toward a green one. Separating the two consumers
+  // neutral "we cannot read this source" badge, never toward a green one. #1268 — that cost assessment
+  // is now understated, not wrong: `services.ts`' `withUnreadFeedFlag` derives `incidentSourceStale`
+  // from this verdict, so an early degrade also blanks uptime, drops the service from rankings, flips
+  // the cached is-down page and is stamped into the month-end archive. Still unpaid; re-evaluate here,
+  // not at the consumer, if it starts firing. Separating the two consumers
   // needs a second timestamp written on the per-request path, which would cost a `tracking:state` write
   // per request for the whole outage and break #1224's steady-state-zero invariant.
   const stillUnrecovered = isFailSinceLive(entry, nowMs)

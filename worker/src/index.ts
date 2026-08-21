@@ -4758,6 +4758,9 @@ export default {
             group: serviceGroupOf(svc.id), // #1068 — fine category (llm/voice/…); coarse `category` unchanged
             status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
             uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
+            // #1268 — same fact on the single-service shape; here the `incidents` array below is the
+            // thing that reads as empty rather than unread.
+            ...(svc.incidentSourceStale ? { incidentSourceStale: true } : {}),
             incidents: (svc.incidents ?? []).slice(0, 5).map((i) => ({
               id: i.id, title: i.title, status: i.status, impact: i.impact,
               startedAt: i.startedAt, duration: i.duration,
@@ -4783,6 +4786,13 @@ export default {
             status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
             uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
             incidentCount: (svc.incidents ?? []).length,
+            // #1268 — the one source-liveness fact on this wire contract. Without it an external
+            // consumer cannot tell `incidentCount: 0` on a quiet month from `incidentCount: 0` on a
+            // status source we could not read: `uptime30d: null` + `medium` is the NORMAL shape of a
+            // healthy probed service with no official uptime, so it discriminates nothing. Every
+            // in-repo surface reads this flag; this is the consumer that cannot be told out of band.
+            // Additive — absent when false, so no existing consumer changes.
+            ...(svc.incidentSourceStale ? { incidentSourceStale: true } : {}),
             // #713 — scoreConfidence disambiguates a null aiwatchScore (low-confidence: no official
             // uptime + no probe → score withheld) from a missing/errored value, matching the
             // single-service response below.

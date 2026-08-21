@@ -296,6 +296,18 @@ const en = {
   // covers timeouts and 5xx as well as unparseable bodies, so don't claim we "parsed and failed".
   'svc.sourceUnknown.title': 'Status source unreadable',
   'svc.sourceUnknown.body': "AIWatch can't read this provider's status page — it may have moved, or be erroring or timing out. It does NOT mean the service is impaired: it means AIWatch can't currently confirm its status. Live status resumes automatically when the source is readable again.",
+  // #1268 — the probe-backed variant, mirroring the sourceDead.body / sourceDead.bodyProbe pair. Says
+  // whose evidence the green pill rests on: ours, from a direct call, not the provider's status page.
+  // #1268 round 7 — the AFFECTED-state variant. The other two both close with "it does NOT mean the
+  // service is impaired", which is false beside a red or amber pill: a probe-CORROBORATED outage and an
+  // aging relay serving a live `down` badge both carry this flag. Suppressing the whole note there left
+  // the card blanking uptime, incidents, MTTR, Score and the calendar with nothing explaining why, so
+  // the fix is to say less rather than to say nothing. It claims ONLY the omission: a second sentence
+  // about where the status came from was false in one of the two states — a probe-CORROBORATED verdict
+  // is manufactured (three failed reads, then Phase 1 promotes it), so there is no "last reading" behind
+  // the pill at all.
+  'svc.sourceUnknown.bodyAffected': "AIWatch can't currently read this provider's status page, so its uptime, score and ranking are omitted until the source is readable again.",
+  'svc.sourceUnknown.bodyProbe': "AIWatch can't read this provider's status page, but the service answers AIWatch's own direct probe — so it's shown as operational on our measurement, not the provider's. Uptime and incidents resume when the source is readable again.",
   'svc.components.title': 'Component Status',
   'svc.components.sub': 'Per-component breakdown from the official status page',
   'svc.components.groupCount': '{n} components',

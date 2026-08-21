@@ -368,7 +368,7 @@ export const SERVICES: ServiceConfig[] = [
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
-  { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'], statusSourceDeactivated: true }, // #800 — Statuspage deactivated (401) since ~2026-06-18 (#689), no replacement; suppress recurring dead-source alerts. REMOVE when the page reactivates.
+  { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'], statusSourceDeactivated: true }, // #800 — status source dead since ~2026-06-18 (#689), no replacement; suppresses recurring dead-source alerts. ALERT SUPPRESSION ONLY — nothing published to readers may key off this flag (#1268): it is a hand-written claim that goes stale the moment the page comes back, and what we tell readers about a status source has to come from tracking that source. REMOVE when the page comes back. FYI the response shape has already moved once — 401 "page inactive" when #800 shipped, 302 → characteraistatus.statuspage.io/page-deleted → 200 HTML as of 2026-08-20.
   // #1006 — uptime is now COMPUTED from the impact records of the ChatGPT badge scope (the full
   // `statusComponentIds` worst-of, matching the badge), over a common 30 days, instead of copying the
   // page's published ChatGPT-group aggregate (#367). That aggregate is
@@ -1667,6 +1667,75 @@ export function classifyStatusPageFailure(httpStatus: number): 'dead-source' | '
   return httpStatus >= 400 && httpStatus < 500 ? 'dead-source' : 'transient'
 }
 
+/** #1268 — `JSON.parse` that answers "unreadable" instead of throwing, so a caller can ask about the
+ *  payload rather than about control flow. Exported for testing. */
+export function safeJsonParse(text: string): unknown {
+  try { return JSON.parse(text) } catch { return null }
+}
+
+/** #1268 — is this body actually an Atlassian Statuspage summary, as opposed to merely valid JSON?
+ *  The question every consumer below assumes has been answered: `resolveSvcStatus` falls back to the
+ *  overall indicator and `parseIncidents` returns `[]`, so an unrelated JSON body (a gateway error
+ *  envelope, `{}`, a different API served at the same URL) yields a fabricated operational badge with
+ *  an empty incident list — indistinguishable from a healthy provider, and exactly the #1268 verdict.
+ *  Permissive by design: any ONE of the four documented top-level keys is enough, so a provider adding
+ *  or dropping a field cannot make us declare a live page unreadable. Exported for testing. */
+export function isStatuspageSummary(v: unknown): v is StatuspageResponse {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const o = v as Record<string, unknown>
+  // Tests each key's VALUE, not its presence. Presence alone admitted `{"status":"error","message":…}`
+  // and `{"status":404}` — the commonest JSON error-envelope shape there is, and precisely what this
+  // predicate exists to reject. Still permissive across keys: any ONE well-shaped field is enough, so a
+  // provider adding or dropping a field cannot make us declare a live page unreadable, and incident.io
+  // global pages (which serve `{components: []}` through the v2 compat API) pass on `components`.
+  return (typeof o.page === 'object' && o.page !== null)
+    || (typeof o.status === 'object' && o.status !== null)
+    || Array.isArray(o.components)
+    || Array.isArray(o.incidents)
+}
+
+/** #1268 — THE invariant, applied at a choke point rather than at each return.
+ *
+ *  `sourceUnknown` means the fetch leg could not read the source, and every one of the nine returns
+ *  that sets it publishes `incidents: []` — so the Score, which reads the live `service.incidents`
+ *  array and has no source-liveness input of its own, books an unread feed as a clean 30-day window:
+ *  full Incidents + Recovery marks. Character.AI reached 75/100 ("good") that way.
+ *
+ *  Setting the ranking flag on the ONE branch that produced the reported bug would have left the class
+ *  open — the 5xx return sits a few branches above it with an identical body, and the Instatus/OnlineOrNot
+ *  parse-failure return carries services that rank in the HIGH-confidence table. Tying the flag to the
+ *  unreadable-source VERDICT here covers all of them, and covers the next one written. Same reasoning as
+ *  the `fetchService` tagging choke point (#983): a per-return copy is a rule nothing enforces.
+ *
+ *  It requires `status === 'unknown'`, not bare `sourceUnknown`, and that is the load-bearing half.
+ *  `sourceUnknown` is set on the FIRST failed read; `status` turns `unknown` only once
+ *  `trackFetchFailure` returns `shouldDegrade`. Precisely (utils.ts): `next >= threshold ||
+ *  stillUnrecovered` — so the three-strike crossing is ONE of two doors, and the other is "we are inside
+ *  a live unrecovered episode" (`failSince` armed, `failCountAt` fresh). Both mean the same thing here,
+ *  which is the point: a genuine first failure of a healthy source publishes `operational` and is NOT
+ *  flagged, and a source that has been unreadable for hours stays flagged even after the counter decays
+ *  (#1232). Both are pinned below.
+ *  Not free of residue: utils.ts:318 documents a shape where a failing SECONDARY leg arms `failSince`
+ *  without the primary ever crossing, so the next primary failure degrades on strike one. That residual
+ *  was accepted on the grounds that it "errs toward the neutral badge, never toward a green one" — a
+ *  justification this change outgrows, since the flag is no longer badge-only. Left as-is rather than
+ *  re-cutting a shared primitive here; recorded on #1268.
+ *  Keying on the first read outright would defeat the flap suppression the ramp exists for — status-determination.md's #1233 entry makes the point directly: a single transient 5xx
+ *  across a 45-service parallel fetch is COMMON, and this flag is not scoping-only. It also flips the
+ *  cached is-down SEO page and its OG image, blanks the uptime the Instatus/OnlineOrNot return goes out
+ *  of its way to preserve from an independent successful fetch, and gets stamped durably into the
+ *  month-end archive. One unlucky timeout at archive time would mark a service stale for the whole
+ *  month. The `sourceDead` (4xx) returns are unaffected: they set the flag inline and publish
+ *  `operational`, which is #689's deliberate semantics.
+ *
+ *  Idempotent, and returns the SAME object when it changes nothing, so it cannot disturb
+ *  `fetchService`'s identity-preserving return. */
+export function withUnreadFeedFlag<T extends { sourceUnknown?: boolean; incidentSourceStale?: boolean; status?: string }>(svc: T): T {
+  return svc.sourceUnknown && svc.status === 'unknown' && !svc.incidentSourceStale
+    ? { ...svc, incidentSourceStale: true }
+    : svc
+}
+
 /** #983 — the single tagging choke point. `fetchServiceUntagged` has ~10 return paths (flashduty feed,
  *  summary.json, AWS health, Azure RSS, BetterStack/Instatus/xAI/aistudio, plus the early operational
  *  and error bases); stamping `autoMonitor` on its result covers all of them, and is safe AFTER
@@ -1691,7 +1760,10 @@ export async function fetchService(config: ServiceConfig, prefetched: Prefetched
   const svc = await fetchServiceUntagged(config, prefetched, kv, trackingStore)
   const tagged = tagAutoMonitorIncidents(svc.incidents, config)  // matches ORIGINAL (e.g. Chinese) titles
   const incidents = applyTitleMap(tagged, config)                // THEN rewrite to English
-  return incidents === svc.incidents ? svc : { ...svc, incidents }
+  // #1268 — the unread-feed invariant rides the same choke point, for the same reason the tagging does:
+  // it must hold on every one of this function's ~10 return paths, and a per-return copy is a rule
+  // nothing enforces. See `withUnreadFeedFlag`.
+  return withUnreadFeedFlag(incidents === svc.incidents ? svc : { ...svc, incidents })
 }
 
 // #1224 — `trackingStore` is the in-memory blob `trackFetchFailure`/etc. mutate directly (see
@@ -1764,7 +1836,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           summaryRes.body?.cancel()
           incidentsRes?.body?.cancel()
           // #689 — a 4xx means the status page itself is GONE / deactivated / misconfigured (e.g.
-          // Character.AI deactivated its Statuspage → 302 to an inactive page → 401 "page inactive"),
+          // a provider deactivating its Statuspage, which answers 401 "page inactive"),
           // NOT that the service is degraded. Don't trackFetchFailure → degraded (a false positive);
           // return a stale base flagged out of rankings (incidentSourceStale). We KEEP fetching apiUrl
           // every cycle, so it auto-recovers to real status the moment the page returns 200. A 5xx /
@@ -1779,9 +1851,66 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
         }
-        summaryData = await summaryRes.json()
+        // #1268 — a JSON API answering 200 with a NON-JSON body is not "temporarily unreadable": the
+        // URL is no longer the API. Statuspage serves a DELETED page this way (302 → /page-deleted →
+        // 200 text/html), so `ok` is true, the `dead-source` branch above never runs, and the
+        // SyntaxError used to fall through to the catch at the bottom of this function — which flags
+        // `sourceUnknown` and nothing else, leaving the Score to read an unread feed as zero incidents.
+        //
+        // Both the status verdict and the ranking flag ride #714's three-strike ramp; what changed is
+        // that the flag now follows the VERDICT — every `sourceUnknown` return, via the choke point —
+        // instead of the 4xx branch alone. Erring costs a ranking slot for a cycle; the reverse error
+        // publishes a reliability score computed from an empty file.
+        // The test is payload IDENTITY, not JSON syntax. Keying on a thrown `SyntaxError` would answer
+        // the wrong question: `{}`, `{"message":"Not Found"}` and any gateway error envelope are valid
+        // JSON, so they parse, resolve to the `none` indicator with no components, and produce the same
+        // fabricated-operational + `incidents: []` verdict this branch exists to stop — the same
+        // argument the `incidentIoGlobalPage` withhold makes for a rebuilt summary.
+        let summaryText: string
+        try {
+          summaryText = await summaryRes.text()
+        } catch (err) {
+          incidentsRes?.body?.cancel()  // the sibling body must not leak on the rethrow path
+          throw err
+        }
+        const summaryParsed = safeJsonParse(summaryText)
+        if (!isStatuspageSummary(summaryParsed)) {
+          // States the OBSERVATION and carries the evidence. It deliberately does not name a cause: the
+          // comment above says a 200 body may be a bot interstitial, and a log that concludes "the URL
+          // is no longer the status API" on cycle one contradicts that — the same cause-claim this
+          // change removed from the reader-facing is-down copy. content-type and the body head are what
+          // separate a Statuspage tombstone from a CF challenge from a truncated response.
+          console.error(`[fetchService] ${config.id} summary.json: HTTP ${summaryRes.status} content-type=${summaryRes.headers.get('content-type') ?? 'none'} is not a Statuspage summary — body[0..120]=${JSON.stringify(summaryText.slice(0, 120))}`)
+          incidentsRes?.body?.cancel()
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+          // No `incidentSourceStale` here on purpose — `sourceUnknown` IS the claim, and
+          // `withUnreadFeedFlag` derives the ranking flag from it at the choke point. Setting it here
+          // too would re-establish the per-return rule the choke point exists to replace, and would
+          // make this branch look special when it is one of nine.
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
+        }
+        summaryData = summaryParsed
         if (incidentsRes?.ok) {
-          rawIncData = await incidentsRes.json()
+          // #1268 — this read was unguarded, and a deleted Statuspage answers 200 HTML here too, so it
+          // threw out of the whole function into the outer catch: one unreadable supplementary feed
+          // destroyed the readable summary alongside it. It now degrades exactly like the `!ok` branch
+          // below — `parseIncidents(summaryData)` is the fallback. Deliberately NOT stale-flagged: the
+          // summary parsed, so the incident feed WAS read; incidents.json only widens it.
+          let incText: string | null = null
+          try { incText = await incidentsRes.text() }
+          catch (err) { console.warn(`[fetchService] ${config.id} incidents.json body read failed:`, err instanceof Error ? err.message : err) }
+          const incParsed = incText == null ? null : safeJsonParse(incText)
+          // Requires the `incidents` ARRAY, not merely an object — that array IS this endpoint's
+          // contract. A weaker `typeof === 'object'` test accepted an error envelope, assigned it to
+          // `rawIncData`, and thereby SKIPPED the `parseIncidents(summaryData)` fallback below: the
+          // active incidents summary.json had successfully returned were thrown away, publishing an
+          // empty list during a live outage. Worse than the defect this issue is about.
+          if (incParsed && typeof incParsed === 'object' && Array.isArray((incParsed as Record<string, unknown>).incidents)) {
+            rawIncData = incParsed as StatuspageResponse
+          } else {
+            console.warn(`[fetchService] ${config.id} incidents.json: HTTP ${incidentsRes.status} content-type=${incidentsRes.headers.get('content-type') ?? 'none'} has no incidents array — falling back to summary.json's list (active incidents only)`)
+            rawIncData = null
+          }
         } else {
           if (incidentsRes) console.warn(`[fetchService] ${config.id} incidents.json returned HTTP ${incidentsRes.status}`)
           incidentsRes?.body?.cancel()
@@ -2891,6 +3020,27 @@ export function detectPlatformOutage(
   return affected
 }
 
+/** #1268 — 90 days, raised from 48h. The daily summary only ever reads TODAY's key, so retention was
+ *  set to the shortest thing that satisfied that one reader — which left the counter unable to answer
+ *  anything retrospective, and it is the only record we keep of when the probe overrode a service's
+ *  verdict at all.
+ *
+ *  What a key on date D licenses, exactly: on D, this service was read-suspect for three consecutive
+ *  cycles and its probe was healthy, so the probe overruled the fetch verdict. It does NOT by itself
+ *  date a change in how a source fails — `isReadSuspect` also admits a page reporting `degraded` with
+ *  no incident named, and an ordinary multi-cycle 5xx or timeout episode produces the same key. For a
+ *  service already KNOWN to have been publishing `sourceDead`, the first key does bound when it stopped
+ *  answering an unambiguous gone-4xx, because that path returns `operational` and never enters
+ *  `degradedFromFetch` — but 403 and 429 are deliberately excluded from `dead-source` on the
+ *  OnlineOrNot leg, so even that reading is a bound and not a proof. Corroborate with `fetch-fail:daily`.
+ *
+ *  Character.AI's failure mode changed somewhere between 2026-08-01 and 2026-08-18 and dating it needed
+ *  Wayback captures of a third-party status host, because these keys had expired. 90d covers the same
+ *  window as the `history:` daily record so the two can be read for one day side by side; the precedent
+ *  for extending a forensic counter is `AI_USAGE_TTL_S` (#995, 2d → 30d). Retention only — the write
+ *  rate is unchanged, and no reader looks at a past date. */
+export const CROSS_VALID_SUPPRESSED_TTL_S = 90 * 86400
+
 /**
  * Increment the daily "probe overrode a status-page degraded status" suppression counter.
  * Surfaced in the daily summary alongside fetch-fail:daily to distinguish a probe-healthy
@@ -2902,7 +3052,7 @@ export function detectPlatformOutage(
 export async function recordProbeSuppression(kv: KVNamespace, svcId: string, date: string): Promise<void> {
   const supKey = `cross-valid:suppressed:${svcId}:${date}`
   const prev = parseInt(await kv.get(supKey).catch(() => null) ?? '0', 10) || 0
-  await kvPut(kv, supKey, String(prev + 1), { expirationTtl: 172800 })
+  await kvPut(kv, supKey, String(prev + 1), { expirationTtl: CROSS_VALID_SUPPRESSED_TTL_S })
 }
 
 /**
@@ -2995,10 +3145,36 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
         // cannot do the same — harmless, since fetchPageComponents never rejects.
         return
       }
-      const summary: StatuspageResponse = await summaryRes.json()
+      // #1268 — validate HERE, where the payload enters. Every Atlassian service is prefetched, so this
+      // is the path production takes and `fetchService`'s own guard is the fallback; a check placed only
+      // there is a check on the branch we skip. An HTML body reaches this by throwing out of `.json()`
+      // into the catch below, which is why the deleted page was caught at all — but a body that is valid
+      // JSON and simply is not a summary (`{}`, a gateway error envelope) parsed cleanly and was cached,
+      // and `fetchService` then consumed it as a real reading: `operational`, `incidents: []`, no flag.
+      // Not caching it is the whole fix — a prefetch miss already falls through to the direct fetch,
+      // which re-reads the URL and produces the proper unreadable-source verdict. Known cost, taken
+      // deliberately: that service is then fetched twice in the cycle. Negligible for one dead page; on
+      // a platform-wide garbage-body event it roughly doubles Atlassian subrequests in one invocation.
+      // The `!ok` path above already behaves this way, so this adds a case rather than a mechanism.
+      const summaryRaw = await summaryRes.json()
+      if (!isStatuspageSummary(summaryRaw)) {
+        console.warn(`[prefetch] ${apiUrl} answered HTTP ${summaryRes.status} with a body that is not a Statuspage summary — skipping; fetchService will fetch directly and record it`)
+        incidentsRes?.body?.cancel()
+        await componentsFetch
+        return
+      }
+      const summary: StatuspageResponse = summaryRaw
       let incidents: StatuspageResponse | null = null
       if (incidentsRes?.ok) {
-        incidents = await incidentsRes.json()
+        // #1268 — its contract IS the `incidents` array, so a body without one is not this feed. Left
+        // null rather than cached, which routes `fetchService` to its `parseIncidents(summaryData)`
+        // fallback instead of handing it an object whose `.incidents` is silently undefined.
+        const incRaw = await incidentsRes.json().catch(() => null)
+        if (incRaw && typeof incRaw === 'object' && Array.isArray((incRaw as Record<string, unknown>).incidents)) {
+          incidents = incRaw as StatuspageResponse
+        } else {
+          console.warn(`[prefetch] ${baseUrl}/incidents.json answered HTTP ${incidentsRes.status} without an incidents array — falling back to summary.json's list`)
+        }
       } else {
         incidentsRes?.body?.cancel()
       }
@@ -3066,9 +3242,12 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       uptime30d: null,
       lastChecked: new Date().toISOString(),
       incidents: [],
-      // #591 — carry the stale flag even on a total fetch reject (fetchService's success paths set it
-      // via `base`; this fresh-object fallback must too, so a stale service stays ranking-excluded).
-      ...(SERVICES[i].incidentSourceStale ? { incidentSourceStale: true } : {}),
+      // #591 carried the config flag here so a declared-stale service stayed ranking-excluded.
+      // #1268 makes it unconditional, which subsumes that: this literal is built in place of a real
+      // result — either the whole batch threw, or `Promise.allSettled` rejected this one service — so
+      // its `incidents: []` is an unread feed, not a quiet month, whatever the config says.
+      // `fetchService`'s choke point cannot reach here; there was no call to it.
+      incidentSourceStale: true,
     }
   })
 
@@ -3129,6 +3308,35 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
         if (isProbeHealthy(probeSnapshots, svc.id)) {
           console.log(`[cross-validation] ${svc.id}: status page down but probe RTT normal — holding operational`)
           svc.status = 'operational'
+          // #1268 — record WHY this is operational. This branch OVERRIDES a verdict: the fetch leg said
+          // `unknown` (we could not read the source) and the probe is what overrules it. Until now the
+          // override left no trace, so the surfaces could not tell a green backed by the provider from
+          // a green backed by our own probe, and rendered a bare pill for both. `probeConfirmed` already
+          // means exactly this — "a healthy direct probe independently confirms reachability" — it was
+          // just set only on the `sourceDead` (4xx) path below.
+          //
+          // That gap is what the reader saw on Character.AI: while its Statuspage answered 401 the 4xx
+          // path set `sourceDead`, this flag came with it, and the detail page explained the green. When
+          // Statuspage moved the deleted page to `302 → /page-deleted → 200 text/html` (between
+          // 2026-08-01 and 2026-08-18) the 4xx path stopped firing, the service arrived here instead,
+          // and the same green lost its explanation — for a source we had stopped being able to read.
+          // (Response shapes observed 2026-08-20; the 2026-07-15 web archive still shows `/inactive`.)
+          //
+          // Gated on `sourceUnknown`, NOT on mere membership of this loop. `isReadSuspect` also admits a
+          // page that was read PERFECTLY and reported `degraded` while naming no incident, and this flag
+          // is serialized onto /api/status: marking that one would put "a healthy probe confirms
+          // reachability DESPITE an unreadable source" on the wire for a source we read fine. This gate is
+          // the only thing keeping the field true: both reader-facing surfaces now branch on
+          // `probeConfirmed` behind `incidentSourceStale` alone, so there is no second line of defence
+          // downstream to catch a wrong mark.
+          //
+          // This closes ONE of three overrides, not the class. Phase 3 (metastatuspage) and Phase 2
+          // (quorum) also force `operational` and record nothing — and because they run FIRST and mutate
+          // these same objects, a service they flip fails this loop's `isReadSuspect` re-test, so on a
+          // platform-incident day an unreadable source's green is bare again and no suppression key is
+          // written for it. Their provenance is platform-held, not probe-backed, so it needs its own
+          // flag rather than this one.
+          if (svc.sourceUnknown) svc.probeConfirmed = true
           // Daily suppression counter — see recordProbeSuppression() docstring.
           if (kv) await recordProbeSuppression(kv, svc.id, date)
         } else if (isProbeFailing(probeSnapshots, svc.id)) {

@@ -49,7 +49,8 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   // Live cross-check 2026-07-03: api2.cursor.sh routes real paths (200, body "Welcome to Cursor. From
   // <build>…") but 404s garbage → representative gateway, NOT a CDN catch-all (unlike windsurf.com).
   { id: 'cursor', url: 'https://api2.cursor.sh/' },                                 // 200, real API gateway
-  // #921 — Character.AI's official Statuspage was deactivated (401 "page inactive") since ~2026-06-18
+  // #921 — Character.AI's official Statuspage has been dead since ~2026-06-18 (the exact response has
+  // moved: 401 "page inactive" when this was written, 302 -> /page-deleted -> 200 HTML as of 2026-08-20)
   // (#689/#800, statusSourceDeactivated) with no first-party replacement, leaving the card a dead
   // surface. neo.character.ai (its backend API host) exposes a plain-fetch, non-bot-walled health
   // endpoint — verified 2026-07-06: 200 {"redis":"UP"}, x-envoy-upstream-service-time header (real
