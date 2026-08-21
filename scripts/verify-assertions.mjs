@@ -311,17 +311,27 @@ export function findBacktickQuotedVerifyBoxes(body) {
  * verify-after lines are skipped — see isSuppressedReminderLine. This is the scanner `main()`
  * actually drives (#541 reminders + #873 auto-verify); `parseVerifyAfter` is the exported twin.
  *
- * The sub-block is the run of consecutive non-blank `assert:` / `durable:` lines under the
- * verify-after, in EITHER order; the first non-blank line that is neither ends it. Order-independence
- * is load-bearing, not a nicety (#1206): the original scan stopped at the first non-blank line, so a
- * `durable:` written above an `assert:` would have silently disabled that issue's auto-verify — the
- * job would fall back to pinging forever and nothing would say why.
+ * The sub-block is the verify-after's own list item: every line indented past the `- [ ]` marker, up to
+ * the next CHECKBOX or the next line at or below the marker's indent. A plain nested bullet does not end
+ * it; an ordered box (`1. [ ]`) is outside this grammar, as it is for `OPEN_BOX_RE` and `tickBox`. `assert:` / `durable:` are collected
+ * anywhere inside it, in either order.
  *
- * First of each marker wins, and a REPEAT does not end the block — a second `durable:` must not strand
- * an `assert:` below it, which is the same silent-auto-verify-loss the ordering fix exists to prevent.
- * A malformed `assert:` is not a marker (it parses to null) and so does end the block, deliberately:
- * that is the pre-existing behaviour, and treating a broken clause as a sub-line would let it swallow
- * the real content underneath.
+ * It used to be the run of consecutive `assert:`/`durable:` lines, ending at the first non-blank line
+ * that was neither — which meant a verify-after whose NOTE wrapped to a second line pushed its own
+ * sub-lines out of reach. The line was written correctly and the machine could not see it, so the issue
+ * was labelled `verify-undecidable` for having no durable trace while naming one eight lines down. Two
+ * open issues were in that state when this was found (#1245, #1224), and the failure is silent in the
+ * worst direction: the label says "you did not write one", never "I could not reach it".
+ * Order-independence within the block is load-bearing for the same reason (#1206) — a `durable:` above
+ * an `assert:` must not disable auto-verify.
+ *
+ * First of each marker wins, and a REPEAT does not end the block. A malformed `assert:` is simply not a
+ * marker (it parses to null); it no longer ends the block either, because ending on it is what the item
+ * boundary is for.
+ *
+ * Fenced code inside the item is skipped, so an `assert:` quoted as an EXAMPLE — which the docs page and
+ * several issue bodies do — is not mistaken for a live one. That was not reachable before, since a fence
+ * line ended the scan.
  */
 export function pairVerifyAssertions(body) {
   const out = []
@@ -338,15 +348,71 @@ export function pairVerifyAssertions(body) {
     const note = line.slice(v.index + v[0].length).replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
     let assertion = null
     let durable = null
-    for (let j = i + 1; j < lines.length; j++) {
-      if (lines[j].trim() === '') continue
-      const a = parseAssertionLine(lines[j])
+    for (const [, raw] of itemSubLines(lines, i)) {
+      const a = parseAssertionLine(raw)
       if (a) { assertion ??= a; continue }
-      const d = parseDurableLine(lines[j])
+      const d = parseDurableLine(raw)
       if (d) { durable ??= d; continue }
-      break
     }
     out.push({ date: v[1], note, lineIndex: i, assertion, durable })
+  }
+  return out
+}
+
+/**
+ * The sub-lines of ONE verify-after item: every line indented past its `- [ ]` marker, up to the next
+ * checkbox or the next line at or below that indent. Blank lines pass through; fenced code is skipped.
+ *
+ * Extracted because there are two callers (#1206 follow-up). They were byte-identical copies for about
+ * an hour, and only one of them had the four boundary tests — so all three of the detector's boundary
+ * conditions could be deleted with CI green. `feedback_shared_primitive_over_parallel_copies`: the
+ * second copy is the extraction point, and the asymmetry in coverage is what makes it a drift risk
+ * rather than harmless duplication.
+ *
+ * The checkbox test is `\[[ xX]\]`, not a bare `\[`: a markdown LINK bullet (`- [label](url)`) is a
+ * plain nested bullet, and both the docstring below and the reference page say a plain nested bullet
+ * does not end the item. `tickBox` can only act on `[ ]` anyway.
+ */
+function* itemSubLines(lines, markerIndex) {
+  const markerIndent = (/^\s*/.exec(lines[markerIndex]) ?? [''])[0].length
+  let inFence = false
+  for (let j = markerIndex + 1; j < lines.length; j++) {
+    const raw = lines[j]
+    if (raw.trim() === '') continue
+    const indent = (/^\s*/.exec(raw) ?? [''])[0].length
+    if (indent <= markerIndent || /^\s*[-*+]\s+\[[ xX]\]/.test(raw)) return
+    if (/^\s*(```|~~~)/.test(raw)) { inFence = !inFence; continue }
+    if (inFence) continue
+    yield [j, raw]
+  }
+}
+
+/**
+ * #1206 follow-up — lines inside a verify-after item that LOOK like `assert:` but do not parse.
+ *
+ * The only way a line can go dark that leaves no trace at all. A malformed clause used to
+ * end the sub-block, which also swallowed any `durable:` below it — so both came back null and the
+ * `verify-undecidable` label fired. Misleading message, but a non-zero signal on the board. Now the
+ * `durable:` survives, the item reads as decidable, and the auto-verify the author believed they wrote
+ * simply never runs, with nothing anywhere saying why.
+ *
+ * Warn-only, like the other silent-drop guards it sits beside in `verify-reminders.mjs`: this reports,
+ * it does not change what `pairVerifyAssertions` attaches.
+ *
+ * Returns [{ lineIndex, text }] — deliberately not the reason it failed to parse. `parseAssertionLine`
+ * returns a bare null for a bad source, a bad clause, a bad operator and a bad selector alike, so
+ * naming one would be a guess; the line itself is what the author has to look at.
+ */
+export function findMalformedAssertLines(body) {
+  const out = []
+  if (!body) return out
+  const lines = body.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    if (isSuppressedReminderLine(lines[i])) continue
+    if (!liveVerifyOccurrences(lines[i])[0]) continue
+    for (const [j, raw] of itemSubLines(lines, i)) {
+      if (/^\s*assert:/i.test(raw) && !parseAssertionLine(raw)) out.push({ lineIndex: j, text: raw.trim() })
+    }
   }
   return out
 }

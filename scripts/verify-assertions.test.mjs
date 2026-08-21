@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   parseAssertionLine, parseLiteral, parseSelector, evalSelector, compare,
-  evaluateAssertion, isAllowedUrl, resolveSource, pairVerifyAssertions, tickBox, runAssertion,
+  evaluateAssertion, isAllowedUrl, resolveSource, pairVerifyAssertions, tickBox, runAssertion, findMalformedAssertLines,
   truncate, countOpenBoxes, countOpenVerifyAfter, planIssueAutoVerify, DEFAULT_ASSERT_BASE,
   isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, isBacktickQuotedOccurrence,
   liveVerifyOccurrences,
@@ -142,6 +142,144 @@ test('pairVerifyAssertions — pairs verify-after with following assert, skips c
   assert.equal(items[0].lineIndex, 0)
   assert.equal(items[1].date, '2026-08-05')
   assert.equal(items[1].assertion, null) // no following assert line
+})
+
+// #1206 follow-up — the sub-block is the verify-after's LIST ITEM, not the run of lines immediately
+// under it. The old scan broke at the first line that was neither `assert:` nor `durable:`, so a note
+// that wrapped to a second line pushed its own sub-lines out of reach. Two open issues were in that
+// state (#1245, #1224): the line was written correctly and the machine reported "no durable trace".
+// The failure direction is what makes it worth pinning — the label says "you did not write one", never
+// "I could not reach it".
+test('pairVerifyAssertions — a wrapped NOTE does not strand the sub-lines (#1206)', () => {
+  const body = [
+    '- [ ] **verify-after 2026-09-19** — read the telemetry and compare against the baseline.',
+    '      **The baseline is the PRE-#1246 log: 4 sessions at maxRound >= 7.** Compare shapes,',
+    '      not like for like: how many BRANCHES reach maxRound >= 7, out of how many.',
+    '      durable: `.claude/hook-audit.jsonl` (local-only, append-only, no rotation)',
+  ].join('\n')
+  const items = pairVerifyAssertions(body)
+  assert.equal(items.length, 1)
+  assert.ok(items[0].durable, 'the durable line is eight lines from the box, still inside the item')
+  assert.match(items[0].durable, /hook-audit\.jsonl/)
+})
+
+test('pairVerifyAssertions — a wrapped note does not strand an assert: either (#1206)', () => {
+  const body = [
+    '- [ ] **verify-after 2026-09-19** — confirm the field ships on the public contract.',
+    '      Context that wraps across a line, because that is how these get written.',
+    '      assert: GET /api/v1/status | services[id=characterai].incidentSourceStale == true',
+  ].join('\n')
+  const [item] = pairVerifyAssertions(body)
+  assert.ok(item.assertion, 'assert: must survive a wrapped note')
+  assert.equal(item.assertion.selector, 'services[id=characterai].incidentSourceStale')
+})
+
+test('pairVerifyAssertions — the NEXT item does not inherit this one\'s sub-lines (#1206)', () => {
+  // The boundary the item-scan has to respect: widening the scan must not let one box\'s durable
+  // satisfy the box below it, which would hide exactly the undecidable lines #1206 exists to catch.
+  const body = [
+    '- [ ] **verify-after 2026-09-19** — first, with a wrapped note.',
+    '      more note text here.',
+    '      durable: artifact-A (90d)',
+    '- [ ] **verify-after 2026-09-20** — second, with nothing of its own.',
+  ].join('\n')
+  const items = pairVerifyAssertions(body)
+  assert.equal(items.length, 2)
+  assert.equal(items[0].durable, 'artifact-A (90d)')
+  assert.equal(items[1].durable, null, 'the second box names no artifact and must stay undecidable')
+})
+
+test('pairVerifyAssertions — a NESTED checkbox keeps its assert to itself (#1206)', () => {
+  // The clause that stops the scan at the next checkbox had NO test: deleting it left the whole suite
+  // green while both boxes took the nested assertion. The failure direction is the worst one available
+  // here — `planIssueAutoVerify` ticks every passing item's lineIndex, so the OUTER box would be
+  // auto-ticked on evidence belonging to a different verification, and close fires if it was the last
+  // open box. The three sibling-box cases all sit at indent 0, where the indent break already fires, so
+  // they cover the other half twice and this half not at all. An assert:, not a durable:, because only
+  // the assertion reaches the auto-tick path.
+  const body = [
+    '- [ ] **verify-after 2026-09-19** — OUTER box, note wraps here',
+    '      and continues onto a second line',
+    '  - [ ] **verify-after 2026-09-20** — NESTED box',
+    '        assert: GET /api/status | services[id=claude].status == "operational"',
+  ].join('\n')
+  const items = pairVerifyAssertions(body)
+  assert.equal(items.length, 2)
+  assert.equal(items[0].assertion, null, 'the outer box must not inherit the nested assertion')
+  assert.ok(items[1].assertion, 'the nested box keeps its own')
+  assert.equal(items[1].assertion.selector, 'services[id=claude].status')
+})
+
+test('pairVerifyAssertions — a markdown LINK bullet is a plain bullet, not a checkbox (#1206)', () => {
+  // The break regex was a bare `\\[`, so `- [label](url)` ended the item and took the durable: with it —
+  // which contradicted both the docstring and the reference page, each of which say a plain nested
+  // bullet does not end it. `tickBox` can only act on `[ ]`, so `\\[[ xX]\\]` is the honest test.
+  const body = [
+    '- [ ] **verify-after 2026-09-19** — note',
+    '  - [the dashboard](https://example.com) is where to look',
+    '      durable: artifact-A',
+  ].join('\n')
+  const [item] = pairVerifyAssertions(body)
+  assert.equal(item.durable, 'artifact-A', 'a link bullet must not end the item')
+})
+
+test('findMalformedAssertLines — an assert: that does not parse is reported, not swallowed (#1206)', () => {
+  // The silent path this fix would otherwise have created: the durable: now survives a broken clause,
+  // so the item reads as decidable, no `verify-undecidable` fires, and the auto-verify the author
+  // believed they wrote never runs. Warn-only — it must not change what pairVerifyAssertions attaches.
+  const body = [
+    '- [ ] **verify-after 2026-12-01** — a future check whose clause has a typo',
+    '      assert: GET /api/status | services[id=claude].status = "operational"',
+    '      durable: archive:monthly:2026-11 (no TTL)',
+  ].join('\n')
+  const bad = findMalformedAssertLines(body)
+  assert.equal(bad.length, 1)
+  assert.equal(bad[0].lineIndex, 1)
+  assert.match(bad[0].text, /^assert:/)
+  const [item] = pairVerifyAssertions(body)
+  assert.equal(item.assertion, null, 'still not an assertion')
+  assert.equal(item.durable, 'archive:monthly:2026-11 (no TTL)', 'and the durable is still honoured')
+})
+
+test('findMalformedAssertLines — a well-formed clause, and an EXAMPLE in a fence, are not reported', () => {
+  const good = [
+    '- [ ] **verify-after 2026-12-01** — fine',
+    '      assert: GET /api/status | services[id=claude].status == "operational"',
+  ].join('\n')
+  assert.deepEqual(findMalformedAssertLines(good), [])
+  const fenced = [
+    '- [ ] **verify-after 2026-12-01** — shows the grammar',
+    '      ```',
+    '      assert: nonsense with no pipe',
+    '      ```',
+  ].join('\n')
+  assert.deepEqual(findMalformedAssertLines(fenced), [], 'an example is not a live clause')
+})
+
+test('pairVerifyAssertions — an unindented line ends the item (#1206)', () => {
+  const body = [
+    '- [ ] **verify-after 2026-09-19** — a box whose item ends at the heading below.',
+    '',
+    '## Some heading',
+    'durable: not-mine',
+  ].join('\n')
+  const [item] = pairVerifyAssertions(body)
+  assert.equal(item.durable, null, 'a top-level line is outside the item')
+})
+
+test('pairVerifyAssertions — a FENCED example assert: is not taken as live (#1206)', () => {
+  // Newly reachable: before the item-scan, a fence line ended the block, so a quoted example could
+  // never be read. The docs page and several issue bodies show the grammar this way.
+  const body = [
+    '- [ ] **verify-after 2026-09-19** — shows the grammar, then names its real artifact.',
+    '      ```',
+    '      assert: GET /api/status | services[id=x].y == "z"',
+    '      ```',
+    '      durable: artifact-B',
+  ].join('\n')
+  const [item] = pairVerifyAssertions(body)
+  assert.equal(item.assertion, null, 'an example inside a fence is not an assertion')
+  assert.equal(item.durable, 'artifact-B')
 })
 
 // #966 — pairVerifyAssertions is the scanner main() actually drives (parseVerifyAfter is its twin),
@@ -443,15 +581,19 @@ test('pairVerifyAssertions — durable: above assert: must not hide the assert (
   assert.equal(dup.durable, 'archive:monthly:2026-08 (no TTL)', 'first of each marker wins')
 })
 
-test('pairVerifyAssertions — the sub-block ends at the first line that is neither marker', () => {
+test('pairVerifyAssertions — the sub-block ends at the ITEM boundary, not at the first non-marker', () => {
   const VA = '- [ ] **verify-after 2026-09-01** — check it'
   const A = '      assert: GET /api/status | services[id=claude].status == "operational"'
+  // Unindented prose is OUTSIDE the item, so an assert: beyond it still is not this line's.
   const [it] = pairVerifyAssertions(`${VA}\nplain prose\n${A}`)
-  assert.equal(it.assertion, null, "an assert: below unrelated prose is not this line's")
+  assert.equal(it.assertion, null, "an assert: below unrelated top-level prose is not this line's")
   assert.equal(it.durable, null)
-  // A MALFORMED assert: is not a marker, so it ends the block (pre-existing behaviour, kept on
-  // purpose: a broken clause must not swallow the real content underneath it).
+  // #1206 follow-up — CHANGED deliberately. A malformed `assert:` used to END the block, which meant a
+  // typo in the clause silently discarded a perfectly good `durable:` under it: one author error
+  // compounded into a second, and the issue was then labelled `verify-undecidable` while naming its
+  // artifact two lines down. The malformed line is still not an assertion; it just no longer takes the
+  // rest of the item with it. The typo itself is surfaced by `findMalformedAssertLines`, tested above.
   const [bad] = pairVerifyAssertions(`${VA}\n      assert: nonsense with no pipe\n      durable: x`)
-  assert.equal(bad.assertion, null)
-  assert.equal(bad.durable, null)
+  assert.equal(bad.assertion, null, 'a broken clause is still not an assertion')
+  assert.equal(bad.durable, 'x', 'but it no longer strands the durable: below it')
 })
