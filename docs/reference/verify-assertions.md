@@ -28,9 +28,16 @@ integration is in `scripts/verify-reminders.mjs`. Both are unit-tested by
 
 ## Grammar
 
-Indented sub-lines **directly under** a `verify-after` checkbox — `assert:` (machine-decidable) and
-`durable:` (#1206, human-decidable). Either order, and a line may carry both; the sub-block ends at the
-first non-blank line that is neither.
+Indented sub-lines under a `verify-after` checkbox — `assert:` (machine-decidable) and `durable:`
+(#1206, human-decidable). Either order, and a line may carry both.
+
+The sub-block is the checkbox's **own list item**: every line indented past the `- [ ]` marker, up to the
+next CHECKBOX or the next line at or below that indent (a plain nested bullet does not end it). So the note may wrap across several lines and the
+sub-lines still attach. It used to end at the first non-blank line that was neither marker, which meant a
+two-line note pushed a correctly-written `durable:` out of reach — the line was right and the machine
+reported "no durable trace", so the issue was labelled `verify-undecidable` for naming an artifact eight
+lines down. Two open issues were in that state when it was found (#1245, #1224). Fenced code inside the
+item is skipped, so an `assert:` shown as an EXAMPLE is not read as a live one.
 
 ```
 - [ ] verify-after 2026-07-09 — turbopuffer probe warmed
@@ -323,6 +330,13 @@ changed.
   (per-occurrence), `liveVerifyOccurrences` (the shared per-line scanner every consumer is built on — both
   parsers, `countOpenVerifyAfter`, the body-drift guard's exclusion, and the dangerous-shape twin
   `findBacktickQuotedVerifyBoxes`).
+
+- **Unparseable-`assert:` warning (#1206 follow-up)** — the only way a line can go dark that leaves no trace
+  at all. A clause that does not parse is simply not attached, so the auto-verify the author believed
+  they wrote never runs; and once a `durable:` sits beside it the item reads as decidable, so not even
+  `verify-undecidable` fires. `findMalformedAssertLines` reports it in the warn-only silent-drop loop
+  beside its siblings. It shares `itemSubLines` with `pairVerifyAssertions` — the boundary is one function, so
+  the two cannot drift and the boundary tests cover both. Warn-only: it never changes what is attached.
 
 Follow-ups tracked in #873: `ship-issue`/`issue-triage`/`adding-a-service` convention notes (done),
 an optional HTML/text-body assertion mode, and a Tier-B weekly "suggest-don't-auto-close" digest for

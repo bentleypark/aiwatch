@@ -14,7 +14,7 @@
 import { execFileSync } from 'node:child_process'
 // #873 — Tier-A auto-verify: evaluate a machine-checkable `assert:` clause on a verify-after line and
 // close the loop (tick + comment + drop verify-blocked) instead of only pinging. See verify-assertions.mjs.
-import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate, isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, liveVerifyOccurrences } from './verify-assertions.mjs'
+import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate, isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, liveVerifyOccurrences, findMalformedAssertLines } from './verify-assertions.mjs'
 
 // Which lines a verify-after scan must SKIP (checked box `- [x]` / blockquote `>`) lives in
 // verify-assertions.mjs as `isSuppressedReminderLine` — one definition shared by both scanners (#966).
@@ -617,7 +617,7 @@ async function main() {
   }
 
   // ── Silent-drop guards (#966) ─────────────────────────────────────────────────
-  // This system exists so a verification is never forgotten, so both ways a line can go dark must be
+  // This system exists so a verification is never forgotten, so every way a line can go dark must be
   // observable. Warn-only (never mutating, never fatal) — a run that drops a real reminder must not
   // look identical to a run with nothing to do.
   for (const iss of considered) {
@@ -629,6 +629,12 @@ async function main() {
     }
     for (const bad of findInvalidVerifyAfterDates(iss.body)) {
       console.warn(`[verify-reminders] ${displayRef(iss.repo, iss.number)}: verify-after date '${bad.date}' (line ${bad.lineIndex + 1}) is not a valid calendar date — it will never ping. Fix the date.`)
+    }
+    // The only FULLY silent one (#1206 follow-up): an `assert:` that does not parse
+    // is simply not attached, so the auto-verify never runs and the line degrades to a human ping with
+    // nothing saying why. It does not even reach `verify-undecidable` when a `durable:` sits beside it.
+    for (const bad of findMalformedAssertLines(iss.body)) {
+      console.warn(`[verify-reminders] ${displayRef(iss.repo, iss.number)}: an assert: clause on line ${bad.lineIndex + 1} does not parse — it will NEVER auto-verify, silently. Check the source/selector/operator: ${truncate(bad.text, 100)}`)
     }
   }
 
