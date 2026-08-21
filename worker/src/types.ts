@@ -169,15 +169,25 @@ export interface ServiceStatus {
    *  while the service stays operational under the <30% threshold (#447). UI shows a
    *  "N affected" badge; absent when 0. */
   partialCount?: number
-  /** #591 — the service's incident source is known-stale (its status page migrated to a
-   *  platform AIWatch can't reach server-side, so the feed AIWatch reads is frozen — e.g.
-   *  DeepSeek → Flashduty, #507). The incident list/uptime read as current but aren't, which
-   *  inflates the Score (an empty 30-day incident window scores full incidents+recovery). All
-   *  ranking surfaces exclude these (like estimate-only services) so a frozen feed can't rank.
-   *  Declared per-service via ServiceConfig.incidentSourceStale; absent when false. */
+  /** #591 — AIWatch cannot currently read this service's incident source, so its incident list and
+   *  uptime read as current but are not: an empty or frozen 30-day window scores full incidents+recovery
+   *  and inflates the Score. All ranking surfaces exclude these so it cannot rank.
+   *  #1268 — the CAUSE is deliberately not part of the contract. This used to say the status page had
+   *  "migrated to a platform AIWatch can't reach server-side" (the #507 DeepSeek→Flashduty case it was
+   *  written for), and reader-facing copy inherited that framing until a page was simply DELETED and
+   *  nothing had migrated anywhere. The flag says only that the source was not read.
+   *  Set wherever a source is unreadable (#1268 — the read failed, so `incidents: []` is unread rather
+   *  than empty, and `score.ts` has no source-liveness input of its own): declared per-service via
+   *  `ServiceConfig.incidentSourceStale`; inline on the `sourceDead` (4xx) returns and on the
+   *  `fetchAllServices` stand-in literal; and at `fetchService`'s exit by `withUnreadFeedFlag` once the
+   *  unreadable-source verdict has CROSSED the ramp — `sourceUnknown` AND `status === 'unknown'`, so a
+   *  first failed read is normally not flagged (normally, not never: `utils.ts`' documented residual can
+   *  return `shouldDegrade` on strike one when a failing SECONDARY leg has armed `failSince` — see
+   *  `withUnreadFeedFlag`). Cleared when a fresh Flashduty feed supersedes the
+   *  frozen mirror. Absent when false. */
   incidentSourceStale?: boolean
-  /** #689 — the status-page API returned a 4xx (the page is deactivated/gone, e.g. Character.AI's
-   *  Statuspage → 401 "page inactive"). The service is shown operational+stale (not a false degraded);
+  /** #689 — the status-page API returned a 4xx (the page is deactivated/gone). The service is shown
+   *  operational+stale (not a false degraded);
    *  this flag lets the cron send a distinct "status source inactive" operator alert (not a misleading
    *  "degraded" alert) so the source death is judged accurately. Runtime-only; absent when the source
    *  responds. */
@@ -189,14 +199,20 @@ export interface ServiceStatus {
    *  alert reads this so a single transient hiccup mid-dead-source is held as 'unknown' rather than
    *  misread as a 'recovered' signal (the #714 Inactive/Recovered flap). Runtime-only. */
   sourceUnknown?: boolean
-  /** #689 — set when `sourceDead` AND a healthy direct probe independently confirms the service is
-   *  reachable (the 2nd case: a PROBED service whose status PAGE died but whose API still responds).
-   *  Then the badge stays operational (probe-backed) instead of "Unknown"; the un-probed case
-   *  (sourceDead without this) shows "Unknown". Set by the cross-validation in `fetchAllServices`. */
+  /** #689 — set when a healthy direct probe independently confirms the service is reachable while its
+   *  status page is NOT (a PROBED service whose status PAGE died but whose API still responds). Then the
+   *  badge stays operational (probe-backed) instead of "Unknown"; without it, the un-probed case shows
+   *  "Unknown". Set by the cross-validation in `fetchAllServices`.
+   *
+   *  #1268 — set on BOTH ways a source becomes unreadable, not just the 4xx one: the `sourceDead` pass,
+   *  and the probe pass that overrides an `unknown` fetch verdict back to `operational`. Keying it to
+   *  `sourceDead` alone tied the explanation to one HTTP status, so a source that died a different way
+   *  (a deleted Statuspage answers `302 → 200 text/html`, not `4xx`) produced the same probe-backed
+   *  green with nothing recording that the probe is what backed it. */
   probeConfirmed?: boolean
   /** #1004 — set when an unreadable-source verdict is CORROBORATED by our own probe (the service is
-   *  probed, and the probe is not healthy). Distinct from `probeConfirmed` (which is about `sourceDead`
-   *  + a HEALTHY probe). Set by the cross-validation in `fetchAllServices`.
+   *  probed, and the probe is not healthy). Distinct from `probeConfirmed` (an unreadable source + a
+   *  HEALTHY probe). Set by the cross-validation in `fetchAllServices`.
    *
    *  #1233 — PROVENANCE ONLY. It used to be the correction token: the value on the wire was `degraded`
    *  either way, and each surface had to read this flag to tell a real outage from an unreadable source

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { recordProbeSuppression } from '../services'
+import { recordProbeSuppression, CROSS_VALID_SUPPRESSED_TTL_S } from '../services'
 
 // Regression guard for #501: the probe cross-validation suppression counter shipped with
 // `kvPut` un-imported in services.ts, so the inline write threw `ReferenceError: kvPut is not
@@ -26,8 +26,19 @@ describe('recordProbeSuppression (#501)', () => {
     expect(kv.put).toHaveBeenCalledWith(
       'cross-valid:suppressed:claude:2026-06-02',
       '1',
-      { expirationTtl: 172800 },
+      { expirationTtl: CROSS_VALID_SUPPRESSED_TTL_S },
     )
+  })
+
+  it('#1268 — retains 90 days, so the FIRST date a service appears here is still readable later', () => {
+    // Not a taste check on the number. This counter is the only record of WHEN the probe began
+    // overriding a service's verdict, and at 48h that was unanswerable two days later — dating
+    // Character.AI's change needed third-party web archives. What a key licenses is bounded, and the
+    // bound is written where the constant is defined (`services.ts`) and in kv-schema.md: it is not by
+    // itself the date a source changed how it fails, since `isReadSuspect` also admits a page reporting
+    // `degraded` with no incident named. Asserted as an absolute so a "tidy-up" back toward the daily
+    // summary's one-day read fails here.
+    expect(CROSS_VALID_SUPPRESSED_TTL_S).toBe(7_776_000)
   })
 
   it('increments an existing same-day counter', async () => {

@@ -24,7 +24,7 @@ import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
-import { sourceFlagsOf } from '../utils/statusDisplay'
+import { sourceFlagsOf, isDisplayAffected } from '../utils/statusDisplay'
 import { STATUS_URL } from '../utils/statusPageUrls'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
@@ -874,7 +874,7 @@ export default function ServiceDetails({ serviceId }) {
 
       {/* #689 — status source inactive (status page 4xx/deactivated): explains the blanked uptime/
           incidents. Two cases: probeConfirmed (a probed service still reachable via direct probe →
-          operational badge, probe-backed) vs no probe (e.g. Character.AI → neutral "Unknown" badge). */}
+          operational badge, probe-backed) vs no probe (→ neutral "Unknown" badge). */}
       {service.sourceDead && (
         <div className="rounded-lg border" style={{ borderColor: 'var(--amber)', background: 'var(--bg2)', padding: '12px 16px' }}>
           <div className="text-[13px] font-medium" style={{ color: 'var(--amber)' }}>⚠ {t('svc.sourceDead.title')}</div>
@@ -888,11 +888,41 @@ export default function ServiceDetails({ serviceId }) {
           #1233 — the status alone is enough for the current shape: an `unknown` badge with no
           explanation beside it is the worst version of this card, so the note must not depend on the
           flag still travelling with the status. The `sourceUnknown` + `degraded` arm is the transitional
-          read of a payload cached before that change. */}
-      {!service.sourceDead && (service.status === 'unknown' || (sourceUnknown && service.status === 'degraded')) && (
+          read of a payload cached before that change.
+          #1268 — the third arm is the case where the badge is GREEN and therefore looks like it needs no
+          note at all: the fetch leg said `unknown` and cross-validation overruled it. That green may be
+          real, but it is OURS, and without a note the card claims a confirmation nobody made — the exact
+          state Character.AI sat in once its deleted Statuspage stopped answering 4xx.
+          It keys on `incidentSourceStale`, NOT on `probeConfirmed`, because there are THREE overrides and
+          only one of them is probe-backed. Phase 2 (platform quorum) and Phase 3 (metastatuspage) also
+          force `operational` and set no provenance at all — and since the flag is set upstream in
+          `fetchService`, those services arrive here with uptime, incidents, calendar and ranking all
+          blanked (`isUnreliableUptime`, `incidentsBlanked`) behind a green pill with nothing explaining
+          why. Phase 2 fires at platform scale, so that is a whole-roster event. Keying on the flag makes
+          the note follow the blanking, which is the thing a reader actually needs explained; it also
+          matches is-down, which already renders on the flag alone.
+          The flag outlives the presentation: two states carry it while the pill is red or amber — a
+          probe-CORROBORATED outage, where Phase 1 promotes the verdict to `degraded` + `probeContradicted`
+          (the state `sourceFlagsOf` deliberately strips `sourceUnknown` from so no surface says
+          "unreadable", #1004 re-cut in #1233), and the aging Flashduty band, where the relayed feed's
+          live badge can be `down`.
+          `isDisplayAffected` therefore picks the SENTENCE; it does not gate the block. Using it to
+          suppress was the previous cut, and it traded a false claim for no claim at all: those cards
+          blank uptime, Incidents, MTTR, the Score section and the calendar, and the reader was left with
+          an amber pill and four em-dashes. The real fault was never the condition — it was that two of
+          the three sentences close with "it does NOT mean the service is impaired", which the flag does
+          not license beside a non-green pill. `bodyAffected` claims only the omission. Saying less beats
+          saying nothing, and it puts this arm on the same condition as is-down, which is what round 4
+          asked for.
+          One genuine strike-1 case survives and is meant to: the `fetchAllServices` stand-in literal is
+          flagged unconditionally, so a batch-loop throw flags a healthy source on its first cycle — for
+          the whole remaining roster. Everything on the card really is blanked there, so the note is the
+          honest thing to show. Body variant picked the same way the sourceDead block above picks its
+          own. */}
+      {!service.sourceDead && (service.status === 'unknown' || service.incidentSourceStale || (sourceUnknown && service.status === 'degraded')) && (
         <div className="rounded-lg border" style={{ borderColor: 'var(--border-hi)', background: 'var(--bg2)', padding: '12px 16px' }}>
           <div className="text-[13px] font-medium text-[var(--text0)]">{t('svc.sourceUnknown.title')}</div>
-          <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '5px', lineHeight: 1.5 }}>{t('svc.sourceUnknown.body')}</div>
+          <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '5px', lineHeight: 1.5 }}>{t(isDisplayAffected(service) ? 'svc.sourceUnknown.bodyAffected' : service.probeConfirmed ? 'svc.sourceUnknown.bodyProbe' : 'svc.sourceUnknown.body')}</div>
         </div>
       )}
 

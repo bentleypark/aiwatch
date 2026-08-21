@@ -1051,7 +1051,9 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   const hasUptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
   const gradeStr = service.scoreGrade ? ` (${service.scoreGrade.charAt(0).toUpperCase() + service.scoreGrade.slice(1)})` : ''
   // #591 — a stale-source service carries a frozen uptime30d + an inflated score; omit both here
-  // (the ⚠️ note below explains why). Status/last-checked stay — they're probe-measured + current.
+  // (the ⚠️ note below explains why). Status/last-checked stay — they are the freshest verdict we have,
+  // which is NOT the same as a measurement (#1268): depending on which writer set the flag the badge may
+  // be a live feed, a probe override, or an unmeasured default, and this file cannot tell them apart.
   const stale = !!service.incidentSourceStale
   const metaParts = [`Last checked: ${esc(timeAgo(service.lastChecked))}`]
   if (hasUptime && !stale) metaParts.push(`Uptime: ${service.uptime30d!.toFixed(2)}%`)
@@ -1062,8 +1064,40 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   return `<div class="header">
 <h1>${statusEmoji(displayStatus)} Is ${esc(seo.displayName)} Down?</h1>
 <p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${answer.yesno} &mdash; ${esc(seo.displayName)} ${answer.phrase}</p>
+${/* #1268 — this note sits directly under the ANSWER, not at the foot of the header. It used to render
+      last, below "No recent incidents" and the ranking line, so the first thing a reader (or a search
+      snippet) took from the page was a flat green verdict about a service whose status source we cannot
+      read. The dashboard says whose evidence the verdict rests on; this surface did not, and it is the
+      higher-reach one.
+      It states only what the flag knows. It used to name a CAUSE ("moved to a source we can't reach"),
+      which described the DeepSeek migration it was written for and is false for a deleted page — the
+      flag carries no cause, and a per-cause branch here would be one more untested claim on an SEO page.
+      The `probeConfirmed` variant is the same pair `svc.sourceDead.body` / `.bodyProbe` uses on the
+      detail card: when our own probe reaches the service, the green above is real but it is OURS, and
+      saying so is the difference between an answer and an assertion.
+      The "so its incident feed is frozen" clause is dropped when incidents are non-empty, because there
+      it is the false half. On an aging DeepSeek relay the flag is re-asserted while the feed still
+      serves live incidents, so the note sat two lines above `Last incident: … (ongoing)` out of the very
+      feed it called frozen. Same discriminator the header line below uses — this is a clause deletion,
+      not a fourth branch. With no incidents and no probe there is no measurement behind the verdict at
+      all, so that variant claims nothing about the service.
+      The SERP answer (`<title>` + meta description) is deliberately untouched — it stays on the raw
+      status, as #744 established; this is the on-page body only. */''}${stale ? `<p class="meta" style="color:var(--amber)">⚠️ ${service.probeConfirmed
+        ? `AIWatch can't read ${esc(seo.displayName)}'s status page, but the service answers AIWatch's own direct checks &mdash; the answer above is our measurement, not the provider's. Uptime, score and ranking are omitted until the source is readable again.`
+        : incidents.length > 0
+          ? `AIWatch can't currently read ${esc(seo.displayName)}'s status source &mdash; uptime, score and ranking are omitted until the source is readable again. The status and incidents shown are from the last reading AIWatch could take.`
+          : `AIWatch can't currently read ${esc(seo.displayName)}'s status source, so its incident feed is frozen &mdash; uptime, score, and ranking are omitted until the source is readable again.`}</p>` : ''}
 <p class="meta mono">${metaParts.join(' &middot; ')}</p>
-${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
+${/* #1268 — a stale source with NOTHING behind it asserts neither branch. "No recent incidents" was the
+      header's own copy of the defect this issue is about: an unread feed rendered as a quiet one, on the
+      SEO answer, directly above a note saying we cannot read the feed. The note carries the explanation,
+      so the line is withheld rather than reworded.
+      Gated on an EMPTY array, not on `stale` alone, and that distinction is load-bearing. `deepseek` on
+      an AGING Flashduty feed (past the 1h soft-stale window, inside the 3h TTL) re-asserts the flag
+      while still serving a live badge AND live incidents — `readFlashdutyStatus` preserves them
+      deliberately. Withholding on bare `stale` deleted the only surviving description of what was wrong
+      from a page answering "Yes — down": `renderIncidents` is stale-gated too, and the #1104 note is
+      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
 ${/* #1104 — withholding the "Resolved" label stopped the false claim but left the page answering
       "Operational" directly above an Investigating row with nothing reconciling the two. The AI card
       cannot do that job: it renders '' whenever no analysis exists, which is the state right after a
@@ -1087,7 +1121,6 @@ ${'' /* #857 — this meta line always renders. When the service is ranked it le
    confidence service's "#N of M" must say what M actually counts, or a small M (e.g. "of 4") reads as an
    unexplained shrink for a reader who just saw a much larger number on the dashboard's high table. */}
 <p class="meta">${service.rank ? `${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services${service.scoreConfidence === 'medium' ? ' with no official uptime metric (scored on incidents, recovery, and responsiveness only)' : ''} by <a href="https://ai-watch.dev/#ranking" data-ga="click_ranking" data-ga-loc="is_down_page" data-ga-source="header">AIWatch reliability score</a>` : `See how AI services rank on reliability, uptime, and incidents each month`} &middot; <a href="${REPORTS_INDEX_HREF}" data-ga="click_reports" data-ga-loc="is_down_page" data-ga-source="header">${REPORTS_INDEX_LABEL} &rarr;</a></p>
-${service.incidentSourceStale ? `<p class="meta" style="color:var(--amber)">⚠️ ${esc(seo.displayName)}'s status page moved to a source AIWatch can't reach, so its incident feed is frozen — uptime, score, and ranking are omitted until the source is reachable again. Live status above is still measured directly.</p>` : ''}
 </div>`
 }
 
@@ -1441,9 +1474,11 @@ export function renderIncidents(service: ServiceData | null): string {
   // here would be a false all-clear; say the history is unavailable instead. The qualifier is dropped
   // here: a frozen array's "still open" incident is frozen too, so claiming it is CURRENTLY open would
   // be the #591 false-currency this branch exists to avoid.
+  // #1268 — the naming of a CAUSE ("moved to a platform") is dropped for the same reason as the header
+  // note above: `incidentSourceStale` carries no cause, and a deleted status page moved nowhere.
   if (service.incidentSourceStale) {
     return `${headingWith('')}
-<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">Incident history unavailable &mdash; ${esc(service.name)}'s status source moved to a platform AIWatch can't currently reach, so recent incidents can't be retrieved.</p></div>`
+<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">Incident history unavailable &mdash; AIWatch can't currently read ${esc(service.name)}'s status source, so recent incidents can't be retrieved.</p></div>`
   }
 
   if (recent.length === 0) {
