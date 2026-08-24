@@ -56,31 +56,186 @@ export interface V1TrafficCounts {
   total: number    // all + service
 }
 
-// ── Feed-poll traffic (#548) ──────────────────────────────────────────────
+// ── Feed-poll traffic (#548, extended #1273) ──────────────────────────────
 // The RSS feeds (/feed.xml + /feed/:slug) are the consent-free retention proxy GA4 can't give:
 // a step-up in poll volume after an outage = retained RSS/Slack subscribers. Mirrors the v1
 // pattern above on the SAME dataset, distinguished by a separate index ('feed-poll').
 //   index1  = 'feed-poll'                     → total feed traffic via one index filter
 //   blob1   = 'feed-all' | 'feed-service'     → /feed.xml vs /feed/:slug split
+//   blob2   = feed target (#1273)             → service id | FEED_ALL_TARGET | FEED_UNKNOWN_TARGET
+//   blob3   = client class (#1273)            → a `FeedClientClass` (the union owns the list)
 //   double1 = 1                               → request counter (SUM in AE SQL)
+//
+// #1273 — WHY blob2/blob3 exist. blob1 alone answers "how many polls", which nobody reading it later
+// can turn into "how many subscriptions": every poller shares one anonymous URL. blob2 says WHICH
+// feed, blob3 says WHAT KIND of client — two facts the path and the headers already carry at the call
+// site, and that this module used to discard.
+//
+// Read the RESULT as a trend, never as a subscriber count. Converting polls to subscriptions needs a
+// per-client cadence we neither own nor measure, so this module does not attempt it and no comment
+// here should quote one. `subscriberFeeds` below exists precisely so the headline signal needs no
+// such divisor.
+/** feed target → client class → poll count. Named so `FeedTrafficCounts.byFeed` and
+ *  `GrowthDailyRow.feedPolls` are visibly the same fact rather than two identical spellings. */
+export type FeedPollsByTarget = Record<string, Record<string, number>>
+
 export type FeedVariant = 'feed-all' | 'feed-service'
 
+/**
+ * Does this stored value represent a MEASUREMENT?
+ *
+ * The single definition of that question. It used to be answered at each site that asked, and the
+ * sites disagreed: the writer stored `{}` as a measured all-zero window while `preserveMeasured`
+ * treated the same value as no measurement at all. One predicate, referenced everywhere.
+ *
+ * An empty map is not a measurement. Zero rows matched `index1='feed-poll'` over 24h, and the worker
+ * writes a point on every feed request — so an empty window is either no traffic at all or a recorder
+ * that wrote nothing (a dropped/renamed ANALYTICS binding makes every write a silent no-op while the
+ * query still succeeds). Those are indistinguishable here, and neither is a count of subscribers.
+ */
+export function isMeasuredFeedPolls(v: unknown): v is FeedPollsByTarget {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const feeds = Object.values(v as Record<string, unknown>)
+  if (feeds.length === 0) return false
+  // Validated to the depth the `v is` promises. A shallow check admitted `{claude: 5}` and
+  // `{claude: null}`, and `preserveMeasured` — whose only input validation is `isRow` (a string
+  // `date`) — then resurrected them over an honest failure, leaving the first reader to throw.
+  return feeds.every((perClient) => {
+    if (typeof perClient !== 'object' || perClient === null || Array.isArray(perClient)) return false
+    const counts = Object.values(perClient as Record<string, unknown>)
+    // Non-empty at this level too: `{claude: {}}` is the same "the recorder wrote nothing" shape as
+    // `{}`, one level down, and would otherwise store and render as a measurement.
+    return counts.length > 0 && counts.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0)
+  })
+}
+
+/** What one day's feed read produced. `polls` is non-null on exactly one verdict, so a caller cannot
+ *  log one story and store another — the two used to be separate functions over the same input and
+ *  the wiring test existed solely to prove they were handed the same argument. */
+export type FeedPollsVerdict = 'ok' | 'failed' | 'zero' | 'unclassifiable'
+export type FeedPollsRead =
+  | { verdict: 'ok'; polls: FeedPollsByTarget }
+  | { verdict: Exclude<FeedPollsVerdict, 'ok'>; polls: null }
+
+/**
+ * Judge one day's feed read: what to STORE and what to SAY about it, as one value.
+ *
+ * `polls` is `null` on every verdict but `ok`, and `verdict` is stored beside it — so `null` is no
+ * longer four different facts wearing one spelling. It used to mean "the AE query failed" by
+ * documentation and "failed, or a quiet window, or thousands of polls none of which carried the
+ * blobs" in practice, in a permanent no-TTL series whose first reader does not exist yet. The run
+ * already knew which; it wrote the answer to a log Workers discards within days and the durable row
+ * got the ambiguous half.
+ *
+ * `zero` vs `unclassifiable` is decided by `total`, not by which check ran first: a window can report
+ * polls while classifying none of them (every row missing blob2/blob3 — what a pre-#1273 24h window
+ * looks like on the day of deploy), and calling that "the recorder wrote no rows" names the wrong
+ * fault. `unclassifiable` also covers a window holding only `__unknown__`: every derived view drops
+ * that key, so there is nothing to show and nothing worth storing as a measurement.
+ */
+export function readFeedPolls(
+  feed: Pick<FeedTrafficCounts, 'total' | 'byFeed'> | null | undefined,
+): FeedPollsRead {
+  if (!feed) return { verdict: 'failed', polls: null }
+  if (!isMeasuredFeedPolls(feed.byFeed)) {
+    return { verdict: feed.total === 0 ? 'zero' : 'unclassifiable', polls: null }
+  }
+  if (!Object.keys(feed.byFeed).some((f) => f !== FEED_UNKNOWN_TARGET)) {
+    return { verdict: 'unclassifiable', polls: null }
+  }
+  return { verdict: 'ok', polls: feed.byFeed }
+}
+
+/** Client classes for blob3. `reader` is a NAMED-reader allowlist (see FEED_CLIENT_MATCHERS), not
+ *  "any feed reader": an unrecognised reader shipping a `Mozilla/…` envelope lands in
+ *  `browser`; one sending no recognisable token lands in `other`. */
+export type FeedClientClass = 'slack' | 'reader' | 'bot' | 'browser' | 'other'
+
 const FEED_INDEX = 'feed-poll'
+
+/** blob2 sentinel for /feed.xml (the all-services feed). Pinned against collision with a real service
+ *  id/slug by `feed-poll-instrumentation-wiring.test.ts` — the same claim `BADGE_UNKNOWN_SERVICE`
+ *  makes and (deliberately) does not enforce. */
+export const FEED_ALL_TARGET = '__all__'
+/** blob2 sentinel for a /feed/:slug segment matching no known feed — see the cardinality note on
+ *  `feedTarget`. Collision-pinned like FEED_ALL_TARGET above. NOT a subscribable feed: traffic to it
+ *  is by definition traffic to a URL we do not serve, so `subscriberFeeds` excludes it. */
+export const FEED_UNKNOWN_TARGET = '__unknown__'
 
 /** Classify a feed request path: /feed.xml = all-services, /feed/:slug = per-service. */
 export function feedVariant(pathname: string): FeedVariant {
   return pathname === '/feed.xml' ? 'feed-all' : 'feed-service'
 }
 
-/** Record one feed-poll data point. Best-effort (guarded binding + try/catch), like recordV1Traffic. */
+/**
+ * Resolve a feed request path to the blob2 target: the canonical SERVICE ID (not the URL slug, so
+ * this dimension lines up with `growth:daily` and the rest of the codebase), `FEED_ALL_TARGET` for
+ * /feed.xml, or `FEED_UNKNOWN_TARGET` for anything else. Pure.
+ *
+ * The lookup is mandatory, not cosmetic: `/feed/<anything>` is caller-controlled and public, so
+ * recording the raw segment would make blob2 cardinality unbounded and inflatable by anyone hitting
+ * /feed/<random> in a loop. Collapsing every miss into one sentinel keeps it bounded by
+ * (known feeds + 2) regardless of input — the same guard `BADGE_UNKNOWN_SERVICE` provides for
+ * /badge/:serviceId (#1157) and `parsePageviewBody`'s `validIds` provides for the audience beacon.
+ */
+export function feedTarget(pathname: string, slugToId: ReadonlyMap<string, string>): string {
+  if (pathname === '/feed.xml') return FEED_ALL_TARGET
+  const segment = pathname.split('/')[2] ?? ''
+  return slugToId.get(segment) ?? FEED_UNKNOWN_TARGET
+}
+
+// Ordered classifiers for `classifyFeedClient`: a real user-agent can match several, and the first
+// match wins. WHICH orderings are load-bearing is decided by the UA literals in api-traffic.test.ts;
+// four successive attempts to enumerate them here each shipped a claim the tests did not hold, so the
+// enumeration is gone rather than corrected a fifth time.
+//
+// All four are best-effort string matching over third-party UA strings and are wrong in BOTH
+// directions at the margins — no delimiter set separates `Googlebot-Image` from a handset model like
+// `CUBOT-P30`. That error is not contained: the class is a KEY of `byFeed`, which lands in the
+// permanent `growth:daily` series, and a named reader misread as `bot` drops OUT of `subscriberFeeds`.
+const FEED_CLIENT_MATCHERS: ReadonlyArray<readonly [FeedClientClass, RegExp]> = [
+  ['slack', /^slackbot(?![-\w])/i],
+  ['bot', /bot[/;),\]-]|bot$|crawl|spider|scrap|slurp|headless|curl\/|wget|python-requests|go-http|okhttp|libwww|httpclient/i],
+  ['reader', /feedly|inoreader|newsblur|feedbin|netvibes|theoldreader|bazqux|miniflux|freshrss|tt-rss|tiny tiny rss|akregator|reeder|feedspot|liferea|nextcloud-news/i],
+  ['browser', /mozilla|webkit|gecko|chrome|safari|firefox|edge\//i],
+]
+
+/**
+ * Bucket a request's user-agent into a `FeedClientClass`. Pure, and the RAW user-agent is never
+ * returned or stored — only the fixed enum reaches WAE, the same discipline `classifyReferrer`
+ * applies to referrer hosts (#1055): free text from the network does not become a dimension value.
+ * A missing or unrecognised UA falls through to `other` — absence is not evidence.
+ */
+export function classifyFeedClient(userAgent: string | null | undefined): FeedClientClass {
+  const ua = userAgent ?? ''
+  for (const [cls, re] of FEED_CLIENT_MATCHERS) if (re.test(ua)) return cls
+  return 'other'
+}
+
+/**
+ * Record one feed-poll data point. Best-effort (guarded binding + try/catch), like recordV1Traffic.
+ *
+ * `slugToId` and `userAgent` are REQUIRED rather than optional on purpose. An optional dimension is
+ * how a derived set silently re-empties: a call site that forgets one keeps compiling and keeps
+ * writing rows that look like real traffic while the new breakdown reads as "nobody polled" (#970).
+ * Required params make `tsc` name every call site instead.
+ */
 export function recordFeedTraffic(
   analytics: AnalyticsEngineDataset | undefined,
-  pathname: string,
+  // The parsed `URL`, NOT a path string. Both `url.pathname` and `request.url` are `string`, so a
+  // `string` parameter let the whole-URL form type-check, keep every source-scan assertion matching,
+  // and pass 4615 tests — while `feedVariant` could never see `/feed.xml` (blob1 permanently
+  // `feed-service`) and `split('/')[2]` yielded the HOST (blob2 permanently `__unknown__`). Taking
+  // the object moves that guard from a scan to tsc.
+  url: URL,
+  slugToId: ReadonlyMap<string, string>,
+  userAgent: string | null | undefined,
 ): void {
   if (!analytics) return
+  const pathname = url.pathname
   try {
     analytics.writeDataPoint({
-      blobs: [feedVariant(pathname)],
+      blobs: [feedVariant(pathname), feedTarget(pathname, slugToId), classifyFeedClient(userAgent)],
       doubles: [1],
       indexes: [FEED_INDEX],
     })
@@ -93,33 +248,211 @@ export interface FeedTrafficCounts {
   all: number      // /feed.xml polls
   service: number  // /feed/:slug polls
   total: number    // all + service
+  // #1273 — polls per feed target (blob2) BROKEN DOWN BY client class (blob3), i.e. exactly the rows
+  // the AE SQL `GROUP BY blob1, blob2, blob3` already returns. Bounded by (known feeds + 2) ×
+  // FeedClientClass.
+  //
+  // NESTED, not two flat maps, and this is the whole point of the shape. Flat `byFeed` + flat
+  // `byClient` cannot answer "which feeds did a SUBSCRIBER poll" — and the headline signal this
+  // dataset exists to produce is exactly that: a feed appearing in the set for the first time means
+  // somebody subscribed to it (a count with no divisor, unlike polls ÷ cadence). A crawler sweeping
+  // every feed would add ~46 keys to a flat byFeed at once and be indistinguishable from 46 new
+  // subscribers, destroying that signal — which is the conflation this dimension was added to end.
+  //
+  // A key is ABSENT when that target/class had no polls in the window. What an absent MAP means is
+  // `GrowthDailyRow.feedPolls`'s contract, stated there.
+  //
+  // The per-class rollup is DERIVED (`rollupByClient`), never stored beside this: two representations
+  // of one fact in one row is a drift waiting to happen.
+  byFeed: FeedPollsByTarget
 }
 
-/** AE SQL summing the last-24h feed poll count per variant (sampling-corrected via SUM(_sample_interval)). */
+/** The column aliases this query emits, which `parseFeedTrafficResponse` reads back by name. Shared
+ *  so an alias rename lands on both sides at once. This pins the NAMES only; the blob POSITION →
+ *  meaning mapping is pinned by the record-site test, not by this constant. */
+export const FEED_SQL_COLUMNS = { variant: 'variant', target: 'target', client: 'client', requests: 'requests' } as const
+
+/** AE SQL summing the last-24h feed poll count per variant, target and client class
+ *  (sampling-corrected via SUM(_sample_interval)). */
 export function buildFeedTrafficSql(dataset = V1_DATASET): string {
+  const c = FEED_SQL_COLUMNS
   return (
-    `SELECT blob1 AS variant, SUM(_sample_interval) AS requests ` +
+    `SELECT blob1 AS ${c.variant}, blob2 AS ${c.target}, blob3 AS ${c.client}, SUM(_sample_interval) AS ${c.requests} ` +
     `FROM ${dataset} ` +
     `WHERE index1 = '${FEED_INDEX}' AND timestamp > NOW() - INTERVAL '1' DAY ` +
-    `GROUP BY blob1 ` +
+    `GROUP BY blob1, blob2, blob3 ` +
     `FORMAT JSON`
   )
 }
 
-/** Parse the AE SQL feed-traffic JSON into per-variant counts. Tolerant of string/number requests. */
+/**
+ * One cell of the AE `requests` column → a usable count, or `null` when it is not one. Rejects
+ * everything `Number()` silently turns into a finite 0 (`null`, `''`, `[]`, `false`, whitespace) and
+ * anything negative — both reach the caller as "a measured zero" and are then stored forever. Pure.
+ */
+function parseRequestCount(raw: unknown): number | null {
+  const n = typeof raw === 'number' ? raw
+    : typeof raw === 'string' && raw.trim() !== '' ? Number(raw)
+    : NaN
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+/**
+ * Parse the AE SQL feed-traffic JSON into per-variant, per-target and per-client counts. Tolerant of
+ * string/number `requests` and of rows predating #1273 (no blob2/blob3): such a row still contributes
+ * its variant total, and simply adds nothing to the two breakdowns rather than inventing a bucket for
+ * it. The variant totals therefore remain comparable across the deploy boundary — the property #1055
+ * broke when it repointed a field's meaning under its old name.
+ */
 export function parseFeedTrafficResponse(json: unknown): FeedTrafficCounts | null {
   const data = (json as { data?: unknown })?.data
-  if (!Array.isArray(data)) return null
+  if (!Array.isArray(data)) {
+    // The parse case; `queryFeedTraffic` logs the HTTP, throw and creds cases separately.
+    console.warn('[wae] feed SQL response has no `data` array — feed poll breakdown unavailable')
+    return null
+  }
   let all = 0
   let service = 0
+  // A Map, not an object literal: `r.target` is a string from the network, and `byFeed[r.target] ??= {}`
+  // on the literal `__proto__` reads back Object.prototype (truthy, so `??=` never assigns) and then
+  // writes onto it — polluting the prototype for the isolate while `byFeed` comes out empty, i.e.
+  // invisibly. `feedTarget` bounds blob2 today so no such row can be produced, but this function takes
+  // its input from the network and must not depend on a guarantee established two layers away.
+  const byFeed = new Map<string, Map<string, number>>()
   for (const row of data) {
-    const r = row as { variant?: unknown; requests?: unknown }
-    const parsed = Number(r.requests)
-    const n = Number.isFinite(parsed) ? parsed : 0
-    if (r.variant === 'feed-all') all += n
-    else if (r.variant === 'feed-service') service += n
+    const r = row as Record<string, unknown>
+    const variant = r[FEED_SQL_COLUMNS.variant]
+    const target = r[FEED_SQL_COLUMNS.target]
+    const client = r[FEED_SQL_COLUMNS.client]
+    const parsed = parseRequestCount(r[FEED_SQL_COLUMNS.requests])
+    const n = parsed ?? 0
+    const counted = variant === 'feed-all' || variant === 'feed-service'
+    if (variant === 'feed-all') all += n
+    else if (variant === 'feed-service') service += n
+    // A pre-#1273 row carries neither blob, and a partially-written one could carry only one. Both
+    // still count toward the variant totals above; neither invents a bucket here.
+    //
+    // An UNREADABLE `requests` also creates no bucket. Creating one would store a hard `0`, and this
+    // field's own contract reads a key present-with-0 as a measured zero — so an unreadable count
+    // would become a measured zero, permanently, in a no-TTL series. Absent is the honest state.
+    // `parseRequestCount`, not `Number()`: the coercion this line used to make read `null`, `''`,
+    // `[]`, `false` and `' '` as a finite 0 and built the very bucket this sentence forbids.
+    // `counted` gates the bucket on the SAME predicate as the totals above. Without it a row with an
+    // unrecognised variant contributes to `byFeed` but to neither total, so the rendered breakdown can
+    // exceed its own headline and the residual goes negative behind a `> 0` guard.
+    if (counted && parsed !== null && typeof target === 'string' && target && typeof client === 'string' && client) {
+      let perClient = byFeed.get(target)
+      if (!perClient) byFeed.set(target, (perClient = new Map()))
+      perClient.set(client, (perClient.get(client) ?? 0) + n)
+    }
   }
-  return { all, service, total: all + service }
+  return {
+    all,
+    service,
+    total: all + service,
+    // `Object.fromEntries` defines OWN properties, so a `__proto__` key round-trips as data.
+    byFeed: Object.fromEntries([...byFeed].map(([f, m]) => [f, Object.fromEntries(m)])),
+  }
+}
+
+/**
+ * Which client classes represent an actual SUBSCRIPTION — a client polling on a schedule because
+ * somebody asked it to.
+ *
+ * A `Record` keyed by the union, NOT an array, and that is the whole point: a `readonly
+ * FeedClientClass[]` carries no exhaustiveness obligation, so adding a sixth class compiles clean,
+ * lands outside the list, and silently undercounts the headline signal forever. `outage-audience.ts`
+ * writes that exact lesson down for `AUDIENCE_SOURCES` ("tsc does NOT catch this") and pins it with a
+ * test; a Record literal keyed by the union IS the tsc-checked site, so a new class cannot be added
+ * without deciding — here, where the reason for each decision is written.
+ */
+const FEED_CLIENT_IS_SUBSCRIBER: Record<FeedClientClass, boolean> = {
+  slack: true,
+  reader: true,
+  bot: false, // a crawler
+  browser: false, // a person looking once — and, per FeedClientClass, an unrecognised reader
+  other: false, // no recognisable token at all; see subscriberFeeds for the undercount this accepts
+}
+
+/** The subscriber-class members, derived from the exhaustive record above. */
+export const SUBSCRIBER_CLIENTS: readonly FeedClientClass[] =
+  (Object.keys(FEED_CLIENT_IS_SUBSCRIBER) as FeedClientClass[]).filter((c) => FEED_CLIENT_IS_SUBSCRIBER[c])
+
+/**
+ * Minimum subscriber-class REQUESTS in the window before a feed counts as subscribed.
+ *
+ * Requests, not polls: the value it gates is `SUM(_sample_interval)` from the AE query, a
+ * sampling-corrected request estimate. It is a floor on volume, nothing more — the stored dimension
+ * carries no client identity, so N one-off fetches are indistinguishable from one client returning N
+ * times. The VALUE is chosen, not derived — nothing in this dataset yields a principled floor.
+ */
+export const MIN_SUBSCRIBER_REQUESTS = 3
+
+/**
+ * Sum a nested `byFeed` down to per-client totals. Pure. The DERIVED view — never stored beside
+ * `byFeed`, so the two cannot disagree.
+ *
+ * `__unknown__` is excluded: `recordFeedTraffic` runs before the handler resolves the segment, so that
+ * bucket is traffic the handler does not serve. The data stays in `byFeed` for anyone who wants it.
+ *
+ * Accumulates through a `Map` for the same reason `parseFeedTrafficResponse` does: the class keys come
+ * from the network, and `out[k] = (out[k] ?? 0) + n` on a plain object silently drops a `__proto__`
+ * key and renders a `constructor` key as a function body.
+ */
+export function rollupByClient(byFeed: FeedPollsByTarget): Record<string, number> {
+  const out = new Map<string, number>()
+  for (const [feed, perClient] of Object.entries(byFeed)) {
+    if (feed === FEED_UNKNOWN_TARGET) continue
+    for (const [cls, n] of Object.entries(perClient)) out.set(cls, (out.get(cls) ?? 0) + n)
+  }
+  return Object.fromEntries(out)
+}
+
+/**
+ * The feeds a SUBSCRIBER-class client polled, split into per-service feeds and the all-services feed.
+ *
+ * `perService` is the growth signal, and the one number here needing no cadence divisor.
+ * `belowFloor` counts per-service feeds that had subscriber-class traffic but stayed under
+ * `MIN_SUBSCRIBER_REQUESTS` — neither sentinel enters it. The split
+ * lives HERE rather than in the renderer so every consumer gets it: as of 2026-08-21 the operator
+ * holds one subscription and it is the all-feed, so folding it into a per-service count publishes an
+ * adoption figure that is +1 by construction. `allFeed` is a flag, not a count — `__all__` aggregates
+ * every /feed.xml poller and cannot be attributed to anyone.
+ *
+ * Limits, all pointing the same way:
+ *   - a SECOND subscriber on an already-listed feed adds no entry, so this UNDERCOUNTS;
+ *   - a client below `MIN_SUBSCRIBER_REQUESTS` is not listed, so a real subscriber polling rarely can
+ *     sit below the floor and stay invisible;
+ *   - `other`/`browser` are excluded, and an unrecognised reader shipping a Mozilla envelope lands in
+ *     `browser`, so it is excluded too;
+ *   - the all-feed is a flag, and it carries no `belowFloor` note — an all-feed that polls 1-2 times
+ *     in a window disappears from the report entirely rather than showing as suppressed.
+ * Treat `perService.length` as a lower bound: it can show growth happened, never that it didn't.
+ *
+ * `__unknown__` is excluded — a URL we answered 404 to is not a subscribable feed.
+ */
+export function subscriberFeeds(byFeed: FeedPollsByTarget): { perService: string[]; allFeed: boolean; belowFloor: number } {
+  const totals: Array<[string, number]> = []
+  let allFeed = false
+  let belowFloor = 0
+  for (const [feed, perClient] of Object.entries(byFeed)) {
+    if (feed === FEED_UNKNOWN_TARGET) continue
+    const n = SUBSCRIBER_CLIENTS.reduce((acc, cls) => acc + (perClient[cls] ?? 0), 0)
+    if (feed === FEED_ALL_TARGET) {
+      // The operator's own: reported as a flag, never inside a per-service count and never inside
+      // `belowFloor` — folding it back in is the +1-by-construction this split exists to prevent.
+      if (n >= MIN_SUBSCRIBER_REQUESTS) allFeed = true
+      continue
+    }
+    // Counted, not just skipped: a FIRST appearance is by construction low-volume, so the floor is
+    // quietest exactly where the signal lives.
+    if (n > 0 && n < MIN_SUBSCRIBER_REQUESTS) belowFloor++
+    if (n < MIN_SUBSCRIBER_REQUESTS) continue
+    totals.push([feed, n])
+  }
+  // Count desc, then name asc — a stable order, so the rendered line changes only when the data does.
+  totals.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  return { perService: totals.map(([feed]) => feed), allFeed, belowFloor }
 }
 
 /** Query the last-24h feed poll count via the AE SQL API. Best-effort: null on missing creds /
@@ -129,7 +462,11 @@ export async function queryFeedTraffic(
   token: string | undefined,
   fetchImpl: typeof fetch = fetch,
 ): Promise<FeedTrafficCounts | null> {
-  if (!accountId || !token) return null
+  if (!accountId || !token) {
+    // Names which null-producing path was taken; the stored `null` alone does not say.
+    console.warn('[wae] feed SQL skipped — CF_ACCOUNT_ID/CF_ANALYTICS_TOKEN absent')
+    return null
+  }
   try {
     const res = await fetchImpl(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,

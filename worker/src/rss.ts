@@ -1,7 +1,10 @@
 // RSS 2.0 incident feed generation (#54).
 // Pure functions — no Worker bindings. The route handlers in index.ts read
 // `services:latest` from KV and pass the service list straight in.
+// ONE exception (#1273): `FEED_TARGET_IDS` is built at module load from the STATIC `SERVICES` config,
+// because the feed-poll recorder runs before any KV read. A config-derived lookup, not a binding.
 
+import { SERVICES } from './services'
 import type { ServiceStatus, Incident } from './types'
 import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
 import { escapeXml } from './badge'
@@ -184,6 +187,26 @@ export const NO_IS_DOWN_PAGE = new Set(['bedrock', 'azureopenai'])
 export function feedSlug(serviceId: string): string {
   return IS_DOWN_SLUG_OVERRIDE[serviceId] ?? serviceId
 }
+
+// #1273 — blob2 lookup for `recordFeedTraffic` (api-traffic.ts): every accepted /feed/{segment} → its
+// canonical service id. Lives HERE, beside `feedSlug` and `resolveFeedService`, because it is a
+// feed-routing fact and because `index.ts` may only export functions (pinned by its own export guard).
+//
+// Built once at module load from the STATIC `SERVICES` config rather than the cached runtime list,
+// which can be absent when the feed handler runs — so a poll is never misrecorded as `__unknown__`
+// merely because KV was cold. The converse is not guaranteed and is not claimed: `resolveFeedService`
+// resolves against the runtime list, so a service present in config but absent at runtime is recorded
+// as a real target while the handler 404s.
+//
+// BOTH keys are registered per service because `resolveFeedService` accepts both forms — the slug
+// (`claude-code`) and the raw id (`claudecode`) — and a request the handler SERVES must not be
+// recorded as an unknown target. `feedSlug` is the identity function for every service without an
+// IS_DOWN_SLUG_OVERRIDE entry, so the two keys usually coincide and the Map de-dupes them. A future
+// override whose VALUE equals another service's id would collide (Map is last-wins) — pinned against
+// in feed-poll-instrumentation-wiring.test.ts.
+export const FEED_TARGET_IDS: ReadonlyMap<string, string> = new Map(
+  SERVICES.flatMap((s) => [[feedSlug(s.id), s.id] as const, [s.id, s.id] as const]),
+)
 
 // Validates a /feed/{segment} path component before lookup — slugs and service
 // IDs are lowercase alphanumerics plus dash/underscore. Rejects dots, slashes

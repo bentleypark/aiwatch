@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAiUsageSection } from '../daily-summary'
+import { formatFeedClientLine, formatSubscribedFeedsLine, buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAiUsageSection } from '../daily-summary'
 import { BADGE_UNKNOWN_SERVICE } from '../api-traffic'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
@@ -532,9 +532,79 @@ describe('formatSubscriberDelta (#548)', () => {
   })
 })
 
-describe('formatFeedTrafficSection (#548)', () => {
+describe('formatFeedClientLine (#1273)', () => {
+  it('prints no residual when the breakdown exceeds the total', () => {
+    // An inconsistent triple cannot arise from `parseFeedTrafficResponse` (the `counted` gate makes
+    // buckets a subset of the totals), but this function is exported and takes all three freely. The
+    // `> 0` guard is what stops a negative residual rendering; `!== 0` would print `-30 unclassified`.
+    expect(formatFeedClientLine({ slack: 40 }, 10, {})).toBe('\n   Clients: slack 40')
+  })
+
+  it('prints no unserved term for a negative unserved count', () => {
+    // The same argument one line up in the source, on the guard one line up — which was the only one
+    // of the pair with no test, so `unservedTotal > 0` → `!== 0` survived the whole suite.
+    //
+    // `classified` has to exceed `total` by at least the negative unserved amount, or `unclassified`
+    // (`total - classified - unservedTotal`) turns POSITIVE and its own term fires instead — which is
+    // a different guard, and an assertion that trips it proves nothing about this one.
+    expect(formatFeedClientLine({ slack: 10 }, 0, { bot: -5 })).toBe('\n   Clients: slack 10')
+  })
+
+  it('prints both residual terms when both are real, so neither absorbs the other', () => {
+    // 100 polls: 40 classified, 25 to a feed we do not serve, 35 carrying no client blob. One label
+    // for the last two would make the arithmetic unreadable, which is why they are separate terms.
+    expect(formatFeedClientLine({ slack: 40 }, 100, { bot: 25 }))
+      .toBe('\n   Clients: slack 40 · 25 unserved · 35 unclassified')
+  })
+})
+
+describe('formatSubscribedFeedsLine (#1273)', () => {
+  // Direct tests: this function is exported but was reached only through formatFeedTrafficSection,
+  // and every render fixture there had belowFloor === 0 — so six independent mutations of the
+  // below-floor term passed the whole suite. The signal was computed right and rendered by
+  // untested code.
+  const slack = (n: number) => ({ slack: n })
+
+  it('names suppressed feeds so "0 per-service" cannot read as a quiet window', () => {
+    expect(formatSubscribedFeedsLine({ claude: slack(2), chatgpt: slack(1) }))
+      .toBe('\n   Feeds: 0 per-service subscribed · 2 below floor')
+  })
+
+  it('renders nothing at all when nothing QUALIFIED', () => {
+    expect(formatSubscribedFeedsLine({})).toBe('')
+    expect(formatSubscribedFeedsLine({ hf: { bot: 90 } })).toBe('')
+  })
+
+  it('carries the note alongside a non-empty per-service list', () => {
+    expect(formatSubscribedFeedsLine({ claude: slack(72), mistral: slack(2) }))
+      .toBe('\n   Feeds: 1 per-service subscribed (claude) · 1 below floor')
+  })
+
+  it('never prints a zero note', () => {
+    expect(formatSubscribedFeedsLine({ claude: slack(72) })).toBe('\n   Feeds: 1 per-service subscribed (claude)')
+  })
+
+  it('keeps the all-feed OUT of both the count and the floor note', () => {
+    // The operator holds exactly one subscription and it is this one. Counting it below the floor
+    // re-merges the split the separation exists to keep.
+    expect(formatSubscribedFeedsLine({ __all__: slack(2) })).toBe('')
+    expect(formatSubscribedFeedsLine({ __all__: slack(77), claude: slack(72) }))
+      .toBe('\n   Feeds: 1 per-service subscribed (claude) · all-feed active')
+  })
+
+  it('excludes unserved URLs from the floor note', () => {
+    // A 404 wave of low-volume /feed/<random> hits would otherwise inflate the one number added to
+    // keep "0 per-service" honest — in the direction that most looks like growth.
+    expect(formatSubscribedFeedsLine({ __unknown__: slack(1) })).toBe('')
+  })
+})
+
+describe('formatFeedTrafficSection (#548, #1273)', () => {
+  // Shorthand: one feed polled only by `slack`.
+  const slack = (n: number) => ({ slack: n })
+
   it('renders the 24h total with the all-vs-per-service split', () => {
-    const out = formatFeedTrafficSection({ all: 120, service: 45, total: 165 })
+    const out = formatFeedTrafficSection({ all: 120, service: 45, total: 165, byFeed: {} })
     expect(out).toContain('Feed Polls')
     expect(out).toContain('Last 24h: 165')
     expect(out).toContain('all-feed 120')
@@ -546,20 +616,139 @@ describe('formatFeedTrafficSection (#548)', () => {
   })
   // #748 — "new feed items" suffix (alert-worthy events, distinct from poll noise)
   it('appends "· N new items" + labels polls when newItems is present', () => {
-    const out = formatFeedTrafficSection({ all: 64, service: 7, total: 71, newItems: 2 })
+    const out = formatFeedTrafficSection({ all: 64, service: 7, total: 71, byFeed: {}, newItems: 2 })
     expect(out).toContain('Last 24h: 71 polls (all-feed 64 · per-service ~7) · 2 new items')
   })
   it('uses the singular "item" for a count of 1', () => {
-    expect(formatFeedTrafficSection({ all: 1, service: 0, total: 1, newItems: 1 })).toContain('· 1 new item')
-    expect(formatFeedTrafficSection({ all: 1, service: 0, total: 1, newItems: 1 })).not.toContain('1 new items')
+    const one = { all: 1, service: 0, total: 1, byFeed: {}, newItems: 1 }
+    expect(formatFeedTrafficSection(one)).toContain('· 1 new item')
+    expect(formatFeedTrafficSection(one)).not.toContain('1 new items')
   })
   it('shows "· 0 new items" on a quiet day (count present but zero)', () => {
-    expect(formatFeedTrafficSection({ all: 30, service: 0, total: 30, newItems: 0 })).toContain('· 0 new items')
+    expect(formatFeedTrafficSection({ all: 30, service: 0, total: 30, byFeed: {}, newItems: 0 })).toContain('· 0 new items')
   })
   it('omits the suffix entirely when newItems is absent (KV read failed)', () => {
-    const out = formatFeedTrafficSection({ all: 30, service: 0, total: 30 })
+    const out = formatFeedTrafficSection({ all: 30, service: 0, total: 30, byFeed: {} })
     expect(out).toContain('Last 24h: 30 polls')
     expect(out).not.toContain('new item')
+  })
+
+  // #1273 — the client split. Without it a crawler sweep and a subscriber both just raise `total`.
+  it('rolls the nested map up into the client split, ordered by count desc', () => {
+    // Steady state: every request contributes to a variant total AND a byFeed bucket, so the two
+    // must balance. 77 + 72 + 24 = 173.
+    const out = formatFeedTrafficSection({
+      all: 77, service: 96, total: 173,
+      byFeed: { __all__: slack(77), claude: slack(72), huggingface: { bot: 24 } },
+    })
+    expect(out).toContain('Clients: slack 149 · bot 24')
+    expect(out).not.toContain('unclassified')
+  })
+
+  it('names UNSERVED (404) separately from UNCLASSIFIED — they are different facts', () => {
+    // `rollupByClient` drops the `__unknown__` bucket, so the gap it leaves is traffic the handler
+    // does not serve. One label cannot say both that and "instrumentation has not caught up".
+    const out = formatFeedTrafficSection({
+      all: 0, service: 162, total: 162,
+      byFeed: { __unknown__: slack(90), claude: slack(72) },
+    })
+    expect(out).toContain('Clients: slack 72 · 90 unserved')
+    expect(out).not.toContain('90 unclassified')
+  })
+
+  it('names both terms when a deploy-boundary window ALSO carries 404 traffic', () => {
+    const out = formatFeedTrafficSection({
+      all: 0, service: 200, total: 200,
+      byFeed: { __unknown__: slack(20), claude: slack(72) },
+    })
+    // 200 total − 72 classified − 20 unserved = 108 rows with no client blob at all.
+    expect(out).toContain('Clients: slack 72 · 20 unserved · 108 unclassified')
+  })
+
+  it('names the residual when the breakdown sums to LESS than the total (deploy-boundary window)', () => {
+    // Rows written before #1273 carry no client blob: they count toward the total and toward no
+    // class. Printing a smaller breakdown under a bigger total with no residual reads as a bug, or
+    // worse as a measured absence. This is the one-time transient the deploy day produces.
+    const out = formatFeedTrafficSection({
+      all: 77, service: 508, total: 585,
+      byFeed: { __all__: slack(77), claude: slack(72), huggingface: { bot: 24 } },
+    })
+    expect(out).toContain('Clients: slack 149 · bot 24 · 412 unclassified')
+  })
+  it('breaks client ties on the class name so the line is stable across runs', () => {
+    const out = formatFeedTrafficSection({ all: 0, service: 8, total: 8, byFeed: { a: { slack: 4 }, b: { bot: 4 } } })
+    expect(out).toContain('Clients: bot 4 · slack 4')
+  })
+  it('renders exactly the pre-#1273 section when nothing was classified', () => {
+    // A window that predates the deploy has no blob2/blob3, so byFeed is empty — both added lines
+    // must vanish rather than render empty labels.
+    const out = formatFeedTrafficSection({ all: 30, service: 0, total: 30, byFeed: {} })
+    expect(out).not.toContain('Clients')
+    expect(out).not.toContain('Feeds:')
+    expect(out).toContain('Last 24h: 30 polls')
+  })
+
+  // #1273 — the subscribed-feeds line: the one signal here that needs no cadence divisor.
+  it('counts per-service feeds and reports the all-feed SEPARATELY, never inside the count', () => {
+    // The operator holds exactly one subscription and it is the all-feed, so folding it into the
+    // headline publishes an adoption number that is +1 by construction.
+    const out = formatFeedTrafficSection({
+      all: 77, service: 432, total: 509,
+      byFeed: {
+        __all__: slack(77), claude: slack(72), chatgpt: slack(72), openai: slack(72),
+        codex: slack(72), gemini: slack(72), cursor: slack(72),
+      },
+    })
+    expect(out).toContain('Feeds: 6 per-service subscribed (chatgpt, claude, codex, cursor, gemini, openai)')
+    expect(out).toContain('· all-feed active')
+    // The raw sentinel must never reach Discord — `__x__` also renders as underline there.
+    expect(out).not.toContain('__all__')
+  })
+
+  it('reports 0 per-service when only the operator all-feed qualifies', () => {
+    const out = formatFeedTrafficSection({ all: 77, service: 0, total: 77, byFeed: { __all__: slack(77) } })
+    expect(out).toContain('Feeds: 0 per-service subscribed (all-feed active)')
+  })
+
+  it('never renders the __unknown__ sentinel as a subscribed feed', () => {
+    const out = formatFeedTrafficSection({
+      all: 0, service: 162, total: 162,
+      byFeed: { __unknown__: slack(90), claude: slack(72) },
+    })
+    expect(out).toContain('Feeds: 1 per-service subscribed (claude)')
+    expect(out).not.toContain('__unknown__')
+    // Unserved traffic is excluded from the client rollup too, so it surfaces under its own label
+    // rather than inflating `Clients: slack` with requests the handler never served.
+    expect(out).toContain('Clients: slack 72 · 90 unserved')
+  })
+  it('EXCLUDES crawler-only feeds from the subscribed count', () => {
+    // The regression this line exists to prevent: a crawler sweeping every feed must not read as a
+    // subscription wave. Only the slack-polled feed counts.
+    const out = formatFeedTrafficSection({
+      all: 0, service: 100, total: 100,
+      byFeed: { claude: slack(72), huggingface: { bot: 24 }, mistral: { bot: 4 } },
+    })
+    expect(out).toContain('Feeds: 1 per-service subscribed (claude)')
+    expect(out).not.toContain('huggingface')
+  })
+  it('still reports a window whose ONLY traffic was unserved', () => {
+    // The early return suppressed the `unserved` term in exactly the case it exists for: an unserved
+    // wave large enough to BE the window rendered as nothing at all, which reads as a quiet day.
+    const out = formatFeedTrafficSection({ all: 0, service: 50, total: 50, byFeed: { __unknown__: { bot: 50 } } })
+    expect(out.trimEnd().endsWith('Clients: — · 50 unserved')).toBe(true)
+  })
+
+  it('omits the line entirely when only crawlers polled (never "0 subscribed")', () => {
+    const out = formatFeedTrafficSection({ all: 0, service: 28, total: 28, byFeed: { a: { bot: 28 } } })
+    expect(out).not.toContain('Feeds:')
+    expect(out).toContain('Clients: bot 28')
+  })
+  it('caps the name list and reports the remainder', () => {
+    const byFeed = Object.fromEntries(
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((k, i) => [k, { slack: 100 - i }]),
+    )
+    const out = formatFeedTrafficSection({ all: 0, service: 772, total: 772, byFeed })
+    expect(out).toContain('Feeds: 8 per-service subscribed (a, b, c, d, e, f, +2 more)')
   })
 })
 
@@ -613,9 +802,16 @@ describe('buildDailySummary — #548 webhook delta + feed section', () => {
     expect(out).not.toContain('today)')
   })
   it('renders the feed-poll section when feedTraffic is present', () => {
-    const out = buildDailySummary({ ...base, feedTraffic: { all: 10, service: 5, total: 15 } })
+    const out = buildDailySummary({
+      ...base,
+      feedTraffic: { all: 10, service: 5, total: 15, byFeed: { __all__: { slack: 10 }, claude: { slack: 5 } } },
+    })
     expect(out).toContain('📡 **Feed Polls (RSS/Slack)**')
     expect(out).toContain('Last 24h: 15')
+    // #1273 — pins buildDailySummary's OWN data→output wiring for the client split, not just the
+    // formatter's: a section can be correct in isolation and never reach the message.
+    expect(out).toContain('Clients: slack 15')
+    expect(out).toContain('Feeds: 1 per-service subscribed (claude)')
   })
   // #1157 — pins buildDailySummary's OWN data→output contract for badgeTraffic (already covered by
   // formatBadgeTrafficSection's unit tests above, but this confirms the `data.badgeTraffic` field is

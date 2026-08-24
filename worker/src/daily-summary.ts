@@ -11,8 +11,8 @@ import type { AccuracyStats } from './incident-history'
 import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
-import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts } from './api-traffic'
-import { BADGE_UNKNOWN_SERVICE } from './api-traffic'
+import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts, FeedTrafficCounts, FeedPollsByTarget } from './api-traffic'
+import { BADGE_UNKNOWN_SERVICE, FEED_UNKNOWN_TARGET, rollupByClient, subscriberFeeds } from './api-traffic'
 
 // #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
 // polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
@@ -116,7 +116,7 @@ export interface DailySummaryData {
   // when the SQL API isn't configured. No cumulative — the daily value (a post-outage step-up) is the signal.
   // `newItems` (#748) — incidents AIWatch first-detected in the 24h window (alert-worthy events),
   // distinct from the mostly-empty poll volume; absent when the KV read failed.
-  feedTraffic?: { all: number; service: number; total: number; newItems?: number } | null
+  feedTraffic?: (FeedTrafficCounts & { newItems?: number }) | null
   // #1157 — badge-request volume (last-24h, from WAE): SVG status-badge embeds (READMEs, status
   // pages) as a retention/distribution signal, mirroring #518/#548. Absent (null) when the SQL API
   // isn't configured. No cumulative — same rationale as feedTraffic (a daily snapshot is the signal).
@@ -472,8 +472,66 @@ export function formatFeedTrafficSection(
     : ''
   return (
     `\n📡 **Feed Polls (RSS/Slack)**\n` +
-    `   Last 24h: ${feed.total} polls (all-feed ${feed.all} · per-service ~${feed.service})${newItems}`
+    `   Last 24h: ${feed.total} polls (all-feed ${feed.all} · per-service ~${feed.service})${newItems}` +
+    formatFeedClientLine(rollupByClient(feed.byFeed), feed.total, feed.byFeed[FEED_UNKNOWN_TARGET] ?? {}) +
+    formatSubscribedFeedsLine(feed.byFeed)
   )
+}
+
+/**
+ * Render the #1273 client-class split as an indented sub-line, e.g. `   Clients: slack 12 · bot 3`.
+ * Empty string when nothing was classified, so a window whose rows all predate #1273 renders exactly
+ * the pre-#1273 section rather than an empty "Clients:" label. This path renders the LIVE Analytics
+ * Engine window, never a stored `growth:daily` row. Pure.
+ *
+ * `total` and `byUnknown` are both REQUIRED, not optional: omitting either silences a term of the
+ * residual, and an optional dimension that silently empties a derived value is the failure this module
+ * argues against at `recordFeedTraffic` and `GrowthDailyInputs.feedPolls` (#970).
+ *
+ * Ordered by count desc, ties by class name, so the line changes only when the data does.
+ */
+export function formatFeedClientLine(byClient: Record<string, number>, total: number, byUnknown: Record<string, number>): string {
+  const entries = Object.entries(byClient)
+  const unservedTotal = Object.values(byUnknown).reduce((acc, n) => acc + n, 0)
+  // Not `entries.length === 0` alone: a window whose ONLY traffic is 404-answered has no classes to
+  // list, and returning early there suppressed the `unserved` term in precisely the case it exists
+  // for — a 404 wave large enough to be the whole window rendered as nothing at all.
+  if (entries.length === 0 && unservedTotal === 0) return ''
+  entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  const classified = entries.reduce((acc, [, n]) => acc + n, 0)
+  // The classes sum to LESS than the headline total for two different reasons, and one label cannot
+  // carry both: `unserved` is traffic to a feed URL the handler does not serve (the `__unknown__`
+  // bucket `rollupByClient` drops — a 400 on an invalid segment or a 404 on an unknown one),
+  // `unclassified` is a row carrying no client blob. Separate terms make the arithmetic close.
+  const unclassified = total - classified - unservedTotal
+  const tail =
+    (unservedTotal > 0 ? ` · ${unservedTotal} unserved` : '') +
+    (unclassified > 0 ? ` · ${unclassified} unclassified` : '')
+  const head = entries.map(([k, n]) => `${k} ${n}`).join(' · ')
+  return `\n   Clients: ${head || '—'}${tail}`
+}
+
+/** How many feed names to spell out before collapsing the rest into "+N more". */
+const SUBSCRIBED_FEEDS_SHOWN = 6
+
+/**
+ * Render the feeds a SUBSCRIBER-class client polled (#1273):
+ * `Feeds: 2 per-service subscribed (claude, chatgpt) · all-feed active`.
+ *
+ * The per-service/all-feed split is decided by `subscriberFeeds`, not here — see its docstring for
+ * why the all-feed is never inside the count, and for the ways this number undercounts. Empty string
+ * when nothing qualifies at all — a window of pure crawler traffic renders no line. Pure.
+ */
+export function formatSubscribedFeedsLine(byFeed: FeedPollsByTarget): string {
+  const { perService, allFeed, belowFloor } = subscriberFeeds(byFeed)
+  const floorNote = belowFloor > 0 ? ` · ${belowFloor} below floor` : ''
+  if (perService.length === 0) return allFeed || belowFloor > 0 ? `\n   Feeds: 0 per-service subscribed${allFeed ? ' (all-feed active)' : ''}${floorNote}` : ''
+  // Count-desc order comes from `subscriberFeeds`; the cap means a newly-subscribed low-volume feed
+  // is the first name truncated into `+N more`, while still being counted.
+  const shown = perService.slice(0, SUBSCRIBED_FEEDS_SHOWN)
+  const more = perService.length - shown.length
+  return `\n   Feeds: ${perService.length} per-service subscribed (${shown.join(', ')}${more > 0 ? `, +${more} more` : ''})` +
+    (allFeed ? ' · all-feed active' : '') + floorNote
 }
 
 /**
