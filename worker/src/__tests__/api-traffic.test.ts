@@ -565,20 +565,20 @@ describe('subscriberFeeds (#1273)', () => {
       claude: { slack: 72 },
       __all__: { slack: 77 },
       mistral: { reader: 30 },
-    })).toEqual({ perService: ['claude', 'mistral'], allFeed: true, belowFloor: 0 })
+    })).toEqual({ perService: ['claude', 'mistral'], allFeed: 'subscribed', belowFloor: 0 })
   })
 
   it('EXCLUDES a crawler-only feed — the whole reason the map is nested', () => {
     // A crawler sweeping every feed would add ~46 keys to a FLAT byFeed and read as 46 new
     // subscribers. This is the assertion that fails if the nesting is ever flattened back.
     expect(subscriberFeeds({ claude: { slack: 72 }, huggingface: { bot: 400 }, mistral: { bot: 4 } }))
-      .toEqual({ perService: ['claude'], allFeed: false, belowFloor: 0 })
+      .toEqual({ perService: ['claude'], allFeed: 'none', belowFloor: 0 })
   })
 
   it('EXCLUDES browser and other — a one-off human hit and an unrecognised UA are not subscriptions', () => {
     // Documented bias: an unrecognised reader lands in `browser` (Mozilla envelope) or `other`, and
     // either way is undercounted. Accepted — admitting them would let any scraper count as a subscriber.
-    expect(subscriberFeeds({ a: { browser: 90 }, b: { other: 90 } })).toEqual({ perService: [], allFeed: false, belowFloor: 0 })
+    expect(subscriberFeeds({ a: { browser: 90 }, b: { other: 90 } })).toEqual({ perService: [], allFeed: 'none', belowFloor: 0 })
   })
 
   it('counts a feed polled by BOTH a subscriber and a crawler', () => {
@@ -607,9 +607,30 @@ describe('subscriberFeeds (#1273)', () => {
     expect(subscriberFeeds({ [FEED_UNKNOWN_TARGET]: { slack: 1 } }).belowFloor).toBe(0)
   })
 
+  it('gives the all-feed the same three states a per-service feed gets', () => {
+    // Observed on the first production window after the #1273 deploy: `__all__` carried one Slack
+    // poll and `subscriberFeeds` reported it identically to no traffic at all, because the value was
+    // a boolean and the `__all__` branch `continue`d above the `belowFloor` increment. Staying out of
+    // `belowFloor` is right — that integer is a per-service count — but it left no way to say
+    // "polled, suppressed" about the one subscription the operator actually holds.
+    const state = (n: number) => subscriberFeeds({ [FEED_ALL_TARGET]: { slack: n } }).allFeed
+    expect(state(0)).toBe('none')
+    expect(state(1)).toBe('below-floor')
+    // Literals, not `MIN_SUBSCRIBER_REQUESTS ± 1`, for the reason on the per-service floor test
+    // above. `state(3)` is what catches the floor moving UP; the `mixed` assertion below already
+    // caught it moving down.
+    expect(state(2)).toBe('below-floor')
+    expect(state(3)).toBe('subscribed')
+    // Non-subscriber traffic never moves it off `none`, in either direction.
+    expect(subscriberFeeds({ [FEED_ALL_TARGET]: { bot: 900, browser: 900 } }).allFeed).toBe('none')
+    // And it still stays out of both per-service tallies.
+    const mixed = subscriberFeeds({ [FEED_ALL_TARGET]: { slack: 2 }, claude: { slack: 5 } })
+    expect(mixed).toEqual({ perService: ['claude'], allFeed: 'below-floor', belowFloor: 0 })
+  })
+
   it('EXCLUDES the __unknown__ sentinel — a 404 URL is not a subscribable feed', () => {
     expect(subscriberFeeds({ [FEED_UNKNOWN_TARGET]: { slack: 90 }, claude: { slack: 72 } }))
-      .toEqual({ perService: ['claude'], allFeed: false, belowFloor: 0 })
+      .toEqual({ perService: ['claude'], allFeed: 'none', belowFloor: 0 })
   })
 
   it('orders by COUNT desc, not alphabetically — the cap names the top six, not the first six', () => {
@@ -619,7 +640,7 @@ describe('subscriberFeeds (#1273)', () => {
   })
 
   it('is empty for an empty map', () => {
-    expect(subscriberFeeds({})).toEqual({ perService: [], allFeed: false, belowFloor: 0 })
+    expect(subscriberFeeds({})).toEqual({ perService: [], allFeed: 'none', belowFloor: 0 })
   })
 })
 

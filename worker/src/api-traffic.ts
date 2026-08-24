@@ -408,6 +408,30 @@ export function rollupByClient(byFeed: FeedPollsByTarget): Record<string, number
   return Object.fromEntries(out)
 }
 
+/** Whether the all-services feed had subscriber-class traffic, and whether it cleared the floor.
+ *  Three states, matching what a per-service feed gets — `boolean` could not express "polled, but
+ *  under the floor", so that case rendered identically to no traffic at all. */
+export type AllFeedState = 'subscribed' | 'below-floor' | 'none'
+
+export interface SubscriberFeeds {
+  readonly perService: readonly string[]
+  readonly allFeed: AllFeedState
+  /** PER-SERVICE feeds only. The all-feed's own suppression is `allFeed`, deliberately not folded in
+   *  here: beside "N per-service subscribed" an incremented integer reads as another per-service
+   *  feed. */
+  readonly belowFloor: number
+}
+
+/**
+ * Where one feed's subscriber-class count sits relative to the floor. ONE spelling of the rule,
+ * which the two populations previously spelled separately, so changing the floor meant finding every
+ * site. They differ only in how they AGGREGATE this, which is the honest asymmetry: per-service feeds
+ * are attributable and get a list plus a count, the all-feed is not and gets a state. Pure.
+ */
+function floorState(n: number): AllFeedState {
+  return n >= MIN_SUBSCRIBER_REQUESTS ? 'subscribed' : n > 0 ? 'below-floor' : 'none'
+}
+
 /**
  * The feeds a SUBSCRIBER-class client polled, split into per-service feeds and the all-services feed.
  *
@@ -416,7 +440,7 @@ export function rollupByClient(byFeed: FeedPollsByTarget): Record<string, number
  * `MIN_SUBSCRIBER_REQUESTS` — neither sentinel enters it. The split
  * lives HERE rather than in the renderer so every consumer gets it: as of 2026-08-21 the operator
  * holds one subscription and it is the all-feed, so folding it into a per-service count publishes an
- * adoption figure that is +1 by construction. `allFeed` is a flag, not a count — `__all__` aggregates
+ * adoption figure that is +1 by construction. `allFeed` is a STATE, not a count — `__all__` aggregates
  * every /feed.xml poller and cannot be attributed to anyone.
  *
  * Limits, all pointing the same way:
@@ -425,29 +449,32 @@ export function rollupByClient(byFeed: FeedPollsByTarget): Record<string, number
  *     sit below the floor and stay invisible;
  *   - `other`/`browser` are excluded, and an unrecognised reader shipping a Mozilla envelope lands in
  *     `browser`, so it is excluded too;
- *   - the all-feed is a flag, and it carries no `belowFloor` note — an all-feed that polls 1-2 times
- *     in a window disappears from the report entirely rather than showing as suppressed.
+ *   - the all-feed is unattributable, so `below-floor` says only THAT it was suppressed, never by how
+ *     many clients.
  * Treat `perService.length` as a lower bound: it can show growth happened, never that it didn't.
  *
  * `__unknown__` is excluded — a URL we answered 404 to is not a subscribable feed.
  */
-export function subscriberFeeds(byFeed: FeedPollsByTarget): { perService: string[]; allFeed: boolean; belowFloor: number } {
+export function subscriberFeeds(byFeed: FeedPollsByTarget): SubscriberFeeds {
   const totals: Array<[string, number]> = []
-  let allFeed = false
+  let allFeed: AllFeedState = 'none'
   let belowFloor = 0
   for (const [feed, perClient] of Object.entries(byFeed)) {
     if (feed === FEED_UNKNOWN_TARGET) continue
     const n = SUBSCRIBER_CLIENTS.reduce((acc, cls) => acc + (perClient[cls] ?? 0), 0)
+    const state = floorState(n)
     if (feed === FEED_ALL_TARGET) {
-      // The operator's own: reported as a flag, never inside a per-service count and never inside
-      // `belowFloor` — folding it back in is the +1-by-construction this split exists to prevent.
-      if (n >= MIN_SUBSCRIBER_REQUESTS) allFeed = true
+      // Never inside the per-service count and never inside `belowFloor` — folding it back into
+      // either is the +1-by-construction this split exists to prevent. But it gets the SAME three
+      // states they do: excluding it from `belowFloor` on the attribution argument left it unable to
+      // say "suppressed", so the one subscription the operator actually holds rendered as absence.
+      allFeed = state
       continue
     }
     // Counted, not just skipped: a FIRST appearance is by construction low-volume, so the floor is
     // quietest exactly where the signal lives.
-    if (n > 0 && n < MIN_SUBSCRIBER_REQUESTS) belowFloor++
-    if (n < MIN_SUBSCRIBER_REQUESTS) continue
+    if (state === 'below-floor') belowFloor++
+    if (state !== 'subscribed') continue
     totals.push([feed, n])
   }
   // Count desc, then name asc — a stable order, so the rendered line changes only when the data does.
