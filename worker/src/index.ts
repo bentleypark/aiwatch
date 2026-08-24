@@ -30,7 +30,8 @@ import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest, isStatuslinePreset, renderStatuslineBrief, buildStatuslineDownResponse, buildStatuslinePresetResponse, STATUSLINE_BRIEF_UNKNOWN } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import { recordCacheReadOutcome, recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
+import type { FeedTrafficCounts } from './api-traffic'
+import { recordCacheReadOutcome, recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, readFeedPolls, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -2002,7 +2003,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg, badgeStatusColor } from './badge'
-import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
+import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, FEED_TARGET_IDS, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable, readRedditSourceDead } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -3677,7 +3678,9 @@ export default {
           // #548 — feed-poll volume (last 24h) as the consent-free retention proxy. Best-effort, like
           // v1; null (skipped) when the AE token/account is absent. No cumulative — the daily value is
           // the signal (a post-outage step-up = retained RSS/Slack subscribers).
-          let feedTraffic = null
+          // Annotated rather than evolving-any (#1273) so the `{ ...feedTraffic, newItems }` spread
+          // below widens into the declared type instead of re-deriving the union on every assignment.
+          let feedTraffic: (FeedTrafficCounts & { newItems?: number }) | null = null
           try {
             feedTraffic = await queryFeedTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
           } catch (err) {
@@ -3896,6 +3899,18 @@ export default {
           if (!outageWindow) {
             console.warn(`[growth-series] outage axis ABSENT for ${today} — months covered: ${[...covered].join(',') || 'none'}`)
           }
+          // #1273 — one judgement over the read, logged AND stored. The verdict used to exist only in
+          // the log line below; the durable row got a bare `null` that meant four different things.
+          // Workers discards these logs within days and this series has no reader yet, so whichever
+          // fact is not written into the row is the fact nobody will ever have.
+          const feedRead = readFeedPolls(feedTraffic)
+          if (feedRead.verdict === 'failed') {
+            console.warn(`[growth-series] feedPolls read FAILED for ${today} — AE query failed or unconfigured`)
+          } else if (feedRead.verdict === 'zero') {
+            console.warn(`[growth-series] feedPolls read 0 polls for ${today} — no traffic, or the recorder wrote nothing (indistinguishable)`)
+          } else if (feedRead.verdict === 'unclassifiable') {
+            console.warn(`[growth-series] feedPolls read no servable feed for ${today} — of ${feedTraffic?.total} polls`)
+          }
           // Hoisted (rather than asserted inside the closure) so the backfill closes over a definite
           // value. Null when nothing parsed — there is then no month to backfill any row against.
           const backfillSources = covered.size ? outageSources : null
@@ -3909,6 +3924,10 @@ export default {
               subscriberNewToday: webhookCounts.newToday,
               audience,
               outage: outageWindow,
+              // #1273 — the same 24h AE read the Discord section already made, now kept. `polls` is
+              // non-null on exactly one verdict, and the verdict rides along so `null` is readable
+              // (see the field docs in growth-series.ts).
+              feedPolls: feedRead,
             }), backfillSources
               ? (rows: GrowthDailyRow[]) => fillOutageWindows(rows, (date) => {
                   // Older rows anchor on the NOMINAL 09:00 UTC run instant — their real run time is
@@ -4440,7 +4459,7 @@ export default {
     ) {
       // #548 — record the poll in WAE (consent-free retention proxy: a post-outage step-up in feed
       // volume = retained RSS/Slack subscribers). Best-effort, before the KV read so a 503 still counts.
-      recordFeedTraffic(env.ANALYTICS, url.pathname)
+      recordFeedTraffic(env.ANALYTICS, url, FEED_TARGET_IDS, request.headers.get('user-agent'))
       const feedReq: FeedRequest =
         url.pathname === '/feed.xml'
           ? { scope: 'all' }

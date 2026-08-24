@@ -43,6 +43,7 @@ describe('buildGrowthDailyRow', () => {
     subscribers: 12,
     subscriberNewToday: 1,
     audience: { total: 40, activeTotal: 31, bySource: { x: 20, search: 11 }, activeBySource: { x: 20 } },
+    feedPolls: { verdict: 'failed', polls: null },
   }
 
   it('carries the outage-day axis and every consent-free counter', () => {
@@ -56,6 +57,8 @@ describe('buildGrowthDailyRow', () => {
       audienceTotal: 40,
       audienceActiveTotal: 31,
       audienceBySource: { x: 20, search: 11 },
+      feedPolls: null,
+      feedPollsRead: 'failed',
     })
   })
 
@@ -64,6 +67,29 @@ describe('buildGrowthDailyRow', () => {
   // 09:00 UTC report). #1117 established that this is still not a whole-day axis — the key is read at
   // 09:00, so 00:00–09:00 is all it can ever hold — which is why `incidentsStartedInWindow` exists
   // below. These assertions pin the narrower fact the field now claims: what the accumulator held.
+  // #1273 — three distinguishable states, and the KV boundary is where it matters: the row is
+  // JSON.stringify'd, which KEEPS null and DROPS undefined, so a bug that passes `undefined` for a
+  // failed read would silently produce the "not instrumented" shape instead of the "could not read"
+  // shape. Asserting on the builder's return value alone cannot see that — `toEqual` treats an
+  // undefined property and an absent one as equal — so the null case is re-asserted at `kv.put` below.
+  it('carries feedPolls when the AE read succeeded, with the verdict that explains it', () => {
+    const r = buildGrowthDailyRow({ ...base, feedPolls: { verdict: 'ok', polls: { claude: { slack: 72 } } } } as never)
+    expect(r.feedPolls).toEqual({ claude: { slack: 72 } })
+    expect(r.feedPollsRead).toBe('ok')
+  })
+
+  // Three causes reach `polls: null` and they call for opposite remedies — a broken query, a quiet
+  // window, and a window of thousands of polls carrying no blobs. The row is permanent and has no
+  // reader yet, so a `null` whose verdict was dropped is a fact nobody can ever recover.
+  it('records WHICH null it stored, so the three causes stay distinguishable', () => {
+    for (const verdict of ['failed', 'zero', 'unclassifiable'] as const) {
+      const r = buildGrowthDailyRow({ ...base, feedPolls: { verdict, polls: null } } as never)
+      expect(r.feedPolls).toBeNull()
+      expect(r.feedPolls).not.toEqual({})
+      expect(r.feedPollsRead, `verdict ${verdict} was not carried into the row`).toBe(verdict)
+    }
+  })
+
   it('an absent alert:count key is a genuine quiet day (0), not a gap', () => {
     const r = buildGrowthDailyRow({ ...base, alertCounts: null } as never)
     expect(r.alertedIncidents).toBe(0)
@@ -431,6 +457,113 @@ describe('fillOutageWindows (#1117)', () => {
     const snapshot = JSON.stringify(input)
     fillOutageWindows(input, (d) => ({ started: 5, windowEnd: nominalWindowEnd(d) }))
     expect(JSON.stringify(input)).toBe(snapshot)
+  })
+})
+
+describe('recordGrowthDaily — feedPolls at the KV boundary (#1273)', () => {
+  it('serializes a failed AE read as an explicit null, not as a dropped key', async () => {
+    let written = ''
+    const kv = { get: vi.fn().mockResolvedValue('[]'), put: vi.fn(async (_k: string, v: string) => { written = v }) }
+    await recordGrowthDaily(kv as never, row('2026-08-22', { feedPolls: null }))
+    // The literal substring, not a parsed round-trip: JSON.parse would collapse `null` and a missing
+    // key back into the same `undefined`, which is exactly the confusion this asserts against.
+    expect(written).toContain('"feedPolls":null')
+    expect(JSON.parse(written)[0]).toHaveProperty('feedPolls', null)
+  })
+
+  it('serializes a successful read as the nested map', async () => {
+    let written = ''
+    const kv = { get: vi.fn().mockResolvedValue('[]'), put: vi.fn(async (_k: string, v: string) => { written = v }) }
+    await recordGrowthDaily(kv as never, row('2026-08-22', {
+      feedPolls: { claude: { slack: 72 }, __all__: { slack: 77 }, huggingface: { bot: 24 } },
+    }))
+    expect(JSON.parse(written)[0].feedPolls).toEqual({
+      claude: { slack: 72 }, __all__: { slack: 77 }, huggingface: { bot: 24 },
+    })
+  })
+
+  it('a same-date re-run with a FAILED read must not destroy an already-measured map', () => {
+    // The 10:00 catch-up re-runs a date whose 09:00 run wrote a row but not its marker (a Discord
+    // throw, or `kvPut` swallowing the marker write). If that run's AE query fails, the whole-row
+    // replace would drop a measured 24h window from a key with no TTL and no backfill path.
+    // `recordGrowthDaily`'s own docstring states the doctrine: losing a day is recoverable,
+    // overwriting is not.
+    const prior = [{ ...row('2026-08-22'), feedPolls: { claude: { slack: 72 } } }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: null }))
+    expect(out).toHaveLength(1)
+    expect(out[0].feedPolls).toEqual({ claude: { slack: 72 } })
+  })
+
+  it('carries the preserved map\'s OWN verdict, not the failed re-run\'s', () => {
+    // `feedPollsRead` explains `feedPolls`, so the two have to travel together. Carrying the map
+    // alone leaves the later run's `failed` sitting beside a measurement — the same one-value-two-
+    // stories defect the verdict field was added to end, reintroduced by the guard that fixed it.
+    const prior = [{ ...row('2026-08-22'), feedPolls: { claude: { slack: 72 } }, feedPollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: null, feedPollsRead: 'failed' }))
+    expect(out[0].feedPolls).toEqual({ claude: { slack: 72 } })
+    expect(out[0].feedPollsRead).toBe('ok')
+  })
+
+  it('keeps the re-run\'s verdict when the re-run is the one that measured', () => {
+    // The mirror: preservation must not fire on a successful re-run and pin a stale verdict to a
+    // fresh map. Without this, hard-coding `feedPollsRead: 'ok'` in the preserve branch would pass.
+    const prior = [{ ...row('2026-08-22'), feedPolls: null, feedPollsRead: 'failed' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: { claude: { slack: 99 } }, feedPollsRead: 'ok' }))
+    expect(out[0].feedPolls).toEqual({ claude: { slack: 99 } })
+    expect(out[0].feedPollsRead).toBe('ok')
+  })
+
+  it('a same-date re-run with a SUCCESSFUL read replaces the prior map', () => {
+    const prior = [{ ...row('2026-08-22'), feedPolls: { claude: { slack: 72 } } }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: { claude: { slack: 99 } } }))
+    expect(out[0].feedPolls).toEqual({ claude: { slack: 99 } })
+  })
+
+  it('an EMPTY incoming map does not replace a measured one either', () => {
+    // Defence in depth: `durableFeedPolls` no longer emits `{}`, so this input is unreachable from
+    // production. `preserveMeasured` is pure and independently callable, and both ends go through
+    // `isMeasuredFeedPolls` — `{}` is not a measurement on either side.
+    const prior = [{ ...row('2026-08-22'), feedPolls: { claude: { slack: 72 } } }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: {} }))
+    expect(out[0].feedPolls).toEqual({ claude: { slack: 72 } })
+  })
+
+  it('an EMPTY prior does not overwrite an honest failed read', () => {
+    // The mirror of the case above. A guard built to stop a measurement being destroyed must not
+    // destroy a correct failure record and replace it with a fabricated measured-zero.
+    const prior = [{ ...row('2026-08-22'), feedPolls: {} }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: null }))
+    expect(out[0].feedPolls).toBeNull()
+  })
+
+  it('does NOT resurrect a corrupt prior feedPolls value', () => {
+    // `isRow` admits any object with a string `date`, so a stored `feedPolls` can be any shape. The
+    // guard exists to stop a MEASUREMENT being destroyed, not to carry a non-object forward as one.
+    for (const corrupt of ['{}', 42, [], true, {}]) {
+      const prior = [{ ...row('2026-08-22'), feedPolls: corrupt as never }]
+      const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: null }))
+      expect(out[0].feedPolls).toBeNull()
+    }
+  })
+
+  it('preservation is scoped to feedPolls — the TTL-backed fields still take the re-run value', () => {
+    // Those read keys that are gone by the next run, so a re-run's null IS the best available value.
+    const prior = [{ ...row('2026-08-22'), referralTotal: 9, subscribers: 9 }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { referralTotal: null, subscribers: null }))
+    expect(out[0].referralTotal).toBeNull()
+    expect(out[0].subscribers).toBeNull()
+  })
+
+  it('a row predating #1273 stays readable and does NOT gain a zero', async () => {
+    // The deploy boundary: old rows have no `feedPolls` key at all. Reading that as 0 would
+    // manufacture a step-up on the deploy date out of nothing.
+    const stored = JSON.stringify([{ date: '2026-08-01', audienceTotal: 440 }])
+    let written = ''
+    const kv = { get: vi.fn().mockResolvedValue(stored), put: vi.fn(async (_k: string, v: string) => { written = v }) }
+    await recordGrowthDaily(kv as never, row('2026-08-22', { feedPolls: { claude: { slack: 7 } } }))
+    const rows = JSON.parse(written)
+    expect(rows[0]).not.toHaveProperty('feedPolls')
+    expect(rows[1].feedPolls).toEqual({ claude: { slack: 7 } })
   })
 })
 

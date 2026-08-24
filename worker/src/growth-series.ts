@@ -29,6 +29,8 @@
 import type { KVLike } from './utils'
 import { kvPut } from './utils'
 import type { AudienceCounts } from './outage-audience'
+import type { FeedPollsByTarget } from './api-traffic'
+import { isMeasuredFeedPolls, type FeedPollsVerdict, type FeedPollsRead } from './api-traffic'
 import type { MonthlyIncidents } from './monthly-archive'
 
 /** Rows kept per monthly key. ~31 days; the cap is a corruption guard, not a retention policy. */
@@ -64,6 +66,37 @@ export interface GrowthDailyRow {
   // the write site). The deploy date is to be recorded in docs/reference/kv-schema.md's
   // `growth:daily` row.
   audienceBySource: Record<string, number> | null
+  // #1273 — feed-poll volume for the window: feed (canonical service ids plus the
+  // `__all__`/`__unknown__` sentinels) → client class → count. This is the durable
+  // half of the RSS/Slack retention proxy: #548 already computed a 24h number but only printed it into
+  // the Discord report, so no window was ever comparable to another and "did subscriptions step up
+  // after the outage?" had no dataset — the same gap this whole file was created to close for the
+  // other counters.
+  //
+  // THREE states, and they are not interchangeable:
+  //   a map  → read succeeded; a key absent WITHIN the map means that feed/class had no polls (= 0)
+  //   null   → nothing was stored. WHY is `feedPollsRead` below, never inferable from the `null`
+  //            itself: a failed query, a quiet window and a window of thousands of polls that carried
+  //            no blobs all land here, and reading them as one fact points at the wrong remedy.
+  //            Recoverable only within the day: a later same-date run whose read succeeds replaces it
+  //            (`preserveMeasured` guards only the other direction).
+  //   absent → the row predates #1273. NOT zero, and not a failure either: nothing was instrumented.
+  // Reading `absent` as 0 would manufacture a step-up on the deploy date out of nothing.
+  //
+  // The day of deploy is a mixed row: its 24h AE window straddles the deploy, so it stores a map
+  // covering only the instrumented part, indistinguishable from a complete one. Which row that is
+  // cannot be recovered from the series — the deploy date goes in docs/reference/kv-schema.md's
+  // `growth:daily` cell, as `audienceBySource` already does for #1055.
+  //
+  // The window is the AE query's rolling `NOW() - INTERVAL '1' DAY`, i.e. the same 24h span the
+  // `audience*` fields above are queried over. No separate anchor field: one would assert an
+  // independence these three fields do not have. Note `outageWindowEnd` names that span's end only
+  // when the incident read succeeded — it is written conditionally, so a row can carry `feedPolls`
+  // with no anchor recorded anywhere.
+  feedPolls?: FeedPollsByTarget | null
+  // #1273 — why `feedPolls` is what it is. `ok` iff a map was stored. Absent on a pre-#1273 row, and
+  // on nothing else: the write site sets it on every run.
+  feedPollsRead?: FeedPollsVerdict
   // #1117 — the WINDOW-ALIGNED outage axis. `alertedIncidents` above is not one (see its comment).
   // The gap it left, measured on production 2026-07-22: `alert:count:2026-07-21` held 23 alerts for the
   // full day while the 07-21 row recorded 1, because the row was written 9 hours into that date.
@@ -234,6 +267,11 @@ export interface GrowthDailyInputs {
   // #1117 — null/undefined when the incident record could not be read; the fields are then left
   // ABSENT so a later run's backfill can still supply them (see the field docs above).
   outage: { started: number; windowEnd: string } | null | undefined
+  // #1273 — the whole verdict, not the map alone: the two are a pair (`polls` is non-null on exactly
+  // one verdict) and passing them separately is what let a stored map sit beside a failure verdict.
+  // REQUIRED (not optional) so `tsc` names every call site: an optional dimension is how a derived
+  // set silently re-empties (#970).
+  feedPolls: FeedPollsRead
 }
 
 /** `growth:daily:{YYYY-MM}` — permanent, no TTL. One key per month. */
@@ -261,6 +299,8 @@ export function buildGrowthDailyRow(i: GrowthDailyInputs): GrowthDailyRow {
     audienceTotal: i.audience?.total ?? null,
     audienceActiveTotal: i.audience?.activeTotal ?? null,
     audienceBySource: i.audience?.bySource ?? null,
+    feedPolls: i.feedPolls.polls,
+    feedPollsRead: i.feedPolls.verdict,
     ...(i.outage ? { incidentsStartedInWindow: i.outage.started, outageWindowEnd: i.outage.windowEnd } : {}),
   }
 }
@@ -273,9 +313,37 @@ export function buildGrowthDailyRow(i: GrowthDailyInputs): GrowthDailyRow {
  */
 export function appendGrowthDaily(existing: unknown, row: GrowthDailyRow): GrowthDailyRow[] {
   const rows = Array.isArray(existing) ? existing.filter((r): r is GrowthDailyRow => isRow(r)) : []
-  const merged = [...rows.filter((r) => r.date !== row.date), row]
+  const prior = rows.find((r) => r.date === row.date)
+  const merged = [...rows.filter((r) => r.date !== row.date), preserveMeasured(prior, row)]
   merged.sort((a, b) => a.date.localeCompare(b.date))
   return merged.slice(-GROWTH_SERIES_CAP)
+}
+
+/**
+ * Same-date replacement must not DOWNGRADE a measurement to "we could not read it" (#1273).
+ *
+ * The 10:00 catch-up re-runs a date whose 09:00 run wrote a row but not its marker (a Discord throw,
+ * or `kvPut` swallowing the marker write). If that second run's read yields nothing, the whole-row
+ * replace would drop a measured 24h window from a key with no TTL and no backfill path —
+ * `recordGrowthDaily`'s own docstring states the doctrine: losing a day to a skipped write is
+ * recoverable, overwriting is not. The sibling outage axis avoids the same trap by leaving its field
+ * ABSENT rather than freezing a recoverable gap.
+ *
+ * "Is this a measurement?" is `isMeasuredFeedPolls`, not a rule restated here — the two sites
+ * disagreeing about `{}` is the defect this shape exists to prevent. Both ends go through it, so a
+ * corrupt or empty prior cannot be resurrected over an honest failure either.
+ *
+ * Scoped deliberately to `feedPolls`. The other nullable fields read TTL'd keys that are gone by the
+ * next run, so for them a re-run's `null` is the best available value. Pure.
+ */
+function preserveMeasured(prior: GrowthDailyRow | undefined, row: GrowthDailyRow): GrowthDailyRow {
+  if (!prior || isMeasuredFeedPolls(row.feedPolls)) return row
+  // `feedPollsRead` travels WITH the map it explains. Carrying the map alone would leave the later
+  // run's failure verdict sitting beside a measurement, which is the same one-value-two-stories
+  // defect the verdict was added to end.
+  return isMeasuredFeedPolls(prior.feedPolls)
+    ? { ...row, feedPolls: prior.feedPolls, feedPollsRead: prior.feedPollsRead }
+    : row
 }
 
 function isRow(r: unknown): r is GrowthDailyRow {
