@@ -12,7 +12,7 @@ import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts, FeedTrafficCounts, FeedPollsByTarget } from './api-traffic'
-import { BADGE_UNKNOWN_SERVICE, FEED_UNKNOWN_TARGET, rollupByClient, subscriberFeeds } from './api-traffic'
+import { BADGE_UNKNOWN_SERVICE, FEED_UNKNOWN_TARGET, rollupByClient, subscriberFeeds, type AllFeedState } from './api-traffic'
 
 // #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
 // polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
@@ -515,6 +515,25 @@ export function formatFeedClientLine(byClient: Record<string, number>, total: nu
 const SUBSCRIBED_FEEDS_SHOWN = 6
 
 /**
+ * The phrase each all-feed state contributes to the `Feeds:` line; `''` contributes no term.
+ *
+ * A `Record` keyed by the union, not a ternary chain — the same shape `AUDIENCE_LABEL` above uses for
+ * its own union, and for the reason `api-traffic.ts`'s `FEED_CLIENT_IS_SUBSCRIBER` writes down in
+ * full. A fourth `AllFeedState` added to a chain falls through to `''` and its term goes silent,
+ * which is the regression `AllFeedState` was introduced to repair; as a `Record` it is a compile
+ * error instead. It also single-sources a phrase the two call sites below used to spell separately.
+ *
+ * `subscriber floor` says whose polls the floor counts: the headline two lines up reports the
+ * all-feed's traffic across EVERY client class, so without that word a crawler-heavy window reads as
+ * a large poll count sitting below a small floor.
+ */
+const ALL_FEED_LABEL: Record<AllFeedState, string> = {
+  subscribed: 'all-feed active',
+  'below-floor': 'all-feed below subscriber floor',
+  none: '',
+}
+
+/**
  * Render the feeds a SUBSCRIBER-class client polled (#1273):
  * `Feeds: 2 per-service subscribed (claude, chatgpt) · all-feed active`.
  *
@@ -524,14 +543,21 @@ const SUBSCRIBED_FEEDS_SHOWN = 6
  */
 export function formatSubscribedFeedsLine(byFeed: FeedPollsByTarget): string {
   const { perService, allFeed, belowFloor } = subscriberFeeds(byFeed)
-  const floorNote = belowFloor > 0 ? ` · ${belowFloor} below floor` : ''
-  if (perService.length === 0) return allFeed || belowFloor > 0 ? `\n   Feeds: 0 per-service subscribed${allFeed ? ' (all-feed active)' : ''}${floorNote}` : ''
+  // The integer names its POPULATION: `below-floor` gives the all-feed a term sharing these words for
+  // the first time, and unqualified the two read as one tally — which puts the all-feed back inside a
+  // per-service count, the +1-by-construction the split exists to prevent, from the other side.
+  const floorNote = belowFloor > 0 ? ` · ${belowFloor} per-service below floor` : ''
+  const label = ALL_FEED_LABEL[allFeed]
+  if (perService.length === 0) {
+    if (!label && !floorNote) return ''
+    return `\n   Feeds: 0 per-service subscribed${label ? ` (${label})` : ''}${floorNote}`
+  }
   // Count-desc order comes from `subscriberFeeds`; the cap means a newly-subscribed low-volume feed
   // is the first name truncated into `+N more`, while still being counted.
   const shown = perService.slice(0, SUBSCRIBED_FEEDS_SHOWN)
   const more = perService.length - shown.length
   return `\n   Feeds: ${perService.length} per-service subscribed (${shown.join(', ')}${more > 0 ? `, +${more} more` : ''})` +
-    (allFeed ? ' · all-feed active' : '') + floorNote
+    (label ? ` · ${label}` : '') + floorNote
 }
 
 /**

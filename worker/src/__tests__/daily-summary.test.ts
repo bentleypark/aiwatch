@@ -559,6 +559,33 @@ describe('formatFeedClientLine (#1273)', () => {
 })
 
 describe('formatSubscribedFeedsLine (#1273)', () => {
+  it('says the all-feed is suppressed rather than rendering it as absence', () => {
+    // `allFeed` was a boolean, so one poll and zero polls rendered identically — on the ONE feed the
+    // operator actually subscribes to. `#860` recorded Slack's poller backing off on exactly this
+    // feed, so a quiet window here is the expected state, not an exotic one.
+    expect(formatSubscribedFeedsLine({ __all__: { slack: 1 } }))
+      .toBe('\n   Feeds: 0 per-service subscribed (all-feed below subscriber floor)')
+    expect(formatSubscribedFeedsLine({ __all__: { slack: 9 } }))
+      .toBe('\n   Feeds: 0 per-service subscribed (all-feed active)')
+  })
+
+  it('keeps the all-feed term and the per-service tally readable side by side', () => {
+    // The live 2026-08-24 post-deploy window, verbatim: `__all__` and seven per-service feeds at one
+    // Slack poll each, all under the floor.
+    const live = {
+      __all__: { slack: 1, bot: 1 }, claude: { slack: 1, bot: 1 }, claudecode: { slack: 1 },
+      chatgpt: { slack: 1 }, openai: { slack: 1 }, codex: { slack: 1 }, gemini: { slack: 1 },
+      cursor: { slack: 1 },
+    }
+    expect(formatSubscribedFeedsLine(live))
+      .toBe('\n   Feeds: 0 per-service subscribed (all-feed below subscriber floor) · 7 per-service below floor')
+    // The shape any such window takes the moment a feed clears the floor — the event this
+    // instrumentation exists to detect. Both terms render here, and nothing rendered both before, so
+    // swapping their order stayed green.
+    expect(formatSubscribedFeedsLine({ __all__: { slack: 2 }, claude: { slack: 5 }, mistral: { slack: 2 } }))
+      .toBe('\n   Feeds: 1 per-service subscribed (claude) · all-feed below subscriber floor · 1 per-service below floor')
+  })
+
   // Direct tests: this function is exported but was reached only through formatFeedTrafficSection,
   // and every render fixture there had belowFloor === 0 — so six independent mutations of the
   // below-floor term passed the whole suite. The signal was computed right and rendered by
@@ -567,7 +594,7 @@ describe('formatSubscribedFeedsLine (#1273)', () => {
 
   it('names suppressed feeds so "0 per-service" cannot read as a quiet window', () => {
     expect(formatSubscribedFeedsLine({ claude: slack(2), chatgpt: slack(1) }))
-      .toBe('\n   Feeds: 0 per-service subscribed · 2 below floor')
+      .toBe('\n   Feeds: 0 per-service subscribed · 2 per-service below floor')
   })
 
   it('renders nothing at all when nothing QUALIFIED', () => {
@@ -577,17 +604,18 @@ describe('formatSubscribedFeedsLine (#1273)', () => {
 
   it('carries the note alongside a non-empty per-service list', () => {
     expect(formatSubscribedFeedsLine({ claude: slack(72), mistral: slack(2) }))
-      .toBe('\n   Feeds: 1 per-service subscribed (claude) · 1 below floor')
+      .toBe('\n   Feeds: 1 per-service subscribed (claude) · 1 per-service below floor')
   })
 
   it('never prints a zero note', () => {
     expect(formatSubscribedFeedsLine({ claude: slack(72) })).toBe('\n   Feeds: 1 per-service subscribed (claude)')
   })
 
-  it('keeps the all-feed OUT of both the count and the floor note', () => {
-    // The operator holds exactly one subscription and it is this one. Counting it below the floor
-    // re-merges the split the separation exists to keep.
-    expect(formatSubscribedFeedsLine({ __all__: slack(2) })).toBe('')
+  it('keeps the all-feed OUT of the per-service count and the floor INTEGER', () => {
+    // The operator holds exactly one subscription and it is this one. Counting it inside either
+    // number re-merges the split the separation exists to keep — but it still gets its own term.
+    expect(formatSubscribedFeedsLine({ __all__: slack(2), claude: slack(72) }))
+      .toBe('\n   Feeds: 1 per-service subscribed (claude) · all-feed below subscriber floor')
     expect(formatSubscribedFeedsLine({ __all__: slack(77), claude: slack(72) }))
       .toBe('\n   Feeds: 1 per-service subscribed (claude) · all-feed active')
   })
