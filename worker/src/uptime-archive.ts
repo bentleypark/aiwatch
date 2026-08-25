@@ -1,8 +1,8 @@
 // #1017 — reconstruct a lost pre-migration calendar window from the durable per-day archive
 // (`daily:{date}` / `history:{date}`'s `weightedOutageSec`, folded in by index.ts's `cacheWrite`,
 // see DailyCounters). A provider status-page migration resets the LIVE source's per-day records
-// (#1004) — `ServiceStatus.uptimeWindowDays` is the disclosed signal that happened (present + short
-// window; ABSENT is the normal full-window case). This module fills the resulting calendar gap from
+// (#1004) — `ServiceStatus.uptimeWindowDays` is the disclosed signal that happened. This module
+// fills the resulting calendar gap from
 // AIWatch's own archive instead of leaving it silently blank, gated so the extra KV reads are paid
 // ONLY by a service actually flagged short — never on the common path.
 
@@ -115,6 +115,30 @@ export async function readArchivedWeightedOutageSec(
  * the next throttled cycle re-applies the restore; acceptable since edge refreshes exist for
  * immediate STATUS visibility, not calendar completeness, and the throttle window is short (~10min).
  */
+/** The ONE eligibility gate: is this service's live window actually narrower than the calendar we
+ *  render, i.e. is there a gap only the archive can fill? A window at or wider than the calendar
+ *  leaves nothing to restore.
+ *
+ *  ABSENT does NOT mean "full window" — only the Statuspage and incident.io paths emit
+ *  `uptimeWindowDays` at all, so an Instatus / OnlineOrNot / Flashduty service publishes a short
+ *  history silently and is never eligible here. That is a real coverage limit of this gate, not an
+ *  all-clear.
+ *
+ *  Exported because `restoreArchivedCalendars` (index.ts) needs the SAME verdict to decide whether to
+ *  record a trace observation (#1017 follow-up). Two copies of this predicate would drift the moment
+ *  the gate changes, and the trace's whole purpose is saying whether the gate fired — a trace computed
+ *  from a stale second copy would answer about a gate that no longer exists.
+ *
+ *  Returns a TYPE PREDICATE, not a bare `boolean`: both call sites rely on it to narrow
+ *  `uptimeWindowDays` to `number`. Simplifying the return type to `boolean` looks like a free cleanup
+ *  and breaks them. */
+export function isArchiveRestoreEligible(
+  calendarDays: number,
+  uptimeWindowDays: number | undefined,
+): uptimeWindowDays is number {
+  return uptimeWindowDays != null && uptimeWindowDays < calendarDays
+}
+
 export interface RestoreArchivedCalendarArgs {
   serviceId: string
   liveDailyImpact: Record<string, DailyImpactLevel> | undefined
@@ -134,7 +158,7 @@ export async function restoreArchivedCalendar(
   kv: KVNamespace,
   { serviceId, liveDailyImpact, calendarDays, uptimeWindowDays, todayISO }: RestoreArchivedCalendarArgs,
 ): Promise<Record<string, DailyImpactLevel> | undefined> {
-  if (uptimeWindowDays == null || uptimeWindowDays >= calendarDays) return liveDailyImpact
+  if (!isArchiveRestoreEligible(calendarDays, uptimeWindowDays)) return liveDailyImpact
   const gapDates = archiveGapDates({ todayISO, calendarDays, uptimeWindowDays })
   if (gapDates.length === 0) return liveDailyImpact
   const archived = await readArchivedWeightedOutageSec(kv, serviceId, gapDates)

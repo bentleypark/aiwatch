@@ -15,7 +15,8 @@ import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTo
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS } from './utils'
-import { restoreArchivedCalendar } from './uptime-archive'
+import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
+import { recordRestoreObservations, type RestoreObservation } from './uptime-archive-trace'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved } from './recovery-mark'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -204,18 +205,54 @@ function todayUTC(): string {
  *  calendar for this cycle, never abort the whole batch — an unguarded Promise.all would let one
  *  throw cancel every other service's restore too. Extracted from `cacheWrite` (not inlined) so this
  *  isolation guarantee is directly testable with a mock KV that fails one service, rather than only
- *  provable by a source-scan regex. */
-export async function restoreArchivedCalendars(kv: KVNamespace, services: ServiceStatus[], todayISO: string): Promise<void> {
+ *  provable by a source-scan regex.
+ *
+ *  Also emits the #1017 follow-up durable trace (`uptime-archive:restored`) for every service that
+ *  passed the gate — the permanent record that this path fired, since a status-page migration is an
+ *  external event no dated reminder can be aimed at. See uptime-archive-trace.ts. */
+export async function restoreArchivedCalendars(kv: KVNamespace, services: ServiceStatus[], nowISO: string): Promise<void> {
+  // ONE instant for both the gap window and the trace. `nowISO` is the only string parameter, so the
+  // adjacent-same-typed-argument swap that `RestoreArchivedCalendarArgs` (uptime-archive.ts) takes an options object
+  // to prevent cannot be reproduced here: a swap with `services` does not type-check. Deriving the
+  // date rather than accepting it separately also closes a UTC-midnight seam, where a `todayISO` read
+  // from one clock and a timestamp read from another disagree about which day it is.
+  const todayISO = nowISO.slice(0, 10)
+  const observations: RestoreObservation[] = []
   await Promise.all(services.map(async (s) => {
+    const calendarDays = s.calendarDays ?? 30
+    const windowDays = s.uptimeWindowDays
+    // Computed BEFORE the restore: eligibility depends only on data already in hand, never on the
+    // restore succeeding. Only `daysRestored` depends on the outcome.
+    const eligible = isArchiveRestoreEligible(calendarDays, windowDays)
+    let daysRestored = 0
+    let failed = false
     try {
+      const beforeKeys = new Set(Object.keys(s.dailyImpact ?? {}))
       const restored = await restoreArchivedCalendar(kv, {
-        serviceId: s.id, liveDailyImpact: s.dailyImpact, calendarDays: s.calendarDays ?? 30, uptimeWindowDays: s.uptimeWindowDays, todayISO,
+        serviceId: s.id, liveDailyImpact: s.dailyImpact, calendarDays, uptimeWindowDays: windowDays, todayISO,
       })
       if (restored !== s.dailyImpact) s.dailyImpact = restored
+      // A SET DIFFERENCE, not an after-minus-before count. The count form silently depends on
+      // `mergeArchivedDailyImpact` never removing a key: the day any future change prunes (trimming
+      // merged dates to the calendar window is the obvious candidate) it would report a NEGATIVE
+      // delta, which folds to a record byte-identical to "eligible, restored nothing" — the exact
+      // false reading this instrument exists to prevent. A set difference cannot go negative.
+      daysRestored = Object.keys(s.dailyImpact ?? {}).filter((k) => !beforeKeys.has(k)).length
     } catch (err) {
+      failed = true
       console.error(`[uptime-archive] restore failed for ${s.id} — serving live-only dailyImpact this cycle:`, err instanceof Error ? err.message : err)
     }
+    // OUTSIDE the try, deliberately. An eligible service whose restore throws every cycle must still
+    // leave a record — otherwise `absent` would mean "never eligible OR eligible-with-a-failing-
+    // restore", reintroducing in the failure branch the very eligible/restored conflation this
+    // instrument was built to remove. `failed` travels with it because `daysRestored: 0` alone cannot
+    // distinguish a broken restore from a clean archive, and those call for opposite responses.
+    if (eligible) observations.push({ serviceId: s.id, uptimeWindowDays: windowDays, daysRestored, failed })
   }))
+  // Outside the per-service loop: ONE merged write per cycle regardless of how many services are
+  // eligible, never one per service. Fail-closed and non-throwing internally — instrumentation must
+  // not break the cache-write cycle it rides on.
+  await recordRestoreObservations(kv, observations, nowISO)
 }
 
 // Returns true when this call issued the writes (counters + CACHE_KEY). `false` means this call
@@ -241,7 +278,8 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
   if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return false
   lastKvWrite = now
 
-  const today = todayUTC()
+  const nowISO = new Date().toISOString()
+  const today = nowISO.slice(0, 10)
   const dailyKey = `daily:${today}`
 
   // Read today's counters from separate daily key (survives cache TTL expiry)
@@ -288,7 +326,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
   // #1017 — restored BEFORE CACHE_KEY is serialized below, so every reader of the live snapshot
   // (frontend calendar, is-down SSR) sees the restored days with no changes on their end. See
   // restoreArchivedCalendars's own doc for the per-service isolation guarantee.
-  await restoreArchivedCalendars(kv, services, today)
+  await restoreArchivedCalendars(kv, services, nowISO)
 
   // Write cache + daily counters (2 writes per interval). The CACHE_KEY snapshot shape
   // ({ services, upstreamFeeds, cachedAt }) MUST match cache-refresh.ts `writeStatusCache` (the #488/#1057 primitive);
