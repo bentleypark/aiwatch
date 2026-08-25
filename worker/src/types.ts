@@ -160,8 +160,9 @@ export interface ServiceStatus {
    *  without stating its window. */
   uptimeReportedDays?: number
   /** #1006 — days the uptime figure actually covers, when the provider's records don't reach back the
-   *  full 30 (a status-page migration creates a NEW component and resets its clock — #1004). ABSENT
-   *  when the window is whole, which is the normal case. The UI states the real window rather than
+   *  full 30 (a status-page migration creates a NEW component and resets its clock — #1004). Emitted only
+   *  by the Statuspage and incident.io paths, so ABSENT means either a whole window OR a source that
+   *  does not disclose one. The UI states the real window rather than
    *  passing a short one off as a 30-day figure. */
   uptimeWindowDays?: number
   detectedAt?: string
