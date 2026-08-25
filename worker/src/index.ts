@@ -4068,7 +4068,7 @@ export default {
 
     // #842-B — consent-free outage-moment audience beacon. The is-down page fires a page-load beacon
     // here (outside any GA/consent guard) → one WAE data point per view, classified by inbound source
-    // and tagged with the active-outage flag → the daily "Outage Audience" line. No KV (WAE absorbs
+    // and tagged with the active-outage flag → the daily "is-down Audience" line. No KV (WAE absorbs
     // the viral-outage view spike; a per-view KV write would burn the budget). Origin-guarded like
     // /api/referral so non-browser noise doesn't inflate the metric.
     if (url.pathname === '/api/pageview') {

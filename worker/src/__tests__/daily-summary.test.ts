@@ -1040,24 +1040,60 @@ describe('formatAudienceLine (#842-B)', () => {
     ...o,
   })
 
-  it('leads with the active-outage subset by source + total when an outage was viewed', () => {
+  it('leads with the active-outage subset by source, then the whole day by source', () => {
     const line = formatAudienceLine(counts({
       total: 320, activeTotal: 240,
       bySource: src({ x: 210, search: 60, feed: 30, owned: 12, direct: 20 }),
       activeBySource: src({ x: 180, search: 40, feed: 15, owned: 8, direct: 5 }),
     }))
-    expect(line).toContain('Outage Audience')
-    expect(line).toContain('240 during outages')
-    expect(line).toContain('X 180 · search 40 · feed 15 · owned 8 · direct 5') // #936 owned bucket rendered
-    expect(line).toContain('320 total views')
+    expect(line).toContain('is-down Audience')
+    expect(line).toContain('During outages: 240 — X 180 · search 40 · feed 15 · owned 8 · direct 5') // #936 owned bucket rendered
+    expect(line).toContain('All views: 320 — X 210 · search 60 · feed 30 · owned 12 · direct 20')
+  })
+
+  // #1280 — the defect that motivated the reshape: the breakdown used to be `activeBySource` while
+  // the number printed next to it was `total`, so a reader attributed the small count to the big
+  // number. This is the real 2026-08-25 production row (audienceTotal 36, audienceActiveTotal 1,
+  // x 21 of the 36) and the old code rendered it as `1 during outages — X 1 · 36 total views`.
+  // Assert BOTH X figures land on their own row: a fix that showed only one of them would pass a
+  // laxer `toContain('X 21')` while re-creating the ambiguity.
+  it('binds each breakdown to its own number (the 08-25 misread)', () => {
+    const line = formatAudienceLine(counts({
+      total: 36, activeTotal: 1,
+      bySource: src({ x: 21, direct: 10, owned: 3, search: 2 }),
+      activeBySource: src({ x: 1 }),
+    }))
+    // `toBe`, not `toContain`: the two-row LAYOUT is the deliverable, and fragment assertions cannot
+    // see it. Every `toContain` here stays a contiguous substring when the rows are merged back onto
+    // one line, so a re-merge regression passes them all — the exact gap that survived round 1.
+    expect(line).toBe('\n👥 **is-down Audience** (24h)\n   During outages: 1 — X 1\n   All views: 36 — X 21 · search 2 · owned 3 · direct 10')
+  })
+
+  // #1280 — the full-day breakdown was computed ONLY in the no-outage branch, so on outage days the
+  // channel mix vanished. A source present all day but absent from the outage minutes must still
+  // appear; this is what the strategy review could not read off the line.
+  it('still shows a source that never appeared during the outage window', () => {
+    const line = formatAudienceLine(counts({
+      total: 100, activeTotal: 5,
+      bySource: src({ x: 5, reddit: 95 }),
+      activeBySource: src({ x: 5 }),
+    }))
+    expect(line).toContain('During outages: 5 — X 5')
+    expect(line).toContain('Reddit 95')
   })
 
   it('renders the #1055 buckets with their operator labels', () => {
     // The labels are the ONLY surface a human reads, and nothing else asserts them: with every
     // fixture zero-filling the new buckets, mislabelling `refhost` as "direct" would restore exactly
     // the ambiguity #1055 removes and no test would notice.
+    // `bySource` is set as well as `activeBySource`, and to the same values: `parseOutageAudienceResponse`
+    // increments `bySource[source]`/`total` for EVERY accepted row and `activeBySource`/`activeTotal` only
+    // inside the `phase === 'active'` arm, so `total === Σ bySource` and `activeBySource[s] <= bySource[s]`
+    // hold by construction. Omitting `bySource` here left it all-zero against `total: 15` — a state the
+    // parser cannot emit, which under the two-row renderer produced a breakdown-less `All views: 15`.
     const line = formatAudienceLine(counts({
       total: 15, activeTotal: 15,
+      bySource: src({ reddit: 5, hn: 3, refhost: 7 }),
       activeBySource: src({ reddit: 5, hn: 3, refhost: 7 }),
     }))
     expect(line).toContain('Reddit 5')
@@ -1078,21 +1114,47 @@ describe('formatAudienceLine (#842-B)', () => {
     expect(line).not.toContain('owned 0')
   })
 
-  it('falls back to the general is-down audience when no active outage was viewed', () => {
+  // #1280 — a zero-outage day keeps the SAME two-row shape rather than switching to a different
+  // sentence. The stability is the point: the header and row labels no longer tell you which branch
+  // ran, because there is no branch to tell apart.
+  it('keeps the same shape when no active outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 50, activeTotal: 0,
       bySource: src({ x: 10, search: 35, feed: 5 }),
     }))
-    expect(line).toContain('is-down Audience')
-    expect(line).toContain('50 views')
-    expect(line).toContain('search 35')
-    expect(line).toContain('no active outages')
+    // Whole-string, same reason as above. It also pins that a zero subset trails no empty em-dash.
+    expect(line).toBe('\n👥 **is-down Audience** (24h)\n   During outages: 0\n   All views: 50 — X 10 · search 35 · feed 5')
   })
 
   it('returns empty (section omitted) when null or no views', () => {
     expect(formatAudienceLine(null)).toBe('')
     expect(formatAudienceLine(undefined)).toBe('')
     expect(formatAudienceLine(counts({ total: 0 }))).toBe('')
+  })
+
+  // #1280 — a pure-function test cannot prove the section reaches the message: deleting the
+  // `lines.push(audienceLine)` call in buildDailySummary left every other test in this file green.
+  // That is the exact failure `badge-wiring.test.ts` was written for after it shipped once, so the
+  // section gets the same treatment its neighbours already have (pushCount, accuracy, badgeTraffic).
+  // The reshape raises the stakes: the block is now four lines, so this also pins that the
+  // multi-line string survives `lines.join('\n')` instead of arriving flattened.
+  it('reaches the assembled daily summary, all rows intact', () => {
+    const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    const out = buildDailySummary({
+      ...minimal,
+      audience: counts({
+        total: 36, activeTotal: 1,
+        bySource: src({ x: 21, search: 2, owned: 3, direct: 10 }),
+        activeBySource: src({ x: 1 }),
+      }),
+    })
+    // One assertion carrying the newlines, so this genuinely pins what the comment claims: the block
+    // arrives with its rows intact rather than flattened. Three separate `toContain` fragments would
+    // all survive a re-merge.
+    expect(out).toContain('👥 **is-down Audience** (24h)\n   During outages: 1 — X 1\n   All views: 36 — X 21 · search 2 · owned 3 · direct 10')
+    // A quiet day is `total: 0`, not an absent field — that is what `queryOutageAudience` hands back,
+    // and it exercises the formatter's early return through the assembly path.
+    expect(buildDailySummary({ ...minimal, audience: counts({ total: 0 }) })).not.toContain('is-down Audience')
   })
 })
 
