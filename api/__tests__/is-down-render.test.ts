@@ -31,7 +31,7 @@ describe('renderDelegatedListeners integrity (#842-B)', () => {
     // classifyReferrer's host patterns are all `$`-anchored, so they only work on a bare hostname.
     // If this ever sent `document.referrer` raw, EVERY host bucket (reddit/hn/search/x/owned) would
     // silently fall through to `refhost`: reddit/hn pinned at zero, refhost absorbing everything,
-    // and the daily Outage Audience line looking perfectly plausible throughout — re-introducing the
+    // and the daily is-down Audience line looking perfectly plausible throughout — re-introducing the
     // "inbound is unreadable" state #1055 exists to fix. Worker-side pin: outage-audience.test.ts
     // asserts a full URL classifies as `refhost`, not `reddit`.
     expect(html).toContain('new URL(document.referrer).hostname')
