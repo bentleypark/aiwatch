@@ -8,6 +8,7 @@ import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidate
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
+import { createReadCensus, formatCensus } from './kv-read-census'
 import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
@@ -2838,1195 +2839,1235 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
 }
 
 export default {
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledEvent, rawEnv: Env, ctx: ExecutionContext): Promise<void> {
     // Use the scheduled trigger time (not wall-clock) so time-of-day checks like
     // `minutes === 0` remain accurate even when cronAlertCheck takes 60+ seconds.
     const scheduledNow = new Date(event.scheduledTime)
 
-    // #629 — reliably trigger the deepseek-feed Action each */5 cycle (GitHub's own schedule is
-    // throttled to ~2h, expiring the Flashduty feed). waitUntil so the GitHub POST runs concurrently
-    // with the rest of the cron instead of serially delaying it; .catch so it can never break the cron.
-    ctx.waitUntil(
-      maybeDispatchDeepseekFeed(env).catch((err) =>
-        console.warn('[cron] deepseek dispatch failed:', err instanceof Error ? err.message : err)
-      )
-    )
+    // #1224 Phase 2 — count every KV read this run makes, bucketed by key prefix. The binding is
+    // wrapped ONCE here and `env` shadows the raw parameter, so every existing `env.STATUS_CACHE`
+    // use in this handler — and everything it hands `env` to — is counted with no per-call-site
+    // edit. `rawEnv` must therefore appear nowhere below: a read taken from it would be invisible,
+    // and an instrument that under-reports says "nothing to see here", which is exactly the answer
+    // that would end this investigation wrongly.
+    //
+    // A Proxy, not `{ ...rawEnv, STATUS_CACHE: … }`: a spread copies own enumerable properties only,
+    // so a binding workerd exposes any other way would vanish for the whole cron run — and it would
+    // surface in a DIFFERENT subsystem (a missing `env.AI` silently changes which model
+    // `ai-analysis.ts` uses), i.e. the instrument breaking the thing it measures, invisibly.
+    const kvCensus = createReadCensus()
+    const censusedKv = rawEnv.STATUS_CACHE ? kvCensus.wrapKv(rawEnv.STATUS_CACHE) : undefined
+    const env: Env = new Proxy(rawEnv, {
+      get: (target, prop) => (prop === 'STATUS_CACHE' && censusedKv) ? censusedKv : Reflect.get(target, prop),
+    })
+    // #1224 Phase 2 — the census line must survive every way this handler can exit. It cannot
+    // sit at the end: `if (!env.DISCORD_WEBHOOK_URL) return` below is a real early return, and a
+    // throw from the unguarded `cronAlertCheck` await is another. Both are the ANOMALOUS runs
+    // whose read counts matter most, and a missing line reads as "nothing to see here".
+    // The body below is deliberately re-indented by exactly two spaces and otherwise unchanged —
+    // `git diff -w` shows only the real edits.
+    try {
 
-    // Health check probing (Phase 2) — runs every cron cycle
-    if (env.STATUS_CACHE) {
-      await writeProbeSnapshot(env.STATUS_CACHE).catch((err) =>
-        console.warn('[cron] probe failed:', err instanceof Error ? err.message : err)
-      )
-    }
-
-    // Probe spike detection — record earliest detection for Detection Lead (no Discord alert, aggregated in daily report)
-    if (env.STATUS_CACHE) {
-      try {
-        const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
-        if (probeRaw) {
-          const snapshots: ProbeSnapshot[] = JSON.parse(probeRaw).snapshots ?? []
-          const serviceIds = PROBE_TARGETS.map((t) => t.id)
-          const spikes = detectConsecutiveSpikes(snapshots, serviceIds, 3)
-          // #464 — read cached service status once so we can tag each RTT degradation as
-          // "on the official status page" vs "not reported there" (the headline differentiator).
-          // `scored` isn't in scope in scheduled(); the services:latest cache is the same snapshot
-          // /api/status/cached serves. Best-effort: a miss → treat status unknown (operational=false).
-          const statusByService = new Map<string, string>()
-          try {
-            const cachedRaw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
-            if (cachedRaw) {
-              const parsed = JSON.parse(cachedRaw)
-              const svcs: ServiceStatus[] = Array.isArray(parsed) ? parsed : parsed.services ?? []
-              for (const s of svcs) statusByService.set(s.id, s.status)
-            }
-          } catch (err) {
-            console.warn('[cron] degradation status read failed:', err instanceof Error ? err.message : err)
-          }
-          const degradationDate = new Date().toISOString().split('T')[0]
-          for (const spike of spikes) {
-            const alertKey = `alerted:probe-spike:${spike.serviceId}`
-            const existing = await env.STATUS_CACHE.get(alertKey).catch(() => null)
-            if (existing) continue
-            await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 3600 })
-            // #464 — rising edge of a spike streak: count this RTT degradation. If the service's
-            // official status is still operational, the degradation isn't on the status page → the
-            // `nostatus` figure. Best-effort, mirrors the fetch-fail:daily counter (48h TTL).
-            // #1233 KNOWN LIMITATION — `classifyDegradation` is a two-way boolean, so an `unknown` service
-            // answers `false` and its RTT degradation is booked as "already on the status page" when in fact
-            // we could not read that page. Reachable: `detectConsecutiveSpikes` has a lower bar than
-            // `isProbeFailing`, so a spiking service can stay `unknown` through cross-validation and land
-            // here. Left as-is deliberately — the honest fix is a third outcome, and changing a second durable
-            // counter in this PR is what the uptime-sampling revert (see `cacheWrite`'s #1233 note) exists to
-            // avoid. Tracked as a follow-up.
-            const svcOperational = statusByService.get(spike.serviceId) === 'operational'
-            const outcome = classifyDegradation(svcOperational)
-            const isNoStatus = outcome === 'degradation_nostatus'
-            const degBase = `probe-degradation:daily:${spike.serviceId}:${degradationDate}`
-            const prevDeg = parseInt(await env.STATUS_CACHE.get(degBase).catch(() => null) ?? '0', 10) || 0
-            await kvPut(env.STATUS_CACHE, degBase, String(prevDeg + 1), { expirationTtl: 172800 })
-            if (isNoStatus) {
-              const nsKey = `probe-degradation:nostatus:daily:${spike.serviceId}:${degradationDate}`
-              const prevNs = parseInt(await env.STATUS_CACHE.get(nsKey).catch(() => null) ?? '0', 10) || 0
-              await kvPut(env.STATUS_CACHE, nsKey, String(prevNs + 1), { expirationTtl: 172800 })
-            }
-            // #511 — dual-write the monthly accumulator (60d TTL) so the archive cron can read
-            // month-complete figures past the daily 48h TTL. Mirrors detection lead's monthly write.
-            const degMonthKey = degradationMonthlyKey()
-            const degMonthRaw = await env.STATUS_CACHE.get(degMonthKey).catch(() => null)
-            let degMonth = null
-            try { degMonth = degMonthRaw ? normalizeDegradationMonthly(JSON.parse(degMonthRaw)) : null } catch { degMonth = null }
-            const nextDegMonth = addDegradationToMonthly(degMonth, spike.serviceId, isNoStatus)
-            await kvPut(env.STATUS_CACHE, degMonthKey, JSON.stringify(nextDegMonth), { expirationTtl: DEGRADATION_MONTHLY_TTL_SECONDS })
-            // Record probe spike as earliest detection (Detection Lead feature)
-            const detectKey = `detected:${spike.serviceId}`
-            const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
-            if (isProbeEarlier(existingDetect, spike.since)) {
-              await kvPut(env.STATUS_CACHE, detectKey, serializeDetectionEntry({ t: spike.since, incId: null }), { expirationTtl: 604800 })
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[cron] probe spike detection failed:', err instanceof Error ? err.message : err)
-      }
-    }
-
-    // Platform health monitoring — check metastatuspage.com for Atlassian Statuspage platform status
-    // Runs every cron cycle (~5min). Stores status in KV for cross-validation + sends Discord alerts.
-    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL) {
-      try {
-        const platformStatus = await checkPlatformStatus('atlassian')
-        if (platformStatus) {
-          const kvKey = platformStatusKey('atlassian')
-          const alertKey = platformAlertKey('atlassian')
-
-          if (platformStatus.status !== 'operational') {
-            // Store non-operational status (10min TTL) — used by cross-validation in fetchAllServices
-            const stored = await kvPut(env.STATUS_CACHE, kvKey, JSON.stringify(platformStatus), { expirationTtl: 600 })
-            if (!stored) console.warn('[platform-monitor] Failed to store platform status in KV')
-
-            // Send outage alert if not already alerted
-            const alreadyAlerted = await env.STATUS_CACHE.get(alertKey).catch(() => null)
-            if (!alreadyAlerted) {
-              const affectedCount = countPlatformServices(SERVICES, 'atlassian')
-              const alert = formatPlatformOutageAlert(platformStatus, affectedCount, SERVICES.length)
-              await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, alert)
-              await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 7200 })
-              console.log(`[platform-monitor] Atlassian outage alert sent: ${platformStatus.status}`)
-            }
-          } else {
-            // Platform operational — send recovery alert if we previously alerted
-            // Uses alertKey (not prevStatus) as recovery signal — immune to KV TTL expiry
-            const alertExists = await env.STATUS_CACHE.get(alertKey).catch(() => null)
-            if (alertExists) {
-              const affectedCount = countPlatformServices(SERVICES, 'atlassian')
-              const alert = formatPlatformRecoveryAlert('Atlassian Statuspage', affectedCount)
-              try {
-                await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, alert)
-                await kvDel(env.STATUS_CACHE, alertKey)
-                console.log('[platform-monitor] Atlassian recovery alert sent')
-              } catch (alertErr) {
-                console.warn('[platform-monitor] Recovery alert send failed — will retry next cycle:', alertErr instanceof Error ? alertErr.message : alertErr)
-                // Keep alertKey so retry works next cycle
-              }
-            }
-            // Clear platform status KV (platform is healthy now)
-            await kvDel(env.STATUS_CACHE, kvKey)
-          }
-        }
-      } catch (err) {
-        console.warn('[cron] platform monitor failed:', err instanceof Error ? err.message : err)
-      }
-    }
-
-    const result = await cronAlertCheck(env, event.scheduledTime)
-    if (!env.DISCORD_WEBHOOK_URL) return
-
-    // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
-    // KV budget (#820 round 2 — the old "max 5 writes/hour" cap is gone, see the outageAlerts loop
-    // below): worst case is REDDIT_TARGETS' 9 outage-mode subs × limit=25 posts = 225 dedup writes/
-    // hour, 5400/day — still trivial against the Workers Paid 1M/month inclusion. Real volume is far
-    // lower in practice (most posts don't match `matchesKeywords`, and #820's measured ~85% 429 rate
-    // on the fetch itself further caps how many subreddits even return posts to write keys for).
-    const now = scheduledNow
-    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
-      try {
-        const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
-        // Split: service outage alerts vs competitive vs security monitoring
-        const outageAlerts = redditAlerts.filter(a => a.type === 'outage')
-        const competitiveAlerts = redditAlerts.filter(a => a.type === 'competitive')
-        const redditSecurityAlerts = redditAlerts.filter(a => a.type === 'security')
-        // Mark EVERY detected post as seen (prevents re-checking next run), but only notify
-        // promotable ones. #820's endpoint swap raised the per-subreddit fetch limit 5 → 25, so a
-        // cap here would now routinely leave outage-matching posts beyond the cap un-marked —
-        // `promotable` below is filtered from the FULL `outageAlerts` list, so an unmarked post
-        // that got promoted this run would be re-detected (and re-promoted to Discord) every run
-        // until it aged out 6h later. Each write is cheap (dedup only, 24h TTL) and volume is
-        // naturally bounded by how many distinct outage-keyword posts actually appear across all
-        // outage-mode subreddits in an hour — capping it traded a real duplicate-alert bug for a
-        // KV-budget saving that was never the bottleneck.
-        //
-        // Tradeoff this creates, stated rather than hidden: `promotable` below is still capped at
-        // `.slice(0, 3)` (the Discord-send limit), but now that every outageAlert gets marked seen
-        // regardless of whether it was sent, a 4th+ promotable post this run is marked seen WITHOUT
-        // ever being sent — it will not become eligible on a later run either, since dedup already
-        // covers it. Before this change such a post would have stayed unmarked (if beyond the old
-        // 5-cap) and could resurface; now it's a clean, permanent skip instead. Silence over
-        // duplication is the right tradeoff here — REDDIT_TARGETS' outage-mode subs order determines
-        // which posts win the 3 slots each run, not recency or severity, but that ordering question
-        // is unrelated to this PR's scope (Reddit is bot-walled far more often than it produces 4+
-        // simultaneous promotable posts in one run in the first place).
-        for (const alert of outageAlerts) {
-          await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
-        }
-        const nowSec = Date.now() / 1000
-        const promotable = outageAlerts
-          .filter(a => isPromotable(a.post.title, nowSec - a.post.createdUtc))
-          .slice(0, 3)
-        for (const alert of promotable) {
-          const formatted = formatRedditAlert(alert)
-          const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-            title: formatted.title,
-            description: `${formatted.description}\n[View Post](${formatted.url})`,
-            color: formatted.color,
-          })
-          // #1202 — the only durable trace that a PROMOTE alert (as opposed to the #1182 engagement
-          // block, which leaves no KV trace either) has ever actually fired. Gated on `sent` — round
-          // 7 caught that an earlier version discarded sendDiscordAlert's return value and wrote the
-          // marker unconditionally, so a failed webhook POST would still read as "delivered" to
-          // anyone checking `reddit:promote:last` (including #1202's own verify-after, whose whole
-          // point is confirming this alert actually reached Discord). Mirrors the #800/#714
-          // source-dead-alert path a few hundred lines up, which gates its KV write on `sent` the
-          // same way. `kvPut` itself never throws (see worker/src/utils.ts) — it returns false on
-          // failure — so the write-failure branch checks the return value rather than catching.
-          if (sent && !(await kvPut(env.STATUS_CACHE, 'reddit:promote:last', JSON.stringify({
-            postId: alert.post.id, subreddit: alert.subreddit, sentAt: now.toISOString(),
-          })))) console.error('[reddit] promote-marker write failed')
-        }
-        // Competitive alerts — mark seen + notify (max 2 per hour)
-        for (const alert of competitiveAlerts.slice(0, 2)) {
-          await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
-          const formatted = formatCompetitiveAlert(alert)
-          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-            title: formatted.title,
-            description: `${formatted.description}\n[View Post](${formatted.url})`,
-            color: formatted.color,
-          })
-        }
-        // Security alerts from Reddit — notify first, then mark seen (max 5 per hour)
-        const secReddit = redditSecurityAlerts.slice(0, 5)
-        if (secReddit.length > 0) {
-          const secLines = secReddit.map(a => {
-            const formatted = formatRedditSecurityAlert(a)
-            return `${formatted.description}\n[View Post](${formatted.url})`
-          })
-          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-            title: `🔒 Reddit Security — ${secReddit.length} post${secReddit.length > 1 ? 's' : ''}`,
-            description: secLines.join('\n\n'),
-            color: 0xf85149,
-          })
-          for (const alert of secReddit) {
-            await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 604800 }).catch(err => { // 7d dedup
-              console.error('[cron] Failed to mark Reddit security alert as seen:', alert.key, err instanceof Error ? err.message : err)
-            })
-          }
-        }
-      } catch (err) {
-        console.error('[cron] Reddit monitoring failed:', err instanceof Error ? err.message : err)
-      }
-
-      // HN + OSV security monitoring (independent of Reddit — separate try/catch)
-      try {
-        const securityAlerts = await detectSecurityAlerts(env.STATUS_CACHE)
-        if (securityAlerts.length > 0) {
-          // Send notification first — duplicate is better than lost alert
-          const digest = formatSecurityDigest(securityAlerts)
-          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-            title: digest.title,
-            description: digest.description,
-            color: digest.color,
-          })
-          // Then mark as seen — store alert metadata for dashboard display
-          const nowISO = new Date().toISOString()
-          for (const alert of securityAlerts) {
-            // #326: persist EPSS fields so dashboard/readRecentSecurityAlerts
-            // can render the exploit-probability tag without a re-fetch.
-            const meta = JSON.stringify({
-              title: alert.title, url: alert.url, source: alert.source,
-              severity: alert.severity, service: alert.service, detectedAt: nowISO,
-              epssPercentile: alert.epssPercentile, epssPercentage: alert.epssPercentage,
-            })
-            await kvPut(env.STATUS_CACHE, alert.kvKey, meta, { expirationTtl: 604800 }).catch(err => { // 7d dedup
-              console.error('[cron] Failed to mark security alert as seen:', alert.kvKey, err instanceof Error ? err.message : err)
-            })
-          }
-
-          // #288: purpose-built daily counter for the daily summary. security:seen:* has a
-          // 7d TTL for dedup semantics and shouldn't double as a "today's count" source.
-          const detectedKey = securityDetectedKey(nowISO.slice(0, 10))
-          try {
-            const prevRaw = await env.STATUS_CACHE.get(detectedKey).catch(() => null)
-            const next = incrementSecurityCount(prevRaw, securityAlerts.length)
-            await kvPut(env.STATUS_CACHE, detectedKey, String(next), { expirationTtl: 259200 }) // 3d TTL
-          } catch (err) {
-            console.warn('[cron] security daily counter increment failed:', err instanceof Error ? err.message : err)
-          }
-
-          // Accumulate for monthly reports (security:monthly:{YYYY-MM}, 60d TTL)
-          const monthKey = `security:monthly:${nowISO.slice(0, 7)}`
-          try {
-            const monthRaw = await env.STATUS_CACHE.get(monthKey).catch(() => null)
-            const monthly: Array<{ title: string; url: string; source: string; severity?: string; service?: string; detectedAt: string; epssPercentile?: number; epssPercentage?: number }> = monthRaw ? JSON.parse(monthRaw) : []
-            const existingIds = new Set(monthly.map(m => m.url))
-            for (const alert of securityAlerts) {
-              if (!existingIds.has(alert.url)) {
-                monthly.push({
-                  title: alert.title, url: alert.url, source: alert.source,
-                  severity: alert.severity, service: alert.service, detectedAt: nowISO,
-                  epssPercentile: alert.epssPercentile, epssPercentage: alert.epssPercentage,
-                })
-              }
-            }
-            await kvPut(env.STATUS_CACHE, monthKey, JSON.stringify(monthly.slice(-100)), { expirationTtl: 5_184_000 }) // 60d
-          } catch (err) {
-            console.warn('[cron] security monthly accumulation failed:', err instanceof Error ? err.message : err)
-          }
-        }
-      } catch (err) {
-        console.error('[cron] Security monitoring (HN/OSV) failed:', err instanceof Error ? err.message : err)
-      }
-
-      // OSV timeline tracking (#291) — runs hourly alongside the dedup path.
-      // Separate from detectSecurityAlerts because timeline needs the CURRENT state
-      // of every tracked OSV alert (to detect severity_changed / fix_released),
-      // not just the new-this-hour ones. Writes only on stage transitions, so
-      // steady-state KV cost is near zero.
-      try {
-        const osvAlerts = await fetchOSVAlerts()
-        const plans = await planOsvTimelineCycle(
-          osvAlerts,
-          (key) => env.STATUS_CACHE.get(key).catch(() => null),
-          new Date().toISOString(),
-          (key, err) => console.warn('[cron] OSV timeline parse failed, preserving blob:', key, err instanceof Error ? err.message : err),
+      // #629 — reliably trigger the deepseek-feed Action each */5 cycle (GitHub's own schedule is
+      // throttled to ~2h, expiring the Flashduty feed). waitUntil so the GitHub POST runs concurrently
+      // with the rest of the cron instead of serially delaying it; .catch so it can never break the cron.
+      ctx.waitUntil(
+        maybeDispatchDeepseekFeed(env).catch((err) =>
+          console.warn('[cron] deepseek dispatch failed:', err instanceof Error ? err.message : err)
         )
-        for (const p of plans) {
-          await kvPut(env.STATUS_CACHE, p.key, JSON.stringify(p.next))
-        }
-      } catch (err) {
-        console.error('[cron] OSV timeline tracking failed:', err instanceof Error ? err.message : err)
+      )
+
+      // Health check probing (Phase 2) — runs every cron cycle
+      if (env.STATUS_CACHE) {
+        await writeProbeSnapshot(env.STATUS_CACHE).catch((err) =>
+          console.warn('[cron] probe failed:', err instanceof Error ? err.message : err)
+        )
       }
-    }
 
-    // GitHub competitive monitoring — weekly on Monday UTC 00:00-00:05
-    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCDay() === 1 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
-      try {
-        const ghAlerts = await detectNewRepos(env.STATUS_CACHE)
-        for (const alert of ghAlerts.slice(0, 3)) {
-          await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 2_592_000 }) // 30d TTL
-          const formatted = formatGitHubAlert(alert)
-          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-            title: formatted.title,
-            description: `${formatted.description}\n[View Repo](${formatted.url})`,
-            color: formatted.color,
-          })
-        }
-      } catch (err) {
-        console.warn('[cron] GitHub competitive monitoring failed:', err instanceof Error ? err.message : err)
-      }
-    }
-
-    // Changelog RSS collection — every hour at :00 (3 sources, write only on new entries)
-    if (env.STATUS_CACHE && now.getUTCMinutes() === 0) {
-      try {
-        const newEntries = await collectChangelogs(env.STATUS_CACHE)
-        if (newEntries.length > 0) {
-          console.log(`[cron] changelog: ${newEntries.length} new entries detected`)
-        }
-      } catch (err) {
-        console.warn('[cron] changelog collection failed:', err instanceof Error ? err.message : err)
-      }
-    }
-
-    // Weekly briefing — Sunday UTC 00:00-00:04 (KST 09:00)
-    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCDay() === 0 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
-      try {
-        const weeklyKey = `weekly-briefing:${todayUTC()}`
-        const alreadySent = await env.STATUS_CACHE.get(weeklyKey).catch(() => null)
-        if (!alreadySent) {
-          const { start: weekStart, end: weekEnd } = getWeekRange(now)
-
-          // Read changelog entries accumulated this week, filtered to the briefing window
-          const changelogRaw = await env.STATUS_CACHE.get('changelog:entries').catch(() => null)
-          let changelog: import('./changelog').ChangelogEntry[] = []
-          if (changelogRaw) {
+      // Probe spike detection — record earliest detection for Detection Lead (no Discord alert, aggregated in daily report)
+      if (env.STATUS_CACHE) {
+        try {
+          const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
+          if (probeRaw) {
+            const snapshots: ProbeSnapshot[] = JSON.parse(probeRaw).snapshots ?? []
+            const serviceIds = PROBE_TARGETS.map((t) => t.id)
+            const spikes = detectConsecutiveSpikes(snapshots, serviceIds, 3)
+            // #464 — read cached service status once so we can tag each RTT degradation as
+            // "on the official status page" vs "not reported there" (the headline differentiator).
+            // `scored` isn't in scope in scheduled(); the services:latest cache is the same snapshot
+            // /api/status/cached serves. Best-effort: a miss → treat status unknown (operational=false).
+            const statusByService = new Map<string, string>()
             try {
-              const all = JSON.parse(changelogRaw)
-              if (!Array.isArray(all)) {
-                console.warn('[cron] changelog entries: expected array, got', typeof all)
-              } else {
-                changelog = filterChangelogToWeek(all, weekStart, weekEnd)
+              const cachedRaw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
+              if (cachedRaw) {
+                const parsed = JSON.parse(cachedRaw)
+                const svcs: ServiceStatus[] = Array.isArray(parsed) ? parsed : parsed.services ?? []
+                for (const s of svcs) statusByService.set(s.id, s.status)
               }
-            } catch (err) { console.warn('[cron] changelog entries parse failed:', err instanceof Error ? err.message : String(err)) }
-          }
-
-          // Read monthly incidents for incident summary (current + previous month for week spanning boundary).
-          const allMonthlyIncidents: Parameters<typeof buildIncidentSummary>[0] = []
-          const serviceNameMap: Record<string, string> = {}
-          for (const svc of SERVICES) serviceNameMap[svc.id] = svc.name
-          // #1117 — `previousPeriod` (string arithmetic), NOT `setUTCMonth(-1)`: the latter keeps the
-          // day-of-month and overflows forward on the 29th-31st, so a briefing run on the 31st read the
-          // CURRENT month twice and lost a week spanning the boundary.
-          const currPeriod = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
-          const currMonthKey = `incidents:monthly:${currPeriod}`
-          const prevMonthKey = `incidents:monthly:${previousPeriod(currPeriod)}`
-          // #904 — filter operator-suppressed incidents out of the raw accumulator before summarizing,
-          // else a suppressed incident (e.g. FedRAMP) resurfaces in the weekly Discord incident summary.
-          const weeklySuppressions = await readSuppressionsFresh(env.STATUS_CACHE)
-          const weeklyOverrides = await readOverridesFresh(env.STATUS_CACHE) // #1019
-          for (const mk of [currMonthKey, prevMonthKey]) {
-            const mRaw = await env.STATUS_CACHE.get(mk).catch(() => null)
-            if (!mRaw) continue
-            try {
-              const parsed = JSON.parse(mRaw) as MonthlyIncidents
-              const suppressed = weeklySuppressions.length ? filterSuppressedFromMonthly(parsed, weeklySuppressions) : parsed
-              const filtered = weeklyOverrides.length ? applyDurationOverrides(suppressed, weeklyOverrides) : suppressed
-              allMonthlyIncidents.push(...parseMonthlyIncidents(filtered, serviceNameMap))
-            } catch (err) { console.warn(`[cron] ${mk} parse failed:`, err instanceof Error ? err.message : String(err)) }
-          }
-          const incidents = buildIncidentSummary(allMonthlyIncidents, weekStart, weekEnd)
-
-          // #733 — Stability Trend compares OFFICIAL status-page uptime, gated on the LIVE current
-          // value. `currentUptime` = live `uptime30d` from services:latest, with no-official-uptime /
-          // stale-source services set to null (= dashboard `isUnreliableUptime`, #713) so they're
-          // excluded. The previous-week official snapshot comes from the history counters' stored
-          // `officialUptime` (i=7→13 below; i ascending = most-recent-first, so the first non-null is
-          // the most recent). The current week is NOT read from history — a service like Bedrock had
-          // intermittently non-null `officialUptime` snapshots (pre-#713 estimate residue) that would
-          // otherwise leak it back in despite publishing no uptime now.
-          type WeekCounter = { ok: number; total: number; officialUptime?: number | null }
-          const prevWeekCounters: Record<string, WeekCounter> = {}
-          for (let i = 7; i < 14; i++) {
-            const pd = new Date(now)
-            pd.setUTCDate(pd.getUTCDate() - i)
-            const pkey = `history:${pd.toISOString().split('T')[0]}`
-            const praw = await env.STATUS_CACHE.get(pkey).catch(() => null)
-            if (!praw) continue
-            try {
-              const pdata = JSON.parse(praw) as Record<string, { ok: number; total: number; officialUptime?: number | null }>
-              for (const [svcId, counts] of Object.entries(pdata)) {
-                const c = prevWeekCounters[svcId] ?? { ok: 0, total: 0, officialUptime: null }
-                c.ok += counts.ok; c.total += counts.total
-                if (c.officialUptime == null && counts.officialUptime != null) c.officialUptime = counts.officialUptime
-                prevWeekCounters[svcId] = c
-              }
-            } catch { console.warn(`[cron] ${pkey} parse failed`) }
-          }
-          const serviceNames: Record<string, string> = {}
-          for (const svc of SERVICES) serviceNames[svc.id] = svc.name
-          // Live current official uptime (isUnreliableUptime → null → excluded)
-          const currentUptime: Record<string, number | null> = {}
-          const latestRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
-          if (latestRaw) {
-            try {
-              const p = JSON.parse(latestRaw)
-              const live: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
-              for (const s of live) {
-                const unreliable = s.uptime30d == null || !!s.incidentSourceStale
-                currentUptime[s.id] = unreliable ? null : s.uptime30d!
-              }
-            } catch { console.warn('[cron] services:latest parse failed for stability') }
-          }
-          const stabilityChanges = buildStabilityChanges(currentUptime, prevWeekCounters, serviceNames)
-          // #733 — a genuine comparison requires at least one service with BOTH a live official
-          // uptime AND a prev-week official snapshot; otherwise the section says "data unavailable"
-          // rather than the reassuring "No significant changes." (which would hide a possible decline).
-          const stabilityDataAvailable = Object.entries(currentUptime).some(
-            ([id, v]) => v != null && prevWeekCounters[id]?.officialUptime != null,
-          )
-
-          // Security summary: count security:seen:* keys (7d TTL — approximate week coverage, ±1d)
-          // KV list returns max 1000 keys — sufficient for weekly security alerts (~50-100 typical)
-          let security
-          try {
-            const secKeys = await env.STATUS_CACHE.list({ prefix: 'security:seen:' })
-            if (secKeys.keys.length > 0) {
-              // TODO: highlights require storing alert titles in KV values or a dedicated accumulation key
-              // KV list() only returns key names — pass empty for now
-              security = buildSecuritySummary(secKeys.keys, [])
+            } catch (err) {
+              console.warn('[cron] degradation status read failed:', err instanceof Error ? err.message : err)
             }
-          } catch { console.warn('[cron] security summary list failed') }
-
-          // Per-source last-fetch staleness check — surfaces silent collection gaps (#274)
-          const staleSources = await getStaleSources(env.STATUS_CACHE).catch(() => [])
-
-          // #995 — AI-analysis usage trend from the retained ai:usage:{date} keys across the week.
-          // parseUsage(null) → zeros, so missing days contribute nothing but keep the window at 7d.
-          let aiUsageTrend = null
-          try {
-            const entries = await Promise.all(
-              weekDateStrings(weekStart, weekEnd).map((dt) => env.STATUS_CACHE.get(`ai:usage:${dt}`).catch(() => null).then(parseUsage)),
-            )
-            aiUsageTrend = summarizeAiUsageTrend(entries)
-          } catch (err) {
-            console.warn('[cron] weekly ai:usage trend read failed:', err instanceof Error ? err.message : err)
+            const degradationDate = new Date().toISOString().split('T')[0]
+            for (const spike of spikes) {
+              const alertKey = `alerted:probe-spike:${spike.serviceId}`
+              const existing = await env.STATUS_CACHE.get(alertKey).catch(() => null)
+              if (existing) continue
+              await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 3600 })
+              // #464 — rising edge of a spike streak: count this RTT degradation. If the service's
+              // official status is still operational, the degradation isn't on the status page → the
+              // `nostatus` figure. Best-effort, mirrors the fetch-fail:daily counter (48h TTL).
+              // #1233 KNOWN LIMITATION — `classifyDegradation` is a two-way boolean, so an `unknown` service
+              // answers `false` and its RTT degradation is booked as "already on the status page" when in fact
+              // we could not read that page. Reachable: `detectConsecutiveSpikes` has a lower bar than
+              // `isProbeFailing`, so a spiking service can stay `unknown` through cross-validation and land
+              // here. Left as-is deliberately — the honest fix is a third outcome, and changing a second durable
+              // counter in this PR is what the uptime-sampling revert (see `cacheWrite`'s #1233 note) exists to
+              // avoid. Tracked as a follow-up.
+              const svcOperational = statusByService.get(spike.serviceId) === 'operational'
+              const outcome = classifyDegradation(svcOperational)
+              const isNoStatus = outcome === 'degradation_nostatus'
+              const degBase = `probe-degradation:daily:${spike.serviceId}:${degradationDate}`
+              const prevDeg = parseInt(await env.STATUS_CACHE.get(degBase).catch(() => null) ?? '0', 10) || 0
+              await kvPut(env.STATUS_CACHE, degBase, String(prevDeg + 1), { expirationTtl: 172800 })
+              if (isNoStatus) {
+                const nsKey = `probe-degradation:nostatus:daily:${spike.serviceId}:${degradationDate}`
+                const prevNs = parseInt(await env.STATUS_CACHE.get(nsKey).catch(() => null) ?? '0', 10) || 0
+                await kvPut(env.STATUS_CACHE, nsKey, String(prevNs + 1), { expirationTtl: 172800 })
+              }
+              // #511 — dual-write the monthly accumulator (60d TTL) so the archive cron can read
+              // month-complete figures past the daily 48h TTL. Mirrors detection lead's monthly write.
+              const degMonthKey = degradationMonthlyKey()
+              const degMonthRaw = await env.STATUS_CACHE.get(degMonthKey).catch(() => null)
+              let degMonth = null
+              try { degMonth = degMonthRaw ? normalizeDegradationMonthly(JSON.parse(degMonthRaw)) : null } catch { degMonth = null }
+              const nextDegMonth = addDegradationToMonthly(degMonth, spike.serviceId, isNoStatus)
+              await kvPut(env.STATUS_CACHE, degMonthKey, JSON.stringify(nextDegMonth), { expirationTtl: DEGRADATION_MONTHLY_TTL_SECONDS })
+              // Record probe spike as earliest detection (Detection Lead feature)
+              const detectKey = `detected:${spike.serviceId}`
+              const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
+              if (isProbeEarlier(existingDetect, spike.since)) {
+                await kvPut(env.STATUS_CACHE, detectKey, serializeDetectionEntry({ t: spike.since, incId: null }), { expirationTtl: 604800 })
+              }
+            }
           }
+        } catch (err) {
+          console.warn('[cron] probe spike detection failed:', err instanceof Error ? err.message : err)
+        }
+      }
 
-          // #1158 — GitHub repo discovery for badge embeds (weekly Code Search sweep). Best-effort,
-          // like the sections above. searchBadgeEmbeds returns null on missing token/HTTP failure/
-          // unparseable response — GitHub API trouble never affects /badge/:serviceId serving (this
-          // cron branch is fully separate from that handler).
+      // Platform health monitoring — check metastatuspage.com for Atlassian Statuspage platform status
+      // Runs every cron cycle (~5min). Stores status in KV for cross-validation + sends Discord alerts.
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL) {
+        try {
+          const platformStatus = await checkPlatformStatus('atlassian')
+          if (platformStatus) {
+            const kvKey = platformStatusKey('atlassian')
+            const alertKey = platformAlertKey('atlassian')
+
+            if (platformStatus.status !== 'operational') {
+              // Store non-operational status (10min TTL) — used by cross-validation in fetchAllServices
+              const stored = await kvPut(env.STATUS_CACHE, kvKey, JSON.stringify(platformStatus), { expirationTtl: 600 })
+              if (!stored) console.warn('[platform-monitor] Failed to store platform status in KV')
+
+              // Send outage alert if not already alerted
+              const alreadyAlerted = await env.STATUS_CACHE.get(alertKey).catch(() => null)
+              if (!alreadyAlerted) {
+                const affectedCount = countPlatformServices(SERVICES, 'atlassian')
+                const alert = formatPlatformOutageAlert(platformStatus, affectedCount, SERVICES.length)
+                await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, alert)
+                await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 7200 })
+                console.log(`[platform-monitor] Atlassian outage alert sent: ${platformStatus.status}`)
+              }
+            } else {
+              // Platform operational — send recovery alert if we previously alerted
+              // Uses alertKey (not prevStatus) as recovery signal — immune to KV TTL expiry
+              const alertExists = await env.STATUS_CACHE.get(alertKey).catch(() => null)
+              if (alertExists) {
+                const affectedCount = countPlatformServices(SERVICES, 'atlassian')
+                const alert = formatPlatformRecoveryAlert('Atlassian Statuspage', affectedCount)
+                try {
+                  await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, alert)
+                  await kvDel(env.STATUS_CACHE, alertKey)
+                  console.log('[platform-monitor] Atlassian recovery alert sent')
+                } catch (alertErr) {
+                  console.warn('[platform-monitor] Recovery alert send failed — will retry next cycle:', alertErr instanceof Error ? alertErr.message : alertErr)
+                  // Keep alertKey so retry works next cycle
+                }
+              }
+              // Clear platform status KV (platform is healthy now)
+              await kvDel(env.STATUS_CACHE, kvKey)
+            }
+          }
+        } catch (err) {
+          console.warn('[cron] platform monitor failed:', err instanceof Error ? err.message : err)
+        }
+      }
+
+      const result = await cronAlertCheck(env, event.scheduledTime)
+      if (!env.DISCORD_WEBHOOK_URL) return
+
+      // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
+      // KV budget (#820 round 2 — the old "max 5 writes/hour" cap is gone, see the outageAlerts loop
+      // below): worst case is REDDIT_TARGETS' 9 outage-mode subs × limit=25 posts = 225 dedup writes/
+      // hour, 5400/day — still trivial against the Workers Paid 1M/month inclusion. Real volume is far
+      // lower in practice (most posts don't match `matchesKeywords`, and #820's measured ~85% 429 rate
+      // on the fetch itself further caps how many subreddits even return posts to write keys for).
+      const now = scheduledNow
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
+        try {
+          const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
+          // Split: service outage alerts vs competitive vs security monitoring
+          const outageAlerts = redditAlerts.filter(a => a.type === 'outage')
+          const competitiveAlerts = redditAlerts.filter(a => a.type === 'competitive')
+          const redditSecurityAlerts = redditAlerts.filter(a => a.type === 'security')
+          // Mark EVERY detected post as seen (prevents re-checking next run), but only notify
+          // promotable ones. #820's endpoint swap raised the per-subreddit fetch limit 5 → 25, so a
+          // cap here would now routinely leave outage-matching posts beyond the cap un-marked —
+          // `promotable` below is filtered from the FULL `outageAlerts` list, so an unmarked post
+          // that got promoted this run would be re-detected (and re-promoted to Discord) every run
+          // until it aged out 6h later. Each write is cheap (dedup only, 24h TTL) and volume is
+          // naturally bounded by how many distinct outage-keyword posts actually appear across all
+          // outage-mode subreddits in an hour — capping it traded a real duplicate-alert bug for a
+          // KV-budget saving that was never the bottleneck.
           //
-          // `badge:repos:seen` (no TTL — a permanent accumulator) is FAIL-CLOSED on both a KV read
-          // throw AND a corrupt/wrong-shape stored value: unlike `component-seen:` (#992, a few
-          // hundred lines up) whose corrupt→empty fallback is safe because its worst case is a
-          // bounded re-alert, this key has no recovery path — persisting a diff computed against a
-          // false "empty" baseline would overwrite real adopter history with just this week's hits.
-          // So any read anomaly here skips the diff+write entirely (this week's briefing section is
-          // simply omitted) rather than substituting an empty baseline. See parseBadgeReposSeen.
-          let badgeRepoDiscovery: BadgeRepoDiscoveryDiff | null = null
-          try {
-            const results = await searchBadgeEmbeds(env.GH_CODE_SEARCH_TOKEN)
-            if (results) {
-              let readFailed = false
-              const seenRaw = await env.STATUS_CACHE.get('badge:repos:seen').catch((err) => {
-                readFailed = true
-                console.warn('[cron] badge:repos:seen read failed — skipping this run to avoid clobbering history:', err instanceof Error ? err.message : err)
-                return null
+          // Tradeoff this creates, stated rather than hidden: `promotable` below is still capped at
+          // `.slice(0, 3)` (the Discord-send limit), but now that every outageAlert gets marked seen
+          // regardless of whether it was sent, a 4th+ promotable post this run is marked seen WITHOUT
+          // ever being sent — it will not become eligible on a later run either, since dedup already
+          // covers it. Before this change such a post would have stayed unmarked (if beyond the old
+          // 5-cap) and could resurface; now it's a clean, permanent skip instead. Silence over
+          // duplication is the right tradeoff here — REDDIT_TARGETS' outage-mode subs order determines
+          // which posts win the 3 slots each run, not recency or severity, but that ordering question
+          // is unrelated to this PR's scope (Reddit is bot-walled far more often than it produces 4+
+          // simultaneous promotable posts in one run in the first place).
+          for (const alert of outageAlerts) {
+            await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
+          }
+          const nowSec = Date.now() / 1000
+          const promotable = outageAlerts
+            .filter(a => isPromotable(a.post.title, nowSec - a.post.createdUtc))
+            .slice(0, 3)
+          for (const alert of promotable) {
+            const formatted = formatRedditAlert(alert)
+            const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: formatted.title,
+              description: `${formatted.description}\n[View Post](${formatted.url})`,
+              color: formatted.color,
+            })
+            // #1202 — the only durable trace that a PROMOTE alert (as opposed to the #1182 engagement
+            // block, which leaves no KV trace either) has ever actually fired. Gated on `sent` — round
+            // 7 caught that an earlier version discarded sendDiscordAlert's return value and wrote the
+            // marker unconditionally, so a failed webhook POST would still read as "delivered" to
+            // anyone checking `reddit:promote:last` (including #1202's own verify-after, whose whole
+            // point is confirming this alert actually reached Discord). Mirrors the #800/#714
+            // source-dead-alert path a few hundred lines up, which gates its KV write on `sent` the
+            // same way. `kvPut` itself never throws (see worker/src/utils.ts) — it returns false on
+            // failure — so the write-failure branch checks the return value rather than catching.
+            if (sent && !(await kvPut(env.STATUS_CACHE, 'reddit:promote:last', JSON.stringify({
+              postId: alert.post.id, subreddit: alert.subreddit, sentAt: now.toISOString(),
+            })))) console.error('[reddit] promote-marker write failed')
+          }
+          // Competitive alerts — mark seen + notify (max 2 per hour)
+          for (const alert of competitiveAlerts.slice(0, 2)) {
+            await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
+            const formatted = formatCompetitiveAlert(alert)
+            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: formatted.title,
+              description: `${formatted.description}\n[View Post](${formatted.url})`,
+              color: formatted.color,
+            })
+          }
+          // Security alerts from Reddit — notify first, then mark seen (max 5 per hour)
+          const secReddit = redditSecurityAlerts.slice(0, 5)
+          if (secReddit.length > 0) {
+            const secLines = secReddit.map(a => {
+              const formatted = formatRedditSecurityAlert(a)
+              return `${formatted.description}\n[View Post](${formatted.url})`
+            })
+            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: `🔒 Reddit Security — ${secReddit.length} post${secReddit.length > 1 ? 's' : ''}`,
+              description: secLines.join('\n\n'),
+              color: 0xf85149,
+            })
+            for (const alert of secReddit) {
+              await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 604800 }).catch(err => { // 7d dedup
+                console.error('[cron] Failed to mark Reddit security alert as seen:', alert.key, err instanceof Error ? err.message : err)
               })
-              if (!readFailed) {
-                const previouslySeen = parseBadgeReposSeen(seenRaw)
-                if (previouslySeen === null) {
-                  console.warn('[cron] badge:repos:seen corrupt/unparseable — skipping this run to avoid clobbering history')
+            }
+          }
+        } catch (err) {
+          console.error('[cron] Reddit monitoring failed:', err instanceof Error ? err.message : err)
+        }
+
+        // HN + OSV security monitoring (independent of Reddit — separate try/catch)
+        try {
+          const securityAlerts = await detectSecurityAlerts(env.STATUS_CACHE)
+          if (securityAlerts.length > 0) {
+            // Send notification first — duplicate is better than lost alert
+            const digest = formatSecurityDigest(securityAlerts)
+            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: digest.title,
+              description: digest.description,
+              color: digest.color,
+            })
+            // Then mark as seen — store alert metadata for dashboard display
+            const nowISO = new Date().toISOString()
+            for (const alert of securityAlerts) {
+              // #326: persist EPSS fields so dashboard/readRecentSecurityAlerts
+              // can render the exploit-probability tag without a re-fetch.
+              const meta = JSON.stringify({
+                title: alert.title, url: alert.url, source: alert.source,
+                severity: alert.severity, service: alert.service, detectedAt: nowISO,
+                epssPercentile: alert.epssPercentile, epssPercentage: alert.epssPercentage,
+              })
+              await kvPut(env.STATUS_CACHE, alert.kvKey, meta, { expirationTtl: 604800 }).catch(err => { // 7d dedup
+                console.error('[cron] Failed to mark security alert as seen:', alert.kvKey, err instanceof Error ? err.message : err)
+              })
+            }
+
+            // #288: purpose-built daily counter for the daily summary. security:seen:* has a
+            // 7d TTL for dedup semantics and shouldn't double as a "today's count" source.
+            const detectedKey = securityDetectedKey(nowISO.slice(0, 10))
+            try {
+              const prevRaw = await env.STATUS_CACHE.get(detectedKey).catch(() => null)
+              const next = incrementSecurityCount(prevRaw, securityAlerts.length)
+              await kvPut(env.STATUS_CACHE, detectedKey, String(next), { expirationTtl: 259200 }) // 3d TTL
+            } catch (err) {
+              console.warn('[cron] security daily counter increment failed:', err instanceof Error ? err.message : err)
+            }
+
+            // Accumulate for monthly reports (security:monthly:{YYYY-MM}, 60d TTL)
+            const monthKey = `security:monthly:${nowISO.slice(0, 7)}`
+            try {
+              const monthRaw = await env.STATUS_CACHE.get(monthKey).catch(() => null)
+              const monthly: Array<{ title: string; url: string; source: string; severity?: string; service?: string; detectedAt: string; epssPercentile?: number; epssPercentage?: number }> = monthRaw ? JSON.parse(monthRaw) : []
+              const existingIds = new Set(monthly.map(m => m.url))
+              for (const alert of securityAlerts) {
+                if (!existingIds.has(alert.url)) {
+                  monthly.push({
+                    title: alert.title, url: alert.url, source: alert.source,
+                    severity: alert.severity, service: alert.service, detectedAt: nowISO,
+                    epssPercentile: alert.epssPercentile, epssPercentage: alert.epssPercentage,
+                  })
+                }
+              }
+              await kvPut(env.STATUS_CACHE, monthKey, JSON.stringify(monthly.slice(-100)), { expirationTtl: 5_184_000 }) // 60d
+            } catch (err) {
+              console.warn('[cron] security monthly accumulation failed:', err instanceof Error ? err.message : err)
+            }
+          }
+        } catch (err) {
+          console.error('[cron] Security monitoring (HN/OSV) failed:', err instanceof Error ? err.message : err)
+        }
+
+        // OSV timeline tracking (#291) — runs hourly alongside the dedup path.
+        // Separate from detectSecurityAlerts because timeline needs the CURRENT state
+        // of every tracked OSV alert (to detect severity_changed / fix_released),
+        // not just the new-this-hour ones. Writes only on stage transitions, so
+        // steady-state KV cost is near zero.
+        try {
+          const osvAlerts = await fetchOSVAlerts()
+          const plans = await planOsvTimelineCycle(
+            osvAlerts,
+            (key) => env.STATUS_CACHE.get(key).catch(() => null),
+            new Date().toISOString(),
+            (key, err) => console.warn('[cron] OSV timeline parse failed, preserving blob:', key, err instanceof Error ? err.message : err),
+          )
+          for (const p of plans) {
+            await kvPut(env.STATUS_CACHE, p.key, JSON.stringify(p.next))
+          }
+        } catch (err) {
+          console.error('[cron] OSV timeline tracking failed:', err instanceof Error ? err.message : err)
+        }
+      }
+
+      // GitHub competitive monitoring — weekly on Monday UTC 00:00-00:05
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCDay() === 1 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
+        try {
+          const ghAlerts = await detectNewRepos(env.STATUS_CACHE)
+          for (const alert of ghAlerts.slice(0, 3)) {
+            await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 2_592_000 }) // 30d TTL
+            const formatted = formatGitHubAlert(alert)
+            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: formatted.title,
+              description: `${formatted.description}\n[View Repo](${formatted.url})`,
+              color: formatted.color,
+            })
+          }
+        } catch (err) {
+          console.warn('[cron] GitHub competitive monitoring failed:', err instanceof Error ? err.message : err)
+        }
+      }
+
+      // Changelog RSS collection — every hour at :00 (3 sources, write only on new entries)
+      if (env.STATUS_CACHE && now.getUTCMinutes() === 0) {
+        try {
+          const newEntries = await collectChangelogs(env.STATUS_CACHE)
+          if (newEntries.length > 0) {
+            console.log(`[cron] changelog: ${newEntries.length} new entries detected`)
+          }
+        } catch (err) {
+          console.warn('[cron] changelog collection failed:', err instanceof Error ? err.message : err)
+        }
+      }
+
+      // Weekly briefing — Sunday UTC 00:00-00:04 (KST 09:00)
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCDay() === 0 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
+        try {
+          const weeklyKey = `weekly-briefing:${todayUTC()}`
+          const alreadySent = await env.STATUS_CACHE.get(weeklyKey).catch(() => null)
+          if (!alreadySent) {
+            const { start: weekStart, end: weekEnd } = getWeekRange(now)
+
+            // Read changelog entries accumulated this week, filtered to the briefing window
+            const changelogRaw = await env.STATUS_CACHE.get('changelog:entries').catch(() => null)
+            let changelog: import('./changelog').ChangelogEntry[] = []
+            if (changelogRaw) {
+              try {
+                const all = JSON.parse(changelogRaw)
+                if (!Array.isArray(all)) {
+                  console.warn('[cron] changelog entries: expected array, got', typeof all)
                 } else {
-                  const diff = diffBadgeRepoDiscovery(results, previouslySeen)
-                  badgeRepoDiscovery = diff
-                  // Skip the write when nothing changed (mirrors component-seen:'s `newComponents.length
-                  // === 0` no-write branch) — a no-op re-put every week for zero real churn is pure KV budget.
-                  if (diff.newRepos.length > 0) {
-                    await env.STATUS_CACHE.put('badge:repos:seen', JSON.stringify(diff.seen)).catch((err) =>
-                      console.warn('[cron] badge:repos:seen write failed:', err instanceof Error ? err.message : err),
-                    )
+                  changelog = filterChangelogToWeek(all, weekStart, weekEnd)
+                }
+              } catch (err) { console.warn('[cron] changelog entries parse failed:', err instanceof Error ? err.message : String(err)) }
+            }
+
+            // Read monthly incidents for incident summary (current + previous month for week spanning boundary).
+            const allMonthlyIncidents: Parameters<typeof buildIncidentSummary>[0] = []
+            const serviceNameMap: Record<string, string> = {}
+            for (const svc of SERVICES) serviceNameMap[svc.id] = svc.name
+            // #1117 — `previousPeriod` (string arithmetic), NOT `setUTCMonth(-1)`: the latter keeps the
+            // day-of-month and overflows forward on the 29th-31st, so a briefing run on the 31st read the
+            // CURRENT month twice and lost a week spanning the boundary.
+            const currPeriod = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+            const currMonthKey = `incidents:monthly:${currPeriod}`
+            const prevMonthKey = `incidents:monthly:${previousPeriod(currPeriod)}`
+            // #904 — filter operator-suppressed incidents out of the raw accumulator before summarizing,
+            // else a suppressed incident (e.g. FedRAMP) resurfaces in the weekly Discord incident summary.
+            const weeklySuppressions = await readSuppressionsFresh(env.STATUS_CACHE)
+            const weeklyOverrides = await readOverridesFresh(env.STATUS_CACHE) // #1019
+            for (const mk of [currMonthKey, prevMonthKey]) {
+              const mRaw = await env.STATUS_CACHE.get(mk).catch(() => null)
+              if (!mRaw) continue
+              try {
+                const parsed = JSON.parse(mRaw) as MonthlyIncidents
+                const suppressed = weeklySuppressions.length ? filterSuppressedFromMonthly(parsed, weeklySuppressions) : parsed
+                const filtered = weeklyOverrides.length ? applyDurationOverrides(suppressed, weeklyOverrides) : suppressed
+                allMonthlyIncidents.push(...parseMonthlyIncidents(filtered, serviceNameMap))
+              } catch (err) { console.warn(`[cron] ${mk} parse failed:`, err instanceof Error ? err.message : String(err)) }
+            }
+            const incidents = buildIncidentSummary(allMonthlyIncidents, weekStart, weekEnd)
+
+            // #733 — Stability Trend compares OFFICIAL status-page uptime, gated on the LIVE current
+            // value. `currentUptime` = live `uptime30d` from services:latest, with no-official-uptime /
+            // stale-source services set to null (= dashboard `isUnreliableUptime`, #713) so they're
+            // excluded. The previous-week official snapshot comes from the history counters' stored
+            // `officialUptime` (i=7→13 below; i ascending = most-recent-first, so the first non-null is
+            // the most recent). The current week is NOT read from history — a service like Bedrock had
+            // intermittently non-null `officialUptime` snapshots (pre-#713 estimate residue) that would
+            // otherwise leak it back in despite publishing no uptime now.
+            type WeekCounter = { ok: number; total: number; officialUptime?: number | null }
+            const prevWeekCounters: Record<string, WeekCounter> = {}
+            for (let i = 7; i < 14; i++) {
+              const pd = new Date(now)
+              pd.setUTCDate(pd.getUTCDate() - i)
+              const pkey = `history:${pd.toISOString().split('T')[0]}`
+              const praw = await env.STATUS_CACHE.get(pkey).catch(() => null)
+              if (!praw) continue
+              try {
+                const pdata = JSON.parse(praw) as Record<string, { ok: number; total: number; officialUptime?: number | null }>
+                for (const [svcId, counts] of Object.entries(pdata)) {
+                  const c = prevWeekCounters[svcId] ?? { ok: 0, total: 0, officialUptime: null }
+                  c.ok += counts.ok; c.total += counts.total
+                  if (c.officialUptime == null && counts.officialUptime != null) c.officialUptime = counts.officialUptime
+                  prevWeekCounters[svcId] = c
+                }
+              } catch { console.warn(`[cron] ${pkey} parse failed`) }
+            }
+            const serviceNames: Record<string, string> = {}
+            for (const svc of SERVICES) serviceNames[svc.id] = svc.name
+            // Live current official uptime (isUnreliableUptime → null → excluded)
+            const currentUptime: Record<string, number | null> = {}
+            const latestRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
+            if (latestRaw) {
+              try {
+                const p = JSON.parse(latestRaw)
+                const live: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
+                for (const s of live) {
+                  const unreliable = s.uptime30d == null || !!s.incidentSourceStale
+                  currentUptime[s.id] = unreliable ? null : s.uptime30d!
+                }
+              } catch { console.warn('[cron] services:latest parse failed for stability') }
+            }
+            const stabilityChanges = buildStabilityChanges(currentUptime, prevWeekCounters, serviceNames)
+            // #733 — a genuine comparison requires at least one service with BOTH a live official
+            // uptime AND a prev-week official snapshot; otherwise the section says "data unavailable"
+            // rather than the reassuring "No significant changes." (which would hide a possible decline).
+            const stabilityDataAvailable = Object.entries(currentUptime).some(
+              ([id, v]) => v != null && prevWeekCounters[id]?.officialUptime != null,
+            )
+
+            // Security summary: count security:seen:* keys (7d TTL — approximate week coverage, ±1d)
+            // KV list returns max 1000 keys — sufficient for weekly security alerts (~50-100 typical)
+            let security
+            try {
+              const secKeys = await env.STATUS_CACHE.list({ prefix: 'security:seen:' })
+              if (secKeys.keys.length > 0) {
+                // TODO: highlights require storing alert titles in KV values or a dedicated accumulation key
+                // KV list() only returns key names — pass empty for now
+                security = buildSecuritySummary(secKeys.keys, [])
+              }
+            } catch { console.warn('[cron] security summary list failed') }
+
+            // Per-source last-fetch staleness check — surfaces silent collection gaps (#274)
+            const staleSources = await getStaleSources(env.STATUS_CACHE).catch(() => [])
+
+            // #995 — AI-analysis usage trend from the retained ai:usage:{date} keys across the week.
+            // parseUsage(null) → zeros, so missing days contribute nothing but keep the window at 7d.
+            let aiUsageTrend = null
+            try {
+              const entries = await Promise.all(
+                weekDateStrings(weekStart, weekEnd).map((dt) => env.STATUS_CACHE.get(`ai:usage:${dt}`).catch(() => null).then(parseUsage)),
+              )
+              aiUsageTrend = summarizeAiUsageTrend(entries)
+            } catch (err) {
+              console.warn('[cron] weekly ai:usage trend read failed:', err instanceof Error ? err.message : err)
+            }
+
+            // #1158 — GitHub repo discovery for badge embeds (weekly Code Search sweep). Best-effort,
+            // like the sections above. searchBadgeEmbeds returns null on missing token/HTTP failure/
+            // unparseable response — GitHub API trouble never affects /badge/:serviceId serving (this
+            // cron branch is fully separate from that handler).
+            //
+            // `badge:repos:seen` (no TTL — a permanent accumulator) is FAIL-CLOSED on both a KV read
+            // throw AND a corrupt/wrong-shape stored value: unlike `component-seen:` (#992, a few
+            // hundred lines up) whose corrupt→empty fallback is safe because its worst case is a
+            // bounded re-alert, this key has no recovery path — persisting a diff computed against a
+            // false "empty" baseline would overwrite real adopter history with just this week's hits.
+            // So any read anomaly here skips the diff+write entirely (this week's briefing section is
+            // simply omitted) rather than substituting an empty baseline. See parseBadgeReposSeen.
+            let badgeRepoDiscovery: BadgeRepoDiscoveryDiff | null = null
+            try {
+              const results = await searchBadgeEmbeds(env.GH_CODE_SEARCH_TOKEN)
+              if (results) {
+                let readFailed = false
+                const seenRaw = await env.STATUS_CACHE.get('badge:repos:seen').catch((err) => {
+                  readFailed = true
+                  console.warn('[cron] badge:repos:seen read failed — skipping this run to avoid clobbering history:', err instanceof Error ? err.message : err)
+                  return null
+                })
+                if (!readFailed) {
+                  const previouslySeen = parseBadgeReposSeen(seenRaw)
+                  if (previouslySeen === null) {
+                    console.warn('[cron] badge:repos:seen corrupt/unparseable — skipping this run to avoid clobbering history')
+                  } else {
+                    const diff = diffBadgeRepoDiscovery(results, previouslySeen)
+                    badgeRepoDiscovery = diff
+                    // Skip the write when nothing changed (mirrors component-seen:'s `newComponents.length
+                    // === 0` no-write branch) — a no-op re-put every week for zero real churn is pure KV budget.
+                    if (diff.newRepos.length > 0) {
+                      await env.STATUS_CACHE.put('badge:repos:seen', JSON.stringify(diff.seen)).catch((err) =>
+                        console.warn('[cron] badge:repos:seen write failed:', err instanceof Error ? err.message : err),
+                      )
+                    }
                   }
                 }
               }
-            }
-          } catch (err) {
-            console.warn('[cron] badge repo discovery failed:', err instanceof Error ? err.message : err)
-          }
-
-          // #917 — operator-authored strategy status (initiative page Status + Next action). Absent
-          // key → section omitted; present-but-malformed → surface a fix nudge (not a silent drop),
-          // since a broken write is operator error worth showing.
-          let strategyBrief = null
-          let strategyBriefMalformed = false
-          try {
-            const raw = await env.STATUS_CACHE.get('strategy:brief')
-            if (raw) {
-              strategyBrief = parseStrategyBrief(raw)
-              if (!strategyBrief) {
-                strategyBriefMalformed = true
-                console.warn('[cron] weekly strategy:brief present but malformed — briefing shows a fix nudge')
-              }
-            }
-          } catch (err) {
-            console.warn('[cron] weekly strategy:brief read failed:', err instanceof Error ? err.message : err)
-          }
-
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend, strategyBrief, strategyBriefMalformed, badgeRepoDiscovery })
-          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-            title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
-            description: briefing,
-            color: 0x58a6ff, // blue
-          })
-          await kvPut(env.STATUS_CACHE, weeklyKey, '1', { expirationTtl: 604_800 }) // 7d dedup
-
-          // Clear accumulated changelog entries after sending
-          await env.STATUS_CACHE.delete('changelog:entries').catch((err) =>
-            console.warn('[cron] changelog entries cleanup failed:', err instanceof Error ? err.message : err),
-          )
-        }
-      } catch (err) {
-        console.error('[cron] weekly briefing failed:', err instanceof Error ? err.message : err)
-      }
-    }
-
-    // Archive yesterday's data every cron cycle (idempotent — skips if already done)
-    // Runs independently of daily summary to prevent data loss from missed summary windows
-    if (env.STATUS_CACHE) {
-      await archiveVitals(env.STATUS_CACHE).catch((err) =>
-        console.warn('[cron] vitals archive failed:', err instanceof Error ? err.message : err)
-      )
-      await archiveProbeDaily(env.STATUS_CACHE, now).catch((err) =>
-        console.warn('[cron] probe archive failed:', err instanceof Error ? err.message : err)
-      )
-      // Refresh probe summaries cache. Probe daily archives change once per day at UTC 00:00, so a
-      // 30-min refresh slot is plenty fresh and keeps writes to ~48/day (vs ~288/day every cron tick).
-      // In-memory dedup mirrors the lastKvWrite/lastProbeSlot pattern used elsewhere in this file.
-      // Only update the slot when an actual write occurred — empty no-op (transient archive miss)
-      // shouldn't block the next 30 min of recovery attempts.
-      const probeSummarySlot = `${now.toISOString().slice(0, 13)}-${Math.floor(now.getUTCMinutes() / 30)}`
-      if (probeSummarySlot !== lastProbeSummaryCacheSlot) {
-        const wrote = await cacheProbeSummaries(env.STATUS_CACHE).catch((err) => {
-          console.warn('[cron] probe summary cache failed:', err instanceof Error ? err.message : err)
-          return false
-        })
-        if (wrote) lastProbeSummaryCacheSlot = probeSummarySlot
-      }
-    }
-
-    // Monthly archive on 1st of each month (UTC 00:00-00:14, catch-up 01:00-01:14)
-    // Aggregates previous month's daily data into permanent archive:monthly:{YYYY-MM} KV key
-    const { inWindow: inArchiveWindow, isCatchUp: isArchiveCatchUp } = isInMonthlyArchiveWindow(now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes())
-    if (inArchiveWindow && env.STATUS_CACHE) {
-      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      const prevYear = prevMonth.getFullYear()
-      const prevMon = prevMonth.getMonth() + 1
-      const archiveKey = `archive:monthly:${prevYear}-${String(prevMon).padStart(2, '0')}`
-      const existing = await env.STATUS_CACHE.get(archiveKey).catch(() => null)
-      if (!existing) {
-        try {
-          // Compute Score data inline from services:latest + probe:summaries.
-          // services:latest stores raw ServiceStatus only — aiwatchScore/scoreGrade
-          // are computed on-demand at /api/status response time via scoreFor(),
-          // never persisted to that cache. Reading the cache directly produced
-          // archive entries with score: null for every service — see #monthly-archive-score.
-          let scoreData: ArchiveScoreInput[] = []
-          // service id → display name, for the AI narrative prompt (#426).
-          const serviceNames: Record<string, string> = {}
-          const cachedRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
-          if (cachedRaw) {
-            try {
-              const p = JSON.parse(cachedRaw)
-              const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
-              const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
-              scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
-              for (const s of services) serviceNames[s.id] = s.name
-            } catch (parseErr) {
-              console.error('[monthly-archive] Failed to parse services:latest — archive will lack Score data:',
-                parseErr instanceof Error ? parseErr.message : parseErr)
-            }
-          }
-
-          // Bake the AI retrospective narrative into the archive (#426). Best-effort:
-          // generateMonthlyNarrative degrades to null on any AI failure, the
-          // deterministic archive ships regardless.
-          const archive = await buildMonthlyArchive(env.STATUS_CACHE, prevYear, prevMon, scoreData, {
-            ai: env.AI,
-            apiKey: env.ANTHROPIC_API_KEY,
-            serviceNames,
-          })
-          const writeOk = await kvPut(env.STATUS_CACHE, archiveKey, JSON.stringify(archive))
-          if (!writeOk) {
-            console.error(`[monthly-archive] KV write failed for ${archive.period} — archive NOT persisted`)
-          } else {
-            if (isArchiveCatchUp) console.log(`[monthly-archive] catch-up run for ${archive.period}`)
-            console.log(`[monthly-archive] Archived ${archive.period}: ${Object.keys(archive.services).length} services, ${archive.daysCollected} days`)
-          }
-        } catch (err) {
-          console.error('[monthly-archive] Failed:', err)
-        }
-      }
-
-      // Sits outside the `if (!existing)` archive-build branch so the 01:00 catch-up
-      // cycle can still ping if the 00:00 cycle built the archive but the Discord send
-      // failed. Dedup via archive:notified:{period}.
-      if (env.DISCORD_WEBHOOK_URL) {
-        await maybeNotifyArchiveReady(env, archiveKey, `${prevYear}-${String(prevMon).padStart(2, '0')}`).catch((err) => {
-          console.error('[monthly-archive] notification failed:', err instanceof Error ? err.message : err)
-        })
-      }
-    }
-
-    // Daily summary at UTC 09:00 (KST 18:00) — purple embed
-    // Also catches up if yesterday's summary was missed (e.g., deploy during the window)
-    const { inWindow: inSummaryWindow, isCatchUp } = isInSummaryWindow(now.getUTCHours(), now.getUTCMinutes())
-    if (inSummaryWindow) {
-      const today = now.toISOString().split('T')[0]
-      const summaryMarker = env.STATUS_CACHE
-        ? await env.STATUS_CACHE.get(`daily-summary:${today}`).catch((err) => {
-            console.warn('[daily-summary] marker read failed, will retry:', err instanceof Error ? err.message : err)
-            return null
-          })
-        : null
-      if (!summaryMarker) {
-        try {
-          // Gather data for expanded daily report
-          const [cachedRaw, aiUsageRaw, latRaw, probeRaw] = await Promise.all([
-            env.STATUS_CACHE.get(CACHE_KEY).catch(() => null),
-            env.STATUS_CACHE.get(`ai:usage:${today}`).catch(() => null),
-            env.STATUS_CACHE.get('latency:24h').catch(() => null),
-            env.STATUS_CACHE.get('probe:24h').catch(() => null),
-          ])
-
-          let dailyServices: ServiceStatus[] = []
-          if (cachedRaw) {
-            try {
-              const p = JSON.parse(cachedRaw)
-              // #1233 — this path reads CACHE_KEY directly rather than through `cacheRead`, so it needs
-              // its own transitional decode. `buildDailySummary` now asks `isAffectedStatus` /
-              // `isUnreadableStatus`, so a snapshot written by the PREVIOUS deploy would list an
-              // unreadable source under **Active Issues** while the new "source unreadable" tally read 0.
-              dailyServices = normalizeCachedServices(Array.isArray(p) ? p : p.services ?? [])
             } catch (err) {
-              console.error('[daily-summary] Failed to parse cached services:', err instanceof Error ? err.message : err)
+              console.warn('[cron] badge repo discovery failed:', err instanceof Error ? err.message : err)
             }
-          }
 
-          let aiUsage = null
-          if (aiUsageRaw) {
-            try { aiUsage = JSON.parse(aiUsageRaw) } catch (err) {
-              console.error('[daily-summary] Failed to parse AI usage:', err instanceof Error ? err.message : err)
-            }
-          }
-          let latSnapshots: Array<{ t: string; data: Record<string, number> }> = []
-          if (latRaw) {
-            try { latSnapshots = JSON.parse(latRaw).snapshots ?? [] } catch (err) {
-              console.error('[daily-summary] Failed to parse latency data:', err instanceof Error ? err.message : err)
-            }
-          }
-          let probeSnapshots: ProbeSnapshot[] = []
-          if (probeRaw) {
-            try { probeSnapshots = JSON.parse(probeRaw).snapshots ?? [] } catch (err) {
-              console.error('[daily-summary] Failed to parse probe data:', err instanceof Error ? err.message : err)
-            }
-          }
-
-          // Count reddit posts seen today (KV list with prefix)
-          let redditCount = 0
-          try {
-            const listed = await env.STATUS_CACHE.list({ prefix: 'reddit:seen:' })
-            redditCount = listed.keys.length
-          } catch (err) {
-            console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
-          }
-          // #820: surface a persistent Reddit block so a silent zeroing-out is visible.
-          const redditSourceDead = await readRedditSourceDead(env.STATUS_CACHE)
-
-          // #288: read the purpose-built daily counter instead of counting security:seen:*
-          // keys (that prefix has 7d TTL and accumulates across the week, inflating the number).
-          // Fallback to 0 if missing (e.g., first run of the day before any detections fire).
-          let securityCount = 0
-          try {
-            const raw = await env.STATUS_CACHE.get(securityDetectedKey(today)).catch(() => null)
-            securityCount = incrementSecurityCount(raw, 0)
-          } catch (err) {
-            console.warn('[daily-summary] Failed to read security daily counter:', err instanceof Error ? err.message : err)
-          }
-
-          // Read daily alert counter
-          let alertCounts = null
-          try {
-            const alertCountRaw = await env.STATUS_CACHE.get(`alert:count:${today}`).catch(() => null)
-            if (alertCountRaw) alertCounts = JSON.parse(alertCountRaw)
-          } catch (err) {
-            console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
-          }
-
-          // #815 — Tier-1 ntfy push count (#778 observability)
-          const pushCount = parseInt((await env.STATUS_CACHE.get(`push:count:${today}`).catch(() => null)) ?? '0', 10) || 0
-
-          // #842 — consent-free outbound-referral counts (is-down "Open ↗" beacon). null on absence/parse fail.
-          let referralCounts: ReferralCounts | null = null
-          // #986 — the growth series must tell "nobody clicked" (absent key → 0) apart from "we could
-          // not read it" (throw / malformed → null). A broken day recorded as a quiet day would corrupt
-          // the very lift comparison the series exists for.
-          let referralReadFailed = false
-          try {
-            const rRaw = await env.STATUS_CACHE.get(`referral:out:${today}`)
-            // Guard BOTH fields: a corrupt value with a non-object byService would throw in formatReferralLine's Object.entries.
-            if (rRaw) {
-              const p = JSON.parse(rRaw)
-              if (p && typeof p.total === 'number' && p.byService && typeof p.byService === 'object') referralCounts = p
-              else referralReadFailed = true // present but malformed
-            }
-          } catch (err) { referralReadFailed = true; console.warn('[daily-summary] referral read failed:', err instanceof Error ? err.message : err) }
-
-          // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
-          // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
-          // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
-          let webhookCounts: { discord: number; newToday: number | null } = { discord: 0, newToday: null }
-          // #986 — `webhookCounts.discord` stays 0 when the listing throws, which the Discord report can
-          // live with but the growth series cannot: 0 subscribers and "we could not count" are different
-          // days. Capture the snapshot separately so a failed read stays null in the series.
-          let subscribersSnapshot: number | null = null
-          try {
-            const hashes = await listConfirmedHashes(env.STATUS_CACHE)
-            webhookCounts.discord = hashes.length
-            subscribersSnapshot = hashes.length
-            // #548 — new-today delta: diff against yesterday's snapshot, then persist today's for
-            // tomorrow's diff (7d TTL so a missed day still leaves a baseline). Consent-free signal.
-            const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
-            const prevRaw = await env.STATUS_CACHE.get(`webhook:sub:count:${yesterday}`).catch(() => null)
-            webhookCounts.newToday = computeSubscriberDelta(hashes.length, prevRaw)
-            // #548 — a CORRUPT baseline (present but non-numeric) collapses to null like a clean
-            // first-day, which would silently kill the retention signal forever. Log that case (only)
-            // so a stuck "no delta" is debuggable — mirrors the v1 block's self-healing visibility.
-            if (prevRaw != null && prevRaw.trim() !== '' && webhookCounts.newToday === null) {
-              console.warn(`[daily-summary] subscriber snapshot corrupt for ${yesterday}: ${JSON.stringify(prevRaw)}`)
-            }
-            // Best-effort write, but log a failure: a silent KV write fault here makes tomorrow's
-            // "why did the delta stop?" un-debuggable (the count read three lines up is already logged).
-            await env.STATUS_CACHE.put(`webhook:sub:count:${today}`, String(hashes.length), { expirationTtl: 7 * 86400 })
-              .catch((err) => console.warn('[daily-summary] subscriber snapshot write failed:', err instanceof Error ? err.message : err))
-          } catch (err) {
-            console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
-          }
-
-          // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
-          let deliveryCounts: { discord: number; failed: number } | null = null
-          try {
-            const proxyDateKey = `alert:proxy:${today}`
-            const proxyRaw = await env.STATUS_CACHE.get(proxyDateKey)
-            const prior = proxyRaw ? JSON.parse(proxyRaw) : {}
-            const merged = {
-              discord: (typeof prior.discord === 'number' ? prior.discord : 0) + deliveryCounter.discord,
-              failed: (typeof prior.failed === 'number' ? prior.failed : 0) + deliveryCounter.failed,
-            }
-            if (merged.discord > 0 || merged.failed > 0) {
-              await env.STATUS_CACHE.put(proxyDateKey, JSON.stringify(merged), { expirationTtl: 172800 })
-            }
-            deliveryCounts = merged
-            // Reset in-memory counter after flush
-            deliveryCounter.discord = 0
-            deliveryCounter.failed = 0
-          } catch (err) {
-            console.warn('[daily-summary] Failed to flush delivery counts:', err instanceof Error ? err.message : err)
-          }
-
-          // Read web vitals summary for today
-          const vitalsSummary = await readVitalsSummary(env.STATUS_CACHE).catch((err) => {
-            console.error('[daily-summary] vitals read failed:', err instanceof Error ? err.message : err)
-            return null
-          })
-
-          // #679 — the Detection Lead audit log + diagnostics reads were removed (the lead metric was
-          // structurally null). RTT-degradation counters below are the kept observability signal.
-
-          // #500 — status page fetch failure observability: read per-service daily counters.
-          // fetch-fail:daily:{svcId}:{date}: threshold crossings today (rising-edge incremented).
-          // cross-valid:suppressed:{svcId}:{date}: times probe overrode degraded → operational.
-          // Individual .catch(() => null) absorb KV I/O errors; missing keys are treated as 0.
-          const fetchFailureCounts: Record<string, number> = {}
-          const crossValidSuppressed: Record<string, number> = {}
-          await Promise.all(SERVICES.filter(s => s.apiUrl).map(async (svc) => {
-            const [failRaw, supRaw] = await Promise.all([
-              env.STATUS_CACHE.get(`fetch-fail:daily:${svc.id}:${today}`).catch(() => null),
-              env.STATUS_CACHE.get(`cross-valid:suppressed:${svc.id}:${today}`).catch(() => null),
-            ])
-            const failCount = parseInt(failRaw ?? '0', 10) || 0
-            const supCount = parseInt(supRaw ?? '0', 10) || 0
-            if (failCount > 0) fetchFailureCounts[svc.id] = failCount
-            if (supCount > 0) crossValidSuppressed[svc.id] = supCount
-          })).catch((err) => {
-            console.warn('[daily-summary] fetch failure counts read failed:', err instanceof Error ? err.message : err)
-          })
-
-          // #464 — RTT degradation observability: read per-service daily counters.
-          // probe-degradation:daily — every probe-spike rising edge; :nostatus — subset not on the
-          // official status page (the differentiator). Probe targets only; best-effort.
-          const degradationCounts: Record<string, number> = {}
-          const degradationNoStatusCounts: Record<string, number> = {}
-          await Promise.all(PROBE_TARGETS.map(async (t) => {
-            const [degRaw, nsRaw] = await Promise.all([
-              env.STATUS_CACHE.get(`probe-degradation:daily:${t.id}:${today}`).catch(() => null),
-              env.STATUS_CACHE.get(`probe-degradation:nostatus:daily:${t.id}:${today}`).catch(() => null),
-            ])
-            const degCount = parseInt(degRaw ?? '0', 10) || 0
-            const nsCount = parseInt(nsRaw ?? '0', 10) || 0
-            if (degCount > 0) degradationCounts[t.id] = degCount
-            if (nsCount > 0) degradationNoStatusCounts[t.id] = nsCount
-          })).catch((err) => {
-            console.warn('[daily-summary] degradation counts read failed:', err instanceof Error ? err.message : err)
-          })
-
-          // #518 — public API (/api/v1) traffic for the daily report. Query the last-24h count from
-          // WAE via the AE SQL API (sampling-corrected), then fold it into a permanent cumulative KV
-          // counter. The increment is made idempotent by storing `lastDate` IN the counter value: it
-          // only folds in once per UTC day, regardless of marker-write ordering or a retried cron
-          // cycle (the daily-summary marker is written later and kvPut swallows failures, so it can't
-          // be relied on to gate a permanent monotonic total). The cumulative is still an APPROXIMATE
-          // lifetime estimate — a 24h rolling window snapshotted once/day can drift slightly or miss a
-          // fully-skipped day. Absent token/account → queryV1Traffic returns null → section skipped.
-          let v1Traffic = null
-          try {
-            const today24h = await queryV1Traffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
-            if (today24h) {
-              const cumKey = 'apiv1:cumulative'
-              const cumRaw = await env.STATUS_CACHE.get(cumKey).catch(() => null)
-              // Self-heal a corrupt value (restart the counter) rather than throwing → being swallowed
-              // by the outer catch → silently suppressing the section forever on every future run.
-              let cum: { total: number; since: string; lastDate: string }
-              try {
-                cum = cumRaw ? JSON.parse(cumRaw) : { total: 0, since: today, lastDate: '' }
-              } catch {
-                cum = { total: 0, since: today, lastDate: '' }
-              }
-              if (typeof cum.total !== 'number') cum.total = 0
-              if (typeof cum.since !== 'string') cum.since = today
-              if (cum.lastDate !== today) { // fold in once per day — idempotent on retry
-                cum.total += today24h.total
-                cum.lastDate = today
-                await env.STATUS_CACHE.put(cumKey, JSON.stringify(cum))
-              }
-              v1Traffic = { today: today24h, cumulative: cum.total, since: cum.since }
-            }
-          } catch (err) {
-            console.warn('[daily-summary] v1 traffic read failed:', err instanceof Error ? err.message : err)
-          }
-
-          // #548 — feed-poll volume (last 24h) as the consent-free retention proxy. Best-effort, like
-          // v1; null (skipped) when the AE token/account is absent. No cumulative — the daily value is
-          // the signal (a post-outage step-up = retained RSS/Slack subscribers).
-          // Annotated rather than evolving-any (#1273) so the `{ ...feedTraffic, newItems }` spread
-          // below widens into the declared type instead of re-deriving the union on every assignment.
-          let feedTraffic: (FeedTrafficCounts & { newItems?: number }) | null = null
-          try {
-            feedTraffic = await queryFeedTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
-          } catch (err) {
-            console.warn('[daily-summary] feed traffic read failed:', err instanceof Error ? err.message : err)
-          }
-          // #748 — attach the "new feed items / 24h" count (incidents AIWatch first-detected in the
-          // window, via #750 feed:firstseen markers) so the poll volume isn't misread as alerts-sent.
-          // Only when the poll section is shown (feedTraffic present); count null (KV fail) → no suffix.
-          if (feedTraffic) {
-            const newItems = await countNewFeedItems(env.STATUS_CACHE)
-            if (newItems != null) feedTraffic = { ...feedTraffic, newItems }
-          }
-
-          // #1157 — badge-request volume (last 24h), the SVG status-badge embed signal. Best-effort,
-          // like feedTraffic; null (section skipped) when the AE token/account is absent. No
-          // cumulative — same rationale as feedTraffic (the daily value is the signal).
-          let badgeTraffic = null
-          try {
-            badgeTraffic = await queryBadgeTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
-          } catch (err) {
-            console.warn('[daily-summary] badge traffic read failed:', err instanceof Error ? err.message : err)
-          }
-
-          // #842-B — consent-free outage-moment audience (is-down page-load beacon → WAE). Last-24h
-          // views by source (x/search/feed/direct), split by active-outage window. null (section
-          // omitted) when the AE token/account is absent. The sponsor-evidence "outage-spike audience".
-          let audience: AudienceCounts | null = null
-          try {
-            audience = await queryOutageAudience(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
-          } catch (err) {
-            console.warn('[daily-summary] outage audience read failed:', err instanceof Error ? err.message : err)
-          }
-
-          // #837 — Chrome-extension activity (consent-free): last-24h poll volume (WAE `ext-claude`
-          // tag) + today's extension-sourced report count (KV). Both best-effort/null-tolerant.
-          let extPolls: number | null = null
-          try {
-            extPolls = await queryExtTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
-          } catch (err) {
-            console.warn('[daily-summary] ext traffic read failed:', err instanceof Error ? err.message : err)
-          }
-          let extReports = 0
-          try {
-            const v = await env.STATUS_CACHE.get(extReportCountKey(today)).catch(() => null)
-            const n = v ? parseInt(v, 10) : 0
-            if (Number.isFinite(n) && n > 0) extReports = n
-          } catch (err) {
-            console.warn('[daily-summary] ext report count read failed:', err instanceof Error ? err.message : err)
-          }
-          const extActivity = (extPolls != null || extReports > 0) ? { polls: extPolls, reports: extReports } : null
-
-          // #918 — Claude Code statusline poll volume (consent-free adoption proxy, #400 Phase 1).
-          // Last-24h counts from WAE (`statusline-*` tags). #944: split into cohorts (server-render
-          // vs legacy proxy) + a day-over-day delta vs yesterday's snapshot, then persist today's for
-          // tomorrow's diff (7d TTL, mirrors the #548 subscriber-count snapshot). Best-effort/
-          // null-tolerant like the ext/feed reads; null (section omitted) when the AE token is absent.
-          let statuslineTraffic = null
-          try {
-            const counts = await queryStatuslineTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
-            if (counts) {
-              const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
-              const prevRaw = await env.STATUS_CACHE.get(`statusline:cohort:${yesterday}`).catch(() => null)
-              const delta = computeStatuslineDelta(counts, prevRaw)
-              // A CORRUPT baseline (present but unparseable) collapses both cohorts to null like a
-              // clean first-day — log that case only (mirrors the #548 subscriber-snapshot visibility).
-              if (prevRaw != null && prevRaw.trim() !== '' && delta.serverRender === null && delta.legacyProxy === null) {
-                console.warn(`[daily-summary] statusline snapshot corrupt for ${yesterday}: ${JSON.stringify(prevRaw)}`)
-              }
-              await env.STATUS_CACHE.put(`statusline:cohort:${today}`, serializeStatuslineSnapshot(counts), { expirationTtl: 7 * 86400 })
-                .catch((err) => console.warn('[daily-summary] statusline snapshot write failed:', err instanceof Error ? err.message : err))
-              statuslineTraffic = { ...counts, delta }
-            }
-          } catch (err) {
-            console.warn('[daily-summary] statusline traffic read failed:', err instanceof Error ? err.message : err)
-          }
-
-          // #920 — Claude Code plugin usage (monitor polls + /aiwatch briefings). Best-effort like above.
-          let pluginTraffic = null
-          try {
-            pluginTraffic = await queryPluginTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
-          } catch (err) {
-            console.warn('[daily-summary] plugin traffic read failed:', err instanceof Error ? err.message : err)
-          }
-
-          // #575 — internal demand signal: today's per-service crowd "Report an issue" counts.
-          // Bounded read (one GET per known service, no KV list); surfaced only inside the operator
-          // summary, never as a public "N reporting" verdict (that gating is Phase B).
-          const reportCounts: Record<string, number> = {}
-          try {
-            await Promise.all(SERVICES.map(async (s) => {
-              const v = await env.STATUS_CACHE.get(reportCountKey(s.id, today)).catch(() => null)
-              const n = v ? parseInt(v, 10) : 0
-              if (Number.isFinite(n) && n > 0) reportCounts[s.id] = n
-            }))
-          } catch (err) {
-            console.warn('[daily-summary] report counts read failed:', err instanceof Error ? err.message : err)
-          }
-
-          // #827 Feature 1 — AI recovery-prediction accuracy across the durable incident:history
-          // corpus (predicted vs actual). Bounded read (one GET per service, once/day), like
-          // reportCounts above; null on failure → section omitted.
-          let accuracy: AccuracyStats | null = null
-          try {
-            const allHistory = (await Promise.all(SERVICES.map(s => readIncidentHistory(env.STATUS_CACHE, s.id)))).flat()
-            accuracy = summarizeAccuracy(allHistory)
-          } catch (err) {
-            console.warn('[daily-summary] accuracy aggregate failed:', err instanceof Error ? err.message : err)
-          }
-
-          const description = buildDailySummary({
-            services: dailyServices,
-            aiUsage,
-            latencySnapshots: latSnapshots,
-            incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
-            alertCounts,
-            pushCount,
-            referralCounts,
-            accuracy,
-            webhookCounts,
-            deliveryCounts,
-            redditCount,
-            redditSourceDead,
-            securityCount,
-            vitals: vitalsSummary,
-            probeSnapshots,
-            fetchFailureCounts,
-            crossValidSuppressed,
-            degradationCounts,
-            degradationNoStatusCounts,
-            v1Traffic,
-            feedTraffic,
-            badgeTraffic,
-            audience,
-            extActivity,
-            statuslineTraffic,
-            pluginTraffic,
-            reportCounts,
-          })
-
-          // #986 — mirror today's consent-free growth counters into the permanent monthly series.
-          // The values above are about to expire (referral:out 2d, webhook:sub:count 7d) and nothing
-          // else accrues them, so the #547·16 lift measurement had no dataset to read. One KV write/day,
-          // plus the three reads #1117 added below. Isolated: a failure here must never abort the report,
-          // and re-running the same date overwrites its row rather than duplicating it.
-          //
-          // `alertCounts` (the `alert:count:{date}` DAILY accumulator) is kept for continuity, but it is
-          // NOT a whole-day axis: this run reads that key at 09:00 UTC, so it only ever sees 00:00–09:00
-          // of `today`, and the rest of the day expires unread (2-day TTL, and tomorrow's run reads
-          // tomorrow's key). #1117 adds the real axis below, counted over the SAME 24h window the
-          // `audience` fields were queried over, from the durable incident record.
-          //
-          // Both month keys are read unconditionally: a window on the 1st reaches into the previous
-          // month, and the backfill pass below covers older rows whose windows do the same. Deciding
-          // per-row would mean knowing the stored series before reading it, for one extra read/day.
-          //
-          // COVERAGE IS TRACKED, NOT ASSUMED, and it is tracked per MONTH, not per run. `kv.get` returns
-          // null for an absent key WITHOUT throwing, and an unread month counts as zero incidents —
-          // which would write a fabricated quiet day into a permanent, never-recomputed row. So a
-          // period joins `covered` only after its value parsed into the expected SHAPE (a bare
-          // `JSON.parse` succeeds on `null`/`[]`/`{}`, and every layer below tolerates those, so the
-          // cast alone would let a truncated write masquerade as a quiet month). A window is counted
-          // only when every month it touches is covered.
-          //
-          // Each period gets its OWN try: a corrupt previous-month key is never repaired (the
-          // accumulator only rewrites the current month), so a shared try would disable the axis for
-          // every remaining day of the month and then freeze those rows at the month rollover.
-          let outageWindow: { started: number; windowEnd: string } | null = null
-          let outageSources: Array<MonthlyIncidents | null> | null = null
-          const covered = new Set<string>()
-          try {
-            const periods = [today.slice(0, 7), previousPeriod(today.slice(0, 7))]
-            // #904 parity with the reports. `…OrNull` (not `readSuppressionsFresh`, which fails OPEN
-            // and returns []) because this value is PERSISTED and never recomputed: counting
-            // unfiltered on a KV blip would bake a permanent disagreement with the published reports.
-            //
-            // The #1019 duration-override layer is deliberately NOT applied, unlike the other readers
-            // of this accumulator (weekly briefing, /api/report, monthly archive). It rewrites only
-            // `durationMin` and the derived `resolvedAt` — never `startedAt` — so it cannot move a
-            // start into or out of this window. Adding it here would be a no-op plus a fail-open read.
-            const suppressions = await readSuppressionsFreshOrNull(env.STATUS_CACHE)
-            if (suppressions === null) throw new Error('suppression list unreadable — refusing to count unfiltered')
-            const parsedMonths: Array<MonthlyIncidents | null> = []
-            for (const period of periods) {
-              try {
-                const raw = await env.STATUS_CACHE.get(`incidents:monthly:${period}`)
-                if (!raw) { parsedMonths.push(null); continue }
-                const parsed: unknown = JSON.parse(raw)
-                if (!parsed || typeof parsed !== 'object' || typeof (parsed as MonthlyIncidents).services !== 'object' || !(parsed as MonthlyIncidents).services) {
-                  console.warn(`[growth-series] incidents:monthly:${period} is not a MonthlyIncidents — month left UNCOVERED`)
-                  parsedMonths.push(null)
-                  continue
+            // #917 — operator-authored strategy status (initiative page Status + Next action). Absent
+            // key → section omitted; present-but-malformed → surface a fix nudge (not a silent drop),
+            // since a broken write is operator error worth showing.
+            let strategyBrief = null
+            let strategyBriefMalformed = false
+            try {
+              const raw = await env.STATUS_CACHE.get('strategy:brief')
+              if (raw) {
+                strategyBrief = parseStrategyBrief(raw)
+                if (!strategyBrief) {
+                  strategyBriefMalformed = true
+                  console.warn('[cron] weekly strategy:brief present but malformed — briefing shows a fix nudge')
                 }
-                parsedMonths.push(filterSuppressedFromMonthly(parsed as MonthlyIncidents, suppressions))
-                covered.add(period)
-              } catch (err) {
-                console.warn(`[growth-series] incidents:monthly:${period} unusable — month left UNCOVERED:`, err instanceof Error ? err.message : err)
-                parsedMonths.push(null)
               }
-            }
-            outageSources = parsedMonths
-            const windowEnd = new Date().toISOString()
-            const livePeriods = periodsCoveringWindow(windowEnd)
-            // Same predicate as the backfill closure below, spelled the same way: `[].every()` is true,
-            // so the length check is what stops an unparseable window from counting as covered.
-            if (livePeriods.length && livePeriods.every((p) => covered.has(p))) {
-              outageWindow = { started: countIncidentsInWindow(parsedMonths, Date.parse(windowEnd)).started, windowEnd }
-            }
-          } catch (err) {
-            // Leave the axis ABSENT rather than null — the incident record is retained ~60 days, so a
-            // later run's backfill can still fill today's row. Never abort the report for it.
-            console.warn('[growth-series] outage window read failed:', err instanceof Error ? err.message : err)
-          }
-          // The axis has no reader yet (no endpoint, no Discord line), so a persistent failure would
-          // otherwise surface only when someone dumps KV months later — by which time the month has
-          // rolled over and the rows are unfillable. Say it every day it happens.
-          if (!outageWindow) {
-            console.warn(`[growth-series] outage axis ABSENT for ${today} — months covered: ${[...covered].join(',') || 'none'}`)
-          }
-          // #1273 — one judgement over the read, logged AND stored. The verdict used to exist only in
-          // the log line below; the durable row got a bare `null` that meant four different things.
-          // Workers discards these logs within days and this series has no reader yet, so whichever
-          // fact is not written into the row is the fact nobody will ever have.
-          const feedRead = readFeedPolls(feedTraffic)
-          if (feedRead.verdict === 'failed') {
-            console.warn(`[growth-series] feedPolls read FAILED for ${today} — AE query failed or unconfigured`)
-          } else if (feedRead.verdict === 'zero') {
-            console.warn(`[growth-series] feedPolls read 0 polls for ${today} — no traffic, or the recorder wrote nothing (indistinguishable)`)
-          } else if (feedRead.verdict === 'unclassifiable') {
-            console.warn(`[growth-series] feedPolls read no servable feed for ${today} — of ${feedTraffic?.total} polls`)
-          }
-          // Hoisted (rather than asserted inside the closure) so the backfill closes over a definite
-          // value. Null when nothing parsed — there is then no month to backfill any row against.
-          const backfillSources = covered.size ? outageSources : null
-
-          try {
-            const wrote = await recordGrowthDaily(env.STATUS_CACHE, buildGrowthDailyRow({
-              date: today,
-              alertCounts,
-              referralTotal: referralReadFailed ? null : (referralCounts?.total ?? 0),
-              subscribers: subscribersSnapshot,
-              subscriberNewToday: webhookCounts.newToday,
-              audience,
-              outage: outageWindow,
-              // #1273 — the same 24h AE read the Discord section already made, now kept. `polls` is
-              // non-null on exactly one verdict, and the verdict rides along so `null` is readable
-              // (see the field docs in growth-series.ts).
-              feedPolls: feedRead,
-            }), backfillSources
-              ? (rows: GrowthDailyRow[]) => fillOutageWindows(rows, (date) => {
-                  // Older rows anchor on the NOMINAL 09:00 UTC run instant — their real run time is
-                  // not recorded. `outageWindowEnd` on each row says which anchor it got.
-                  const end = nominalWindowEnd(date)
-                  const periods = periodsCoveringWindow(end)
-                  // This is the `compute → null` branch `fillOutageWindows` documents: a row whose
-                  // window reaches into a month we could not read stays ABSENT and retries tomorrow,
-                  // rather than being frozen at a fabricated 0.
-                  if (!periods.length || !periods.every((p) => covered.has(p))) return null
-                  return { started: countIncidentsInWindow(backfillSources, Date.parse(end)).started, windowEnd: end }
-                })
-              : undefined)
-            // `recordGrowthDaily` returns false (it does not throw) when its own read or the write
-            // fails. Today's referral/subscriber/audience values cannot be re-derived tomorrow, so this
-            // is the one genuinely unrecoverable loss in the block — do not let it pass as a `[kv]` line.
-            if (!wrote) console.error(`[growth-series] row for ${today} NOT written — this day's consent-free counters are unrecoverable`)
-          } catch (err) {
-            console.warn('[growth-series] append failed:', err instanceof Error ? err.message : err)
-          }
-
-          if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
-          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-            title: `📊 AIWatch Daily Report — ${today}`,
-            description,
-            color: 0x9B59B6, // purple
-          })
-          // Mark today's summary as done (prevents re-send on subsequent cron cycles)
-          await kvPut(env.STATUS_CACHE, `daily-summary:${today}`, '1', { expirationTtl: 604800 })
-
-          // Accumulate monthly incident data. As of #587 this also runs on the */5 alert cron
-          // (so short-lived / RSS incidents are captured before they age out of the feed); this
-          // daily pass stays as a backstop. accumulateIncidentsOnlyIfChanged writes only when the
-          // incident data changed, so the two cadences don't double-write or double-count.
-          if (dailyServices.length > 0) {
-            try {
-              const currentMonth = today.slice(0, 7) // YYYY-MM
-              const res = await accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE, dailyServices, currentMonth)
-              // #975 — 'failed' now covers a KV READ error too (which aborts before writing), not only
-              // a failed write. Either way the cycle is a no-op and the next one retries.
-              if (res === 'failed') console.error(`[daily-summary] incident accumulation KV read/write failed for ${currentMonth}`)
             } catch (err) {
-              console.error('[daily-summary] incident accumulation failed:', err instanceof Error ? err.message : err)
+              console.warn('[cron] weekly strategy:brief read failed:', err instanceof Error ? err.message : err)
             }
+
+            const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend, strategyBrief, strategyBriefMalformed, badgeRepoDiscovery })
+            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
+              description: briefing,
+              color: 0x58a6ff, // blue
+            })
+            await kvPut(env.STATUS_CACHE, weeklyKey, '1', { expirationTtl: 604_800 }) // 7d dedup
+
+            // Clear accumulated changelog entries after sending
+            await env.STATUS_CACHE.delete('changelog:entries').catch((err) =>
+              console.warn('[cron] changelog entries cleanup failed:', err instanceof Error ? err.message : err),
+            )
           }
         } catch (err) {
-          // NOTE: marker intentionally NOT written — allows retry on catch-up window (UTC 10:00)
-          console.error('[daily-summary] Expanded report failed:', err instanceof Error ? err.message : err)
+          console.error('[cron] weekly briefing failed:', err instanceof Error ? err.message : err)
+        }
+      }
+
+      // Archive yesterday's data every cron cycle (idempotent — skips if already done)
+      // Runs independently of daily summary to prevent data loss from missed summary windows
+      if (env.STATUS_CACHE) {
+        await archiveVitals(env.STATUS_CACHE).catch((err) =>
+          console.warn('[cron] vitals archive failed:', err instanceof Error ? err.message : err)
+        )
+        await archiveProbeDaily(env.STATUS_CACHE, now).catch((err) =>
+          console.warn('[cron] probe archive failed:', err instanceof Error ? err.message : err)
+        )
+        // Refresh probe summaries cache. Probe daily archives change once per day at UTC 00:00, so a
+        // 30-min refresh slot is plenty fresh and keeps writes to ~48/day (vs ~288/day every cron tick).
+        // In-memory dedup mirrors the lastKvWrite/lastProbeSlot pattern used elsewhere in this file.
+        // Only update the slot when an actual write occurred — empty no-op (transient archive miss)
+        // shouldn't block the next 30 min of recovery attempts.
+        const probeSummarySlot = `${now.toISOString().slice(0, 13)}-${Math.floor(now.getUTCMinutes() / 30)}`
+        if (probeSummarySlot !== lastProbeSummaryCacheSlot) {
+          const wrote = await cacheProbeSummaries(env.STATUS_CACHE).catch((err) => {
+            console.warn('[cron] probe summary cache failed:', err instanceof Error ? err.message : err)
+            return false
+          })
+          if (wrote) lastProbeSummaryCacheSlot = probeSummarySlot
+        }
+      }
+
+      // Monthly archive on 1st of each month (UTC 00:00-00:14, catch-up 01:00-01:14)
+      // Aggregates previous month's daily data into permanent archive:monthly:{YYYY-MM} KV key
+      const { inWindow: inArchiveWindow, isCatchUp: isArchiveCatchUp } = isInMonthlyArchiveWindow(now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes())
+      if (inArchiveWindow && env.STATUS_CACHE) {
+        const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        const prevYear = prevMonth.getFullYear()
+        const prevMon = prevMonth.getMonth() + 1
+        const archiveKey = `archive:monthly:${prevYear}-${String(prevMon).padStart(2, '0')}`
+        const existing = await env.STATUS_CACHE.get(archiveKey).catch(() => null)
+        if (!existing) {
           try {
-            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-              title: '📊 Daily Summary',
-              // #1233 — the unreadable count is printed here for the same reason `buildDailySummary`
-              // prints it: without it these numbers stop summing to `total` and the reader cannot tell
-              // whether the missing services were fine or unread. Omitted when zero, like the others.
-              description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues${result.unreadable > 0 ? ` · ${result.unreadable} source unreadable` : ''}`,
-              color: 0x9B59B6,
+            // Compute Score data inline from services:latest + probe:summaries.
+            // services:latest stores raw ServiceStatus only — aiwatchScore/scoreGrade
+            // are computed on-demand at /api/status response time via scoreFor(),
+            // never persisted to that cache. Reading the cache directly produced
+            // archive entries with score: null for every service — see #monthly-archive-score.
+            let scoreData: ArchiveScoreInput[] = []
+            // service id → display name, for the AI narrative prompt (#426).
+            const serviceNames: Record<string, string> = {}
+            const cachedRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
+            if (cachedRaw) {
+              try {
+                const p = JSON.parse(cachedRaw)
+                const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
+                const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
+                scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
+                for (const s of services) serviceNames[s.id] = s.name
+              } catch (parseErr) {
+                console.error('[monthly-archive] Failed to parse services:latest — archive will lack Score data:',
+                  parseErr instanceof Error ? parseErr.message : parseErr)
+              }
+            }
+
+            // Bake the AI retrospective narrative into the archive (#426). Best-effort:
+            // generateMonthlyNarrative degrades to null on any AI failure, the
+            // deterministic archive ships regardless.
+            const archive = await buildMonthlyArchive(env.STATUS_CACHE, prevYear, prevMon, scoreData, {
+              ai: env.AI,
+              apiKey: env.ANTHROPIC_API_KEY,
+              serviceNames,
             })
-          } catch (discordErr) {
-            console.error('[daily-summary] Fallback Discord send also failed:', discordErr instanceof Error ? discordErr.message : discordErr)
+            const writeOk = await kvPut(env.STATUS_CACHE, archiveKey, JSON.stringify(archive))
+            if (!writeOk) {
+              console.error(`[monthly-archive] KV write failed for ${archive.period} — archive NOT persisted`)
+            } else {
+              if (isArchiveCatchUp) console.log(`[monthly-archive] catch-up run for ${archive.period}`)
+              console.log(`[monthly-archive] Archived ${archive.period}: ${Object.keys(archive.services).length} services, ${archive.daysCollected} days`)
+            }
+          } catch (err) {
+            console.error('[monthly-archive] Failed:', err)
           }
         }
+
+        // Sits outside the `if (!existing)` archive-build branch so the 01:00 catch-up
+        // cycle can still ping if the 00:00 cycle built the archive but the Discord send
+        // failed. Dedup via archive:notified:{period}.
+        if (env.DISCORD_WEBHOOK_URL) {
+          await maybeNotifyArchiveReady(env, archiveKey, `${prevYear}-${String(prevMon).padStart(2, '0')}`).catch((err) => {
+            console.error('[monthly-archive] notification failed:', err instanceof Error ? err.message : err)
+          })
+        }
+      }
+
+      // Daily summary at UTC 09:00 (KST 18:00) — purple embed
+      // Also catches up if yesterday's summary was missed (e.g., deploy during the window)
+      const { inWindow: inSummaryWindow, isCatchUp } = isInSummaryWindow(now.getUTCHours(), now.getUTCMinutes())
+      if (inSummaryWindow) {
+        const today = now.toISOString().split('T')[0]
+        const summaryMarker = env.STATUS_CACHE
+          ? await env.STATUS_CACHE.get(`daily-summary:${today}`).catch((err) => {
+              console.warn('[daily-summary] marker read failed, will retry:', err instanceof Error ? err.message : err)
+              return null
+            })
+          : null
+        if (!summaryMarker) {
+          try {
+            // Gather data for expanded daily report
+            const [cachedRaw, aiUsageRaw, latRaw, probeRaw] = await Promise.all([
+              env.STATUS_CACHE.get(CACHE_KEY).catch(() => null),
+              env.STATUS_CACHE.get(`ai:usage:${today}`).catch(() => null),
+              env.STATUS_CACHE.get('latency:24h').catch(() => null),
+              env.STATUS_CACHE.get('probe:24h').catch(() => null),
+            ])
+
+            let dailyServices: ServiceStatus[] = []
+            if (cachedRaw) {
+              try {
+                const p = JSON.parse(cachedRaw)
+                // #1233 — this path reads CACHE_KEY directly rather than through `cacheRead`, so it needs
+                // its own transitional decode. `buildDailySummary` now asks `isAffectedStatus` /
+                // `isUnreadableStatus`, so a snapshot written by the PREVIOUS deploy would list an
+                // unreadable source under **Active Issues** while the new "source unreadable" tally read 0.
+                dailyServices = normalizeCachedServices(Array.isArray(p) ? p : p.services ?? [])
+              } catch (err) {
+                console.error('[daily-summary] Failed to parse cached services:', err instanceof Error ? err.message : err)
+              }
+            }
+
+            let aiUsage = null
+            if (aiUsageRaw) {
+              try { aiUsage = JSON.parse(aiUsageRaw) } catch (err) {
+                console.error('[daily-summary] Failed to parse AI usage:', err instanceof Error ? err.message : err)
+              }
+            }
+            let latSnapshots: Array<{ t: string; data: Record<string, number> }> = []
+            if (latRaw) {
+              try { latSnapshots = JSON.parse(latRaw).snapshots ?? [] } catch (err) {
+                console.error('[daily-summary] Failed to parse latency data:', err instanceof Error ? err.message : err)
+              }
+            }
+            let probeSnapshots: ProbeSnapshot[] = []
+            if (probeRaw) {
+              try { probeSnapshots = JSON.parse(probeRaw).snapshots ?? [] } catch (err) {
+                console.error('[daily-summary] Failed to parse probe data:', err instanceof Error ? err.message : err)
+              }
+            }
+
+            // Count reddit posts seen today (KV list with prefix)
+            let redditCount = 0
+            try {
+              const listed = await env.STATUS_CACHE.list({ prefix: 'reddit:seen:' })
+              redditCount = listed.keys.length
+            } catch (err) {
+              console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
+            }
+            // #820: surface a persistent Reddit block so a silent zeroing-out is visible.
+            const redditSourceDead = await readRedditSourceDead(env.STATUS_CACHE)
+
+            // #288: read the purpose-built daily counter instead of counting security:seen:*
+            // keys (that prefix has 7d TTL and accumulates across the week, inflating the number).
+            // Fallback to 0 if missing (e.g., first run of the day before any detections fire).
+            let securityCount = 0
+            try {
+              const raw = await env.STATUS_CACHE.get(securityDetectedKey(today)).catch(() => null)
+              securityCount = incrementSecurityCount(raw, 0)
+            } catch (err) {
+              console.warn('[daily-summary] Failed to read security daily counter:', err instanceof Error ? err.message : err)
+            }
+
+            // Read daily alert counter
+            let alertCounts = null
+            try {
+              const alertCountRaw = await env.STATUS_CACHE.get(`alert:count:${today}`).catch(() => null)
+              if (alertCountRaw) alertCounts = JSON.parse(alertCountRaw)
+            } catch (err) {
+              console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
+            }
+
+            // #815 — Tier-1 ntfy push count (#778 observability)
+            const pushCount = parseInt((await env.STATUS_CACHE.get(`push:count:${today}`).catch(() => null)) ?? '0', 10) || 0
+
+            // #842 — consent-free outbound-referral counts (is-down "Open ↗" beacon). null on absence/parse fail.
+            let referralCounts: ReferralCounts | null = null
+            // #986 — the growth series must tell "nobody clicked" (absent key → 0) apart from "we could
+            // not read it" (throw / malformed → null). A broken day recorded as a quiet day would corrupt
+            // the very lift comparison the series exists for.
+            let referralReadFailed = false
+            try {
+              const rRaw = await env.STATUS_CACHE.get(`referral:out:${today}`)
+              // Guard BOTH fields: a corrupt value with a non-object byService would throw in formatReferralLine's Object.entries.
+              if (rRaw) {
+                const p = JSON.parse(rRaw)
+                if (p && typeof p.total === 'number' && p.byService && typeof p.byService === 'object') referralCounts = p
+                else referralReadFailed = true // present but malformed
+              }
+            } catch (err) { referralReadFailed = true; console.warn('[daily-summary] referral read failed:', err instanceof Error ? err.message : err) }
+
+            // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
+            // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
+            // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
+            let webhookCounts: { discord: number; newToday: number | null } = { discord: 0, newToday: null }
+            // #986 — `webhookCounts.discord` stays 0 when the listing throws, which the Discord report can
+            // live with but the growth series cannot: 0 subscribers and "we could not count" are different
+            // days. Capture the snapshot separately so a failed read stays null in the series.
+            let subscribersSnapshot: number | null = null
+            try {
+              const hashes = await listConfirmedHashes(env.STATUS_CACHE)
+              webhookCounts.discord = hashes.length
+              subscribersSnapshot = hashes.length
+              // #548 — new-today delta: diff against yesterday's snapshot, then persist today's for
+              // tomorrow's diff (7d TTL so a missed day still leaves a baseline). Consent-free signal.
+              const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
+              const prevRaw = await env.STATUS_CACHE.get(`webhook:sub:count:${yesterday}`).catch(() => null)
+              webhookCounts.newToday = computeSubscriberDelta(hashes.length, prevRaw)
+              // #548 — a CORRUPT baseline (present but non-numeric) collapses to null like a clean
+              // first-day, which would silently kill the retention signal forever. Log that case (only)
+              // so a stuck "no delta" is debuggable — mirrors the v1 block's self-healing visibility.
+              if (prevRaw != null && prevRaw.trim() !== '' && webhookCounts.newToday === null) {
+                console.warn(`[daily-summary] subscriber snapshot corrupt for ${yesterday}: ${JSON.stringify(prevRaw)}`)
+              }
+              // Best-effort write, but log a failure: a silent KV write fault here makes tomorrow's
+              // "why did the delta stop?" un-debuggable (the count read three lines up is already logged).
+              await env.STATUS_CACHE.put(`webhook:sub:count:${today}`, String(hashes.length), { expirationTtl: 7 * 86400 })
+                .catch((err) => console.warn('[daily-summary] subscriber snapshot write failed:', err instanceof Error ? err.message : err))
+            } catch (err) {
+              console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
+            }
+
+            // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
+            let deliveryCounts: { discord: number; failed: number } | null = null
+            try {
+              const proxyDateKey = `alert:proxy:${today}`
+              const proxyRaw = await env.STATUS_CACHE.get(proxyDateKey)
+              const prior = proxyRaw ? JSON.parse(proxyRaw) : {}
+              const merged = {
+                discord: (typeof prior.discord === 'number' ? prior.discord : 0) + deliveryCounter.discord,
+                failed: (typeof prior.failed === 'number' ? prior.failed : 0) + deliveryCounter.failed,
+              }
+              if (merged.discord > 0 || merged.failed > 0) {
+                await env.STATUS_CACHE.put(proxyDateKey, JSON.stringify(merged), { expirationTtl: 172800 })
+              }
+              deliveryCounts = merged
+              // Reset in-memory counter after flush
+              deliveryCounter.discord = 0
+              deliveryCounter.failed = 0
+            } catch (err) {
+              console.warn('[daily-summary] Failed to flush delivery counts:', err instanceof Error ? err.message : err)
+            }
+
+            // Read web vitals summary for today
+            const vitalsSummary = await readVitalsSummary(env.STATUS_CACHE).catch((err) => {
+              console.error('[daily-summary] vitals read failed:', err instanceof Error ? err.message : err)
+              return null
+            })
+
+            // #679 — the Detection Lead audit log + diagnostics reads were removed (the lead metric was
+            // structurally null). RTT-degradation counters below are the kept observability signal.
+
+            // #500 — status page fetch failure observability: read per-service daily counters.
+            // fetch-fail:daily:{svcId}:{date}: threshold crossings today (rising-edge incremented).
+            // cross-valid:suppressed:{svcId}:{date}: times probe overrode degraded → operational.
+            // Individual .catch(() => null) absorb KV I/O errors; missing keys are treated as 0.
+            const fetchFailureCounts: Record<string, number> = {}
+            const crossValidSuppressed: Record<string, number> = {}
+            await Promise.all(SERVICES.filter(s => s.apiUrl).map(async (svc) => {
+              const [failRaw, supRaw] = await Promise.all([
+                env.STATUS_CACHE.get(`fetch-fail:daily:${svc.id}:${today}`).catch(() => null),
+                env.STATUS_CACHE.get(`cross-valid:suppressed:${svc.id}:${today}`).catch(() => null),
+              ])
+              const failCount = parseInt(failRaw ?? '0', 10) || 0
+              const supCount = parseInt(supRaw ?? '0', 10) || 0
+              if (failCount > 0) fetchFailureCounts[svc.id] = failCount
+              if (supCount > 0) crossValidSuppressed[svc.id] = supCount
+            })).catch((err) => {
+              console.warn('[daily-summary] fetch failure counts read failed:', err instanceof Error ? err.message : err)
+            })
+
+            // #464 — RTT degradation observability: read per-service daily counters.
+            // probe-degradation:daily — every probe-spike rising edge; :nostatus — subset not on the
+            // official status page (the differentiator). Probe targets only; best-effort.
+            const degradationCounts: Record<string, number> = {}
+            const degradationNoStatusCounts: Record<string, number> = {}
+            await Promise.all(PROBE_TARGETS.map(async (t) => {
+              const [degRaw, nsRaw] = await Promise.all([
+                env.STATUS_CACHE.get(`probe-degradation:daily:${t.id}:${today}`).catch(() => null),
+                env.STATUS_CACHE.get(`probe-degradation:nostatus:daily:${t.id}:${today}`).catch(() => null),
+              ])
+              const degCount = parseInt(degRaw ?? '0', 10) || 0
+              const nsCount = parseInt(nsRaw ?? '0', 10) || 0
+              if (degCount > 0) degradationCounts[t.id] = degCount
+              if (nsCount > 0) degradationNoStatusCounts[t.id] = nsCount
+            })).catch((err) => {
+              console.warn('[daily-summary] degradation counts read failed:', err instanceof Error ? err.message : err)
+            })
+
+            // #518 — public API (/api/v1) traffic for the daily report. Query the last-24h count from
+            // WAE via the AE SQL API (sampling-corrected), then fold it into a permanent cumulative KV
+            // counter. The increment is made idempotent by storing `lastDate` IN the counter value: it
+            // only folds in once per UTC day, regardless of marker-write ordering or a retried cron
+            // cycle (the daily-summary marker is written later and kvPut swallows failures, so it can't
+            // be relied on to gate a permanent monotonic total). The cumulative is still an APPROXIMATE
+            // lifetime estimate — a 24h rolling window snapshotted once/day can drift slightly or miss a
+            // fully-skipped day. Absent token/account → queryV1Traffic returns null → section skipped.
+            let v1Traffic = null
+            try {
+              const today24h = await queryV1Traffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+              if (today24h) {
+                const cumKey = 'apiv1:cumulative'
+                const cumRaw = await env.STATUS_CACHE.get(cumKey).catch(() => null)
+                // Self-heal a corrupt value (restart the counter) rather than throwing → being swallowed
+                // by the outer catch → silently suppressing the section forever on every future run.
+                let cum: { total: number; since: string; lastDate: string }
+                try {
+                  cum = cumRaw ? JSON.parse(cumRaw) : { total: 0, since: today, lastDate: '' }
+                } catch {
+                  cum = { total: 0, since: today, lastDate: '' }
+                }
+                if (typeof cum.total !== 'number') cum.total = 0
+                if (typeof cum.since !== 'string') cum.since = today
+                if (cum.lastDate !== today) { // fold in once per day — idempotent on retry
+                  cum.total += today24h.total
+                  cum.lastDate = today
+                  await env.STATUS_CACHE.put(cumKey, JSON.stringify(cum))
+                }
+                v1Traffic = { today: today24h, cumulative: cum.total, since: cum.since }
+              }
+            } catch (err) {
+              console.warn('[daily-summary] v1 traffic read failed:', err instanceof Error ? err.message : err)
+            }
+
+            // #548 — feed-poll volume (last 24h) as the consent-free retention proxy. Best-effort, like
+            // v1; null (skipped) when the AE token/account is absent. No cumulative — the daily value is
+            // the signal (a post-outage step-up = retained RSS/Slack subscribers).
+            // Annotated rather than evolving-any (#1273) so the `{ ...feedTraffic, newItems }` spread
+            // below widens into the declared type instead of re-deriving the union on every assignment.
+            let feedTraffic: (FeedTrafficCounts & { newItems?: number }) | null = null
+            try {
+              feedTraffic = await queryFeedTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            } catch (err) {
+              console.warn('[daily-summary] feed traffic read failed:', err instanceof Error ? err.message : err)
+            }
+            // #748 — attach the "new feed items / 24h" count (incidents AIWatch first-detected in the
+            // window, via #750 feed:firstseen markers) so the poll volume isn't misread as alerts-sent.
+            // Only when the poll section is shown (feedTraffic present); count null (KV fail) → no suffix.
+            if (feedTraffic) {
+              const newItems = await countNewFeedItems(env.STATUS_CACHE)
+              if (newItems != null) feedTraffic = { ...feedTraffic, newItems }
+            }
+
+            // #1157 — badge-request volume (last 24h), the SVG status-badge embed signal. Best-effort,
+            // like feedTraffic; null (section skipped) when the AE token/account is absent. No
+            // cumulative — same rationale as feedTraffic (the daily value is the signal).
+            let badgeTraffic = null
+            try {
+              badgeTraffic = await queryBadgeTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            } catch (err) {
+              console.warn('[daily-summary] badge traffic read failed:', err instanceof Error ? err.message : err)
+            }
+
+            // #842-B — consent-free outage-moment audience (is-down page-load beacon → WAE). Last-24h
+            // views by source (x/search/feed/direct), split by active-outage window. null (section
+            // omitted) when the AE token/account is absent. The sponsor-evidence "outage-spike audience".
+            let audience: AudienceCounts | null = null
+            try {
+              audience = await queryOutageAudience(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            } catch (err) {
+              console.warn('[daily-summary] outage audience read failed:', err instanceof Error ? err.message : err)
+            }
+
+            // #837 — Chrome-extension activity (consent-free): last-24h poll volume (WAE `ext-claude`
+            // tag) + today's extension-sourced report count (KV). Both best-effort/null-tolerant.
+            let extPolls: number | null = null
+            try {
+              extPolls = await queryExtTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            } catch (err) {
+              console.warn('[daily-summary] ext traffic read failed:', err instanceof Error ? err.message : err)
+            }
+            let extReports = 0
+            try {
+              const v = await env.STATUS_CACHE.get(extReportCountKey(today)).catch(() => null)
+              const n = v ? parseInt(v, 10) : 0
+              if (Number.isFinite(n) && n > 0) extReports = n
+            } catch (err) {
+              console.warn('[daily-summary] ext report count read failed:', err instanceof Error ? err.message : err)
+            }
+            const extActivity = (extPolls != null || extReports > 0) ? { polls: extPolls, reports: extReports } : null
+
+            // #918 — Claude Code statusline poll volume (consent-free adoption proxy, #400 Phase 1).
+            // Last-24h counts from WAE (`statusline-*` tags). #944: split into cohorts (server-render
+            // vs legacy proxy) + a day-over-day delta vs yesterday's snapshot, then persist today's for
+            // tomorrow's diff (7d TTL, mirrors the #548 subscriber-count snapshot). Best-effort/
+            // null-tolerant like the ext/feed reads; null (section omitted) when the AE token is absent.
+            let statuslineTraffic = null
+            try {
+              const counts = await queryStatuslineTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+              if (counts) {
+                const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
+                const prevRaw = await env.STATUS_CACHE.get(`statusline:cohort:${yesterday}`).catch(() => null)
+                const delta = computeStatuslineDelta(counts, prevRaw)
+                // A CORRUPT baseline (present but unparseable) collapses both cohorts to null like a
+                // clean first-day — log that case only (mirrors the #548 subscriber-snapshot visibility).
+                if (prevRaw != null && prevRaw.trim() !== '' && delta.serverRender === null && delta.legacyProxy === null) {
+                  console.warn(`[daily-summary] statusline snapshot corrupt for ${yesterday}: ${JSON.stringify(prevRaw)}`)
+                }
+                await env.STATUS_CACHE.put(`statusline:cohort:${today}`, serializeStatuslineSnapshot(counts), { expirationTtl: 7 * 86400 })
+                  .catch((err) => console.warn('[daily-summary] statusline snapshot write failed:', err instanceof Error ? err.message : err))
+                statuslineTraffic = { ...counts, delta }
+              }
+            } catch (err) {
+              console.warn('[daily-summary] statusline traffic read failed:', err instanceof Error ? err.message : err)
+            }
+
+            // #920 — Claude Code plugin usage (monitor polls + /aiwatch briefings). Best-effort like above.
+            let pluginTraffic = null
+            try {
+              pluginTraffic = await queryPluginTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            } catch (err) {
+              console.warn('[daily-summary] plugin traffic read failed:', err instanceof Error ? err.message : err)
+            }
+
+            // #575 — internal demand signal: today's per-service crowd "Report an issue" counts.
+            // Bounded read (one GET per known service, no KV list); surfaced only inside the operator
+            // summary, never as a public "N reporting" verdict (that gating is Phase B).
+            const reportCounts: Record<string, number> = {}
+            try {
+              await Promise.all(SERVICES.map(async (s) => {
+                const v = await env.STATUS_CACHE.get(reportCountKey(s.id, today)).catch(() => null)
+                const n = v ? parseInt(v, 10) : 0
+                if (Number.isFinite(n) && n > 0) reportCounts[s.id] = n
+              }))
+            } catch (err) {
+              console.warn('[daily-summary] report counts read failed:', err instanceof Error ? err.message : err)
+            }
+
+            // #827 Feature 1 — AI recovery-prediction accuracy across the durable incident:history
+            // corpus (predicted vs actual). Bounded read (one GET per service, once/day), like
+            // reportCounts above; null on failure → section omitted.
+            let accuracy: AccuracyStats | null = null
+            try {
+              const allHistory = (await Promise.all(SERVICES.map(s => readIncidentHistory(env.STATUS_CACHE, s.id)))).flat()
+              accuracy = summarizeAccuracy(allHistory)
+            } catch (err) {
+              console.warn('[daily-summary] accuracy aggregate failed:', err instanceof Error ? err.message : err)
+            }
+
+            const description = buildDailySummary({
+              services: dailyServices,
+              aiUsage,
+              latencySnapshots: latSnapshots,
+              incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
+              alertCounts,
+              pushCount,
+              referralCounts,
+              accuracy,
+              webhookCounts,
+              deliveryCounts,
+              redditCount,
+              redditSourceDead,
+              securityCount,
+              vitals: vitalsSummary,
+              probeSnapshots,
+              fetchFailureCounts,
+              crossValidSuppressed,
+              degradationCounts,
+              degradationNoStatusCounts,
+              v1Traffic,
+              feedTraffic,
+              badgeTraffic,
+              audience,
+              extActivity,
+              statuslineTraffic,
+              pluginTraffic,
+              reportCounts,
+            })
+
+            // #986 — mirror today's consent-free growth counters into the permanent monthly series.
+            // The values above are about to expire (referral:out 2d, webhook:sub:count 7d) and nothing
+            // else accrues them, so the #547·16 lift measurement had no dataset to read. One KV write/day,
+            // plus the three reads #1117 added below. Isolated: a failure here must never abort the report,
+            // and re-running the same date overwrites its row rather than duplicating it.
+            //
+            // `alertCounts` (the `alert:count:{date}` DAILY accumulator) is kept for continuity, but it is
+            // NOT a whole-day axis: this run reads that key at 09:00 UTC, so it only ever sees 00:00–09:00
+            // of `today`, and the rest of the day expires unread (2-day TTL, and tomorrow's run reads
+            // tomorrow's key). #1117 adds the real axis below, counted over the SAME 24h window the
+            // `audience` fields were queried over, from the durable incident record.
+            //
+            // Both month keys are read unconditionally: a window on the 1st reaches into the previous
+            // month, and the backfill pass below covers older rows whose windows do the same. Deciding
+            // per-row would mean knowing the stored series before reading it, for one extra read/day.
+            //
+            // COVERAGE IS TRACKED, NOT ASSUMED, and it is tracked per MONTH, not per run. `kv.get` returns
+            // null for an absent key WITHOUT throwing, and an unread month counts as zero incidents —
+            // which would write a fabricated quiet day into a permanent, never-recomputed row. So a
+            // period joins `covered` only after its value parsed into the expected SHAPE (a bare
+            // `JSON.parse` succeeds on `null`/`[]`/`{}`, and every layer below tolerates those, so the
+            // cast alone would let a truncated write masquerade as a quiet month). A window is counted
+            // only when every month it touches is covered.
+            //
+            // Each period gets its OWN try: a corrupt previous-month key is never repaired (the
+            // accumulator only rewrites the current month), so a shared try would disable the axis for
+            // every remaining day of the month and then freeze those rows at the month rollover.
+            let outageWindow: { started: number; windowEnd: string } | null = null
+            let outageSources: Array<MonthlyIncidents | null> | null = null
+            const covered = new Set<string>()
+            try {
+              const periods = [today.slice(0, 7), previousPeriod(today.slice(0, 7))]
+              // #904 parity with the reports. `…OrNull` (not `readSuppressionsFresh`, which fails OPEN
+              // and returns []) because this value is PERSISTED and never recomputed: counting
+              // unfiltered on a KV blip would bake a permanent disagreement with the published reports.
+              //
+              // The #1019 duration-override layer is deliberately NOT applied, unlike the other readers
+              // of this accumulator (weekly briefing, /api/report, monthly archive). It rewrites only
+              // `durationMin` and the derived `resolvedAt` — never `startedAt` — so it cannot move a
+              // start into or out of this window. Adding it here would be a no-op plus a fail-open read.
+              const suppressions = await readSuppressionsFreshOrNull(env.STATUS_CACHE)
+              if (suppressions === null) throw new Error('suppression list unreadable — refusing to count unfiltered')
+              const parsedMonths: Array<MonthlyIncidents | null> = []
+              for (const period of periods) {
+                try {
+                  const raw = await env.STATUS_CACHE.get(`incidents:monthly:${period}`)
+                  if (!raw) { parsedMonths.push(null); continue }
+                  const parsed: unknown = JSON.parse(raw)
+                  if (!parsed || typeof parsed !== 'object' || typeof (parsed as MonthlyIncidents).services !== 'object' || !(parsed as MonthlyIncidents).services) {
+                    console.warn(`[growth-series] incidents:monthly:${period} is not a MonthlyIncidents — month left UNCOVERED`)
+                    parsedMonths.push(null)
+                    continue
+                  }
+                  parsedMonths.push(filterSuppressedFromMonthly(parsed as MonthlyIncidents, suppressions))
+                  covered.add(period)
+                } catch (err) {
+                  console.warn(`[growth-series] incidents:monthly:${period} unusable — month left UNCOVERED:`, err instanceof Error ? err.message : err)
+                  parsedMonths.push(null)
+                }
+              }
+              outageSources = parsedMonths
+              const windowEnd = new Date().toISOString()
+              const livePeriods = periodsCoveringWindow(windowEnd)
+              // Same predicate as the backfill closure below, spelled the same way: `[].every()` is true,
+              // so the length check is what stops an unparseable window from counting as covered.
+              if (livePeriods.length && livePeriods.every((p) => covered.has(p))) {
+                outageWindow = { started: countIncidentsInWindow(parsedMonths, Date.parse(windowEnd)).started, windowEnd }
+              }
+            } catch (err) {
+              // Leave the axis ABSENT rather than null — the incident record is retained ~60 days, so a
+              // later run's backfill can still fill today's row. Never abort the report for it.
+              console.warn('[growth-series] outage window read failed:', err instanceof Error ? err.message : err)
+            }
+            // The axis has no reader yet (no endpoint, no Discord line), so a persistent failure would
+            // otherwise surface only when someone dumps KV months later — by which time the month has
+            // rolled over and the rows are unfillable. Say it every day it happens.
+            if (!outageWindow) {
+              console.warn(`[growth-series] outage axis ABSENT for ${today} — months covered: ${[...covered].join(',') || 'none'}`)
+            }
+            // #1273 — one judgement over the read, logged AND stored. The verdict used to exist only in
+            // the log line below; the durable row got a bare `null` that meant four different things.
+            // Workers discards these logs within days and this series has no reader yet, so whichever
+            // fact is not written into the row is the fact nobody will ever have.
+            const feedRead = readFeedPolls(feedTraffic)
+            if (feedRead.verdict === 'failed') {
+              console.warn(`[growth-series] feedPolls read FAILED for ${today} — AE query failed or unconfigured`)
+            } else if (feedRead.verdict === 'zero') {
+              console.warn(`[growth-series] feedPolls read 0 polls for ${today} — no traffic, or the recorder wrote nothing (indistinguishable)`)
+            } else if (feedRead.verdict === 'unclassifiable') {
+              console.warn(`[growth-series] feedPolls read no servable feed for ${today} — of ${feedTraffic?.total} polls`)
+            }
+            // Hoisted (rather than asserted inside the closure) so the backfill closes over a definite
+            // value. Null when nothing parsed — there is then no month to backfill any row against.
+            const backfillSources = covered.size ? outageSources : null
+
+            try {
+              const wrote = await recordGrowthDaily(env.STATUS_CACHE, buildGrowthDailyRow({
+                date: today,
+                alertCounts,
+                referralTotal: referralReadFailed ? null : (referralCounts?.total ?? 0),
+                subscribers: subscribersSnapshot,
+                subscriberNewToday: webhookCounts.newToday,
+                audience,
+                outage: outageWindow,
+                // #1273 — the same 24h AE read the Discord section already made, now kept. `polls` is
+                // non-null on exactly one verdict, and the verdict rides along so `null` is readable
+                // (see the field docs in growth-series.ts).
+                feedPolls: feedRead,
+              }), backfillSources
+                ? (rows: GrowthDailyRow[]) => fillOutageWindows(rows, (date) => {
+                    // Older rows anchor on the NOMINAL 09:00 UTC run instant — their real run time is
+                    // not recorded. `outageWindowEnd` on each row says which anchor it got.
+                    const end = nominalWindowEnd(date)
+                    const periods = periodsCoveringWindow(end)
+                    // This is the `compute → null` branch `fillOutageWindows` documents: a row whose
+                    // window reaches into a month we could not read stays ABSENT and retries tomorrow,
+                    // rather than being frozen at a fabricated 0.
+                    if (!periods.length || !periods.every((p) => covered.has(p))) return null
+                    return { started: countIncidentsInWindow(backfillSources, Date.parse(end)).started, windowEnd: end }
+                  })
+                : undefined)
+              // `recordGrowthDaily` returns false (it does not throw) when its own read or the write
+              // fails. Today's referral/subscriber/audience values cannot be re-derived tomorrow, so this
+              // is the one genuinely unrecoverable loss in the block — do not let it pass as a `[kv]` line.
+              if (!wrote) console.error(`[growth-series] row for ${today} NOT written — this day's consent-free counters are unrecoverable`)
+            } catch (err) {
+              console.warn('[growth-series] append failed:', err instanceof Error ? err.message : err)
+            }
+
+            if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
+            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: `📊 AIWatch Daily Report — ${today}`,
+              description,
+              color: 0x9B59B6, // purple
+            })
+            // Mark today's summary as done (prevents re-send on subsequent cron cycles)
+            await kvPut(env.STATUS_CACHE, `daily-summary:${today}`, '1', { expirationTtl: 604800 })
+
+            // Accumulate monthly incident data. As of #587 this also runs on the */5 alert cron
+            // (so short-lived / RSS incidents are captured before they age out of the feed); this
+            // daily pass stays as a backstop. accumulateIncidentsOnlyIfChanged writes only when the
+            // incident data changed, so the two cadences don't double-write or double-count.
+            if (dailyServices.length > 0) {
+              try {
+                const currentMonth = today.slice(0, 7) // YYYY-MM
+                const res = await accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE, dailyServices, currentMonth)
+                // #975 — 'failed' now covers a KV READ error too (which aborts before writing), not only
+                // a failed write. Either way the cycle is a no-op and the next one retries.
+                if (res === 'failed') console.error(`[daily-summary] incident accumulation KV read/write failed for ${currentMonth}`)
+              } catch (err) {
+                console.error('[daily-summary] incident accumulation failed:', err instanceof Error ? err.message : err)
+              }
+            }
+          } catch (err) {
+            // NOTE: marker intentionally NOT written — allows retry on catch-up window (UTC 10:00)
+            console.error('[daily-summary] Expanded report failed:', err instanceof Error ? err.message : err)
+            try {
+              await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+                title: '📊 Daily Summary',
+                // #1233 — the unreadable count is printed here for the same reason `buildDailySummary`
+                // prints it: without it these numbers stop summing to `total` and the reader cannot tell
+                // whether the missing services were fine or unread. Omitted when zero, like the others.
+                description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues${result.unreadable > 0 ? ` · ${result.unreadable} source unreadable` : ''}`,
+                color: 0x9B59B6,
+              })
+            } catch (discordErr) {
+              console.error('[daily-summary] Fallback Discord send also failed:', discordErr instanceof Error ? discordErr.message : discordErr)
+            }
+          }
+        }
+      }
+
+    } finally {
+      // ONE line per cron run, unconditional. `total` is a LOWER BOUND on this minute's
+      // account-level `kvOperationsAdaptiveGroups` reads (the fetch() path reads the same
+      // namespace and is not instrumented). `snapshot()` reconciles both lists against `total`.
+      // Self-guarded: a throw from inside a `finally` REPLACES the exception the body was raising, so
+      // an instrument fault would erase the outage it was measuring. Diagnostics never outrank the
+      // thing they diagnose.
+      try {
+        const kvReadCensus = kvCensus.snapshot()
+        console.log('[cron] #1224 kv read census —', `total=${kvReadCensus.total}`, `distinct=${kvReadCensus.distinct}`,
+          censusedKv ? `| family: ${formatCensus(kvReadCensus.families)} | detail: ${formatCensus(kvReadCensus.detail, 8)}` : '| uninstrumented (no STATUS_CACHE binding)')
+      } catch (err) {
+        console.error('[cron] #1224 kv read census FAILED', err instanceof Error ? err.message : err)
       }
     }
   },

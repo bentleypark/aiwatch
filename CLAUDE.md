@@ -300,6 +300,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   probe.ts probe-archival.ts   # Direct RTT probing (33 targets) + daily archival
   daily-summary.ts weekly-briefing.ts monthly-archive.ts monthly-narrative.ts  # Discord reports + archives
   api-traffic.ts outage-audience.ts referral.ts vitals.ts   # WAE/KV instrumentation
+  kv-read-census.ts  # Per-cron-run KV READ attribution (#1224 Phase 2) — every read bucketed by key, one log line per run
   growth-series.ts   # Durable daily series of the consent-free growth counters (#986) — the dataset #547's lift measurement reads
   reddit.ts security-monitor.ts changelog.ts platform-monitor.ts  # External monitoring
   alert-feed.ts ext-claude.ts indexnow.ts badge.ts og.ts og-render.ts  # Feeds, projections, SEO, images
