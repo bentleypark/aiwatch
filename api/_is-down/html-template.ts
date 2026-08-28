@@ -625,10 +625,29 @@ ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
 
 </div>
-${renderDelegatedListeners(service?.id ?? slug, service ? ['down', 'degraded'].includes(assertableStatus(service)) : false)}
+${renderDelegatedListeners(resolveBeaconSvcId(slug, service), service ? ['down', 'degraded'].includes(assertableStatus(service)) : false)}
 ${cookieBannerHtml()}
 </body>
 </html>`
+}
+
+/**
+ * #1287 — the service id the audience beacon reports, resolved WITHOUT a status read.
+ *
+ * This used to be `service?.id ?? slug`, and the fallback fires whenever the status read did not
+ * produce this service's row — which includes the paths where the worker is under strain, i.e. the
+ * outage window this metric exists to measure.
+ *
+ * A slug is not an id on 10 of the 43 pages, including the busiest (`claude-api` → `claude`,
+ * `claude-code` → `claudecode`, `openai-api` → `openai`, …), so those posts were rejected and the
+ * view was DELETED — not booked as unknown, simply absent, and absent is indistinguishable from
+ * nobody having visited.
+ *
+ * `SLUG_TO_SERVICE` is static data, so the id is available whether or not the status read worked.
+ * The `?? slug` tail remains only for a slug outside the map, which routing does not produce.
+ */
+export function resolveBeaconSvcId(slug: string, service: { id: string } | null | undefined): string {
+  return service?.id ?? SLUG_TO_SERVICE[slug]?.id ?? slug
 }
 
 // #482 — one always-rendered, CSP-safe delegated-listener block replacing every inline on*= handler.
@@ -639,11 +658,10 @@ ${cookieBannerHtml()}
 export function renderDelegatedListeners(svcId: string, active: boolean): string {
   return `<script>
 // #842-B — consent-free outage-moment audience beacon. Fires once on load, OUTSIDE any GA/consent
-// guard (no cookie, no PII: the referrer is reduced to its HOSTNAME client-side). Body = { svc,
-// ref(host), utm(utm_source), active }; classifyReferrer folds ref+utm to a fixed source bucket
-// server-side. → one WAE point → daily Outage Audience. Shared with the group page (#1193), which
-// the Reddit block's family link points at — see api/_shared/audience-beacon.ts.
-${audienceBeaconScript(svcId, active)}
+// guard (no cookie, no PII: the referrer is reduced to its HOSTNAME client-side). classifyReferrer folds ref+utm to a fixed source bucket
+// server-side. → one WAE point → daily is-down Audience. Shared with the group page (#1193), which
+// the Reddit block's family link points at — see api/_shared/audience-beacon.ts. This is the per-service surface (#1280).
+${audienceBeaconScript(svcId, active, 'service')}
 document.addEventListener('click', function (e) {
   var g = e.target.closest('[data-ga]');
   if (g) {

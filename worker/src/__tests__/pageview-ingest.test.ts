@@ -32,7 +32,7 @@ function post(body: unknown): Request {
   })
 }
 
-/** The single recorded data point's blobs: [source, 'active'|'clear', svcId]. */
+/** The single recorded data point's blobs: [source, 'active'|'clear', svcId, surface]. */
 function recordedBlobs(writeDataPoint: ReturnType<typeof vi.fn>): string[] {
   expect(writeDataPoint).toHaveBeenCalledTimes(1)
   return writeDataPoint.mock.calls[0][0].blobs
@@ -44,19 +44,50 @@ describe('POST /api/pageview → recorded source bucket (#1055 wiring)', () => {
 
   it('records a Reddit referrer as the reddit bucket, not direct — with the active flag and svc', async () => {
     const { env, writeDataPoint } = makeEnv()
-    const res = await workerModule.fetch(post({ svc: 'claude', ref: 'www.reddit.com', utm: '', active: true }), env, ctx)
+    const res = await workerModule.fetch(post({ svc: 'claude', ref: 'www.reddit.com', utm: '', active: true, surface: 'service' }), env, ctx)
     expect(res.status).toBe(204)
     // All three blobs, not just the source: the handler passes `active` and `svc` as separate
     // arguments to recordOutageView, and a unit test calling that fn directly cannot see a bad
     // argument at the CALL SITE. `activeTotal` is the sponsor-evidence number, so a dropped `active`
-    // would silently collapse it to zero.
-    expect(recordedBlobs(writeDataPoint)).toEqual(['reddit', 'active', 'claude'])
+    // would silently collapse it to zero. #1280 added `surface` as a fourth argument with exactly the
+    // same exposure — it is the one dimension that separates a group-page view from a per-service one.
+    expect(recordedBlobs(writeDataPoint)).toEqual(['reddit', 'active', 'claude', 'service'])
   })
 
   it('records a self-referral (our own is-down cross-links) as owned, not refhost (#1055)', async () => {
     const { env, writeDataPoint } = makeEnv()
-    await workerModule.fetch(post({ svc: 'openai', ref: 'ai-watch.dev', utm: '', active: false }), env, ctx)
-    expect(recordedBlobs(writeDataPoint)).toEqual(['owned', 'clear', 'openai'])
+    await workerModule.fetch(post({ svc: 'openai', ref: 'ai-watch.dev', utm: '', active: false, surface: 'service' }), env, ctx)
+    expect(recordedBlobs(writeDataPoint)).toEqual(['owned', 'clear', 'openai', 'service'])
+  })
+
+  // #1280 — the surface dimension, asserted at the CALL SITE. A unit test of parsePageviewBody or
+  // recordOutageView cannot see the handler dropping the field between them, and that failure is
+  // invisible in production: every view still lands, just all on one surface, which reads as a
+  // plausible number rather than as an error.
+  it('records a group-page view as the group surface, keeping the member id it reported', async () => {
+    const { env, writeDataPoint } = makeEnv()
+    // A family page posts the WORST-OF member's id by design (api/is-down-group.ts), so this row is
+    // indistinguishable from a view of claudecode's own page without blob4.
+    await workerModule.fetch(post({ svc: 'claudecode', ref: '', utm: 'x', active: true, surface: 'group' }), env, ctx)
+    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'active', 'claudecode', 'group'])
+  })
+
+  it('records a body with NO surface as unknown, never as service (the deploy window)', async () => {
+    const { env, writeDataPoint } = makeEnv()
+    // is-down is edge-cached, so pre-deploy HTML keeps posting this shape for a while. The view must
+    // still be counted — dropping it would render the deploy window as a traffic dip — but it must
+    // not be attributed, because folding it into `service` under-reports the group surface in exactly
+    // the direction of the bug #1280 exists to fix.
+    await workerModule.fetch(post({ svc: 'claude', ref: '', utm: 'x', active: false }), env, ctx)
+    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'clear', 'claude', 'unknown'])
+  })
+
+  it('records a junk surface as unknown rather than trusting or rejecting it', async () => {
+    const { env, writeDataPoint } = makeEnv()
+    // /api/pageview is public, so the surface is caller-controlled. It collapses to a fixed sentinel,
+    // which is what keeps blob4's cardinality bounded.
+    await workerModule.fetch(post({ svc: 'claude', ref: '', utm: 'x', active: false, surface: 'haxx' }), env, ctx)
+    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'clear', 'claude', 'unknown'])
   })
 
   it('records an unnamed referring host as refhost', async () => {
@@ -71,9 +102,19 @@ describe('POST /api/pageview → recorded source bucket (#1055 wiring)', () => {
     expect(recordedSource(writeDataPoint)).toBe('direct')
   })
 
-  it('rejects an unknown service id without recording (public endpoint abuse guard)', async () => {
+  // #1287 — asserted at the CALL SITE, because the failure this replaced was invisible in production:
+  // the view simply did not exist, which is indistinguishable from nobody having visited.
+  it('records an unrecognised service id under the sentinel rather than 400ing the view away', async () => {
     const { env, writeDataPoint } = makeEnv()
-    const res = await workerModule.fetch(post({ svc: 'not-a-service', ref: 'www.reddit.com', active: true }), env, ctx)
+    // `claude-api` is a real is-down SLUG.
+    const res = await workerModule.fetch(post({ svc: 'claude-api', ref: 'www.reddit.com', active: true, surface: 'service' }), env, ctx)
+    expect(res.status).toBe(204)
+    expect(recordedBlobs(writeDataPoint)).toEqual(['reddit', 'active', '__unknown__', 'service'])
+  })
+
+  it('still rejects a body with no service id at all, without recording', async () => {
+    const { env, writeDataPoint } = makeEnv()
+    const res = await workerModule.fetch(post({ ref: 'www.reddit.com', active: true }), env, ctx)
     expect(res.status).toBe(400)
     expect(writeDataPoint).not.toHaveBeenCalled()
   })

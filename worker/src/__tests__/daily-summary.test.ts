@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatFeedClientLine, formatSubscribedFeedsLine, buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAiUsageSection } from '../daily-summary'
+import { formatFeedClientLine, formatSubscribedFeedsLine, buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAudienceScreenRow, AUDIENCE_SCREEN_TOP_N, formatAiUsageSection } from '../daily-summary'
 import { BADGE_UNKNOWN_SERVICE } from '../api-traffic'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
@@ -1037,27 +1037,64 @@ describe('formatAudienceLine (#842-B)', () => {
     total: 0, activeTotal: 0,
     bySource: src(),
     activeBySource: src(),
+    byScreen: { service: {}, group: {}, unknown: {} },
     ...o,
   })
 
-  it('leads with the active-outage subset by source + total when an outage was viewed', () => {
+  it('leads with the active-outage subset by source, then the whole day by source', () => {
     const line = formatAudienceLine(counts({
       total: 320, activeTotal: 240,
       bySource: src({ x: 210, search: 60, feed: 30, owned: 12, direct: 20 }),
       activeBySource: src({ x: 180, search: 40, feed: 15, owned: 8, direct: 5 }),
     }))
-    expect(line).toContain('Outage Audience')
-    expect(line).toContain('240 during outages')
-    expect(line).toContain('X 180 · search 40 · feed 15 · owned 8 · direct 5') // #936 owned bucket rendered
-    expect(line).toContain('320 total views')
+    expect(line).toContain('is-down Audience')
+    expect(line).toContain('During outages: 240 — X 180 · search 40 · feed 15 · owned 8 · direct 5') // #936 owned bucket rendered
+    expect(line).toContain('All views: 320 — X 210 · search 60 · feed 30 · owned 12 · direct 20')
+  })
+
+  // #1280 — the defect that motivated the reshape: the breakdown used to be `activeBySource` while
+  // the number printed next to it was `total`, so a reader attributed the small count to the big
+  // number. This is the real 2026-08-25 production row (audienceTotal 36, audienceActiveTotal 1,
+  // x 21 of the 36) and the old code rendered it as `1 during outages — X 1 · 36 total views`.
+  // Assert BOTH X figures land on their own row: a fix that showed only one of them would pass a
+  // laxer `toContain('X 21')` while re-creating the ambiguity.
+  it('binds each breakdown to its own number (the 08-25 misread)', () => {
+    const line = formatAudienceLine(counts({
+      total: 36, activeTotal: 1,
+      bySource: src({ x: 21, direct: 10, owned: 3, search: 2 }),
+      activeBySource: src({ x: 1 }),
+    }))
+    // `toBe`, not `toContain`: the two-row LAYOUT is the deliverable, and fragment assertions cannot
+    // see it. Every `toContain` here stays a contiguous substring when the rows are merged back onto
+    // one line, so a re-merge regression passes them all — the exact gap that survived round 1.
+    expect(line).toBe('\n👥 **is-down Audience** (24h)\n   During outages: 1 — X 1\n   All views: 36 — X 21 · search 2 · owned 3 · direct 10')
+  })
+
+  // #1280 — the full-day breakdown was computed ONLY in the no-outage branch, so on outage days the
+  // channel mix vanished. A source present all day but absent from the outage minutes must still
+  // appear; this is what the strategy review could not read off the line.
+  it('still shows a source that never appeared during the outage window', () => {
+    const line = formatAudienceLine(counts({
+      total: 100, activeTotal: 5,
+      bySource: src({ x: 5, reddit: 95 }),
+      activeBySource: src({ x: 5 }),
+    }))
+    expect(line).toContain('During outages: 5 — X 5')
+    expect(line).toContain('Reddit 95')
   })
 
   it('renders the #1055 buckets with their operator labels', () => {
     // The labels are the ONLY surface a human reads, and nothing else asserts them: with every
     // fixture zero-filling the new buckets, mislabelling `refhost` as "direct" would restore exactly
     // the ambiguity #1055 removes and no test would notice.
+    // `bySource` is set as well as `activeBySource`, and to the same values: `parseOutageAudienceResponse`
+    // increments `bySource[source]`/`total` for EVERY accepted row and `activeBySource`/`activeTotal` only
+    // inside the `phase === 'active'` arm, so `total === Σ bySource` and `activeBySource[s] <= bySource[s]`
+    // hold by construction. Omitting `bySource` here left it all-zero against `total: 15` — a state the
+    // parser cannot emit, which under the two-row renderer produced a breakdown-less `All views: 15`.
     const line = formatAudienceLine(counts({
       total: 15, activeTotal: 15,
+      bySource: src({ reddit: 5, hn: 3, refhost: 7 }),
       activeBySource: src({ reddit: 5, hn: 3, refhost: 7 }),
     }))
     expect(line).toContain('Reddit 5')
@@ -1078,21 +1115,167 @@ describe('formatAudienceLine (#842-B)', () => {
     expect(line).not.toContain('owned 0')
   })
 
-  it('falls back to the general is-down audience when no active outage was viewed', () => {
+  // #1280 — a zero-outage day keeps the SAME two-row shape rather than switching to a different
+  // sentence. The stability is the point: the header and row labels no longer tell you which branch
+  // ran, because there is no branch to tell apart.
+  it('keeps the same shape when no active outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 50, activeTotal: 0,
       bySource: src({ x: 10, search: 35, feed: 5 }),
     }))
-    expect(line).toContain('is-down Audience')
-    expect(line).toContain('50 views')
-    expect(line).toContain('search 35')
-    expect(line).toContain('no active outages')
+    // Whole-string, same reason as above. It also pins that a zero subset trails no empty em-dash.
+    expect(line).toBe('\n👥 **is-down Audience** (24h)\n   During outages: 0\n   All views: 50 — X 10 · search 35 · feed 5')
   })
 
   it('returns empty (section omitted) when null or no views', () => {
     expect(formatAudienceLine(null)).toBe('')
     expect(formatAudienceLine(undefined)).toBe('')
     expect(formatAudienceLine(counts({ total: 0 }))).toBe('')
+  })
+
+  // #1280 — the screen row rides on the two rows above, so its presence must not disturb them.
+  it('appends the screen row without altering the two rows above it', () => {
+    const line = formatAudienceLine(counts({
+      total: 36, activeTotal: 1,
+      bySource: src({ x: 21, search: 2, owned: 3, direct: 10 }),
+      activeBySource: src({ x: 1 }),
+      byScreen: { service: { claude: 18, chatgpt: 9 }, group: { claude: 9 }, unknown: {} },
+    }))
+    expect(line).toBe(
+      '\n👥 **is-down Audience** (24h)' +
+      '\n   During outages: 1 — X 1' +
+      '\n   All views: 36 — X 21 · search 2 · owned 3 · direct 10' +
+      '\n   Screens: claude 18 · chatgpt 9 · claude (group) 9',
+    )
+  })
+
+  // #1280 — a pure-function test cannot prove the section reaches the message: deleting the
+  // `lines.push(audienceLine)` call in buildDailySummary left every other test in this file green.
+  // That is the exact failure `badge-wiring.test.ts` was written for after it shipped once, so the
+  // section gets the same treatment its neighbours already have (pushCount, accuracy, badgeTraffic).
+  // The reshape raises the stakes: the block is now four lines, so this also pins that the
+  // multi-line string survives `lines.join('\n')` instead of arriving flattened.
+  it('reaches the assembled daily summary, all rows intact', () => {
+    const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    const out = buildDailySummary({
+      ...minimal,
+      audience: counts({
+        total: 36, activeTotal: 1,
+        bySource: src({ x: 21, search: 2, owned: 3, direct: 10 }),
+        activeBySource: src({ x: 1 }),
+      }),
+    })
+    // One assertion carrying the newlines, so this genuinely pins what the comment claims: the block
+    // arrives with its rows intact rather than flattened. Three separate `toContain` fragments would
+    // all survive a re-merge.
+    expect(out).toContain('👥 **is-down Audience** (24h)\n   During outages: 1 — X 1\n   All views: 36 — X 21 · search 2 · owned 3 · direct 10')
+    // A quiet day is `total: 0`, not an absent field — that is what `queryOutageAudience` hands back,
+    // and it exercises the formatter's early return through the assembly path.
+    expect(buildDailySummary({ ...minimal, audience: counts({ total: 0 }) })).not.toContain('is-down Audience')
+  })
+})
+
+describe('formatAudienceScreenRow (#1280 — which screen the views landed on)', () => {
+  const screens = (o: Partial<Record<'service' | 'group' | 'unknown', Record<string, number>>> = {}) =>
+    ({ service: {}, group: {}, unknown: {}, ...o })
+
+  // THE finding this whole issue rests on. `/is-claude-down` (the Anthropic family page) and
+  // `/is-claude-api-down` (Claude API) both report `claude`, so before the surface dimension they
+  // were one number. Summing them here would restore exactly that, with the extra harm that the
+  // group page's id migrates to whichever member is worst at render time — so the merged figure
+  // would move between services during an outage.
+  it('keeps a group page separate from the member page that shares its id', () => {
+    const row = formatAudienceScreenRow(screens({ service: { claude: 18 }, group: { claude: 40 } }))
+    expect(row).toContain('claude (group) 40')
+    expect(row).toContain('claude 18')
+    expect(row).not.toContain('claude 58') // the pre-#1280 reading
+  })
+
+  // The defect one level down. `/is-claude-down` posts whichever member is worst at render time, so
+  // across a window the SAME page arrives as claude / claudeai / claudecode. Labelling before summing
+  // would split one screen into three — each able to fall below the top-N cut while their sum leads —
+  // and it would split precisely during an outage, which is when the row is read.
+  it('folds a group page onto its family however its member id moved during the window', () => {
+    const row = formatAudienceScreenRow(screens({
+      group: { claude: 40, claudeai: 30, claudecode: 30 },
+    }))
+    expect(row).toBe('\n   Screens: claude (group) 100')
+    expect(row).not.toContain('claudecode')
+  })
+
+  it('orders by volume and caps the tail, counting what it hides', () => {
+    const row = formatAudienceScreenRow(screens({
+      service: { claude: 50, chatgpt: 40, cursor: 30, gemini: 20, codex: 10, openai: 5 },
+    }))
+    expect(row).toBe('\n   Screens: claude 50 · chatgpt 40 · cursor 30 · gemini 20 · +2 more (15)')
+    expect(AUDIENCE_SCREEN_TOP_N).toBe(4) // the cap the line above depends on
+  })
+
+  // #1280 — the tail must carry VIEWS, not just how many screens are hidden. Every other token on the
+  // row is `<label> <views>`, so a bare `+13 more` reads as a view count in the same grammar: a reader
+  // sums left to right and silently under-counts the day. At the spread this repo actually sees, the
+  // tail is the MAJORITY of it.
+  it('makes the row reconcile: shown + hidden + unattributed === the day', () => {
+    const byScreen = screens({
+      service: { claude: 6, chatgpt: 4, cursor: 3, gemini: 3, codex: 2, openai: 1, mistral: 1 },
+      group: { claude: 3 },
+      unknown: { claude: 13 },
+    })
+    const row = formatAudienceScreenRow(byScreen)
+    // Parse the row the way a reader does: strip the label, split on the separator, drop the two
+    // residual tokens.
+    const tokens = row.replace('\n   Screens: ', '').split(' · ')
+    const hidden = Number(/\+\d+ more \((\d+)\)/.exec(row)![1])
+    const unattributed = Number(/(\d+) unattributed/.exec(row)![1])
+    const shown = tokens
+      .filter((t) => !t.startsWith('+') && !t.endsWith('unattributed'))
+      .reduce((a, t) => a + Number(t.slice(t.lastIndexOf(' ') + 1)), 0)
+    const everything = Object.values(byScreen).flatMap((m) => Object.values(m)).reduce((a, b) => a + b, 0)
+    expect(shown + hidden + unattributed).toBe(everything)
+  })
+
+  // #1280 round 3 — the two residuals' ORDER. Every other test carries only ONE of them, so swapping
+  // them passed the whole suite while re-creating, mirrored, the misreading the separator change was
+  // written to remove: `20 unattributed · +3 more (35)` reads as "and 3 more unattributed, 35 views"
+  // — `(35)` attaching to the wrong antecedent again. `(N)` means "views of the token before it", so
+  // the tail it belongs to has to sit next to it, and the row-level residual has to come last.
+  it('puts the per-token tail before the row-level residual', () => {
+    const row = formatAudienceScreenRow(screens({
+      service: { claude: 50, chatgpt: 40, cursor: 30, gemini: 20, codex: 10, openai: 5 },
+      group: { claude: 22 },
+      unknown: { claude: 20 },
+    }))
+    expect(row).toBe('\n   Screens: claude 50 · chatgpt 40 · cursor 30 · claude (group) 22 · +3 more (35) · 20 unattributed')
+  })
+
+  // #1280 round 4 — ties are the common case at this repo's spread and the cut sits at 4, so without
+  // the label tie-break WHICH screens get named depends on the order AE happened to return rows in
+  // (the query has no ORDER BY). Same day, different names, and a different screen pushed into the
+  // tail — read as a trend by an operator, and green in every other test.
+  it('breaks ties by label so the same day always names the same screens', () => {
+    const a = formatAudienceScreenRow(screens({ service: { claude: 9, chatgpt: 3, codex: 3, cursor: 3, gemini: 3, openai: 1 } }))
+    const b = formatAudienceScreenRow(screens({ service: { openai: 1, gemini: 3, cursor: 3, codex: 3, chatgpt: 3, claude: 9 } }))
+    expect(a).toBe(b)
+    expect(a).toBe('\n   Screens: claude 9 · chatgpt 3 · codex 3 · cursor 3 · +2 more (4)')
+  })
+
+  // The deploy-day reading. Views with no recorded surface are REAL views — they must not be
+  // dropped (that reads as a traffic dip) nor distributed across surfaces (that invents attribution).
+  it('names unattributed views instead of hiding or distributing them', () => {
+    const row = formatAudienceScreenRow(screens({ service: { claude: 4 }, unknown: { claude: 96, chatgpt: 30 } }))
+    expect(row).toBe('\n   Screens: claude 4 · 126 unattributed')
+  })
+
+  it('renders a whole-window unattributed day rather than going silent', () => {
+    // The straddling row right after deploy: nothing carries blob4 yet, but traffic existed.
+    expect(formatAudienceScreenRow(screens({ unknown: { claude: 12 } }))).toBe('\n   Screens: 12 unattributed')
+  })
+
+  it('is empty when the read failed or nothing is attributable — never a fake zero', () => {
+    expect(formatAudienceScreenRow(null)).toBe('')       // WAE read failed
+    expect(formatAudienceScreenRow(undefined)).toBe('')  // pre-#1280 row
+    expect(formatAudienceScreenRow(screens())).toBe('')  // read fine, no views
+    expect(formatAudienceScreenRow(screens({ service: { claude: 0 } }))).toBe('') // zeros are not screens
   })
 })
 
