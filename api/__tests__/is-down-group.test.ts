@@ -568,9 +568,8 @@ describe('outage-audience beacon (#842-B / #1193)', () => {
   })
 
   // The operator Reddit block hands out THIS page's URL for a family-wide incident, so a group page
-  // that posts no pageview leaves every visitor arriving on a family link uncounted. `svc` must be a real service id — parsePageviewBody validates against SERVICES and
-  // drops anything else, which would look identical to no traffic. That every member id is valid is
-  // pinned in api/_is-down/__tests__/family-groups.test.ts.
+  // that posts no pageview leaves every visitor arriving on a family link uncounted. That every
+  // member id is valid is pinned in api/_is-down/__tests__/family-groups.test.ts.
   it('posts a pageview naming a family member, flagged inactive when all are healthy', async () => {
     fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },

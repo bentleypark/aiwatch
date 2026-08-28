@@ -102,9 +102,19 @@ describe('POST /api/pageview → recorded source bucket (#1055 wiring)', () => {
     expect(recordedSource(writeDataPoint)).toBe('direct')
   })
 
-  it('rejects an unknown service id without recording (public endpoint abuse guard)', async () => {
+  // #1287 — asserted at the CALL SITE, because the failure this replaced was invisible in production:
+  // the view simply did not exist, which is indistinguishable from nobody having visited.
+  it('records an unrecognised service id under the sentinel rather than 400ing the view away', async () => {
     const { env, writeDataPoint } = makeEnv()
-    const res = await workerModule.fetch(post({ svc: 'not-a-service', ref: 'www.reddit.com', active: true }), env, ctx)
+    // `claude-api` is a real is-down SLUG.
+    const res = await workerModule.fetch(post({ svc: 'claude-api', ref: 'www.reddit.com', active: true, surface: 'service' }), env, ctx)
+    expect(res.status).toBe(204)
+    expect(recordedBlobs(writeDataPoint)).toEqual(['reddit', 'active', '__unknown__', 'service'])
+  })
+
+  it('still rejects a body with no service id at all, without recording', async () => {
+    const { env, writeDataPoint } = makeEnv()
+    const res = await workerModule.fetch(post({ ref: 'www.reddit.com', active: true }), env, ctx)
     expect(res.status).toBe(400)
     expect(writeDataPoint).not.toHaveBeenCalled()
   })
