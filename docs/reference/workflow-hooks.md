@@ -65,6 +65,41 @@ will not tell you that a rule which sounds objective is unreachable, non-discrim
 Include the worktree session directories (`~/.claude/projects/*--claude-worktrees-*`): issue work happens
 there, and a main-directory-only scan silently drops those sessions.
 
+## The instruction budget — a CI ratchet on always-loaded context (#1285)
+
+`scripts/check-instruction-budget.mjs` caps the size of what every session loads before it does
+anything. CLAUDE.md's step 7 asks it to stay "lean, ~40k-char guideline"; nothing enforced that, and
+the excess never showed up in a diff. Moving `BUDGET_CHARS` is what puts it there.
+
+It measures `CLAUDE.md` plus `.claude/hooks/workflow-gates.txt`, which `workflow-gates-reminder.sh`
+injects every turn. Skill *bodies* and `docs/reference/*` (this file included) are out of scope —
+they cost context only when something loads them, which is why detail is moved here rather than
+deleted, and why CLAUDE.md references these pages with ordinary markdown links.
+
+A **ratchet, not a target**: `BUDGET_CHARS` is set at the current size, not at 40k, because a cap
+that is red on day one gets disabled. Growth past the cap fails, and so does a reduction that opens
+more than `MAX_SLACK` — a cap with headroom permits exactly the drift it exists to stop. Both
+remedies are the same edit: move the constant in the PR that moved the file. Measured in Unicode code
+points, not bytes, because the guideline is written in chars.
+
+**Where it is gated.** `test.yml` paths-ignores `CLAUDE.md`, so a CLAUDE.md-only PR — the shape that
+moves this budget — starts none of its jobs. The guard therefore runs as its own `Docs Lint` job, the
+same reason `doc-symbols` lives there (#1100) and the count lockstep was moved there (#1081). That is
+also why the slack check lives in the script and not only in the tests: a test-only check would pass
+the reducing PR and red an unrelated later one. `npm run test:scripts` covers the gate text, which is
+not a docs path. Those links are tested in `scripts/workflow-paths-sync.test.mjs` and
+`scripts/check-instruction-budget.test.mjs`.
+
+**What it does not do.** It does not verify that the measured set is COMPLETE — only that those two
+files stay within the cap. `ALWAYS_LOADED` is pinned as a literal so a change to the set lands in the
+diff, but nothing proves no third surface is always-loaded. Two specific gaps were built during
+review and then deliberately removed (#1285): a detector for CLAUDE.md `@path` imports, which load a
+whole file for one line of link, and a check that the gate hook injects the file the budget measures.
+Both required modelling behaviour that cannot be verified from this repo — Claude Code's import
+grammar, markdown fence semantics, hook payload identity — and each attempt shipped a hole that read
+as protection. The convention they were guarding is already the practice: CLAUDE.md references
+`docs/reference/*` with markdown links (18 of them) and contains no `@` imports.
+
 ## Related
 
 - [Reference Tooling](reference-tooling.md) — the `tooling-trigger.sh` trigger map (chub vs modern-web-guidance).

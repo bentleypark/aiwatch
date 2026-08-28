@@ -23,9 +23,9 @@ name: Docs Lint
 # `test.yml` carries the same shape via its `paths-ignore`, so this applies to its four jobs too.
 # As of 2026-07-09 `main` has NO required status checks, so the trap is latent, not live.
 # If you ever want these required, first move the path decision from the workflow trigger into the
-# job (always run the workflow; skip each job's step when no docs changed). There are THREE jobs here
-# now — `Service Count Lockstep` and `Doc Symbol Lint` are further contexts that likewise never report on a code-only PR,
-# so both need converting. Note that doing so removes the `paths:` list that
+# job (always run the workflow; skip each job's step when no docs changed). There are FOUR jobs here
+# now — `Service Count Lockstep`, `Doc Symbol Lint` and `Instruction Budget` are further contexts that
+# likewise never report on a code-only PR, so all three need converting. Note that doing so removes the `paths:` list that
 # `scripts/workflow-paths-sync.test.mjs` asserts against, so that guard would need rewriting too.
 
 on:
@@ -38,6 +38,7 @@ on:
       - '.github/**/*.md'
       - 'scripts/lint-okf-bundle.mjs'      # the guard guards itself
       - 'scripts/check-doc-symbols.mjs'    # #1100 — ditto, the doc-symbol lint
+      - 'scripts/check-instruction-budget.mjs'   # #1285 — ditto, the instruction-budget ratchet
       - 'api/__tests__/service-count-lockstep.test.ts'   # ditto, for the count lockstep
       - 'vitest.config.js'                 # passWithNoTests there would disarm the lockstep gate
       - '.github/workflows/docs-lint.yml'
@@ -50,6 +51,7 @@ on:
       - '.github/**/*.md'
       - 'scripts/lint-okf-bundle.mjs'
       - 'scripts/check-doc-symbols.mjs'
+      - 'scripts/check-instruction-budget.mjs'
       - 'api/__tests__/service-count-lockstep.test.ts'
       - 'vitest.config.js'
       - '.github/workflows/docs-lint.yml'
@@ -123,3 +125,19 @@ jobs:
         with:
           node-version: 20
       - run: node scripts/check-doc-symbols.mjs
+
+  instruction-budget:
+    name: Instruction Budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 10   # #1253 — never inherit the 6h default
+    # #1285 — the ratchet on ALWAYS-loaded agent context (CLAUDE.md + the per-turn gate injection).
+    # Wired here for the doc-symbols reason: test.yml paths-ignores CLAUDE.md, so the PR shape that
+    # moves this budget starts none of that workflow's jobs. `test:scripts` runs the same real-set
+    # assertion on code PRs, covering the other always-loaded file (not a docs path).
+    # Zero-dependency (node: builtins) → no `npm ci`.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/check-instruction-budget.mjs
