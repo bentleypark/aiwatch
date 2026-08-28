@@ -26,7 +26,7 @@ import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForA
 import { buildSupplyChainBanner } from './supply-chain'
 import { buildUpstreamLinks } from './upstream-link'
 import type { UpstreamCandidate } from './upstream-feed'
-import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge } from './cache-refresh'
+import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge, refreshStatusCacheOnUnusableSnapshot } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders, matchOrigin } from './cors'
@@ -576,8 +576,10 @@ async function cacheRead(
   if (!raw) {
     // Severity is deliberately below the others: the key can expire legitimately (TTL 900s, and the
     // only unconditional writer is the traffic-throttled /api/status handler), so a quiet period can
-    // produce this. How OFTEN is unmeasured — the `cache-read` index exists to answer that, and the
-    // answer decides whether this stays a warn or the cron starts re-seeding the key.
+    // produce this. #1227 follow-up: the `cache-read` index measurement answered "how often" and the
+    // cron now re-seeds on exactly this outcome (and its `unparsed`/`empty` siblings below) —
+    // `refreshStatusCacheOnUnusableSnapshot` in cronAlertCheck. Stays a `warn` because it now
+    // self-heals within one cron tick instead of persisting until the next throttled write.
     console.warn('[kv] CACHE_KEY read returned NO VALUE — the key is absent or expired')
     recordCacheReadOutcome(analytics, 'miss')
     return null
@@ -827,6 +829,17 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   const raw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
   const STALE_THRESHOLD_MS = 10 * 60 * 1000
   const { stale, services: cachedServices, upstreamFeeds: cachedFeeds } = isCacheStale(raw, STALE_THRESHOLD_MS)
+  // #1227 follow-up — isCacheStale normalizes a missing key, a read that threw, unparsed JSON, and a
+  // parsed-but-empty services array all down to `services: []` (it's the cron's one parser of the
+  // snapshot shape). That's the same four DATA outcomes `cacheRead()` reports for every OTHER reader
+  // (`miss`/`threw`/`unparsed`/`empty`; its fifth, `no-binding`, can't reach here — this function
+  // already returned above when `env.STATUS_CACHE` is absent). Not a perfect overlap: isCacheStale
+  // tolerates a legacy bare-array payload that `cacheRead` rejects — a gap with ~nil production impact
+  // (no current writer emits that shape, and it would be long past its TTL by now). So
+  // `cachedServices.length === 0` reads as "no usable snapshot exists at all" — distinct from
+  // `stale === true` with a non-empty array, which just means "present but older than 10 min" and needs
+  // no repair below.
+  const snapshotUnusable = cachedServices.length === 0
   // #1233 — this path reads CACHE_KEY directly rather than through `cacheRead`, so it needs its own
   // transitional decode. It is the one that matters most: on a fresh cache (<10 min) the entire alert
   // pipeline runs on this array, so a snapshot written by the PREVIOUS deploy — where an unreadable
@@ -842,8 +855,9 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   let upstreamFeeds = cachedFeeds as UpstreamCandidate[]
 
   // If cache is stale (>10min) or empty, fetch live data to avoid alert decisions on outdated status.
-  // Does NOT write to KV — cache writes are handled exclusively by /api/status handler's cacheWrite()
-  // so the 10-min KV write throttle keeps us well inside the Workers Paid 1M writes/month inclusion.
+  // The routine writer stays the throttled /api/status handler's cacheWrite() (10-min throttle). The
+  // ONE write in this block is the #1227 re-seed below, and it fires only when there was no usable
+  // snapshot to begin with — never on a merely-stale-but-present one.
   let cronProbes: ProbeSnapshot[] = []
   // #992 — per-page raw components from the live fetch, for the new-component detector below. Only
   // populated on a stale-triggered live fetch (a fresh-cache cycle skips detection — it runs next cycle).
@@ -862,6 +876,20 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         // from the SAME cycle. A mixed snapshot (fresh feeds beside stale services) would let the
         // upstream gate reason about two different moments in time.
         upstreamFeeds = freshFeeds
+        // #1227 follow-up — re-seed CACHE_KEY when there was no usable snapshot to serve, so
+        // cacheRead() callers (badge, statusline, v1 API, ...) don't sit on a miss until the next
+        // throttled /api/status write. No-op (and no write) when the key merely existed-but-stale.
+        // Deliberately not aligned with `lastKvWrite` — see the function's own doc comment.
+        //
+        // This DOES reset the cron's own 10-min staleness clock, so a fully quiet window live-fetches
+        // only roughly 1-in-2 to 1-in-3 ticks instead of every tick (exact ratio depends on where the
+        // fetch's own latency lands `cachedAt` relative to the tick boundary) — bounded by the same
+        // 10-min tolerance the threshold already declares acceptable. Up to two consecutive ticks can
+        // skip #992 new-component detection this way; it resumes on the next stale-triggered fetch.
+        const reseeded = await refreshStatusCacheOnUnusableSnapshot(env.STATUS_CACHE, snapshotUnusable, freshServices, freshFeeds, CACHE_KEY, CACHE_TTL_SECONDS)
+        if (snapshotUnusable && !reseeded) {
+          console.error('[cron] #1227 CACHE_KEY re-seed FAILED after a genuine miss — badge/statusline/v1 keep failing closed until the next throttled /api/status write')
+        }
       }
       cronPageComponents = pageComponents
     } catch (err) {
