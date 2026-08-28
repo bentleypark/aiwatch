@@ -581,6 +581,12 @@ describe('outage-audience beacon (#842-B / #1193)', () => {
     expect(html).toContain('/api/pageview')
     expect(html).toContain('svc: "claude"')
     expect(html).toContain('active: false')
+    // #1280 — and it must say it is the GROUP. `svc: "claude"` above is a member id, not this page's
+    // identity: the per-service page at /is-claude-api-down posts the very same id. The surface is the
+    // only thing separating them, so asserting the id without it would pin a value that means two
+    // different screens.
+    expect(html).toContain('surface: "group"')
+    expect(html).not.toContain('surface: "service"')
   })
 
   it('flags the view active AND names the member that is actually down', async () => {

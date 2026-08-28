@@ -42,7 +42,9 @@ describe('buildGrowthDailyRow', () => {
     referralTotal: 7,
     subscribers: 12,
     subscriberNewToday: 1,
-    audience: { total: 40, activeTotal: 31, bySource: { x: 20, search: 11 }, activeBySource: { x: 20 } },
+    // #1280 — a real AudienceCounts always carries `byScreen`; the `as never` below means tsc cannot
+    // enforce that here, so the fixture has to stay faithful by hand.
+    audience: { total: 40, activeTotal: 31, bySource: { x: 20, search: 11 }, activeBySource: { x: 20 }, byScreen: { service: { claude: 25 }, group: { claude: 15 }, unknown: {} } },
     feedPolls: { verdict: 'failed', polls: null },
   }
 
@@ -57,6 +59,9 @@ describe('buildGrowthDailyRow', () => {
       audienceTotal: 40,
       audienceActiveTotal: 31,
       audienceBySource: { x: 20, search: 11 },
+      // #1280 — stored as read: the group page's views stay under `group` rather than being folded
+      // into the member id they share, which is the whole reason the field exists.
+      audienceByScreen: { service: { claude: 25 }, group: { claude: 15 }, unknown: {} },
       feedPolls: null,
       feedPollsRead: 'failed',
     })
@@ -116,6 +121,11 @@ describe('buildGrowthDailyRow', () => {
     expect(r.subscriberNewToday).toBeNull()
     expect(r.audienceTotal).toBeNull()
     expect(r.audienceBySource).toBeNull()
+    // #1280 — `null`, never `undefined`: JSON.stringify drops an undefined-valued key, so the row
+    // would store the field ABSENT, and absent means "no screen instrumentation existed then" while
+    // null means "the read failed". A day whose WAE query died would become permanently readable as
+    // a pre-deploy day.
+    expect(r.audienceByScreen).toBeNull()
   })
 
   it('a real zero stays 0 — nobody clicked is a fact, not a gap', () => {
@@ -517,6 +527,60 @@ describe('recordGrowthDaily — feedPolls at the KV boundary (#1273)', () => {
     const prior = [{ ...row('2026-08-22'), feedPolls: { claude: { slack: 72 } } }]
     const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: { claude: { slack: 99 } } }))
     expect(out[0].feedPolls).toEqual({ claude: { slack: 99 } })
+  })
+
+  // #1280 — the same catch-up path was destroying the AUDIENCE group, and the guard's docstring gave
+  // a reason that was false for it: the audience fields do NOT read a TTL'd key. `queryOutageAudience`
+  // reads the Analytics Engine SQL API and returns `null` on missing creds / non-OK HTTP / an
+  // unparseable body — nothing expired, a request failed. The screen split is the most expensive value
+  // in the row to lose: no other system holds it and this key has no TTL and no backfill.
+  it('a same-date re-run with a FAILED audience read must not destroy the measured screen split', () => {
+    const measured = {
+      ...row('2026-08-22'),
+      audienceTotal: 380, audienceActiveTotal: 78,
+      audienceBySource: { x: 200, direct: 180 },
+      audienceByScreen: { service: { claude: 300 }, group: { claude: 78 }, unknown: { openai: 2 } },
+    }
+    const out = appendGrowthDaily([measured], row('2026-08-22', {
+      audienceTotal: null, audienceActiveTotal: null, audienceBySource: null, audienceByScreen: null,
+    }))
+    expect(out[0].audienceByScreen).toEqual({ service: { claude: 300 }, group: { claude: 78 }, unknown: { openai: 2 } })
+    // The four travel as ONE group — carrying a subset would leave one run's totals beside another
+    // run's breakdown, the same defect `feedPollsRead` travelling with its map exists to prevent.
+    expect(out[0].audienceTotal).toBe(380)
+    expect(out[0].audienceActiveTotal).toBe(78)
+    expect(out[0].audienceBySource).toEqual({ x: 200, direct: 180 })
+  })
+
+  it('a SUCCESSFUL audience re-run still replaces the prior measurement', () => {
+    // The mirror. Without it, preserving unconditionally would pin the first read of the day forever.
+    const prior = [{ ...row('2026-08-22'), audienceTotal: 380, audienceByScreen: { service: { claude: 300 }, group: {}, unknown: {} } }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', {
+      audienceTotal: 401, audienceByScreen: { service: { claude: 320 }, group: { claude: 81 }, unknown: {} },
+    }))
+    expect(out[0].audienceTotal).toBe(401)
+    expect(out[0].audienceByScreen).toEqual({ service: { claude: 320 }, group: { claude: 81 }, unknown: {} })
+  })
+
+  it('a measured QUIET day is preserved, not mistaken for a failed read', () => {
+    // `audienceTotal: 0` is a real measurement — AE returns `{data: []}` on a quiet window, which
+    // parses to a zeroed object, never `null`. Discriminating on falsiness instead of nullishness
+    // would throw the quiet day away and let the failed re-run's `null` win.
+    const prior = [{ ...row('2026-08-22'), audienceTotal: 0, audienceActiveTotal: 0, audienceBySource: {}, audienceByScreen: { service: {}, group: {}, unknown: {} } }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { audienceTotal: null, audienceByScreen: null }))
+    expect(out[0].audienceTotal).toBe(0)
+    expect(out[0].audienceByScreen).toEqual({ service: {}, group: {}, unknown: {} })
+  })
+
+  it('a pre-#1280 prior keeps audienceByScreen ABSENT rather than turning it into a null', () => {
+    // Absent means "no screen instrumentation existed then"; null means "the read failed". Carrying
+    // the group from an old row must not convert the first into the second — that would claim a
+    // failure on a day that never had the field.
+    const prior = [{ ...row('2026-08-22'), audienceTotal: 40, audienceBySource: { x: 40 } }]
+    delete (prior[0] as { audienceByScreen?: unknown }).audienceByScreen
+    const out = appendGrowthDaily(prior, row('2026-08-22', { audienceTotal: null, audienceByScreen: null }))
+    expect(out[0].audienceTotal).toBe(40)
+    expect(out[0].audienceByScreen).toBeUndefined()
   })
 
   it('an EMPTY incoming map does not replace a measured one either', () => {

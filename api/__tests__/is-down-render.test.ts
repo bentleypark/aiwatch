@@ -27,6 +27,16 @@ describe('renderDelegatedListeners integrity (#842-B)', () => {
     expect(html).toContain('outbound_fallback_click') // referral beacon still present
   })
 
+  // #1280 — the per-service page must declare its own surface. Without this the worker has no way to
+  // tell this view from a GROUP-page view: the group page posts one of its members' service ids by
+  // design, so `svc` alone identifies neither the screen nor even a stable service (the member it
+  // reports changes with the family's status). The two pages are pinned in two files because they are
+  // two Functions; the group half lives in is-down-group.test.ts.
+  it('declares the service surface in the beacon body (#1280)', () => {
+    expect(html).toContain('surface: "service"')
+    expect(html).not.toContain('surface: "group"')
+  })
+
   it('reduces the referrer to a bare HOSTNAME before sending it (#1055 contract)', () => {
     // classifyReferrer's host patterns are all `$`-anchored, so they only work on a bare hostname.
     // If this ever sent `document.referrer` raw, EVERY host bucket (reddit/hn/search/x/owned) would

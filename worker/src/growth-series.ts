@@ -66,6 +66,18 @@ export interface GrowthDailyRow {
   // the write site). The deploy date is to be recorded in docs/reference/kv-schema.md's
   // `growth:daily` row.
   audienceBySource: Record<string, number> | null
+  // #1280 — the same window's views keyed by SCREEN: surface (`service`/`group`/`unknown`) → service
+  // id, plus the `__unknown__` sentinel for a row whose id could not be read → count.
+  // `audienceBySource` above says where a visitor came FROM; this says what they LOOKED AT, which
+  // nothing recorded before.
+  //
+  // States match `audienceBySource` exactly — a map on a successful read, `null` when it failed,
+  // ABSENT on a row predating this field. Absent is not zero. No read-verdict field: this map comes
+  // from the same parse as `audienceBySource`, so the two are null together.
+  //
+  // A service id here does not name a screen on its own — read the (surface, id) PAIR. Why:
+  // outage-audience.ts.
+  audienceByScreen?: Record<string, Record<string, number>> | null
   // #1273 — feed-poll volume for the window: feed (canonical service ids plus the
   // `__all__`/`__unknown__` sentinels) → client class → count. This is the durable
   // half of the RSS/Slack retention proxy: #548 already computed a 24h number but only printed it into
@@ -299,6 +311,7 @@ export function buildGrowthDailyRow(i: GrowthDailyInputs): GrowthDailyRow {
     audienceTotal: i.audience?.total ?? null,
     audienceActiveTotal: i.audience?.activeTotal ?? null,
     audienceBySource: i.audience?.bySource ?? null,
+    audienceByScreen: i.audience?.byScreen ?? null,
     feedPolls: i.feedPolls.polls,
     feedPollsRead: i.feedPolls.verdict,
     ...(i.outage ? { incidentsStartedInWindow: i.outage.started, outageWindowEnd: i.outage.windowEnd } : {}),
@@ -333,17 +346,34 @@ export function appendGrowthDaily(existing: unknown, row: GrowthDailyRow): Growt
  * disagreeing about `{}` is the defect this shape exists to prevent. Both ends go through it, so a
  * corrupt or empty prior cannot be resurrected over an honest failure either.
  *
- * Scoped deliberately to `feedPolls`. The other nullable fields read TTL'd keys that are gone by the
- * next run, so for them a re-run's `null` is the best available value. Pure.
+ * Covers `feedPolls` and the AUDIENCE group. The other nullable fields read TTL'd keys that really
+ * are gone by the next run, so for them a re-run's `null` is the best available value.
+ *
+ * #1280 — the audience fields do NOT belong to that TTL rationale: `queryOutageAudience` reads the
+ * Analytics Engine SQL API, so its `null` is a failed request, not an expiry. Overwriting a real
+ * measurement with it destroys the value permanently — this key has no TTL and no backfill. The four
+ * fields travel as ONE group because they come from one `AudienceCounts`. Pure.
  */
 function preserveMeasured(prior: GrowthDailyRow | undefined, row: GrowthDailyRow): GrowthDailyRow {
-  if (!prior || isMeasuredFeedPolls(row.feedPolls)) return row
+  if (!prior) return row
+  let out = row
   // `feedPollsRead` travels WITH the map it explains. Carrying the map alone would leave the later
   // run's failure verdict sitting beside a measurement, which is the same one-value-two-stories
   // defect the verdict was added to end.
-  return isMeasuredFeedPolls(prior.feedPolls)
-    ? { ...row, feedPolls: prior.feedPolls, feedPollsRead: prior.feedPollsRead }
-    : row
+  if (!isMeasuredFeedPolls(row.feedPolls) && isMeasuredFeedPolls(prior.feedPolls)) {
+    out = { ...out, feedPolls: prior.feedPolls, feedPollsRead: prior.feedPollsRead }
+  }
+  // `audienceTotal` discriminates the group: `null` only on a failed read, a real `0` on a quiet day.
+  if (row.audienceTotal == null && prior.audienceTotal != null) {
+    out = {
+      ...out,
+      audienceTotal: prior.audienceTotal,
+      audienceActiveTotal: prior.audienceActiveTotal,
+      audienceBySource: prior.audienceBySource,
+      audienceByScreen: prior.audienceByScreen, // ABSENT on a pre-#1280 prior; must not become null
+    }
+  }
+  return out
 }
 
 function isRow(r: unknown): r is GrowthDailyRow {

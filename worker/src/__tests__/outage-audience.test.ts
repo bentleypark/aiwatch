@@ -7,6 +7,10 @@ import {
   queryOutageAudience,
   recordOutageView,
   AUDIENCE_SOURCES,
+  AUDIENCE_SURFACES,
+  AUDIENCE_SURFACE_UNKNOWN,
+  AUDIENCE_SURFACE_KEYS,
+  AUDIENCE_UNKNOWN_SCREEN,
 } from '../outage-audience'
 
 describe('classifyReferrer (#842-B)', () => {
@@ -138,8 +142,8 @@ describe('classifyReferrer (#842-B)', () => {
 describe('parsePageviewBody (#842-B)', () => {
   const ids = new Set(['claude', 'openai'])
   it('accepts a valid body and classifies the source', () => {
-    expect(parsePageviewBody({ svc: 'claude', utm: 'x', ref: '', active: true }, ids)).toEqual({
-      svc: 'claude', source: 'x', active: true,
+    expect(parsePageviewBody({ svc: 'claude', utm: 'x', ref: '', active: true, surface: 'service' }, ids)).toEqual({
+      svc: 'claude', source: 'x', active: true, surface: 'service',
     })
   })
   it('rejects an unknown / missing service id (abuse guard)', () => {
@@ -157,12 +161,12 @@ describe('parsePageviewBody (#842-B)', () => {
     // stored raw), so it belongs in `refhost`, not `direct`. `direct` now asserts the absence of a
     // referrer, and a garbage referrer is not an absent one.
     const r = parsePageviewBody({ svc: 'claude', utm: 123, ref: 'x'.repeat(500) }, ids)
-    expect(r).toEqual({ svc: 'claude', source: 'refhost', active: false })
+    expect(r).toEqual({ svc: 'claude', source: 'refhost', active: false, surface: 'unknown' })
   })
 
   it('maps a non-string (absent) ref to direct — no host at all (#1055)', () => {
     expect(parsePageviewBody({ svc: 'claude', utm: 123, ref: 456 }, ids))
-      .toEqual({ svc: 'claude', source: 'direct', active: false })
+      .toEqual({ svc: 'claude', source: 'direct', active: false, surface: 'unknown' })
   })
 })
 
@@ -177,6 +181,19 @@ describe('bucket-vocabulary sync (#1055)', () => {
     const zeroed = parseOutageAudienceResponse({ data: [] })
     expect(zeroed).not.toBeNull()
     expect([...AUDIENCE_SOURCES].sort()).toEqual(Object.keys(zeroed!.bySource).sort())
+  })
+
+  // #1280 — the same hazard on the surface union, pinned the same way. Widen `AudienceSurface` without
+  // widening `AUDIENCE_SURFACES` and tsc catches ONE of four sites (`emptyByScreen`'s keyed Record);
+  // the three it misses — both `includes()` normalisations and the render loop — silently route the
+  // new surface into `unknown` forever. `byScreen`'s keys are the authoritative set for the same
+  // reason `bySource`'s are above: they come from the tsc-enforced Record.
+  it('AUDIENCE_SURFACES + the sentinel cover every read-side surface key — the edit tsc CANNOT catch', () => {
+    const zeroed = parseOutageAudienceResponse({ data: [] })
+    expect(zeroed).not.toBeNull()
+    expect([...AUDIENCE_SURFACE_KEYS].sort()).toEqual(Object.keys(zeroed!.byScreen).sort())
+    // The sentinel is READ-side only: no page may declare it.
+    expect(AUDIENCE_SURFACES).not.toContain(AUDIENCE_SURFACE_UNKNOWN)
   })
 })
 
@@ -218,6 +235,75 @@ describe('parseOutageAudienceResponse (#842-B)', () => {
     expect(parseOutageAudienceResponse({})).toBeNull()
     expect(parseOutageAudienceResponse(null)).toBeNull()
   })
+
+  // #1280 — the widened GROUP BY means one (source, phase) pair now spans MANY rows, up to
+  // services × surfaces of them. Every counter must accumulate; an assignment silently keeps only
+  // the last row and discards the rest, which at 9 sources × 2 phases loses most of a screen's day
+  // while every hand-written-JSON test elsewhere stays green.
+  it('accumulates a (source, phase) pair spread across several screen rows', () => {
+    const r = parseOutageAudienceResponse({ data: [
+      { source: 'x', phase: 'active', svc: 'claude', surface: 'service', views: 5 },
+      { source: 'x', phase: 'active', svc: 'claude', surface: 'group', views: 7 },
+      { source: 'x', phase: 'clear', svc: 'chatgpt', surface: 'service', views: 3 },
+      { source: 'search', phase: 'clear', svc: 'claude', surface: 'service', views: 2 },
+    ] })!
+    expect(r.total).toBe(17)
+    expect(r.activeTotal).toBe(12)
+    expect(r.bySource.x).toBe(15)
+    expect(r.bySource.search).toBe(2)
+    // The two `claude` rows are the SAME id on DIFFERENT surfaces — they must not merge.
+    expect(r.byScreen.service).toEqual({ claude: 7, chatgpt: 3 })
+    expect(r.byScreen.group).toEqual({ claude: 7 })
+    expect(r.byScreen.unknown).toEqual({})
+  })
+
+  // The invariant every consumer rests on, and the one the docstring names as load-bearing.
+  it('keeps total === Σ bySource === Σ byScreen across the widened grouping', () => {
+    const rows = [
+      { source: 'x', phase: 'active', svc: 'claude', surface: 'group', views: 40 },
+      { source: 'direct', phase: 'clear', svc: 'claude', surface: 'service', views: 18 },
+      { source: 'direct', phase: 'clear', svc: 'chatgpt', surface: 'service', views: 9 },
+      { source: 'reddit', phase: 'clear', svc: 'cursor', surface: '', views: 4 },
+    ]
+    const r = parseOutageAudienceResponse({ data: rows })!
+    const sumSource = Object.values(r.bySource).reduce((a, b) => a + b, 0)
+    const sumScreen = Object.values(r.byScreen).flatMap((m) => Object.values(m)).reduce((a, b) => a + b, 0)
+    expect(r.total).toBe(71)
+    expect(sumSource).toBe(r.total)
+    expect(sumScreen).toBe(r.total) // no view may be counted in `total` and lost from the screen map
+  })
+
+  // #1280 round 2 — the hole the invariant docstring used to promise a guard against. A row with no
+  // usable id was SKIPPED from byScreen while still counting in `total`, so the operator row
+  // under-summed with no residual naming the gap. It is now booked under a bounded sentinel in the
+  // `unknown` surface, which the row's `unattributed` tail already reports.
+  it('books a row with no usable service id as unattributed rather than skipping it', () => {
+    const r = parseOutageAudienceResponse({ data: [
+      { source: 'direct', phase: 'clear', svc: 'claude', surface: 'service', views: 10 },
+      { source: 'direct', phase: 'clear', svc: '', surface: 'service', views: 90 },
+      { source: 'direct', phase: 'clear', surface: 'group', views: 5 },
+      { source: 'direct', phase: 'clear', svc: 42, surface: 'service', views: 1 },
+    ] })!
+    expect(r.total).toBe(106)
+    expect(r.byScreen.service).toEqual({ claude: 10 })
+    // A view whose SCREEN cannot be named is unattributed whatever surface it claimed — otherwise
+    // `service` would absorb 96 views of a page nobody can identify.
+    expect(r.byScreen.unknown).toEqual({ [AUDIENCE_UNKNOWN_SCREEN]: 96 })
+    expect(r.byScreen.group).toEqual({})
+    const sumScreen = Object.values(r.byScreen).flatMap((m) => Object.values(m)).reduce((a, b) => a + b, 0)
+    expect(sumScreen).toBe(r.total)
+  })
+
+  it('routes an absent or unrecognised surface to unknown, never to service', () => {
+    const r = parseOutageAudienceResponse({ data: [
+      { source: 'x', phase: 'clear', svc: 'claude', views: 6 },                      // pre-blob4 row
+      { source: 'x', phase: 'clear', svc: 'openai', surface: 'Group', views: 4 },    // wrong case
+      { source: 'x', phase: 'clear', svc: 'gemini', surface: 'haxx', views: 2 },     // junk
+    ] })!
+    expect(r.byScreen.unknown).toEqual({ claude: 6, openai: 4, gemini: 2 })
+    expect(r.byScreen.service).toEqual({})
+    expect(r.byScreen.group).toEqual({})
+  })
 })
 
 describe('queryOutageAudience (#842-B)', () => {
@@ -248,20 +334,32 @@ describe('queryOutageAudience (#842-B)', () => {
 })
 
 describe('recordOutageView (#842-B)', () => {
-  it('writes one data point with the source/phase/svc blob order the SQL reads', () => {
+  it('writes one data point with the source/phase/svc/surface blob order the SQL reads', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claude')
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claude', 'service')
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['x', 'active', 'claude'],
+      blobs: ['x', 'active', 'claude', 'service'],
       doubles: [1],
       indexes: ['isdown-view'],
     })
   })
   it('maps active=false → clear and no-ops when the binding is absent', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'search', false, 'openai')
-    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['search', 'clear', 'openai'] }))
-    expect(() => recordOutageView(undefined, 'x', true, 'claude')).not.toThrow()
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'search', false, 'openai', 'service')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['search', 'clear', 'openai', 'service'] }))
+    expect(() => recordOutageView(undefined, 'x', true, 'claude', 'service')).not.toThrow()
+  })
+  // #1280 — the group surface is the whole point of blob4: without it this row is indistinguishable
+  // from a view of claude's OWN page, because the group page reports a member id by design.
+  it('writes the group surface without altering the service id it reports', () => {
+    const writeDataPoint = vi.fn()
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claudecode', 'group')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['x', 'active', 'claudecode', 'group'] }))
+  })
+  it('writes the unknown sentinel through unchanged, so a pre-blob4 body is not booked as service', () => {
+    const writeDataPoint = vi.fn()
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'direct', false, 'claude', 'unknown')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['direct', 'clear', 'claude', 'unknown'] }))
   })
 })
 
@@ -270,7 +368,22 @@ describe('buildOutageAudienceSql (#842-B)', () => {
     const sql = buildOutageAudienceSql('ds')
     expect(sql).toContain("index1 = 'isdown-view'")
     expect(sql).toContain('SUM(_sample_interval)')
-    expect(sql).toContain('GROUP BY blob1, blob2')
     expect(sql).toContain('FROM ds')
+  })
+
+  // #1280 — the GROUP BY is asserted WHOLE, not as a prefix. `toContain('GROUP BY blob1, blob2')`
+  // passes against both the old two-column query and this one, so reverting the widening left every
+  // downstream test green (they all feed hand-written JSON) while `byScreen` sat empty in production
+  // forever. Same pin #1273 added for the feed-poll query one commit earlier, for the same reason.
+  it('selects AND groups by the screen dimensions (#1280)', () => {
+    const sql = buildOutageAudienceSql('ds')
+    expect(sql).toContain('blob3 AS svc')
+    expect(sql).toContain('blob4 AS surface')
+    expect(sql).toContain('GROUP BY blob1, blob2, blob3, blob4')
+    // A selected-but-ungrouped column is the failure mode that matters: AE either rejects the query
+    // (→ the whole 👥 section silently disappears, the trap the `phase` alias comment guards) or
+    // returns an arbitrary representative row.
+    expect(sql).not.toContain('GROUP BY blob1, blob2 ')
+    expect(sql.endsWith('FORMAT JSON')).toBe(true)
   })
 })

@@ -10,7 +10,8 @@ import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
 import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
-import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
+import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
+import { FAMILY_OF_SERVICE } from './alerts'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts, FeedTrafficCounts, FeedPollsByTarget } from './api-traffic'
 import { BADGE_UNKNOWN_SERVICE, FEED_UNKNOWN_TARGET, rollupByClient, subscriberFeeds, type AllFeedState } from './api-traffic'
 
@@ -415,9 +416,9 @@ export function formatReferralLine(
 // referring host but don't name it, and 'other-ref' says that more plainly than the field name does.
 const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', owned: 'owned', direct: 'direct', plugin: 'plugin', reddit: 'Reddit', hn: 'HN', refhost: 'other-ref' }
 
-/** #842-B — outage-moment audience line (consent-free is-down views by source). Two rows, always:
- *  the active-outage subset (the sponsor-evidence "outage-spike audience") first, then the whole
- *  day. Zero buckets are dropped so the line stays readable. Empty (section omitted) when the WAE
+/** #842-B — outage-moment audience line (consent-free is-down views by source). The active-outage
+ *  subset (the sponsor-evidence "outage-spike audience") first, then the whole day, then the screens.
+ *  Zero buckets are dropped so the line stays readable. Empty (section omitted) when the WAE
  *  read was unconfigured/null or there were no views. Pure + unit-tested.
  *
  *  #1280 — this used to branch on `activeTotal > 0`, and the branch cost two things. (1) The
@@ -440,8 +441,40 @@ export function formatAudienceLine(audience: AudienceCounts | null | undefined):
   return (
     `\n👥 **is-down Audience** (24h)\n` +
     `   During outages: ${row(audience.activeTotal, audience.activeBySource)}\n` +
-    `   All views: ${row(audience.total, audience.bySource)}`
+    `   All views: ${row(audience.total, audience.bySource)}` +
+    formatAudienceScreenRow(audience.byScreen)
   )
+}
+
+/** Max screens named before the rest collapse into a `+N more` tail, so the row cannot wrap into a
+ *  wall of text in a Discord embed. */
+export const AUDIENCE_SCREEN_TOP_N = 4
+
+/**
+ * #1280 — the screen row: WHICH is-down page the day's views landed on. `''` when nothing is
+ * attributable. Group ids are resolved to their family before labelling (see outage-audience.ts for
+ * why the reported id is not the page). Shape is pinned by `toBe` in daily-summary.test.ts.
+ */
+export function formatAudienceScreenRow(byScreen: AudienceByScreen | null | undefined): string {
+  if (!byScreen) return ''
+  const totals = new Map<string, number>()
+  for (const surface of AUDIENCE_SURFACES) {
+    for (const [svc, n] of Object.entries(byScreen[surface] ?? {})) {
+      if (n <= 0) continue
+      const label = surface === 'group' ? `${FAMILY_OF_SERVICE[svc]?.slug ?? svc} (group)` : svc
+      totals.set(label, (totals.get(label) ?? 0) + n)
+    }
+  }
+  const unattributed = Object.values(byScreen[AUDIENCE_SURFACE_UNKNOWN] ?? {}).reduce((a, b) => a + b, 0)
+  if (totals.size === 0 && unattributed === 0) return ''
+  const named = [...totals].map(([label, n]) => ({ label, n }))
+  named.sort((a, b) => b.n - a.n || a.label.localeCompare(b.label))
+  const shown = named.slice(0, AUDIENCE_SCREEN_TOP_N)
+  const hiddenViews = named.slice(AUDIENCE_SCREEN_TOP_N).reduce((a, s) => a + s.n, 0)
+  const parts = shown.map((s) => `${s.label} ${s.n}`)
+  if (named.length > shown.length) parts.push(`+${named.length - shown.length} more (${hiddenViews})`)
+  if (unattributed > 0) parts.push(`${unattributed} unattributed`)
+  return `\n   Screens: ${parts.join(' · ')}`
 }
 
 /** #827 Feature 1 — AI recovery-prediction accuracy, rendered as a labeled multi-line block so an

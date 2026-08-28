@@ -19,10 +19,21 @@
 //             backfill exists. (Deploy date: see the `growth:daily` row in docs/reference/kv-schema.md
 //             — recorded there at deploy time rather than guessed here.)
 //   blob2   = 'active' | 'clear'                    → viewed during an outage window vs not
-//   blob3   = service id                            → stored for a future per-service split; NOT
-//                                                     queried yet (buildOutageAudienceSql groups on
-//                                                     blob1+blob2 only)
+//   blob3   = service id                            → which service's page. On its own this does NOT
+//                                                     identify the SCREEN — see blob4.
+//   blob4   = surface                               → #1280, which SURFACE was viewed. Values are
+//                                                     AudienceSurfaceKey — a hand-written AE SQL
+//                                                     filter of `IN ('service','group')` silently
+//                                                     drops every deploy-window row.
 //   double1 = 1                                     → view counter (SUM in AE SQL)
+//
+// #1280 — why blob3 alone could not be read. Two surfaces write it. A per-service page sends its own
+// id, but a provider-family GROUP page (`/is-claude-down`, #1164) has a slug that is not a service id,
+// so `api/is-down-group.ts` sends the WORST-OF member instead — deliberately, so the outage flag and
+// the service it is paired with cannot contradict each other. The consequence is that group traffic
+// lands on `claude` on a quiet day and migrates to `claudeai` or `claudecode` the moment one of them
+// degrades: the attribution moves exactly when the number is being read. blob4 is what separates the
+// two, and it is the reason a per-service split could not simply be switched on.
 
 import { V1_DATASET } from './api-traffic'
 
@@ -53,6 +64,34 @@ import { V1_DATASET } from './api-traffic'
 //      test stays green. `AUDIENCE_SOURCES covers every AudienceSource` in the tests pins 3 against 2.
 export type AudienceSource = 'x' | 'search' | 'feed' | 'owned' | 'direct' | 'plugin' | 'reddit' | 'hn' | 'refhost'
 export const AUDIENCE_SOURCES: AudienceSource[] = ['x', 'search', 'feed', 'owned', 'direct', 'plugin', 'reddit', 'hn', 'refhost']
+
+/**
+ * #1280 — which is-down SURFACE a view landed on. These two are the only values a PAGE may declare.
+ *
+ * `AUDIENCE_SURFACE_UNKNOWN` is not part of this union: it
+ * stands for a row whose surface we cannot know, which happens two ways and never because a page
+ * chose it. (a) A row written before the blob4 deploy carries no blob4 at all. (b) For a while after
+ * the deploy, edge-cached HTML (`s-maxage=60` on is-down) keeps posting bodies with no `surface`.
+ *
+ * Neither may fold into `'service'`. Doing so would book every historical and deploy-window group
+ * view as a per-service view — structurally under-reporting the surface this dimension exists to
+ * isolate, and in the same direction as the bug (#1280) that motivated it, so the error would look
+ * like a confirmation.
+ *
+ * Widening this union without widening `AUDIENCE_SURFACES` routes the new surface into `unknown`
+ * everywhere. Pinned by `AUDIENCE_SURFACES covers every AudienceSurface` in outage-audience.test.ts.
+ */
+export type AudienceSurface = 'service' | 'group'
+export const AUDIENCE_SURFACES: AudienceSurface[] = ['service', 'group']
+/** Read-side third state for a view whose surface was never recorded. NOT written by any page. */
+export const AUDIENCE_SURFACE_UNKNOWN = 'unknown'
+/** Bounded stand-in for a row carrying no usable service id, mirroring `FEED_UNKNOWN_TARGET` (#1273)
+ *  and `BADGE_UNKNOWN_SERVICE` (#1157). It keeps `Σ byScreen === total` true without inventing an
+ *  attribution: the view is real and counted, we just cannot name its screen. */
+export const AUDIENCE_UNKNOWN_SCREEN = '__unknown__'
+/** Every key that can appear in a stored map. */
+export type AudienceSurfaceKey = AudienceSurface | typeof AUDIENCE_SURFACE_UNKNOWN
+export const AUDIENCE_SURFACE_KEYS: AudienceSurfaceKey[] = [...AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN]
 
 const ISDOWN_INDEX = 'isdown-view'
 
@@ -124,23 +163,29 @@ export function classifyReferrer(utmSource: string | undefined, refHost: string 
 }
 
 /**
- * Validate a beacon body → `{ svc, source, active }` or null. `svc` MUST be a known service id (the
- * abuse guard: the endpoint is public, so an arbitrary body can't inflate an unknown bucket). `ref`
- * (referrer hostname) + `utm` (utm_source) are length-capped free-text — never stored raw, only fed
- * to the pure `classifyReferrer` → a fixed bucket. `active` (in an outage window) comes from the
+ * Validate a beacon body → `{ svc, source, active, surface }` or null. `svc` MUST be a known service
+ * id (the abuse guard: the endpoint is public, so an arbitrary body can't inflate an unknown bucket).
+ * `ref` (referrer hostname) + `utm` (utm_source) are length-capped free-text — never stored raw, only
+ * fed to the pure `classifyReferrer` → a fixed bucket. `active` (in an outage window) comes from the
  * rendered page status. Pure. Cheap id-safe validation; no free-form strings reach WAE.
+ *
+ * #1280 — an unrecognised or absent `surface` becomes the sentinel rather than defaulting to
+ * `'service'` or rejecting the beacon; see AudienceSurface for why. Pinned in pageview-ingest.test.ts.
  */
 export function parsePageviewBody(
   body: unknown,
   validIds: Set<string>,
-): { svc: string; source: AudienceSource; active: boolean } | null {
+): { svc: string; source: AudienceSource; active: boolean; surface: AudienceSurfaceKey } | null {
   if (!body || typeof body !== 'object') return null
   const b = body as Record<string, unknown>
   const svc = typeof b.svc === 'string' ? b.svc : ''
   if (!validIds.has(svc)) return null
   const utm = typeof b.utm === 'string' ? b.utm.slice(0, 64) : ''
   const ref = typeof b.ref === 'string' ? b.ref.slice(0, 128) : ''
-  return { svc, source: classifyReferrer(utm, ref), active: b.active === true }
+  const surface: AudienceSurfaceKey = AUDIENCE_SURFACES.includes(b.surface as AudienceSurface)
+    ? (b.surface as AudienceSurface)
+    : AUDIENCE_SURFACE_UNKNOWN
+  return { svc, source: classifyReferrer(utm, ref), active: b.active === true, surface }
 }
 
 /**
@@ -153,11 +198,12 @@ export function recordOutageView(
   source: AudienceSource,
   active: boolean,
   svcId: string,
+  surface: AudienceSurfaceKey,
 ): void {
   if (!analytics) return
   try {
     analytics.writeDataPoint({
-      blobs: [source, active ? 'active' : 'clear', svcId],
+      blobs: [source, active ? 'active' : 'clear', svcId, surface],
       doubles: [1],
       indexes: [ISDOWN_INDEX],
     })
@@ -166,40 +212,69 @@ export function recordOutageView(
   }
 }
 
+/** #1280 — views keyed by SCREEN: surface → service id (or `AUDIENCE_UNKNOWN_SCREEN`) → count. A key
+ *  absent WITHIN a present map means that screen had no views (= 0). */
+export type AudienceByScreen = Record<AudienceSurfaceKey, Record<string, number>>
+
 export interface AudienceCounts {
   total: number // all is-down views in the window
   activeTotal: number // subset viewed while the service was in an active outage (the sponsor evidence)
   bySource: Record<AudienceSource, number> // all views by source
   activeBySource: Record<AudienceSource, number> // active-outage views by source
+  byScreen: AudienceByScreen // #1280 — surface → service id → views (all views, not the active subset)
 }
 
 const zeroBySource = (): Record<AudienceSource, number> => ({ x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0, reddit: 0, hn: 0, refhost: 0 })
+// Derived from AUDIENCE_SURFACE_KEYS rather than written out, so that array is load-bearing.
+const emptyByScreen = (): AudienceByScreen =>
+  Object.fromEntries(AUDIENCE_SURFACE_KEYS.map((k) => [k, {}])) as AudienceByScreen
 
-/** AE SQL summing the last-24h is-down view count per (source, active/clear) — sampling-corrected
- *  via SUM(_sample_interval), NOT COUNT(*) which undercounts at high volume (WAE samples). */
+/** AE SQL summing the last-24h is-down view count per (source, active/clear, service, surface) —
+ *  sampling-corrected via SUM(_sample_interval), NOT COUNT(*) which undercounts at high volume (WAE
+ *  samples). #1280 widened the grouping from blob1+blob2; the extra dimensions are bounded by
+ *  sources × phases × services × surfaces, and every consumer of the old two-column shape aggregates
+ *  across the new ones rather than assuming one row per (source, phase). */
 export function buildOutageAudienceSql(dataset = V1_DATASET): string {
   // `phase` (NOT `window`, a SQL reserved keyword the AE parser may reject → 400 → the section
   // silently omits forever); mirrors api-traffic.ts aliasing to non-reserved tokens.
   return (
-    `SELECT blob1 AS source, blob2 AS phase, SUM(_sample_interval) AS views ` +
+    `SELECT blob1 AS source, blob2 AS phase, blob3 AS svc, blob4 AS surface, SUM(_sample_interval) AS views ` +
     `FROM ${dataset} ` +
     `WHERE index1 = '${ISDOWN_INDEX}' AND timestamp > NOW() - INTERVAL '1' DAY ` +
-    `GROUP BY blob1, blob2 ` +
+    `GROUP BY blob1, blob2, blob3, blob4 ` +
     `FORMAT JSON`
   )
 }
 
-/** Parse the AE SQL JSON into per-source + active/clear counts. Tolerant of string/number `views`
- *  and unknown source buckets (skipped). Returns null when the payload has no usable data array. */
+/** Parse the AE SQL JSON into per-source + active/clear counts and the #1280 per-screen map.
+ *  Tolerant of string/number `views` and unknown source buckets (skipped). Returns null when the
+ *  payload has no usable data array.
+ *
+ *  Two things the row loop must keep straight, both of which the widened GROUP BY introduced:
+ *
+ *  A (source, phase) pair now spans SEVERAL rows — one per (service, surface) — so every counter
+ *  accumulates with `+=` and none may assign. `total === Σ bySource` stays exact by construction
+ *  because both increment on every accepted row, which is the invariant the daily line's fixtures
+ *  and #1280's whole reading rest on.
+ *
+ *  `surface` is normalised through the same sentinel `parsePageviewBody` uses, so a row written
+ *  before blob4 existed (the field comes back empty/absent) lands in `unknown` rather than being
+ *  dropped or, worse, folded into `service`. `svc` is NOT validated against SERVICES here: this file
+ *  has no service roster and the write side already gated it (`parsePageviewBody` requires a known
+ *  id). A row with no usable id at all is booked under `AUDIENCE_UNKNOWN_SCREEN` in the `unknown`
+ *  surface — never skipped, because skipping is what would subtract real views from `byScreen` while
+ *  leaving them in `total`. So `Σ byScreen === total` holds for EVERY input, not just well-formed
+ *  ones, and the operator row can promise that its numbers reconcile. */
 export function parseOutageAudienceResponse(json: unknown): AudienceCounts | null {
   const data = (json as { data?: unknown })?.data
   if (!Array.isArray(data)) return null
   const bySource = zeroBySource()
   const activeBySource = zeroBySource()
+  const byScreen = emptyByScreen()
   let total = 0
   let activeTotal = 0
   for (const row of data) {
-    const r = row as { source?: unknown; phase?: unknown; views?: unknown }
+    const r = row as { source?: unknown; phase?: unknown; svc?: unknown; surface?: unknown; views?: unknown }
     const source = r.source as AudienceSource
     if (!AUDIENCE_SOURCES.includes(source)) continue
     const parsed = Number(r.views)
@@ -210,8 +285,16 @@ export function parseOutageAudienceResponse(json: unknown): AudienceCounts | nul
       activeBySource[source] += n
       activeTotal += n
     }
+    // A row with no usable id is booked as unattributed, never skipped: skipping would subtract it
+    // from `byScreen` while leaving it in `total`, breaking the invariant above.
+    const svc = typeof r.svc === 'string' && r.svc ? r.svc : AUDIENCE_UNKNOWN_SCREEN
+    const declared: AudienceSurfaceKey = AUDIENCE_SURFACES.includes(r.surface as AudienceSurface)
+      ? (r.surface as AudienceSurface)
+      : AUDIENCE_SURFACE_UNKNOWN
+    const surface = svc === AUDIENCE_UNKNOWN_SCREEN ? AUDIENCE_SURFACE_UNKNOWN : declared
+    byScreen[surface][svc] = (byScreen[surface][svc] ?? 0) + n
   }
-  return { total, activeTotal, bySource, activeBySource }
+  return { total, activeTotal, bySource, activeBySource, byScreen }
 }
 
 /** Query the last-24h is-down audience via the AE SQL API. Best-effort: null on missing creds /
