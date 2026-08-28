@@ -19,8 +19,10 @@
 //             backfill exists. (Deploy date: see the `growth:daily` row in docs/reference/kv-schema.md
 //             — recorded there at deploy time rather than guessed here.)
 //   blob2   = 'active' | 'clear'                    → viewed during an outage window vs not
-//   blob3   = service id                            → which service's page. On its own this does NOT
-//                                                     identify the SCREEN — see blob4.
+//   blob3   = service id | '__unknown__'             → which service's page. On its own this does NOT
+//                                                     identify the SCREEN (see blob4), and a
+//                                                     hand-written `IN (<ids>)` filter silently drops
+//                                                     the sentinel rows #1287 books here.
 //   blob4   = surface                               → #1280, which SURFACE was viewed. Values are
 //                                                     AudienceSurfaceKey — a hand-written AE SQL
 //                                                     filter of `IN ('service','group')` silently
@@ -85,9 +87,10 @@ export type AudienceSurface = 'service' | 'group'
 export const AUDIENCE_SURFACES: AudienceSurface[] = ['service', 'group']
 /** Read-side third state for a view whose surface was never recorded. NOT written by any page. */
 export const AUDIENCE_SURFACE_UNKNOWN = 'unknown'
-/** Bounded stand-in for a row carrying no usable service id, mirroring `FEED_UNKNOWN_TARGET` (#1273)
- *  and `BADGE_UNKNOWN_SERVICE` (#1157). It keeps `Σ byScreen === total` true without inventing an
- *  attribution: the view is real and counted, we just cannot name its screen. */
+/** Bounded stand-in for a view whose screen cannot be named, mirroring `FEED_UNKNOWN_TARGET` (#1273)
+ *  and `BADGE_UNKNOWN_SERVICE` (#1157). Written by BOTH sides: the read side for a row carrying no id
+ *  (#1280), and the write side for an id we do not recognise (#1287). It keeps `Σ byScreen === total`
+ *  true without inventing an attribution: the view is real and counted, we just cannot name it. */
 export const AUDIENCE_UNKNOWN_SCREEN = '__unknown__'
 /** Every key that can appear in a stored map. */
 export type AudienceSurfaceKey = AudienceSurface | typeof AUDIENCE_SURFACE_UNKNOWN
@@ -163,14 +166,24 @@ export function classifyReferrer(utmSource: string | undefined, refHost: string 
 }
 
 /**
- * Validate a beacon body → `{ svc, source, active, surface }` or null. `svc` MUST be a known service
- * id (the abuse guard: the endpoint is public, so an arbitrary body can't inflate an unknown bucket).
- * `ref` (referrer hostname) + `utm` (utm_source) are length-capped free-text — never stored raw, only
+ * Validate a beacon body → `{ svc, source, active, surface }` or null. `svc` must be a NON-EMPTY
+ * string; an id we do not recognise is bounded to a sentinel rather than trusted (see #1287 below),
+ * so an arbitrary body still cannot mint a per-service bucket. `ref` (referrer hostname) + `utm` (utm_source) are length-capped free-text — never stored raw, only
  * fed to the pure `classifyReferrer` → a fixed bucket. `active` (in an outage window) comes from the
  * rendered page status. Pure. Cheap id-safe validation; no free-form strings reach WAE.
  *
  * #1280 — an unrecognised or absent `surface` becomes the sentinel rather than defaulting to
  * `'service'` or rejecting the beacon; see AudienceSurface for why. Pinned in pageview-ingest.test.ts.
+ *
+ * #1287 — an unrecognised `svc` does the same, for the same reason one level down. It used to reject
+ * the whole beacon, which DELETED the view. Counted-but-unattributed beats uncounted, and the
+ * sentinel is a fixed string, so blob3's cardinality stays bounded — an arbitrary body cannot mint a
+ * per-service bucket.
+ * The read side needs no change: `parseOutageAudienceResponse` already routes this sentinel into the
+ * `unknown` surface, so it surfaces as the operator row's `unattributed` residual.
+ *
+ * A MALFORMED body is still rejected. `svc` absent or non-string means the caller sent nothing to
+ * identify, which is a different fact from sending something we do not recognise.
  */
 export function parsePageviewBody(
   body: unknown,
@@ -178,8 +191,9 @@ export function parsePageviewBody(
 ): { svc: string; source: AudienceSource; active: boolean; surface: AudienceSurfaceKey } | null {
   if (!body || typeof body !== 'object') return null
   const b = body as Record<string, unknown>
-  const svc = typeof b.svc === 'string' ? b.svc : ''
-  if (!validIds.has(svc)) return null
+  const rawSvc = typeof b.svc === 'string' ? b.svc : ''
+  if (!rawSvc) return null
+  const svc = validIds.has(rawSvc) ? rawSvc : AUDIENCE_UNKNOWN_SCREEN
   const utm = typeof b.utm === 'string' ? b.utm.slice(0, 64) : ''
   const ref = typeof b.ref === 'string' ? b.ref.slice(0, 128) : ''
   const surface: AudienceSurfaceKey = AUDIENCE_SURFACES.includes(b.surface as AudienceSurface)
@@ -260,8 +274,8 @@ export function buildOutageAudienceSql(dataset = V1_DATASET): string {
  *  `surface` is normalised through the same sentinel `parsePageviewBody` uses, so a row written
  *  before blob4 existed (the field comes back empty/absent) lands in `unknown` rather than being
  *  dropped or, worse, folded into `service`. `svc` is NOT validated against SERVICES here: this file
- *  has no service roster and the write side already gated it (`parsePageviewBody` requires a known
- *  id). A row with no usable id at all is booked under `AUDIENCE_UNKNOWN_SCREEN` in the `unknown`
+ *  has no service roster, and the write side bounds it to the same sentinel (#1287) rather than
+ *  admitting free-form ids. A row with no usable id at all is booked under `AUDIENCE_UNKNOWN_SCREEN` in the `unknown`
  *  surface — never skipped, because skipping is what would subtract real views from `byScreen` while
  *  leaving them in `total`. So `Σ byScreen === total` holds for EVERY input, not just well-formed
  *  ones, and the operator row can promise that its numbers reconcile. */

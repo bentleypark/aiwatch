@@ -146,11 +146,23 @@ describe('parsePageviewBody (#842-B)', () => {
       svc: 'claude', source: 'x', active: true, surface: 'service',
     })
   })
-  it('rejects an unknown / missing service id (abuse guard)', () => {
-    expect(parsePageviewBody({ svc: 'evil', utm: 'x' }, ids)).toBeNull()
+  // #1287 — a MALFORMED body is still rejected: nothing was sent to identify.
+  it('rejects a body carrying no service id at all', () => {
     expect(parsePageviewBody({ utm: 'x' }, ids)).toBeNull()
+    expect(parsePageviewBody({ svc: 42, utm: 'x' }, ids)).toBeNull()
+    expect(parsePageviewBody({ svc: '', utm: 'x' }, ids)).toBeNull()
     expect(parsePageviewBody(null, ids)).toBeNull()
     expect(parsePageviewBody('nope', ids)).toBeNull()
+  })
+
+  // #1287 — an id we do not RECOGNISE is a different fact, and rejecting it deleted real views: 10 of
+  // 43 is-down slugs are not service ids.
+  // The sentinel is fixed, so blob3's cardinality stays bounded — this does not become an abuse hole.
+  it('books an unrecognised service id under the sentinel instead of dropping the view', () => {
+    expect(parsePageviewBody({ svc: 'claude-api', utm: 'x' }, ids)?.svc).toBe(AUDIENCE_UNKNOWN_SCREEN)
+    expect(parsePageviewBody({ svc: 'evil', utm: 'x' }, ids)?.svc).toBe(AUDIENCE_UNKNOWN_SCREEN)
+    // …and a real id is still passed through untouched.
+    expect(parsePageviewBody({ svc: 'claude', utm: 'x' }, ids)?.svc).toBe('claude')
   })
   it('coerces active to a strict boolean and defaults false', () => {
     expect(parsePageviewBody({ svc: 'openai', active: 'yes' }, ids)?.active).toBe(false)

@@ -373,8 +373,7 @@ ${otherFamiliesSection}
 // #842-B / #1193 — consent-free outage-moment audience beacon, the same one the per-service is-down
 // pages fire (api/_shared/audience-beacon.ts). It has to be here because the operator Reddit block
 // hands out THIS page URL for a family-wide incident: without it a Reddit visitor arriving on a
-// group link is invisible to audienceBySource. svc must be a real SERVICE id: parsePageviewBody validates it
-// against SERVICES and drops the row otherwise, which reads as no traffic rather than as an error.
+// group link is invisible to audienceBySource.
 // It names the WORST-OF member rather than the first one: the active flag is the family headline,
 // and pairing it with a member that was operational at render time would assert an outage view of a
 // service that had no outage.

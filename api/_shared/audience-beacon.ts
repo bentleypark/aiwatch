@@ -8,9 +8,8 @@
 // was invisible to `audienceBySource`. Extracted here so the second surface is a
 // caller rather than a copy.
 //
-// `svc` MUST be a real service id: `parsePageviewBody` (worker/src/outage-audience.ts) validates it
-// against SERVICES and drops the row otherwise, which would be a silent zero. A family slug is a URL
-// slug, not necessarily a service id, so a family page passes one of its members instead.
+// A family slug is a URL slug, not necessarily a service id, so a family page passes one of its
+// members instead.
 
 /**
  * The beacon body, inlined into a `<script>` the caller already emits (both callers hash their own

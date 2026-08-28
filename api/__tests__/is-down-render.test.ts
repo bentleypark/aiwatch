@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { renderDelegatedListeners, buildMetaDescription, renderPage, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
+import { renderDelegatedListeners, resolveBeaconSvcId, buildMetaDescription, renderPage, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
 import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/utils/predictionAccuracy'
 import { getSEOContent } from '../_is-down/seo-content'
+import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
 
 // Guard for #842-B: the audience beacon + click delegation live inside ONE `<script>` template
 // literal. A stray backtick in a comment there once truncated the literal → the Edge SSR built a
@@ -51,6 +52,54 @@ describe('renderDelegatedListeners integrity (#842-B)', () => {
     expect(renderDelegatedListeners('claude', true)).toContain('svc: "claude"')
     expect(renderDelegatedListeners('claude', true)).toContain('active: true')
     expect(renderDelegatedListeners('openai', false)).toContain('active: false')
+  })
+})
+
+// #1287 — the beacon's service id on the path where the status read FAILED, which includes the paths
+// where the worker is under strain, i.e. the outage window this metric measures.
+describe('resolveBeaconSvcId (#1287 — the id survives a failed status read)', () => {
+  // The whole defect in one case. `claude-api` is the slug, `claude` is the id; posting the slug was a
+  // 400 and the view was DELETED — not booked as unknown, absent, and absent reads as nobody visiting.
+  it('resolves a slug whose id differs, with no service data', () => {
+    expect(resolveBeaconSvcId('claude-api', null)).toBe('claude')
+    expect(resolveBeaconSvcId('claude-code', null)).toBe('claudecode')
+    expect(resolveBeaconSvcId('openai-api', null)).toBe('openai')
+    expect(resolveBeaconSvcId('flux', null)).toBe('bfl')
+    expect(resolveBeaconSvcId('langchain', null)).toBe('langsmith')
+  })
+
+  // Every one of the 10 slug != id pages, read off the map rather than hand-listed: a future rename
+  // that reintroduces a mismatch is covered without editing this test.
+  it('never returns a bare slug for any page whose slug is not its id', () => {
+    const mismatched = Object.entries(SLUG_TO_SERVICE).filter(([slug, e]) => slug !== e.id)
+    expect(mismatched.length).toBeGreaterThan(0) // the test is vacuous if the map ever flattens
+    for (const [slug, entry] of mismatched) {
+      expect(resolveBeaconSvcId(slug, null), `slug ${slug} still posts a slug`).toBe(entry.id)
+    }
+  })
+
+  // The 33 slug == id pages cannot distinguish the bug from the fix — stated so the case above is not
+  // mistaken for redundant coverage.
+  it('is unchanged for a slug that already equals its id', () => {
+    expect(resolveBeaconSvcId('gemini', null)).toBe('gemini')
+  })
+
+  // The helper is not the fix — the CALL SITE is. Reverting `renderPage` to `service?.id ?? slug`
+  // while leaving this helper and all its tests intact passed the whole suite, which is exactly the
+  // "guard planted where the test calls, not where production calls" recurrence this repo has
+  // recorded twice (#966, #1268). These two render through `renderPage`, so the wire is pinned.
+  //
+  // `service: null` is the state under test.
+  it('renderPage emits the ID, not the slug, when the status read failed', () => {
+    const html = renderPage('claude-api', null as never, getSEOContent('claude-api')!, [], null)
+    expect(html).toContain('svc: "claude"')
+    expect(html).not.toContain('svc: "claude-api"')
+  })
+
+  it('renderPage does the same for a non-Anthropic mismatch', () => {
+    const html = renderPage('flux', null as never, getSEOContent('flux')!, [], null)
+    expect(html).toContain('svc: "bfl"')
+    expect(html).not.toContain('svc: "flux"')
   })
 })
 
