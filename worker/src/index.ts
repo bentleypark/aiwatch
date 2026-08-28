@@ -4078,7 +4078,7 @@ export default {
         try {
           const parsed = parsePageviewBody(await request.json(), new Set(SERVICES.map(s => s.id)))
           if (!parsed) return new Response(null, { status: 400, headers: cors })
-          recordOutageView(env.ANALYTICS, parsed.source, parsed.active, parsed.svc)
+          recordOutageView(env.ANALYTICS, parsed.source, parsed.active, parsed.svc, parsed.surface)
           return new Response(null, { status: 204, headers: cors })
         } catch (err) {
           if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })

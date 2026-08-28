@@ -639,11 +639,10 @@ ${cookieBannerHtml()}
 export function renderDelegatedListeners(svcId: string, active: boolean): string {
   return `<script>
 // #842-B — consent-free outage-moment audience beacon. Fires once on load, OUTSIDE any GA/consent
-// guard (no cookie, no PII: the referrer is reduced to its HOSTNAME client-side). Body = { svc,
-// ref(host), utm(utm_source), active }; classifyReferrer folds ref+utm to a fixed source bucket
-// server-side. → one WAE point → daily Outage Audience. Shared with the group page (#1193), which
-// the Reddit block's family link points at — see api/_shared/audience-beacon.ts.
-${audienceBeaconScript(svcId, active)}
+// guard (no cookie, no PII: the referrer is reduced to its HOSTNAME client-side). classifyReferrer folds ref+utm to a fixed source bucket
+// server-side. → one WAE point → daily is-down Audience. Shared with the group page (#1193), which
+// the Reddit block's family link points at — see api/_shared/audience-beacon.ts. This is the per-service surface (#1280).
+${audienceBeaconScript(svcId, active, 'service')}
 document.addEventListener('click', function (e) {
   var g = e.target.closest('[data-ga]');
   if (g) {

@@ -375,12 +375,12 @@ ${otherFamiliesSection}
 // hands out THIS page URL for a family-wide incident: without it a Reddit visitor arriving on a
 // group link is invisible to audienceBySource. svc must be a real SERVICE id: parsePageviewBody validates it
 // against SERVICES and drops the row otherwise, which reads as no traffic rather than as an error.
-// It names the WORST-OF member rather than the first one, so the row recordOutageView writes
-// (source, active-flag, svcId) stays internally consistent: the active flag is the family headline,
+// It names the WORST-OF member rather than the first one: the active flag is the family headline,
 // and pairing it with a member that was operational at render time would assert an outage view of a
 // service that had no outage.
 // (No backticks in this comment: it sits inside a template literal — see #842-B.)
-${audienceBeaconScript(beaconSvcId, headline === 'down' || headline === 'degraded')}
+// #1280 — 'group' is what makes beaconSvcId readable; see worker/src/outage-audience.ts.
+${audienceBeaconScript(beaconSvcId, headline === 'down' || headline === 'degraded', 'group')}
 // #1243 — hold the BUTTON in a variable instead of reading e.currentTarget inside the async callback.
 // The DOM resets currentTarget to null once dispatch finishes, and the clipboard promise resolves
 // after that, so the old code threw a TypeError in .then(): the copy succeeded but the confirmation
