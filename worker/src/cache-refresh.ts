@@ -98,6 +98,42 @@ export function hasStatusEdge(
   return false
 }
 
+/** #1227 follow-up — re-seed CACHE_KEY when the cron's own read found NO usable snapshot to serve
+ *  (`snapshotUnusable`): the key was absent, the read itself failed, or what was stored didn't parse
+ *  into a non-empty services array — the same four DATA outcomes `cacheRead()` reports for every other
+ *  reader (`miss`/`threw`/`unparsed`/`empty`; its fifth, `no-binding`, can't reach the cron). Not a
+ *  perfect overlap — the caller's parser tolerates a legacy bare-array payload `cacheRead` rejects, a
+ *  gap with ~nil production impact — but close enough that fixing this fixes what `cacheRead()` sees
+ *  too. Distinct from "present but older than the alert-decision staleness threshold", which needs no
+ *  repair here.
+ *
+ *  The only unconditional CACHE_KEY writer is the traffic-throttled /api/status handler (`cacheWrite`),
+ *  so a quiet period can let the key expire with nothing to re-seed it — every `cacheRead()` caller
+ *  (badge, statusline, v1 API, ...) then sees a miss until a real visitor happens to hit /api/status.
+ *  The measured volume + read date that justified adding this (rather than leaving the `warn` +
+ *  fail-closed behaviour as-is) is recorded on the #1227 issue's verify-after comment, not restated
+ *  here where it would go stale.
+ *
+ *  Fires only inside the cron's own stale-triggered live-fetch branch, so it adds no fetch of its own —
+ *  only a conditional extra write, gated on `snapshotUnusable`. Routes through the same
+ *  `writeStatusCache` primitive as the #488/#1057 edge refreshes (CACHE_KEY only, never the daily
+ *  uptime counters — a cron-driven re-seed must not bias the uptime sampling `cacheWrite` does on real
+ *  traffic). Like #1057 (and unlike #488, which deliberately does), this one does NOT align the
+ *  caller's `lastKvWrite` throttle clock — doing so would suppress the next traffic-driven `cacheWrite`
+ *  and, with it, the uptime counter sample this change exists to leave undisturbed. */
+export async function refreshStatusCacheOnUnusableSnapshot(
+  kv: KVNamespace,
+  snapshotUnusable: boolean,
+  services: ServiceStatus[],
+  upstreamFeeds: UpstreamCandidate[],
+  cacheKey: string,
+  ttlSeconds: number,
+  now: number = Date.now(),
+): Promise<boolean> {
+  if (!snapshotUnusable || services.length === 0) return false
+  return writeStatusCache(kv, services, upstreamFeeds, cacheKey, ttlSeconds, now)
+}
+
 export type LiveEdgeRefresh = 'skipped' | 'refreshed' | 'refresh-failed'
 
 /** #1057 — the live /api/status handler's post-cacheWrite step, extracted so the read→edge→write

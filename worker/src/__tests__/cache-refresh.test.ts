@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { refreshStatusCacheOnChange, writeStatusCache, hasStatusEdge, refreshStatusCacheOnLiveEdge } from '../cache-refresh'
+import { refreshStatusCacheOnChange, writeStatusCache, hasStatusEdge, refreshStatusCacheOnLiveEdge, refreshStatusCacheOnUnusableSnapshot } from '../cache-refresh'
 import type { ServiceStatus } from '../services'
 import type { UpstreamCandidate } from '../upstream-feed'
 
@@ -97,6 +97,55 @@ describe('refreshStatusCacheOnChange (#488)', () => {
     await refreshStatusCacheOnChange(a, SERVICES, FEEDS, 1, CACHE_KEY, TTL, 1_700_000_000_000)
     await writeStatusCache(b, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
     expect(a._store.get(CACHE_KEY)).toBe(b._store.get(CACHE_KEY))
+  })
+})
+
+describe('refreshStatusCacheOnUnusableSnapshot (#1227 follow-up)', () => {
+  it('writes the fresh snapshot when no usable snapshot existed and the live fetch succeeded', async () => {
+    const kv = makeKV()
+    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, true, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
+    expect(ok).toBe(true)
+    const parsed = JSON.parse(kv._store.get(CACHE_KEY)!)
+    expect(parsed.services).toEqual(SERVICES)
+    expect(parsed.upstreamFeeds).toEqual(FEEDS)
+    expect(kv.put).toHaveBeenCalledWith(CACHE_KEY, expect.any(String), { expirationTtl: TTL })
+  })
+
+  it('does NOT write when a usable snapshot already existed (merely stale-but-present) — the normal-aging case', async () => {
+    const kv = makeKV()
+    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, false, SERVICES, FEEDS, CACHE_KEY, TTL)
+    expect(ok).toBe(false)
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('does NOT write when the live fetch produced zero services, even if no usable snapshot existed', async () => {
+    const kv = makeKV()
+    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, true, [], FEEDS, CACHE_KEY, TTL)
+    expect(ok).toBe(false)
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('is agnostic to WHY no usable snapshot existed — the caller collapses miss/threw/unparsed/empty into one flag', async () => {
+    // The gate is a plain boolean; the function has no opinion on which of cacheRead's five outcomes
+    // produced it. This pins that indifference so a future caller can't assume a narrower contract.
+    const kv = makeKV()
+    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, true, SERVICES, FEEDS, CACHE_KEY, TTL)
+    expect(ok).toBe(true)
+  })
+
+  it('routes through the shared writeStatusCache primitive — same bytes as the #488/#1057 writers', async () => {
+    const a = makeKV()
+    const b = makeKV()
+    await refreshStatusCacheOnUnusableSnapshot(a, true, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
+    await writeStatusCache(b, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
+    expect(a._store.get(CACHE_KEY)).toBe(b._store.get(CACHE_KEY))
+  })
+
+  it('returns false (does not throw) when the KV write fails', async () => {
+    const kv = makeKV()
+    kv.put.mockRejectedValueOnce(new Error('kv down'))
+    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, true, SERVICES, FEEDS, CACHE_KEY, TTL)
+    expect(ok).toBe(false)
   })
 })
 
