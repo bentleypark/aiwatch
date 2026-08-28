@@ -34,11 +34,9 @@ jobs:
     name: Worker Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10   # #1253 — never inherit the 6h default
-    if: >-
-      github.event_name == 'push' ||
-      contains(toJSON(github.event.pull_request.labels.*.name), 'ci:all') ||
-      !startsWith(github.event.pull_request.title, 'feat:') ||
-      true
+    # No `if:` — the previous one ended in a literal `|| true`, so it was a tautology that only made
+    # the job LOOK conditional. Removed with #1285, which needs this job to be provably unskippable:
+    # `npm run test:scripts` below is what runs scripts/check-instruction-budget.test.mjs.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
