@@ -4020,17 +4020,14 @@ export default {
             }
             // A `zero` gets its own line, mirroring the feedPolls path below. Without it the verdict
             // exists only in a row nothing reads yet, and the operator-exclusion window — where zero is
-            // the EXPECTED reading — would produce no daily signal at all, whether the recorder is
-            // alive or dead. The cross-counter rule that resolves it is in kv-schema's `growth:daily`
-            // cell: the extension always carries the operator's own browser, so `extPolls > 0` proves
-            // the recorder is alive and any sibling zero is real.
+            // the EXPECTED reading — would produce no daily signal at all.
             for (const [name, verdict] of [
               ['extPolls', extRead.verdict],
               ['pluginPolls', pluginRead.verdict],
               ['statuslinePolls', statuslineRead.verdict],
             ] as const) {
               if (verdict === 'zero') {
-                console.warn(`[growth-series] ${name} read ZERO for ${today} — the MEASURED quantity was zero (plugin: monitor; statusline: serverRenderTotal). Ambiguous vs a silent recorder only if the payload's other components are zero too; otherwise a non-zero sibling already proves the recorder wrote. Cross-check extPolls when it is.`)
+                console.warn(`[growth-series] ${name} read ZERO for ${today} — measured quantity was zero; see kv-schema growth:daily for how to read it`)
               }
             }
             if (feedRead.verdict === 'failed') {

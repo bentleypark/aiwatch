@@ -683,8 +683,10 @@ export function formatStatuslineDeltaSuffix(delta: number | null | undefined): s
 
 /**
  * Format the Claude Code statusline poll volume as a Discord section (#918; #944 cohort-split).
- * Empty string when unavailable (SQL API not configured) OR the 24h grand total is 0, so the caller
- * skips it. Renders TWO cohorts on separate lines instead of one blended total (#944):
+ * Empty string ONLY when there was no read at all (`null`/`undefined` — SQL API not configured, or the
+ * query failed); a measured all-zero window renders a quiet-window line rather than vanishing, so a
+ * real zero and an unread day are distinguishable on the daily surface (#1293, symmetric with the
+ * plugin section). Renders TWO cohorts on separate lines instead of one blended total (#944):
  *   • Server-render (#918) — path-tagged presets, the adoption signal we want to GROW (+ per-preset
  *     breakdown, highest-first).
  *   • Legacy/untagged (apex proxy) — the `?src=statusline-proxy` catch-all: pre-#918 jq installs PLUS
@@ -702,7 +704,7 @@ export function formatStatuslineTrafficSection(
   // the daily surface, which is the distinction the operator-exclusion window exists to see.
   if (!statusline) return ''
   if (statusline.total <= 0) {
-    return `\n🖥️ **Statusline**\n   Last 24h: no polls (read OK — no traffic, or the recorder wrote nothing)`
+    return `\n📟 **Statusline Polls (Claude Code)**\n   Last 24h: no polls (read OK — no traffic, or the recorder wrote nothing)`
   }
   const delta = statusline.delta
   const breakdown = Object.entries(statusline.byPreset)

@@ -1027,8 +1027,8 @@ export function buildPluginTrafficSql(dataset = V1_DATASET): string {
  * parser makes about its own empty array: `buildPluginTrafficSql` carries `GROUP BY index1`, so a tag
  * with no polls simply produces no row. A quiet window is genuinely measurable here.
  *
- * #1293 — but a row that IS present with an unreadable `requests` fails the whole read rather than
- * contributing `0`. Same reason as `parseExtTrafficResponse`: the result is now written to a
+ * #1293 — a row that IS present fails the WHOLE read, rather than contributing `0` or being skipped,
+ * when its `requests` is unreadable OR its `tag` is not one of the two indexes. Same reason as `parseExtTrafficResponse`: the result is now written to a
  * permanent no-TTL key, and a silently-zeroed component is indistinguishable from a measured quiet
  * window once stored. Failing the pair (rather than just that component) is deliberate — a partial
  * count filed as a measurement is the worse of the two, since nothing downstream can tell it apart.

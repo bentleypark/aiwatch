@@ -953,7 +953,9 @@ describe('formatStatuslineTrafficSection (#918; #944 cohort-split + delta)', () 
     expect(formatStatuslineTrafficSection(null)).toBe('')
     expect(formatStatuslineTrafficSection(undefined)).toBe('')
     const quiet = formatStatuslineTrafficSection({ byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 })
-    expect(quiet).toContain('🖥️ **Statusline**')
+    // The SAME heading the non-quiet branch emits — a quiet day must not rename the section, or a
+    // reader scanning Discord for it misses exactly the days the exclusion window exists to observe.
+    expect(quiet).toContain('📟 **Statusline Polls (Claude Code)**')
     expect(quiet).toContain('no polls (read OK — no traffic, or the recorder wrote nothing)')
   })
 })
