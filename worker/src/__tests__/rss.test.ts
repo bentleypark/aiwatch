@@ -1281,3 +1281,30 @@ describe('reportArchiveResponse (#908)', () => {
     expect(await res.text()).toBe(BODY)
   })
 })
+
+describe('#1292 — status_history-derived incidents never reach /feed', () => {
+  // These are synthesized already CLOSED, so they were never announced as active. A lone "Resolved"
+  // for one is an orphan by construction — the #793 case — and because the handler's marker read
+  // fails OPEN, a KV blip would otherwise emit a burst of backdated recoveries for outages no
+  // subscriber saw. rss.ts drops them itself so a direct caller (which passes no `servedActive` and
+  // fails open) cannot publish them either.
+  const derived = incident({
+    id: 'bs-hist:8603734:2026-05-15', title: 'eu.api.helicone.ai — recovered', status: 'resolved',
+    impact: 'minor', startedAt: '2026-05-15T09:00:00.000Z', resolvedAt: '2026-05-16T02:18:00.000Z',
+    duration: '17h 18m', derived: 'status_history',
+  })
+
+  it('is suppressed even with no servedActive set (the fail-open path)', () => {
+    const xml = buildRssFeed([service({ incidents: [derived] })], { scope: 'all' }, NOW)
+    expect(xml).not.toContain('bs-hist:8603734:2026-05-15')
+    expect(xml).not.toContain('eu.api.helicone.ai')
+  })
+
+  it('CONTROL — an ordinary resolved incident still publishes on that same path', () => {
+    const ordinary = incident({
+      id: 'inc-9', title: 'API errors', status: 'resolved',
+      startedAt: '2026-05-15T09:00:00.000Z', resolvedAt: '2026-05-16T02:18:00.000Z', duration: '17h 18m',
+    })
+    expect(buildRssFeed([service({ incidents: [ordinary] })], { scope: 'all' }, NOW)).toContain('inc-9')
+  })
+})

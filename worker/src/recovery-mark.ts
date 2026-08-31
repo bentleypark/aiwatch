@@ -35,6 +35,25 @@ import { formatDuration, kvDel, kvPut, type KVLike } from './utils'
  *  analysis" link leads nowhere (or vice versa). */
 export const RESOLVED_TTL_S = 7200
 
+/**
+ * Which incidents the STATUS-EDGE path may mark resolved (#1003 terminal-only, #1292 no synthesis).
+ *
+ * The two cron resolution paths select their incidents very differently, and only this one needs a
+ * predicate. The `alerted:res:` path is keyed on the incidents that actually ALERTED, which is already
+ * a safe set. This one runs over the service's WHOLE incident list on a status edge, so anything on
+ * that list that is not a real, finished, provider-observed incident has to be excluded here:
+ *
+ *  - non-terminal (#1003) — an `incidentExclude`d entry or a maintenance notice still RUNNING would
+ *    get `resolvedAt` stamped on a live analysis, flipping the modal to a predicted-vs-actual verdict.
+ *  - `status_history`-derived (#1292) — synthesized from a per-day downtime bucket and born `resolved`,
+ *    so up to 30 of them sit on the list at once. Marking them would light the "Recently Resolved"
+ *    banner for every one, each naming a recovery MOMENT the source never stated.
+ */
+export function isMarkableOnStatusEdge(inc: { status?: string; derived?: string }): boolean {
+  if (inc.status !== 'resolved' && inc.status !== 'monitoring') return false
+  return inc.derived !== 'status_history'
+}
+
 export function recoveryMarkerKey(svcId: string, incId: string): string {
   return `recovered:${svcId}:${incId}`
 }

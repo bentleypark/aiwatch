@@ -56,6 +56,41 @@ function getLatestActivityMs(inc: { status: string; startedAt: string; resolvedA
   return new Date(inc.startedAt).getTime()
 }
 
+/** Whole minutes as DISPLAYED. Mirrors `formatDuration` (`worker/src/utils.ts`) and
+ *  `displayedMinutes` (`src/utils/incidentSort.js`) — a comparator on a different rounding splits two
+ *  rows that read identically and ties two that do not. */
+function displayedMinutes(ms: number): number {
+  return Math.max(1, Math.ceil(ms / 60_000))
+}
+
+/**
+ * #1292 — two `status_history`-derived incidents on the SAME day: longest first, then resource name.
+ *
+ * They share one anchor (page-local noon), so `getLatestActivityMs` reduces to their sub-second
+ * `downtime_duration` floats — an order nothing states and the reader cannot see. Returns `null` when
+ * the rule does not apply, so the caller keeps its own axis.
+ *
+ * MIRROR of `compareDerivedSameDay` in `src/utils/incidentSort.js`; the Edge bundle cannot import from
+ * `src/`. Pinned against the SPA copy by `src/utils/__tests__/derived-same-day-order.test.js`, which
+ * drives BOTH through their real grouping pipelines.
+ */
+function compareDerivedSameDay(
+  a: GroupingIncident,
+  b: GroupingIncident,
+): number | null {
+  if (a.derived !== 'status_history' || b.derived !== 'status_history') return null
+  if (a.derivedDay === undefined || a.derivedDay !== b.derivedDay) return null
+  const span = (i: GroupingIncident) => {
+    if (!i.startedAt || !i.resolvedAt) return null
+    const ms = new Date(i.resolvedAt).getTime() - new Date(i.startedAt).getTime()
+    return Number.isFinite(ms) ? displayedMinutes(ms) : null
+  }
+  const aMin = span(a)
+  const bMin = span(b)
+  if (aMin !== null && bMin !== null && aMin !== bMin) return bMin - aMin
+  return (a.title ?? '').localeCompare(b.title ?? '')
+}
+
 export interface GroupingIncident {
   id: string
   title: string
@@ -72,6 +107,12 @@ export interface GroupingIncident {
   // component-derived rather than a human severity call. Optional because only opted-in services
   // (ServiceConfig.autoMonitorTitles) emit it.
   autoMonitor?: boolean
+  // #1292 — worker-synthesized from a per-day `status_history` bucket. Declared, not merely present at
+  // runtime: an undeclared optional makes TypeScript's weak-type check prove the guards below can never
+  // fire. Kept in lockstep with `src/utils/incidentGrouping.js`.
+  derived?: 'status_history'
+  /** #1292 — the page-local day; see `worker/src/types.ts`. */
+  derivedDay?: string
 }
 
 export interface GroupRow {
@@ -148,7 +189,13 @@ export function groupIncidents(
     // All cluster because the impact is boilerplate, not curation.
     // Lockstep with src/utils/incidentGrouping.js.
     const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
-    if (inc.impact != null && !inc.autoMonitor && !isGenericTitle(inc.title) && !isMinorAutoNoise) {
+    // #1292 — never group a synthesized incident. Kept in lockstep with the SPA copy in
+    // `src/utils/incidentGrouping.js`: it wears the same "<resource> — recovered" suffix `isFlapTitle`
+    // keys on but is one whole DAY of downtime, and grouping buckets on the VIEWER's local day, so it
+    // could merge with a real feed item and print the reconstructed anchor at minute precision (a
+    // group range carries no `dayOnly`).
+    if (inc.derived === 'status_history'
+      || (inc.impact != null && !inc.autoMonitor && !isGenericTitle(inc.title) && !isMinorAutoNoise)) {
       ungroupable.push({ idx, inc })
       return
     }
@@ -205,6 +252,10 @@ export function groupIncidents(
   }
 
   rows.sort((a, b) => {
+    if (a.row.kind === 'single' && b.row.kind === 'single') {
+      const derivedOrder = compareDerivedSameDay(a.row.incident, b.row.incident)
+      if (derivedOrder !== null) return derivedOrder
+    }
     if (a.sortKey !== b.sortKey) return b.sortKey - a.sortKey
     return a.idx - b.idx
   })

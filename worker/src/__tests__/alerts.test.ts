@@ -712,6 +712,53 @@ describe('buildServiceAlerts', () => {
     expect(alerts[0].color).toBe(0xE86235) // amber
   })
 
+  // #1292 — a synthesized (`status_history`-derived) incident is a per-DAY downtime bucket, not an
+  // observed event. Neither of these two guards had ANY test: `grep status_history alerts.test.ts`
+  // returned nothing before round 12, and a suppressed alert is the one failure here nobody would see.
+  describe('#1292 — a synthesized incident never stands in for an observed event', () => {
+    const NOW = Date.parse('2026-08-20T12:00:00.000Z')
+    const derived = {
+      id: 'bs-hist:1:2026-08-20', title: 'api.hconeai.com — recovered', status: 'resolved' as const,
+      impact: 'minor' as const, startedAt: '2026-08-20T00:00:00.000Z',
+      // A full-day bucket closes at the page-local anchor, which lands INSIDE the 15-minute
+      // #394 race window — the exact coincidence that would silence a real alert.
+      resolvedAt: '2026-08-20T11:55:00.000Z',
+      duration: '11h 55m', timeline: [], derived: 'status_history' as const, derivedDay: '2026-08-20',
+    }
+
+    it('does not silence a REAL degraded alert via the #394 recently-resolved window', () => {
+      const svc = mockService({ status: 'degraded', incidents: [derived] })
+      const alerts = buildServiceAlerts([svc], new Map(), new Map(), NOW)
+      expect(alerts.map((a) => a.key), 'the 🟠 must still fire').toEqual(['alerted:degraded:openai'])
+    })
+
+    it('CONTROL — a provider-published resolution in the same window DOES silence it', () => {
+      const published = { ...derived, id: 'rss-1', derived: undefined, derivedDay: undefined }
+      const svc = mockService({ status: 'degraded', incidents: [published] })
+      expect(buildServiceAlerts([svc], new Map(), new Map(), NOW),
+        'the guard must be what differs, not the fixture').toEqual([])
+    })
+
+    it('does not caption a 🟢 Recovered with a reconstructed day-bucket', () => {
+      // For a service whose feed died, a synthesized row is the newest "resolved" for up to 30 days,
+      // so today's recovery alert would quote a day bucket from weeks ago.
+      const svc = mockService({ status: 'operational', incidents: [derived] })
+      const alerts = buildServiceAlerts([svc], new Map([['openai', '2026-08-20T00:00:00.000Z']]), new Map(), NOW)
+      const recovered = alerts.find((a) => a.key === 'alerted:recovered:openai')
+      expect(recovered, 'the recovery alert itself must still fire').toBeDefined()
+      expect(recovered!.description, 'but never quoting the synthesized title')
+        .not.toContain('api.hconeai.com')
+    })
+
+    it('CONTROL — a provider-published resolution IS quoted', () => {
+      const published = { ...derived, id: 'rss-1', derived: undefined, derivedDay: undefined }
+      const svc = mockService({ status: 'operational', incidents: [published] })
+      const alerts = buildServiceAlerts([svc], new Map([['openai', '2026-08-20T00:00:00.000Z']]), new Map(), NOW)
+      expect(alerts.find((a) => a.key === 'alerted:recovered:openai')!.description)
+        .toContain('api.hconeai.com')
+    })
+  })
+
   // #1233 — the decision that an unreadable source fires NO status-edge alert existed only as an
   // 11-line comment; the degraded arm could be rewritten as `!isHealthyStatus(svc.status)` — which
   // reads as a tidy-up — and start Discord-paging Tier 1 off a status page we failed to fetch.

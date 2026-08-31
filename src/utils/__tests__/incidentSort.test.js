@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  formatMttrHours,
+  incidentDurationText,
   STATUS_PRIORITY,
   STATUS_ORDER,
   getResolvedTime,
@@ -504,6 +506,7 @@ describe('getContextualTime', () => {
     expect(getContextualTime(inc, t)).toEqual({
       label: 'incidents.time.resolved',
       date: '2026-05-09T00:17:00Z',
+      dayOnly: false,
     })
   })
 
@@ -519,6 +522,7 @@ describe('getContextualTime', () => {
     expect(getContextualTime(inc, t)).toEqual({
       label: 'incidents.time.resolved',
       date: '2026-05-09T00:17:00Z',
+      dayOnly: false,
     })
   })
 
@@ -534,6 +538,7 @@ describe('getContextualTime', () => {
     expect(getContextualTime(inc, t)).toEqual({
       label: 'incidents.time.updated',
       date: '2026-05-09T00:05:00Z',
+      dayOnly: false,
     })
   })
 
@@ -546,6 +551,7 @@ describe('getContextualTime', () => {
     expect(getContextualTime(inc, t)).toEqual({
       label: 'incidents.time.started',
       date: '2026-05-08T23:12:00Z',
+      dayOnly: false,
     })
   })
 
@@ -561,6 +567,7 @@ describe('getContextualTime', () => {
     expect(getContextualTime(inc, t)).toEqual({
       label: 'incidents.time.updated',
       date: '2026-05-08T23:30:00Z',
+      dayOnly: false,
     })
   })
 
@@ -573,6 +580,7 @@ describe('getContextualTime', () => {
     expect(getContextualTime(inc, t)).toEqual({
       label: 'incidents.time.started',
       date: '2026-05-08T23:12:00Z',
+      dayOnly: false,
     })
   })
 
@@ -588,6 +596,7 @@ describe('getContextualTime', () => {
     expect(getContextualTime(inc, t)).toEqual({
       label: 'incidents.time.started',
       date: '2026-05-08T23:12:00Z',
+      dayOnly: false,
     })
   })
 
@@ -652,5 +661,46 @@ describe('getContextualTime', () => {
     // sort axis.
     expect(getContextualTime(fileOps, t).date.slice(0, 10)).toBe('2026-05-09')
     expect(getContextualTime(sonnet46, t).date.slice(0, 10)).toBe('2026-05-09')
+  })
+})
+
+describe('formatMttrHours (#1292 — the Recovery component gets a column)', () => {
+  // Recovery is 15 of the Score's 100 and was the only component with no column on the ranking table,
+  // so two services with the same uptime and affected days could score differently with nothing on
+  // screen to explain it. `mttrHours` is a float in HOURS while every other duration is rendered from
+  // ms, so the conversion is here rather than duplicated at the desktop and mobile call sites.
+  it('renders hours in the same shape as every other duration on screen', () => {
+    expect(formatMttrHours(2.7)).toBe('2h 42m')
+    expect(formatMttrHours(0.4)).toBe('24m')
+    expect(formatMttrHours(24)).toBe('24h 0m')
+  })
+
+  it('rounds a sub-minute sample up rather than showing 0m', () => {
+    expect(formatMttrHours(0.008)).toBe('1m')
+  })
+
+  it('renders no sample as an em dash — NOT as zero, which would read as instant recovery', () => {
+    expect(formatMttrHours(null)).toBe('—')
+    expect(formatMttrHours(undefined)).toBe('—')
+    // 0 is a real measurement, not an absent one, so it must not collapse to the dash.
+    expect(formatMttrHours(0)).toBe('1m')
+  })
+})
+
+describe('#1292 — incidentDurationText', () => {
+  const t = (k) => (k === 'incidents.derived.dayTotal' ? 'that day' : k)
+
+  it('qualifies a day-bucket duration so it does not read as one outage', () => {
+    expect(incidentDurationText({ duration: '17h 18m', derived: 'status_history' }, t, '—'))
+      .toBe('17h 18m that day')
+  })
+
+  it('leaves a provider-published duration alone', () => {
+    expect(incidentDurationText({ duration: '17h 18m' }, t, '—')).toBe('17h 18m')
+  })
+
+  it('falls back when there is no duration yet — the qualifier must not appear', () => {
+    expect(incidentDurationText({ derived: 'status_history' }, t, 'Ongoing')).toBe('Ongoing')
+    expect(incidentDurationText({ duration: null }, t, 'Ongoing')).toBe('Ongoing')
   })
 })

@@ -44,9 +44,19 @@ export function countsAsUptimeOk(status: string, incidents: Incident[] | undefin
   return worst !== 'major' && worst !== 'critical'
 }
 
+/**
+ * The whole minutes a duration is DISPLAYED as. Exported because #1292's same-day comparator orders
+ * rows by what the reader sees: a comparator on a different rounding splits two rows that read
+ * identically and ties two that do not (both reproduced in review). Mirrored by `displayedMinutes` in
+ * `src/utils/incidentSort.js` and `api/_is-down/incident-grouping.ts`.
+ */
+export function displayedMinutes(ms: number): number {
+  return Math.max(1, Math.ceil(ms / 60_000))
+}
+
 export function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
-  const totalMin = Math.max(1, Math.ceil(diffMs / 60_000))
+  const totalMin = displayedMinutes(diffMs)
   const hours = Math.floor(totalMin / 60)
   const minutes = totalMin % 60
   if (hours > 0) return `${hours}h ${minutes}m`
@@ -940,4 +950,38 @@ export async function fetchWithTimeout(
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * #1292 — the calendar day an incident belongs to, as `YYYY-MM-DD`.
+ *
+ * For a provider-published incident that is the UTC day of `startedAt`, which is what every
+ * day-bucketing consumer read before. A `status_history`-derived incident, though, has no start
+ * INSTANT to read: its source is one day's downtime-seconds bucket on the provider's status page,
+ * stated in that page's own timezone, and `startedAt` is only an anchor placed inside that day so
+ * ordering and windowing work. Reading the day back off that anchor re-derives a fact we already
+ * know exactly, and gets it wrong whenever the reader's zone differs from the page's — which is
+ * every consumer here, since they all slice in UTC.
+ *
+ * So: prefer the day the incident carries. This is the one place that rule lives; day-bucketing
+ * consumers call it rather than each re-deriving `startedAt.slice(0, 10)`.
+ */
+export function incidentDay(inc: { startedAt: string; derived?: string; derivedDay?: string }): string {
+  return statedDay(inc) ?? inc.startedAt.slice(0, 10)
+}
+
+/**
+ * The day an incident STATES it covers, or `null` when it states none (every provider-published one).
+ *
+ * The pair rule lives here and nowhere else: keyed on the TAG, not on the mere presence of
+ * `derivedDay`. Every producer and forwarder writes the two together, so a lone `derivedDay` means
+ * something upstream split them — and reading it anyway would silently re-date a provider-published
+ * incident by a field nothing vouched for.
+ *
+ * Separate from `incidentDay` because two callers need the *absence* as a signal rather than a
+ * fallback: `calculateAIWatchScore` windows by DAY when there is a stated day and by INSTANT when
+ * there is not, and those are different comparisons — not two ways of writing the same one.
+ */
+export function statedDay(inc: { derived?: string; derivedDay?: string }): string | null {
+  return inc.derived === 'status_history' && inc.derivedDay ? inc.derivedDay : null
 }

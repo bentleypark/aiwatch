@@ -9,7 +9,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useMonthlyArchives } from '../hooks/useMonthlyArchives'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
-import { getResolvedTime, getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
+import { getResolvedTime, getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText } from '../utils/incidentSort'
 import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService, isWithinPeriod } from '../utils/archiveMerge'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
@@ -102,8 +102,9 @@ function DetailPanel({ incident, onClose, hideHeader, t, lang }) {
   return (
     <IncidentTimeline
       title={`${incident.serviceName} — ${incident.title}`}
-      subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${t('incidents.col.duration')}: ${incident.duration ?? t('incidents.duration.ongoing')}`}
+      subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}  ·  ${t('incidents.col.duration')}: ${incidentDurationText(incident, t, t('incidents.duration.ongoing'))}`}
       timeline={incident.timeline}
+      note={incident.derived === 'status_history' ? t('incidents.derived.note') : undefined}
       onClose={onClose}
       hideHeader={hideHeader}
       t={t}
@@ -129,7 +130,7 @@ function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
           ${isSelected ? 'bg-[var(--bg2)] border-l-2 border-l-[var(--blue)]' : 'hover:bg-[var(--bg2)]'}`}
         style={{ display: 'grid', gridTemplateColumns: '190px 1fr 100px 80px 80px', gap: '12px', padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}
       >
-        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}><span style={{ color: 'var(--text2)', opacity: 0.7 }}>{ctx.label}</span> {formatDate(ctx.date, lang)}</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}><span style={{ color: 'var(--text2)', opacity: 0.7 }}>{ctx.label}</span> {formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day })}</span>
         <div role="cell" className="flex items-center gap-2 min-w-0">
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{incident.title}</span>
           <span className={`shrink-0 mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}>
@@ -167,7 +168,7 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
           <StatusBadge status={incident.status} t={t} />
         </div>
         <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
-          <span>{ctx.label} {formatDate(ctx.date, lang)}</span>
+          <span>{ctx.label} {formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day })}</span>
           <span>·</span>
           <span>{incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName}</span>
           <span>·</span>

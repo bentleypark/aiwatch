@@ -1152,13 +1152,13 @@ describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
   })
 
   it('returns null/null when there are no incidents', () => {
-    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0 })
-    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0 })
+    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0 })
+    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0 })
   })
 
   it('treats a full list of zero-duration incidents as null (no downtime)', () => {
     const r = aggregateIncidentDurations([entry(0), entry(0)], 2, 0, 0)
-    expect(r).toEqual({ totalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0 })
+    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0 })
   })
 })
 
@@ -1234,7 +1234,7 @@ describe('aggregateIncidentDurations (#1210 — autoMonitor exclusion)', () => {
     // The other 43 services carry no autoMonitor entries — the fix must be a no-op for them.
     const unflagged = REAL_DURATIONS.map(real)
     const r = aggregateIncidentDurations(unflagged, unflagged.length, 0, 0)
-    expect(r).toEqual({ totalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0 })
+    expect(r).toEqual({ totalMin: 47, countedTotalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0 })
   })
 
   it('treats an ABSENT flag as false, so pre-#989 archives still count (no retroactive deflation)', () => {
@@ -1323,6 +1323,44 @@ describe('buildMonthlyArchive', () => {
     delete: async () => {},
     list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
   } as unknown as KVNamespace
+
+  it('#1292 — avgResolutionMin is computed over COUNTED rows, at the real division site', async () => {
+    // The helper-level test asserts `countedTotalMin / countedCount` by doing the division itself.
+    // The PRODUCTION division is here, in buildMonthlyArchive, and every other fixture has
+    // `countedTotalMin === totalMin` by construction — so reverting that line to `totalMin / divisor`
+    // was invisible to the whole suite. This is the #1210 defect the split exists to prevent:
+    // one 30m incident beside a 17h18m day-bucket must publish 30m, not ~9h.
+    const kv = {
+      get: async (key: string) => (key === 'history:2026-03-01'
+        ? JSON.stringify({ together: { ok: 280, total: 288 } })
+        : key === 'history:2026-03-02'
+        ? JSON.stringify({ together: { ok: 288, total: 288 } })
+        : key === 'incidents:monthly:2026-03' ? JSON.stringify({
+        lastUpdated: '2026-03-31T09:00:00Z',
+        services: {
+          together: {
+            count: 2, totalMinutes: 1068, longestMinutes: 1038,
+            dates: ['2026-03-10', '2026-03-11'], incidentIds: ['bs-hist:1:2026-03-10', 'r1'],
+            durations: { 'bs-hist:1:2026-03-10': 1038, r1: 30 },
+            incidents: [
+              { id: 'bs-hist:1:2026-03-10', title: 'api — recovered', startedAt: '2026-03-10T12:00:00Z',
+                resolvedAt: '2026-03-11T05:18:00Z', durationMin: 1038, finalStatus: 'resolved',
+                impact: 'minor', derived: 'status_history', derivedDay: '2026-03-10' },
+              { id: 'r1', title: 'Elevated error rate', startedAt: '2026-03-11T01:00:00Z',
+                resolvedAt: '2026-03-11T01:30:00Z', durationMin: 30, finalStatus: 'resolved', impact: 'minor' },
+            ],
+          },
+        },
+      }) : null),
+      put: async () => {}, delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [])
+    expect(archive.services.together.avgResolutionMin, 'only the real 30m incident is a recovery sample').toBe(30)
+    expect(archive.services.together.totalDowntimeMin, 'the day-bucket downtime is still published').toBe(1068)
+    expect(archive.services.together.longestIncidentMin, 'a day is not the longest INCIDENT').toBe(30)
+  })
 
   it('builds archive with uptime + latency + accumulated incidents', async () => {
     const scoreData = [

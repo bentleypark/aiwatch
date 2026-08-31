@@ -19,7 +19,7 @@ import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatP
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
 import { recordRestoreObservations, type RestoreObservation } from './uptime-archive-trace'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
-import { markIncidentResolved } from './recovery-mark'
+import { markIncidentResolved, isMarkableOnStatusEdge } from './recovery-mark'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
@@ -1566,16 +1566,9 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       // resolves ≥2 incidents in a cycle (the per-incId recovered: markers below use distinct
       // keys, so they're safe to race).
       const historyRecords: IncidentHistoryRecord[] = []
-      // #1003 — only TERMINAL incidents may be marked resolved. This map used to run over EVERY
-      // incident on the service, so an operational service still carrying an ACTIVE one (an
-      // `incidentExclude`d entry, a maintenance notice, a component mapping to nothing monitored)
-      // had `resolvedAt` stamped on a live analysis. That was invisible before — nothing read the
-      // stamp on the normal path — but now it is exactly what flips a surface into "resolved":
-      // the modal/is-down would render a predicted-vs-actual verdict for an incident still running,
-      // and suppress the "past estimate" wording that belongs there. `buildHistoryRecord` already
-      // gates on these two statuses, and the `alerted:res:` path is resolved-only by construction —
-      // so this also makes the two paths structurally symmetric.
-      const terminal = incidents.filter(i => i.status === 'resolved' || i.status === 'monitoring')
+      // This map runs over the service's WHOLE incident list, so it needs a predicate the
+      // `alerted:res:` path below does not — see `isMarkableOnStatusEdge` for what it excludes and why.
+      const terminal = incidents.filter(isMarkableOnStatusEdge)
       await Promise.all(terminal.map(async (inc) => {
         // The recovery marker + the analysis `resolvedAt` stamp are the two writes every
         // resolved-incident READ surface is gated on; `markIncidentResolved` is the shared step both
@@ -4630,7 +4623,10 @@ export default {
           (svc.incidents ?? [])
             // #827 F4 — also load RESOLVED analyses (still present for 2h post-resolution) so the
             // resolved feed item can render "predicted vs actual". `monitoring` stays excluded (#724).
-            .filter((i) => i.status !== 'monitoring')
+            // #1292 — and a `status_history`-derived incident never had an analysis (it is synthesized
+            // already closed and never reaches `/feed`), so probing it is a permanently-absent KV read
+            // on every poll. The sibling `feed:active-emitted` probe below filters it for the same reason.
+            .filter((i) => i.status !== 'monitoring' && i.derived !== 'status_history')
             .map(async (inc) => {
               const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
               if (!raw) return
@@ -4682,7 +4678,13 @@ export default {
         const servedActive = new Set<string>()
         await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
           (svc.incidents ?? [])
-            .filter((i) => i.status === 'resolved')
+            // #1292 — a `status_history`-derived incident was never ACTIVE (it is synthesized already
+            // closed), so its `feed:active-emitted` marker can never exist. Probing it would be one
+            // permanently-absent KV read per incident per poll — up to 20 per BetterStack service, on
+            // a path whose 304 is computed afterwards, so even a cached poll pays. Worse, the read
+            // below fails OPEN, so a KV blip would emit a burst of backdated "— recovered" items for
+            // outages no subscriber ever saw announced — the orphan #793 exists to prevent.
+            .filter((i) => i.status === 'resolved' && i.derived !== 'status_history')
             .map(async (inc) => {
               // Clean miss (null) → leave OUT → buildRssFeed suppresses the orphan resolved item.
               // A KV throw is indistinguishable from "never served", so fail OPEN (add → emit the
@@ -4890,6 +4892,10 @@ export default {
             incidents: (svc.incidents ?? []).slice(0, 5).map((i) => ({
               id: i.id, title: i.title, status: i.status, impact: i.impact,
               startedAt: i.startedAt, duration: i.duration,
+              // #1292 — additive: without it this is the one PUBLIC surface handing a consumer a
+              // reconstructed anchor and a day-bucket duration with no way to apply the rule the rest
+              // of the codebase applies to them.
+              ...(i.derived ? { derived: i.derived, derivedDay: i.derivedDay } : {}),
             })),
             aiwatchScore: scoreData.score,
             scoreGrade: scoreData.grade,
@@ -5246,7 +5252,11 @@ export default {
         const recoveryCutoff = Date.now() - 3 * 3600_000
         const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
         await Promise.all(operationalCached.flatMap(svc =>
-          (svc.incidents ?? []).filter(i => i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
+          // #1292 — a synthesized incident can never have a `recovered:` marker (isMarkableOnStatusEdge
+          // refuses it, and it never alerts), so probing for one is a guaranteed miss. It would fire for
+          // ~3h/day per day-bucket, since a full-day bucket "resolves" at the next day's local noon.
+          // Same skip the /feed handler applies for the same reason.
+          (svc.incidents ?? []).filter(i => i.derived !== 'status_history' && i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
             // Check independent recovery marker first
             const recoveredRaw = await env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null)
             if (recoveredRaw) {
@@ -5537,7 +5547,11 @@ export default {
         const recoveryCutoff = Date.now() - 3 * 3600_000
         const operationalSvcs = servicesWithScore.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
         await Promise.all(operationalSvcs.flatMap(svc =>
-          (svc.incidents ?? []).filter(i => i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
+          // #1292 — a synthesized incident can never have a `recovered:` marker (isMarkableOnStatusEdge
+          // refuses it, and it never alerts), so probing for one is a guaranteed miss. It would fire for
+          // ~3h/day per day-bucket, since a full-day bucket "resolves" at the next day's local noon.
+          // Same skip the /feed handler applies for the same reason.
+          (svc.incidents ?? []).filter(i => i.derived !== 'status_history' && i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
             // Check independent recovery marker first
             const recoveredRaw = await env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null)
             if (recoveredRaw) {

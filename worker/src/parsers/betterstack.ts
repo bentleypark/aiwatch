@@ -1,7 +1,7 @@
 // Better Stack RSS Feed Parser — for HuggingFace, Together, Modal, xAI (fireworks left this group in #1198)
 
 import type { TimelineEntry, Incident, DailyImpactLevel, ServiceComponent } from '../types'
-import { formatDuration } from '../utils'
+import { formatDuration, displayedMinutes } from '../utils'
 
 function decodeXmlEntities(text: string): string {
   return text
@@ -228,7 +228,13 @@ export interface BetterStackStatusHistory {
 
 export interface BetterStackIndex {
   data?: {
-    attributes?: { aggregate_state?: string }
+    attributes?: {
+      aggregate_state?: string
+      /** #1292 — the status page's display timezone, which the per-day `status_history` buckets are
+       *  cut on. A Rails/ActiveSupport zone NAME, not necessarily an IANA id — see
+       *  `resolveBetterStackTimeZone`. */
+      timezone?: string
+    }
   }
   included?: Array<{
     type: string
@@ -248,6 +254,49 @@ export interface BetterStackIndex {
       name?: string
     }
   }>
+}
+
+/** section id → section (group) display name. */
+function betterStackSectionNames(data: BetterStackIndex): Map<string, string> {
+  const sections = new Map<string, string>()
+  for (const s of data.included ?? []) {
+    if (s.type === 'status_page_section' && s.id && s.attributes?.name) sections.set(s.id, s.attributes.name)
+  }
+  return sections
+}
+
+type BetterStackResource = NonNullable<BetterStackIndex['included']>[number]
+
+/** The section (group) label a resource belongs to, if any. */
+function betterStackResourceGroup(r: BetterStackResource, sections: Map<string, string>): string | undefined {
+  const sectionId = r.attributes?.status_page_section_id
+  return sectionId != null ? sections.get(String(sectionId)) : undefined
+}
+
+/** Every `status_page_resource` display name on the page, denylist NOT applied. #1292 attribution
+ *  reads this: the denylist governs which resources are SYNTHESIZED, not which feed titles can be
+ *  recognised. Filtering it would make a `"Website went down"` item match no name, fall through to
+ *  the catch-all, and suppress synthesis for every OTHER resource that day. */
+export function betterStackResourceNames(data: BetterStackIndex): string[] {
+  const names: string[] = []
+  for (const r of data.included ?? []) {
+    if (r.type === 'status_page_resource' && r.attributes?.public_name) names.push(r.attributes.public_name)
+  }
+  return names
+}
+
+/** `componentDenylist` membership by resource name OR its section label. Shared by the component
+ *  breakdown and the #1292 status_history synthesis so the two cannot drift into denying different
+ *  sets — a second copy of this rule is what would let a denied surface reappear as an incident. */
+function isDeniedBetterStackResource(
+  r: BetterStackResource,
+  sections: Map<string, string>,
+  deny: Set<string>,
+): boolean {
+  const name = r.attributes?.public_name
+  if (!name) return true
+  const group = betterStackResourceGroup(r, sections)
+  return deny.has(name.toLowerCase()) || (group != null && deny.has(group.toLowerCase()))
 }
 
 /** #606 Cat C — normalize a BetterStack resource status to the component union. */
@@ -272,19 +321,15 @@ export function parseBetterStackComponents(
   opts: { denylist?: string[] } = {},
 ): ServiceComponent[] {
   const inc = data.included ?? []
-  const sections = new Map<string, string>()
-  for (const s of inc) {
-    if (s.type === 'status_page_section' && s.id && s.attributes?.name) sections.set(s.id, s.attributes.name)
-  }
+  const sections = betterStackSectionNames(data)
   const deny = new Set((opts.denylist ?? []).map((n) => n.toLowerCase()))
   const out: ServiceComponent[] = []
   for (const r of inc) {
     if (r.type !== 'status_page_resource') continue
     const name = r.attributes?.public_name
     if (!name) continue
-    const sectionId = r.attributes?.status_page_section_id
-    const group = sectionId != null ? sections.get(String(sectionId)) : undefined
-    if (deny.has(name.toLowerCase()) || (group && deny.has(group.toLowerCase()))) continue
+    const group = betterStackResourceGroup(r, sections)
+    if (isDeniedBetterStackResource(r, sections, deny)) continue
     out.push({
       id: r.id ?? name,
       name,
@@ -529,4 +574,364 @@ export function parseBetterStackDailyImpact(data: BetterStackIndex): Record<stri
   }
 
   return Object.keys(dailyImpact).length > 0 ? dailyImpact : null
+}
+
+// ── #1292 — incidents synthesized from index.json `status_history` ───────────────────
+//
+// BetterStack stopped publishing its monitor auto-events ("<resource> went down" / "recovered") to
+// `/feed`. Services whose incident stream was ENTIRELY monitor-derived therefore publish zero
+// incidents while `index.json` still records the downtime, and `score.ts` pays out Incidents 25/25 +
+// Recovery 15/15 because both derive from `service.incidents`. This is NOT the #1199/#1234 class: the
+// scrape is a healthy 200 with well-formed XML, so nothing books a failure anywhere.
+//
+// Measured 2026-08-28 against a 2026-07 baseline, the loss is not uniform — a service that DECLARES
+// incidents by hand keeps them, while a monitor-derived one loses everything. So this synthesizes
+// only to FILL GAPS; `services.ts` keeps RSS authoritative wherever the feed still speaks.
+
+/** ActiveSupport zone NAME → IANA id. BetterStack publishes `timezone` as a Rails zone name, which is
+ *  only sometimes an IANA id: `together` reads 'Pacific Time (US & Canada)' and `modal`/`huggingface`
+ *  'Eastern Time (US & Canada)' as of 2026-08-28. V8/ICU rejects a non-IANA name with
+ *  `RangeError: Invalid time zone specified` — in workerd and in Node alike (the workerd half checked
+ *  in `wrangler dev` on 2026-08-28). Without a mapping those pages fall through to the UTC fallback:
+ *  no crash, but every boundary shifts by the true offset, which is enough to move an incident onto
+ *  the adjacent day and so into the wrong `affectedDays` bucket.
+ *
+ *  Rails names most of the world as a BARE CITY ('Berlin', 'Tokyo', 'Seoul'), and ICU rejects all of
+ *  those too — so the table is not a US convenience, it is what keeps a European or Asian status page
+ *  from silently computing in UTC. It is a fixed vocabulary (`ActiveSupport::TimeZone::MAPPING`), not
+ *  a rotating one, so listing it here does not rot the way naming today's users would. */
+/** Zones already reported this isolate. Keeps the warn above at effectively zero volume on a
+ *  per-request path without demoting it to a level nothing reads. */
+const WARNED_ZONES = new Set<string>()
+
+const RAILS_ZONE_ALIASES: Record<string, string> = {
+  // North America — the offset-style names, which no other Rails region uses.
+  'pacific time (us & canada)': 'America/Los_Angeles',
+  'mountain time (us & canada)': 'America/Denver',
+  'central time (us & canada)': 'America/Chicago',
+  'eastern time (us & canada)': 'America/New_York',
+  'atlantic time (canada)': 'America/Halifax',
+  'alaska': 'America/Anchorage', 'hawaii': 'Pacific/Honolulu', 'arizona': 'America/Phoenix',
+  'newfoundland': 'America/St_Johns', 'saskatchewan': 'America/Regina',
+  'indiana (east)': 'America/Indiana/Indianapolis', 'tijuana': 'America/Tijuana',
+  // Europe / Africa
+  'london': 'Europe/London', 'dublin': 'Europe/Dublin', 'edinburgh': 'Europe/London',
+  'lisbon': 'Europe/Lisbon', 'amsterdam': 'Europe/Amsterdam', 'berlin': 'Europe/Berlin',
+  'paris': 'Europe/Paris', 'madrid': 'Europe/Madrid', 'rome': 'Europe/Rome',
+  'stockholm': 'Europe/Stockholm', 'copenhagen': 'Europe/Copenhagen', 'brussels': 'Europe/Brussels',
+  'vienna': 'Europe/Vienna', 'bern': 'Europe/Zurich', 'zurich': 'Europe/Zurich',
+  'prague': 'Europe/Prague', 'warsaw': 'Europe/Warsaw', 'budapest': 'Europe/Budapest',
+  'helsinki': 'Europe/Helsinki', 'athens': 'Europe/Athens', 'istanbul': 'Europe/Istanbul',
+  'kyiv': 'Europe/Kyiv', 'moscow': 'Europe/Moscow', 'casablanca': 'Africa/Casablanca',
+  'cairo': 'Africa/Cairo', 'nairobi': 'Africa/Nairobi', 'jerusalem': 'Asia/Jerusalem',
+  // Asia / Pacific
+  'dubai': 'Asia/Dubai', 'karachi': 'Asia/Karachi', 'new delhi': 'Asia/Kolkata',
+  'mumbai': 'Asia/Kolkata', 'chennai': 'Asia/Kolkata', 'kolkata': 'Asia/Kolkata',
+  'bangkok': 'Asia/Bangkok', 'jakarta': 'Asia/Jakarta', 'hanoi': 'Asia/Bangkok',
+  'beijing': 'Asia/Shanghai', 'hong kong': 'Asia/Hong_Kong', 'singapore': 'Asia/Singapore',
+  'taipei': 'Asia/Taipei', 'seoul': 'Asia/Seoul', 'tokyo': 'Asia/Tokyo', 'osaka': 'Asia/Tokyo',
+  'perth': 'Australia/Perth', 'adelaide': 'Australia/Adelaide', 'brisbane': 'Australia/Brisbane',
+  'sydney': 'Australia/Sydney', 'melbourne': 'Australia/Melbourne', 'auckland': 'Pacific/Auckland',
+  'wellington': 'Pacific/Auckland', 'fiji': 'Pacific/Fiji', 'guam': 'Pacific/Guam',
+  'vladivostok': 'Asia/Vladivostok',
+  // Latin America
+  'mexico city': 'America/Mexico_City', 'bogota': 'America/Bogota', 'lima': 'America/Lima',
+  'santiago': 'America/Santiago', 'brasilia': 'America/Sao_Paulo',
+  'buenos aires': 'America/Argentina/Buenos_Aires',
+}
+
+/** Rails zone name / IANA id → an id this runtime accepts.
+ *
+ *  An unrecognised zone falls back to UTC. That is a real loss — every day boundary below is then off
+ *  by the true offset — but it is NOT separately counted: this runs on the `/api/status` request path,
+ *  where a permanent page-config condition would produce a traffic-shaped counter. The alias table
+ *  covers the common `ActiveSupport::TimeZone::MAPPING` names, not all ~150 of them. */
+export function resolveBetterStackTimeZone(tz: string | undefined): { tz: string } {
+  const trimmed = (tz ?? '').trim()
+  if (!trimmed || /^(utc|gmt)$/i.test(trimmed)) return { tz: 'UTC' }
+  const alias = RAILS_ZONE_ALIASES[trimmed.toLowerCase()]
+  if (alias) return { tz: alias }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: trimmed })
+    return { tz: trimmed }
+  } catch (err) {
+    // WARN, once per zone per isolate. `debug` answered the RATE objection — `fetchService` resolves
+    // the zone on every `/api/status` request — by dropping to a level nothing reads: there are a
+    // handful of console.debug calls in the whole worker and the monitoring vocabulary is warn/error.
+    // Keying the log answers the rate objection without hiding the condition, and the condition is
+    // worth seeing: the consequence is not silence but MIS-BUCKETING — `derivedDay` shifts by the true
+    // offset, moving an incident into the adjacent affectedDays bucket and, past ±12h, the adjacent
+    // month. Nobody would ever trace an off-by-one-day incident date back to a timezone table.
+    if (!WARNED_ZONES.has(trimmed)) {
+      WARNED_ZONES.add(trimmed)
+      console.warn(`[betterstack] #1292 unrecognized status-page timezone "${trimmed}" — computing day boundaries in UTC, which shifts them by the true offset:`, err instanceof Error ? err.message : err)
+    }
+    return { tz: 'UTC' }
+  }
+}
+
+/** Offset (ms) of `tz` from UTC at the given instant. DST-correct because it asks the formatter. */
+function zoneOffsetMs(utcMs: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMs))
+  const p: Record<string, string> = {}
+  for (const { type, value } of parts) p[type] = value
+  // en-US + hour12:false renders midnight as '24' in some ICU builds — normalize before arithmetic.
+  const hour = p.hour === '24' ? 0 : Number(p.hour)
+  return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), hour, Number(p.minute), Number(p.second)) - utcMs
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** `Intl.DateTimeFormat` construction is the expensive part, and the claim walk in `services.ts`
+ *  calls `zonedDayOf` twice per day of every feed incident's span, for all 45 services, on the
+ *  `/api/status` request path. One formatter per zone, reused. Bounded by the alias table's size. */
+const DAY_FORMATTERS = new Map<string, Intl.DateTimeFormat>()
+function dayFormatter(tz: string): Intl.DateTimeFormat {
+  let f = DAY_FORMATTERS.get(tz)
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    DAY_FORMATTERS.set(tz, f)
+  }
+  return f
+}
+
+/** The calendar date `at` falls on IN `tz` — NOT `toISOString().slice(0,10)`, which is the UTC date.
+ *  Every other day string here is a page-local `status_history` day, and mixing the two made a page
+ *  west of UTC compare against a midnight in the future. */
+export function zonedDayOf(at: number, tz: string): string {
+  return dayFormatter(tz).format(new Date(at))
+}
+
+/** The FIRST instant of local day `day` in `tz`, as UTC epoch ms.
+ *
+ *  Usually local midnight, but in a spring-forward-AT-midnight zone (`America/Santiago`,
+ *  `America/Havana` — both reachable through `RAILS_ZONE_ALIASES`) 00:00 does not exist that day and
+ *  the first instant is the transition itself. Correcting by the post-transition offset then lands on
+ *  23:00 of the PREVIOUS day, which buckets the incident under the wrong `affectedDays`. So both
+ *  candidate offsets are tried and the earliest one that actually falls on `day` wins; when local
+ *  midnight exists (the ordinary case, and either side of an ordinary 02:00 transition) both agree. */
+export function zonedDayStartMs(day: string, tz: string): number {
+  const [y, m, d] = day.split('-').map(Number)
+  const guess = Date.UTC(y, m - 1, d)
+  const first = guess - zoneOffsetMs(guess, tz)
+  const second = guess - zoneOffsetMs(first, tz)
+  const onDay = [first, second].filter((c) => zonedDayOf(c, tz) === day)
+  return onDay.length > 0 ? Math.min(...onDay) : first
+}
+
+
+/** `day` shifted by `n` calendar days, still YYYY-MM-DD. */
+function addDays(day: string, n: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+
+/** A day's downtime is at least this long before it can become an incident. Aligned with
+ *  `parseBetterStackDailyImpact`'s 600s floor for `minor` — below it the calendar already treats the
+ *  day as negligible, so synthesizing an incident there would make the two signals disagree in the
+ *  opposite direction. It also keeps the monitor flaps these pages emit out of affectedDays (helicone
+ *  recorded a 43-second and a 5-minute one in August 2026), which every one of these services already
+ *  asks for via `flapSuppression`. */
+export const BS_HISTORY_MIN_DOWNTIME_SEC = 600
+
+/** Default window, in `status_history` ROWS. The live pages serve one row per day ending with today,
+ *  and today is then dropped as still-accruing — so this is ~29 completed days in practice, matching
+ *  the Score's own trailing window closely enough for its purpose, rather than the 90 the page
+ *  serves: `together` exposes a per-model resource each, so a 90-day sweep can add hundreds of rows to
+ *  `svc.incidents` → `services:latest` → `incidents:monthly`, whose per-service cap truncates OLDEST
+ *  first and would let synthesized history evict real incidents. */
+const BS_HISTORY_WINDOW_DAYS = 30
+
+/** Row-level BACKSTOP, not the working bound — the window is. Deliberately set where real data does
+ *  not reach it, because the previous value (20, taken by analogy to `parseRssIncidents`' per-service
+ *  feed cap) was dimensioned in the wrong unit and quietly defeated the fix.
+ *
+ *  A row here is one (resource, DAY); `affectedDays` — the metric this synthesis exists to restore —
+ *  counts DAYS. A page with many resources spends the row budget on resource multiplicity, not on
+ *  history, so the row cap truncates the WINDOW. Measured against `status.together.ai` on 2026-08-30
+ *  (22 monitored resources): 41 rows over 22 downtime days became 20 rows over **10** days, dropping
+ *  12 days and 73% of the downtime — oldest-first, i.e. toward a BETTER score, the same direction as
+ *  the bug being fixed. The other four BetterStack services produced ≤9 rows, which is why a
+ *  helicone-only check missed it.
+ *
+ *  Size, which is what 20 was protecting: the theoretical worst case is `resources × windowDays`
+ *  (`resources × windowDays`, ~660 rows ≈ 165KB for one service) against a 25MB KV value limit, so it
+ *  was never the binding constraint. Set above that worst case on purpose: a page that reaches it is
+ *  in total outage across every resource for a month, and under-reporting THAT is academic. If it ever
+ *  binds it is logged, never silent. */
+const MAX_SYNTHESIZED_INCIDENTS = 1000
+
+/** The bound that actually matters, in the unit that matters. Equal to the window by construction —
+ *  every emitted day is already inside it — so this cannot bind today; it exists so the truncation is
+ *  expressed in DAYS and a future window change cannot silently re-introduce the row-cap defect. */
+const MAX_SYNTHESIZED_DAYS = BS_HISTORY_WINDOW_DAYS
+
+/** #1292 — one incident per DOWNTIME DAY, synthesized from each resource's `status_history`.
+ *
+ *  **Exact:** the day, and that day's downtime seconds (the `duration`).
+ *
+ *  **Inferred:** where inside the day the downtime sat. `status_history` is per-DAY, so `4h 58m` on
+ *  one day could be one outage or six and carries no time-of-day. Each incident therefore carries its day
+ *  in `derivedDay` and is tagged `derived: 'status_history'`. That tag is READ, not decorative: the
+ *  SPA's `formatDate({ dayOnly })` and the is-down template both drop the time of day for it, and
+ *  `carriesRecoveryTime` (score.ts) keeps its duration out of every MTTR consumer.
+ *
+ *  **Deliberately NOT joined across midnight.** An earlier design merged consecutive days into runs so
+ *  a multi-day outage read as one incident, and reconstructed its true boundaries from the first and
+ *  last day's partial seconds — which reproduced helicone's Jul 2-4 outage to the minute. It was
+ *  removed because the id has to key on something, a run's extent is a function of the window, the
+ *  RSS claim set AND the not-yet-closed day, and all three of those move: across three review rounds
+ *  every key derived from a run renamed itself in production, and `incidents:monthly` accumulates BY
+ *  id — so one 59h outage banked as three rows totalling 113h, and `prunePhantomIncidents` reads a
+ *  vanished id as a provider WITHDRAWAL and announces it publicly. A per-day id is a function of one
+ *  closed, immutable `status_history` row and nothing else.
+ *
+ *  The cost is real and one-directional: a multi-day outage is published as N day-sized incidents, so
+ *  the count is the number of downtime DAYS and `affectedDays` counts each of them. Total downtime is
+ *  unaffected. Two adjacent partial days were never disambiguable anyway — helicone's Jul 23 (4.97h) +
+ *  Jul 24 (16.30h) WAS one incident while together's Gemma Jul 27-30 was four separate blips, and the
+ *  daily totals do not separate those shapes — so the join was always guessing on exactly the input it
+ *  was least able to read.
+ *
+ *  **The current local day is excluded** — still accruing, so its seconds are a partial read and its
+ *  incident would have to invent a start time. Everything emitted is closed and immutable, which also
+ *  keeps synthesis off the alert path: the new-incident branch never sees a resolved incident, and the
+ *  resolved branch is gated on the `alertedNewMap` marker a new alert would have written.
+ */
+export function parseBetterStackDowntimeIncidents(
+  data: BetterStackIndex,
+  opts: {
+    denylist?: string[]
+    windowDays?: number
+    now?: number
+    minDowntimeSec?: number
+    /** Days the RSS feed already accounts for, per resource. */
+    isClaimed?: (resourceName: string, day: string) => boolean
+    /** Oldest page-local day the feed can still speak for. Days older than this are skipped: the
+     *  feed's silence there means "the item aged out of what we parse", not "there was no incident",
+     *  and the accumulator may already hold an RSS row for that outage under a different id. */
+    notBefore?: string
+  } = {},
+): Incident[] {
+  const {
+    windowDays = BS_HISTORY_WINDOW_DAYS, now = Date.now(),
+    minDowntimeSec = BS_HISTORY_MIN_DOWNTIME_SEC, isClaimed, notBefore,
+  } = opts
+  const { tz } = resolveBetterStackTimeZone(data.data?.attributes?.timezone)
+  const sections = betterStackSectionNames(data)
+  const deny = new Set((opts.denylist ?? []).map((n) => n.toLowerCase()))
+  const today = zonedDayOf(now, tz)
+  const windowFrom = addDays(today, -windowDays)
+  const out: Incident[] = []
+
+  for (const resource of data.included ?? []) {
+    if (resource.type !== 'status_page_resource') continue
+    const name = resource.attributes?.public_name
+    if (!name || isDeniedBetterStackResource(resource, sections, deny)) continue
+    const history = resource.attributes?.status_history
+    if (!Array.isArray(history)) continue
+
+    for (const d of history) {
+      if (!DAY_RE.test(d.day ?? '')) {
+        console.warn(`[betterstack] #1292 ${name}: unusable status_history day "${d.day}" — skipping the row`)
+        continue
+      }
+      if (d.day >= today) continue                 // still accruing — see the doc comment
+      if (d.day < windowFrom) continue
+      // The feed's reach is NOT the synthesis window. `parseRssIncidents` caps at 20 groups, drops
+      // maintenance titles and sub-60s blips, and only sees whatever `/feed` still serves — so for a
+      // day older than the oldest surviving feed item we cannot read silence as absence. Synthesizing
+      // there re-banks an outage the accumulator already holds from RSS, under a second id that
+      // nothing dedups (both rows are `resolved`, so `prunePhantomIncidents` skips them).
+      if (notBefore && d.day < notBefore) continue
+      if (d.status === 'not_monitored') continue
+      // Excluded to match how the INCIDENT path has always treated maintenance: `parseRssIncidents`
+      // drops `MAINTENANCE_TITLE` items and `services.ts` drops `index.json` `report_type:
+      // 'maintenance'` ids. Note the two OTHER readers of this same field do NOT — measured
+      // 2026-08-29, a `status: 'maintenance'` day with non-zero `downtime_duration` scores identically
+      // to a `downtime` day in `parseBetterStackUptime` (91.66 either way) and reddens
+      // `parseBetterStackDailyImpact`. So a maintenance day shows on the calendar and in uptime while
+      // carrying no incident — a deliberate divergence inherited from the incident path, not an
+      // oversight, and NOT something this parser is making consistent.
+      if (d.status === 'maintenance' || d.status === 'under_maintenance') continue
+      if ((d.maintenance_duration ?? 0) > 0 && (d.downtime_duration ?? 0) <= (d.maintenance_duration ?? 0)) continue
+      const sec = d.downtime_duration ?? 0
+      // A row that DECLARES downtime but reports none is self-contradictory — a schema signal, not a
+      // quiet day, and it must not fall through the same floor as a genuine 3-minute blip. This is the
+      // #1292 failure mode returning by another door: the three readers of this payload
+      // (`parseBetterStackUptime`, `parseBetterStackDailyImpact`, and this one) all key on
+      // `downtime_duration`, so renaming that ONE subfield yields uptime 100.00%, an empty calendar and
+      // zero incidents — the exact production signature, now with a plausible uptime instead of a null.
+      if ((d.status === 'downtime' || d.status === 'degraded') && sec === 0) {
+        console.warn(`[betterstack] #1292 ${name}: status="${d.status}" on ${d.day} but downtime_duration is ${d.downtime_duration === undefined ? 'absent' : '0'} — status_history shape may have changed`)
+        continue
+      }
+      if (sec < minDowntimeSec) continue
+      if (isClaimed?.(name, d.day)) continue
+
+      // An anchor INSIDE the day, not a claim about the time of day — which `status_history` does not
+      // state. The day itself travels as `derivedDay` (see `types.ts`), because no instant can encode
+      // it for consumers that slice in different zones: local noon reads back as the previous UTC day
+      // on a page past UTC+12 (`Auckland` in NZDT, aliased here), and as the next one for a viewer far
+      // enough east of the page. Noon is chosen only so the anchor sits inside its own local day.
+      const startMs = zonedDayStartMs(d.day, tz) + 12 * 3_600_000
+      out.push({
+        // A function of ONE closed `status_history` row: the resource and the day. Nothing about the
+        // window, the RSS claim set, or a run's extent can move it. See the doc comment for why that
+        // matters — `incidents:monthly` accumulates by id, and a vanished id reads as a withdrawal.
+        id: `bs-hist:${resource.id ?? name}:${d.day}`,
+        title: `${name} — recovered`,
+        status: 'resolved',
+        // The RSS monitor posts these replace carried no severity wording either, so
+        // `mapBetterStackImpact` scored every one of them `minor`. Matching that keeps the monthly
+        // series continuous — and it must be NON-null, or the #261 filter drops it from affectedDays.
+        // Deliberately NOT `autoMonitor`: that flag makes `isReliabilityIncident` exclude the incident
+        // from affectedDays/MTTR (#989), which would leave the Score exactly as broken as it is today.
+        // These services carry no `autoMonitorTitles`, so their RSS incidents were untagged too.
+        impact: 'minor',
+        componentNames: [name],
+        startedAt: new Date(startMs).toISOString(),
+        resolvedAt: new Date(startMs + sec * 1000).toISOString(),
+        duration: formatDuration(new Date(0), new Date(sec * 1000)),
+        timeline: [],
+        derived: 'status_history',
+        derivedDay: d.day,
+      })
+    }
+  }
+
+  // Truncate by DAY, newest-first — never by row. See `MAX_SYNTHESIZED_INCIDENTS` for the measurement
+  // that made this necessary. A whole day is kept or dropped together, so `affectedDays` can never be
+  // halved by a page that simply has more resources than another.
+  //
+  // WITHIN a day every row shares one anchor, so `startedAt` ties and a bare date sort leaves the order
+  // to however the resources happened to appear in `included`. The is-down card renders this array's
+  // order directly, so that order is published: state it — longest first, then resource name, the same
+  // rule `compareIncidents` applies on the SPA (pinned by `derived-same-day-order.test.js`). Compared
+  // at the MINUTE each row displays, so two rows reading "11h 36m" fall to the name instead of being
+  // split by the sub-second float in `downtime_duration`.
+  const spanMin = (i: Incident) =>
+    displayedMinutes(Date.parse(i.resolvedAt ?? '') - Date.parse(i.startedAt))
+  out.sort((a, b) =>
+    b.startedAt.localeCompare(a.startedAt)
+    || (a.derivedDay === b.derivedDay ? spanMin(b) - spanMin(a) || a.title.localeCompare(b.title) : 0))
+  const kept: Incident[] = []
+  const keptDays = new Set<string>()
+  for (const inc of out) {
+    const day = inc.derivedDay!
+    if (!keptDays.has(day) && keptDays.size >= MAX_SYNTHESIZED_DAYS) break
+    if (kept.length >= MAX_SYNTHESIZED_INCIDENTS) {
+      // The one branch that knowingly discards MEASURED downtime. Never silent: an under-reported
+      // `affectedDays` is indistinguishable from a healthier service, which is the whole #1292 bug.
+      console.warn(`[betterstack] #1292 synthesis hit the row backstop: ${out.length} rows over ${new Set(out.map((i) => i.derivedDay)).size} days capped to ${MAX_SYNTHESIZED_INCIDENTS} — affectedDays is UNDER-reported`)
+      break
+    }
+    keptDays.add(day)
+    kept.push(inc)
+  }
+  return kept
 }

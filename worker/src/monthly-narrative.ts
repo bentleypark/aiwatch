@@ -87,6 +87,7 @@ export function selectIncidentCandidates(
   serviceNames: Record<string, string>,
 ): FlatIncident[] {
   const flat: FlatIncident[] = []
+  let excludedDerived = 0
   for (const [id, svc] of Object.entries(archive.services)) {
     // Only skip where the downtime aggregates ALSO excluded them. On the truncated branch they did not,
     // so skipping here would recreate the contradiction from the other side: an inflated published total
@@ -99,6 +100,17 @@ export function selectIncidentCandidates(
       // 14). Ranking them here would also contradict the same archive's downtime aggregates, which
       // exclude them (aggregateIncidentDurations) — the "two halves of one archive disagree" defect.
       if (inc.autoMonitor && filtered) continue
+      // #1292 — a `status_history`-derived entry is a per-DAY downtime bucket, not an event. It has no
+      // start time, no updates and no remediation, yet this list feeds the Notable Incidents prompt,
+      // which orders the model to "Copy service, title, durationLabel VERBATIM" and then write "what
+      // was impacted and (if inferable) how it was remediated" — inviting an invented narrative for
+      // something the provider never published as an incident. It also ranks by `durationMin`, where a
+      // full day is 1440 and renders as "1 day", outranking most genuine outages.
+      //
+      // The downtime is NOT hidden: it stays in `totalDowntimeMin` and the Incident Summary table.
+      // Only the per-EVENT narrative excludes it, which is the same line every other narrative-grade
+      // consumer draws (`incident:history`, `findSimilarIncidents`, the MTTR sample).
+      if (inc.derived === 'status_history') { excludedDerived++; continue }
       flat.push({ ...inc, serviceId: id, serviceName: serviceNames[id] ?? id })
     }
   }
@@ -110,6 +122,11 @@ export function selectIncidentCandidates(
     // Then longest duration.
     return b.durationMin - a.durationMin
   })
+  if (excludedDerived > 0) {
+    // Named, like #1210-EXCLUDED: a candidate list that quietly shrinks is indistinguishable from a
+    // quiet month, and these services are precisely the ones whose feed went silent.
+    console.warn(`[monthly-narrative] #1292-EXCLUDED ${excludedDerived} status_history-derived day-bucket(s) from the Notable Incident candidates — their downtime remains in the published totals`)
+  }
   return flat.slice(0, MAX_INCIDENT_CANDIDATES)
 }
 
@@ -168,15 +185,29 @@ export function buildMonthlyNarrativePrompt(
     })
     .slice(0, MAX_OBSERVATION_SERVICES)
     .map(s => {
-      const rec = s.avgResolutionMin != null ? `${s.avgResolutionMin}m avg recovery` : 'no resolved incidents'
+      // "no resolved incidents" is false for a service whose month is all day-buckets: they ARE
+      // resolved and carry real downtime, they simply carry no recovery TIME. Round 11 fixed the
+      // sibling clause below and stopped at the line boundary, leaving the two halves of one line
+      // contradicting each other.
+      const rec = s.avgResolutionMin != null
+        ? `${s.avgResolutionMin}m avg recovery`
+        : (s.countedIncidents === 0 && s.incidents > 0 ? 'no recovery time available' : 'no resolved incidents')
       // #1210 — `avgResolutionMin` is computed over `countedIncidents`, not `incidents`, whenever an
       // exclusion fired. Handing the model the raw pair reads as "40 incidents, 9m avg recovery" for a
       // month whose real event was a ~35h outage, so name the divisor rather than letting it be inferred.
-      // Name the divisor, NOT a cause: the gap is either #1210 auto-monitor duplicates or a #1021
-      // non-reliability advisory, and asserting one would write a fabricated fact into a permanent draft.
-      const n = s.countedIncidents != null && s.countedIncidents !== s.incidents
-        ? `${s.incidents} incidents (${s.countedIncidents} counted toward the downtime figures; the rest are excluded as non-outage)`
-        : `${s.incidents} incidents`
+      // Name the divisor, NOT a cause: the gap is a #1210 auto-monitor duplicate, a #1021
+      // non-reliability advisory, or a #1292 synthesized day-bucket, and asserting one would write a
+      // fabricated fact into a permanent draft. The old wording DID assert one — "excluded as
+      // non-outage" — which is the opposite of true for a #1292 row: that IS an outage, it simply
+      // carries no recovery time, and it is counted in the downtime total.
+      // Zero is its own sentence: "the average recovery is over the 0 that carry one" reads as a
+      // divide-by-zero artifact, and `avgResolutionMin` is null in that case anyway — there is no
+      // average for the model to attribute.
+      const n = s.countedIncidents === 0
+        ? `${s.incidents} incidents (none of them carry a comparable recovery time, so no average is stated)`
+        : s.countedIncidents != null && s.countedIncidents !== s.incidents
+          ? `${s.incidents} incidents (the average recovery is over the ${s.countedIncidents} that carry a comparable recovery time)`
+          : `${s.incidents} incidents`
       return `- ${s.name}: score ${s.score ?? 'N/A'} (${s.grade ?? 'N/A'}), ${n}, ${rec}`
     })
 

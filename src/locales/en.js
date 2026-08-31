@@ -146,6 +146,8 @@ const en = {
   'incidents.status.monitoring': 'Monitoring',
   'incidents.status.resolved': 'Resolved',
   'incidents.duration.ongoing': 'Ongoing',
+  'incidents.derived.note': 'The provider did not publish this as an incident. It is reconstructed from the daily availability record they do publish, so the date and that day’s downtime are known — but the start time and the progress updates are not.',
+  'incidents.derived.dayTotal': 'that day',
   'incidents.time.started': 'Started',
   'incidents.time.updated': 'Updated',
   'incidents.time.resolved': 'Resolved',
@@ -424,6 +426,7 @@ const en = {
   'ranking.grade': 'Grade',
   'ranking.uptime': 'Uptime',
   'ranking.responsiveness': 'Resp. (p50)',
+  'ranking.mttr': 'Avg recovery',
   'ranking.aboutScore': 'How AIWatch Score Works',
   'ranking.day': ' days',
 

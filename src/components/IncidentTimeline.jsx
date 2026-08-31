@@ -43,7 +43,7 @@ function TimelineStep({ stage, text, at, isLast, t, lang }) {
   )
 }
 
-export default function IncidentTimeline({ title, subtitle, timeline, onClose, hideHeader, t, lang }) {
+export default function IncidentTimeline({ title, subtitle, timeline, note, onClose, hideHeader, t, lang }) {
   const panelRef = useRef(null)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -72,7 +72,12 @@ export default function IncidentTimeline({ title, subtitle, timeline, onClose, h
       )}
       <div style={{ padding: hideHeader ? '12px 16px 16px' : '20px 24px' }}>
         {(timeline ?? []).length === 0 ? (
-          <p className="text-xs text-[var(--text2)]">{t('incidents.timeline.empty')}</p>
+          /* #1292 — a status_history-derived incident has no event log to show, because the provider
+             published none: it is reconstructed from a daily availability record. Falling through to
+             "no timeline data available" reads as a defect rather than as the explanation it needs. */
+          <p className="text-xs text-[var(--text2)]" style={{ lineHeight: 1.7 }}>
+            {note ?? t('incidents.timeline.empty')}
+          </p>
         ) : (
           timeline.map((step, i) => (
             <TimelineStep

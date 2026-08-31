@@ -7,6 +7,7 @@ import { usePage } from '../utils/pageContext'
 import { useSettings } from '../hooks/useSettings'
 import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
 import { formatTime } from '../utils/time'
+import { formatMttrHours } from '../utils/incidentSort'
 import { buildRanking, MIN_COVERAGE_DAYS } from '../utils/serviceReliability'
 import { trackEvent } from '../utils/analytics'
 import SkeletonUI from '../components/SkeletonUI'
@@ -40,6 +41,7 @@ function RankingTable({ t, setPage, rows, label, note }) {
               <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.uptime')}</th>
               <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.responsiveness')}</th>
               <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.affectedDays')}</th>
+              <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.mttr')}</th>
             </tr>
           </thead>
           <tbody>
@@ -70,6 +72,11 @@ function RankingTable({ t, setPage, rows, label, note }) {
                 <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
                   {svc.scoreMetrics?.affectedDays30d != null ? `${svc.scoreMetrics.affectedDays30d}${t('ranking.day')}` : '—'}
                 </td>
+                {/* Recovery is 15 of the Score's 100 and was the one component with no column, so a
+                    reader could not see why two services with the same uptime scored differently. */}
+                <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
+                  {formatMttrHours(svc.scoreMetrics?.mttrHours)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -81,6 +88,7 @@ function RankingTable({ t, setPage, rows, label, note }) {
         {rows.map((svc, i) => {
           const affectedDays = svc.scoreMetrics?.affectedDays30d ?? null
           const probeP50 = svc.scoreMetrics?.probe?.p50 ?? null
+          const mttrHours = svc.scoreMetrics?.mttrHours ?? null
           const hasUptime = svc.uptime30d != null
           const hasAffected = affectedDays != null && affectedDays > 0
           const hasProbe = probeP50 != null
@@ -88,6 +96,7 @@ function RankingTable({ t, setPage, rows, label, note }) {
             hasUptime ? `${svc.uptime30d.toFixed(2)}%` : null,
             hasProbe ? `${probeP50}ms` : null,
             hasAffected ? `${affectedDays}${t('ranking.day')}` : null,
+            mttrHours != null ? formatMttrHours(mttrHours) : null,
           ].filter(Boolean)
           return (
             <div

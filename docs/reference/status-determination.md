@@ -269,6 +269,126 @@ Unlike Instatus/BetterStack — where the fix was to widen a **title heuristic**
 
 **General rule**: when adding a parser for a new status-page platform, confirm it maps the platform's severity/impact vocabulary onto `'minor' | 'major' | 'critical'` (reserve `null` for genuinely informational/maintenance entries) — otherwise the service's incidents won't count toward its score.
 
+## BetterStack incidents synthesized from `status_history` (#1292)
+
+BetterStack incident ingestion was **RSS-only**. In August 2026 BetterStack stopped publishing its
+monitor auto-events (`"<resource> went down"` / `"recovered"`) to `/feed`, so a service whose incident
+stream was entirely monitor-derived began publishing **zero incidents over live downtime**: the scrape
+is a healthy `200` with well-formed XML and no `<item>`, `parseRssIncidents` returns `[]`
+legitimately, and nothing books a failure. This is **not** reachable by #1199/#1234 — both need a
+*non-ok* scrape.
+
+The damage was in the Score, not just the list: `score.ts` derives `affectedDays` and MTTR from
+`service.incidents` alone, so an empty list pays out **Incidents 25/25 and Recovery 15/15**.
+
+**"Uses the BetterStack parser" is not the discriminator** — whether the service's incidents were
+monitor-derived is. Measured **2026-08-28** against a 2026-07 baseline (feed healthy) over the
+trailing 30 days: the two monitor-derived services lost all coverage, one hand-declaring service lost
+only its sub-hour blips, one was unaffected, and one had no downtime in the window so it proves
+nothing. A page that declares incidents by hand keeps them; that is the whole split.
+
+`parseBetterStackDowntimeIncidents` therefore **fills gaps only**, emitting **one incident per
+downtime day**. `fetchService` computes the days the feed already accounts for and passes them in, so
+a claimed day is skipped and nothing else is affected. Claiming is keyed by **(resource, day)**: a
+monitor-style title names its resource and claims only that one, a hand-written title names none and
+claims the whole day. Names are matched longest-first and case-insensitively, since they nest
+(`helicone.ai` is a substring of `eu.api.helicone.ai`).
+
+- **Exact**: the day, and that day's downtime seconds. `duration` is that day's downtime; total
+  downtime across a multi-day outage is preserved because every day is emitted.
+- **Inferred**: placement *inside* the day. `status_history` is per-DAY, so `4h 58m` could be one
+  outage or six and carries no time-of-day. Each incident carries its day in `derivedDay`, is anchored
+  at an arbitrary instant inside that day, and is tagged `derived: 'status_history'`.
+- **That anchor is never published at minute precision, and never read for its DATE.** Until this
+  change, an incident's `startedAt` was an instant the provider published — true of every source
+  (`inc.created_at`, RSS `pubDate`, `ev.startTime`, `notice.started`, …), so universally that no
+  renderer needed a qualifier. This is the first incident AIWatch constructs itself, and printing our
+  anchor beside the (real) duration would assert a window the provider's own page contradicts. Two
+  anchors were tried — local midnight, then local noon — and each read back as the wrong DATE for some
+  consumer, because an instant means different days in different zones and these consumers slice in
+  four of them. So the day is not derived at all: it travels as `derivedDay` and every day-consumer
+  reads it, through `incidentDay()` (`worker/src/utils.ts`) on the worker side and the `day` argument
+  to `formatDate` on the two rendering surfaces. Same principle as #713 (invent no uptime value) and
+  #1006 (compute, never copy). The per-day data itself is not new — uptime (#1006) and the calendar
+  have read it since; what is new is projecting it into a shape that has a timestamp field.
+
+- **`duration` is likewise not a recovery time**, and THREE surfaces asked that question separately:
+  the Score's Recovery component, the dashboard's Recovery card (`src/utils/recovery.js`) and the
+  is-down "average recovery time" line — plus the MONTHLY Score and the published `avgResolutionMin`
+  once the row round-trips through `incidents:monthly`. Each was missed in turn and published a
+  day-bucket AS a recovery figure while the live Score reported none. They cannot share an import (three
+  runtimes, no common module graph), so they MIRROR one rule and are pinned together by
+  `src/utils/__tests__/derived-tag-sync.test.js` — the treatment `service-groups.ts` gets.
+- **The tag is PERSISTED on `MonthlyIncidentEntry`**, exactly as `autoMonitor` is and for the same
+  reason (#989): it describes HOW the incident was obtained, which no stored field reveals. Without it
+  every guard above is bypassed the moment a row comes back from the archive — including on the SPA,
+  via `archiveMerge.js`. It is also forwarded on `/api/v1/status/:id`, the one public projection.
+- **Never entered into `incident:history`.** That corpus has no TTL, grounds the AI's recovery
+  estimate through `findSimilarHistory` (whose title scoring matches these strongly, since they are
+  named after the same resource), and truncates OLDEST-first at `HISTORY_CAP` — so one recovery edge
+  sweeping a month of synthesized days would evict real incidents permanently. Gated in
+  `buildHistoryRecord`, which both cron resolution paths funnel through; the status-edge path has no
+  `alertedNewMap` gate to piggyback on.
+- **`longestMinutes` in `incidents:monthly` becomes "longest downtime DAY"**, capped at 24h, since the
+  accumulator banks each day separately — a 59h outage reports a 24h longest. That is the raw
+  accumulator field; the figure actually PUBLISHED as `MonthlyArchive.longestIncidentMin` comes from
+  `aggregateIncidentDurations`, which skips synthesized rows so it keeps meaning "the longest single
+  incident". `totalMinutes` stays honest on both: it is real downtime either way.
+- **Days are deliberately NOT joined across midnight.** An earlier design merged consecutive days into
+  runs and reconstructed a multi-day outage's true boundaries from the first and last day's partial
+  seconds — reproducing helicone's Jul 2–4 outage to the minute. It was removed because the incident
+  id must key on something, and a run's extent is a function of the trailing window, the RSS claim set
+  AND the day that has not closed yet — all three of which move. Across three review rounds every key
+  derived from a run renamed itself; `incidents:monthly` accumulates BY id, so one 59h outage banked as
+  three rows totalling 113h, and `prunePhantomIncidents` reads a vanished id as a provider
+  **withdrawal** and announces it publicly. A per-day id is a function of one closed, immutable
+  `status_history` row. Two adjacent partial days were never disambiguable anyway — helicone's Jul 23
+  (4.97h) + Jul 24 (16.30h) *was* one incident while together's Gemma Jul 27–30 was four separate
+  blips, and the daily totals do not separate those shapes.
+- **`affectedDays` counts one day per incident** (`score.ts`, via `incidentDay`), so a multi-day
+  outage now contributes one affected day per downtime day. Total downtime is unchanged.
+- **The current local day is excluded** — still accruing, so its seconds are a partial read and an
+  incident there would have to invent a start time. Everything emitted is closed, which also keeps
+  synthesis off the alert path: the new-incident branch never sees a resolved incident, and the
+  resolved branch is gated on the `alertedNewMap` marker a new alert would have written. "Today" is the
+  **page-local** date — mixing a UTC date with page-local day strings made a page west of UTC compare
+  against a midnight in the future.
+- **Count semantics change.** A synthesized count is the number of downtime DAYS, not a true event
+  count, and is **not continuous** with a per-model-resource series — the monthly report's Incident
+  Summary column and its granularity note both read this field.
+- **Volume**: capped at 20 per page, the same bound `parseRssIncidents` applies to the feed this stands
+  in for, emitted newest-first; `fetchService` then sorts the MERGED list, because two consumers read a
+  raw prefix of `svc.incidents` (the is-down "Last incident" header and `/api/v1/status/:id`).
+- **Window**: 30 completed days, matching the Score's own, not the 90 the page serves. A per-model page
+  exposes one resource each, and an unbounded sweep would cost KV reads on every `/feed` poll and push
+  real incidents out of `incidents:monthly`, whose per-service cap truncates oldest-first.
+- Sub-threshold flaps drop at `BS_HISTORY_MIN_DOWNTIME_SEC` (600s), the same figure as
+  `parseBetterStackDailyImpact`'s `minor` floor — though the calendar also classifies on an
+  affected-resource RATIO, so the two do not always agree and this is a shared constant, not an
+  alignment. Announced maintenance is excluded to match how the **incident** path has always treated
+  it (`parseRssIncidents` drops maintenance titles; `services.ts` drops `report_type: 'maintenance'`).
+  The other two readers of this field do NOT exclude it: a maintenance day with non-zero downtime is
+  counted by `parseBetterStackUptime` and reddens the calendar. That divergence is inherited, not
+  introduced here.
+- `impact: 'minor'` (matching what `mapBetterStackImpact` scored the RSS posts these replace) and **no
+  `autoMonitor` tag** — that flag would make `isReliabilityIncident` (#989) drop them from
+  affectedDays/MTTR, leaving the Score exactly as broken as before.
+- **Never flap-grouped.** These wear the same `"<resource> — recovered"` suffix `groupIncidents` keys
+  on, but grouping buckets on the VIEWER's local day, so a real feed item and a synthetic could share
+  a bucket and the merged row would print the anchor at minute precision (group ranges carry no
+  `dayOnly`). Excluded at the source so the invariant is structural.
+- **Timezone**: days are cut on the page's own timezone, published as a Rails zone NAME. ICU rejects a
+  non-IANA name with `RangeError: Invalid time zone specified` — in workerd and Node alike — and Rails
+  names most of the world as a bare city (`Berlin`, `Tokyo`), so the alias table is what keeps a
+  European or Asian page from silently computing in UTC.
+- **A shape change is not separately counted.** If `status_history` is renamed or dropped,
+  `parseBetterStackUptime` and `parseBetterStackDailyImpact` read the same field on the same payload
+  and both go null, so the service visibly loses its uptime figure and its calendar. A per-request KV
+  counter for a condition that is permanent once it starts would be traffic-shaped.
+- **Accepted limitation**: the tagged incidents say nothing about a gap day under the 600s floor, and
+  nothing at all when a feed dies during a clean month — that case stays invisible until the next
+  outage.
+
 ## Intermediate "Partial" display state + BetterStack threshold (#722)
 
 BetterStack multi-monitor services (together/huggingface/modal/luma/helicone; fireworks left this group in #1198) expose N per-model resources. When one goes down the official page shows **"Some services are down"**, but `parseBetterStackStatus` collapses the badge to `operational` when non-operational resources are below a fleet-ratio threshold (single-model churn ≠ service-level outage, #159). `parseBetterStackPartialCount` separately counts the affected (degraded+downtime) resources → `ServiceStatus.partialCount`.

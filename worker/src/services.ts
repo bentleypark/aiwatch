@@ -22,7 +22,7 @@ import {
   synthesizeAistudioComponents,
 } from './parsers/aistudio'
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { mergeOnlineOrNotIncidents, parseOnlineOrNotIncidentHistory, parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
 import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { mergeXaiRegionalIncidents } from './xai-regions'
@@ -2787,6 +2787,140 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
             if (matched === 0 && unresolved.length > 0) {
               console.debug(`[fetchService] ${config.id} resolvedIds=[${[...resolvedIds].join(',')}] but no RSS IDs matched (RSS IDs: ${incidents.map(i => i.id).join(',')})`)
             }
+          }
+          // #1292 — GAP-FILL from `status_history`. BetterStack stopped publishing its monitor
+          // auto-events to `/feed`, so a service whose incident stream was entirely monitor-derived
+          // (`helicone`, `together`) now parses a healthy 200 with zero items and publishes "no
+          // incidents" over live downtime — and `score.ts` then pays out Incidents 25/25 and
+          // Recovery 15/15 because both derive from `service.incidents`. Nothing books a failure,
+          // so this is NOT reachable by #1199/#1234 (both need a non-ok scrape).
+          //
+          // RSS stays AUTHORITATIVE: it carries real titles and intra-day granularity that
+          // `status_history`'s per-day buckets cannot. Days the feed already accounts for are
+          // excluded BEFORE runs are formed, so a feed item covering one day of a long outage
+          // suppresses that day only — dropping the whole run would re-create the under-report this
+          // change exists to end.
+          //
+          // Claiming is keyed by (RESOURCE, page-local day). A monitor-style title names its
+          // resource ("eu.api.helicone.ai — down") and claims only that one; a HAND-WRITTEN title
+          // (modal, huggingface) names none, so it claims the whole day rather than risk duplicating
+          // a declared incident.
+          //
+          // The day is the PAGE-LOCAL one, because that is the bucket `status_history` is cut on. An
+          // earlier version keyed on the UTC date and padded ±1 day to absorb the mismatch — which
+          // over-claimed by construction: on a UTC page a 2-hour feed item on the 11th discarded 11
+          // hours of unpublished downtime on the 10th and 12th, re-creating this issue's own failure
+          // mode one day either side of every feed item. Converting the instant makes the comparison
+          // exact, so no padding is needed.
+          const ANY_RESOURCE = '*'
+          const { tz: pageTz } = resolveBetterStackTimeZone(bsData.data?.attributes?.timezone)
+          // Longest first: these names nest (`helicone.ai` is a substring of `eu.api.helicone.ai`), so
+          // a first-match scan credits the eu.api item to the bare domain and leaves eu.api unclaimed.
+          // EVERY resource name, denylist NOT applied: the denylist decides what gets synthesized, not
+          // what a feed title may be attributed to. Filtering it would make a `"Website went down"`
+          // item match nothing, fall to the catch-all, and suppress every other resource that day.
+          const bsResourceNames = betterStackResourceNames(bsData).sort((a, b) => b.length - a.length)
+          // Built from the RAW feed list, before `filterIncidents` drops anything: an incident that
+          // `incidentExclude`/`incidentKeywords` will discard still proves the feed SPOKE about that
+          // day, which is the only question here. No BetterStack service sets either option today.
+          const claimedDays = new Set<string>()
+          let unmatchedTitles = 0
+          for (const inc of incidents) {
+            // Case-insensitive, like every other name comparison on this payload: a feed title that
+            // cases the host differently would otherwise match nothing, fall to the catch-all, and
+            // suppress every resource that day.
+            const title = inc.title.toLowerCase()
+            const named = bsResourceNames.find((n) => title.includes(n.toLowerCase())) ?? ANY_RESOURCE
+            // #1292 — the catch-all is deliberate for a hand-written title that names no resource, but
+            // it is ALSO what fires if BetterStack changes its auto-event title format (dropping the
+            // hostname, say) — and a title-format change is precisely what started this issue. Every
+            // day with any feed item would then claim all resources and synthesis would silently stop.
+            if (named === ANY_RESOURCE) unmatchedTitles++
+            const from = Date.parse(inc.startedAt)
+            // An UNRESOLVED item has no end, and collapsing it to its start day leaves day 3 of a
+            // running outage unclaimed — the parser would then publish a closed "— recovered" for a
+            // day the provider still calls down. It claims through now instead.
+            const to = inc.resolvedAt ? Date.parse(inc.resolvedAt) : Date.now()
+            if (Number.isNaN(from) || Number.isNaN(to)) continue
+            // Step in half-days so every local day the incident touches is covered without needing
+            // calendar arithmetic, and clamp the walk so a malformed far-future date cannot spin.
+            const end = Math.min(Math.max(to, from), from + 366 * 86_400_000)
+            for (let at = from; at < end; at += 43_200_000) {
+              claimedDays.add(`${named}\u0000${zonedDayOf(at, pageTz)}`)
+            }
+            // The loop stops short of `end`, so claim its day explicitly rather than stepping PAST
+            // it — an extra half-day of slack silently claims the following day too.
+            claimedDays.add(`${named}\u0000${zonedDayOf(end, pageTz)}`)
+          }
+          // Every item falling through is the schema-drift signature, not the hand-written-incident one.
+          if (unmatchedTitles > 0 && unmatchedTitles === incidents.length && bsResourceNames.length > 0) {
+            console.warn(`[fetchService] ${config.id} #1292 no feed title matched any of the ${bsResourceNames.length} known resources (${unmatchedTitles} item(s)) — every day is being claimed for EVERY resource, which suppresses synthesis service-wide`)
+          }
+          // #1292 — synthesis gets its OWN try. It is the LAST statement in the enclosing one, and it
+          // is now the sole incident source for a service whose feed died — so a throw anywhere in it
+          // (an `Intl` call on a hostile timezone string, a malformed history row) used to be caught
+          // by the outer handler as "BetterStack parse failed", discarding the uptime, status and
+          // calendar results already computed above it. Worse, the card then reads green with zero
+          // incidents, which is indistinguishable from a healthy service: the warn is the only trace.
+          try {
+            // How far back the FEED can still speak. A day older than its oldest surviving item is one
+            // where silence proves nothing — the item aged out of the 20-group parse or off `/feed`
+            // entirely — and the accumulator may already hold that outage from RSS. Same watermark
+            // discipline `prunePhantomIncidents` uses for the same reason. An EMPTY feed sets no floor,
+            // which is the #1292 case: nothing to age out, so silence across the window is real.
+            let feedFloor: string | undefined
+            for (const inc of incidents) {
+              const at = Date.parse(inc.startedAt)
+              if (Number.isNaN(at)) continue
+              const day = zonedDayOf(at, pageTz)
+              if (!feedFloor || day < feedFloor) feedFloor = day
+            }
+            const synthesized = parseBetterStackDowntimeIncidents(bsData, {
+              denylist: config.componentDenylist,
+              notBefore: feedFloor,
+              isClaimed: (resource, day) =>
+                claimedDays.has(`${resource}\u0000${day}`) || claimedDays.has(`${ANY_RESOURCE}\u0000${day}`),
+            })
+            if (synthesized.length === 0 && incidents.length > 0 && feedFloor) {
+              // The transition, not the steady state. `feedFloor` is the day of the OLDEST surviving feed
+              // item, so ONE hand-written incident published today sets the floor to today and every
+              // history day is then either accruing or out of reach — the whole 30-day gap-fill vanishes
+              // on the next poll and the live Score reverts, while `incidents:monthly` keeps the banked
+              // rows (they are `finalStatus: 'resolved'`, which `prunePhantomIncidents` never touches).
+              // Two published numbers for one service then disagree. Nothing else observes this: the
+              // debug line below is guarded on `length > 0`, and an ABSENT log is not an observable
+              // outcome. BetterStack's monitor auto-events died; its ability to post a manual incident
+              // did not, so this is a live path, not a hypothetical.
+              console.warn(`[fetchService] ${config.id} #1292 gap-fill fully suppressed — feedFloor=${feedFloor} from ${incidents.length} feed item(s); no status_history day is both inside the window and older than the floor`)
+            }
+            if (synthesized.length > 0) {
+              // Debug, not warn: for a service whose feed died this is the permanent steady state, and
+              // `fetchService` runs on every `/api/status` request — a warn would be traffic-shaped and
+              // read as noise rather than as an anomaly. Nor is it counted: the durable record is the
+              // synthesized incidents themselves, published on `/api/status` and stored in
+              // `incidents:monthly`, each tagged `derived: 'status_history'`.
+              console.debug(`[fetchService] ${config.id} #1292 synthesizing ${synthesized.length} downtime incident(s) the feed did not publish (feed yielded ${incidents.length})`)
+              // Sorted as ONE list, not appended: `parseRssIncidents` output is feed order, so before
+              // this change `incidents[0]` was the newest — and two consumers still read a raw prefix
+              // (`api/_is-down/html-template.ts`'s "Last incident" header, `/api/v1/status/:id`'s
+              // slice(0,5)). Appending would let an older RSS item head the array while the card below
+              // it, which does sort, showed a newer one.
+              //
+              // ONGOING FIRST, then newest. Sorting by `startedAt` alone is not what those two prefix
+              // consumers need: a feed item's claim walk credits only the ONE resource its title names,
+              // so other resources' buckets on later days survive beside a live incident and outrank it
+              // by start time. The is-down header would then read "Last incident: <yesterday's bucket>"
+              // directly under a "Yes — down" answer, while the incident LIST on the same page — which
+              // sorts ongoing-first — named a different one. `/api/v1/status/:id`'s slice(0,5) could drop
+              // the live incident entirely. Mirrors the SPA's `compareIncidents`.
+              const isOngoing = (i: Incident) => (i.status !== 'resolved' ? 1 : 0)
+              incidents = [...incidents, ...synthesized]
+                .sort((a, b) => (isOngoing(b) - isOngoing(a)) || b.startedAt.localeCompare(a.startedAt))
+            }
+
+          } catch (err) {
+            // Scoped so the reader can tell WHICH half failed. Everything above survives.
+            console.warn(`[fetchService] ${config.id} #1292 status_history synthesis failed — the feed is the only incident source this cycle:`, err instanceof Error ? err.message : err)
           }
         } catch (err) {
           console.warn(`[fetchService] ${config.id} BetterStack parse failed:`, err instanceof Error ? err.message : err)

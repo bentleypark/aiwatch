@@ -145,6 +145,8 @@ const ko = {
   'incidents.status.monitoring': '모니터링',
   'incidents.status.resolved': '해결됨',
   'incidents.duration.ongoing': '진행 중',
+  'incidents.derived.note': '이 장애는 제공사가 인시던트로 발행하지 않았습니다. 제공사가 공개한 일별 가동 기록에서 재구성한 것이라 날짜와 그날의 중단 시간은 확인되지만, 시작 시각과 진행 경과는 알 수 없습니다.',
+  'incidents.derived.dayTotal': '(그날 합계)',
   'incidents.time.started': '발생',
   'incidents.time.updated': '업데이트',
   'incidents.time.resolved': '해결',
@@ -421,6 +423,7 @@ const ko = {
   'ranking.grade': '등급',
   'ranking.uptime': 'Uptime',
   'ranking.responsiveness': '응답성 (p50)',
+  'ranking.mttr': '평균 복구',
   'ranking.aboutScore': 'AIWatch Score 계산 방식',
   'ranking.day': '일',
 

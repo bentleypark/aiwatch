@@ -31,6 +31,28 @@ describe('parseBetterStackComponents (#606 Cat C)', () => {
     expect(out.map((c) => c.name)).toEqual(['Llama 3.3 70B', 'Kimi K2', 'FLUX.1', 'Playground'])
   })
 
+  it('separates the two denylist branches — name-denied and section-denied are different rules', () => {
+    // The fixture above conflates them: its only section-denied resource is ALSO named 'Website', so
+    // dropping either branch of `isDeniedBetterStackResource` leaves that test green. Since #1292
+    // extracted the rule for the status_history synthesis to share, a silent behaviour change here
+    // would be caught only by the OTHER caller's suite. This pins it at this caller.
+    const split = {
+      included: [
+        { type: 'status_page_section', id: 's1', attributes: { name: 'Marketing' } },
+        { type: 'status_page_section', id: 's2', attributes: { name: 'APIs' } },
+        // name NOT denied, section IS → only the section branch can drop it
+        { type: 'status_page_resource', id: '1', attributes: { public_name: 'Docs', status: 'operational', status_page_section_id: 's1' } },
+        { type: 'status_page_resource', id: '2', attributes: { public_name: 'Blog', status: 'operational', status_page_section_id: 's1' } },
+        // name IS denied, section is NOT → only the name branch can drop it
+        { type: 'status_page_resource', id: '3', attributes: { public_name: 'Website', status: 'operational', status_page_section_id: 's2' } },
+        { type: 'status_page_resource', id: '4', attributes: { public_name: 'API', status: 'operational', status_page_section_id: 's2' } },
+        { type: 'status_page_resource', id: '5', attributes: { public_name: 'Console', status: 'operational', status_page_section_id: 's2' } },
+      ],
+    }
+    expect(parseBetterStackComponents(split, { denylist: ['Marketing', 'Website'] }).map((c) => c.name))
+      .toEqual(['API', 'Console'])
+  })
+
   it('returns [] when fewer than 2 components survive', () => {
     const tiny = { included: [{ type: 'status_page_resource', id: '1', attributes: { public_name: 'API', status: 'operational' } }] }
     expect(parseBetterStackComponents(tiny)).toEqual([])

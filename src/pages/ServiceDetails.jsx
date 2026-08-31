@@ -14,7 +14,7 @@ import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { buildBadgeMarkdown } from '../utils/badge'
-import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
+import { compareGroupedRows, dominantGroupStatus, incidentDurationText } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
@@ -203,7 +203,9 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
   )
 }
 
-function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
+// Exported for the render test that pins which rows are expandable (same reason `ComponentBreakdown`
+// below is): the #1292 defect was a row that silently did nothing on click.
+export function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
   const [expanded, setExpanded] = useState(false)
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
@@ -216,26 +218,32 @@ function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
   const displayStatus = incident.status === 'resolved' ? 'resolved'
     : incident.status === 'monitoring' ? 'monitoring'
     : 'ongoing'
+  // #1292 — a status_history-derived incident carries an empty timeline (the provider published no
+  // event log), so the `hasTimeline` gate alone would make it inert: on `together` that is 42 of 43
+  // rows, a whole page of entries that do not respond to a click and are not marked as unclickable.
+  // It expands on `incidents.derived.note` instead, the same explanation the Incidents page renders.
+  const isDerived = incident.derived === 'status_history'
   const hasTimeline = (incident.timeline ?? []).length > 0
+  const expandable = hasTimeline || isDerived
 
   return (
     <div>
       <div
-        className={`flex items-start gap-[10px] ${hasTimeline ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors' : ''}`}
+        className={`flex items-start gap-[10px] ${expandable ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors' : ''}`}
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
-        onClick={hasTimeline ? () => setExpanded((v) => !v) : undefined}
+        onClick={expandable ? () => setExpanded((v) => !v) : undefined}
       >
         <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
-            {hasTimeline && expanded && (
+            {expandable && expanded && (
               <span className="shrink-0 text-[9px] text-[var(--text2)]">▾</span>
             )}
           </div>
           <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
-            {formatDate(incident.startedAt, lang)}
-            {incident.duration ? ` · ${incident.duration}` : ''}
+            {formatDate(incident.startedAt, lang, { dayOnly: isDerived, day: incident.derivedDay })}
+            {incident.duration ? ` · ${incidentDurationText(incident, t, '')}` : ''}
           </p>
         </div>
         {isRecentlyRecovered ? (
@@ -252,8 +260,9 @@ function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
         <div className="ml-6">
           <IncidentTimeline
             title={incident.title}
-            subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? t('incidents.duration.ongoing')}`}
+            subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: isDerived, day: incident.derivedDay })}  ·  ${incidentDurationText(incident, t, t('incidents.duration.ongoing'))}`}
             timeline={incident.timeline}
+            note={isDerived ? t('incidents.derived.note') : undefined}
             onClose={() => setExpanded(false)}
             hideHeader
             t={t}
