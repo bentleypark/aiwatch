@@ -145,11 +145,13 @@ describe('#1003 — BOTH cron resolution paths mark the incident resolved', () =
     }
   })
 
-  it('the status-edge path marks only TERMINAL incidents (never stamps a live one)', () => {
+  it('the status-edge path filters through isMarkableOnStatusEdge (never stamps a live one)', () => {
     // An operational service can still carry an ACTIVE incident (incidentExclude'd, maintenance, a
     // component mapping to nothing monitored). Stamping `resolvedAt` on its analysis would make the
     // modal + is-down render a predicted-vs-actual verdict for an incident that is still running.
-    expect(src).toMatch(/const terminal = incidents\.filter\(i => i\.status === 'resolved' \|\| i\.status === 'monitoring'\)/)
+    // #1292 added a second exclusion to the same predicate; WHAT it excludes is asserted against the
+    // exported function in status-edge-markable.test.ts — this only pins that index.ts routes through it.
+    expect(src).toMatch(/const terminal = incidents\.filter\(isMarkableOnStatusEdge\)/)
     expect(src).toMatch(/await Promise\.all\(terminal\.map\(/)
   })
 

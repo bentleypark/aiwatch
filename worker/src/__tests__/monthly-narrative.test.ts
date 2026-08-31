@@ -86,6 +86,26 @@ describe('selectIncidentCandidates', () => {
     expect(out.map(c => c.serviceName).sort()).toEqual(['Claude API', 'Gemini API'])
   })
 
+  it('#1292 — a day-bucket is never a Notable Incident candidate', () => {
+    // A synthesized entry has no start time, no updates and no remediation, but this list feeds a
+    // prompt that orders the model to copy the duration label VERBATIM and then narrate "how it was
+    // remediated". A full day is durationMin 1440 and renders as "1 day", so it also outranks most
+    // genuine outages. The downtime itself stays in totalDowntimeMin — only the narrative excludes it.
+    const archive = mkArchive({
+      services: {
+        helicone: { uptime: 96, score: 60, grade: 'fair', incidents: 3, countedIncidents: 0, avgResolutionMin: null, totalDowntimeMin: 2478, longestIncidentMin: null, avgLatencyMs: 200, officialUptime: 96, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
+          incidentList: [
+            mkIncident({ id: 'bs-hist:1:2026-05-10', title: 'api.hconeai.com — recovered', durationMin: 1440, derived: 'status_history' }),
+            mkIncident({ id: 'bs-hist:1:2026-05-11', title: 'api.hconeai.com — recovered', durationMin: 1038, derived: 'status_history' }),
+          ] },
+        claude: { uptime: 99, score: 70, grade: 'fair', incidents: 1, avgResolutionMin: 30, totalDowntimeMin: 30, longestIncidentMin: 30, avgLatencyMs: 150, officialUptime: 99, p95LatencyMs: 240, latencySpikes: 1, p50LatencyMs: null, cvCombined: null,
+          incidentList: [mkIncident({ id: 'real-1', title: 'Elevated error rate', durationMin: 45 })] },
+      },
+    })
+    const out = selectIncidentCandidates(archive, { helicone: 'Helicone', claude: 'Claude API' })
+    expect(out.map(c => c.id), 'only the provider-published incident is a candidate').toEqual(['real-1'])
+  })
+
   it('#1210 — skips autoMonitor entries so one provider\'s hourly paperwork cannot crowd out the month', () => {
     // The real shape: an auto-monitor opens hourly through ONE outage and bulk-closes, leaving a
     // descending staircase of 20-to-35h durations. Ranking is by durationMin desc, so without the skip
@@ -132,7 +152,11 @@ describe('selectIncidentCandidates', () => {
       },
     })
     const prompt = buildMonthlyNarrativePrompt(archive, { kimi: 'Kimi' })
-    expect(prompt).toContain('6 incidents (1 counted toward the downtime figures')
+    // #1292 — the old wording asserted a CAUSE ("the rest are excluded as non-outage"), which the
+    // comment above the code explicitly forbade and which is the opposite of true for a synthesized
+    // row: that IS an outage, counted in the downtime total, it just carries no recovery time. The
+    // divisor is named; the reason is not.
+    expect(prompt).toContain('6 incidents (the average recovery is over the 1 that carry a comparable recovery time)')
     expect(prompt).not.toContain('Kimi: score 80 (good), 6 incidents, 45m avg recovery')
     // States the EFFECT, never a cause: the gap can also come from a #1021 advisory, and asserting
     // "auto-monitor duplicates" would write a fabricated fact into a permanent archived draft.

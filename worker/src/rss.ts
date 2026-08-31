@@ -620,6 +620,12 @@ export function buildFeedWithMeta(
   for (const svc of sources) {
     for (const incident of svc.incidents ?? []) {
       if (incident.status === 'resolved') {
+        // #1292 — never emit a `status_history`-derived resolved item. It is synthesized already
+        // closed, so it was never announced as active and a lone "Resolved" is an orphan by
+        // construction. The handler skips probing its marker for the same reason; this keeps rss.ts
+        // self-consistent for direct callers, which pass no `servedActive` and would otherwise
+        // fail-open straight into the orphan.
+        if (incident.derived === 'status_history') continue
         // #793 — suppress an "orphan resolution": if the active item was never served to /feed (no
         // `feed:active-emitted` marker), the outage was never announced, so a lone "Resolved" item
         // would confuse subscribers (a recovery for an event they never saw). Fail-open when

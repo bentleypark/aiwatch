@@ -34,6 +34,12 @@ export function formatRecoveryMin(min) {
 export function computeRecoveryStats(incidents, now = Date.now(), windowDays = 7) {
   const cutoff = now - windowDays * 86_400_000
   const mins = (incidents ?? [])
+    // #1292 — a `status_history`-derived incident's `duration` is one DAY'S downtime, not a time to
+    // recover (no start, no end, no recovery event at the source). Publishing it here made this card
+    // say "17h 18m" while the Score Breakdown right below it showed Recovery 15/15 and the ranking
+    // showed "—": three surfaces, three answers, one field. Mirrors `carriesRecoveryTime` in
+    // `worker/src/score.ts`, which is the same question asked by the third consumer.
+    .filter((i) => i.derived !== 'status_history')
     .filter((i) => i.status === 'resolved' && i.duration && i.duration !== '0m' && new Date(i.startedAt).getTime() >= cutoff)
     .map((i) => parseDurationToMin(i.duration))
     .filter((m) => m > 0)

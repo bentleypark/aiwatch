@@ -234,6 +234,10 @@ export function countIncidentsInWindow(
     for (const [svcId, data] of Object.entries(src.services)) {
       for (const inc of data?.incidents ?? []) {
         if (!inc?.id) continue // no dedup key — merging them would count N as 1
+        // #1292 — a `status_history`-derived row is one downtime DAY, not one incident START. This is
+        // the outage-day AXIS the growth series is read on (#1117), so counting days as starts would
+        // inflate it for a service whose feed died — and this key has no TTL to age the error out.
+        if ((inc as { derived?: string }).derived === 'status_history') continue
         if (inWindow(inc.startedAt)) startedSeen.add(`${svcId}::${inc.id}`)
       }
     }

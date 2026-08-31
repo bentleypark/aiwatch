@@ -2,6 +2,7 @@
 
 import type { Incident, ProbeSummary, ServiceStatus } from './types'
 import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
+import { incidentDay, statedDay } from './utils'
 
 export interface AIWatchScore {
   // #713 — null for a 'low'-confidence service (no official uptime AND no probe): scored on only
@@ -47,6 +48,23 @@ export type ProbeContext =
 // counts the prior as N pseudo-incidents. See `computeMttrHours` for the ASYMMETRIC application.
 export const MTTR_PRIOR_MIN = 60
 export const MTTR_PRIOR_WEIGHT = 2
+
+/** #1292 — does this incident's `duration` mean a TIME TO RECOVER?
+ *
+ *  For a `status_history`-derived one it does not: the source is a per-day downtime-seconds bucket
+ *  with no start, no end and no recovery event, so its `duration` is "how long the service was down
+ *  that day", capped at 24h. Feeding it to any mean/median MTTR is a category error, and it has a
+ *  perverse sign — a handful of short synthesized days drags a median under the real incidents.
+ *
+ *  Three runtimes answer this same question and CANNOT share an import — the worker bundle, the SPA
+ *  bundle and the Edge functions have no common module graph. So the other two MIRROR this rule
+ *  (`src/utils/recovery.js`, `api/_is-down/html-template.ts`'s `isDailyRecordIncident`) and the three
+ *  are pinned together by `src/utils/__tests__/derived-tag-sync.test.js`, the same treatment
+ *  `service-groups.ts` gets against `SERVICE_CATEGORIES`. Both mirrors were missed on the first pass
+ *  and published a day-bucket AS a recovery time while this file reported none. */
+export function carriesRecoveryTime<T extends { derived?: string }>(i: T): boolean {
+  return i.derived !== 'status_history'
+}
 
 /** MTTR (hours) from resolved-impactful incident durations (minutes). ≥3 → the robust MEDIAN (one
  *  outlier can't move it). 1–2 → an ASYMMETRIC shrinkage toward `MTTR_PRIOR_MIN`: shrink toward the prior
@@ -184,11 +202,26 @@ export function calculateAIWatchScore(
   // {startISO, endISO} scores a FIXED past window (a calendar month) so the monthly archive can
   // persist a month-aligned Score instead of a build-day snapshot of the rolling one. `uptime30d`
   // and the probe summary are already scoped by the caller, so only this filter changes.
+  // #1292 — a synthesized incident is windowed by its DAY, not by its anchor. The anchor is an
+  // arbitrary instant inside the page's local day, so on a page past UTC+12 it falls on the previous
+  // UTC day: an incident stated for Jan 1 would be banked into January by the accumulator (which keys
+  // on `incidentDay`) and scored in neither month here. The two must select the same rows.
+  // `statedDay` (utils.ts) owns the tag/day pair rule — one copy, shared with `incidentDay`.
+  // `null` means "this incident states no day", i.e. window it by the instant as always.
   const inWindow: (i: Incident) => boolean = window
-    ? (i) => i.startedAt >= window.startISO && i.startedAt < window.endISO
+    ? (i) => {
+        const d = statedDay(i)
+        return d
+          ? d >= window.startISO.slice(0, 10) && d < window.endISO.slice(0, 10)
+          : i.startedAt >= window.startISO && i.startedAt < window.endISO
+      }
     : (() => {
         const cutoff = new Date(Date.now() - cutoffDays * 86_400_000).toISOString()
-        return (i: Incident) => i.startedAt >= cutoff
+        // A whole day is in or out; the cutoff day itself counts, since its downtime is inside it.
+        return (i: Incident) => {
+          const d = statedDay(i)
+          return d ? d >= cutoff.slice(0, 10) : i.startedAt >= cutoff
+        }
       })()
   const windowIncidents = (service.incidents ?? []).filter(inWindow)
   const incidentCount = windowIncidents.length
@@ -198,7 +231,10 @@ export function calculateAIWatchScore(
   // renames, post-mortems) — including them in affected_days inflates services like cohere/groq whose
   // feeds mix info posts with real incidents, producing scores ~10pts lower than reality.
   const impactfulDays = new Set(
-    windowIncidents.filter(isReliabilityIncident).map((i) => i.startedAt.slice(0, 10)),
+    // #1292 — `derivedDay` when present: a synthesized incident's own anchor is an arbitrary instant
+    // inside the page's local day, so slicing its UTC date buckets it under the wrong date for any
+    // page far enough from UTC. Parsed incidents keep the UTC slice they have always used.
+    windowIncidents.filter(isReliabilityIncident).map(incidentDay),
   )
   const affectedDays = impactfulDays.size
 
@@ -217,7 +253,7 @@ export function calculateAIWatchScore(
       unknownImpacts.add(String(inc.impact))
       continue
     }
-    const day = inc.startedAt.slice(0, 10)
+    const day = incidentDay(inc) // #1292 — the derived day when it carries one
     const existing = dailyMaxWeight.get(day) ?? 0
     if (weight > existing) dailyMaxWeight.set(day, weight)
   }
@@ -232,7 +268,20 @@ export function calculateAIWatchScore(
   // zero the Recovery score on a service that never actually went down (symmetric with the #261
   // null-impact exclusion from affectedDays / the uptime estimate).
   const impactfulWindowIncidents = windowIncidents.filter(isReliabilityIncident)  // #989 — excl. autoMonitor
-  const durations = impactfulWindowIncidents
+  // #1292 — a `status_history`-derived incident's `duration` is ONE DAY'S total downtime, not a time
+  // to recover: the source is a per-day seconds bucket with no start, no end and no recovery event.
+  // Feeding it to MTTR is a category error with a perverse sign — a handful of short synthesized days
+  // pushes the sample past `computeMttrHours`' 3-sample switch to the robust median, dragging the
+  // median below the service's real incidents, so ADDING downtime can RAISE the Recovery component.
+  // They still count toward `affectedDays` above, which is the component that should move.
+  // ...so they are removed from the recovery SAMPLE entirely — both the durations and the default
+  // below, which keys off the same set. Removing them from only the durations would leave the default
+  // seeing incidents with no measurable recovery and score Recovery 0, which is worse than the
+  // category error it was meant to fix. With no recovery signal at all, Recovery abstains at full
+  // marks — the same treatment #707 already gives a window whose only incidents are advisories. The
+  // downtime itself is still carried by Uptime and by `affectedDays`.
+  const recoveryCandidates = impactfulWindowIncidents.filter(carriesRecoveryTime)
+  const durations = recoveryCandidates
     .filter((i) => i.status === 'resolved' && i.duration)
     .map((i) => parseDurationMin(i.duration!))
     .filter((m) => m > 0)
@@ -255,7 +304,7 @@ export function calculateAIWatchScore(
   // null-impact advisories has no reliability recovery to penalize → full 15, not 0.
   const recoveryScore = mttrHours != null
     ? 15 * Math.exp(-mttrHours / 4)
-    : impactfulWindowIncidents.length > 0 ? 0 : 15
+    : recoveryCandidates.length > 0 ? 0 : 15
 
   // Responsiveness (probe) — compute first so the rescale below knows whether it's an available
   // component. Exhaustive switch — adding a new ProbeContext kind is a compile error until handled.

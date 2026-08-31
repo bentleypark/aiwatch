@@ -45,6 +45,21 @@ export interface Incident {
   // component status, so one sub-component at `major_outage` yields `impact: 'major'` on a 6-minute
   // machine-emitted blip. Absent (undefined) on every untagged service — never assume `false`.
   autoMonitor?: boolean
+  // #1292 — this incident was SYNTHESIZED from BetterStack `index.json` `status_history` (per-DAY
+  // downtime seconds) rather than read from a feed item, because BetterStack stopped publishing its
+  // monitor auto-events to `/feed`. `duration` is exact; the placement of the downtime INSIDE a day
+  // is not, so `startedAt` is only an anchor inside `derivedDay`. Read this before asserting
+  // minute-level precision about it. Absent on every parsed incident. Rules: status-determination.md.
+  derived?: 'status_history'
+  // #1292 — the page-local calendar day this incident covers (YYYY-MM-DD), stated ONCE at the source.
+  //
+  // The day is the only fact this synthesis knows exactly, and it cannot be recovered from `startedAt`
+  // by any consumer: an instant means different days in different zones, and the consumers genuinely
+  // differ — score.ts slices the UTC date, the accumulator matches a UTC month prefix, the SPA formats
+  // in the VIEWER's zone, the Edge template in UTC. Two anchors were tried and each published a wrong
+  // date somewhere; carrying the day removes the arithmetic instead of relocating its error. Absent on
+  // every parsed incident — those have a real timestamp and no such ambiguity.
+  derivedDay?: string
 }
 
 /** A single status-page component preserved for the per-component breakdown (#604).

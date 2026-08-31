@@ -130,7 +130,9 @@ describe('buildWeeklyBriefing', () => {
     expect(result).not.toContain('Weekly Briefing')
     expect(result).toContain('Service Changes')
     expect(result).toContain('GPT-5 released')
-    expect(result).toContain('8 incidents across 2 services')
+    // #1292 — "records", not "incidents": a synthesized row is one downtime DAY, not one event, so the
+    // count changes meaning for a service whose feed died. The downtime sum below is unaffected.
+    expect(result).toContain('8 incident records across 2 services')
     expect(result).toContain('Mistral API (6)')
     expect(result).toContain('2h 45m')
     expect(result).toContain('Improved: Groq Cloud')

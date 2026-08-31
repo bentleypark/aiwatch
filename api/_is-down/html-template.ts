@@ -128,6 +128,15 @@ export interface ServiceData {
     impact: string | null
     startedAt: string
     duration: string | null
+    // #1292 — must be DECLARED, not merely present at runtime. Without it TypeScript's weak-type check
+    // proves `isDailyRecordIncident` can never return true here, so all three Edge guards are dead code
+    // by the type system's reckoning — and the moment anyone narrows these objects to their declared
+    // shape (the normal way to satisfy the resulting TS2559) the guards silently return false and the
+    // page regresses with a green suite. It survives at runtime only via JSON passthrough, and neither
+    // `typecheck-worker.mjs` (scoped to worker/src) nor the esbuild Edge build would catch it.
+    derived?: 'status_history'
+    /** #1292 — the page-local day; see `worker/src/types.ts`. */
+    derivedDay?: string
   }>
   aiwatchScore: number | null
   scoreGrade: string | null
@@ -297,11 +306,23 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-function formatDate(iso: string): string {
-  const d = new Date(iso)
+/** #1292 — `dayOnly` drops the time of day and `derivedDay` supplies the date. A `status_history`-
+ *  derived incident is reconstructed from a per-DAY downtime-seconds bucket, so its `startedAt` is our
+ *  anchor inside that day, not the provider's instant. Every other incident's timestamp is
+ *  provider-published, hence the single exception. Mirrors `src/utils/time.js`'s `formatDate`. */
+function formatDate(iso: string, dayOnly = false, derivedDay?: string): string {
+  // #1292 — when the incident carries its own page-local day, print THAT. The anchor is an arbitrary
+  // instant inside it, so reading a date off the instant publishes a day the source never stated.
+  const d = new Date(dayOnly && derivedDay ? `${derivedDay}T12:00:00Z` : iso)
   if (Number.isNaN(d.getTime())) return 'Unknown date'
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`
+  const day = `${months[d.getUTCMonth()]} ${d.getUTCDate()}`
+  return dayOnly ? day : `${day}, ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`
+}
+
+/** True when this incident's timestamp was reconstructed by AIWatch rather than published. */
+function isDailyRecordIncident(inc: { derived?: string } | null | undefined): boolean {
+  return inc?.derived === 'status_history'
 }
 
 // #539→og-fix — maps the social share `?e=` hint to an OG card status the generator renders
@@ -1115,7 +1136,7 @@ ${/* #1268 — a stale source with NOTHING behind it asserts neither branch. "No
       while still serving a live badge AND live incidents — `readFlashdutyStatus` preserves them
       deliberately. Withholding on bare `stale` deleted the only surviving description of what was wrong
       from a page answering "Yes — down": `renderIncidents` is stale-gated too, and the #1104 note is
-      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
+      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt, isDailyRecordIncident(lastIncident), lastIncident.derivedDay))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}${isDailyRecordIncident(lastIncident) ? ' &mdash; start time not published by the provider' : ''}</p>` : '<p class="meta">No recent incidents</p>'}
 ${/* #1104 — withholding the "Resolved" label stopped the false claim but left the page answering
       "Operational" directly above an Investigating row with nothing reconciling the two. The AI card
       cannot do that job: it renders '' whenever no analysis exists, which is the state right after a
@@ -1403,7 +1424,7 @@ function renderIncidentSingle(inc: GroupingIncident): string {
   const impactMeta = impactCls ? ` &middot; <span class="${impactCls}">${esc(inc.impact ?? '')}</span>` : ''
   return `<div class="incident-item">
 <div class="incident-title">${esc(inc.title)}</div>
-<div class="incident-meta mono">${esc(formatDate(inc.startedAt))} &middot; <span style="color:${statusColor}">${statusText}</span>${durationOrElapsed}${impactMeta}</div>
+<div class="incident-meta mono">${esc(formatDate(inc.startedAt, isDailyRecordIncident(inc), inc.derivedDay))} &middot; <span style="color:${statusColor}">${statusText}</span>${durationOrElapsed}${impactMeta}</div>
 </div>`
 }
 
@@ -1550,8 +1571,11 @@ function buildDataSummary(service: ServiceData | null, displayName: string): str
       : `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents.`
   }
 
-  // MTTR: only resolved incidents with parseable duration
-  const resolved = recent.filter((i) => i.status === 'resolved' && i.duration)
+  // MTTR: only resolved incidents with parseable duration.
+  // #1292 — a `status_history`-derived incident is excluded: its `duration` is one DAY'S downtime,
+  // not a time to recover, so averaging it publishes a fabricated recovery figure on the SEO answer
+  // surface — two sections above the header that already says the start time is not published.
+  const resolved = recent.filter((i) => i.status === 'resolved' && i.duration && !isDailyRecordIncident(i))
   let mttrText = ''
   if (resolved.length > 0) {
     const totalMins = resolved.reduce((sum, i) => {

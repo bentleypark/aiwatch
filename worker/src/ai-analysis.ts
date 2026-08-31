@@ -372,11 +372,18 @@ export function findSimilarIncidents(
   allIncidents: Incident[],
   limit = 5,
 ): Incident[] {
+  // #1292 — a `status_history`-derived incident's `duration` is one DAY'S downtime, not a recovery
+  // time, and this feeds the model's `estimatedRecovery` calibration under the label "Historical Data".
+  // It is the FALLBACK path, taken only when the durable corpus is empty (`useCorpus`) — and
+  // `buildHistoryRecord` keeps these out of that corpus, so guarding one without the other simply
+  // routes the same day-buckets to the same model through the other door. They also match strongly:
+  // the live title and the synthesized one are named after the same resource, and a dotted hostname
+  // is a single token.
+  const usable = allIncidents.filter(i => i.status === 'resolved' && i.derived !== 'status_history')
   const keywords = currentTitle.toLowerCase().split(/[\s\-—·:,]+/).filter(w => w.length > 3)
-  if (keywords.length === 0) return allIncidents.filter(i => i.status === 'resolved').slice(0, limit)
+  if (keywords.length === 0) return usable.slice(0, limit)
 
-  return allIncidents
-    .filter(i => i.status === 'resolved')
+  return usable
     .map(i => {
       const titleLower = i.title.toLowerCase()
       const score = keywords.filter(k => titleLower.includes(k)).length

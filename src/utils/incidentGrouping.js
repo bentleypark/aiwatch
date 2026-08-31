@@ -31,7 +31,7 @@
  * See issue #282.
  */
 
-import { getLatestActivity } from './incidentSort.js'
+import { getLatestActivity, compareDerivedSameDay } from './incidentSort.js'
 
 export const GROUP_THRESHOLD = 2
 
@@ -191,7 +191,16 @@ export function groupIncidents(incidents, options = {}) {
   const ungroupable = []
   incidents.forEach((inc, idx) => {
     const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
-    if (inc.impact != null && !inc.autoMonitor && !isGenericTitle(inc.title) && !isMinorAutoNoise) {
+    // #1292 — a `status_history`-derived incident is never grouped. It wears the same
+    // "<resource> — recovered" suffix `isFlapTitle` keys on, but it is not a flap: it is one whole
+    // DAY of downtime. Grouping buckets on the VIEWER's local day, so a real feed item late on the
+    // page's day D and a synthetic anchored on D+1 could share a viewer-day bucket for the same
+    // resource — and the merged row would then print the reconstructed anchor at minute precision
+    // (group ranges carry no `dayOnly`) and add the day-bucket into "cumulative impacted time"
+    // beside a real duration. Excluding it here makes that invariant structural rather than
+    // incidental, which is what `derived-date-precision-wiring.test.js` relies on.
+    if (inc.derived === 'status_history'
+      || (inc.impact != null && !inc.autoMonitor && !isGenericTitle(inc.title) && !isMinorAutoNoise)) {
       ungroupable.push({ idx, inc })
       return
     }
@@ -249,7 +258,17 @@ export function groupIncidents(incidents, options = {}) {
   }
 
   // Newest first by sortKey (ms epoch); tiebreak by original input index for stable ordering.
+  //
+  // #1292 — EXCEPT for two derived rows on the same day, which is decided before sortKey because
+  // sortKey is exactly what has no meaning there: they share one anchor, so it reduces to their
+  // sub-second downtime floats. This is the sort every page actually renders (`compareIncidents` runs
+  // before it, when it runs at all, and is overwritten here), so the rule has to live at this call or
+  // nowhere. See `compareDerivedSameDay`.
   rows.sort((a, b) => {
+    if (a.row.kind === 'single' && b.row.kind === 'single') {
+      const derivedOrder = compareDerivedSameDay(a.row.incident, b.row.incident)
+      if (derivedOrder !== null) return derivedOrder
+    }
     if (a.sortKey !== b.sortKey) return b.sortKey - a.sortKey
     return a.idx - b.idx
   })

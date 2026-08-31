@@ -289,7 +289,10 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
     const totalInc = data.incidents.reduce((s, i) => s + i.count, 0)
     const totalMin = data.incidents.reduce((s, i) => s + i.totalDurationMin, 0)
     const svcCount = data.incidents.length
-    lines.push(`${totalInc} incidents across ${svcCount} services`)
+    // #1292 — a `status_history`-derived row is one downtime DAY, not one event, so this total counts
+    // days for a service whose feed died. The downtime sum below stays correct either way; the count
+    // is the part that changes meaning, so it is labelled rather than silently restated as events.
+    lines.push(`${totalInc} incident records across ${svcCount} services`)
     const top3 = data.incidents.slice(0, 3).map((i) => `${i.serviceName} (${i.count})`).join(', ')
     lines.push(`Most affected: ${top3}`)
     if (totalMin > 0) {

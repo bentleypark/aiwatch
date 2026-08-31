@@ -87,3 +87,29 @@ describe('computeRecoveryStats (#557 — median + worst, not mean)', () => {
     expect(computeRecoveryStats([inc('10m', ago(20))], NOW, 7)).toBeNull() // all out of window
   })
 })
+
+describe('#1292 — a status_history-derived duration is not a recovery time', () => {
+  // Its source is a per-day downtime-seconds bucket: no start, no end, no recovery event. Publishing
+  // it here made this card read "17h 18m" while the Score Breakdown below it showed Recovery 15/15
+  // and the ranking column showed "—" — three surfaces, three answers, one field. `score.ts`
+  // `carriesRecoveryTime` asks the same question for the Score and the is-down page.
+  const NOW = Date.parse('2026-08-29T00:00:00Z')
+  const day = (back) => new Date(NOW - back * 86_400_000).toISOString()
+  const derived = { id: 'bs-hist:1:d', status: 'resolved', duration: '17h 18m', startedAt: day(2), derived: 'status_history' }
+  const real = { id: 'rss-1', status: 'resolved', duration: '30m', startedAt: day(3) }
+
+  it('is excluded from the card entirely', () => {
+    expect(computeRecoveryStats([derived], NOW)).toBeNull()
+  })
+
+  it('does not drag the median when a real incident is present', () => {
+    const withBoth = computeRecoveryStats([real, derived], NOW)
+    const realOnly = computeRecoveryStats([real], NOW)
+    expect(withBoth).toEqual(realOnly)
+    expect(withBoth.count, 'the derived one is not counted').toBe(1)
+  })
+
+  it('CONTROL — an ordinary resolved incident still counts', () => {
+    expect(computeRecoveryStats([real], NOW).medianMin).toBe(30)
+  })
+})

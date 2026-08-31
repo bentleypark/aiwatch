@@ -146,12 +146,20 @@ const MAX_SUMMARY = 500
  */
 export function buildHistoryRecord(
   svc: { id: string; provider: string; category: 'api' | 'app' | 'agent' },
-  inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null },
+  inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null; derived?: string },
   analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; summary?: string; affectedScope?: string[]; model?: string } | null,
   now: string,
 ): IncidentHistoryRecord | null {
   if (!inc.startedAt) return null
   if (inc.status !== 'resolved' && inc.status !== 'monitoring') return null
+  // #1292 — a `status_history`-derived incident carries no recovery time (its duration is one DAY'S
+  // downtime) and no real start, so it must not enter this corpus: the store has NO TTL, it grounds
+  // the AI's recovery estimate via `findSimilarHistory` — whose title scoring matches these strongly,
+  // since they are named after the same resource as the live incident — and `HISTORY_CAP` truncates
+  // OLDEST-first, so a single recovery edge sweeping ~20 synthesized days would evict real incidents
+  // permanently. Gated HERE rather than at the call sites: both cron resolution paths funnel through
+  // this function, and the status-edge one has no `alertedNewMap` gate to piggyback on.
+  if (inc.derived === 'status_history') return null
   const resolvedAt = inc.resolvedAt ?? now
   // #1003 — the durable record is the ledger the accuracy aggregate AND the RAG grounding are built
   // from, so it must store the hindsight-free baseline, not the re-analysis-inflated current estimate.

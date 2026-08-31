@@ -16,7 +16,7 @@ import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionS
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
-import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
+import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText } from '../utils/incidentSort'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
@@ -372,6 +372,11 @@ export function GroupIncidentItem({ group, lang, t }) {
 function IncidentItem({ incident, lang, t }) {
   const [expanded, setExpanded] = useState(false)
   const barCls = INC_BAR_CLASS[incident.status] ?? INC_BAR_CLASS.resolved
+  // #1292 — a status_history-derived incident has an empty timeline, so this row is inert and the
+  // full `incidents.derived.note` explanation is NOT reachable here; the Incidents page, whose rows
+  // are unconditionally clickable, is where it renders. Not wired as a dead prop, which would read as
+  // handled. What this row does carry is `incidentDurationText`'s qualifier, so the day total is not
+  // shown as one continuous outage with no explanation available at all.
   const hasTimeline = (incident.timeline ?? []).length > 0
   return (
     <div style={{ marginBottom: '8px' }}>
@@ -390,9 +395,9 @@ function IncidentItem({ incident, lang, t }) {
             <div
               className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0"
               style={{ width: '52px', paddingTop: '1px' }}
-              title={`${ctx.label} ${formatDate(ctx.date, lang)}`}
+              title={`${ctx.label} ${formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day })}`}
             >
-              {formatDate(ctx.date, lang).split(' ').slice(0, 2).join(' ')}
+              {formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day }).split(' ').slice(0, 2).join(' ')}
             </div>
           )
         })()}
@@ -407,7 +412,7 @@ function IncidentItem({ incident, lang, t }) {
             )}
           </div>
           <div className="mono text-[10px] text-[var(--text2)]">
-            {incident.duration ?? (incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
+            {incidentDurationText(incident, t, incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
           </div>
         </div>
       </div>
@@ -415,7 +420,7 @@ function IncidentItem({ incident, lang, t }) {
         <div className="ml-[66px]">
           <IncidentTimeline
             title={`${incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName} — ${incident.title}`}
-            subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? (incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}`}
+            subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}  ·  ${incidentDurationText(incident, t, incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}`}
             timeline={incident.timeline}
             onClose={() => setExpanded(false)}
             hideHeader

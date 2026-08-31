@@ -96,6 +96,11 @@ export function archiveIncidentToLive(archIncident, service) {
     // "7h 26m") instead of falling through to the "Ongoing" placeholder (`incident.duration ??`).
     // An unresolved archive entry (resolvedAt null) keeps duration undefined → renders "Ongoing".
     duration: archIncident.resolvedAt ? formatRecoveryMin(archIncident.durationMin ?? 0) : undefined,
+    // #1292 — forward the tag AND the day, or an archive-served incident silently loses every guard
+    // the live one has: its anchor renders at minute precision again, on whatever date that anchor
+    // happens to fall, and the modal falls back to "no timeline data" instead of explaining the
+    // reconstruction.
+    ...(archIncident.derived ? { derived: archIncident.derived, derivedDay: archIncident.derivedDay } : {}),
     timeline: [],
     serviceName: service.name,
     serviceId: service.id,

@@ -493,3 +493,76 @@ describe('the analysis card asks the INCIDENT, not the badge (#1104)', () => {
     expect(html).toContain('Est. Recovery')        // …while the live one still shows an estimate
   })
 })
+
+describe('#1292 — a reconstructed timestamp is not published at minute precision', () => {
+  // A status_history-derived incident's `startedAt` is OUR anchor (the status page's local midnight),
+  // not a provider-published instant — the invariant every renderer here was built on. Printing it
+  // beside the real duration would assert a window the provider's own page contradicts, on the SEO
+  // answer surface. Same principle as #713 (invent no uptime) and #1006 (compute, never copy).
+  const seo = getSEOContent('helicone')!
+  // Dated RELATIVE to now: `renderIncidents` drops a resolved incident older than 7 days, so a
+  // fixed-date fixture would render only the header and leave `renderIncidentSingle` — the second
+  // changed call site — unexecuted, passing on the header alone.
+  const startedAt = new Date(Date.now() - 2 * 86_400_000)
+  const resolvedAt = new Date(startedAt.getTime() + 62_280_000)
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const dayStr = `${MONTHS[startedAt.getUTCMonth()]} ${startedAt.getUTCDate()}`
+  const timeStr = `${dayStr}, ${String(startedAt.getUTCHours()).padStart(2, '0')}:${String(startedAt.getUTCMinutes()).padStart(2, '0')} UTC`
+
+  const base = {
+    id: 'helicone', name: 'Helicone', provider: 'Helicone', category: 'api', status: 'operational',
+    latency: null, uptime30d: 96.68, lastChecked: new Date().toISOString(),
+    incidents: [], aiwatchScore: null, scoreGrade: null,
+  }
+  const inc = {
+    id: 'bs-hist:8603734:day', title: 'eu.api.helicone.ai — recovered', status: 'resolved',
+    impact: 'minor', startedAt: startedAt.toISOString(), resolvedAt: resolvedAt.toISOString(),
+    duration: '17h 18m', timeline: [],
+  }
+  const render = (incident: object) => renderPage('helicone', { ...base, incidents: [incident] } as never, seo, [], null)
+
+  it('drops the time of day in BOTH the header and the incident row, and says why', () => {
+    const html = render({ ...inc, derived: 'status_history' })
+    expect(html).toContain(`Last incident: ${dayStr} &mdash;`)
+    expect(html).toContain('start time not published')
+    // The per-incident meta line is the second call site; without it the assertion below passes on
+    // the header alone. `renderIncidentSingle` runs only because the fixture is inside the 7d window.
+    expect(html).toContain('incident-meta')
+    expect(html).not.toContain(timeStr)
+  })
+
+  it('prints the STATED day, not the day its anchor happens to fall on', () => {
+    // Round 9's failure mode, one layer down: the fixture above carries `derived` but no `derivedDay`,
+    // so `formatDate`'s derivedDay branch never executes and `dayStr` is exactly what the UNFIXED code
+    // printed. Strip derivedDay handling out of formatDate entirely and those assertions still pass.
+    // Here the anchor is deliberately on the day BEFORE the stated one — the UTC+13 shape — so the two
+    // answers differ and only the right one can satisfy this.
+    const anchor = new Date(Date.now() - 2 * 86_400_000)
+    const stated = new Date(anchor.getTime() + 86_400_000)
+    const statedStr = `${MONTHS[stated.getUTCMonth()]} ${stated.getUTCDate()}`
+    const anchorStr = `${MONTHS[anchor.getUTCMonth()]} ${anchor.getUTCDate()}`
+    expect(statedStr, 'the fixture must actually straddle a day boundary').not.toBe(anchorStr)
+
+    const html = render({
+      ...inc, derived: 'status_history',
+      derivedDay: stated.toISOString().slice(0, 10),
+      startedAt: anchor.toISOString(),
+      resolvedAt: new Date(anchor.getTime() + 62_280_000).toISOString(),
+    })
+    expect(html).toContain(`Last incident: ${statedStr} &mdash;`)
+    expect(html, 'the anchor date must not reach the page').not.toContain(`Last incident: ${anchorStr} &mdash;`)
+  })
+
+  it('CONTROL — a provider-published incident keeps its time of day on both, and gains no qualifier', () => {
+    const html = render(inc)
+    expect(html).toContain(timeStr)
+    expect(html).not.toContain('start time not published')
+  })
+
+  it('does not publish an average recovery time built from a derived duration', () => {
+    // `buildDataSummary` averaged every resolved incident's duration with no guard, so the green
+    // "AIWatch Data" block stated a fabricated recovery figure on the SEO answer surface.
+    expect(render({ ...inc, derived: 'status_history' })).not.toContain('average recovery time')
+    expect(render(inc), 'a real incident still reports one').toContain('average recovery time')
+  })
+})

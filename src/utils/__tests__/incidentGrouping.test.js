@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { groupIncidents, GROUP_THRESHOLD, normalizeTitle, isGenericTitle, isFlapTitle, isAutoMonitorTitle, GENERIC_TITLE_PATTERNS_SOURCES } from '../incidentGrouping'
-import { compareIncidents, compareGroupedRows } from '../incidentSort'
+import { compareIncidents, compareGroupedRows, getContextualTime } from '../incidentSort'
+import { formatDate } from '../time'
 
 // Minimal Incident factory — fields match worker/src/types.ts shape
 function makeIncident({ id, title, startedAt, status = 'resolved', impact = null, duration = '5m' }) {
@@ -820,5 +821,122 @@ describe('worker-tagged autoMonitor incidents (#983)', () => {
     // 08:24 PDT is 2026-07-10 00:24 KST; the other three are also 07-10 KST → still one group.
     expect(rows).toHaveLength(1)
     expect(rows[0].dayKey).toBe('2026-07-10')
+  })
+})
+
+describe('#1292 — status_history-derived incidents and flap grouping', () => {
+  // These carry the same `"<resource> — recovered"` suffix the BetterStack flap grouping keys on, so
+  // the two features meet. An earlier version of this block built its fixtures without the tag and so
+  // passed for unrelated reasons — different days, different titles — while the guard it named could
+  // be deleted with the suite still green. Every fixture here carries the tag.
+  const day = (d, name) => ({
+    ...makeIncident({
+      id: `bs-hist:8603734:${d}:${name}`, title: `${name} — recovered`,
+      startedAt: `${d}T09:00:00.000Z`, impact: 'minor', duration: '17h 18m',
+    }),
+    derived: 'status_history',
+    derivedDay: d,
+  })
+
+  it('does not group even when several land on ONE (resource, day)', () => {
+    // The case that actually exercises the guard: same resource, same viewer-day, identical title,
+    // past GROUP_THRESHOLD. Without the guard these collapse into a single "×N" flap row whose range
+    // is rendered from two anchors — neither of which is a time the provider published.
+    const rows = groupIncidents(Array.from({ length: GROUP_THRESHOLD + 1 }, (_, i) => ({
+      ...day('2026-08-15', 'eu.api.helicone.ai'), id: `dup-${i}`,
+    })))
+    expect(rows).toHaveLength(GROUP_THRESHOLD + 1)
+    expect(rows.every((r) => r.count === undefined || r.count === 1)).toBe(true)
+  })
+
+  it('CONTROL — the identical set UNTAGGED does group, so the guard is what stops it', () => {
+    const rows = groupIncidents(Array.from({ length: GROUP_THRESHOLD + 1 }, (_, i) => {
+      const { derived: _d, derivedDay: _dd, ...untagged } = day('2026-08-15', 'eu.api.helicone.ai')
+      return { ...untagged, id: `dup-${i}` }
+    }))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].count).toBe(GROUP_THRESHOLD + 1)
+  })
+
+  it('does not absorb a REAL flap into a group either', () => {
+    // Mixed set: the derived rows must not act as group members for a genuine feed item.
+    const real = makeIncident({
+      id: 'rss-1', title: 'eu.api.helicone.ai — recovered',
+      startedAt: '2026-08-15T09:00:00.000Z', impact: 'minor', duration: '5m',
+    })
+    const rows = groupIncidents([
+      { ...day('2026-08-15', 'eu.api.helicone.ai'), id: 'd1' },
+      { ...day('2026-08-15', 'eu.api.helicone.ai'), id: 'd2' },
+      real,
+    ])
+    expect(rows).toHaveLength(3)
+  })
+
+  it('a multi-day outage renders one row per day', () => {
+    const rows = groupIncidents([
+      day('2026-08-14', 'eu.api.helicone.ai'),
+      day('2026-08-15', 'eu.api.helicone.ai'),
+      day('2026-08-16', 'eu.api.helicone.ai'),
+    ])
+    expect(rows).toHaveLength(3)
+  })
+})
+
+describe('#1292 — the DAY is published exactly, in every viewer zone', () => {
+  // The day is the only fact this synthesis knows exactly, and the copy says so
+  // ("날짜와 그날의 중단 시간은 확인되지만"). It cannot be recovered from the anchor: an instant means
+  // different days in different zones. Both anchors were tried and both published a wrong date —
+  // local midnight breaks every UTC-slicing consumer east of the page, local noon breaks a viewer more
+  // than 12h from it — so the day now travels as its own field and the renderers read THAT.
+  const DAY = '2026-07-24'
+  const derived = {
+    id: 'bs-hist:1:2026-07-24', title: 'api — recovered', status: 'resolved', impact: 'minor',
+    // Pacific page: noon anchor = 19:00Z, and a >12h bucket resolves on the NEXT UTC day.
+    startedAt: '2026-07-24T19:00:00.000Z', resolvedAt: '2026-07-25T11:18:00.000Z',
+    duration: '16h 18m', timeline: [], derived: 'status_history', derivedDay: DAY,
+  }
+  const t = (k) => k
+
+  it('getContextualTime carries the day alongside the resolved instant', () => {
+    const ctx = getContextualTime(derived, t)
+    // It returns `resolvedAt` for a resolved incident — which is 07-25. The day must not follow it.
+    expect(ctx.date.slice(0, 10)).toBe('2026-07-25')
+    expect(ctx.dayOnly).toBe(true)
+    expect(ctx.day).toBe(DAY)
+  })
+
+  it('renders 24 July, not 25, from that context', () => {
+    const ctx = getContextualTime(derived, t)
+    expect(formatDate(ctx.date, 'en', { dayOnly: ctx.dayOnly, day: ctx.day })).toContain('24')
+    expect(formatDate(ctx.date, 'en', { dayOnly: ctx.dayOnly, day: ctx.day })).not.toContain('25')
+  })
+
+  it('renders the same day in ko and en — the viewer zone must not move it', () => {
+    const ctx = getContextualTime(derived, t)
+    for (const lang of ['en', 'ko']) {
+      expect(formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day }),
+        `${lang} must print the page's own day`).toMatch(/24/)
+    }
+  })
+
+  it('CONTROL — a provider-published incident is unaffected and keeps its instant', () => {
+    const published = { ...derived, derived: undefined, derivedDay: undefined }
+    const ctx = getContextualTime(published, t)
+    expect(ctx.dayOnly).toBe(false)
+    expect(formatDate(ctx.date, 'en', { dayOnly: ctx.dayOnly, day: ctx.day })).toMatch(/\d{2}:\d{2}/)
+  })
+})
+
+describe('#1292 — formatDate never throws on a malformed carried day', () => {
+  // `Intl.format()` throws a RangeError on an invalid Date. In React that is an unhandled render
+  // throw — the whole dashboard blanks — and `derivedDay` is a raw string forwarded through KV and
+  // the archive, unlike `startedAt`, which was always a round-tripped toISOString().
+  it.each(['not-a-day', '2026-13-45', ''])('returns empty for day=%o rather than throwing', (day) => {
+    expect(() => formatDate('2026-07-24T12:00:00.000Z', 'en', { dayOnly: true, day })).not.toThrow()
+  })
+
+  it('still renders a valid carried day', () => {
+    expect(formatDate('2026-07-23T23:00:00.000Z', 'en', { dayOnly: true, day: '2026-07-24' }))
+      .toContain('24')
   })
 })

@@ -942,6 +942,11 @@ export function buildServiceAlerts(
     // the user already received the canonical "back to normal" signal — silence the
     // 🟠 degraded that would otherwise fire from the still-stale component indicator.
     const hasRecentlyResolvedIncident = (svc.incidents ?? []).some((inc) => {
+      // #1292 — a synthesized incident's `resolvedAt` is derived from a per-day bucket, not an
+      // observed recovery, so it must not stand in for the 🟢 the user supposedly just received. A
+      // full 24h day closes at today's page-local anchor, which can land inside this 15-min window and
+      // silence a REAL 🟠 degraded alert.
+      if (inc.derived === 'status_history') return false
       if (inc.status !== 'resolved' || !inc.resolvedAt) return false
       const resolvedMs = new Date(inc.resolvedAt).getTime()
       if (Number.isNaN(resolvedMs)) return false
@@ -994,7 +999,10 @@ export function buildServiceAlerts(
         }
       }
       // Include recent incident title in recovery alert if available
-      const recentInc = (svc.incidents ?? []).filter(i => i.status === 'resolved').sort((a, b) => (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? '')).at(0)
+      // #1292 — never quote a synthesized incident here: for a service whose feed died it would be the
+      // newest "resolved" for up to 30 days, so today's 🟢 Recovered would be captioned with a
+      // reconstructed day-bucket from weeks ago.
+      const recentInc = (svc.incidents ?? []).filter(i => i.status === 'resolved' && i.derived !== 'status_history').sort((a, b) => (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? '')).at(0)
       const incTitle = recentInc ? `\n> ${sanitize(recentInc.title).slice(0, 120)}` : ''
       alerts.push({
         key: `alerted:recovered:${svc.id}`,

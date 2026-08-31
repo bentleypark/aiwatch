@@ -39,6 +39,14 @@ interface FamilyIncident {
   startedAt: string
   resolvedAt?: string | null
   duration: string | null
+  /** #1292 — synthesized from a per-day `status_history` bucket. Latent for this surface today:
+   *  `FAMILY_GROUPS` is claude/openai/xai and no BetterStack service is a member — but the row below
+   *  is the most explicit recovery-time phrasing in the repo ("resolved after {duration}"), so the
+   *  guard ships with the field rather than waiting for the day one joins. */
+  derived?: 'status_history'
+  /** #1292 — the page-local day the bucket covers. The anchor cannot be read for its date: it is an
+   *  arbitrary instant inside the day, so a page past UTC+12 reads back as the previous one. */
+  derivedDay?: string
   /** AI-generated summary for this SPECIFIC incident, when the worker's analysis pipeline has one
    *  (matched by incidentId — the worker can hold analyses for other, unrelated incidents on the
    *  same member). Absent is normal (no incident, or not yet analyzed), not an error. */
@@ -107,10 +115,21 @@ function worstStatus(members: Array<{ status: MemberStatus['status'] }>): Member
   return members.reduce((worst, m) => (STATUS_RANK[m.status] > STATUS_RANK[worst] ? m.status : worst), 'operational' as MemberStatus['status'])
 }
 
-/** Formats an incident row's date, resolved-duration text (if applicable). Pure/side-effect-free. */
-function incidentMeta(inc: FamilyIncident): string {
-  const started = new Date(inc.startedAt)
+/** Formats an incident row's date, resolved-duration text (if applicable). Pure/side-effect-free.
+ *  Exported for `api/__tests__/edge-derived-guards.test.ts` — the #1292 phrasing guard below had no
+ *  behavioural test while this was file-private, so deleting it left the suite green. */
+export function incidentMeta(inc: FamilyIncident): string {
+  // #1292 — prefer the stated day; `startedAt` is only an anchor inside it for a synthesized row.
+  // Keyed on the TAG, like `incidentDay` (worker/src/utils.ts): a `derivedDay` without the tag means
+  // something upstream split the pair, and reading it anyway would re-date a provider-published
+  // incident. This file was the last reader keying on presence alone.
+  const started = new Date(inc.derived === 'status_history' && inc.derivedDay
+    ? `${inc.derivedDay}T12:00:00Z`
+    : inc.startedAt)
   const dateStr = Number.isNaN(started.getTime()) ? '' : started.toISOString().slice(0, 10)
+  // #1292 — a synthesized incident's `duration` is one DAY'S downtime, not a time to recover, and its
+  // start is our own anchor: "resolved after 17h 18m" would assert both. State the day's downtime.
+  if (inc.derived === 'status_history') return inc.duration ? `${dateStr} · down ${inc.duration} that day` : dateStr
   if (inc.status === 'resolved') return inc.duration ? `${dateStr} · resolved after ${inc.duration}` : `${dateStr} · resolved`
   return `${dateStr} · ongoing`
 }
@@ -488,6 +507,9 @@ export default async function handler(req: Request) {
             incidents?: Array<{
               id: string; title: string; status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
               startedAt: string; resolvedAt?: string | null; duration: string | null
+              // #1292 — read them if the upstream carries them, so the row's guard is wired rather
+              // than latent. Absent on every other source.
+              derived?: 'status_history'; derivedDay?: string
             }>
           }>
           // #926 — one entry per active incident, keyed by service id (same shape is-down.ts reads).
@@ -579,6 +601,7 @@ export default async function handler(req: Request) {
             byIncidentId.set(inc.id, {
               members: [{ name: memberName, slug }], title: inc.title, status: inc.status,
               startedAt: inc.startedAt, resolvedAt: inc.resolvedAt, duration: inc.duration,
+              derived: inc.derived, derivedDay: inc.derivedDay,
               aiSummary: analysis?.summary, aiEstimatedRecovery: analysis?.estimatedRecovery,
             })
           }

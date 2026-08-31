@@ -74,11 +74,40 @@ export function dominantGroupStatus(group) {
  * @param {number} ms
  * @returns {string}
  */
+/**
+ * The whole minutes a duration is DISPLAYED as. The one definition — `formatDurationMs` below and
+ * `compareDerivedSameDay` must agree, or the comparator splits two rows that read identically and
+ * ties two that do not (both directions reproduced in review). Mirrors `formatDuration`
+ * (`worker/src/utils.ts`), whose `displayedMinutes` is the same function for the same reason.
+ *
+ * @param {number} ms
+ * @returns {number}
+ */
+export function displayedMinutes(ms) {
+  return Math.max(1, Math.ceil(ms / 60_000))
+}
+
 export function formatDurationMs(ms) {
-  const totalMin = Math.max(1, Math.ceil(ms / 60_000))
+  const totalMin = displayedMinutes(ms)
   const hours = Math.floor(totalMin / 60)
   const minutes = totalMin % 60
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
+}
+
+/**
+ * MTTR for display. `scoreMetrics.mttrHours` is a float in HOURS; every other duration on screen is
+ * rendered by `formatDurationMs`, so this converts rather than inventing a second time format.
+ *
+ * `null` is not "fast" — it means the Score had no recovery sample at all, which happens when a
+ * service had no incidents (deservedly full Recovery marks) AND when its only incidents carry no
+ * recovery time (#1292 status_history-derived ones, excluded from the MTTR sample because a day's
+ * downtime total is not a time-to-recover). The affected-days column beside it separates the two.
+ *
+ * @param {number|null|undefined} hours
+ * @returns {string}
+ */
+export function formatMttrHours(hours) {
+  return hours == null ? '—' : formatDurationMs(hours * 3_600_000)
 }
 
 /**
@@ -159,20 +188,36 @@ const ACTIVE_TIMELINE_GUARDED = new Set(['ongoing', 'investigating', 'identified
  * @param {(key: string) => string} t
  * @returns {{ label: string, date: string }}
  */
+/**
+ * Which timestamp to show for an incident, and what to call it.
+ *
+ * `dayOnly` (#1292) says the timestamp carries no time of day: a `status_history`-derived incident is
+ * reconstructed from a per-DAY downtime bucket, so its `startedAt` is AIWatch's own anchor inside the
+ * day rather than a provider-published instant — the invariant every other incident satisfies. `day`
+ * is the date that anchor stands in for. Callers pass both to `formatDate`, so the reader is shown
+ * neither a window the provider never published nor a date it never stated.
+ *
+ * @returns {{ label: string, date: string, dayOnly: boolean, day: string|undefined }}
+ */
 export function getContextualTime(inc, t) {
+  const dayOnly = inc.derived === 'status_history'
+  // The day travels WITH the flag: for a resolved incident this returns `resolvedAt`, and a day bucket
+  // over 12h resolves on the NEXT calendar day under the noon anchor — so a consumer formatting that
+  // instant would print a date the source never stated.
+  const day = inc.derivedDay
   const tl = inc.timeline ?? []
   const lastTimeline = tl.length > 0 ? tl[tl.length - 1] : undefined
   if (inc.status === 'resolved') {
     const resolved = getResolvedTime(inc)
-    if (resolved) return { label: t('incidents.time.resolved'), date: resolved }
+    if (resolved) return { label: t('incidents.time.resolved'), date: resolved, dayOnly, day }
   }
   if (inc.status === 'monitoring' && lastTimeline?.at) {
-    return { label: t('incidents.time.updated'), date: lastTimeline.at }
+    return { label: t('incidents.time.updated'), date: lastTimeline.at, dayOnly, day }
   }
   if (ACTIVE_TIMELINE_GUARDED.has(inc.status) && lastTimeline?.at && lastTimeline.at !== inc.startedAt) {
-    return { label: t('incidents.time.updated'), date: lastTimeline.at }
+    return { label: t('incidents.time.updated'), date: lastTimeline.at, dayOnly, day }
   }
-  return { label: t('incidents.time.started'), date: inc.startedAt }
+  return { label: t('incidents.time.started'), date: inc.startedAt, dayOnly, day }
 }
 
 /**
@@ -195,6 +240,48 @@ export function getLatestActivity(inc) {
   const lastTimeline = tl.length > 0 ? tl[tl.length - 1] : undefined
   if (lastTimeline?.at) return new Date(lastTimeline.at).getTime()
   return new Date(inc.startedAt).getTime()
+}
+
+/**
+ * #1292 — the order of two `status_history`-derived incidents on the SAME day.
+ *
+ * Every derived incident on a day shares one anchor (page-local noon), so the activity axis
+ * degenerates to `anchor + duration` there: two rows showing the same duration end up separated by the
+ * sub-second float in `downtime_duration` — 62ms apart on helicone's real Aug 16 pair, with nothing on
+ * screen to explain the order. There is no chronology to sort by, because the source states none.
+ *
+ * So the rule is stated instead of emerging: **longest first, then resource name**, compared at the
+ * minute the row DISPLAYS (`displayedMinutes`) so two rows reading "11h 36m" tie here and fall to the
+ * name rather than to a difference the reader cannot see.
+ *
+ * Returns `null` when the rule does not apply, so the caller keeps its own axis.
+ *
+ * **This lives on the GROUPING sort, not on `compareIncidents`.** Every page renders
+ * `groupIncidents(...)` output, and that function re-sorts by `getLatestActivity` — so a rule applied
+ * in `compareIncidents` is overwritten before anything renders, and `ServiceDetails.jsx` never calls
+ * `compareIncidents` at all. That was this change's first shape and it was dead code on all three
+ * pages. `api/_is-down/incident-grouping.ts` carries the same rule for the Edge card (no shared module
+ * graph); both are pinned by `src/utils/__tests__/derived-same-day-order.test.js` through the real page
+ * pipeline, not through this function alone.
+ *
+ * @param {{ derived?: string, derivedDay?: string, startedAt?: string, resolvedAt?: string|null, title?: string }} a
+ * @param {{ derived?: string, derivedDay?: string, startedAt?: string, resolvedAt?: string|null, title?: string }} b
+ * @returns {number|null}
+ */
+export function compareDerivedSameDay(a, b) {
+  if (a.derived !== 'status_history' || b.derived !== 'status_history') return null
+  if (a.derivedDay === undefined || a.derivedDay !== b.derivedDay) return null
+  const aMin = displayedSpanMinutes(a)
+  const bMin = displayedSpanMinutes(b)
+  if (aMin !== null && bMin !== null && aMin !== bMin) return bMin - aMin
+  return (a.title ?? '').localeCompare(b.title ?? '')
+}
+
+/** Displayed length in whole minutes, or null when the row has no resolved span yet. */
+function displayedSpanMinutes(inc) {
+  if (!inc.startedAt || !inc.resolvedAt) return null
+  const ms = new Date(inc.resolvedAt).getTime() - new Date(inc.startedAt).getTime()
+  return Number.isFinite(ms) ? displayedMinutes(ms) : null
 }
 
 /**
@@ -233,4 +320,25 @@ export function compareGroupedRows(a, b) {
   const aStatus = a.kind === 'single' ? a.incident.status : dominantGroupStatus(a)
   const bStatus = b.kind === 'single' ? b.incident.status : dominantGroupStatus(b)
   return (STATUS_PRIORITY[aStatus] ?? 2) - (STATUS_PRIORITY[bStatus] ?? 2)
+}
+
+/**
+ * The duration text for an incident row, qualified when the number is a DAY TOTAL (#1292).
+ *
+ * A `status_history`-derived incident's `duration` is one day's summed downtime, not a single outage's
+ * length, and only the Incidents page can show the full `incidents.derived.note` explanation — the
+ * other two render an inert row (empty timeline, nothing to expand). Without a qualifier those two
+ * print a bare "17h 18m" that reads as one continuous outage, while the is-down card for the same
+ * incident already says "down 17h 18m that day".
+ *
+ * @param {{ duration?: string|null, derived?: string }} inc
+ * @param {(key: string) => string} t
+ * @param {string} fallback  what to show when there is no duration yet (ongoing / monitoring)
+ * @returns {string}
+ */
+export function incidentDurationText(inc, t, fallback) {
+  if (!inc.duration) return fallback
+  return inc.derived === 'status_history'
+    ? `${inc.duration} ${t('incidents.derived.dayTotal')}`
+    : inc.duration
 }
