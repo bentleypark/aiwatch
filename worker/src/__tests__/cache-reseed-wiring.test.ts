@@ -82,7 +82,20 @@ describe('behavior — the real scheduled() handler re-seeds only on a genuine m
   afterEach(() => { vi.restoreAllMocks() })
 
   const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
-  const event = { scheduledTime: Date.now(), cron: '*/5 * * * *' } as ScheduledEvent
+  // The EVENT time is pinned; the cache fixtures below are deliberately NOT. `scheduled()` derives its
+  // `scheduledNow` from `event.scheduledTime`, and the daily-summary block fires when that lands in
+  // `isInSummaryWindow` (09:00–09:05 and 10:00–10:05 UTC) — so with `Date.now()` these tests ran the
+  // whole summary path, including unmocked Analytics Engine reads, for ten minutes every day, failing
+  // as a 5s TIMEOUT rather than a legible assertion. Mid-month and off the hour, so no monthly or
+  // hourly cron branch is entangled either.
+  //
+  // The fixtures stay wall-clock-relative because `cronAlertCheck` calls `isCacheStale(raw, threshold)`
+  // with TWO arguments — its `now` defaults to `Date.now()` and the scheduled time never reaches it.
+  // Pinning `cachedAt` to this constant therefore does not make a snapshot look fresh; it makes it
+  // weeks stale, which silently moved the "fresh and unchanged" case onto the stale path and left the
+  // not-stale branch covered by nothing. Both fixtures are relative to the same clock `isCacheStale`
+  // reads, so they are deterministic without being pinned.
+  const event = { scheduledTime: Date.parse('2026-08-12T12:07:00.000Z'), cron: '*/5 * * * *' } as ScheduledEvent
 
   // All-operational, exactly the real roster — matching ids avoids the #221 service-count-drop alert,
   // and matching status against whatever's "cached" below avoids an incidental status-edge (#488)
