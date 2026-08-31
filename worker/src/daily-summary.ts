@@ -12,6 +12,7 @@ import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
 import { FAMILY_OF_SERVICE } from './alerts'
+import { clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from './api-traffic'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts, FeedTrafficCounts, FeedPollsByTarget } from './api-traffic'
 import { BADGE_UNKNOWN_SERVICE, FEED_UNKNOWN_TARGET, rollupByClient, subscriberFeeds, type AllFeedState } from './api-traffic'
 
@@ -636,16 +637,36 @@ export function formatBadgeTrafficSection(
 /**
  * Format the Chrome-extension activity as a Discord section (#837). Empty string when unavailable
  * so the caller skips it. Two consent-free signals: last-24h poll volume (WAE `ext-claude` tag — a
- * WAE sampling estimate, shown with `~`; omitted from the line when the SQL API isn't configured, i.e.
- * polls === null) and today's extension-sourced "Report an issue" count (KV). The real active-user
- * trend lives in the Chrome Web Store dashboard (WAU); this is the in-product engagement proxy. Pure.
+ * WAE sampling estimate, shown with `~`; omitted from the line whenever the read did not produce a
+ * usable number — polls === null, which since #1293 also covers a malformed AE body, not only an
+ * unconfigured SQL API) and today's extension-sourced "Report an issue" count (KV). The real active-user
+ * trend lives in the Chrome Web Store dashboard (WAU); this is the in-product engagement proxy.
+ *
+ * #1293 — the poll total is rendered WITH the running time it represents. A bare `~2010 status polls`
+ * is not a number a human reads, and the conversion used to be documented as a step for the reader to
+ * perform by hand: during the 2026-08-30 audit nobody had performed it until the poll period was dug
+ * out of `extension/config.js`. A rule that asks for mental arithmetic is not a rule. The interval comes
+ * from `EXT_POLL_PERIOD_MINUTES`, so changing the extension's alarm changes this line with it.
+ *
+ * Rendered as DURATION, not as a client count — see `clientMinutesFromPolls` for why a poll total cannot
+ * yield a count and why a figure shaped like one is the expensive misreading here. The figure INCLUDES
+ * the operator's own browser (a deliberate #1293 decision — excluding it costs dogfooding), which is also
+ * what makes it subtractable: a browser running all day is 24h of the total. Pure.
  */
 export function formatExtActivitySection(
   ext: DailySummaryData['extActivity'],
 ): string {
   if (!ext) return ''
   const parts: string[] = []
-  if (ext.polls != null) parts.push(`~${ext.polls} status polls`)
+  if (ext.polls != null) {
+    const mins = clientMinutesFromPolls(ext.polls, EXT_POLL_PERIOD_MINUTES)
+    // On `null` render the raw total rather than nothing, so a bad constant degrades the line instead
+    // of hiding the measurement behind it.
+    // `incl. operator` belongs on the LINE, not only in the field docs: the reader of a Discord number
+    // is not the reader of the schema. It is also load-bearing arithmetic here — a browser left running
+    // all day contributes 24h, so `total − 24h` is a legible lower bound on external usage.
+    parts.push(mins == null ? `~${ext.polls} status polls` : `~${ext.polls} status polls ≈ ${formatClientTime(mins, 'browser')} (incl. operator)`)
+  }
   if (ext.reports > 0) parts.push(`${ext.reports} issue report${ext.reports === 1 ? '' : 's'}`)
   if (parts.length === 0) return ''
   return `\n🧩 **Chrome Extension**\n   Last 24h: ${parts.join(' · ')}`
@@ -676,7 +697,13 @@ export function formatStatuslineDeltaSuffix(delta: number | null | undefined): s
 export function formatStatuslineTrafficSection(
   statusline: DailySummaryData['statuslineTraffic'],
 ): string {
-  if (!statusline || statusline.total <= 0) return ''
+  // #1293 — symmetric with the plugin section: only a MISSING read is silent. Suppressing on
+  // `total <= 0` made a measured quiet window indistinguishable from an unconfigured or failed read on
+  // the daily surface, which is the distinction the operator-exclusion window exists to see.
+  if (!statusline) return ''
+  if (statusline.total <= 0) {
+    return `\n🖥️ **Statusline**\n   Last 24h: no polls (read OK — no traffic, or the recorder wrote nothing)`
+  }
   const delta = statusline.delta
   const breakdown = Object.entries(statusline.byPreset)
     .filter(([, n]) => n > 0)
@@ -695,18 +722,43 @@ export function formatStatuslineTrafficSection(
 }
 
 /**
- * Format the Claude Code PLUGIN usage as a Discord section (#920). Empty string when unavailable
- * (SQL API not configured) OR both counts are 0, so the caller skips it until the plugin sees
- * adoption. Shows the last-24h background-monitor poll volume + on-demand /aiwatch briefings.
+ * Format the Claude Code PLUGIN usage as a Discord section (#920). Empty string ONLY when there was no
+ * read at all (`null`/`undefined` — SQL API not configured, or the query failed); a measured `{0, 0}`
+ * renders a quiet-window line instead of vanishing (see the #1293 note below). Shows the last-24h background-monitor poll volume + on-demand /aiwatch briefings.
  * WAE sampling estimates (shown with `~`); the day-over-day step-up is the signal. A poll ≈
- * active-usage proxy (the monitor polls every 60s while a session is open), NOT a user count. Pure.
+ * active-usage proxy (the monitor polls every 60s while a session is open), NOT a user count.
+ *
+ * #1293 — the monitor total carries its running-time conversion for the same reason the extension's
+ * does. Two caveats this line must not lose. First, the interval assumes `AIWATCH_POLL_SECONDS` is at
+ * its DEFAULT: unlike the extension's compiled-in period a user can set it either way with no minimum
+ * clamp, so the figure can err in BOTH directions. Second, `no operator exclusion` states the
+ * COUNTER'S RULE and not a claim about today's number — the operator has their own monitor disabled to
+ * measure external usage, so their share is currently nil, but re-enabling it would make each
+ * concurrent session contribute a full day again. The rule holds either way; a claim about presence
+ * would not. Briefings are NOT converted: on-demand runs have no rate.
  */
 export function formatPluginTrafficSection(
   plugin: DailySummaryData['pluginTraffic'],
 ): string {
-  if (!plugin || (plugin.monitor <= 0 && plugin.brief <= 0)) return ''
+  // #1293 — a wholly quiet window RENDERS, it is not suppressed. It used to return '' for
+  // `{0,0}`, which made a measured zero and an unconfigured/failed read look identical on the only
+  // surface anyone reads daily. That was tolerable while the operator's own monitor guaranteed a
+  // non-zero number; they disabled it to measure external usage, so zero is now the expected reading
+  // and the distinction it hides is the one the window was opened to see. `null` (no read) still
+  // omits the section — that genuinely has nothing to say.
+  if (!plugin) return ''
+  if (plugin.monitor <= 0 && plugin.brief <= 0) {
+    return `\n🧩 **Plugin (Claude Code)**\n   Last 24h: no polls (read OK — no traffic, or the recorder wrote nothing)`
+  }
   const parts: string[] = []
-  if (plugin.monitor > 0) parts.push(`~${plugin.monitor} monitor polls`)
+  if (plugin.monitor > 0) {
+    const mins = clientMinutesFromPolls(plugin.monitor, PLUGIN_POLL_PERIOD_SECONDS / 60)
+    // `no operator exclusion` states the COUNTER'S RULE, not a claim about who is in today's number.
+    // `incl. operator` would be false right now — the operator disabled their own monitor to measure
+    // external usage — but true again the moment they re-enable it, and the code cannot know which.
+    // The rule holds either way; a claim about presence would not.
+    parts.push(mins == null ? `~${plugin.monitor} monitor polls` : `~${plugin.monitor} monitor polls ≈ ${formatClientTime(mins, 'session')} (default interval, no operator exclusion)`)
+  }
   if (plugin.brief > 0) parts.push(`~${plugin.brief} /aiwatch briefings`)
   return `\n🧩 **Plugin (Claude Code)**\n   Last 24h: ${parts.join(' · ')}`
 }

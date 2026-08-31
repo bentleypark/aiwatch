@@ -802,7 +802,12 @@ describe('ext-claude traffic (#837)', () => {
   it('parseExtTrafficResponse reads the single total (tolerant of string/number)', () => {
     expect(parseExtTrafficResponse({ data: [{ requests: '4212' }] })).toBe(4212)
     expect(parseExtTrafficResponse({ data: [{ requests: 7 }] })).toBe(7)
-    expect(parseExtTrafficResponse({ data: [{ requests: 'nope' }] })).toBe(0) // unparseable → 0
+    // #1293 — unparseable is NOT zero. This value is now written to a permanent no-TTL row where a
+    // coerced 0 is indistinguishable from a measured quiet window, so it must fail the read instead.
+    expect(parseExtTrafficResponse({ data: [{ requests: 'nope' }] })).toBeNull()
+    expect(parseExtTrafficResponse({ data: [{}] })).toBeNull()          // column absent / renamed
+    expect(parseExtTrafficResponse({ data: [{ requests: null }] })).toBeNull()
+    expect(parseExtTrafficResponse({ data: [{ requests: 0 }] })).toBe(0) // a real measured zero
     expect(parseExtTrafficResponse({ data: [] })).toBeNull() // no rows → null
     expect(parseExtTrafficResponse({})).toBeNull()
     expect(parseExtTrafficResponse(null)).toBeNull()
@@ -837,14 +842,29 @@ describe('statusline traffic (#918)', () => {
     const json = { data: [
       { preset: 'statusline-branded', requests: '120' },
       { preset: 'statusline-degraded_only', requests: 45 },
-      { preset: 'statusline-clickable', requests: 'nope' }, // unparseable → 0
     ] }
     expect(parseStatuslineTrafficResponse(json)).toEqual({
-      byPreset: { branded: 120, degraded_only: 45, clickable: 0 },
+      byPreset: { branded: 120, degraded_only: 45 },
       serverRenderTotal: 165,
       legacyProxy: 0,
       total: 165,
     })
+  })
+
+  // #1293 Part F — this result is now persisted to `growth:daily`, so an unreadable row fails the read
+  // instead of contributing `0`. It used to coerce to `0`, which was survivable while the only consumer
+  // was a Discord line that lived for a day; in a permanent no-TTL row a laundered zero is
+  // indistinguishable from a measured quiet window, and there is no backfill to repair it.
+  it('parseStatuslineTrafficResponse fails the read on an unreadable requests value', () => {
+    for (const bad of ['nope', null, undefined, '', ' ', [], false, -1]) {
+      expect(
+        parseStatuslineTrafficResponse({ data: [{ preset: 'statusline-branded', requests: bad }] }),
+        `requests: ${JSON.stringify(bad)} must not read as a measurement`,
+      ).toBeNull()
+    }
+    // A real zero is still a measurement.
+    expect(parseStatuslineTrafficResponse({ data: [{ preset: 'statusline-branded', requests: 0 }] }))
+      .toEqual({ byPreset: { branded: 0 }, serverRenderTotal: 0, legacyProxy: 0, total: 0 })
   })
 
   it('parseStatuslineTrafficResponse routes the legacy `proxy` catch-all into legacyProxy, not byPreset (#944)', () => {
@@ -861,15 +881,19 @@ describe('statusline traffic (#918)', () => {
     })
   })
 
-  it('parseStatuslineTrafficResponse ignores rows whose index1 is not a statusline- tag', () => {
-    const json = { data: [
+  // #1293 — FAILS the read on an unrecognised preset, where it used to skip the row. `WHERE index1
+  // LIKE 'statusline-%'` makes a foreign preset impossible while query and response agree, so one
+  // appearing means the `AS preset` alias or the schema drifted. Skipping silently shrank the stored
+  // total; if EVERY row drifts it produced `{total: 0}`, which this PR's contract would then report as
+  // `zero` — a permanent row asserting a read succeeded when it did not.
+  it('parseStatuslineTrafficResponse fails the read on a row that is not a statusline- tag', () => {
+    expect(parseStatuslineTrafficResponse({ data: [
       { preset: 'statusline-branded', requests: 10 },
-      { preset: 'ext-claude', requests: 999 },   // wrong tag (LIKE guard belt-and-suspenders) → skipped
-      { preset: null, requests: 5 },             // invalid → skipped
-    ] }
-    expect(parseStatuslineTrafficResponse(json)).toEqual({
-      byPreset: { branded: 10 }, serverRenderTotal: 10, legacyProxy: 0, total: 10,
-    })
+      { preset: 'ext-claude', requests: 999 },
+    ] })).toBeNull()
+    expect(parseStatuslineTrafficResponse({ data: [{ preset: null, requests: 5 }] })).toBeNull()
+    // The alias dropped entirely — rows arrive keyed `index1`, so `preset` is undefined.
+    expect(parseStatuslineTrafficResponse({ data: [{ index1: 'statusline-branded', requests: 1200 }] })).toBeNull()
   })
 
   it('parseStatuslineTrafficResponse returns null on malformed shape, empty on no rows', () => {
@@ -932,7 +956,6 @@ describe('plugin traffic (#920)', () => {
     const json = { data: [
       { tag: 'aiwatch-monitor', requests: '1440' },
       { tag: 'aiwatch-brief', requests: 12 },
-      { tag: 'statusline-branded', requests: 999 }, // wrong tag → ignored
     ] }
     expect(parsePluginTrafficResponse(json)).toEqual({ monitor: 1440, brief: 12 })
   })
@@ -941,6 +964,49 @@ describe('plugin traffic (#920)', () => {
     expect(parsePluginTrafficResponse({})).toBeNull()
     expect(parsePluginTrafficResponse(null)).toBeNull()
     expect(parsePluginTrafficResponse({ data: [] })).toEqual({ monitor: 0, brief: 0 })
+  })
+
+  // #1293 — this result is now written to a permanent no-TTL row, so every way the response can be
+  // unreadable must fail the read rather than contribute a `0`. A silently-zeroed component is
+  // indistinguishable from a quiet window once stored, and there is no backfill to repair it.
+  it('parsePluginTrafficResponse fails the read on an unreadable requests value', () => {
+    for (const bad of ['nope', null, undefined, '', ' ', [], false, true, -1, '-5']) {
+      expect(
+        parsePluginTrafficResponse({ data: [{ tag: 'aiwatch-monitor', requests: bad }] }),
+        `requests: ${JSON.stringify(bad)} must not read as a measurement`,
+      ).toBeNull()
+    }
+    // A missing `requests` key entirely — the shape a renamed/dropped SELECT alias produces.
+    expect(parsePluginTrafficResponse({ data: [{ tag: 'aiwatch-monitor' }] })).toBeNull()
+    // One good row does not rescue a bad sibling: a partial count filed as a measurement is worse
+    // than no count, because nothing downstream can tell it apart.
+    expect(parsePluginTrafficResponse({ data: [
+      { tag: 'aiwatch-monitor', requests: 720 },
+      { tag: 'aiwatch-brief', requests: 'nope' },
+    ] })).toBeNull()
+    // A real zero is still a measurement.
+    expect(parsePluginTrafficResponse({ data: [{ tag: 'aiwatch-monitor', requests: 0 }] }))
+      .toEqual({ monitor: 0, brief: 0 })
+  })
+
+  it('parsePluginTrafficResponse fails the read on an unrecognised tag rather than skipping it', () => {
+    // `WHERE index1 IN (...)` makes a foreign tag impossible while query and response agree, so one
+    // appearing means the `AS tag` alias or the schema drifted. Skipping it (the old behaviour) turned
+    // "we are reading the wrong column" into a confident `{0, 0}` that reads as zero adoption forever.
+    expect(parsePluginTrafficResponse({ data: [{ tag: 'statusline-branded', requests: 999 }] })).toBeNull()
+    // The alias dropped entirely — the row arrives keyed `index1`, so `tag` is undefined.
+    expect(parsePluginTrafficResponse({ data: [{ index1: 'aiwatch-monitor', requests: 1440 }] })).toBeNull()
+  })
+
+  it('parseExtTrafficResponse fails the read on every unreadable requests value', () => {
+    // The ext twin of the above. A value blacklist would leak whichever spellings it did not
+    // enumerate; the guard is a type test, so none of these reaches `Number()` at all.
+    for (const bad of ['nope', null, undefined, '', ' ', [], false, -1, '-5']) {
+      expect(
+        parseExtTrafficResponse({ data: [{ requests: bad }] }),
+        `requests: ${JSON.stringify(bad)} must not read as a measurement`,
+      ).toBeNull()
+    }
   })
 
   it('queryPluginTraffic returns null without creds and never throws on failure', async () => {
