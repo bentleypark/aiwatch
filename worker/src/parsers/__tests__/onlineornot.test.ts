@@ -204,6 +204,11 @@ describe('parseOnlineOrNotIncidentHistory (#1134)', () => {
     const merged = mergeOnlineOrNotIncidents(
       [incident('shared', 'major')],
       [incident('shared', null), incident('history-only', null)],
+      // Pinned clock, like the two cases below. Omitted, this defaulted to `Date.now()` while the
+      // fixtures stayed at 2026-06-01, so `history-only` crossed the 90-day supplemental cutoff on
+      // 2026-08-30 and the case began failing on every branch — this one asserts merge behaviour, not
+      // the cutoff, so it must not depend on the run date.
+      Date.parse('2026-07-23T00:00:00.000Z'),
     )
     expect(merged.find((i) => i.id === 'shared')?.impact).toBe('major')
     expect(merged.some((i) => i.id === 'history-only')).toBe(true)
