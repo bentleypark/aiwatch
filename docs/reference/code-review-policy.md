@@ -67,6 +67,38 @@ flags; on #1244 that path produced one of round 2's Criticals.
 Take the **finding** ("this claim outruns its evidence") and discard the **remedy** ("write this
 instead"). Where the finding names a deletion, apply the deletion.
 
+## The remedy is withheld at the source (#1298)
+
+"Take the finding, not the remedy" is a rule about what the CALLER does with a report, and on #1293 it
+failed nine rounds running: every finding in rounds 8 and 9 landed on prose the previous round's fix had
+just written, and one log message was wrong in BOTH directions across two rounds — first over-claiming an
+ambiguity, then over-claiming its resolution.
+
+Two things about that failure are worth separating. The policy was never opened (the path was cited in
+subagent prompts without being read), but reading it would not have been sufficient: `ship-issue` step
+6's causal stop trigger WAS in context every turn via the #415 hook and was violated anyway. So the
+remaining lever is not a better reminder.
+
+**`.claude/agents/review-findings-only.md`** is that lever. It is a project-defined reviewer whose system
+prompt forbids replacement prose outright — findings, `file:line`, reproduction-or-judgement-call, and
+round attribution, with no "change it to this". Where the answer is a deletion it says so as a finding
+and lets the caller delete. It keeps the ≥80 floor, since that is the plugin reviewer's one real quality
+signal. Use it for the step 5-6 loop from round 2 onward, when the previous round's fix is itself part of
+the diff.
+
+This is **not** the class of gate #1150 rejected. Those tried to judge the operator's reasoning ("did
+this fix cause this finding?") — a content judgement measured through phrasing. This changes the INPUT:
+with no remedy in the report there is nothing to adopt. It also does not depend on overriding the
+marketplace agents, whose names are namespaced (`pr-review-toolkit:code-reviewer`); it is a separate
+agent, invoked instead of them.
+
+**What it does not do:** guarantee compliance. It removes one specific, repeatedly-used input. Nothing
+here stops a caller from rewriting prose on its own initiative.
+
+**Deployment caveat:** agent definitions load at SESSION START, like `.claude/settings.json` hooks. A
+newly added or edited agent is not visible to the session that wrote it — `subagent_type` resolution
+fails with "agent type not found" until a restart. Verify it resolves before relying on it.
+
 ## Verify a finding before acting on it
 
 Every Critical is a claim about the record, and the record is one command away — `gh pr view`,
