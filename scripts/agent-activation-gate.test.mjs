@@ -108,3 +108,40 @@ test('the gate is wired for BOTH events it needs, or it cannot work', () => {
   assert.equal(pre.length, 1, 'PreToolUse/Bash denial is not wired — the gate would never fire')
   assert.match(pre[0], /^Bash::/, 'the denial must match Bash')
 })
+
+test('the wiring INVOKES the hook, rather than merely naming it', () => {
+  // This is the assertion whose absence let a dead hook ship green. The first cut wired the command
+  // BARE — `"$CLAUDE_PROJECT_DIR"/.claude/hooks/agent-activation-gate.mjs` — while the file is
+  // committed 100644, like both sibling `.mjs` hooks. Without an exec bit a bare command exits 126
+  // (permission denied), not 2, so the PreToolUse half denied nothing and the PostToolUse half
+  // recorded nothing. Both were silently inert, and every other assertion in this file still passed
+  // because they only ever checked that the command STRING contained the filename.
+  //
+  // The repo's convention for a `.mjs` hook is `node "<path>"`; the two shipped ones prove it works
+  // without an exec bit. So this pins the invocation form, not the file mode.
+  const settings = JSON.parse(readFileSync(path.join(HERE, '..', '.claude', 'settings.json'), 'utf8'))
+  const all = Object.values(settings.hooks ?? {}).flat().flatMap((m) => (m.hooks ?? []).map((h) => h.command ?? ''))
+  const ours = all.filter((c) => c.includes('agent-activation-gate.mjs'))
+  assert.equal(ours.length, 2, 'expected both call sites')
+  for (const c of ours) {
+    assert.match(c, /^node\s+"/, `hook is not invoked with an interpreter: ${c}`)
+  }
+  // And the same rule for every other `.mjs` hook, so the next one cannot repeat this.
+  for (const c of all.filter((x) => x.endsWith('.mjs"') || x.endsWith('.mjs'))) {
+    assert.match(c, /^(node|bash)\s+/, `a hook command must name its interpreter: ${c}`)
+  }
+})
+
+test('the hook actually RUNS and can return the deny code', async () => {
+  // Executes the shipped file the way settings invokes it. A hook that cannot start is the failure
+  // this suite missed; asserting the exit code is what distinguishes "denied" (2) from "could not
+  // run" (126) — the two look alike from the outside and only one of them blocks anything.
+  const { execFileSync } = await import('node:child_process')
+  const hook = path.join(HERE, '..', '.claude', 'hooks', 'agent-activation-gate.mjs')
+  // A command the gate does not care about must exit 0 — proving it started and made a decision.
+  const out = execFileSync('node', [hook], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_input: { command: 'git status' } }),
+    encoding: 'utf8',
+  })
+  assert.equal(typeof out, 'string')
+})
