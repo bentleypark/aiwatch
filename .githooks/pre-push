@@ -1,0 +1,135 @@
+#!/usr/bin/env node
+// #1298 — refuse to push an agent definition nobody has run.
+//
+// THE PROBLEM. A file under `.claude/agents/` takes effect only at SESSION START, so the session that
+// writes one cannot spawn it — `subagent_type` resolves to "agent type not found". #1299 was opened
+// with a definition nobody had executed, because the failing check was filed as a follow-up item
+// instead of treated as a stop.
+//
+// WHY THIS LIVES IN GIT AND NOT IN A CLAUDE HOOK. The first attempt intercepted `PreToolUse`/`Bash`
+// and decided from the COMMAND STRING whether a push was happening. That cannot work:
+// `echo git push` was denied, `git -C /elsewhere push` slipped through, and — the one that mattered —
+// `cd ~/aiwatch-reports && git push` was denied, because the hook read the diff of the SESSION's repo
+// rather than the repo being pushed. Publishing a monthly report is exactly that command, so an
+// unrelated agent edit sitting on an aiwatch branch blocked a different repository, with a message
+// telling the operator to spawn an agent that repo has never heard of.
+//
+// `pre-push` deletes the parsing. Git runs this in the repository actually being pushed and hands it
+// the refs on stdin, so a push from another repo runs THAT repo's hooks and cannot see these agents.
+// The false positives are not narrowed — they become unrepresentable.
+//
+// It is also why this one could be verified the day it was written: `core.hooksPath` is local git
+// config, so the gate is live immediately. The two Claude-hook attempts before it could not be tested
+// without a session restart, and both shipped inert.
+//
+// SCOPE: agents only. Hooks and `settings.json` share the restart-activation problem and have no
+// equivalent "it ran" event, so they are not covered and this does not pretend otherwise.
+//
+// ESCAPE HATCH, on purpose. `AGENT_VERIFIED=1 git push` passes. #1150 rejected earlier gates because
+// "a deny the operator cannot satisfy honestly leaves only the override" — a demand that cannot be met
+// just manufactures the override. This one's demand (restart, spawn once) is usually meetable, but the
+// recorder that writes the evidence is a Claude Code hook and may not be loaded. So the stated escape
+// is part of the design, not a leak. `--no-verify` bypasses it as it does every git hook; the
+// Claude-side `step35-verify-gate` denies that flag separately.
+
+import fs from 'node:fs'
+import { execFileSync } from 'node:child_process'
+
+const ZERO = /^0+$/
+
+/** `.claude/agents/<name>.md` → `<name>`. Path-shaped, so a file that merely mentions an agent does
+ *  not count. Nested paths return null: the harness discovers agents at the top level only. */
+export function agentNameFromPath(p) {
+  if (typeof p !== 'string') return null
+  const m = p.replace(/\\/g, '/').match(/(?:^|\/)\.claude\/agents\/([^/]+)\.md$/)
+  return m ? m[1] : null
+}
+
+/** Agent names ADDED or MODIFIED in `git diff --name-status` output. Deletions are exempt: a removed
+ *  agent cannot be spawned, so demanding proof would be a deny with no honest exit. */
+export function changedAgentNames(nameStatus) {
+  const out = new Set()
+  for (const line of String(nameStatus || '').split('\n')) {
+    if (!line.trim()) continue
+    const [status, ...paths] = line.split('\t')
+    if (status[0] === 'D') continue
+    const name = agentNameFromPath(paths[paths.length - 1]) // rename → the destination must resolve
+    if (name) out.add(name)
+  }
+  return [...out]
+}
+
+/** One stdin line → the commit range this push would publish, or null when there is nothing to add.
+ *  Git's format is `<localRef> <localSha> <remoteRef> <remoteSha>`; an all-zero LOCAL sha is a branch
+ *  DELETION (nothing to inspect), an all-zero REMOTE sha is a branch that does not exist yet. */
+export function rangeForLine(line, fallbackBase = 'origin/main') {
+  const [, localSha, , remoteSha] = String(line || '').trim().split(/\s+/)
+  if (!localSha || ZERO.test(localSha)) return null
+  return ZERO.test(remoteSha || '') ? `${fallbackBase}...${localSha}` : `${remoteSha}..${localSha}`
+}
+
+/** Agent names with a recorded successful spawn, written by the Claude-side `PostToolUse` recorder.
+ *  Absent entirely when that hook is not loaded — which is what `AGENT_VERIFIED` exists for. */
+export function spawnedAgents(auditText) {
+  const out = new Set()
+  for (const line of String(auditText || '').split('\n')) {
+    if (!line.trim()) continue
+    let rec
+    try { rec = JSON.parse(line) } catch { continue }
+    if (rec?.hook !== 'agent-activation' || rec?.decision !== 'spawned') continue
+    const m = String(rec.note || '').match(/^agent=([^\s]+)/)
+    if (m) out.add(m[1])
+  }
+  return out
+}
+
+/** The decision. Pure, so it is testable without a repo or a push. */
+export function unverified(nameStatus, auditText, override) {
+  if (override) return []
+  const changed = changedAgentNames(nameStatus)
+  if (changed.length === 0) return []
+  const spawned = spawnedAgents(auditText)
+  return changed.filter((n) => !spawned.has(n))
+}
+
+export function denyMessage(names) {
+  return (
+    `\nBLOCKED — agent definition(s) never spawned: ${names.join(', ')}\n\n` +
+    `A file under .claude/agents/ loads at SESSION START, so the session that wrote it cannot have\n` +
+    `run it. Pushing now publishes a definition nobody has executed.\n\n` +
+    `Either:\n` +
+    `  1. Start a session rooted in this working tree, spawn the agent once so it resolves, push again.\n` +
+    `  2. AGENT_VERIFIED=1 git push   — if you have run it and the recorder was not loaded.\n\n` +
+    `A failed spawn is a stop, not a follow-up item. Scope: agents only; hooks and settings.json are\n` +
+    `not covered by this check.\n\n`
+  )
+}
+
+function main() {
+  const stdin = (() => { try { return fs.readFileSync(0, 'utf8') } catch { return '' } })()
+  // Fail-OPEN on an unreadable payload. This guards a sequencing habit, not data integrity, and a hook
+  // that cannot read its own input has no basis to block a push.
+  if (!stdin.trim()) process.exit(0)
+
+  const pending = new Set()
+  for (const line of stdin.split('\n')) {
+    const range = rangeForLine(line)
+    if (!range) continue
+    let nameStatus = ''
+    try {
+      nameStatus = execFileSync('git', ['diff', '--name-status', range], { encoding: 'utf8' })
+    } catch { continue } // an unresolvable range is not evidence of a violation
+    let audit = ''
+    for (const p of ['.claude/hook-audit.jsonl', `${process.env.HOME}/.claude/hook-audit.jsonl`]) {
+      try { audit += fs.readFileSync(p, 'utf8') } catch { /* absent is normal */ }
+    }
+    for (const n of unverified(nameStatus, audit, process.env.AGENT_VERIFIED)) pending.add(n)
+  }
+
+  if (pending.size === 0) process.exit(0)
+  process.stderr.write(denyMessage([...pending]))
+  process.exit(1)
+}
+
+// Only run when git invoked us, not when a test imports the pure functions above.
+if (process.env.PREPUSH_SELFTEST !== '1' && import.meta.url === `file://${process.argv[1]}`) main()

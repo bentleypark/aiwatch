@@ -27,7 +27,8 @@
     "lint:graph": "node scripts/lint-decision-graph.mjs",
     "lint:docs": "node scripts/check-doc-symbols.mjs",
     "lint:budget": "node scripts/check-instruction-budget.mjs",
-    "lint:korean": "node scripts/lint-korean-copy.mjs"
+    "lint:korean": "node scripts/lint-korean-copy.mjs",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "dependencies": {
     "chart.js": "^4.4.7",
