@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { formatFeedClientLine, formatSubscribedFeedsLine, buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAudienceScreenRow, AUDIENCE_SCREEN_TOP_N, formatAiUsageSection } from '../daily-summary'
-import { BADGE_UNKNOWN_SERVICE } from '../api-traffic'
+import { BADGE_UNKNOWN_SERVICE, clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from '../api-traffic'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from '../outage-audience'
@@ -871,10 +871,44 @@ describe('formatPluginTrafficSection (#920)', () => {
     expect(out).toContain('~60 monitor polls')
     expect(out).not.toContain('briefings')
   })
-  it('is empty when null/undefined or both are 0', () => {
+  // #1293 — the monitor total is converted at ITS OWN interval.
+  it('renders the running time at the monitor interval, not the extension one', () => {
+    // 1440 polls × 1 min = 24h. At the extension's 2-min interval the same input would render 48h —
+    // which is the copy-pasted-interval mutation this pins.
+    expect(formatPluginTrafficSection({ monitor: 1440, brief: 0 })).toContain('~1440 monitor polls ≈ 24h of session time')
+    expect(formatPluginTrafficSection({ monitor: 1044, brief: 0 })).toContain('≈ 17h of session time')
+  })
+
+  it('derives the divisor from PLUGIN_POLL_PERIOD_SECONDS rather than a literal', () => {
+    const s = formatPluginTrafficSection({ monitor: 5000, brief: 0 })
+    expect(s).toContain(`≈ ${formatClientTime(clientMinutesFromPolls(5000, PLUGIN_POLL_PERIOD_SECONDS / 60)!, 'session')}`)
+  })
+
+  it('carries both caveats the figure cannot be read without', () => {
+    // The interval caveat because AIWATCH_POLL_SECONDS is user-settable with no minimum clamp (unlike
+    // the extension's compiled-in alarm), so the figure can err either way; and `no operator
+    // exclusion` rather than `incl. operator`, because that states the counter's RULE — true whether
+    // or not the operator currently runs their own monitor, which they have disabled.
+    const s = formatPluginTrafficSection({ monitor: 1440, brief: 0 })
+    expect(s).toContain('(default interval, no operator exclusion)')
+  })
+
+  it('does not convert briefings — on-demand runs have no rate to divide by', () => {
+    const s = formatPluginTrafficSection({ monitor: 0, brief: 12 })
+    expect(s).toContain('~12 /aiwatch briefings')
+    expect(s).not.toContain('of session time')
+  })
+
+  it('is empty only when there was NO read — a quiet window still renders', () => {
+    // `null` has nothing to say. `{0, 0}` does: it is a successful read of a quiet window, and
+    // suppressing it made a measured zero and a failed read look identical on the only surface anyone
+    // reads daily. That was tolerable while the operator's own monitor guaranteed a non-zero number;
+    // they disabled it to measure external usage, so zero is now the expected reading.
     expect(formatPluginTrafficSection(null)).toBe('')
     expect(formatPluginTrafficSection(undefined)).toBe('')
-    expect(formatPluginTrafficSection({ monitor: 0, brief: 0 })).toBe('')
+    const quiet = formatPluginTrafficSection({ monitor: 0, brief: 0 })
+    expect(quiet).toContain('🧩 **Plugin (Claude Code)**')
+    expect(quiet).toContain('no polls (read OK — no traffic, or the recorder wrote nothing)')
   })
 })
 
@@ -912,10 +946,17 @@ describe('formatStatuslineTrafficSection (#918; #944 cohort-split + delta)', () 
     expect(out).not.toContain('clickable')
     expect(out).not.toContain('apex proxy')
   })
-  it('is empty when null/undefined or grand total is 0 (section skipped until adoption)', () => {
+  it('is empty only when there was NO read — a quiet window still renders', () => {
+    // #1293, symmetric with the plugin section: suppressing on `total <= 0` made a measured quiet
+    // window indistinguishable from an unconfigured or failed read on the daily surface, and the
+    // operator disabled their own statusline precisely to read that zero.
     expect(formatStatuslineTrafficSection(null)).toBe('')
     expect(formatStatuslineTrafficSection(undefined)).toBe('')
-    expect(formatStatuslineTrafficSection({ byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 })).toBe('')
+    const quiet = formatStatuslineTrafficSection({ byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 })
+    // The SAME heading the non-quiet branch emits — a quiet day must not rename the section, or a
+    // reader scanning Discord for it misses exactly the days the exclusion window exists to observe.
+    expect(quiet).toContain('📟 **Statusline Polls (Claude Code)**')
+    expect(quiet).toContain('no polls (read OK — no traffic, or the recorder wrote nothing)')
   })
 })
 
@@ -1019,6 +1060,46 @@ describe('formatExtActivitySection (#837)', () => {
     expect(s).toContain('~10 status polls')
     expect(s).not.toContain('report')
   })
+  // #1293 — the conversion half. A bare poll total is not a number a human reads; the 2026-08-30
+  // audit divided it by hand only after digging the poll period out of `extension/config.js`.
+  it('renders the observed running time beside the raw total', () => {
+    // 2010 polls × 2 min = 4020 min = 67h. No divisor, no fractional browsers.
+    expect(formatExtActivitySection({ polls: 2010, reports: 0 })).toContain('~2010 status polls ≈ 67h of browser time')
+  })
+
+  it('derives the divisor from EXT_POLL_PERIOD_MINUTES rather than a literal', () => {
+    // The literal above pins today's value; this pins the WIRING, so the rendered figure moves with
+    // the constant. The constant in turn is held to `extension/config.js` by the lockstep test in
+    // client-polls.test.ts — together those two are what make the divisor derived rather than typed.
+    const s = formatExtActivitySection({ polls: 5000, reports: 0 })
+    expect(s).toContain(`≈ ${formatClientTime(clientMinutesFromPolls(5000, EXT_POLL_PERIOD_MINUTES)!, 'browser')}`)
+  })
+
+  it('does NOT use the plugin divisor — the two clients poll at different periods', () => {
+    // The mutation this catches: one interval copy-pasted into both formatters. At the plugin's
+    // 1-min interval 720 polls read as 12h; at the extension's 2-min it is 24h.
+    expect(formatExtActivitySection({ polls: 720, reports: 0 })).toContain('≈ 24h of browser time')
+  })
+
+  it('keeps small non-zero totals distinct instead of collapsing them', () => {
+    // The client-day form rounded this to `0`, which read as "no clients" when the truth is "a
+    // little". Small values are the expected reading now that operator usage is excluded elsewhere,
+    // so they must stay distinct.
+    const s = formatExtActivitySection({ polls: 10, reports: 0 })
+    expect(s).toContain('~10 status polls')
+    expect(s).toContain('20 min of browser time')
+  })
+
+  it('still prints an exact 0 as 0', () => {
+    expect(formatExtActivitySection({ polls: 0, reports: 0 })).toContain('≈ 0 min of browser time')
+  })
+
+  it('states on the LINE that the operator\'s own browser is included', () => {
+    // Not only in the schema comment: whoever reads the Discord number does not read the field docs,
+    // and an undisclosed figure reads as adoption.
+    expect(formatExtActivitySection({ polls: 2010, reports: 0 })).toContain('(incl. operator)')
+  })
+
   it('empty string when absent or both signals empty', () => {
     expect(formatExtActivitySection(null)).toBe('')
     expect(formatExtActivitySection(undefined)).toBe('')

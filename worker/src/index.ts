@@ -32,8 +32,8 @@ import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest, isStatuslinePreset, renderStatuslineBrief, buildStatuslineDownResponse, buildStatuslinePresetResponse, STATUSLINE_BRIEF_UNKNOWN } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import type { FeedTrafficCounts } from './api-traffic'
-import { recordCacheReadOutcome, recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, readFeedPolls, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
+import type { FeedTrafficCounts, StatuslineTrafficCounts } from './api-traffic'
+import { EXT_INDEX, PLUGIN_MONITOR_INDEX, PLUGIN_BRIEF_INDEX, recordCacheReadOutcome, recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, readFeedPolls, readExtPolls, readPluginPolls, readStatuslinePolls, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -3822,9 +3822,15 @@ export default {
             // tomorrow's diff (7d TTL, mirrors the #548 subscriber-count snapshot). Best-effort/
             // null-tolerant like the ext/feed reads; null (section omitted) when the AE token is absent.
             let statuslineTraffic = null
+            // #1293 Part F — the counts WITHOUT the rendered `delta`, kept separately so the permanent
+            // row and the Discord section provably describe the same read rather than two shapes that
+            // happen to agree. `delta` is a render concern (it is derived from yesterday's snapshot)
+            // and has no place in the stored record.
+            let statuslineCounts: StatuslineTrafficCounts | null = null
             try {
               const counts = await queryStatuslineTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
               if (counts) {
+                statuslineCounts = counts
                 const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
                 const prevRaw = await env.STATUS_CACHE.get(`statusline:cohort:${yesterday}`).catch(() => null)
                 const delta = computeStatuslineDelta(counts, prevRaw)
@@ -3988,6 +3994,42 @@ export default {
             // Workers discards these logs within days and this series has no reader yet, so whichever
             // fact is not written into the row is the fact nobody will ever have.
             const feedRead = readFeedPolls(feedTraffic)
+            // #1293 — the same judgement over the two other retention counters. Both AE reads already
+            // happened above for the Discord sections; this keeps them instead of dropping them. Note
+            // `extPolls`/`pluginTraffic`/`statuslineCounts` are the LOCALS read above, so the row and the rendered
+            // section cannot disagree about the same window.
+            const extRead = readExtPolls(extPolls)
+            const pluginRead = readPluginPolls(pluginTraffic)
+            // #1293 Part F — the same treatment for the third counter, judged from `statuslineCounts`:
+            // the pure query result captured before the render local `statuslineTraffic` attaches a
+            // `delta`, so no presentation value can reach the permanent row.
+            const statuslineRead = readStatuslinePolls(statuslineCounts)
+            // No cause list. Both messages used to enumerate the ways the read can fail, and both had
+            // already drifted from their parsers by the time the guards were tightened — the plugin one
+            // could not even name the alias/schema drift its new tag guard exists to surface. An
+            // enumeration in prose is unbounded verification debt (nothing pins it, every new guard
+            // ages it), so the message says WHICH counter and points at the judge that owns the list.
+            if (extRead.verdict === 'failed') {
+              console.warn(`[growth-series] extPolls read FAILED for ${today} — cause not distinguishable at this boundary; see readExtPolls`)
+            }
+            if (pluginRead.verdict === 'failed') {
+              console.warn(`[growth-series] pluginPolls read FAILED for ${today} — cause not distinguishable at this boundary; see readPluginPolls`)
+            }
+            if (statuslineRead.verdict === 'failed') {
+              console.warn(`[growth-series] statuslinePolls read FAILED for ${today} — cause not distinguishable at this boundary; see readStatuslinePolls`)
+            }
+            // A `zero` gets its own line, mirroring the feedPolls path below. Without it the verdict
+            // exists only in a row nothing reads yet, and the operator-exclusion window — where zero is
+            // the EXPECTED reading — would produce no daily signal at all.
+            for (const [name, verdict] of [
+              ['extPolls', extRead.verdict],
+              ['pluginPolls', pluginRead.verdict],
+              ['statuslinePolls', statuslineRead.verdict],
+            ] as const) {
+              if (verdict === 'zero') {
+                console.warn(`[growth-series] ${name} read ZERO for ${today} — measured quantity was zero; see kv-schema growth:daily for how to read it`)
+              }
+            }
             if (feedRead.verdict === 'failed') {
               console.warn(`[growth-series] feedPolls read FAILED for ${today} — AE query failed or unconfigured`)
             } else if (feedRead.verdict === 'zero') {
@@ -4012,6 +4054,10 @@ export default {
                 // non-null on exactly one verdict, and the verdict rides along so `null` is readable
                 // (see the field docs in growth-series.ts).
                 feedPolls: feedRead,
+                // #1293 — same pairing: the verdict rides along so a `null` in the row is readable.
+                extPolls: extRead,
+                pluginPolls: pluginRead,
+                statuslinePolls: statuslineRead,
               }), backfillSources
                 ? (rows: GrowthDailyRow[]) => fillOutageWindows(rows, (date) => {
                     // Older rows anchor on the NOMINAL 09:00 UTC run instant — their real run time is
@@ -4945,7 +4991,7 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/statusline/down') {
       if (env.ANALYTICS) {
         try {
-          env.ANALYTICS.writeDataPoint({ blobs: ['aiwatch-monitor'], doubles: [1], indexes: ['aiwatch-monitor'] })
+          env.ANALYTICS.writeDataPoint({ blobs: [PLUGIN_MONITOR_INDEX], doubles: [1], indexes: [PLUGIN_MONITOR_INDEX] })
         } catch (err) {
           console.warn('[wae] aiwatch-monitor writeDataPoint failed:', err instanceof Error ? err.message : err)
         }
@@ -4975,7 +5021,7 @@ export default {
         // prefix here would misattribute on-demand /aiwatch briefing traffic as statusline
         // PRESET adoption (a distinct feature). Distinct index → measurable separately later.
         try {
-          env.ANALYTICS.writeDataPoint({ blobs: ['aiwatch-brief'], doubles: [1], indexes: ['aiwatch-brief'] })
+          env.ANALYTICS.writeDataPoint({ blobs: [PLUGIN_BRIEF_INDEX], doubles: [1], indexes: [PLUGIN_BRIEF_INDEX] })
         } catch (err) {
           console.warn('[wae] aiwatch-brief writeDataPoint failed:', err instanceof Error ? err.message : err)
         }
@@ -5084,7 +5130,7 @@ export default {
         // would record just the ~1/PoP/60s miss rate. Synchronous void; wrap so a WAE
         // failure never aborts the response. Index entries cap at 32 bytes.
         try {
-          env.ANALYTICS?.writeDataPoint({ blobs: ['ext-claude'], doubles: [1], indexes: ['ext-claude'] })
+          env.ANALYTICS?.writeDataPoint({ blobs: [EXT_INDEX], doubles: [1], indexes: [EXT_INDEX] })
         } catch (err) {
           console.warn('[wae] ext-claude writeDataPoint failed:', err instanceof Error ? err.message : err)
         }

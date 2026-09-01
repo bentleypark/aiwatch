@@ -629,7 +629,14 @@ export async function queryBadgeTraffic(
 // aiwatch_statusline dataset (index1). Counting it gives a CONSENT-FREE active-usage proxy
 // (no in-extension analytics needed — see the extension's "zero data collection" privacy bar).
 // Single total (no blob split): every ext poll is one variant.
-const EXT_INDEX = 'ext-claude'
+/** The WAE index the extension's polls are tagged with. EXPORTED and imported by the write site in
+ *  `index.ts` (#1293) — it used to be a bare literal there and a separate const here, two spellings of
+ *  one decision with nothing holding them together. A rename on either side killed the counter
+ *  silently and forever: the SQL still succeeds and matches nothing. Whether that lands as a confident
+ *  `0` or as a permanent `failed` is the unsettled question on `readExtPolls`. Either way the row
+ *  records it and the daily warn reports it — but only as `zero`/`failed`, never as "the tag was
+ *  renamed". Extraction makes the rename a compile error instead. */
+export const EXT_INDEX = 'ext-claude'
 
 export function buildExtTrafficSql(dataset = V1_DATASET): string {
   return (
@@ -640,12 +647,31 @@ export function buildExtTrafficSql(dataset = V1_DATASET): string {
   )
 }
 
-/** Parse the AE SQL ext-claude JSON into a single last-24h poll total. Tolerant of string/number. */
+/**
+ * Parse the AE SQL ext-claude JSON into a single last-24h poll total. Tolerant of string/number.
+ *
+ * #1293 — an unreadable `requests` returns `null`, NOT `0`. It used to return `0`, which was survivable
+ * while the only consumer was a Discord line that lived for a day: a malformed row rendered a wrong
+ * number once and was gone. That value is now written to `growth:daily`, a permanent key with no TTL
+ * and no backfill, and `readExtPolls` cannot tell a coerced `0` from a measured one — so the old
+ * fallback would have filed a broken read as a measured quiet day, forever, under verdict `ok`. That
+ * is the precise failure this series exists to prevent ("a broken day must never read as a quiet one").
+ *
+ * `null` here means only "this response did not carry a number we can use"; it deliberately says
+ * nothing about WHY, which is why the verdict at the read boundary is `failed` rather than a guess.
+ */
 export function parseExtTrafficResponse(json: unknown): number | null {
   const data = (json as { data?: unknown })?.data
   if (!Array.isArray(data) || data.length === 0) return null
-  const parsed = Number((data[0] as { requests?: unknown })?.requests)
-  return Number.isFinite(parsed) ? parsed : 0
+  const raw = (data[0] as { requests?: unknown })?.requests
+  // A TYPE test, not a list of bad values. `Number()` maps `null`, `''`, `' '`, `[]` and `false` all to
+  // `0`, so blacklisting the ones we thought of still lets the rest through as a measured zero — the
+  // enumeration is the bug. Only a number, or a string with non-space content, is even a candidate.
+  if (typeof raw !== 'number' && (typeof raw !== 'string' || raw.trim() === '')) return null
+  const parsed = Number(raw)
+  // `>= 0`: a poll total cannot be negative, and rejecting it here rather than downstream keeps the
+  // stored row and the rendered Discord line on ONE predicate (they read the same local).
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
 /** Query the last-24h extension poll count via the AE SQL API. Best-effort: null on missing creds /
@@ -670,6 +696,161 @@ export async function queryExtTraffic(
     console.warn('[wae] ext SQL query error:', err instanceof Error ? err.message : err)
     return null
   }
+}
+
+// ── #1293: keeping the ext/plugin poll counts, and reading them as clients ─
+// Both counters were queried once a day for the Discord line and then dropped. #1273 closed exactly
+// this gap for the feed counter; the audit that motivated this one had to quote a 9-day-old figure
+// because today's did not exist anywhere. The judgement below is the same shape as `readFeedPolls`:
+// value and verdict as ONE value, so a caller cannot log one story and store another.
+
+/**
+ * A poll counter's read.
+ *
+ * THREE verdicts, and `zero` is the one #1293 originally left out. The argument for omitting it was
+ * that these counters can hold their own zero, so a reported `0` needs no verdict to explain a `null`.
+ * That conflated two questions: whether the FIELD can represent zero (it can) and whether a stored
+ * zero is INTERPRETABLE (it is not). A window with no polls and a recorder that wrote nothing are the
+ * same `0` — exactly the pair `isMeasuredFeedPolls` names indistinguishable, and exactly why
+ * `readFeedPolls` grew a `zero` verdict.
+ *
+ * What forced it: the operator disabled their own plugin monitor and statusline to open a clean
+ * external-usage measurement window. Inside that window the EXPECTED reading is `0`, and the question
+ * being asked IS "is it really 0?". While the operator's own traffic was in the count, a non-zero
+ * value doubled as proof the recorder was alive; removing it removed that canary. A `0` stored as `ok`
+ * would let a dead binding answer the window's question with a confident "no adoption", permanently,
+ * in a key with no TTL and no backfill.
+ *
+ * `zero` keeps the value (the read DID succeed) while refusing to call it unambiguous. `failed` covers
+ * everything the source cannot tell apart (see `readExtPolls`).
+ */
+export type PollsVerdict = 'ok' | 'zero' | 'failed'
+
+export type ExtPollsRead =
+  | { verdict: 'ok'; polls: number }
+  | { verdict: 'zero'; polls: 0 }
+  | { verdict: 'failed'; polls: null }
+
+/**
+ * Is this STORED value a measurement? The `feedPolls` counterpart of this question is
+ * `isMeasuredFeedPolls`, and it exists because the same question used to be answered inline at each
+ * site that asked and the sites disagreed.
+ *
+ * These two predicates are why a value read back from KV gets the same judgement a freshly-queried
+ * one does. `preserveMeasured` restores a prior row's value over a failed re-run, and the only thing
+ * `appendGrowthDaily` validates about a stored row is that its `date` is a string — so without this,
+ * a corrupt prior (`"2010"`, `-5`, `{monitor: null}`, or a value carrying no verdict at all) is
+ * resurrected over an honest failure and filed as measured, permanently. That is not hypothetical —
+ * see the inline note inside `isMeasuredFeedPolls` (not its opening paragraph, which describes a
+ * different, stricter disagreement): a shallow check admitted `{claude: 5}` / `{claude: null}` and
+ * `preserveMeasured` resurrected them over an honest failure.
+ */
+export function isMeasuredExtPolls(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0
+}
+
+export function isMeasuredPluginPolls(v: unknown): v is PluginTrafficCounts {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const c = v as { monitor?: unknown; brief?: unknown }
+  return isMeasuredExtPolls(c.monitor) && isMeasuredExtPolls(c.brief)
+}
+
+/**
+ * Judge one day's extension poll read.
+ *
+ * `failed` is deliberately broad, and the breadth is the honest part: every way the read can go wrong
+ * arrives here as the same `null` — missing creds, an HTTP failure, a body that is not the expected
+ * shape, and a `requests` value that is absent or does not parse. Those are not distinguishable by
+ * the time the value reaches this function, so it does not invent a distinction between them.
+ * #1273's rule is that one value must not tell two stories; where the SOURCE cannot discriminate, the
+ * verdict says so rather than guessing which story to tell.
+ *
+ * A `0` that AE actually reported keeps its VALUE but arrives as `zero`, not `ok` — the read succeeded,
+ * and a window nobody polled is indistinguishable from a recorder that wrote nothing.
+ *
+ * What is NOT settled is whether AE ever represents a zero-match window as `data: []` instead — this SQL
+ * has no `GROUP BY`, so it probably returns one row carrying `0`, but that has not been observed and is
+ * not asserted here. If it does return `[]`, a genuinely quiet day records as `failed` rather than
+ * `zero`. That is the fail-safe direction (a `failed` row is visibly unread; a fabricated `0` is not),
+ * which is why it ships this way unresolved.
+ */
+export function readExtPolls(total: number | null | undefined): ExtPollsRead {
+  if (!isMeasuredExtPolls(total)) return { verdict: 'failed', polls: null }
+  if (total === 0) return { verdict: 'zero', polls: 0 }
+  return { verdict: 'ok', polls: total }
+}
+
+/** The extension's alarm period — `POLL_PERIOD_MINUTES` in `extension/config.js`. Duplicated here
+ *  because a Worker cannot import the extension bundle; `client-polls.test.ts` fails if the
+ *  two drift, the same lockstep treatment `feed-slug-sync` gives its own duplicated list.
+ *  NOT user-settable — the value is compiled into the shipped extension. */
+export const EXT_POLL_PERIOD_MINUTES = 2
+
+/** The monitor's DEFAULT poll period — `AIWATCH_POLL_SECONDS` in
+ *  `plugin/aiwatch/bin/aiwatch-monitor.sh`. Unlike the extension's, this one IS user-settable: the
+ *  script rejects only a non-numeric or zero value, with no minimum, so a derived client count can err
+ *  in EITHER direction and callers must carry that caveat rather than printing a bare number. */
+export const PLUGIN_POLL_PERIOD_SECONDS = 60
+
+/**
+ * Polls observed in a 24h window → **observed client running time, in minutes**.
+ *
+ * Each poll marks one interval during which a client was alive, so the running time is simply
+ * `polls × interval` — no divisor, and nothing to look up before the number means something.
+ * `2010 ext polls × 2 min = 4020 min = 67h`.
+ *
+ * This replaced a "client-days" figure (`polls ÷ 720`) that rendered as `2.8 browsers`. Three reasons,
+ * and the second is the one that mattered:
+ *   1. `2.8 browsers` names a quantity that cannot exist, so it reads as wrong before it reads as
+ *      anything;
+ *   2. it invites exactly one misreading — a USER COUNT — and that misreading feeds growth decisions.
+ *      The count of distinct clients is NOT recoverable from a poll total (the same total is produced
+ *      by 3 clients running all day or 9 running a third of it), so a figure shaped like a count
+ *      claims a precision this counter does not have. A duration makes no such claim;
+ *   3. small values survive. Rounding client-days needed a `<0.1` floor that collapsed 1 poll and 40
+ *      polls into the same string — and with the operator's own client excluded, small values are the
+ *      EXPECTED reading, not an edge case.
+ *
+ * It also makes the operator's own share subtractable in the SAME unit: a browser left running all day
+ * contributes 24h, so `67h − 24h` is a legible lower bound on external usage. `2.8 − 1.0 = 1.8 browsers`
+ * was not.
+ *
+ * Returns `null` rather than a bogus number for a non-positive period or an invalid total; the caller
+ * decides what to do with that (both formatters fall back to the raw poll count). EXACT — rounding is
+ * `formatClientTime`'s job. Pure.
+ */
+export function clientMinutesFromPolls(polls: number, periodMinutes: number): number | null {
+  if (!Number.isFinite(polls) || polls < 0) return null
+  if (!Number.isFinite(periodMinutes) || periodMinutes <= 0) return null
+  // The PRODUCT, not just the inputs: two finite numbers multiply to `Infinity`, and the docstring
+  // above promises `null` rather than a bogus number.
+  const minutes = polls * periodMinutes
+  return Number.isFinite(minutes) ? minutes : null
+}
+
+/** Whose running time the figure describes. A union, not a `string`, so a typo cannot ship. */
+export type ClientTimeUnit = 'browser' | 'session'
+
+/**
+ * Render observed running time: `67h of browser time` / `20 min of session time`.
+ *
+ * INTEGERS only, and the unit switches at an hour. Sub-hour values keep minute resolution because that
+ * is the range the operator-exclusion window put the plugin and statusline counters into — `2 min` and
+ * `40 min` are different findings, and the client-day form printed both as `<0.1`.
+ *
+ * A total above 24h is not an error: it is the SUM across clients over a 24h window, which is what
+ * more than one concurrent client produces.
+ */
+export function formatClientTime(minutes: number, unit: ClientTimeUnit): string {
+  // Round FIRST, then choose the unit: comparing the raw value let 59.6 round to 60 and print
+  // "60 min", the exact string the unit switch exists to make unreachable.
+  const mins = Math.round(minutes)
+  // A non-zero reading must never print `0`. Unreachable while both periods are whole minutes, but
+  // `PLUGIN_POLL_PERIOD_SECONDS` is the user-settable one, and a sub-minute interval would make a
+  // single poll render as "0 min" — the same defect the deleted `<0.1` floor existed to prevent.
+  if (minutes > 0 && mins === 0) return `<1 min of ${unit} time`
+  if (mins < 60) return `${mins} min of ${unit} time`
+  return `${Math.round(mins / 60)}h of ${unit} time`
 }
 
 // ── Statusline poll volume (#918, feeds #400 Phase 1 measurement) ─────────
@@ -717,8 +898,10 @@ export function buildStatuslineTrafficSql(dataset = V1_DATASET): string {
 
 /** Parse the AE SQL statusline JSON into per-cohort counts. Strips the 'statusline-' prefix from the
  *  key for readability, and routes the legacy `proxy` catch-all (#452/#453) into its OWN `legacyProxy`
- *  field so it's never blended into the server-render preset adoption signal (#944). Tolerant of
- *  string/number requests + a missing/invalid preset. */
+ *  field so it's never blended into the server-render preset adoption signal (#944).
+ *
+ *  #1293 — tolerant of a string OR number `requests`, and of NOTHING else: a row whose `requests` is
+ *  unreadable, or whose `preset` is not a `statusline-` tag, FAILS the whole read. See the body. */
 export function parseStatuslineTrafficResponse(json: unknown): StatuslineTrafficCounts | null {
   const data = (json as { data?: unknown })?.data
   if (!Array.isArray(data)) return null
@@ -727,9 +910,21 @@ export function parseStatuslineTrafficResponse(json: unknown): StatuslineTraffic
   let legacyProxy = 0
   for (const row of data) {
     const r = row as { preset?: unknown; requests?: unknown }
-    if (typeof r.preset !== 'string' || !r.preset.startsWith(STATUSLINE_INDEX_PREFIX)) continue
+    // #1293 — an unreadable or unrecognised `preset` FAILS the read rather than being skipped, the
+    // same treatment `parsePluginTrafficResponse` gives an unrecognised `tag` and for the same reason:
+    // `WHERE index1 LIKE 'statusline-%'` makes a foreign preset impossible while query and response
+    // agree, so one appearing means the `AS preset` alias or the schema drifted. Skipping it turns
+    // "we are reading the wrong column" into a confident smaller total — or, if EVERY row drifts, into
+    // a confident `{total: 0}` that this PR's own contract would then report as `zero`, i.e. as a read
+    // that succeeded. That is the permanent, un-backfillable version of the defect.
+    if (typeof r.preset !== 'string' || !r.preset.startsWith(STATUSLINE_INDEX_PREFIX)) return null
+    // #1293 — an unreadable `requests` fails the whole read rather than contributing `0`. Same reason
+    // as the ext/plugin parsers: this value is now written to a permanent no-TTL row, where a
+    // silently-zeroed component is indistinguishable from a measured quiet window.
+    if (typeof r.requests !== 'number' && (typeof r.requests !== 'string' || r.requests.trim() === '')) return null
     const parsed = Number(r.requests)
-    const n = Number.isFinite(parsed) ? parsed : 0
+    if (!Number.isFinite(parsed) || parsed < 0) return null
+    const n = parsed
     const key = r.preset.slice(STATUSLINE_INDEX_PREFIX.length) || r.preset
     if (key === STATUSLINE_PROXY_KEY) {
       legacyProxy += n
@@ -804,8 +999,10 @@ export async function queryStatuslineTraffic(
 // Collected since #920 but, like the pre-#918 statusline tags, needs a read-back to be
 // usable. This is the consent-free plugin-adoption proxy (monitor volume ≈ installs × up-time;
 // brief volume ≈ active engagement). Same NOT-a-user-count caveat as statusline.
-const PLUGIN_MONITOR_INDEX = 'aiwatch-monitor'
-const PLUGIN_BRIEF_INDEX = 'aiwatch-brief'
+/** The plugin's two WAE indexes. Exported for the same #1293 reason as `EXT_INDEX` above: the write
+ *  sites in `index.ts` import these rather than repeating the strings. */
+export const PLUGIN_MONITOR_INDEX = 'aiwatch-monitor'
+export const PLUGIN_BRIEF_INDEX = 'aiwatch-brief'
 
 export interface PluginTrafficCounts {
   monitor: number  // last-24h background-monitor polls
@@ -823,7 +1020,19 @@ export function buildPluginTrafficSql(dataset = V1_DATASET): string {
   )
 }
 
-/** Parse the AE SQL plugin JSON into monitor/brief counts. Tolerant of string/number + missing rows. */
+/**
+ * Parse the AE SQL plugin JSON into monitor/brief counts. Tolerant of string/number + missing rows.
+ *
+ * An EMPTY `data` really is `{monitor: 0, brief: 0}`, and that is not the same judgement the ext
+ * parser makes about its own empty array: `buildPluginTrafficSql` carries `GROUP BY index1`, so a tag
+ * with no polls simply produces no row. A quiet window is genuinely measurable here.
+ *
+ * #1293 — a row that IS present fails the WHOLE read, rather than contributing `0` or being skipped,
+ * when its `requests` is unreadable OR its `tag` is not one of the two indexes. Same reason as `parseExtTrafficResponse`: the result is now written to a
+ * permanent no-TTL key, and a silently-zeroed component is indistinguishable from a measured quiet
+ * window once stored. Failing the pair (rather than just that component) is deliberate — a partial
+ * count filed as a measurement is the worse of the two, since nothing downstream can tell it apart.
+ */
 export function parsePluginTrafficResponse(json: unknown): PluginTrafficCounts | null {
   const data = (json as { data?: unknown })?.data
   if (!Array.isArray(data)) return null
@@ -831,10 +1040,16 @@ export function parsePluginTrafficResponse(json: unknown): PluginTrafficCounts |
   let brief = 0
   for (const row of data) {
     const r = row as { tag?: unknown; requests?: unknown }
+    // An unrecognised tag fails the read rather than being skipped. `WHERE index1 IN (...)` means a
+    // foreign tag cannot occur while the query and the response agree — so if one appears, the SELECT's
+    // `AS tag` alias or the schema has drifted, and silently skipping it turns "we are reading the
+    // wrong column" into a confident `{0, 0}`, which is indistinguishable from a quiet window forever.
+    if (r.tag !== PLUGIN_MONITOR_INDEX && r.tag !== PLUGIN_BRIEF_INDEX) return null
+    if (typeof r.requests !== 'number' && (typeof r.requests !== 'string' || r.requests.trim() === '')) return null
     const parsed = Number(r.requests)
-    const n = Number.isFinite(parsed) ? parsed : 0
-    if (r.tag === PLUGIN_MONITOR_INDEX) monitor += n
-    else if (r.tag === PLUGIN_BRIEF_INDEX) brief += n
+    if (!Number.isFinite(parsed) || parsed < 0) return null
+    if (r.tag === PLUGIN_MONITOR_INDEX) monitor += parsed
+    else brief += parsed
   }
   return { monitor, brief }
 }
@@ -861,6 +1076,114 @@ export async function queryPluginTraffic(
     console.warn('[wae] plugin SQL query error:', err instanceof Error ? err.message : err)
     return null
   }
+}
+
+export type PluginPollsRead =
+  | { verdict: 'ok'; counts: PluginTrafficCounts }
+  | { verdict: 'zero'; counts: PluginTrafficCounts }
+  | { verdict: 'failed'; counts: null }
+
+/** Judge one day's plugin read — same three-verdict shape as `readExtPolls`. `{monitor: 0, brief: 0}`
+ *  is a SUCCESSFUL read of a quiet window and must store as such; `null` is the query having failed.
+ *  `isMeasuredPluginPolls` is not reachable from THIS caller with a malformed shape — it is shared
+ *  with `preserveMeasured`, where the input is a KV-loaded prior that nothing else validates.
+ *
+ *  `parsePluginTrafficResponse` maps an empty `data` array to `{0, 0}`; `GROUP BY index1` explains why
+ *  a quiet tag yields no row, but it does NOT separate "nobody polled" from "the recorder wrote
+ *  nothing" — `isMeasuredFeedPolls` above names that pair indistinguishable for the identical shape.
+ *  That is what the `zero` verdict carries, so the value is stored and the ambiguity travels with it.
+ *  Do not read a plugin `zero` as evidence of no adoption; resolve it against `extPolls`, which always
+ *  carries the operator's own browser and so cannot legitimately read zero.
+ *
+ *  Causes of a `failed` verdict are deliberately NOT enumerated here or at the call site: every way the
+ *  read can go wrong — missing creds, a non-OK HTTP response, a throw, a `data` that is not an array, an
+ *  unreadable `requests`, or a tag the SELECT alias no longer matches — arrives as the same `null`. */
+export function readPluginPolls(counts: PluginTrafficCounts | null | undefined): PluginPollsRead {
+  if (!isMeasuredPluginPolls(counts)) return { verdict: 'failed', counts: null }
+  const copy = { monitor: counts.monitor, brief: counts.brief }
+  // Keyed on `monitor` ALONE, not on the pair. `monitor` is the background-poll volume this counter
+  // exists to measure and the one the operator disabled; `brief` counts on-demand `/aiwatch` runs.
+  // An earlier cut required both to be zero, so `{monitor: 0, brief: 3}` filed a monitor zero as `ok`
+  // — three briefings from anywhere would certify the measured quantity as unambiguous. It is also
+  // the aggregation this file forbids ten lines up: the two indexes stay separate "because they
+  // measure different things — summing them would make a burst of briefings look like installs".
+  if (copy.monitor === 0) return { verdict: 'zero', counts: copy }
+  return { verdict: 'ok', counts: copy }
+}
+
+/**
+ * What the PERMANENT row stores for the statusline counter: three totals, and deliberately NOT the
+ * per-preset breakdown.
+ *
+ * `byPreset` is keyed by the WAE `index1` value, and the legacy `?src=` path
+ * (`/api/status/cached?src=…`) writes that index from a CALLER-SUPPLIED query parameter with no
+ * allowlist — only a 32-byte truncation. (The server-rendered `/api/statusline/:preset` route IS
+ * allowlist-guarded; this is the other one.) So the key space is unbounded and externally controlled.
+ *
+ * That was survivable while the map was rendered into a Discord line and dropped. It is not survivable
+ * in `growth:daily`, which has no TTL, no pruning for these keys, and is written as a WHOLE-VALUE
+ * rewrite — so a wide enough map does not merely bloat the row, it pushes the month's value past the
+ * per-value cap and the put fails, stopping the entire series. One outside caller could silence the
+ * growth measurement quietly.
+ *
+ * Nothing needs the breakdown here: the series has no reader yet, and the Discord section renders from
+ * the live query rather than from the row. So it is not stored, rather than stored behind a new
+ * allowlist or a size cap.
+ */
+export interface StatuslinePollTotals {
+  serverRenderTotal: number
+  legacyProxy: number
+  total: number
+}
+
+export type StatuslinePollsRead =
+  | { verdict: 'ok'; counts: StatuslinePollTotals }
+  | { verdict: 'zero'; counts: StatuslinePollTotals }
+  | { verdict: 'failed'; counts: null }
+
+/**
+ * Is this STORED statusline value a measurement? Same role as `isMeasuredExtPolls` — the KV prior
+ * `preserveMeasured` restores from is validated only for a string `date`, so this is what stops a
+ * corrupt one being resurrected over an honest failure.
+ */
+export function isMeasuredStatuslinePolls(v: unknown): v is StatuslinePollTotals {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const c = v as { serverRenderTotal?: unknown; legacyProxy?: unknown; total?: unknown }
+  if (!isMeasuredExtPolls(c.serverRenderTotal) || !isMeasuredExtPolls(c.legacyProxy) || !isMeasuredExtPolls(c.total)) return false
+  // The SUM invariant, not just the field types. `readStatuslinePolls` discriminates its verdict on
+  // `serverRenderTotal`, so a prior whose components disagree with its total would be restored AND
+  // relabelled — a payload carrying visible traffic could come back as `zero`. The live parser always
+  // computes these together; a KV-loaded prior is what this predicate exists to distrust.
+  return c.total === (c.serverRenderTotal as number) + (c.legacyProxy as number)
+}
+
+/**
+ * Judge one day's statusline read (#1293 Part F).
+ *
+ * Persisted for the same reason the other two are: the cron queries it for the Discord line and then
+ * discards it, so no window is comparable to another. It matters NOW because the operator disabled
+ * their own statusline at the same time as the plugin monitor, opening a clean external-usage window
+ * whose data was still evaporating daily.
+ *
+ * NOTE — no client-day conversion exists for this counter, and none should be invented. The extension
+ * and plugin monitor poll on a fixed interval, so their totals divide by a known rate; a statusline
+ * renders on Claude Code events, not on a timer, so there is no divisor. Store the raw counts.
+ */
+export function readStatuslinePolls(counts: StatuslineTrafficCounts | StatuslinePollTotals | null | undefined): StatuslinePollsRead {
+  if (!isMeasuredStatuslinePolls(counts)) return { verdict: 'failed', counts: null }
+  // Copied field-by-field, which is also what DROPS `byPreset` and the render path's `delta`: only the
+  // three totals reach the permanent record. See `StatuslinePollTotals` for why the breakdown must not.
+  const copy: StatuslinePollTotals = {
+    serverRenderTotal: counts.serverRenderTotal,
+    legacyProxy: counts.legacyProxy,
+    total: counts.total,
+  }
+  // Keyed on `serverRenderTotal`, not `total`. `total` folds in `legacyProxy` — the pre-#918 jq-snippet
+  // cohort, tracked in its own field precisely because #944 established that blending the two cancels
+  // the adoption signal. A still-ticking legacy cohort would otherwise certify a `serverRenderTotal` of
+  // zero as unambiguous, which is the one number the operator-exclusion window exists to read.
+  if (copy.serverRenderTotal === 0) return { verdict: 'zero', counts: copy }
+  return { verdict: 'ok', counts: copy }
 }
 
 // ── New-feed-items count (#748) ───────────────────────────────────────────

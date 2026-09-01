@@ -46,6 +46,10 @@ describe('buildGrowthDailyRow', () => {
     // enforce that here, so the fixture has to stay faithful by hand.
     audience: { total: 40, activeTotal: 31, bySource: { x: 20, search: 11 }, activeBySource: { x: 20 }, byScreen: { service: { claude: 25 }, group: { claude: 15 }, unknown: {} } },
     feedPolls: { verdict: 'failed', polls: null },
+    // #1293 — same shape as `feedPolls`: the pair, never the value alone.
+    extPolls: { verdict: 'failed', polls: null },
+    pluginPolls: { verdict: 'failed', counts: null },
+    statuslinePolls: { verdict: 'failed', counts: null },
   }
 
   it('carries the outage-day axis and every consent-free counter', () => {
@@ -64,7 +68,79 @@ describe('buildGrowthDailyRow', () => {
       audienceByScreen: { service: { claude: 25 }, group: { claude: 15 }, unknown: {} },
       feedPolls: null,
       feedPollsRead: 'failed',
+      extPolls: null,
+      extPollsRead: 'failed',
+      pluginPolls: null,
+      pluginPollsRead: 'failed',
+      statuslinePolls: null,
+      statuslinePollsRead: 'failed',
     })
+  })
+
+  // #1293 — `0` keeps its VALUE for these counters rather than collapsing to `null`, so the series can
+  // still tell "nobody polled" from "the query broke". It arrives under `zero`, not `ok`: the value is
+  // kept and the ambiguity travels with it, because a quiet window and a recorder that wrote nothing
+  // produce the same reading.
+  it('stores a genuine zero as zero, not as the null that means "could not read"', () => {
+    const r = buildGrowthDailyRow({
+      ...base,
+      extPolls: { verdict: 'zero', polls: 0 },
+      pluginPolls: { verdict: 'zero', counts: { monitor: 0, brief: 0 } },
+    } as never)
+    expect(r.extPolls).toBe(0)
+    expect(r.extPolls).not.toBeNull()
+    // `zero`, not `ok`: the value is kept (the read succeeded) but flagged as the one reading a dead
+    // recorder also produces. With the operator's own client excluded this is the EXPECTED state.
+    expect(r.extPollsRead).toBe('zero')
+    expect(r.pluginPolls).toEqual({ monitor: 0, brief: 0 })
+    expect(r.pluginPolls).not.toBeNull()
+    expect(r.pluginPollsRead).toBe('zero')
+  })
+
+  // The two counters are two INDEPENDENT AE queries — one can fail while the other succeeds — so a
+  // mixed row is a production-realistic state, and it is the only one that discriminates a copy-paste
+  // between the four near-identical assignment lines in `buildGrowthDailyRow`.
+  it('keeps all three counters\' verdicts independent — a three-way mixed row', () => {
+    // Three INDEPENDENT AE reads: any one can fail while another succeeds and a third reads quiet, so a
+    // mixed row is production-realistic. It is also the only shape that discriminates a copy-paste
+    // between the six near-identical assignment lines in `buildGrowthDailyRow` — and the only test that
+    // puts a NON-NULL `statuslinePolls` through the builder at all.
+    const sl = { serverRenderTotal: 0, legacyProxy: 0, total: 0 }
+    const r = buildGrowthDailyRow({
+      ...base,
+      extPolls: { verdict: 'ok', polls: 2010 },
+      pluginPolls: { verdict: 'failed', counts: null },
+      statuslinePolls: { verdict: 'zero', counts: sl },
+    } as never)
+    expect(r.extPolls).toBe(2010)
+    expect(r.extPollsRead).toBe('ok')
+    expect(r.pluginPolls).toBeNull()
+    expect(r.pluginPollsRead).toBe('failed')
+    expect(r.statuslinePolls).toEqual(sl)
+    expect(r.statuslinePollsRead).toBe('zero')
+  })
+
+  it('carries a measured statusline payload through the builder', () => {
+    // Without this, hardcoding `statuslinePolls: null` at the write site leaves the field this change
+    // exists to add permanently null in every row, with the suite green.
+    const sl = { serverRenderTotal: 120, legacyProxy: 3, total: 123 }
+    const r = buildGrowthDailyRow({ ...base, statuslinePolls: { verdict: 'ok', counts: sl } } as never)
+    expect(r.statuslinePolls).toEqual(sl)
+    expect(r.statuslinePollsRead).toBe('ok')
+  })
+
+  it('carries the ext/plugin poll counts with the verdict that explains them', () => {
+    const r = buildGrowthDailyRow({
+      ...base,
+      extPolls: { verdict: 'ok', polls: 2010 },
+      pluginPolls: { verdict: 'ok', counts: { monitor: 1044, brief: 3 } },
+    } as never)
+    expect(r.extPolls).toBe(2010)
+    expect(r.extPollsRead).toBe('ok')
+    // The plugin's two indexes stay separate — summing them would make a burst of on-demand
+    // briefings read as background-monitor uptime, i.e. as installs.
+    expect(r.pluginPolls).toEqual({ monitor: 1044, brief: 3 })
+    expect(r.pluginPollsRead).toBe('ok')
   })
 
   // `alertedIncidents` must come from the `alert:count:{date}` daily accumulator rather than
@@ -512,6 +588,152 @@ describe('recordGrowthDaily — feedPolls at the KV boundary (#1273)', () => {
     const out = appendGrowthDaily(prior, row('2026-08-22', { feedPolls: null, feedPollsRead: 'failed' }))
     expect(out[0].feedPolls).toEqual({ claude: { slack: 72 } })
     expect(out[0].feedPollsRead).toBe('ok')
+  })
+
+  // #1293 — the same doctrine for the two counters, and its verdict travels too.
+  it('a failed ext/plugin re-run must not destroy an already-measured count', () => {
+    const prior = [{ ...row('2026-08-22'), extPolls: 2010, extPollsRead: 'ok' as const, pluginPolls: { monitor: 1044, brief: 3 }, pluginPollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { extPolls: null, extPollsRead: 'failed', pluginPolls: null, pluginPollsRead: 'failed' }))
+    expect(out).toHaveLength(1)
+    expect(out[0].extPolls).toBe(2010)
+    expect(out[0].extPollsRead).toBe('ok')
+    expect(out[0].pluginPolls).toEqual({ monitor: 1044, brief: 3 })
+    expect(out[0].pluginPollsRead).toBe('ok')
+  })
+
+  // The OTHER direction, and the one a truthiness check would get wrong. `0` is a successful read of a
+  // quiet window: preserving the prior over it would invent traffic that never happened, permanently,
+  // in a key with no TTL. This is what makes the guard `== null` rather than `!row.extPolls`.
+  it('a genuine ZERO overwrites a measured prior — it is a measurement, not an empty read', () => {
+    const prior = [{ ...row('2026-08-22'), extPolls: 2010, extPollsRead: 'ok' as const, pluginPolls: { monitor: 1044, brief: 3 }, pluginPollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { extPolls: 0, extPollsRead: 'ok', pluginPolls: { monitor: 0, brief: 0 }, pluginPollsRead: 'ok' }))
+    expect(out[0].extPolls).toBe(0)
+    expect(out[0].pluginPolls).toEqual({ monitor: 0, brief: 0 })
+  })
+
+  // A pre-#1293 prior has NOTHING to restore, so the preserve branch must not fire and must not
+  // invent a value. The re-run's honest `failed` stands. (The old version of this test asserted
+  // `'extPolls' in prior[0] === false` — a property of its own fixture, which the spread makes
+  // structurally impossible to violate; it could not have failed.)
+  it('does not restore anything from a pre-#1293 prior that never carried the fields', () => {
+    const prior = [row('2026-08-22')]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { extPolls: null, extPollsRead: 'failed', pluginPolls: null, pluginPollsRead: 'failed' }))
+    expect(out[0].extPolls).toBeNull()
+    expect(out[0].extPollsRead).toBe('failed')
+    expect(out[0].pluginPolls).toBeNull()
+    expect(out[0].pluginPollsRead).toBe('failed')
+  })
+
+  // The guard is `== null` on the re-run side, aimed at ITSELF: with `=== null` an absent field on the
+  // re-run would skip the branch and silently drop a measured prior. Unreachable from
+  // `buildGrowthDailyRow` today (it always writes both keys), which is exactly why it needs a test —
+  // a guard whose default is "passes" proves nothing by being green.
+  it('restores over a re-run whose field is ABSENT, not just explicitly null', () => {
+    const prior = [{ ...row('2026-08-22'), extPolls: 2010, extPollsRead: 'ok' as const, pluginPolls: { monitor: 1044, brief: 3 }, pluginPollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22'))
+    expect(out[0].extPolls).toBe(2010)
+    expect(out[0].extPollsRead).toBe('ok')
+    expect(out[0].pluginPolls).toEqual({ monitor: 1044, brief: 3 })
+  })
+
+  // A prior that KV handed back corrupt must not be resurrected over an honest failure and filed as
+  // measured. `isRow` only checks that `date` is a string, so these all reach `preserveMeasured`.
+  // the inline note inside `isMeasuredFeedPolls` records this exact defect happening once already.
+  it.each([
+    ['a numeric string', '2010'],
+    ['a negative count', -5],
+    ['a non-finite count', Number.NaN],
+    ['an object where a number belongs', { monitor: 1 }],
+  ])('refuses to restore %s as a measured extPolls', (_label, corrupt) => {
+    const prior = [{ ...row('2026-08-22'), extPolls: corrupt as never, extPollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { extPolls: null, extPollsRead: 'failed' }))
+    expect(out[0].extPolls).toBeNull()
+    expect(out[0].extPollsRead).toBe('failed')
+  })
+
+  it('refuses to restore a half-corrupt pluginPolls prior', () => {
+    const prior = [{ ...row('2026-08-22'), pluginPolls: { monitor: null, brief: 3 } as never, pluginPollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { pluginPolls: null, pluginPollsRead: 'failed' }))
+    // The harm is in the ROW, not the render: resurrecting this files a half-null count under verdict
+    // `ok` in a key with no TTL and no repair path.
+    expect(out[0].pluginPolls).toBeNull()
+    expect(out[0].pluginPollsRead).toBe('failed')
+  })
+
+  // A restored value must never arrive under a verdict that contradicts it — including an ABSENT one,
+  // which the field docs define as "this row predates the field".
+  // #1293 Part F — the statusline branch of `preserveMeasured`. It shipped with NO coverage: deleting
+  // the whole `if (row.statuslinePolls == null && ...)` block left the suite green, on the counter with
+  // the most complex predicate (a nested `byPreset` record plus a sum invariant).
+  const SL = { serverRenderTotal: 165, legacyProxy: 3, total: 168 }
+
+  it('restores a measured statusline prior over a failed re-run', () => {
+    const prior = [{ ...row('2026-08-22'), statuslinePolls: SL, statuslinePollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { statuslinePolls: null, statuslinePollsRead: 'failed' }))
+    expect(out[0].statuslinePolls).toEqual(SL)
+    expect(out[0].statuslinePollsRead).toBe('ok')
+  })
+
+  it('lets a genuine statusline zero overwrite a measured prior, under the zero verdict', () => {
+    const quiet = { serverRenderTotal: 0, legacyProxy: 0, total: 0 }
+    const prior = [{ ...row('2026-08-22'), statuslinePolls: SL, statuslinePollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { statuslinePolls: quiet, statuslinePollsRead: 'zero' }))
+    expect(out[0].statuslinePolls).toEqual(quiet)
+    expect(out[0].statuslinePollsRead).toBe('zero')
+  })
+
+  it('re-derives a restored statusline zero as `zero`, never as `ok`', () => {
+    // The prior is a measured all-quiet window. Restoring it must not upgrade it to `ok` — that is the
+    // mutation a hardcoded verdict would reintroduce, and inside the operator-exclusion window it is
+    // the difference between "nobody used it" and "we could not tell".
+    const quiet = { serverRenderTotal: 0, legacyProxy: 0, total: 0 }
+    const prior = [{ ...row('2026-08-22'), statuslinePolls: quiet, statuslinePollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { statuslinePolls: null, statuslinePollsRead: 'failed' }))
+    expect(out[0].statuslinePolls).toEqual(quiet)
+    expect(out[0].statuslinePollsRead).toBe('zero')
+  })
+
+  it.each([
+    ['a desynced total', { serverRenderTotal: 500, legacyProxy: 0, total: 0 }],
+    ['a negative component', { serverRenderTotal: -1, legacyProxy: 0, total: -1 }],
+    ['a non-numeric component', { serverRenderTotal: null, legacyProxy: 0, total: 0 }],
+    ['a missing component', { legacyProxy: 0, total: 0 }],
+  ])('refuses to restore %s as a measured statusline prior', (_label, corrupt) => {
+    // The desynced cases matter most: the verdict is keyed on `serverRenderTotal`, so a prior whose
+    // components disagree with its totals could otherwise be restored AND relabelled `zero` while
+    // carrying visible traffic.
+    const prior = [{ ...row('2026-08-22'), statuslinePolls: corrupt as never, statuslinePollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { statuslinePolls: null, statuslinePollsRead: 'failed' }))
+    expect(out[0].statuslinePolls).toBeNull()
+    expect(out[0].statuslinePollsRead).toBe('failed')
+  })
+
+  it('re-derives the verdict on restore rather than copying a prior that carried none', () => {
+    const prior = [{ ...row('2026-08-22'), extPolls: 2010 }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { extPolls: null, extPollsRead: 'failed' }))
+    expect(out[0].extPolls).toBe(2010)
+    expect(out[0].extPollsRead).toBe('ok')
+  })
+
+  // The DISCRIMINATING case for re-derivation, and the one the test above cannot see: a restored ZERO.
+  // Hardcoding `'ok'` in the preserve branch reproduces the test above exactly, so only a zero prior
+  // separates re-derivation from a hardcode — and inside the operator-exclusion window a restored zero
+  // is the EXPECTED row, not an edge case. Filing it `ok` destroys the whole point of the `zero`
+  // verdict, permanently, in a key with no backfill.
+  it('re-derives a restored ext ZERO as `zero`, never as `ok`', () => {
+    const prior = [{ ...row('2026-08-22'), extPolls: 0, extPollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { extPolls: null, extPollsRead: 'failed' }))
+    expect(out[0].extPolls).toBe(0)
+    expect(out[0].extPollsRead).toBe('zero')
+  })
+
+  it('re-derives a restored plugin monitor ZERO as `zero`, even when briefings are non-zero', () => {
+    // Also pins the verdict KEY: `monitor` alone. A hardcode gives `ok`; keying on the pair would too,
+    // because `brief: 3` is non-zero.
+    const prior = [{ ...row('2026-08-22'), pluginPolls: { monitor: 0, brief: 3 }, pluginPollsRead: 'ok' as const }]
+    const out = appendGrowthDaily(prior, row('2026-08-22', { pluginPolls: null, pluginPollsRead: 'failed' }))
+    expect(out[0].pluginPolls).toEqual({ monitor: 0, brief: 3 })
+    expect(out[0].pluginPollsRead).toBe('zero')
   })
 
   it('keeps the re-run\'s verdict when the re-run is the one that measured', () => {

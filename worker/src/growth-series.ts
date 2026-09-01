@@ -29,8 +29,9 @@
 import type { KVLike } from './utils'
 import { kvPut } from './utils'
 import type { AudienceCounts } from './outage-audience'
-import type { FeedPollsByTarget } from './api-traffic'
-import { isMeasuredFeedPolls, type FeedPollsVerdict, type FeedPollsRead } from './api-traffic'
+import type { FeedPollsByTarget, PluginTrafficCounts, StatuslinePollTotals } from './api-traffic'
+import { isMeasuredFeedPolls, isMeasuredExtPolls, isMeasuredPluginPolls, isMeasuredStatuslinePolls, readExtPolls, readPluginPolls, readStatuslinePolls, type FeedPollsVerdict, type FeedPollsRead } from './api-traffic'
+import type { PollsVerdict, ExtPollsRead, PluginPollsRead, StatuslinePollsRead } from './api-traffic'
 import type { MonthlyIncidents } from './monthly-archive'
 
 /** Rows kept per monthly key. ~31 days; the cap is a corruption guard, not a retention policy. */
@@ -109,6 +110,63 @@ export interface GrowthDailyRow {
   // #1273 — why `feedPolls` is what it is. `ok` iff a map was stored. Absent on a pre-#1273 row, and
   // on nothing else: the write site sets it on every run.
   feedPollsRead?: FeedPollsVerdict
+  // #1293 — the OTHER retention clients' 24h poll volume, kept for the same reason `feedPolls` is
+  // and previously discarded the same way: both were queried once a day for the Discord line and
+  // thrown away, so no window was ever comparable to another. The 2026-08-30 extension audit had to
+  // quote a 9-day-old figure because that day's did not exist anywhere, and "did an outage add
+  // extension users?" had no dataset at all.
+  //
+  // States mirror `feedPolls`: a value when the read succeeded, `null` when it did not, ABSENT on a
+  // row predating this field. Absent is NOT zero — reading it as zero would manufacture a step-up on
+  // the deploy date out of nothing, the trap #1055 and #1273 both name.
+  //
+  // THREE verdicts (`ok`/`zero`/`failed`), one fewer than `feedPolls`. A reported zero keeps its VALUE
+  // — these fields can hold it, so it never needs a `null` to stand in — but it does NOT arrive as
+  // `ok`: a window nobody polled and a recorder that wrote nothing are the same reading. Each verdict
+  // is keyed on the quantity its counter EXISTS TO MEASURE, not on a payload total: `pluginPolls` on
+  // `monitor` (not the pair — briefings would certify a monitor zero), `statuslinePolls` on
+  // `serverRenderTotal` (not `total` — the legacy proxy cohort would do the same). `readExtPolls`,
+  // `readPluginPolls` and `readStatuslinePolls` carry the per-counter limits.
+  //
+  // ⚠️ NO counter here applies an operator exclusion — the code corrects for nothing. What that means
+  // in practice differs per counter and has CHANGED, so read this with the deploy boundary in hand:
+  //
+  //   - EXTENSION: the operator's browser carries it and cannot be excluded server-side (no identity;
+  //     adding one breaks the published no-analytics promise). A browser running all day contributes
+  //     24h, which is what makes `total − 24h` a usable lower bound rather than a correction.
+  //   - PLUGIN MONITOR + STATUSLINE: the operator DISABLED both locally to measure external usage, so
+  //     from that point these read near zero BY CONSTRUCTION. That is the measurement working, not
+  //     adoption collapsing — and re-enabling either produces a step-up that is operator traffic, not
+  //     growth. Before that window their share was dominant (each concurrent session runs its own
+  //     monitor), so the two sides of the boundary are not comparable.
+  //
+  // Excluding operator usage in CODE was left out of scope on #1293; the window above is a manual
+  // exclusion and its start date belongs in the kv-schema `growth:daily` cell beside the deploy
+  // boundaries. Read all three as CHANGE, never as a population.
+  //
+  // Deploy day is a mixed row here too (the AE window straddles it) and which row that is cannot be
+  // recovered from the series — the boundary goes in docs/reference/kv-schema.md's `growth:daily`
+  // cell, beside the `feedPolls` (#1273) and `audienceByScreen` (#1280) boundaries.
+  extPolls?: number | null
+  extPollsRead?: PollsVerdict
+  // The plugin's two indexes stay SEPARATE (`aiwatch-monitor` background polls vs `aiwatch-brief`
+  // on-demand `/aiwatch` runs) because they measure different things — uptime vs engagement — and
+  // summing them would make a burst of briefings look like installs.
+  pluginPolls?: PluginTrafficCounts | null
+  pluginPollsRead?: PollsVerdict
+  // #1293 Part F — the THIRD counter the cron queried for a Discord line and threw away. Added in the
+  // same change as the other two because the operator disabled their own statusline at the same time
+  // as the plugin monitor, so the clean external-usage window it opened was evaporating daily.
+  //
+  // Stored as RAW TOTALS with no derived figure, unlike the two above: a statusline renders on Claude
+  // Code events rather than on a timer, so there is no poll interval to divide by and no client count
+  // to derive. Anything that invents one here is wrong.
+  //
+  // And TOTALS only — the per-preset breakdown is deliberately not stored, because its keys come from a
+  // caller-supplied query parameter with no allowlist. See `StatuslinePollTotals` for what that would
+  // have cost in a whole-value-rewrite key with no TTL.
+  statuslinePolls?: StatuslinePollTotals | null
+  statuslinePollsRead?: PollsVerdict
   // #1117 — the WINDOW-ALIGNED outage axis. `alertedIncidents` above is not one (see its comment).
   // The gap it left, measured on production 2026-07-22: `alert:count:2026-07-21` held 23 alerts for the
   // full day while the 07-21 row recorded 1, because the row was written 9 hours into that date.
@@ -288,6 +346,10 @@ export interface GrowthDailyInputs {
   // REQUIRED (not optional) so `tsc` names every call site: an optional dimension is how a derived
   // set silently re-empties (#970).
   feedPolls: FeedPollsRead
+  // #1293 — same pairing and the same REQUIRED-ness, for the same #970 reason.
+  extPolls: ExtPollsRead
+  pluginPolls: PluginPollsRead
+  statuslinePolls: StatuslinePollsRead
 }
 
 /** `growth:daily:{YYYY-MM}` — permanent, no TTL. One key per month. */
@@ -318,6 +380,12 @@ export function buildGrowthDailyRow(i: GrowthDailyInputs): GrowthDailyRow {
     audienceByScreen: i.audience?.byScreen ?? null,
     feedPolls: i.feedPolls.polls,
     feedPollsRead: i.feedPolls.verdict,
+    extPolls: i.extPolls.polls,
+    extPollsRead: i.extPolls.verdict,
+    pluginPolls: i.pluginPolls.counts,
+    pluginPollsRead: i.pluginPolls.verdict,
+    statuslinePolls: i.statuslinePolls.counts,
+    statuslinePollsRead: i.statuslinePolls.verdict,
     ...(i.outage ? { incidentsStartedInWindow: i.outage.started, outageWindowEnd: i.outage.windowEnd } : {}),
   }
 }
@@ -350,8 +418,9 @@ export function appendGrowthDaily(existing: unknown, row: GrowthDailyRow): Growt
  * disagreeing about `{}` is the defect this shape exists to prevent. Both ends go through it, so a
  * corrupt or empty prior cannot be resurrected over an honest failure either.
  *
- * Covers `feedPolls` and the AUDIENCE group. The other nullable fields read TTL'd keys that really
- * are gone by the next run, so for them a re-run's `null` is the best available value.
+ * Covers `feedPolls`, the three #1293 poll counters and the AUDIENCE group. The other nullable fields
+ * read TTL'd keys that really are gone by the next run, so for them a re-run's `null` is the best
+ * available value.
  *
  * #1280 — the audience fields do NOT belong to that TTL rationale: `queryOutageAudience` reads the
  * Analytics Engine SQL API, so its `null` is a failed request, not an expiry. Overwriting a real
@@ -366,6 +435,35 @@ function preserveMeasured(prior: GrowthDailyRow | undefined, row: GrowthDailyRow
   // defect the verdict was added to end.
   if (!isMeasuredFeedPolls(row.feedPolls) && isMeasuredFeedPolls(prior.feedPolls)) {
     out = { ...out, feedPolls: prior.feedPolls, feedPollsRead: prior.feedPollsRead }
+  }
+  // #1293 — same doctrine for the two poll counters, with one difference that matters: `0` is
+  // a MEASUREMENT here, not an empty one. Hence `== null` on the re-run side (it catches `undefined`
+  // too and leaves `0` alone); a truthiness check would resurrect a stale count over a genuine quiet
+  // day, inventing traffic that never happened in a key with no TTL and no backfill.
+  //
+  // The PRIOR side goes through the same predicate a fresh read does, not a `!= null`. `isRow` admits
+  // any object with a string `date`, so a bare null-check would restore `"2010"`, `-5` or
+  // `{monitor: null}` over an honest failure and file it as measured — the exact defect
+  // the inline note inside `isMeasuredFeedPolls` records having happened once already. The verdict is re-derived
+  // rather than copied from the prior, so a restored value cannot arrive under a contradictory (or
+  // absent) verdict.
+  // The restored verdict is re-derived by running the prior back through the SAME reader the live path
+  // uses, rather than being copied from the prior or hardcoded. Copying can resurrect a contradictory
+  // (or absent) verdict; hardcoding `'ok'` was correct only while `ok` and `failed` were the only
+  // verdicts, and would now label a restored `0` as unambiguous — the exact distinction the `zero`
+  // verdict was added to preserve. The readers also do the field-by-field copy, so a corrupt prior's
+  // junk keys cannot ride into a permanent row.
+  if (row.extPolls == null && isMeasuredExtPolls(prior.extPolls)) {
+    const restored = readExtPolls(prior.extPolls)
+    out = { ...out, extPolls: restored.polls, extPollsRead: restored.verdict }
+  }
+  if (row.pluginPolls == null && isMeasuredPluginPolls(prior.pluginPolls)) {
+    const restored = readPluginPolls(prior.pluginPolls)
+    out = { ...out, pluginPolls: restored.counts, pluginPollsRead: restored.verdict }
+  }
+  if (row.statuslinePolls == null && isMeasuredStatuslinePolls(prior.statuslinePolls)) {
+    const restored = readStatuslinePolls(prior.statuslinePolls)
+    out = { ...out, statuslinePolls: restored.counts, statuslinePollsRead: restored.verdict }
   }
   // `audienceTotal` discriminates the group: `null` only on a failed read, a real `0` on a quiet day.
   if (row.audienceTotal == null && prior.audienceTotal != null) {
