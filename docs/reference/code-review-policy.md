@@ -80,7 +80,7 @@ subagent prompts without being read), but reading it would not have been suffici
 remaining lever is not a better reminder.
 
 **`.claude/agents/review-findings-only.md`** is that lever. It is a project-defined reviewer whose system
-prompt forbids replacement prose outright — findings, `file:line`, reproduction-or-judgement-call, and
+prompt forbids replacement prose outright — findings, a locator, reproduction-or-judgement-call, and
 round attribution, with no "change it to this". Where the answer is a deletion it says so as a finding
 and lets the caller delete. It keeps the ≥80 floor, since that is the plugin reviewer's one real quality
 signal. Use it for the step 5-6 loop from round 2 onward, when the previous round's fix is itself part of
