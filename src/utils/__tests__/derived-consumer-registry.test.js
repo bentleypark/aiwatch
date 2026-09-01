@@ -28,6 +28,7 @@ const APPLIERS = {
   'worker/src/score.ts': 'excludes from the MTTR sample AND the Recovery default (carriesRecoveryTime)',
   'worker/src/incident-history.ts': 'never enters the no-TTL RAG corpus (buildHistoryRecord returns null)',
   'worker/src/monthly-archive.ts': 'kept out of countedCount (the published "avg recovery"), kept in totalMinutes',
+  'worker/src/archive-patch.ts': '#1295 — the tag is the removal key: only a `status_history` row can be a duplicate of a feed row, so it decides what leaves a frozen archive',
   'worker/src/rss.ts': 'never emitted as a /feed resolved item — it was never announced as active',
   'worker/src/ai-analysis.ts': 'excluded from findSimilarIncidents, the LLM recovery-estimate grounding',
   'worker/src/growth-series.ts': 'not counted as an incident START on the outage-day axis',
@@ -136,7 +137,7 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // Pinned at the count the widened detector finds, not a loose floor: the failure this whole file
     // guards against is the SCAN going quiet, and a floor of 40 stays green while a narrowed regex
     // drops 30 files. A legitimate change moves this number in the same diff.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(70)
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(71)
   })
 
   it('leaves none unclassified', () => {
