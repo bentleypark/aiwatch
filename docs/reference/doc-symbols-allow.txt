@@ -37,3 +37,4 @@ _templates          # Jekyll dir in the sibling aiwatch-reports repo, not this t
 kv_limit_alert      # KV key name in the kv-schema table (data key column, not a code identifier)
 workers_kv          # Cloudflare wrangler OAuth token scope name (whoami output), not ours
 page_location       # GA4 auto-collected event parameter, not a symbol in this tree (#1243)
+PostToolUse         # Claude Code hook event name; no code cites it since the #1304 recorder was withdrawn (#1298)

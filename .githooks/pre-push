@@ -25,12 +25,17 @@
 // SCOPE: agents only. Hooks and `settings.json` share the restart-activation problem and have no
 // equivalent "it ran" event, so they are not covered and this does not pretend otherwise.
 //
-// ESCAPE HATCH, on purpose. `AGENT_VERIFIED=1 git push` passes. #1150 rejected earlier gates because
-// "a deny the operator cannot satisfy honestly leaves only the override" — a demand that cannot be met
-// just manufactures the override. This one's demand (restart, spawn once) is usually meetable, but the
-// recorder that writes the evidence is a Claude Code hook and may not be loaded. So the stated escape
-// is part of the design, not a leak. `--no-verify` bypasses it as it does every git hook; the
-// Claude-side `step35-verify-gate` denies that flag separately.
+// WHAT THIS ACTUALLY IS TODAY: a conscious-confirmation gate, not an evidence-based one. The recorder
+// that would write spawn evidence was part of the `PreToolUse` design that got withdrawn (#1304), so
+// NOTHING currently writes a `spawned` record and `AGENT_VERIFIED=1` is the ONLY way through. Reading
+// the audit log is kept because the recorder may return; it finds nothing today.
+//
+// That makes the override honest rather than a leak — it is the mechanism, not a bypass of it. The
+// gate's value is that it stops you at the moment you would otherwise publish an unrun definition and
+// makes you assert, out loud, that you ran it. #1150 rejected earlier gates because "a deny the
+// operator cannot satisfy honestly leaves only the override"; here the override IS the honest
+// satisfaction. `--no-verify` bypasses the whole hook as it does every git hook; the Claude-side
+// `step35-verify-gate` denies that flag separately.
 
 import fs from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -68,8 +73,10 @@ export function rangeForLine(line, fallbackBase = 'origin/main') {
   return ZERO.test(remoteSha || '') ? `${fallbackBase}...${localSha}` : `${remoteSha}..${localSha}`
 }
 
-/** Agent names with a recorded successful spawn, written by the Claude-side `PostToolUse` recorder.
- *  Absent entirely when that hook is not loaded — which is what `AGENT_VERIFIED` exists for. */
+/** Agent names with a recorded successful spawn. NO recorder currently ships — the one that would
+ *  write these records was withdrawn with #1304 — so this returns empty in practice. Kept because the
+ *  format is what a future recorder would emit, and because an empty result is the correct answer
+ *  either way. */
 export function spawnedAgents(auditText) {
   const out = new Set()
   for (const line of String(auditText || '').split('\n')) {
@@ -97,11 +104,14 @@ export function denyMessage(names) {
     `\nBLOCKED — agent definition(s) never spawned: ${names.join(', ')}\n\n` +
     `A file under .claude/agents/ loads at SESSION START, so the session that wrote it cannot have\n` +
     `run it. Pushing now publishes a definition nobody has executed.\n\n` +
-    `Either:\n` +
-    `  1. Start a session rooted in this working tree, spawn the agent once so it resolves, push again.\n` +
-    `  2. AGENT_VERIFIED=1 git push   — if you have run it and the recorder was not loaded.\n\n` +
-    `A failed spawn is a stop, not a follow-up item. Scope: agents only; hooks and settings.json are\n` +
-    `not covered by this check.\n\n`
+    `Run it first, then say so:\n` +
+    `  1. Start a session rooted in this working tree and spawn the agent, so you know it resolves\n` +
+    `     and that your edit is what loads.\n` +
+    `  2. AGENT_VERIFIED=1 git push\n\n` +
+    `Step 2 is the only way through: no spawn RECORDER ships today, so spawning alone will not clear\n` +
+    `this. That is deliberate — the gate stops you here so the assertion is a conscious one. Do not\n` +
+    `set AGENT_VERIFIED without having run the agent; a failed spawn is a stop, not a follow-up item.\n\n` +
+    `Scope: agents only; hooks and settings.json are not covered by this check.\n\n`
   )
 }
 

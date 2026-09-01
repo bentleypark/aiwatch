@@ -98,11 +98,23 @@ filtered.
 is local git config, so the gate is live immediately — no session restart, which is what neither
 Claude-hook attempt could get past. Both of those shipped inert.
 
-**`AGENT_VERIFIED=1` is a designed exit, not a leak.** The spawn evidence is written by a Claude-side
-recorder that may not be loaded, so without a stated escape the deny would sometimes be unsatisfiable
-— exactly what #1150 rejected ("a deny the operator cannot satisfy honestly leaves only the
-override"). `--no-verify` bypasses it as it does every git hook; `step35-verify-gate` denies that flag
-separately, so the two layers cover each other.
+**What it is today: a conscious-confirmation gate, not an evidence-based one.** The recorder that
+would write spawn evidence belonged to the withdrawn `PreToolUse` design (#1304), so **nothing
+currently writes a `spawned` record and `AGENT_VERIFIED=1` is the only way through** — spawning the
+agent alone will not clear the deny. The hook still reads the audit log, because the recorder may
+return and an empty result is the right answer either way.
+
+That makes the override the mechanism rather than a bypass of it: the gate stops you at the moment you
+would otherwise publish an unrun definition and makes you assert, out loud, that you ran it. #1150
+rejected earlier gates because "a deny the operator cannot satisfy honestly leaves only the override";
+here the override IS the honest satisfaction. The deny message says so plainly, so nobody reads step 1
+as sufficient. `--no-verify` bypasses the whole hook as it does every git hook; `step35-verify-gate`
+denies that flag separately, so the two layers cover each other.
+
+**Whether to add the recorder is open.** It would be a Claude `PostToolUse` hook, which reintroduces
+the binding problem that sank both earlier attempts — and its load-bearing premise, that `PostToolUse`
+fires only on SUCCESS, has never been observed. Until someone measures that, the honest design is the
+one shipped.
 
 **Two things make it live, and both are pinned by `scripts/prepush-agent-gate.test.mjs`:** the exec
 bit (git invokes the hook directly, unlike a `node`-wired Claude hook) and a `prepare` script pointing
