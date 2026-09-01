@@ -38,6 +38,7 @@
     "web-vitals": "^5.2.0"
   },
   "devDependencies": {
+    "tsx": "^4.21.0",
     "@cloudflare/vite-plugin": "^1.30.0",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.0.0",
