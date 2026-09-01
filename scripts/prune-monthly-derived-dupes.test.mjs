@@ -9,7 +9,9 @@
 // mirror that drifts WIDER here deletes rows the worker would have kept.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, symlinkSync, rmSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
@@ -110,6 +112,24 @@ test('the backup filename cannot collide with the other ops scripts', () => {
   // this key — unlike theirs — has no second copy.
   assert.ok(CMDS[0].endsWith('/out/incidents-monthly-2026-08-before.json'))
   assert.ok(!CMDS.some((c) => c.includes('archive-before.json')))
+})
+
+// EXECUTE the shipped script, the discipline #1238 / #1254 use. Two rounds of #1295 review shipped a
+// main-module guard that exited 0 printing nothing — first for a path with a space, then through a
+// symlinked parent — and both were invisible to a suite that only imports the module. A silent exit-0
+// here reads as "nothing to prune" while leaving a stale patched document for the operator to apply.
+test('running the script through a SYMLINKED path still runs main', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aiwatch-1295-'))
+  try {
+    symlinkSync(ROOT, join(dir, 'link'))
+    const r = spawnSync(process.execPath, [join(dir, 'link', 'scripts/prune-monthly-derived-dupes.mjs')],
+      { encoding: 'utf-8', cwd: ROOT })
+    // No `--period`: main() prints usage and exits 2. A guard that did not fire exits 0, silently.
+    assert.equal(r.status, 2, `expected the usage exit, got ${r.status}: ${r.stderr || r.stdout}`)
+    assert.match(r.stderr, /usage: node scripts\/prune-monthly-derived-dupes\.mjs/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('resourceOfDerived reads the resource off a synthesized title', () => {

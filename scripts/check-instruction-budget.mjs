@@ -27,8 +27,12 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  forces into the diff.
  *
  *  46_670 → 46_793 (#1224): the KV read-census entry in the Directory Layout block, +123. First raise
- *  by a PR other than the guard's own. */
-export const BUDGET_CHARS = 46_793
+ *  by a PR other than the guard's own.
+ *
+ *  46_793 → 46_961 (#1295): the `archive-patch.ts` entry in the Directory Layout block, +168. A new
+ *  worker module has to be listed there (CLAUDE.md's own rule), and the line states what the module
+ *  refuses to do, which is the part a reader needs before reaching for it. */
+export const BUDGET_CHARS = 46_961
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

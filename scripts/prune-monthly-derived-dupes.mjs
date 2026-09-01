@@ -23,8 +23,9 @@
  *   node scripts/prune-monthly-derived-dupes.mjs --period 2026-08
  */
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const NAMESPACE_ID = 'e49508d80bb144e9a7ff872f2be771a4' // STATUS_CACHE (worker/wrangler.toml)
 
@@ -265,4 +266,11 @@ function main(argv) {
   process.exit(0)
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main(process.argv.slice(2))
+// The guard stays here because the test file IMPORTS this module; importing it must not run `main`.
+// Both sides are realpath'd: Node's ESM loader resolves `import.meta.url` through symlinks while
+// `process.argv[1]` is only made absolute, so comparing them without it exits 0 printing nothing when
+// the script is reached through a symlinked parent — reproduced, and the second silent-exit-0 shape
+// this guard has had.
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]))) {
+  main(process.argv.slice(2))
+}

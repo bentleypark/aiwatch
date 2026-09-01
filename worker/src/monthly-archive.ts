@@ -550,7 +550,10 @@ const HALF_DAY_MS = 12 * 3_600_000
  */
 export function derivedDayAlreadyBankedFromFeed(
   entries: MonthlyIncidentEntry[],
-  inc: Incident,
+  // Only the two fields this reads. Narrower than `Incident` on purpose: the #1295 archive patch feeds
+  // it a STORED row adapted at the boundary, and a wider parameter would have needed a cast there —
+  // which is exactly what would hide a mismatch if this ever started reading a third field.
+  inc: Pick<Incident, 'componentNames' | 'startedAt'>,
 ): boolean {
   const resource = inc.componentNames?.[0]
   if (!resource) return false

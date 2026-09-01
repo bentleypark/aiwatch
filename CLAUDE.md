@@ -287,6 +287,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   anthropic.ts       # Anthropic Messages REST call — model id, request body, retry + status classification (#955)
   incident-history.ts # Durable resolved-incident corpus → prediction accuracy + RAG (#827)
   recovery-mark.ts   # The shared "incident resolved" step both cron paths call — recovered: marker + analysis resolvedAt stamp (#1003)
+  archive-patch.ts   # #1295 — corrects a FROZEN monthly archive with the builder's own functions (no mirror); refuses a service whose stored figures do not reproduce
   rss.ts             # Incident RSS feeds (/feed.xml, /feed/:slug) + Slack-poller behaviours
   fallback.ts        # Fallback recommendation (tiered, Score-ranked)
   service-groups.ts  # Fine service taxonomy (llm/voice/inference/…) → /api/v1/status `group` (mirror of frontend SERVICE_CATEGORIES, sync-tested) (#1068)
