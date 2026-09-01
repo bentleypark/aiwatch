@@ -70,3 +70,6 @@ worker/coverage/
 # #1210 — patch-archive-automonitor.mjs output + the operator's pre-write backup
 *.patched.json
 archive-before.json
+# #1295 — the accumulator backup is named after its KV key, so it cannot be overwritten by the
+# archive scripts' own archive-before.json in the same directory
+*-before.json

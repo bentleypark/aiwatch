@@ -520,6 +520,68 @@ export function prunePhantomIncidents(
   return touched ? { ...data, services: nextServices } : data
 }
 
+/** Half a day in ms — the reach of the derived anchor to either end of its own local day. */
+const HALF_DAY_MS = 12 * 3_600_000
+
+/**
+ * #1295 — is this synthesized (resource, day) already accounted for by a FEED-published row?
+ *
+ * A `status_history`-derived incident is that resource's whole-day downtime TOTAL, so it contains by
+ * construction whatever a feed row on the same day covered. Banking both counts one outage twice.
+ *
+ * The window is `anchor ± 12h`: a derived incident's `startedAt` is local midnight plus twelve hours
+ * (`zonedDayStartMs` + 12h), so on a 24-hour day that is exactly the local day the `status_history`
+ * bucket is cut on, with no timezone lookup. It is NOT the local day across a DST transition, when the
+ * local day is 23 or 25 hours — the window then reaches an hour into the next local day, or stops an
+ * hour short of this one. Correcting that needs the page timezone, which this module is not given.
+ *
+ * **What it does not recognise, by design:** the resource name must be the title's PREFIX. Feed titles
+ * are `${component} — down|recovered`, but `component` keeps whatever words the provider wrote around
+ * the resource, so a title that does not START with the resource name is not matched and its day stays
+ * double-banked. Matching anywhere in the title instead is what the claim-walk does, and it cannot be
+ * copied here: the walk disambiguates nested resource names by scanning ALL of them longest-first, and
+ * this function holds one name. Failing to match leaves a duplicate; matching the wrong resource
+ * deletes a real outage day, so the narrow rule is the safe one.
+ *
+ * A missing resource name, or an unparseable timestamp on either side, returns `false` and keeps the
+ * synthesized row — not evidence that the day is covered. The same is true past
+ * `MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE`, where this reads a `data.incidents` the accumulator has
+ * already truncated — the older feed rows are simply gone and a duplicate can be banked.
+ */
+export function derivedDayAlreadyBankedFromFeed(
+  entries: MonthlyIncidentEntry[],
+  inc: Incident,
+): boolean {
+  const resource = inc.componentNames?.[0]
+  if (!resource) return false
+  const anchor = Date.parse(inc.startedAt)
+  if (Number.isNaN(anchor)) return false
+  // ANCHORED, not containment. BetterStack resource names NEST, and `services.ts`'s claim-walk sorts
+  // longest-first for exactly that reason. A bare `includes` is strictly wider than the walk it mirrors: the walk credits
+  // `"eu.api.helicone.ai — down"` to that resource ONLY, so `helicone.ai`'s day stays unclaimed and IS
+  // synthesized — and containment would then throw that row away, re-creating #1292's under-report one
+  // door down. `parseRssIncidents` writes these titles as `${component} — down|recovered`
+  // (`parsers/betterstack.ts`), so the separator is what makes the match exact.
+  const needle = resource.toLowerCase() + ' — '
+  const dayStart = anchor - HALF_DAY_MS
+  const dayEnd = anchor + HALF_DAY_MS
+  return entries.some((e) => {
+    if (e.derived) return false // another synthesized row is not feed evidence
+    const from = Date.parse(e.startedAt)
+    if (Number.isNaN(from)) return false
+    // The row's INTERVAL, not its start instant. `services.ts`'s claim-walk steps a feed item from
+    // `startedAt` to `resolvedAt` and claims every local day it touches; testing only the start missed
+    // a live case — together's `Inkling Small — down` ran 06:14:36Z→07:26:37Z against a local day
+    // opening at 07:00Z, so it began 45 min outside the window and ended 26 min inside, and the
+    // day-total was banked on top of it. An unresolved row collapses to its start, which is the only
+    // instant it is known to occupy.
+    const to = Date.parse(e.resolvedAt ?? '')
+    const until = Number.isNaN(to) ? from : Math.max(from, to)
+    if (until < dayStart || from >= dayEnd) return false
+    return (e.title ?? '').toLowerCase().startsWith(needle)
+  })
+}
+
 /** Accumulate current service incidents into monthly totals. Deduplicates by incident ID.
  *  `suppressions` is only consumed by the #975 phantom prune (an operator-hidden incident must never
  *  be pruned); accumulation itself needs no filtering, since `services` arrives already suppressed.
@@ -576,6 +638,20 @@ export function accumulateMonthlyIncidents(
           existingDetail.resolvedAt = inc.resolvedAt ?? existingDetail.resolvedAt
           existingDetail.impact = inc.impact ?? existingDetail.impact ?? null // #653 — snapshot/refresh impact
         }
+        continue
+      }
+
+      // #1295 — do not bank a synthesized day-total onto a day this accumulator already holds a
+      // FEED-published row for, from the same resource. The live claim-walk cannot prevent this: it
+      // asks what the feed says NOW, and BetterStack removes its monitor items retroactively, so a day
+      // we banked from RSS in early August reads as unspoken-for weeks later and gets synthesized on
+      // top. Both rows are `resolved`, so `prunePhantomIncidents` never touches either.
+      if (inc.derived === 'status_history' && derivedDayAlreadyBankedFromFeed(data.incidents, inc)) {
+        // Never silent: this drops a measured day from a durable record on a judgement, and
+        // `docs/reference/status-determination.md` states the rule (#970/#983). It is also how to
+        // confirm in production that the guard fires at all — #1295 exists because a duplicate shipped
+        // with no signal.
+        console.log(`[monthly-archive] #1295 ${svc.id}: skipping synthesized ${inc.id} (day ${inc.derivedDay}) — the accumulator already holds a feed row for that resource on that day`)
         continue
       }
 
