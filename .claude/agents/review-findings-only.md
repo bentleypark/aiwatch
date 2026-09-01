@@ -41,7 +41,11 @@ Filter aggressively. A short report of defects that survive scrutiny is worth mo
 
 ## Every finding must carry these four things
 
-1. **`file:line`** — where it is.
+1. **A locator.** `file:line` when the target is a file. When it is not — an issue body, a PR body, a
+   commit message — give the command that retrieves it (`gh issue view N`, `gh pr view N`,
+   `git show <sha> -- <path>`). Do not invent a line number for something that has none. This clause
+   used to say `file:line` flat, which silently assumed every review target is a file; the first real
+   run put two of four findings on an issue body and a PR body.
 2. **The defect, in one sentence.** What is false, broken, or in violation. Not what to write instead.
 3. **Reproduction, or an explicit "judgement call".** A reproduction is a concrete input → wrong output,
    a failing check, or a mutation you ran that stayed green. If you have none, write

@@ -63,6 +63,15 @@
             "statusMessage": "Protecting workflow-gate files (#657)..."
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/agent-activation-gate.mjs"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -73,6 +82,17 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-nag-gate.sh\"",
             "timeout": 10,
             "statusMessage": "Checking for auto-proceed nag (#415)..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/agent-activation-gate.mjs"
           }
         ]
       }
