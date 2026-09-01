@@ -199,7 +199,7 @@ describe('formatClientTime (#1293)', () => {
 })
 
 describe('readStatuslinePolls (#1293 Part F)', () => {
-  const counts = { byPreset: { branded: 120, clickable: 45 }, serverRenderTotal: 165, legacyProxy: 3, total: 168 }
+  const counts = { serverRenderTotal: 165, legacyProxy: 3, total: 168 }
 
   it('carries the counts with an ok verdict', () => {
     expect(readStatuslinePolls(counts)).toEqual({ verdict: 'ok', counts })
@@ -209,7 +209,7 @@ describe('readStatuslinePolls (#1293 Part F)', () => {
     // The reading the operator's own statusline used to make impossible. They disabled it to measure
     // external usage, so this is now the expected shape — and it must stay distinguishable from a dead
     // recorder, which produces the identical row.
-    const quiet = { byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 }
+    const quiet = { serverRenderTotal: 0, legacyProxy: 0, total: 0 }
     expect(readStatuslinePolls(quiet)).toEqual({ verdict: 'zero', counts: quiet })
   })
 
@@ -218,7 +218,7 @@ describe('readStatuslinePolls (#1293 Part F)', () => {
     // on it would let a still-ticking legacy cohort file a `serverRenderTotal` of zero as unambiguous —
     // and that is the one number the operator-exclusion window exists to read. Legal under the sum
     // invariant, so this fixture is reachable.
-    const legacyOnly = { byPreset: {}, serverRenderTotal: 0, legacyProxy: 9888, total: 9888 }
+    const legacyOnly = { serverRenderTotal: 0, legacyProxy: 9888, total: 9888 }
     expect(readStatuslinePolls(legacyOnly)).toEqual({ verdict: 'zero', counts: legacyOnly })
   })
 
@@ -229,31 +229,38 @@ describe('readStatuslinePolls (#1293 Part F)', () => {
 
   it('rejects a corrupt shape rather than storing it in a no-TTL row', () => {
     for (const bad of [
-      { byPreset: {}, serverRenderTotal: Number.NaN, legacyProxy: 0, total: 0 },
-      { byPreset: {}, serverRenderTotal: -1, legacyProxy: 0, total: 0 },
-      { byPreset: { branded: null }, serverRenderTotal: 0, legacyProxy: 0, total: 0 },
-      { byPreset: null, serverRenderTotal: 0, legacyProxy: 0, total: 0 },
-      { serverRenderTotal: 0, legacyProxy: 0, total: 0 },
+      { serverRenderTotal: Number.NaN, legacyProxy: 0, total: 0 },
+      { serverRenderTotal: -1, legacyProxy: 0, total: 0 },
+      { serverRenderTotal: 5, legacyProxy: 0, total: 0 },   // total disagrees with its components
+      { legacyProxy: 0, total: 0 },                          // a field missing entirely
     ]) {
       expect(readStatuslinePolls(bad as never)).toEqual({ verdict: 'failed', counts: null })
     }
   })
 
-  it('drops the rendered `delta` and copies, so the stored row is only the counts', () => {
-    // The cron's render local carries a day-over-day `delta`; that is a presentation value derived from
-    // yesterday's snapshot and has no place in the permanent record.
-    const withDelta = { ...counts, delta: { serverRender: 5, legacyProxy: null } }
-    const read = readStatuslinePolls(withDelta as never)
-    expect(read.counts).toEqual(counts)
+  it('drops the rendered `delta` AND the per-preset breakdown — only the totals are stored', () => {
+    // Two things must not reach a permanent, no-TTL, whole-value-rewrite key. `delta` is a presentation
+    // value derived from yesterday's snapshot. `byPreset` is worse: its keys are WAE `index1` values,
+    // and the legacy `?src=` path writes that index straight from a caller-supplied query parameter
+    // with no allowlist, so the key space is unbounded and externally controlled. A wide enough map
+    // pushes the month's value past the per-value cap, the put fails, and the whole series stops.
+    const wide: Record<string, number> = {}
+    for (let i = 0; i < 500; i++) wide[`statusline-junk${i}`] = 1
+    const hostile = { ...counts, byPreset: wide, delta: { serverRender: 5, legacyProxy: null } }
+    const read = readStatuslinePolls(hostile as never)
+    expect(read.counts).toEqual({ serverRenderTotal: 165, legacyProxy: 3, total: 168 })
+    expect(read.counts).not.toHaveProperty('byPreset')
     expect(read.counts).not.toHaveProperty('delta')
+    // The stored value's size must not scale with attacker-controlled input.
+    expect(JSON.stringify(read.counts).length).toBeLessThan(100)
   })
 
   it('returns a fresh object so a later mutation cannot rewrite a stored row', () => {
-    const src = { byPreset: { branded: 1 }, serverRenderTotal: 1, legacyProxy: 0, total: 1 }
+    const src = { serverRenderTotal: 1, legacyProxy: 0, total: 1 }
     const read = readStatuslinePolls(src)
-    src.byPreset.branded = 999
     src.total = 999
-    expect(read.counts).toEqual({ byPreset: { branded: 1 }, serverRenderTotal: 1, legacyProxy: 0, total: 1 })
+    src.serverRenderTotal = 999
+    expect(read.counts).toEqual({ serverRenderTotal: 1, legacyProxy: 0, total: 1 })
   })
 
   it('does NOT derive a client count — a statusline has no poll interval', () => {

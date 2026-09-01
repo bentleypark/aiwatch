@@ -105,7 +105,7 @@ describe('buildGrowthDailyRow', () => {
     // mixed row is production-realistic. It is also the only shape that discriminates a copy-paste
     // between the six near-identical assignment lines in `buildGrowthDailyRow` — and the only test that
     // puts a NON-NULL `statuslinePolls` through the builder at all.
-    const sl = { byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 }
+    const sl = { serverRenderTotal: 0, legacyProxy: 0, total: 0 }
     const r = buildGrowthDailyRow({
       ...base,
       extPolls: { verdict: 'ok', polls: 2010 },
@@ -123,7 +123,7 @@ describe('buildGrowthDailyRow', () => {
   it('carries a measured statusline payload through the builder', () => {
     // Without this, hardcoding `statuslinePolls: null` at the write site leaves the field this change
     // exists to add permanently null in every row, with the suite green.
-    const sl = { byPreset: { branded: 120 }, serverRenderTotal: 120, legacyProxy: 3, total: 123 }
+    const sl = { serverRenderTotal: 120, legacyProxy: 3, total: 123 }
     const r = buildGrowthDailyRow({ ...base, statuslinePolls: { verdict: 'ok', counts: sl } } as never)
     expect(r.statuslinePolls).toEqual(sl)
     expect(r.statuslinePollsRead).toBe('ok')
@@ -665,7 +665,7 @@ describe('recordGrowthDaily — feedPolls at the KV boundary (#1273)', () => {
   // #1293 Part F — the statusline branch of `preserveMeasured`. It shipped with NO coverage: deleting
   // the whole `if (row.statuslinePolls == null && ...)` block left the suite green, on the counter with
   // the most complex predicate (a nested `byPreset` record plus a sum invariant).
-  const SL = { byPreset: { branded: 120, clickable: 45 }, serverRenderTotal: 165, legacyProxy: 3, total: 168 }
+  const SL = { serverRenderTotal: 165, legacyProxy: 3, total: 168 }
 
   it('restores a measured statusline prior over a failed re-run', () => {
     const prior = [{ ...row('2026-08-22'), statuslinePolls: SL, statuslinePollsRead: 'ok' as const }]
@@ -675,7 +675,7 @@ describe('recordGrowthDaily — feedPolls at the KV boundary (#1273)', () => {
   })
 
   it('lets a genuine statusline zero overwrite a measured prior, under the zero verdict', () => {
-    const quiet = { byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 }
+    const quiet = { serverRenderTotal: 0, legacyProxy: 0, total: 0 }
     const prior = [{ ...row('2026-08-22'), statuslinePolls: SL, statuslinePollsRead: 'ok' as const }]
     const out = appendGrowthDaily(prior, row('2026-08-22', { statuslinePolls: quiet, statuslinePollsRead: 'zero' }))
     expect(out[0].statuslinePolls).toEqual(quiet)
@@ -686,7 +686,7 @@ describe('recordGrowthDaily — feedPolls at the KV boundary (#1273)', () => {
     // The prior is a measured all-quiet window. Restoring it must not upgrade it to `ok` — that is the
     // mutation a hardcoded verdict would reintroduce, and inside the operator-exclusion window it is
     // the difference between "nobody used it" and "we could not tell".
-    const quiet = { byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 }
+    const quiet = { serverRenderTotal: 0, legacyProxy: 0, total: 0 }
     const prior = [{ ...row('2026-08-22'), statuslinePolls: quiet, statuslinePollsRead: 'ok' as const }]
     const out = appendGrowthDaily(prior, row('2026-08-22', { statuslinePolls: null, statuslinePollsRead: 'failed' }))
     expect(out[0].statuslinePolls).toEqual(quiet)
@@ -694,11 +694,10 @@ describe('recordGrowthDaily — feedPolls at the KV boundary (#1273)', () => {
   })
 
   it.each([
-    ['a desynced total', { byPreset: { branded: 500 }, serverRenderTotal: 500, legacyProxy: 0, total: 0 }],
-    ['a byPreset that does not sum to serverRenderTotal', { byPreset: { branded: 1 }, serverRenderTotal: 500, legacyProxy: 0, total: 500 }],
-    ['a non-numeric preset count', { byPreset: { branded: null }, serverRenderTotal: 0, legacyProxy: 0, total: 0 }],
-    ['a negative component', { byPreset: {}, serverRenderTotal: -1, legacyProxy: 0, total: -1 }],
-    ['a missing byPreset', { serverRenderTotal: 0, legacyProxy: 0, total: 0 }],
+    ['a desynced total', { serverRenderTotal: 500, legacyProxy: 0, total: 0 }],
+    ['a negative component', { serverRenderTotal: -1, legacyProxy: 0, total: -1 }],
+    ['a non-numeric component', { serverRenderTotal: null, legacyProxy: 0, total: 0 }],
+    ['a missing component', { legacyProxy: 0, total: 0 }],
   ])('refuses to restore %s as a measured statusline prior', (_label, corrupt) => {
     // The desynced cases matter most: the verdict is keyed on `serverRenderTotal`, so a prior whose
     // components disagree with its totals could otherwise be restored AND relabelled `zero` while

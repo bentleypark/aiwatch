@@ -1111,9 +1111,34 @@ export function readPluginPolls(counts: PluginTrafficCounts | null | undefined):
   return { verdict: 'ok', counts: copy }
 }
 
+/**
+ * What the PERMANENT row stores for the statusline counter: three totals, and deliberately NOT the
+ * per-preset breakdown.
+ *
+ * `byPreset` is keyed by the WAE `index1` value, and the legacy `?src=` path
+ * (`/api/status/cached?src=…`) writes that index from a CALLER-SUPPLIED query parameter with no
+ * allowlist — only a 32-byte truncation. (The server-rendered `/api/statusline/:preset` route IS
+ * allowlist-guarded; this is the other one.) So the key space is unbounded and externally controlled.
+ *
+ * That was survivable while the map was rendered into a Discord line and dropped. It is not survivable
+ * in `growth:daily`, which has no TTL, no pruning for these keys, and is written as a WHOLE-VALUE
+ * rewrite — so a wide enough map does not merely bloat the row, it pushes the month's value past the
+ * per-value cap and the put fails, stopping the entire series. One outside caller could silence the
+ * growth measurement quietly.
+ *
+ * Nothing needs the breakdown here: the series has no reader yet, and the Discord section renders from
+ * the live query rather than from the row. So it is not stored, rather than stored behind a new
+ * allowlist or a size cap.
+ */
+export interface StatuslinePollTotals {
+  serverRenderTotal: number
+  legacyProxy: number
+  total: number
+}
+
 export type StatuslinePollsRead =
-  | { verdict: 'ok'; counts: StatuslineTrafficCounts }
-  | { verdict: 'zero'; counts: StatuslineTrafficCounts }
+  | { verdict: 'ok'; counts: StatuslinePollTotals }
+  | { verdict: 'zero'; counts: StatuslinePollTotals }
   | { verdict: 'failed'; counts: null }
 
 /**
@@ -1121,19 +1146,15 @@ export type StatuslinePollsRead =
  * `preserveMeasured` restores from is validated only for a string `date`, so this is what stops a
  * corrupt one being resurrected over an honest failure.
  */
-export function isMeasuredStatuslinePolls(v: unknown): v is StatuslineTrafficCounts {
+export function isMeasuredStatuslinePolls(v: unknown): v is StatuslinePollTotals {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
-  const c = v as { byPreset?: unknown; serverRenderTotal?: unknown; legacyProxy?: unknown; total?: unknown }
+  const c = v as { serverRenderTotal?: unknown; legacyProxy?: unknown; total?: unknown }
   if (!isMeasuredExtPolls(c.serverRenderTotal) || !isMeasuredExtPolls(c.legacyProxy) || !isMeasuredExtPolls(c.total)) return false
-  if (typeof c.byPreset !== 'object' || c.byPreset === null || Array.isArray(c.byPreset)) return false
-  if (!Object.values(c.byPreset as Record<string, unknown>).every(isMeasuredExtPolls)) return false
   // The SUM invariant, not just the field types. `readStatuslinePolls` discriminates its verdict on
-  // `serverRenderTotal`, so a prior whose components disagree with its totals would be restored AND
+  // `serverRenderTotal`, so a prior whose components disagree with its total would be restored AND
   // relabelled — a payload carrying visible traffic could come back as `zero`. The live parser always
   // computes these together; a KV-loaded prior is what this predicate exists to distrust.
-  const byPresetSum = Object.values(c.byPreset as Record<string, number>).reduce((a, b) => a + b, 0)
   return c.total === (c.serverRenderTotal as number) + (c.legacyProxy as number)
-    && byPresetSum === c.serverRenderTotal
 }
 
 /**
@@ -1148,12 +1169,11 @@ export function isMeasuredStatuslinePolls(v: unknown): v is StatuslineTrafficCou
  * and plugin monitor poll on a fixed interval, so their totals divide by a known rate; a statusline
  * renders on Claude Code events, not on a timer, so there is no divisor. Store the raw counts.
  */
-export function readStatuslinePolls(counts: StatuslineTrafficCounts | null | undefined): StatuslinePollsRead {
+export function readStatuslinePolls(counts: StatuslineTrafficCounts | StatuslinePollTotals | null | undefined): StatuslinePollsRead {
   if (!isMeasuredStatuslinePolls(counts)) return { verdict: 'failed', counts: null }
-  // Copied field-by-field so a later mutation of the source cannot rewrite a stored row, and so a
-  // caller's extra keys (the render path attaches a `delta`) never reach the permanent record.
-  const copy: StatuslineTrafficCounts = {
-    byPreset: { ...counts.byPreset },
+  // Copied field-by-field, which is also what DROPS `byPreset` and the render path's `delta`: only the
+  // three totals reach the permanent record. See `StatuslinePollTotals` for why the breakdown must not.
+  const copy: StatuslinePollTotals = {
     serverRenderTotal: counts.serverRenderTotal,
     legacyProxy: counts.legacyProxy,
     total: counts.total,

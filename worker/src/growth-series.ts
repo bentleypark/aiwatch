@@ -29,7 +29,7 @@
 import type { KVLike } from './utils'
 import { kvPut } from './utils'
 import type { AudienceCounts } from './outage-audience'
-import type { FeedPollsByTarget, PluginTrafficCounts, StatuslineTrafficCounts } from './api-traffic'
+import type { FeedPollsByTarget, PluginTrafficCounts, StatuslinePollTotals } from './api-traffic'
 import { isMeasuredFeedPolls, isMeasuredExtPolls, isMeasuredPluginPolls, isMeasuredStatuslinePolls, readExtPolls, readPluginPolls, readStatuslinePolls, type FeedPollsVerdict, type FeedPollsRead } from './api-traffic'
 import type { PollsVerdict, ExtPollsRead, PluginPollsRead, StatuslinePollsRead } from './api-traffic'
 import type { MonthlyIncidents } from './monthly-archive'
@@ -158,10 +158,14 @@ export interface GrowthDailyRow {
   // same change as the other two because the operator disabled their own statusline at the same time
   // as the plugin monitor, so the clean external-usage window it opened was evaporating daily.
   //
-  // Stored as RAW COUNTS with no derived figure, unlike the two above: a statusline renders on Claude
+  // Stored as RAW TOTALS with no derived figure, unlike the two above: a statusline renders on Claude
   // Code events rather than on a timer, so there is no poll interval to divide by and no client count
   // to derive. Anything that invents one here is wrong.
-  statuslinePolls?: StatuslineTrafficCounts | null
+  //
+  // And TOTALS only — the per-preset breakdown is deliberately not stored, because its keys come from a
+  // caller-supplied query parameter with no allowlist. See `StatuslinePollTotals` for what that would
+  // have cost in a whole-value-rewrite key with no TTL.
+  statuslinePolls?: StatuslinePollTotals | null
   statuslinePollsRead?: PollsVerdict
   // #1117 — the WINDOW-ALIGNED outage axis. `alertedIncidents` above is not one (see its comment).
   // The gap it left, measured on production 2026-07-22: `alert:count:2026-07-21` held 23 alerts for the
