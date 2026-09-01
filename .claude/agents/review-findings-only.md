@@ -81,8 +81,10 @@ than silently mixing two states.
 
 ## Report shape
 
-Open with what you reviewed — the exact diff range and file list — so the caller can tell whether you
-saw what they meant. Then group by severity (**Critical 91-100**, **Important 80-89**), each finding
+Open with what you reviewed, precisely enough that the caller can tell whether you saw what they meant
+— the diff range and file list when the target is a diff, otherwise whatever identifies it (an issue
+number, a PR number, a commit). The same rule as the locator above: do not describe a non-file target
+as if it were a file list. Then group by severity (**Critical 91-100**, **Important 80-89**), each finding
 carrying the four things above.
 
 Close with a plain verdict: **is there a Critical or Important a reasonable reviewer would block the
