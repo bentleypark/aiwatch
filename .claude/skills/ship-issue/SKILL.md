@@ -72,6 +72,11 @@ is the *procedure* — follow it top to bottom.
    returns** — which agent by domain, why only `code-reviewer` carries a severity floor, and why the
    suggested rewrites in a report are not to be adopted — is
    [docs/reference/code-review-policy.md](../../../docs/reference/code-review-policy.md) (#1245).
+   - **From round 2 onward, spawn `review-findings-only` directly** — `subagent_type: "review-findings-only"`,
+     in place of the plugin's `code-reviewer`. `/pr-review-toolkit:review-pr` selects among its own plugin
+     agents, so this one is reached only by naming it. It keeps the ≥80 floor, withholds the replacement
+     prose that reseeded findings on #1293, and requires the round attribution step 6's causal trigger
+     runs on (#1298).
    - **Carry the round number, the RUNNING Critical total, and the prior round's findings into the next
      review prompt (#1097/#1124).** The review agents are spawned fresh each round and cannot see how many
      rounds have run or what the last one found — *you* are the only place that history lives, so state it:

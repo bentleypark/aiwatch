@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // #1150 — review-loop telemetry (PreToolUse, matcher `Task|Agent`).
 //
-// WHAT IT DOES. On every `pr-review-toolkit:*` subagent spawn it records one audit line: the round the
-// prompt declares (or that it declared none), the session, and the branch (#1245). Nothing else. It
-// never blocks.
+// WHAT IT DOES. On every review-agent spawn — the `pr-review-toolkit:*` plugin agents, and the project's
+// own `review-findings-only` (#1298), which was invisible here until #1308 — it records one audit line:
+// the round the prompt declares (or that it declared none), the session, and the branch (#1245). Nothing
+// else. It never blocks.
 // `npm run hook-audit`'s 🔁 section turns those lines into a round histogram and an
 // undeclared-round count, so a review loop that ran long — or that stopped tracking rounds at all — is
 // visible after the fact instead of being reconstructed from memory.
@@ -60,9 +61,21 @@ function audit(decision, note = '') {
  *  only as a `round-*` count that quietly drops to zero. */
 export const REVIEW_AGENT_PREFIX = 'pr-review-toolkit'
 
+/** Project-defined review agents, matched EXACTLY. A `.claude/agents/` definition has a bare name and no
+ *  namespace, so there is no prefix to anchor on, and `startsWith` would also swallow a longer name that
+ *  merely begins the same way. A list rather than one constant because what this hook measures is the
+ *  review ROUND, not one vendor's agents.
+ *
+ *  #1308 is why: `review-findings-only` shipped in #1298 and matched nothing here, so a spawn of it exited
+ *  before any audit line was written. The effect ran backwards — the more closely the loop followed
+ *  `docs/reference/code-review-policy.md` and switched to it from round 2 onward, the more the 🔁 histogram
+ *  under-reported the rounds that actually ran. */
+export const PROJECT_REVIEW_AGENTS = ['review-findings-only']
+
 export function isPrReviewSpawn(toolInput) {
   const st = toolInput?.subagent_type
-  return typeof st === 'string' && st.startsWith(REVIEW_AGENT_PREFIX)
+  if (typeof st !== 'string') return false
+  return st.startsWith(REVIEW_AGENT_PREFIX) || PROJECT_REVIEW_AGENTS.includes(st)
 }
 
 // The round a prompt declares: `ROUND 4`, `round #4`, `round-4`, `라운드 4`, `4라운드`. The `(?!\d)` on the
@@ -168,7 +181,7 @@ function main() {
   // (`JSON.parse` also succeeds on the scalar `null`, which this same guard catches before any deref.)
   if (input === null || typeof input !== 'object' || !('tool_input' in input)) failOpen('no-tool-input')
   const ti = input.tool_input ?? {}
-  if (!isPrReviewSpawn(ti)) process.exit(0) // not a pr-review spawn → not our call
+  if (!isPrReviewSpawn(ti)) process.exit(0) // not a review spawn → not our call
 
   try {
     // A missing `prompt` is a harness schema drift. Keyed on `prompt` ALONE, with no fallback to
