@@ -13,7 +13,8 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  isPrReviewSpawn, REVIEW_AGENT_PREFIX, declaredRound, sessionId, noteFor, auditLine, branchName, repoRootFrom,
+  isPrReviewSpawn, REVIEW_AGENT_PREFIX, PROJECT_REVIEW_AGENTS, declaredRound, sessionId, noteFor, auditLine,
+  branchName, repoRootFrom,
 } from '../.claude/hooks/review-loop-gate.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -40,6 +41,27 @@ test('isPrReviewSpawn — prefix-anchored, so a lookalike suffix does not match'
   assert.equal(isPrReviewSpawn({ subagent_type: 'Explore' }), false)
   assert.equal(isPrReviewSpawn({}), false)
   assert.equal(isPrReviewSpawn(undefined), false)
+})
+
+test('isPrReviewSpawn — a project agent matches EXACTLY, not by prefix (#1308)', () => {
+  // The plugin agents share a namespace to anchor on; a `.claude/agents/` name is bare. Matching those by
+  // `startsWith` would swallow any longer name beginning the same way, so they are compared whole.
+  assert.equal(isPrReviewSpawn({ subagent_type: 'review-findings-only' }), true)
+  assert.equal(isPrReviewSpawn({ subagent_type: 'review-findings-only-v2' }), false)
+  assert.equal(isPrReviewSpawn({ subagent_type: 'x-review-findings-only' }), false)
+})
+
+test('every PROJECT_REVIEW_AGENTS entry exists as an agent, and the runbook names it (#1308)', () => {
+  // #1308: a spawn of `review-findings-only` matched nothing here and exited before writing any line.
+  // These are text checks over two files. Nothing here decides what a sentence routes to, so the reverse
+  // direction — an agent the runbook names but the list omits — is not pinned.
+  assert.ok(PROJECT_REVIEW_AGENTS.length > 0, 'the list is empty — nothing is pinned')
+  const skill = readFileSync(join(REPO, '.claude', 'skills', 'ship-issue', 'SKILL.md'), 'utf8')
+  for (const name of PROJECT_REVIEW_AGENTS) {
+    const def = readFileSync(join(REPO, '.claude', 'agents', `${name}.md`), 'utf8')
+    assert.match(def, new RegExp(`^name:\\s*${name}\\s*$`, 'm'), `.claude/agents/${name}.md does not declare name: ${name}`)
+    assert.ok(skill.includes(`subagent_type: "${name}"`), `ship-issue SKILL.md does not name ${name}`)
+  }
 })
 
 test('REVIEW_AGENT_PREFIX stays in lockstep with the documented review command', () => {
@@ -223,6 +245,25 @@ test('CLI — a non-review spawn records nothing at all', () => {
   const { stdout, audit } = runHook({ subagent_type: 'Explore', description: 'find x', prompt: 'find x' })
   assert.equal(stdout.trim(), '')
   assert.equal(audit.length, 0)
+})
+
+test('CLI — a project review agent records a line, like a plugin one (#1308)', () => {
+  // The positive counterpart to the negative above, and the assertion that would have failed before #1308:
+  // this spawn matched nothing, so the hook exited before writing. Executed rather than asserted on the
+  // pure function, because "matched but did not record" and "never matched" are the same silence from
+  // outside.
+  //
+  // The `subagent_type` value is OBSERVED, not assumed: real `name: "Agent"` tool_use records in this
+  // project's session transcripts carry `"subagent_type":"review-findings-only"` — the bare name, no
+  // namespace, no decoration. A fixture that merely restated an assumption about the harness would leave
+  // the whole matcher unadjudicated while every test here stayed green.
+  const { stdout, audit } = runHook({
+    subagent_type: 'review-findings-only', description: 'Review the diff', prompt: 'This is ROUND 2. Please review.',
+  })
+  assert.equal(stdout.trim(), '', 'this hook has no deny path')
+  assert.equal(audit.length, 1, 'a project review spawn was not recorded')
+  assert.equal(audit[0].decision, 'pass')
+  assert.equal(audit[0].note, `round-2:s=abcdef12:b=${branchName(REPO)}`)
 })
 
 test('CLI — a review spawn records exactly one pass line, and NEVER blocks', () => {
