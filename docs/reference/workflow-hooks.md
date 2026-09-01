@@ -1,7 +1,7 @@
 ---
 type: reference
 title: "Workflow-gate hooks (#415/#657) — the enforcement layer"
-description: "The seven .claude/hooks workflow hooks: what each fires on, hard vs soft, the audit log, and how to monitor + tune the step-3.5 hard gate."
+description: "The seven .claude/hooks workflow hooks plus the .githooks/pre-push agent gate: what each fires on, hard vs soft, the audit log, and how to monitor + tune the step-3.5 hard gate."
 tags: [workflow, hooks, enforcement, ci]
 ---
 
@@ -64,6 +64,58 @@ already lives in, and count how often it fires and how many of those firings are
 will not tell you that a rule which sounds objective is unreachable, non-discriminating, or inverted.
 Include the worktree session directories (`~/.claude/projects/*--claude-worktrees-*`): issue work happens
 there, and a main-directory-only scan silently drops those sessions.
+
+## A git hook, not a Claude hook — the agent-activation gate (#1298)
+
+`.githooks/pre-push` is the one enforcement point here that is **not** a `.claude/settings.json` hook.
+It refuses a push that adds or modifies a file under `.claude/agents/` unless a successful spawn of
+that agent is on record, or `AGENT_VERIFIED=1` is set. The count above stays SEVEN: this is a
+different mechanism, run by git rather than by the harness.
+
+**Why it is not a Claude hook, having been built as one twice.** An agent definition loads at session
+start, so the session that writes one cannot spawn it — #1299 shipped a definition nobody had run.
+Two `PreToolUse` attempts failed for reasons worth keeping:
+
+1. The first was wired BARE (`"$CLAUDE_PROJECT_DIR"/.claude/hooks/…`) while the file is committed
+   `100644`. A bare command with no exec bit exits **126**, which `PreToolUse` treats as a
+   non-blocking error rather than the deny code **2** — so it blocked nothing and recorded nothing,
+   silently. Every `.mjs` hook in the table above is `100644` and is invoked `node "…"`; that is the
+   convention, and this one broke it. Its own suite could not see the failure: it asserted that the
+   command STRING contained the filename, never that the command could run.
+2. The second, deeper, failure was the interception point. Deciding from the command string whether a
+   push is happening cannot work — `echo git push` denied, `git -C /elsewhere push` bypassed, and
+   `cd ~/aiwatch-reports && git push` **denied**, because the hook read the diff of the SESSION's repo
+   rather than the repo being pushed. That command is how a monthly report is published, so an
+   unrelated agent edit on an aiwatch branch blocked a different repository, naming an agent that repo
+   has never heard of. Per CLAUDE.md the response to a false-positive rate is to tune or soften; there
+   was nothing to tune, because a shell string cannot answer "which repo is being pushed".
+
+`pre-push` deletes that question instead of narrowing it. Git runs the hook **in the repository being
+pushed** and hands it the refs on stdin, so cross-repo false positives are unrepresentable rather than
+filtered.
+
+**It is also the first of the three that could be verified the day it was written.** `core.hooksPath`
+is local git config, so the gate is live immediately — no session restart, which is what neither
+Claude-hook attempt could get past. Both of those shipped inert.
+
+**`AGENT_VERIFIED=1` is a designed exit, not a leak.** The spawn evidence is written by a Claude-side
+recorder that may not be loaded, so without a stated escape the deny would sometimes be unsatisfiable
+— exactly what #1150 rejected ("a deny the operator cannot satisfy honestly leaves only the
+override"). `--no-verify` bypasses it as it does every git hook; `step35-verify-gate` denies that flag
+separately, so the two layers cover each other.
+
+**Two things make it live, and both are pinned by `scripts/prepush-agent-gate.test.mjs`:** the exec
+bit (git invokes the hook directly, unlike a `node`-wired Claude hook) and a `prepare` script pointing
+git at `.githooks`, since `.git/hooks` is not version-controlled and a committed hook is inert on
+every clone without it. **An existing clone needs one `npm install` before the gate is active.**
+
+The suite's shape is deliberate: every test that matters EXECUTES the hook in a throwaway repo and
+asserts its EXIT CODE, because "denied" and "never ran" are indistinguishable from outside otherwise.
+That is the lesson of failure 1 — a structural scan cannot tell a live gate from a dead one.
+
+**Scope: agents only.** Hooks and `settings.json` have the same restart-activation problem and no
+equivalent "it ran" event, so they are not covered, and the deny message says so rather than implying
+coverage that does not exist.
 
 ## The instruction budget — a CI ratchet on always-loaded context (#1285)
 
