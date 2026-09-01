@@ -813,7 +813,7 @@ describe('displayComponentIds config sanity (#606)', () => {
   // junie: 2 — #1004 follow-on. Single statusComponentId badge (Central Console, the AI gateway) + a
   // curated 2-row breakdown [Central Console, JetBrains AI]; no worst-of statusComponentIds (that would
   // pin uptime to JetBrains AI's ~6d window).
-  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, junie: 2, voyageai: 2, pinecone: 6, twelvelabs: 10 }
+  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, junie: 2, voyageai: 2, pinecone: 6, twelvelabs: 11 }
 
   it('single-owner services carry the curated displayComponentIds count, keep their badge statusComponentId, and have no worst-of statusComponentIds', () => {
     for (const [id, count] of Object.entries(SINGLE_OWNER_COUNT)) {
@@ -937,6 +937,14 @@ describe('SERVICES multi-component config sanity (#379)', () => {
       'k0trcq273dr6', // Automations
       'vsny1qv7v86c', // CLI
     ])
+  })
+
+  it('cursor displayComponentIds is a SUPERSET of statusComponentIds — resolveSvcComponents falls back to statusComponentIds only when displayComponentIds is absent entirely, so a display-only addition that omits the badge set would silently drop the four core rows from the breakdown card', () => {
+    const cursor = SERVICES.find((s) => s.id === 'cursor')!
+    expect(cursor.displayComponentIds, 'cursor').toBeDefined()
+    for (const id of cursor.statusComponentIds!) {
+      expect(cursor.displayComponentIds, `statusComponentIds entry ${id} missing from displayComponentIds`).toContain(id)
+    }
   })
 
   it('claudecode intentionally stays single-component (dependency tracking would clash with incidentKeywords filter)', () => {

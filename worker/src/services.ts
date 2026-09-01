@@ -301,8 +301,11 @@ export const SERVICES: ServiceConfig[] = [
   // statuspage.ts covers it, no new parser. Single-owner page → no incidentKeywords needed.
   // Category inference (not video-gen: Twelve Labs is search/embed/analyze, not generation).
   // EXCLUDE_FALLBACK: no API_TIER; video understanding has no clean substitute.
-  // displayComponentIds (#606): all 10 individual API surfaces (Search/Embed/Analyze/Index/Video
-  // list) under the API group. Excludes Platform/Playground/Dashboard (non-API surfaces).
+  // displayComponentIds (#606): all 11 individual API surfaces (Search/Embed/Analyze/Index/Video
+  // list) under the API group, verified against the live components.json 2026-09-01. Excludes
+  // Platform/Playground/Dashboard (non-API surfaces). Embed API - Marengo3.5 Sync/Async added
+  // 2026-08-31 (new-component alert, display-only per #606 convention); '2k0gnkk2kjmz' dropped in the
+  // same pass — no longer present on the page (was silently logging a breakdown-drift warning).
   // #983 — Twelve Labs' Statuspage auto-monitor opens a BRAND-NEW incident per component blip, all
   // under one fixed title, and Statuspage stamps `impact: 'major'` on it whenever the affected
   // sub-component reads `major_outage`. On 2026-07-09 that produced four 5–16m incidents with
@@ -311,7 +314,7 @@ export const SERVICES: ServiceConfig[] = [
   // them into one ×N row; `flapSuppression` then dedups a repeat within the 60-min window (#283).
   // The provider's REAL, human-written incidents use distinct titles ("Search API failure", "API
   // server failure") and never match this anchored pattern.
-  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', '2k0gnkk2kjmz', 'j21c5rdfj8kf', '91lzwtn6071h'], autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
+  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', 'j21c5rdfj8kf', '91lzwtn6071h', 'p1hx7t867896', '3ng4ddpvmv3r'], autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
   // LangSmith (#561) — LangChain's hosted observability/eval platform on an incident.io page. Since #1066
   // that page is a "global"/multi-region page whose Atlassian v2 compat API returns `components: []`, so
   // it is NO LONGER covered by statuspage.ts directly — `incidentIoGlobalPage` routes it through
@@ -464,9 +467,14 @@ export const SERVICES: ServiceConfig[] = [
   //   Codex product (API/CLI/VS Code/Web) was operational. Removed from BOTH arrays and moved to
   //   chatgpt where it belongs.
   { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', statusComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', statusComponentIds: ['01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK'], displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV'] },
-  // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379).
-  // Bugbot/cursor.com/Marketplace are auxiliary surfaces and intentionally excluded.
-  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'] },
+  // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379). Auxiliary
+  // surfaces are intentionally excluded from that worst-of set. Origin + Grok Bot (new components,
+  // 2026-08-17) join that excluded category — Grok Bot is a bot integration, not a core product
+  // surface, and Origin has no confirmed core-surface role — but resolveSvcComponents falls back to
+  // statusComponentIds ONLY when displayComponentIds is absent, so displayComponentIds here MUST be a
+  // superset of statusComponentIds (mirrors codex/openai/langsmith) or the breakdown card silently
+  // loses the four core rows the moment this field exists at all.
+  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'], displayComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', 'xwjpvdf81qh9', 'sm5wkcnqkvr9'] },
   // copilot badge reflects worst-of: Copilot + Copilot AI Model Providers (direct upstream) (#379).
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
   // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
