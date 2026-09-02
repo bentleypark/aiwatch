@@ -70,8 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10   # #1253 — never inherit the 6h default
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       # Zero-dependency script (node: builtins only) — deliberately no `npm ci`.
@@ -101,8 +101,8 @@ jobs:
     # test.yml on code PRs, and re-running it here would duplicate ~4s of unrelated work on every
     # doc edit for no added coverage.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: 'npm'
@@ -120,8 +120,8 @@ jobs:
     # that orphans a doc ref) is caught by the real-repo assertion in check-doc-symbols.test.mjs,
     # which runs under test:scripts on code PRs. Zero-dependency (node: builtins) → no `npm ci`.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: node scripts/check-doc-symbols.mjs
@@ -136,8 +136,8 @@ jobs:
     # assertion on code PRs, covering the other always-loaded file (not a docs path).
     # Zero-dependency (node: builtins) → no `npm ci`.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: node scripts/check-instruction-budget.mjs

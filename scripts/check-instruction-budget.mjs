@@ -31,8 +31,16 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *
  *  46_793 → 46_961 (#1295): the `archive-patch.ts` entry in the Directory Layout block, +168. A new
  *  worker module has to be listed there (CLAUDE.md's own rule), and the line states what the module
- *  refuses to do, which is the part a reader needs before reaching for it. */
-export const BUDGET_CHARS = 46_961
+ *  refuses to do, which is the part a reader needs before reaching for it.
+ *
+ *  46_961 → 47_145 (#671): the `ci-action-majors` entry in the `test:scripts` enumeration, +200. That
+ *  is the ENTRY's cost, re-measured on this branch; the constant moved only 184 because the 16
+ *  characters of slack left by #1295 were consumed first. The two entries above happen to coincide
+ *  because they were raised from zero slack, so do not read a delta here as the constant's movement.
+ *  The entry earns its place because that list names every guard `test:scripts` gates, and it is held
+ *  to one line by keeping the WHY in the guard file's own header — the first draft cost +328, and the
+ *  ratchet is what made that visible. */
+export const BUDGET_CHARS = 47_145
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

@@ -38,8 +38,8 @@ jobs:
     # the job LOOK conditional. Removed with #1285, which needs this job to be provably unskippable:
     # `npm run test:scripts` below is what runs scripts/check-instruction-budget.test.mjs.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: npm ci
@@ -74,8 +74,8 @@ jobs:
       matrix:
         awk: [original-awk, mawk, gawk]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       # Only when missing. `mawk` IS ubuntu's default awk, and re-installing the package that owns
@@ -111,8 +111,8 @@ jobs:
     # index.html / api/ / src/ — the e2e+build frontend detector regex matches none of
     # vercel.json or api/, so any path gate would re-open the blind spot. Suite runs ~4s.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: npm ci
@@ -123,11 +123,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15   # #1253 — a stalled browser install must fail, not hang on the 6h default
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # #1254 — the push base can be any distance back; see scripts/ci-detect-frontend.sh.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: npm ci
@@ -174,11 +174,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10   # #1253 — never inherit the 6h default
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # #1254 — the push base can be any distance back; see scripts/ci-detect-frontend.sh.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: npm ci
