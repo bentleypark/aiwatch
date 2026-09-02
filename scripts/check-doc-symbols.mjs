@@ -85,28 +85,61 @@ export function isCodeShaped(tok) {
 /**
  * A line/sentence that documents a symbol's REMOVAL, RENAME, or absence. The hardest false positive is
  * a doc CORRECTLY saying "#713 removed `estimateUptimeFromIncidents`" — shape-identical to #1076's
- * invented `violationsOf`, distinguishable only by the surrounding prose. If a removal/rename/absence
- * verb sits on the same line, the cited symbol is deliberately absent, not a dangler.
+ * invented `violationsOf`, distinguishable only by the surrounding prose.
  *
- * Deliberately line-scoped, not whole-doc: these docs use paragraph-length lines, so "same line" ≈
- * "same thought". Residual risk — a NEW invented symbol added to a paragraph that also says "removed"
- * would be masked — is accepted as rare; the allowlist covers anything this misses.
+ * `delet` carries `\w*` because it never matched anything (#1312). The group's trailing `\b` demands a
+ * non-word character after the alternative, and "deleted" continues with "e" — so the stem was dead
+ * from #1100. Nothing noticed: the exemption used to be judged on the WHOLE line, and a 16.6k-character
+ * line needs only ONE trigger anywhere in it, which the full-word alternatives always supplied. The two
+ * defects hid each other — narrowing the scope without this fix surfaces three legitimate removal
+ * citations in product-constraints.md as false positives.
+ *
+ * `dropp` and `deprecat` were dead the same way and stay dead, deliberately. The corpus does not
+ * implicate them — in these docs "dropped" is the ordinary word for a runtime discard and "deprecation"
+ * appears as a data value, not as a note that a symbol is gone. Reviving a stem the corpus does not
+ * force is a new exemption rule, not a bug fix. Both directions are pinned by tests.
  */
 export function isRemovalContext(line) {
-  return /\b(removed?|delet|dropp|retired?|deprecat|no longer|renamed?|replaced by|was `|used to|former|gone\b|absent)\b/i.test(line)
+  return /\b(removed?|delet\w*|retired?|no longer|renamed?|replaced by|was `|used to|former|gone\b|absent)\b/i.test(line)
     || /삭제|제거|없앴|없어졌|폐기|이전 이름|옛/.test(line)
+}
+
+/** How far from a citation a removal verb still governs it. DERIVED, not picked: the furthest citation
+ *  in CLAUDE.md and docs/reference that needs the exemption sits 151 characters from its verb
+ *  (`estimateUptimeFromIncidents` in product-constraints.md), and 200 clears it with margin. The lower
+ *  bound is pinned by the real-corpus test, which reddens once the window stops covering that citation.
+ *  A removal note further than this from its symbol fails loudly and takes an allowlist entry — the
+ *  designed exit. */
+export const REMOVAL_WINDOW_CHARS = 200
+
+/** The text a citation's exemption is judged on: itself plus `REMOVAL_WINDOW_CHARS` either side.
+ *
+ *  Judging the whole line is what #1312 was: kv-schema.md's `growth:daily` cell is ONE line of 16.6k
+ *  characters carrying "used to", "ABSENT" and "removed", so every symbol in it was exempt and a
+ *  fabricated name planted there survived.
+ *
+ *  A window, not a splitter. Splitting the line at table pipes and sentence ends was tried and is wrong
+ *  in both directions: it cuts INSIDE inline code spans — `string | null` in backticks becomes two
+ *  fragments with unbalanced backticks, and every identifier after the cut stops being extracted at all
+ *  — and it cuts too finely the other way, so on the canonical
+ *  removal row `| oldFn | removed in #713 |` the verb and the symbol land in different cells and a
+ *  correct doc becomes a false positive. A window needs no notion of a boundary and has neither. */
+export function removalWindow(line, start, end) {
+  return line.slice(Math.max(0, start - REMOVAL_WINDOW_CHARS), end + REMOVAL_WINDOW_CHARS)
 }
 
 /** Extract inline-backtick identifier tokens from prose (fenced blocks already stripped). */
 export function extractInlineTokens(prose) {
   const out = new Set()
   for (const line of prose.split('\n')) {
-    if (isRemovalContext(line)) continue // a line documenting removal/rename cites absent symbols on purpose
     // single-backtick spans; skip double+ (rare). Token = the identifier at the head of the span
     // (`foo`, `foo.bar`→foo, `foo()`→foo).
     for (const m of line.matchAll(/(?<!`)`([^`\n]+)`(?!`)/g)) {
       const head = m[1].trim().match(/^([A-Za-z_][A-Za-z0-9_]*)/)
-      if (head && isCodeShaped(head[1]) && !STOPLIST.has(head[1]) && !isMemoryPageName(head[1])) out.add(head[1])
+      if (!head || !isCodeShaped(head[1]) || STOPLIST.has(head[1]) || isMemoryPageName(head[1])) continue
+      // a removal/rename verb NEAR this citation means the symbol is absent on purpose
+      if (isRemovalContext(removalWindow(line, m.index, m.index + m[0].length))) continue
+      out.add(head[1])
     }
   }
   return out

@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  stripFencedBlocks, isCodeShaped, isMemoryPageName, isRemovalContext,
+  stripFencedBlocks, isCodeShaped, isMemoryPageName, isRemovalContext, REMOVAL_WINDOW_CHARS,
   extractInlineTokens, parseAllowlist, auditDocSymbols,
   docFiles, collectSourceBlob,
 } from './check-doc-symbols.mjs'
@@ -130,4 +130,87 @@ test('a doc re-introducing the #1076 headline example IS flagged against the rea
   const docs = [{ file: 'z.md', content: 'This line justifies itself with `violationsOf`.' }]
   const findings = auditDocSymbols({ docs, sourceBlob: collectSourceBlob(ROOT), allow: new Map() })
   assert.deepEqual(findings.map((f) => f.token), ['violationsOf'])
+})
+
+// ── #1312: the window, and the dead stem it was hiding ───────────────────────
+
+test('#1312: `delet` fires on its inflections — the trailing word-boundary made it match NOTHING', () => {
+  for (const w of ['deleted', 'deleting', 'delete', 'deletion']) {
+    assert.ok(isRemovalContext(`#713 ${w} the helper`), `stem does not match "${w}"`)
+  }
+})
+
+test('#1312: `dropped`/`deprecated` are NOT removal contexts — reviving those stems is a new rule', () => {
+  // Both were dead the same way as `delet` and stay dead: in these docs "dropped" is a runtime discard
+  // and "deprecation" is a data value, not a note that a symbol is gone. Without these negatives the
+  // suite is green while that coverage silently disappears.
+  assert.ok(!isRemovalContext('an untagged incident is dropped before scoring'))
+  assert.ok(!isRemovalContext('the poll is dropping under load'))
+  assert.ok(!isRemovalContext('keywords: compliance/access-revocation-or-deprecation'))
+})
+
+test('#1312: the window governs a nearby verb and not a distant one', () => {
+  const near = `#713 removed it. ${'x'.repeat(50)} \`fabricatedHelperName\``
+  const far = `#713 removed it. ${'x'.repeat(REMOVAL_WINDOW_CHARS + 50)} \`fabricatedHelperName\``
+  assert.ok(!extractInlineTokens(near).has('fabricatedHelperName'), 'a verb this close must exempt')
+  assert.ok(extractInlineTokens(far).has('fabricatedHelperName'), 'a verb this far must not')
+})
+
+test('#1312: a pipe inside an inline code span does not blind the rest of the line', () => {
+  // The splitter tried first cut at table pipes, including pipes INSIDE `` `string | null` ``. That left
+  // two fragments with unbalanced backticks and every identifier after the cut stopped being extracted —
+  // a coverage LOSS versus the line-scoped original, in real spans in this corpus.
+  const line = 'the field is `string | null`, produced by `fabricatedHelperName`'
+  assert.ok(extractInlineTokens(line).has('fabricatedHelperName'))
+})
+
+test('#1312: the canonical removal ROW stays exempt — verb and symbol in different cells', () => {
+  // The other direction the splitter got wrong: cell-scoping severs `| \`oldFn\` | removed in #713 |`,
+  // turning the most likely way a doc records a removal into a false positive.
+  const row = '| `estimateUptimeFromIncidents` | removed in #713 | gone |'
+  assert.equal(extractInlineTokens(row).size, 0)
+})
+
+test('#1312: one removal citation no longer immunises a whole 16k-character row', () => {
+  const row = '| `growth:daily` | #713 removed `estimateUptimeFromIncidents` entirely |'
+    + ` ${'filler. '.repeat(60)} it calls \`fabricatedHelperName\` daily |`
+  const toks = extractInlineTokens(row)
+  assert.ok(toks.has('fabricatedHelperName'), 'a citation far from the verb must still be checked')
+  assert.ok(!toks.has('estimateUptimeFromIncidents'), 'the citation beside the verb stays exempt')
+})
+
+test('#1312 MUTATION: judging the whole line re-hides the fabricated symbol', () => {
+  // Guards the fix itself: with a line-wide skip this row yields nothing, because the removal note far
+  // to the left covers the fabricated name. That was the defect.
+  const row = '| `growth:daily` | #713 removed `estimateUptimeFromIncidents` entirely |'
+    + ` ${'filler. '.repeat(60)} it calls \`fabricatedHelperName\` daily |`
+  const lineScoped = (prose) => {
+    const out = new Set()
+    for (const line of prose.split('\n')) {
+      if (isRemovalContext(line)) continue
+      for (const m of line.matchAll(/(?<!`)`([^`\n]+)`(?!`)/g)) {
+        const head = m[1].trim().match(/^([A-Za-z_][A-Za-z0-9_]*)/)
+        if (head && isCodeShaped(head[1])) out.add(head[1])
+      }
+    }
+    return out
+  }
+  assert.equal(lineScoped(row).size, 0, 'the old scope saw nothing here — that was the defect')
+  assert.ok(extractInlineTokens(row).has('fabricatedHelperName'), 'the shipped window sees it')
+})
+
+test('#1312 REAL DOCS: a fabricated symbol planted in the longest table row is caught', () => {
+  // A pure-function test cannot prove the blind spot is closed in the corpus this gate actually reads.
+  // Plant a name in kv-schema.md's real `growth:daily` cell — the 16.6k-character line — and require the
+  // audit to flag it. This assertion fails on the pre-#1312 script.
+  const file = join(ROOT, 'docs/reference/kv-schema.md')
+  const raw = readFileSync(file, 'utf8')
+  assert.ok(raw.includes('`readPluginPolls`'), 'anchor symbol missing — re-anchor this test, do not delete it')
+  const mutated = raw.replace('`readPluginPolls`', '`readPluginPollsFabricated1312`')
+  assert.notEqual(mutated, raw, 'mutation did not apply')
+  const findings = auditDocSymbols({ docs: [{ file, content: mutated }], sourceBlob: 'nothing here', allow: new Map() })
+  assert.ok(
+    findings.some((f) => f.token === 'readPluginPollsFabricated1312'),
+    'a fabricated symbol in the longest row went unflagged — the #1312 blind spot is back',
+  )
 })
