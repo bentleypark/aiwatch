@@ -13,6 +13,9 @@
 
 import { defuseAutolinkDomain } from './alerts'
 import { appendStatusHint, appendUtm } from './utils'
+import { isAffectedStatus, isUnreadableStatus, type ServiceStatusValue } from './status-verdict'
+import { SERVICES } from './services'
+import { UPSTREAM_DEPS } from './upstream-link'
 
 // #820 observability, still load-bearing after the endpoint swap: `fetchSubreddit` only warns to a
 // log nobody reads on a failed response, and the daily summary counts `reddit:seen:*` keys, so a
@@ -48,6 +51,9 @@ export interface RedditAlert {
   subreddit: string
   post: RedditPost
   type: RedditAlertType
+  /** #1315 — the gate's join keys, expanded by `promoteJoinIds` from the target's `statusId` at
+   *  detection time so the call site does not re-derive them. `undefined` = gate-exempt. */
+  statusIds?: readonly string[]
 }
 
 // Subreddit → scan-mode mapping (#820 round 7: no server-side search exists anymore — `service`
@@ -58,20 +64,30 @@ export interface RedditAlert {
 // NOT read the playbook: #1182 removed the playbook's per-sub cron column (a prose mirror of this
 // list), so nothing is being kept "in sync" with a doc. Note this is the CRON's scan list; the
 // operator alert's link list is a separate map, REDDIT_ENGAGE_SUBS in alerts.ts.
-export const REDDIT_TARGETS: ReadonlyArray<{ subreddit: string; service: string }> = [
-  // Service-specific subreddits (outage detection + promotion)
-  { subreddit: 'ClaudeAI',        service: 'Claude' },
-  { subreddit: 'ClaudeCode',      service: 'Claude Code' },
-  { subreddit: 'ChatGPT',         service: 'ChatGPT' },
-  { subreddit: 'OpenAI',          service: 'OpenAI' },
-  { subreddit: 'cursor',          service: 'Cursor' },
-  { subreddit: 'windsurf',        service: 'Windsurf' },
-  { subreddit: 'Codeium',         service: 'Windsurf' },
+export const REDDIT_TARGETS: ReadonlyArray<{ subreddit: string; service: string; statusId?: string }> = [
+  // Service-specific subreddits (outage detection + promotion).
+  //
+  // `statusId` names the ONE service a subreddit is about. The #1315 promote gate does not join on
+  // it directly — `promoteJoinIds` EXPANDS it (see there). An earlier cut hand-wrote the expanded
+  // set on each entry; three separate narrowings of those sets shipped green under review, because
+  // a hand-written membership has no rule to check it against.
+  //
+  // Separate from `service`, whose '_competitive' / '_security' values select the scan mode.
+  // No `statusId` = exempt from the gate.
+  { subreddit: 'ClaudeAI',        service: 'Claude',      statusId: 'claudeai' },
+  { subreddit: 'ClaudeCode',      service: 'Claude Code', statusId: 'claudecode' },
+  { subreddit: 'ChatGPT',         service: 'ChatGPT',     statusId: 'chatgpt' },
+  { subreddit: 'OpenAI',          service: 'OpenAI',      statusId: 'openai' },
+  { subreddit: 'cursor',          service: 'Cursor',      statusId: 'cursor' },
+  { subreddit: 'windsurf',        service: 'Windsurf',    statusId: 'windsurf' },
+  { subreddit: 'Codeium',         service: 'Windsurf',    statusId: 'windsurf' },
   // Broader AI communities in outage mode — playbook engagement targets (#280).
   // r/LocalLLaMA was previously competitive mode; switched to outage so API-reliability
   // threads (the playbook's actual engagement hook) are caught. r/AINews added for
   // press-adjacent outage threads. Promotion filter (isPromotable) still gates Discord
   // alerts, so news-flavored posts that aren't question-seeking won't spam.
+  // No `statusIds`: these discuss the whole field, not a set of monitored services, so there is
+  // nothing to join to. Exempt from the #1315 gate rather than gated on a guessed mapping.
   { subreddit: 'LocalLLaMA',      service: 'AI Community' },
   { subreddit: 'AINews',          service: 'AI Community' },
   // Competitive monitoring — broader AI/DevOps communities
@@ -222,11 +238,225 @@ const SEEKING_HELP = /\b(help|what('s| is) (going on|happening)|how (to|do) (che
  * the megathread path only activates when the caller passes real post age.
  */
 export function isPromotable(title: string, ageSec: number = Infinity): boolean {
-  if (QUESTION_WITH_CONTEXT.test(title)) return true
-  if (ANYONE_WITH_OUTAGE.test(title)) return true
-  if (SEEKING_HELP.test(title)) return true
-  if (PROMOTABLE_STRONG.test(title) && ageSec < MEGATHREAD_MAX_AGE_SEC) return true
-  return false
+  return promoteReason(title, ageSec) !== null
+}
+
+/**
+ * Which promotion path a title matched, or `null` for none — the same decision `isPromotable`
+ * makes, with the branch retained instead of collapsed to a boolean (#1315).
+ *
+ * `isPromotable` delegates here so the two can never disagree: one matcher, two views of it. The
+ * branch is what the promote record stores, so a false-positive rate can be read per branch.
+ */
+export type PromoteReason = 'question' | 'anyone-outage' | 'seeking-help' | 'megathread'
+
+export function promoteReason(title: string, ageSec: number = Infinity): PromoteReason | null {
+  if (QUESTION_WITH_CONTEXT.test(title)) return 'question'
+  if (ANYONE_WITH_OUTAGE.test(title)) return 'anyone-outage'
+  if (SEEKING_HELP.test(title)) return 'seeking-help'
+  if (PROMOTABLE_STRONG.test(title) && ageSec < MEGATHREAD_MAX_AGE_SEC) return 'megathread'
+  return null
+}
+
+/**
+ * #1315 — expand a subreddit's anchor service into the set the promote gate joins on.
+ *
+ * Two things widen it, and both are facts already in the codebase rather than a judgement made here:
+ *
+ *   1. **The other surfaces on the SAME status source.** Readers say "is Claude down?" about
+ *      whichever Anthropic surface they were using, and AIWatch resolves `claude` / `claudeai` /
+ *      `claudecode` independently off one `status.claude.com` — so joining r/ClaudeAI to one of them
+ *      downgraded every post during a single-surface outage we were carrying under another id.
+ *      Grouped by `statusUrl`, NOT by `provider`: `provider` is the corporate vendor, and Microsoft
+ *      spans `azureopenai` (azure.status.microsoft) and `copilot` (githubstatus.com) — one vendor,
+ *      two unrelated status sources. That pair is the only place the two groupings differ today, and
+ *      neither is a `REDDIT_TARGETS` anchor, so this is the rule being right rather than a fix.
+ *   2. **A declared upstream** (`UPSTREAM_DEPS`). On 2026-07-17 Anthropic opened its incident at
+ *      06:47:54Z and Cursor opened its own at 07:17:15Z — the two times `upstream-link.ts` records.
+ *      A dependent that files 29 minutes late reads healthy for those 29 minutes.
+ *
+ * Derived rather than hand-listed because the hand-listed version was wrong three times and nothing
+ * could tell: a set written by hand has no rule to check it against, so a narrowing ships green and
+ * fails toward silence. An upstream that is not a monitored service (`github-platform`, a feed under
+ * #1072) is dropped — there is no status to read for it.
+ *
+ * The one call site (`detectRedditPosts`) is the remaining hand-written expression, so it is covered
+ * behaviourally there — deriving correctly and never being called is the same bug as not deriving.
+ */
+export function promoteJoinIds(statusId: string | undefined): readonly string[] | undefined {
+  if (!statusId) return undefined
+  const anchor = SERVICES.find(s => s.id === statusId)
+  if (!anchor) return [statusId]
+  const ids = new Set(SERVICES.filter(s => s.statusUrl === anchor.statusUrl).map(s => s.id))
+  for (const id of [...ids]) {
+    for (const up of UPSTREAM_DEPS.find(d => d.id === id)?.upstreamIds ?? []) {
+      if (SERVICES.some(s => s.id === up)) ids.add(up)
+    }
+  }
+  return [...ids]
+}
+
+/**
+ * #1315 — what the gate is allowed to know about one service this cycle.
+ *
+ * The bare `ServiceStatus.status` is NOT enough, and assuming it was made the first cut of this gate
+ * fail CLOSED. `services.ts` publishes `status: 'operational'` for a source it could not read, on two
+ * different paths: a failed read sets `sourceUnknown` and keeps `operational` until
+ * `trackFetchFailure` ramps to `unknown`, and a 4xx source sets `sourceDead` with no ramp at all. So
+ * "operational" means either "we read it and it is up" or "we did not read it", and only the flags
+ * separate them.
+ *
+ * That distinction is load-bearing here in a way it is not for a badge: a status page tends to fall
+ * over exactly when the service behind it is in trouble, which is also when Reddit fills with "is X
+ * down?" — so reading our own failed fetch as green would silence the gate precisely when it matters.
+ */
+export interface PromoteJoinReading {
+  status: ServiceStatusValue
+  /** False when this cycle did not actually read the source (`sourceUnknown` or `sourceDead`). */
+  sourceRead: boolean
+}
+
+/** Build the gate's view of one service. Kept next to the gate so the two cannot drift. */
+export function promoteJoinReading(
+  svc: { status: ServiceStatusValue; sourceUnknown?: boolean; sourceDead?: boolean },
+): PromoteJoinReading {
+  return { status: svc.status, sourceRead: !svc.sourceUnknown && !svc.sourceDead }
+}
+
+/**
+ * #1315 — may we promote a post from this subreddit right now?
+ *
+ * Joins on AIWatch's own status instead of tightening the title regex: `PROMOTABLE_STRONG` matches a
+ * bare `\bdown\b`, which is also the English verb particle ("slowing down", "scroll down"), and
+ * narrowing it only moves the leak to the next particle verb.
+ *
+ * **The gate never suppresses an alert — it downgrades the label.** An earlier cut withheld the
+ * Discord message entirely on `downgrade-healthy` and re-decided the post on later runs. That cost
+ * more than it saved: `promoteReason`'s `megathread` branch stops matching at 2h while the cron runs
+ * hourly, so a declarative "X is down for everyone" held once was gone — and our polling is
+ * structurally later than a provider's own page, so the posts most likely to be held early are real
+ * outage megathreads, the exact thing this channel exists to catch. Measured throughput was ~1 alert
+ * per run across all 9 subreddits, so suppression was buying almost nothing for that risk.
+ *
+ * This is not a new tier: #296 scoped a *"Tier-2 MONITOR alert type below PROMOTE"* and deferred it
+ * *"until we see whether the relaxed filters over-fire"*. They did — 2026-09-01 promoted a Sam Altman
+ * interview off a bare `down`. The deferral condition is what has changed, not the design.
+ *
+ * Two properties carry the rest:
+ *   - ANY affected member promotes. A subreddit spans several services (see `REDDIT_TARGETS`), so
+ *     requiring all of them to be affected would downgrade during a real single-surface outage.
+ *   - `downgrade-healthy` requires a POSITIVE reading of healthy on EVERY member. An unknown id, a
+ *     service missing from the map, an `unknown` verdict (#1233), an unread source, or an empty map
+ *     all promote — a gate that reacts to a broken status read by quietly relabelling is still wrong.
+ */
+export type PromoteGateVerdict = 'allow' | 'allow-exempt' | 'allow-unreadable' | 'downgrade-healthy'
+
+export function promoteStatusGate(
+  statusIds: readonly string[] | undefined,
+  statusById: ReadonlyMap<string, PromoteJoinReading>,
+): PromoteGateVerdict {
+  if (!statusIds || statusIds.length === 0) return 'allow-exempt'
+
+  let sawUnreadable = false
+  for (const id of statusIds) {
+    const reading = statusById.get(id)
+    if (reading === undefined || !reading.sourceRead || isUnreadableStatus(reading.status)) {
+      sawUnreadable = true
+      continue
+    }
+    if (isAffectedStatus(reading.status)) return 'allow'
+  }
+  return sawUnreadable ? 'allow-unreadable' : 'downgrade-healthy'
+}
+
+/** True when the verdict earns the 🎯 PROMOTE label — the one place `downgrade-healthy` is special.
+ *  A false answer costs a label, never a message.
+ *  An exhaustive switch, not `!== 'downgrade-healthy'`: #1233 measured that widening a status union
+ *  produces zero type errors, so a future `downgrade-*` member added to a negative test would silently
+ *  promote. The `never` binding fails `typecheck:worker` instead; the runtime default stays
+ *  fail-open to match this module's safety property. */
+export function gatePromotes(verdict: PromoteGateVerdict): boolean {
+  switch (verdict) {
+    case 'allow':
+    case 'allow-exempt':
+    case 'allow-unreadable':
+      return true
+    case 'downgrade-healthy':
+      return false
+    default: {
+      const exhaustive: never = verdict
+      void exhaustive
+      return true
+    }
+  }
+}
+
+/**
+ * #1315 — a durable record of each promote decision, so the gate's precision can be measured rather
+ * than argued from anecdotes. Downgrades are recorded alongside promotes; that pair IS the precision
+ * measurement, read per `reason` branch.
+ *
+ * One key per post. A post is deduped by `reddit:seen` for 24h and age-filtered out at 6h, so on the
+ * normal path each post is decided once and a prefix list reads as one row per post.
+ *
+ * Independent keys rather than one array under a month key: an array needs read-modify-write, and a
+ * failed read that still writes destroys the window (#1256).
+ */
+export const PROMOTE_RECORD_PREFIX = 'reddit:promote:rec:'
+/** 90 days — long enough for a monthly review, bounded so the prefix stays listable. */
+export const PROMOTE_RECORD_TTL_SEC = 7776000
+
+export interface PromoteRecord {
+  postId: string
+  subreddit: string
+  title: string
+  /** Which `promoteReason` branch matched — lets a per-branch false-positive rate be read. */
+  reason: PromoteReason
+  /** The join keys, or null for a gate-exempt subreddit. */
+  statusIds: string[] | null
+  /** Each joined service's reading AT DECISION TIME, which cannot be reconstructed later. The whole
+   *  field is `null` for a gate-exempt subreddit; within it, an id we held no reading for maps to
+   *  `null` — kept as a key rather than dropped, so the join is legible after the fact. */
+  statusAtDecision: Record<string, PromoteJoinReading | null> | null
+  verdict: PromoteGateVerdict
+  /** Whether the Discord send SUCCEEDED. Not "was selected": #1202 round 7 caught the same field
+   *  meaning intent on `reddit:promote:last`, and this record exists to measure precision, so a
+   *  numerator that counts undelivered sends corrupts the one number it produces. */
+  sent: boolean
+  ageSec: number
+  at: string
+}
+
+export function buildPromoteRecord(input: {
+  postId: string
+  subreddit: string
+  title: string
+  reason: PromoteReason
+  statusIds?: readonly string[]
+  statusById: ReadonlyMap<string, PromoteJoinReading>
+  verdict: PromoteGateVerdict
+  sent: boolean
+  ageSec: number
+  now?: Date
+}): { key: string; value: PromoteRecord } {
+  const readings = input.statusIds
+    ? Object.fromEntries(input.statusIds.map(id => [id, input.statusById.get(id) ?? null]))
+    : null
+  return {
+    key: `${PROMOTE_RECORD_PREFIX}${input.postId}`,
+    value: {
+      postId: input.postId,
+      subreddit: input.subreddit,
+      title: input.title,
+      reason: input.reason,
+      statusIds: input.statusIds ? [...input.statusIds] : null,
+      statusAtDecision: readings,
+      verdict: input.verdict,
+      sent: input.sent,
+      ageSec: Math.round(input.ageSec),
+      at: (input.now ?? new Date()).toISOString(),
+    },
+  }
 }
 
 // Competitive monitoring keywords — match posts about status monitoring tools
@@ -543,7 +773,7 @@ export async function detectRedditPosts(
       })
       if (seen) continue
 
-      alerts.push({ key, subreddit: target.subreddit, post, type: mode })
+      alerts.push({ key, subreddit: target.subreddit, post, type: mode, statusIds: promoteJoinIds(target.statusId) })
     }
   }
 
@@ -599,8 +829,13 @@ const SUBREDDIT_SLUG: Record<string, string> = {
 /**
  * Format a Reddit alert for Discord.
  * Only called for promotable posts — non-promotable are filtered out upstream.
+ *
+ * #1315 — `verdict` decides the LABEL, not whether this is sent. `downgrade-healthy` means the
+ * title matched but every service the subreddit covers reads healthy right now, so the operator gets
+ * the post with our reading attached instead of a call to go reply. Omitted verdict = promote, which
+ * keeps the pre-#1315 contract for any caller that has no status to join on.
  */
-export function formatRedditAlert(alert: RedditAlert): { title: string; description: string; color: number; url: string } {
+export function formatRedditAlert(alert: RedditAlert, verdict?: PromoteGateVerdict): { title: string; description: string; color: number; url: string } {
   const ago = Math.floor(Date.now() / 1000 - alert.post.createdUtc)
   const agoText = ago < 60 ? 'just now'
     : ago < 3600 ? `${Math.floor(ago / 60)}m ago`
@@ -621,10 +856,18 @@ export function formatRedditAlert(alert: RedditAlert): { title: string; descript
   // upvotes", which would read as a real (and wrong) measurement.
   const scoreClause = alert.post.score != null ? ` · ${alert.post.score} upvotes` : ''
 
+  // The downgraded variant states WHY, naming the services checked — an operator who can see that we
+  // read all three Anthropic surfaces as operational can overrule it; a bare missing label cannot be
+  // argued with. The share link is dropped: it is the "go reply with our status" affordance, and
+  // there is no outage to point at.
+  const downgraded = verdict === 'downgrade-healthy'
+  const checked = alert.statusIds?.length ? ` (${alert.statusIds.join(', ')})` : ''
+
   return {
-    title: `📢 Reddit: r/${alert.subreddit} [🎯 PROMOTE]`,
-    description: `"${defuseAutolinkDomain(alert.post.title)}"\nby u/${alert.post.author}${scoreClause} · ${agoText}${shareLink}`,
-    color: 0x3fb950, // green
+    title: `📢 Reddit: r/${alert.subreddit} ${downgraded ? '[monitor]' : '[🎯 PROMOTE]'}`,
+    description: `"${defuseAutolinkDomain(alert.post.title)}"\nby u/${alert.post.author}${scoreClause} · ${agoText}`
+      + (downgraded ? `\n🟢 our status reads operational${checked} — no outage to point at` : shareLink),
+    color: downgraded ? 0x8b949e : 0x3fb950, // grey when downgraded, green when promotable
     url: alert.post.url,
   }
 }
