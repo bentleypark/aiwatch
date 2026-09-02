@@ -4,12 +4,12 @@
 // counter, Workers analytics don't break down by URL path, and the worker runs on a
 // workers.dev subdomain (no zone-level HTTP analytics). This records one Analytics Engine
 // data point per served (non-429) v1 request, mirroring the #494 statusline pattern, so the
-// call volume becomes queryable via the Cloudflare GraphQL Analytics API.
+// call volume becomes queryable.
 //
 // Schema (dataset: aiwatch_statusline, binding env.ANALYTICS):
 //   index1  = constant 'v1-status'           → total v1 traffic via one index filter (≤32 bytes)
 //   blob1   = 'v1-status-all'|'v1-status-service' → optional all-vs-per-service split
-//   double1 = 1                              → request counter (SUM in GraphQL queries)
+//   double1 = 1                              → request counter
 
 // AnalyticsEngineDataset is a global ambient type from @cloudflare/workers-types.
 
@@ -64,7 +64,7 @@ export interface V1TrafficCounts {
 //   blob1   = 'feed-all' | 'feed-service'     → /feed.xml vs /feed/:slug split
 //   blob2   = feed target (#1273)             → service id | FEED_ALL_TARGET | FEED_UNKNOWN_TARGET
 //   blob3   = client class (#1273)            → a `FeedClientClass` (the union owns the list)
-//   double1 = 1                               → request counter (SUM in AE SQL)
+//   double1 = 1                               → request counter
 //
 // #1273 — WHY blob2/blob3 exist. blob1 alone answers "how many polls", which nobody reading it later
 // can turn into "how many subscriptions": every poller shares one anonymous URL. blob2 says WHICH
@@ -518,7 +518,7 @@ export async function queryFeedTraffic(
 // so per-service embed counts are directly queryable via GROUP BY blob1.
 //   index1  = 'badge-request'                                  → total badge traffic, one index filter
 //   blob1   = serviceId, or BADGE_UNKNOWN_SERVICE on a miss     → per-service breakdown
-//   double1 = 1                                                 → request counter (SUM in AE SQL)
+//   double1 = 1                                                 → request counter
 // blob1 is NOT restricted to known service ids by the handler's `^[a-z0-9_-]+$` validation — that
 // regex only constrains the character set, and the badge handler deliberately still records a
 // not-found id (a stale/retired-service embed is itself a signal worth surfacing). Recording the
@@ -1241,7 +1241,7 @@ export async function countNewFeedItems(kv: KVNamespace, now: Date = new Date())
 // Schema (dataset: aiwatch_statusline, binding env.ANALYTICS):
 //   index1  = constant 'cache-read'   → all snapshot-read failures behind one index filter
 //   blob1   = the outcome            → which failure it was
-//   double1 = 1                       → counter (SUM)
+//   double1 = 1                       → counter
 export const CACHE_READ_INDEX = 'cache-read' as const
 
 /** The mutually-exclusive ways a status-snapshot read fails to yield a usable snapshot. Every one
