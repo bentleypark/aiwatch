@@ -5,7 +5,7 @@
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
-import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
+import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
 import { createReadCensus, formatCensus } from './kv-read-census'
@@ -2078,7 +2078,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -2440,6 +2440,16 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
   const monthNum = Number(monthStr)
 
   const expiredDays = expiredDaysInMonth(month, HISTORY_RETENTION_DAYS, Date.now())
+  // #1274 — a still-running month used to return 0, i.e. "full rebuild, proceed". Rebuilding it
+  // freezes a PARTIAL archive that the month-end cron will never replace (it writes only when the
+  // key is absent), and no `:prev:` backup exists to fall back on because there were no prior bytes.
+  if (expiredDays === MONTH_NOT_ENDED) {
+    return json(400, {
+      ok: false,
+      error: 'that month has not ended yet',
+      hint: 'rebuild a COMPLETED month; the current month is served live by /api/report and is archived by the month-end cron',
+    })
+  }
   if (expiredDays < 0) {
     return json(400, { ok: false, error: 'month is not a real calendar month' })
   }
@@ -2536,6 +2546,37 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
   }
   const suppressions = suppressionRead.list
 
+  // #1274 — the same treatment for the duration-override list, left fail-open by #1260. Its failure
+  // is the silent one: `applyDurationOverrides` rewrites `durations` and leaves `incidentIds` alone
+  // by design, so a bad read moves nothing the census counts and the operator gets `200 ok:true`
+  // over an archive still carrying the un-corrected duration.
+  const overrideRead = await readOverridesFreshResult(env.STATUS_CACHE)
+  if (overrideRead.state !== 'ok') {
+    console.error(`[admin/rebuild-archive] duration-override list ${overrideRead.state} — refusing ${month}`)
+    // Same split, same reason as the suppression read above: an unusable value never becomes usable
+    // on a retry, so calling it retryable would leave the operator re-running a call that cannot
+    // succeed. `reason` and `droppedRows` are echoed because the response is the only place that
+    // sees them: `GET /api/admin/duration-override` reads through `normalizeOverrides` and so
+    // renders the surviving rows only, and the rejected ones are invisible there.
+    //
+    // Deliberately NO repair instruction. The obvious one — re-add through
+    // `POST /api/admin/duration-override` — rewrites the whole KV value from that same normalized
+    // read, so it PERMANENTLY DROPS every rejected row, including overrides meant for other
+    // incidents, on a key with no backup (the #1256 whole-value-rewrite shape). Naming a remedy
+    // that destroys data is worse than naming none.
+    return overrideRead.state === 'malformed'
+      ? json(500, {
+          ok: false,
+          error: 'the duration-override list is unusable',
+          reason: overrideRead.reason,
+          droppedRows: overrideRead.dropped,
+          retryable: false,
+          hint: 'read incident:duration-overrides directly (wrangler kv key get --remote) and repair it there; do NOT re-add through the admin endpoint, which rewrites the whole value and would drop the rejected rows',
+        })
+      : json(503, { ok: false, error: 'could not read the duration-override list', retryable: true })
+  }
+  const overrides = overrideRead.list
+
   let archive
   try {
     // Regenerate the AI narrative on rebuild too — an operator rebuilding after a
@@ -2544,7 +2585,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       ai: env.AI,
       apiKey: env.ANTHROPIC_API_KEY,
       serviceNames,
-    }, suppressions)
+    }, suppressions, overrides)
   } catch (err) {
     return json(502, { ok: false, error: 'archive build failed', detail: err instanceof Error ? err.message : String(err) })
   }
@@ -3492,6 +3533,37 @@ export default {
               }
             }
 
+            // #1274 — read the duration-override list HERE, with the reader that can tell a fault
+            // from an empty list, and hand the result to the build so it does not read again.
+            //
+            // This path does NOT refuse on a bad read, and that is deliberate — the opposite choice
+            // to `rebuild-archive`'s. A refusal is safe where a human is holding the request and can
+            // retry; here nobody is, and the opportunity expires: `if (!existing)` above means a
+            // month skipped now is never revisited, `incidents:monthly` carries a 60-day TTL, and a
+            // first-ever write leaves no `:prev:` bytes. Skipping therefore trades one wrong
+            // duration for a month that vanishes and is later replaced by an incident-free archive.
+            // Writing keeps the month; `rebuild-archive` can still correct it while the sources live.
+            //
+            // What the issue actually requires is that a fault must not read as "no overrides
+            // configured" SILENTLY. So it is announced instead. One alert per period falls out of
+            // the write: the next cycle finds the key present and never re-enters this branch.
+            const overrideRead = await readOverridesFreshResult(env.STATUS_CACHE)
+            if (overrideRead.state !== 'ok') {
+              console.error(`[monthly-archive] duration-override list ${overrideRead.state} — archiving ${archiveKey} WITHOUT overrides`)
+              if (env.DISCORD_WEBHOOK_URL) {
+                const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+                  title: '⚠️ Monthly archive written WITHOUT duration overrides',
+                  description: `\`${archiveKey}\` was archived, but \`incident:duration-overrides\` is \`${overrideRead.state}\`,`
+                    + ' so any operator-pinned duration is missing and the provider paperwork span was published instead.'
+                    + '\nRepair the KV value, then run `POST /api/admin/rebuild-archive` for this month'
+                    + ' — while `incidents:monthly` still exists (60d).',
+                  color: 0xd29922, // amber
+                })
+                // `sendDiscordAlert` reports failure by returning false rather than throwing, so a
+                // `.catch` here would never run and a dropped alert would leave no trace at all.
+                if (!sent) console.error(`[monthly-archive] override-missing alert NOT delivered for ${archiveKey}`)
+              }
+            }
             // Bake the AI retrospective narrative into the archive (#426). Best-effort:
             // generateMonthlyNarrative degrades to null on any AI failure, the
             // deterministic archive ships regardless.
@@ -3499,7 +3571,7 @@ export default {
               ai: env.AI,
               apiKey: env.ANTHROPIC_API_KEY,
               serviceNames,
-            })
+            }, undefined, overrideRead.state === 'ok' ? overrideRead.list : [])
             const writeOk = await kvPut(env.STATUS_CACHE, archiveKey, JSON.stringify(archive))
             if (!writeOk) {
               console.error(`[monthly-archive] KV write failed for ${archive.period} — archive NOT persisted`)

@@ -44,23 +44,36 @@ export interface DurationOverride {
   by?: string
 }
 
-/** Pure: validate/normalize a parsed KV value into well-formed entries (drops malformed rows). A row
- *  needs a non-empty `id` and a finite `durationMin >= 0` (0 zeroes the incident's downtime, allowed). */
-export function normalizeOverrides(parsed: unknown): DurationOverride[] {
-  if (!Array.isArray(parsed)) return []
+/** Pure: validate/normalize a parsed KV value into well-formed entries, ALSO reporting how many rows
+ *  were rejected. A row needs a non-empty `id` and a finite `durationMin >= 0` (0 zeroes the
+ *  incident's downtime, allowed).
+ *
+ *  #1274 — the count exists because a dropped row is indistinguishable from an absent one downstream.
+ *  `readOverridesFreshResult` refuses on a non-zero count; `readOverridesFresh` still ignores it.
+ *  `dropped` counts ROWS, so a value that is not an array at all reports 0 — reporting 1 there would
+ *  let "the list was replaced" masquerade as "one bad row". */
+export function normalizeOverridesCounted(parsed: unknown): { list: DurationOverride[]; dropped: number } {
+  if (!Array.isArray(parsed)) return { list: [], dropped: 0 }
   const out: DurationOverride[] = []
+  let dropped = 0
   for (const raw of parsed) {
-    if (!raw || typeof raw !== 'object') continue
+    if (!raw || typeof raw !== 'object') { dropped++; continue }
     const e = raw as Record<string, unknown>
-    if (typeof e.id !== 'string' || !e.id) continue
-    if (typeof e.durationMin !== 'number' || !Number.isFinite(e.durationMin) || e.durationMin < 0) continue
+    if (typeof e.id !== 'string' || !e.id) { dropped++; continue }
+    if (typeof e.durationMin !== 'number' || !Number.isFinite(e.durationMin) || e.durationMin < 0) { dropped++; continue }
     const o: DurationOverride = { id: e.id, durationMin: e.durationMin }
     if (typeof e.reason === 'string') o.reason = e.reason
     if (typeof e.createdAt === 'string') o.createdAt = e.createdAt
     if (typeof e.by === 'string') o.by = e.by
     out.push(o)
   }
-  return out
+  return { list: out, dropped }
+}
+
+/** Pure: validate/normalize a parsed KV value into well-formed entries (drops malformed rows). A row
+ *  needs a non-empty `id` and a finite `durationMin >= 0` (0 zeroes the incident's downtime, allowed). */
+export function normalizeOverrides(parsed: unknown): DurationOverride[] {
+  return normalizeOverridesCounted(parsed).list
 }
 
 /** Pure: id → durationMin map for the current list. Last entry wins on a duplicate id. */
@@ -163,7 +176,10 @@ export function mutateOverrides(list: DurationOverride[], m: OverrideMutation): 
 
 /** Fresh (uncached) read of the override list from KV — the apply sites are the rare, correctness-
  *  critical archive-build / report-partial / weekly-briefing reads (same callers as
- *  `readSuppressionsFresh`). Best-effort → [] on absent kv / read / parse error (never breaks caller). */
+ *  `readSuppressionsFresh`). Best-effort → [] on absent kv / read / parse error (never breaks caller).
+ *
+ *  A caller that must tell a fault apart from an empty list has to use `readOverridesFreshResult`
+ *  below; this one cannot express the difference. */
 export async function readOverridesFresh(kv?: KVNamespace): Promise<DurationOverride[]> {
   if (!kv) return []
   try {
@@ -172,4 +188,49 @@ export async function readOverridesFresh(kv?: KVNamespace): Promise<DurationOver
   } catch {
     return []
   }
+}
+
+/** #1274 — like `readOverridesFresh`, but distinguishes a KV FAULT, an unusable value, and a
+ *  genuinely absent one, so a caller that PERSISTS can refuse instead of writing.
+ *
+ *  Why this read needs it: `applyDurationOverrides` rewrites `durations[id]` and deliberately leaves
+ *  `incidentIds` untouched (#1019 keeps the incident and only corrects its length). So a read that
+ *  yields `[]` when it should not moves no field the #1260 content census counts — the rebuild
+ *  answers `200 ok:true` and the archive carries the un-corrected duration, with nothing anywhere
+ *  saying so.
+ *
+ *  Three ways to be unusable, all refused, because none of them clears on a retry:
+ *   - `not-json`      — the value does not parse.
+ *   - `not-an-array`  — it parses to something else. `mutateOverrides` only ever writes an array, so
+ *                       this means the list was replaced, and it would otherwise normalize to `[]`.
+ *   - `unusable-rows` — rows present that `normalizeOverridesCounted` rejects. Reachable with no KV
+ *                       fault at all: `[{"id":"x","durationMin":"18"}]` — a QUOTED number — is valid
+ *                       JSON that normalizes to nothing.
+ *  `unreadable` stays separate from all three because it IS worth retrying. */
+export async function readOverridesFreshResult(kv?: KVNamespace): Promise<
+  | { state: 'ok'; list: DurationOverride[] }
+  | { state: 'unreadable' }
+  | { state: 'malformed'; reason: 'not-json' | 'not-an-array' | 'unusable-rows'; dropped: number }
+> {
+  if (!kv) return { state: 'unreadable' }
+  let raw: string | null
+  try {
+    raw = await kv.get(OVERRIDES_KEY)
+  } catch {
+    return { state: 'unreadable' }
+  }
+  if (raw === null) return { state: 'ok', list: [] }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { state: 'malformed', reason: 'not-json', dropped: 0 }
+  }
+  // A non-array normalizes to `[]` with `dropped: 0`, which would otherwise be indistinguishable
+  // from a legitimately empty list. The stored shape IS an array (`mutateOverrides` only ever writes
+  // one), so anything else is a hand-edit that lost the whole list.
+  if (!Array.isArray(parsed)) return { state: 'malformed', reason: 'not-an-array', dropped: 0 }
+  const { list, dropped } = normalizeOverridesCounted(parsed)
+  if (dropped > 0) return { state: 'malformed', reason: 'unusable-rows', dropped }
+  return { state: 'ok', list }
 }

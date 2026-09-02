@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { expiredDaysInMonth, archiveContentCensus, censusRegressions } from '../monthly-archive'
+import { expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions } from '../monthly-archive'
 
 // #1260 — `buildMonthlyArchive` reads every day of uptime from `history:{date}`, which expires, and
 // writes the result over the TTL-less `archive:monthly`. This is the predicate the rebuild endpoint
@@ -45,6 +45,31 @@ describe('expiredDaysInMonth', () => {
   it('returns a negative for a month it cannot parse, never the safe-looking 0', () => {
     // 0 is the value that means "full rebuild, proceed" — a parse failure must not report it.
     expect(expiredDaysInMonth('0000-01', RETENTION, at('2026-08-20'))).toBeLessThan(0)
+  })
+
+  // #1274 — the CURRENT month used to return 0, indistinguishable from a legitimate full rebuild of
+  // a completed recent month. Rebuilding it freezes a PARTIAL archive, and the month-end cron writes
+  // the previous month only when nothing is stored, so it never replaces it. No `:prev:` backup
+  // exists to fall back on either — a first-ever write has no prior bytes to copy.
+  it('rejects the current month, which used to read as a full rebuild', () => {
+    expect(expiredDaysInMonth('2026-08', RETENTION, at('2026-08-24'))).toBe(MONTH_NOT_ENDED)
+    // Including its first and last days, so the answer does not depend on where in the month we are.
+    expect(expiredDaysInMonth('2026-08', RETENTION, at('2026-08-01'))).toBe(MONTH_NOT_ENDED)
+    expect(expiredDaysInMonth('2026-08', RETENTION, at('2026-08-31'))).toBe(MONTH_NOT_ENDED)
+  })
+
+  it('accepts the month that just ended, on its first day', () => {
+    // The boundary the guard must not overshoot: rebuilding the month that just closed is the
+    // documented operator action, and the month-end cron itself runs on the 1st.
+    expect(expiredDaysInMonth('2026-07', RETENTION, at('2026-08-01'))).toBe(0)
+  })
+
+  it('tells "not ended" apart from "not a real month", because the operator hears different words', () => {
+    // Both refuse, but only one of them means "you mistyped it".
+    expect(expiredDaysInMonth('2026-13', RETENTION, at('2026-08-24'))).toBe(-1)
+    expect(expiredDaysInMonth('2026-08', RETENTION, at('2026-08-24'))).not.toBe(-1)
+    // Still one refusal to a caller that only tests the sign.
+    expect(MONTH_NOT_ENDED).toBeLessThan(0)
   })
 })
 

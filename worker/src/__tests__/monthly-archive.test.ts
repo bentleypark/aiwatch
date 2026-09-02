@@ -1324,6 +1324,37 @@ describe('buildMonthlyArchive', () => {
     list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
   } as unknown as KVNamespace
 
+  it('#1274 — with no overridesOverride it reads the list itself', async () => {
+    // The `?? await readOverridesFresh(kv)` fallback arm had no coverage: every override test
+    // supplied the list, so deleting the arm outright kept the suite green. Both callers that
+    // persist an archive now pass a list, but the arm is still the contract for a caller that
+    // passes nothing.
+    const kv = {
+      get: async (key: string) => (
+        key === 'history:2026-03-01' ? JSON.stringify({ claude: { ok: 288, total: 288 } })
+        : key === 'incident:duration-overrides' ? JSON.stringify([{ id: 'a', durationMin: 18 }])
+        : key === 'incidents:monthly:2026-03' ? JSON.stringify({
+            lastUpdated: '2026-03-31T09:00:00Z',
+            services: {
+              claude: {
+                count: 1, totalMinutes: 800, longestMinutes: 800, dates: ['2026-03-01'],
+                incidentIds: ['a'], durations: { a: 800 },
+                incidents: [{ id: 'a', title: 'Elevated errors', startedAt: '2026-03-01T00:00:00Z', resolvedAt: '2026-03-01T13:20:00Z', durationMin: 800, status: 'resolved' }],
+              },
+            },
+          })
+        : null),
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kv, 2026, 3)
+
+    expect(archive.services.claude.longestIncidentMin, 'the fallback arm must still apply the override').toBe(18)
+    expect(archive.services.claude.totalDowntimeMin).toBe(18)
+  })
+
   it('#1292 — avgResolutionMin is computed over COUNTED rows, at the real division site', async () => {
     // The helper-level test asserts `countedTotalMin / countedCount` by doing the division itself.
     // The PRODUCTION division is here, in buildMonthlyArchive, and every other fixture has

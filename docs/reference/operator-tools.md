@@ -92,12 +92,16 @@ archive, and answers:
 
 | | when |
 |---|---|
-| **`503` `retryable:true`** | one of the three reads taken BEFORE the build failed — the stored archive, `services:latest`, or the suppression list. Retry; `force` does not override these. A fault in the month's own sources is NOT distinguished from expiry (the helpers below the build swallow their own reads), so it lands in the `409` below. |
-| **`500` `retryable:false`** | the suppression list is present but malformed. Retrying never clears it — repair the KV value by hand. |
+| **`503` `retryable:true`** | a read taken BEFORE the build could not be completed. Retry; `force` does not override it. |
+| **`500` `retryable:false`** | an operator list is present but unusable. Retrying never clears it — repair the KV value by hand. The two lists are NOT checked to the same depth: the duration-override read also refuses a value that parses to a non-array, or that holds rows it cannot use (a quoted `"18"` for `durationMin`), because those normalize to an empty list and would read as "no overrides configured" (#1274). The suppression read still classifies only an unparseable value, so the same hand-edit there is silently dropped. |
 | **`409`** | the rebuild measurably holds less than what is stored — `regressed` names what, alongside `prior` and `rebuilt`. Incidents the suppression list accounts for are NOT a loss, so the suppress-then-rebuild flow above passes without a `force`. |
 | **`409`** | the stored archive is unparseable, so the comparison could not be made at all. |
-| **`400`** | the month is not a real calendar month, or has not happened yet. |
+| **`400`** | the month is not a real calendar month, or has not ENDED yet — the current month included (#1274). |
 | **`200`** | otherwise — including a first-ever build of an old month, where nothing is stored and so nothing can be lost. |
+
+**A `200` is not evidence that every read succeeded.** The reads the handler takes before the build fail closed and are answered above. Reads taken further in still absorb their own faults, and whether that surfaces depends on the content census: it counts presence, so a fault that removes a whole section registers, while one that only changes per-service VALUES does not. The duration-override read was the live instance of the second kind (#1274) and is now taken up front; the shape is not eliminated.
+
+Widening the census to per-service values was tried and rejected in #1260: it produces false refusals faster than it closes gaps, and a refused rebuild teaches the operator to keep `force` typed, which disarms every guard behind it. The safety property is the unconditional `:prev:` copy below.
 
 `{"force": true}` overrides the `409`s. **Every** overwrite of an existing archive — forced or not —
 first copies the prior bytes to `archive:monthly:{period}:prev:{ts}` (90d) and is refused outright if

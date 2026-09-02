@@ -125,6 +125,18 @@ deliberately **not** overridden — MTTR robustness for the general case is trac
 confidence-gate or small-sample shrinkage on MTTR, vs. computing duration from AIWatch's own observed
 `degraded → operational` edge). Removing an override restores the provider duration with zero code change.
 
+**A failed READ of the list is not treated the same everywhere (#1274)**, because a missing override is
+invisible downstream — `applyDurationOverrides` leaves `incidentIds` untouched by design, so the #1260
+content census sees no change and nothing objects on its own.
+
+- `rebuild-archive` **refuses** (`readOverridesFreshResult` → `503`/`500`). An operator is holding the
+  request and can retry, so nothing is lost by declining.
+- The **month-end cron** reads it the same way but **archives anyway**, announcing on Discord that the
+  month went out without its overrides. Refusing there would be worse than the bug: the cron writes a
+  month once, so a skipped month is never revisited, and the sources it would be rebuilt from expire.
+- The **display paths** (`/api/report` current-month partial, weekly briefing) keep `readOverridesFresh`,
+  which returns `[]` on a fault. They render and move on rather than failing a page over one bad list.
+
 ## Per-component snapshot — `resolveSvcComponents` (#604)
 
 `resolveSvcStatus` collapses the `statusComponentIds` subset into one worst-of badge and **discards** the per-component statuses. `resolveSvcComponents(config, summaryData)` is the **display counterpart**: it preserves the same matched subset as `ServiceComponent[]` (`{ id, name, status }`, normalized, in configured order) on `ServiceStatus.components`, so the ServiceDetails + "Is X Down" surfaces can render a per-component breakdown card (parity with StatusGator / IsDown).
