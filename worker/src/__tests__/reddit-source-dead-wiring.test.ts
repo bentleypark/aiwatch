@@ -87,7 +87,7 @@ describe('#1202 — reddit:promote:last marker wiring', () => {
     // indistinguishable again, the same blind spot #820 is about one KV key over.
     const loopStart = index.indexOf('for (const alert of promotable)')
     expect(loopStart).toBeGreaterThan(-1)
-    const loopBody = index.slice(loopStart, loopStart + 1800)
+    const loopBody = index.slice(loopStart, loopStart + 2600)
     const sendIdx = loopBody.indexOf('sendDiscordAlert')
     const writeIdx = loopBody.indexOf("kvPut(env.STATUS_CACHE, 'reddit:promote:last'")
     expect(sendIdx).toBeGreaterThan(-1)
@@ -98,7 +98,7 @@ describe('#1202 — reddit:promote:last marker wiring', () => {
     // round 5 — ordering alone doesn't prove the VALUE written is useful; kv-schema.md documents
     // this exact shape as what an operator reads back via `wrangler kv key get`.
     const loopStart = index.indexOf('for (const alert of promotable)')
-    const loopBody = index.slice(loopStart, loopStart + 1800)
+    const loopBody = index.slice(loopStart, loopStart + 2600)
     const writeIdx = loopBody.indexOf("kvPut(env.STATUS_CACHE, 'reddit:promote:last'")
     const payload = loopBody.slice(writeIdx, writeIdx + 200)
     expect(payload).toContain('postId: alert.post.id')
@@ -110,7 +110,7 @@ describe('#1202 — reddit:promote:last marker wiring', () => {
     // round 5 — the ordering test doesn't prove the failure branch exists at all. `kvPut` returns
     // false (never throws, see utils.ts), so this must be a return-value check, not a .catch().
     const loopStart = index.indexOf('for (const alert of promotable)')
-    const loopBody = index.slice(loopStart, loopStart + 1800)
+    const loopBody = index.slice(loopStart, loopStart + 2600)
     expect(loopBody).toContain("console.error('[reddit] promote-marker write failed')")
   })
 
@@ -121,9 +121,26 @@ describe('#1202 — reddit:promote:last marker wiring', () => {
     // whole reason this key exists is to let an operator confirm the alert actually reached
     // Discord, so this gate is load-bearing, not defensive-programming filler.
     const loopStart = index.indexOf('for (const alert of promotable)')
-    const loopBody = index.slice(loopStart, loopStart + 1800)
+    const loopBody = index.slice(loopStart, loopStart + 2600)
     expect(loopBody).toContain('const sent = await sendDiscordAlert(')
-    expect(loopBody).toMatch(/if \(sent && !\(await kvPut\(env\.STATUS_CACHE, 'reddit:promote:last'/)
+    // Anchored to the marker write's OWN condition, not to any `if (sent && …)` in the loop: the
+    // unanchored form let the gate be dropped here while an unrelated `if (sent && …)` kept it green.
+    const writeIdx = loopBody.indexOf("kvPut(env.STATUS_CACHE, 'reddit:promote:last'")
+    expect(writeIdx).toBeGreaterThan(-1)
+    const condition = loopBody.slice(loopBody.lastIndexOf('if (', writeIdx), writeIdx)
+    expect(condition).toContain('sent &&')
+  })
+
+  it('#1315 — and gated on the alert actually being a PROMOTE, not a downgraded [monitor]', () => {
+    // This loop carries downgraded alerts since #1315, and kv-schema.md defines this key as the
+    // PROMOTE-only trace, so a `[monitor]` post writing it would read as a promote that never
+    // happened — the #1202 defect one class over.
+    const loopStart = index.indexOf('for (const alert of promotable)')
+    const loopBody = index.slice(loopStart, loopStart + 2600)
+    const writeIdx = loopBody.indexOf("kvPut(env.STATUS_CACHE, 'reddit:promote:last'")
+    expect(writeIdx).toBeGreaterThan(-1)
+    // the guard sits between the send and the write
+    expect(loopBody.slice(0, writeIdx)).toMatch(/gatePromotes\(verdict\)/)
   })
 })
 

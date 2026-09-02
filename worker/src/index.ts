@@ -815,6 +815,12 @@ interface CronResult {
   resolvedCount: number
   downCount: number
   recoveredCount: number
+  /** #1315 — this cycle's per-service readings for the Reddit promote gate, keyed by `SERVICES[].id`.
+   *  Carries the source-liveness flags, not a bare status: `services.ts` publishes `operational` for
+   *  a source it could not read, so the enum alone cannot tell "up" from "we did not look".
+   *  This is the alerting snapshot, which is the `CACHE_KEY` payload itself unless it was stale
+   *  (>10 min) and refetched — so it can be up to ~15 min behind, not live. */
+  statusById: Map<string, PromoteJoinReading>
 }
 
 // `scheduledTimeMs` is `event.scheduledTime`, not wall clock: time-of-day slot checks (e.g. the
@@ -822,7 +828,11 @@ interface CronResult {
 // takes 60+ seconds, otherwise a slow tick skips its slot for the whole hour. Defaults to `Date.now()`
 // for the rare direct caller / test. (Same convention `scheduled()` states for its own `scheduledNow`.)
 async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): Promise<CronResult> {
-  const empty: CronResult = { total: 0, operational: 0, issues: 0, unreadable: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0 }
+  // #1315 — `statusById` empty is the FAIL-OPEN default, not a neutral placeholder. An empty map
+  // makes `promoteStatusGate` answer `allow-unreadable` for every id, so a cycle that read no status
+  // suppresses no promote. Only the `services.length === 0` return can reach the gate (the binding
+  // check below returns before the Reddit block runs), but both are empty for the same reason.
+  const empty: CronResult = { total: 0, operational: 0, issues: 0, unreadable: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0, statusById: new Map() }
   if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return empty
 
   // Read cached service data — fetch live if cache is stale or missing
@@ -2057,6 +2067,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     resolvedCount: sent.filter(a => a.key.startsWith('alerted:res:')).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
     downCount: sent.filter(a => a.key.startsWith('alerted:down:')).length,
     recoveredCount: sent.filter(a => a.key.startsWith('alerted:recovered:')).length,
+    statusById: new Map(scored.map(s => [s.id, promoteJoinReading(s)])),
   }
 }
 
@@ -2065,7 +2076,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 import { generateBadgeSvg, badgeStatusColor } from './badge'
 import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, FEED_TARGET_IDS, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
-import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable, readRedditSourceDead } from './reddit'
+import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
@@ -3057,24 +3068,50 @@ export default {
           // ever being sent — it will not become eligible on a later run either, since dedup already
           // covers it. Before this change such a post would have stayed unmarked (if beyond the old
           // 5-cap) and could resurface; now it's a clean, permanent skip instead. Silence over
-          // duplication is the right tradeoff here — REDDIT_TARGETS' outage-mode subs order determines
-          // which posts win the 3 slots each run, not recency or severity, but that ordering question
-          // is unrelated to this PR's scope (Reddit is bot-walled far more often than it produces 4+
-          // simultaneous promotable posts in one run in the first place).
+          // duplication is the right tradeoff here. (That paragraph used to add that subs order alone
+          // decides the 3 slots; #1315 made the gate verdict the primary key, with subs order only
+          // breaking ties within each group — see the partition below.)
+          //
+          // #1315 — the gate decides the LABEL, not whether a post is sent, so the seen-marking loop
+          // is unconditional again (its pre-#1315 shape). An earlier cut withheld downgraded posts
+          // and left their seen key unburned so a later run could re-decide them; that machinery is
+          // gone, and with it the ordering trap it created. Why: `promoteReason`'s `megathread`
+          // branch stops matching at 2h while this block runs hourly, so a withheld declarative
+          // outage post got at most one retry and then aged out permanently — and those are the
+          // posts most likely to be withheld, because our polling lags a provider's own status page.
+          const nowSec = Date.now() / 1000
+          const decisions = outageAlerts.map((alert) => {
+            const ageSec = nowSec - alert.post.createdUtc
+            const reason = promoteReason(alert.post.title, ageSec)
+            const verdict = reason ? promoteStatusGate(alert.statusIds, result.statusById) : null
+            return { alert, ageSec, reason, verdict }
+          })
           for (const alert of outageAlerts) {
             await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
           }
-          const nowSec = Date.now() / 1000
-          const promotable = outageAlerts
-            .filter(a => isPromotable(a.post.title, nowSec - a.post.createdUtc))
-            .slice(0, 3)
+          // Promotable posts win the send slots ahead of downgraded ones: the cap is the only place
+          // a post can still be dropped, and a real outage must not lose it to a false positive.
+          const sendable = decisions.filter(d => d.reason !== null && d.verdict !== null)
+          const promotable = [
+            ...sendable.filter(d => gatePromotes(d.verdict!)),
+            ...sendable.filter(d => !gatePromotes(d.verdict!)),
+          ].slice(0, 3).map(d => d.alert)
+          // Looked up rather than destructured in the send loop's header: `reddit-source-dead-wiring`
+          // locates that header by source text to guard #1202's marker, and that guard protects a
+          // property this change does not touch. (Its locator also scans a fixed window from the
+          // first match, so this note deliberately avoids repeating the header verbatim.)
+          const verdictOf = new Map(decisions.map(d => [d.alert.post.id, d.verdict]))
+
+          const delivered = new Set<string>()
           for (const alert of promotable) {
-            const formatted = formatRedditAlert(alert)
+            const verdict = verdictOf.get(alert.post.id) ?? undefined
+            const formatted = formatRedditAlert(alert, verdict)
             const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
               title: formatted.title,
               description: `${formatted.description}\n[View Post](${formatted.url})`,
               color: formatted.color,
             })
+            if (sent) delivered.add(alert.post.id)
             // #1202 — the only durable trace that a PROMOTE alert (as opposed to the #1182 engagement
             // block, which leaves no KV trace either) has ever actually fired. Gated on `sent` — round
             // 7 caught that an earlier version discarded sendDiscordAlert's return value and wrote the
@@ -3084,9 +3121,37 @@ export default {
             // source-dead-alert path a few hundred lines up, which gates its KV write on `sent` the
             // same way. `kvPut` itself never throws (see worker/src/utils.ts) — it returns false on
             // failure — so the write-failure branch checks the return value rather than catching.
-            if (sent && !(await kvPut(env.STATUS_CACHE, 'reddit:promote:last', JSON.stringify({
-              postId: alert.post.id, subreddit: alert.subreddit, sentAt: now.toISOString(),
-            })))) console.error('[reddit] promote-marker write failed')
+            // #1315 — ALSO gated on the verdict. This loop now carries downgraded `[monitor]` alerts,
+            // and `docs/reference/kv-schema.md` defines this key as the trace that a `[🎯 PROMOTE]`
+            // alert fired. A downgraded false positive writing it would read as a promote that never
+            // happened — corrupting the instrument this issue exists to protect.
+            if (sent && (verdict === undefined || gatePromotes(verdict))
+              && !(await kvPut(env.STATUS_CACHE, 'reddit:promote:last', JSON.stringify({
+                postId: alert.post.id, subreddit: alert.subreddit, sentAt: now.toISOString(),
+              })))) console.error('[reddit] promote-marker write failed')
+          }
+          // #1315 — the durable decision record, written AFTER the sends so `sent` means delivered
+          // rather than selected. Downgrades are recorded alongside promotes: that pair is what makes
+          // the gate's precision readable per branch. The write failure is logged rather than
+          // swallowed — an empty prefix list would otherwise be indistinguishable from "the gate
+          // reached no decisions", which is exactly the ambiguity this record removes. Best-effort:
+          // `kvPut` returns false rather than throwing, so a failure here never costs an alert.
+          for (const d of decisions) {
+            if (!d.reason || !d.verdict) continue
+            const { key, value } = buildPromoteRecord({
+              postId: d.alert.post.id,
+              subreddit: d.alert.subreddit,
+              title: d.alert.post.title,
+              reason: d.reason,
+              statusIds: d.alert.statusIds,
+              statusById: result.statusById,
+              verdict: d.verdict,
+              sent: delivered.has(d.alert.post.id),
+              ageSec: d.ageSec,
+            })
+            if (!(await kvPut(env.STATUS_CACHE, key, JSON.stringify(value), { expirationTtl: PROMOTE_RECORD_TTL_SEC }))) {
+              console.error('[reddit] promote-record write failed:', d.alert.post.id)
+            }
           }
           // Competitive alerts — mark seen + notify (max 2 per hour)
           for (const alert of competitiveAlerts.slice(0, 2)) {
