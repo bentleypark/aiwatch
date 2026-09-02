@@ -146,22 +146,18 @@ jobs:
         run: bash scripts/ci-detect-frontend.sh '^(src/|tests/|playwright|public/|index\.html|vite\.config|package\.json|\.github/workflows/)'
         env:
           PUSH_BASE: ${{ github.event.before }}
-      # #1253 — bound the apt phase, then install the browser without apt; rationale in edge-e2e.yml.
+      - name: Cache Playwright browsers
+        if: steps.changes.outputs.frontend == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-1.58.2-${{ runner.os }}
+      # #1253 — install only the browser. `--with-deps` enters apt on every run and intermittently
+      # stalls on the runner's Ubuntu mirror; the browser cache is independent of that apt phase.
       - name: Install Playwright
         if: steps.changes.outputs.frontend == 'true'
-        timeout-minutes: 5
         run: |
-          rc=0
-          timeout 120 npx playwright install --with-deps chromium || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            case $rc in
-              124) why="apt stalled and the bound fired (#1253)" ;;
-              127) why="\`timeout\` not found — THE BOUND DID NOT RUN" ;;
-              *)   why="a non-timeout apt failure (mirror / dpkg lock / disk)" ;;
-            esac
-            echo "::warning title=Playwright deps degraded::--with-deps exited $rc: $why. Installing the browser without apt; font packages will be missing."
-            npx playwright install chromium
-          fi
+          npx playwright install chromium
       - name: Run E2E tests
         if: steps.changes.outputs.frontend == 'true'
         run: npm test

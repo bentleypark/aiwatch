@@ -47,22 +47,10 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-1.58.2-${{ runner.os }}
-      # #1253 — bound the apt phase, then install the browser without apt; rationale in edge-e2e.yml.
-      # The cache above restores the browser, never the apt phase, so it cannot prevent this stall.
+      # #1253 — install only the browser. `--with-deps` enters apt on every run and intermittently
+      # stalls on the runner's Ubuntu mirror; the cache above restores the browser artifact.
       - name: Install Chromium
-        timeout-minutes: 3
-        run: |
-          rc=0
-          timeout 120 npx playwright install --with-deps chromium || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            case $rc in
-              124) why="apt stalled and the bound fired (#1253)" ;;
-              127) why="\`timeout\` not found — THE BOUND DID NOT RUN" ;;
-              *)   why="a non-timeout apt failure (mirror / dpkg lock / disk)" ;;
-            esac
-            echo "::warning title=Playwright deps degraded::--with-deps exited $rc: $why. Installing the browser without apt; font packages will be missing."
-            npx playwright install chromium
-          fi
+        run: npx playwright install chromium
       - name: Scrape DeepSeek feed + push to Worker
         run: node scripts/scrape-deepseek-feed.mjs
         env:

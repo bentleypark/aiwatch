@@ -47,28 +47,16 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      # #1253 — `--with-deps` runs apt first, and that phase intermittently stops returning. Bound it,
-      # then install the browser without apt. On this image apt adds only font packages (every
-      # Playwright shared library reports `already the newest version`), so the degraded path costs
-      # fonts, not the ability to launch.
-      #
-      # The fallback is ANNOTATED rather than silent: it triggers on any non-zero exit, not just a
-      # timeout, so without this a genuine apt failure — or a missing `timeout` binary, which means the
-      # bound never ran at all — would ship as a green step. Full evidence: #1253.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-1.58.2-${{ runner.os }}
+      # #1253 — install only the browser. `--with-deps` enters apt on every run and intermittently
+      # stalls on the runner's Ubuntu mirror; the browser cache is independent of that apt phase.
       - name: Install Chromium
-        timeout-minutes: 5
         run: |
-          rc=0
-          timeout 120 npx playwright install --with-deps chromium || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            case $rc in
-              124) why="apt stalled and the bound fired (#1253)" ;;
-              127) why="\`timeout\` not found — THE BOUND DID NOT RUN" ;;
-              *)   why="a non-timeout apt failure (mirror / dpkg lock / disk)" ;;
-            esac
-            echo "::warning title=Playwright deps degraded::--with-deps exited $rc: $why. Installing the browser without apt; font packages will be missing."
-            npx playwright install chromium
-          fi
+          npx playwright install chromium
       - name: Wait for the deployment to be reachable (cold-start guard)
         env:
           EDGE_BASE_URL: ${{ github.event.deployment_status.environment_url }}

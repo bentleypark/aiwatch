@@ -126,14 +126,12 @@ test('every apt-reaching step is bounded (#1253)', () => {
   assert.deepEqual(unbounded, [], `apt-reaching steps with no bound:\n${unbounded.join('\n')}`)
 })
 
-test('the degraded install path stays annotated, not silent (#1253)', () => {
-  // The fallback runs on ANY non-zero exit, so without the annotation a real apt failure — or a
-  // missing `timeout`, meaning the bound never ran — would ship as a green step.
-  const withDeps = parsed.filter(({ text }) => text.includes('--with-deps'))
-  assert.ok(withDeps.length >= 3, `expected the three install steps, found ${withDeps.length}`)
-  for (const { file, text } of withDeps) {
-    assert.match(text, /::warning title=Playwright deps degraded::/, `${file}: fallback has no warning annotation`)
-    assert.match(text, /npx playwright install chromium/, `${file}: no apt-free fallback install`)
+test('Playwright installs stay apt-free and cache the browser (#1253)', () => {
+  const playwrightWorkflows = parsed.filter(({ text }) => text.includes('playwright install chromium'))
+  assert.equal(playwrightWorkflows.length, 3, `expected the three Playwright workflows, found ${playwrightWorkflows.length}`)
+  for (const { file, text } of playwrightWorkflows) {
+    assert.doesNotMatch(text, /playwright install --with-deps|playwright install-deps/, `${file}: Playwright install reintroduced apt`)
+    assert.match(text, /path: ~\/\.cache\/ms-playwright/, `${file}: browser cache is missing`)
   }
 })
 
