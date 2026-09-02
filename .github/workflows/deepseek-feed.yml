@@ -35,15 +35,15 @@ jobs:
     # Microsoft's edge ("The request is blocked", Ref A/B/C) for GitHub's shared runner IPs, killing
     # the job before any step ran. Browsers download from Playwright's CDN (cached across runs).
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Install Playwright npm package
         run: npm install --no-save playwright@1.58.2
       - name: Cache Playwright browsers
         id: pw-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-1.58.2-${{ runner.os }}

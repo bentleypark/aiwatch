@@ -39,11 +39,11 @@ jobs:
     # timeouts below are what a stall should hit first.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Test the same commit that was deployed, so the spec files match the preview.
           ref: ${{ github.event.deployment.sha }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: npm ci
@@ -102,7 +102,7 @@ jobs:
       # about the report directory it never created.
       - name: Upload Playwright report on failure
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: edge-e2e-report
           path: playwright-report/
