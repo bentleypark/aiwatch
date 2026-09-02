@@ -96,9 +96,10 @@ export interface GrowthDailyRow {
   //   absent → the row predates #1273. NOT zero, and not a failure either: nothing was instrumented.
   // Reading `absent` as 0 would manufacture a step-up on the deploy date out of nothing.
   //
-  // The day of deploy is a mixed row: its 24h AE window straddles the deploy, so it stores a map
-  // covering only the instrumented part, indistinguishable from a complete one. Which row that is
-  // cannot be recovered from the series — the deploy date goes in docs/reference/kv-schema.md's
+  // The FIRST row carrying this field is a mixed row: its 24h AE window straddles the deploy, so it
+  // stores a map covering only the instrumented part, indistinguishable from a complete one. It is not
+  // always the deploy-day row — #1275 landed after that day's 09:00 run, so `2026-08-24` predates the
+  // field and `2026-08-25` is the mixed one. The deploy date goes in docs/reference/kv-schema.md's
   // `growth:daily` cell, as `audienceBySource` already does for #1055.
   //
   // The window is the AE query's rolling `NOW() - INTERVAL '1' DAY`, i.e. the same 24h span the
@@ -144,9 +145,10 @@ export interface GrowthDailyRow {
   // exclusion and its start date belongs in the kv-schema `growth:daily` cell beside the deploy
   // boundaries. Read all three as CHANGE, never as a population.
   //
-  // Deploy day is a mixed row here too (the AE window straddles it) and which row that is cannot be
-  // recovered from the series — the boundary goes in docs/reference/kv-schema.md's `growth:daily`
-  // cell, beside the `feedPolls` (#1273) and `audienceByScreen` (#1280) boundaries.
+  // The first row carrying these fields has a 24h window that straddles the deploy — here that IS the
+  // deploy-day row, #1297 having landed before the run — but its counts are NOT mixed: the row covers
+  // a fully recorded window. The boundary goes in docs/reference/kv-schema.md's `growth:daily` cell,
+  // beside the `feedPolls` (#1273) and `audienceByScreen` (#1280) boundaries.
   extPolls?: number | null
   extPollsRead?: PollsVerdict
   // The plugin's two indexes stay SEPARATE (`aiwatch-monitor` background polls vs `aiwatch-brief`

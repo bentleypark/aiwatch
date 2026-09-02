@@ -19,7 +19,9 @@ binding = "AI"
 
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
-dataset = "aiwatch_statusline" # #494: statusline per-preset traffic counts (queried via CF GraphQL)
+# Named for its first use (#494, statusline presets); it now carries every WAE counter in the worker,
+# this being the only dataset. Read via the SQL REST API, not GraphQL.
+dataset = "aiwatch_statusline"
 
 # #955 — without this, `console.error`/`console.warn` are emitted and immediately lost, so a
 # silently-failing AI path (a retired model id 404ing for weeks) is undiagnosable after the

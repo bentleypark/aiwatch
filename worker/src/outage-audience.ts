@@ -27,7 +27,7 @@
 //                                                     AudienceSurfaceKey — a hand-written AE SQL
 //                                                     filter of `IN ('service','group')` silently
 //                                                     drops every deploy-window row.
-//   double1 = 1                                     → view counter (SUM in AE SQL)
+//   double1 = 1                                     → view counter
 //
 // #1280 — why blob3 alone could not be read. Two surfaces write it. A per-service page sends its own
 // id, but a provider-family GROUP page (`/is-claude-down`, #1164) has a slug that is not a service id,

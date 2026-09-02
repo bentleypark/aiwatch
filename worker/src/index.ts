@@ -5222,7 +5222,7 @@ export default {
             const safeSrc = src.slice(0, 32)
             env.ANALYTICS.writeDataPoint({
               blobs: [safeSrc],   // blob1: full src tag (preset slug)
-              doubles: [1],       // double1: request counter (sum in GraphQL queries)
+              doubles: [1],       // double1: request counter
               indexes: [safeSrc], // fast dimension filter (max 32 bytes)
             })
           } catch (err) {
