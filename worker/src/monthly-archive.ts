@@ -19,7 +19,7 @@ import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
 import { incidentDay } from './utils'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
-import { readOverridesFresh, applyDurationOverrides } from './overrides'
+import { readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { kvPut, isNonReliabilityAdvisory } from './utils'
 import { diffPrunedIncidents, appendWithdrawn, type WithdrawnIncident } from './withdrawn'
 import { recordWithdrawalsPruned } from './withdrawal-log'
@@ -1507,6 +1507,9 @@ export async function buildMonthlyArchive(
   narrativeOpts?: NarrativeAiOptions,
   // #1260 — pass the list the caller already read (fail-closed) rather than re-reading it fail-open.
   suppressionsOverride?: SuppressionEntry[],
+  // #1274 — same contract, for the override read below. That one's fault is the one the content
+  // census is structurally unable to see; see `readOverridesFreshResult`.
+  overridesOverride?: DurationOverride[],
 ): Promise<MonthlyArchive> {
   const mm = String(month).padStart(2, '0')
   const period = `${year}-${mm}`
@@ -1571,7 +1574,11 @@ export async function buildMonthlyArchive(
     if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
     // #1019 — build-time duration overrides: pin a paperwork-inflated incident's duration to the
     // operator value, recomputing downtime/longest from the survivors (rebuild-safe, no KV surgery).
-    const overrides = await readOverridesFresh(kv)
+    // #1274 — prefer the caller's fail-closed read. BOTH callers that persist an archive supply it
+    // now: `rebuild-archive` and the month-end cron. The fail-open fallback survives only for a
+    // caller that passes nothing (tests, and any future one), and it is the weaker contract — a KV
+    // fault there yields `[]`, which is indistinguishable from "no overrides configured".
+    const overrides = overridesOverride ?? await readOverridesFresh(kv)
     if (overrides.length) incidentData = applyDurationOverrides(incidentData, overrides)
   }
 
@@ -1785,12 +1792,22 @@ export async function buildMonthlyArchive(
   return archive
 }
 
+/** `expiredDaysInMonth` sentinel: `month` is a real calendar month that has not ended, so it is not
+ *  rebuildable (#1274). Any negative is a refusal, so a caller testing only `< 0` stays correct. */
+export const MONTH_NOT_ENDED = -2
+
 /**
  * How many days of `month` (YYYY-MM) can no longer be read back from `history:{date}` (#1260).
  *
  * `buildMonthlyArchive` sources every day of uptime from those keys, and they expire. A rebuild of a
  * month with expired days therefore produces an archive that is *worse* than the one already stored —
  * and `archive:monthly` is TTL-less, so the write is not recoverable. `0` means a full rebuild.
+ *
+ * Two distinct negatives (#1274): `-1` = not a month this function can score (unparseable, or a
+ * month number outside 1-12), `MONTH_NOT_ENDED` = a real month that has not finished. Both are
+ * refusals, so a caller testing only `< 0` stays correct; the split exists so the one caller that
+ * reports back to a human can say which. Note a far-future year is `MONTH_NOT_ENDED`, not `-1` —
+ * literally true, and the reason the two are worth telling apart is the CURRENT month, not a typo.
  *
  * `retentionDays` is passed in rather than imported so this stays pure and free of a cycle back to
  * the writer. Deliberately conservative: a day is counted expired at exactly `retentionDays` old,
@@ -1801,10 +1818,21 @@ export function expiredDaysInMonth(month: string, retentionDays: number, nowMs: 
   // -1, not 0: 0 is the value that means "full rebuild, proceed", so an unparseable month must not
   // report the safest possible answer. The caller 400s on a negative.
   if (!year || !monthNum) return -1
+  // #1274 — an out-of-range month must stay `-1`. `Date.UTC` rolls `2026-13` over into 2027-01, so
+  // the not-ended check below would otherwise classify it as a real month still running. Defence in
+  // depth on an exported pure function: the one production caller rejects it on a format check
+  // first, so nothing reaches this today.
+  if (monthNum < 1 || monthNum > 12) return -1
   const now = new Date(nowMs)
   const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-  // A month that has not happened is not "0 expired days, proceed" — it is not a rebuildable month.
-  if (Date.UTC(year, monthNum - 1, 1) > todayMs) return -1
+  // #1274 — a month that has not ENDED is not rebuildable, and the current month is the dangerous
+  // half of that. It used to return `0`, which is indistinguishable from a legitimate full rebuild
+  // of a completed recent month, so a mid-month rebuild froze a PARTIAL archive — and the month-end
+  // cron then never replaces it, because it writes the previous month only when nothing is stored
+  // (`index.ts`: `if (!existing)`). The #1260 `:prev:` backup does not cover this either: a
+  // first-ever write has no prior bytes to copy, so no `:prev:` key is created.
+  // One condition covers both cases: the first day of the FOLLOWING month is still in the future.
+  if (Date.UTC(year, monthNum, 1) > todayMs) return MONTH_NOT_ENDED
   const daysInMonth = new Date(Date.UTC(year, monthNum, 0)).getUTCDate()
   let expired = 0
   for (let day = 1; day <= daysInMonth; day++) {

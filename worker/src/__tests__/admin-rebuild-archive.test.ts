@@ -549,4 +549,216 @@ describe('POST /api/admin/rebuild-archive', () => {
     expect(res.status).toBe(503)
     expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
   })
+
+  // ── #1274 — the duration-override read, which #1260 did not reach ─────────────────────────────
+  //
+  // `applyDurationOverrides` rewrites `durations[id]` and deliberately leaves `incidentIds` alone
+  // (#1019 keeps the incident, correcting only its length), so a read that yields "no overrides
+  // configured" when it should not moves NOTHING the content census counts: no `regressed` entry,
+  // no 409, and a `200 ok:true` publishing the duration the operator ran the rebuild to correct.
+
+  /** Accumulator carrying one incident whose stored duration is the inflated paperwork span. */
+  function paperworkAccumulator() {
+    return JSON.stringify({
+      lastUpdated: '2026-07-31T00:00:00Z',
+      services: {
+        claude: {
+          count: 1, totalMinutes: 800, longestMinutes: 800,
+          dates: ['2026-07-02'], incidentIds: ['inc-1'], durations: { 'inc-1': 800 },
+          incidents: [{ id: 'inc-1', title: 'Elevated errors', startedAt: '2026-07-02T00:00:00Z', resolvedAt: '2026-07-02T13:20:00Z', durationMin: 800, status: 'resolved' }],
+        },
+      },
+    })
+  }
+
+  it('hands the override list to the build instead of letting it re-read fail-open', async () => {
+    // Pins BOTH directions of the wiring in one run: the read happens exactly once (so the build is
+    // consuming the handler's fail-closed read, not taking its own), and the pinned duration is what
+    // lands in the archive (so the list is not merely read and discarded). With no fault present the
+    // answer is still 200 — the control for the two refusal cases below.
+    const month = monthsAgo(1)
+    const store: Record<string, string> = {
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      'incident:duration-overrides': JSON.stringify([{ id: 'inc-1', durationMin: 18, reason: 'component recovered long before the formal resolve' }]),
+      [`incidents:monthly:${month}`]: paperworkAccumulator(),
+    }
+    let overrideReads = 0
+    const kv = {
+      get: vi.fn(async (k: string) => {
+        if (k === 'incident:duration-overrides') overrideReads++
+        return store[k] ?? null
+      }),
+      put: vi.fn(async (k: string, v: string) => { store[k] = v }),
+      delete: vi.fn(async () => {}),
+      list: vi.fn(async () => ({ keys: [], list_complete: true, cacheStatus: null })),
+    } as unknown as KVNamespace
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+    expect(overrideReads).toBe(1)
+    const written = JSON.parse(store[`archive:monthly:${month}`])
+    expect(written.services?.claude?.longestIncidentMin, 'the pinned duration, not the 800m paperwork span').toBe(18)
+    expect(written.services?.claude?.totalDowntimeMin).toBe(18)
+    // Asserted separately because it reaches the archive by a different route — a counted total over
+    // a counted divisor, filtered by the #1021 / #1210 / #1292 exclusions — so it is not a restatement
+    // of the two above and can diverge as those rules accrue.
+    expect(written.services?.claude?.avgResolutionMin).toBe(18)
+  })
+
+  // `force: true` is the operator's escape hatch from the census `409`. It must NOT reach past the
+  // pre-build reads: those refuse because the handler could not establish what it is building FROM,
+  // and forcing past that publishes an archive with no overrides applied — the outcome this issue
+  // exists to prevent, reached deliberately. Both refusals are stated as force-proof in
+  // operator-tools.md, so they need a test rather than a sentence.
+  it('does not let force:true past the override-list refusal', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeFaultyKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      [`incidents:monthly:${month}`]: paperworkAccumulator(),
+    }, /^incident:duration-overrides$/)
+
+    const res = await workerModule.fetch(req({ month, force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(503)
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
+  })
+
+  it('does not let force:true past the unusable-rows refusal', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      'incident:duration-overrides': '[{"id":"inc-1","durationMin":"18"}]',
+      [`incidents:monthly:${month}`]: paperworkAccumulator(),
+    })
+
+    const res = await workerModule.fetch(req({ month, force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(500)
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
+  })
+
+  it('refuses when the duration-override list cannot be read, so the paperwork duration is not archived', async () => {
+    // The fault case the census is blind to. Before the fix this answered 200 with 800m archived.
+    const month = monthsAgo(1)
+    const { kv } = makeFaultyKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      [`incidents:monthly:${month}`]: paperworkAccumulator(),
+    }, /^incident:duration-overrides$/)
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(503)
+    expect((await res.json() as { retryable: boolean }).retryable).toBe(true)
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls, 'nothing may be written').toHaveLength(0)
+  })
+
+  it('answers 500 retryable:false when the duration-override list is malformed, not a forever-retry 503', async () => {
+    // Same split as the suppression sibling (#1260 r3): a bad JSON value never parses on a retry, so
+    // "retryable" would leave the operator re-running a call that cannot succeed.
+    const { kv } = makeKV({ 'incident:duration-overrides': '{ not json' })
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(1) }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(500)
+    const body = await res.json() as { retryable: boolean; reason: string }
+    expect(body.retryable).toBe(false)
+    expect(body.reason).toBe('not-json')
+  })
+
+  it('refuses a row that parses but is unusable — the shape a hand-edit produces', async () => {
+    // Found in round 1 review, reproduced before fixing: `durationMin: "18"` (a STRING) is valid
+    // JSON, `normalizeOverrides` drops the row, and the list read as `[]` — "no overrides
+    // configured". The rebuild then archived the 800m paperwork duration under `200 ok:true`, which
+    // is the #1274 symptom reached without any KV fault at all. The endpoint's own repair hint sends
+    // the operator to hand-edit this value, so this is the likeliest way to produce it.
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      'incident:duration-overrides': '[{"id":"inc-1","durationMin":"18"}]',
+      [`incidents:monthly:${month}`]: paperworkAccumulator(),
+    })
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(500)
+    const body = await res.json() as { retryable: boolean; reason: string; droppedRows: number }
+    expect(body.reason).toBe('unusable-rows')
+    expect(body.droppedRows).toBe(1)
+    expect(body.retryable).toBe(false)
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls, 'the paperwork duration must not be archived').toHaveLength(0)
+  })
+
+  it('refuses a list that is no longer an array, which normalizes to an empty one', async () => {
+    // `mutateOverrides` only ever writes an array, so any other shape is a hand-edit that lost the
+    // whole list — and it would otherwise be indistinguishable from "nothing configured".
+    const { kv } = makeKV({ 'incident:duration-overrides': '{"id":"inc-1","durationMin":18}' })
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(1) }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(500)
+    expect((await res.json() as { reason: string }).reason).toBe('not-an-array')
+  })
+
+  it('rebuilds normally when the override list is merely absent — a fault is not an empty list', async () => {
+    // The negative control for the two refusals above: absence must stay a 200, or the fix would
+    // have traded a silent wrong archive for an endpoint nobody can run.
+    const month = monthsAgo(1)
+    const { kv, store } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      [`incidents:monthly:${month}`]: paperworkAccumulator(),
+    })
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+    const written = JSON.parse(store[`archive:monthly:${month}`])
+    expect(written.services?.claude?.longestIncidentMin, 'no override configured → the stored duration stands').toBe(800)
+  })
+
+  // ── #1274 Part 3 — a rebuild of the CURRENT month froze a partial archive the cron never replaces ──
+  it('refuses the current month, which the month-end cron would then never replace', async () => {
+    const { kv } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+    })
+    const thisMonth = monthsAgo(0)
+
+    const res = await workerModule.fetch(req({ month: thisMonth }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    // Not the "not a real calendar month" wording — it IS a real month, and telling the operator
+    // they mistyped it would send them looking for a typo that is not there.
+    expect(body.error).toBe('that month has not ended yet')
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
+  })
+
+  it('does not let force:true past the current-month refusal', async () => {
+    // The one refusal here that guards an UNRECOVERABLE outcome: a mid-month rebuild freezes a
+    // partial archive, `if (!existing)` stops the month-end cron ever replacing it, and a first-ever
+    // write leaves no `:prev:` bytes to restore. The guard sitting ahead of the force check is the
+    // whole safety property, and statement order is not something the compiler polices.
+    const { kv } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+    })
+
+    const res = await workerModule.fetch(req({ month: monthsAgo(0), force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(400)
+    expect((await res.json() as { error: string }).error).toBe('that month has not ended yet')
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
+  })
+
+  it('still rebuilds the month that just ended — the current-month guard is not off by one', async () => {
+    // The boundary control: `monthsAgo(1)` is the newest rebuildable month, and it is exactly the
+    // month operator-tools.md tells the operator to rebuild after suppressing an incident.
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+    })
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+  })
 })

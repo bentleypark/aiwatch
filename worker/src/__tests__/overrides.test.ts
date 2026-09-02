@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   normalizeOverrides,
+  normalizeOverridesCounted,
   overrideMap,
   applyDurationOverrides,
   mutateOverrides,
   readOverridesFresh,
+  readOverridesFreshResult,
   type DurationOverride,
 } from '../overrides'
 import {
@@ -212,5 +214,66 @@ describe('readOverridesFresh', () => {
     expect(await readOverridesFresh(kvOf(null))).toEqual([])
     expect(await readOverridesFresh(kvOf('not json'))).toEqual([])
     expect(await readOverridesFresh(kvOf(null, true))).toEqual([])
+  })
+
+  // #1274 — the display paths keep this collapsing behaviour on purpose. Pinned so a later change
+  // cannot make `/api/report` or the weekly briefing throw or blank out over one bad row.
+  it('still collapses a fault and a junk row to [], because its callers only render', async () => {
+    expect(await readOverridesFresh(kvOf('[{"id":"a","durationMin":"18"}]'))).toEqual([])
+    expect(await readOverridesFresh(kvOf(null, true))).toEqual([])
+  })
+})
+
+describe('normalizeOverridesCounted (#1274)', () => {
+  it('reports every rejected row, so a caller that persists can refuse', () => {
+    // A quoted number is the shape a hand-edit produces, and the one that used to read as
+    // "no overrides configured" all the way through to a 200.
+    expect(normalizeOverridesCounted(JSON.parse('[{"id":"a","durationMin":"18"}]')))
+      .toEqual({ list: [], dropped: 1 })
+    expect(normalizeOverridesCounted([{ id: 'a', durationMin: 18 }, { id: 'b' }, null, 'x']))
+      .toEqual({ list: [{ id: 'a', durationMin: 18 }], dropped: 3 })
+  })
+
+  it('reports nothing dropped for a clean list — dropped is not a proxy for length', () => {
+    expect(normalizeOverridesCounted([{ id: 'a', durationMin: 18 }, { id: 'b', durationMin: 0 }]).dropped).toBe(0)
+    expect(normalizeOverridesCounted([]).dropped).toBe(0)
+  })
+
+  it('counts ROWS, so a non-array reports 0 and is left for the reader to classify', () => {
+    // Reporting 1 here would let "the list is gone" masquerade as "one bad row".
+    expect(normalizeOverridesCounted({ id: 'a', durationMin: 18 })).toEqual({ list: [], dropped: 0 })
+    expect(normalizeOverridesCounted(null)).toEqual({ list: [], dropped: 0 })
+  })
+
+  it('is what normalizeOverrides delegates to, so the two can never disagree', () => {
+    const input = [{ id: 'a', durationMin: 18 }, { id: 'b', durationMin: 'x' }]
+    expect(normalizeOverrides(input)).toEqual(normalizeOverridesCounted(input).list)
+  })
+})
+
+describe('readOverridesFreshResult (#1274)', () => {
+  const kvOf = (val: string | null, throwOn = false): KVNamespace =>
+    ({ get: async () => { if (throwOn) throw new Error('kv down'); return val } }) as unknown as KVNamespace
+
+  it('tells a fault apart from a genuinely empty list', async () => {
+    expect(await readOverridesFreshResult(kvOf(null, true))).toEqual({ state: 'unreadable' })
+    expect(await readOverridesFreshResult(undefined)).toEqual({ state: 'unreadable' })
+    // Absent key is a real answer, not a fault — the whole point of the type.
+    expect(await readOverridesFreshResult(kvOf(null))).toEqual({ state: 'ok', list: [] })
+    expect(await readOverridesFreshResult(kvOf('[]'))).toEqual({ state: 'ok', list: [] })
+  })
+
+  it('names which kind of malformed, because they need different repairs', async () => {
+    expect(await readOverridesFreshResult(kvOf('{ not json')))
+      .toEqual({ state: 'malformed', reason: 'not-json', dropped: 0 })
+    expect(await readOverridesFreshResult(kvOf('{"id":"a","durationMin":18}')))
+      .toEqual({ state: 'malformed', reason: 'not-an-array', dropped: 0 })
+    expect(await readOverridesFreshResult(kvOf('[{"id":"a","durationMin":"18"}]')))
+      .toEqual({ state: 'malformed', reason: 'unusable-rows', dropped: 1 })
+  })
+
+  it('passes a well-formed list through unchanged', async () => {
+    expect(await readOverridesFreshResult(kvOf('[{"id":"a","durationMin":18}]')))
+      .toEqual({ state: 'ok', list: [{ id: 'a', durationMin: 18 }] })
   })
 })
