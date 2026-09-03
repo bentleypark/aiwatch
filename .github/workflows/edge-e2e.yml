@@ -34,9 +34,8 @@ jobs:
       && github.event.deployment_status.environment_url != ''
       && github.event.deployment_status.environment == 'Preview'
     runs-on: ubuntu-latest
-    # #1253 — this job had no timeout, so a stalled step hung on GitHub's 6-hour default. A job timeout
-    # ends the run as `cancelled`, which this repo produces routinely via cancel-in-progress; the step
-    # timeouts below are what a stall should hit first.
+    # #1253 — this job had no timeout, so a stalled step hung on GitHub's 6-hour default. This bound is
+    # now the job's only one: the step-level bound went with the `timeout`-wrapped apt phase it guarded.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -48,7 +47,7 @@ jobs:
           node-version: 20
       - run: npm ci
       # #1253 — install only the browser. `--with-deps` enters apt on every run and intermittently
-      # stalls on the runner's Ubuntu mirror.
+      # stalls in that phase.
       #
       # NO browser cache here, unlike the repo's other two Playwright workflows: `actions/cache`
       # refuses to run when the triggering event is not tied to a branch or tag ref, and this

@@ -5,11 +5,8 @@
 // green" carries no information about whether the bound is still in place — only a structural
 // assertion does.
 //
-// Invariants:
-//   1. Every job declares `timeout-minutes`. Without it a stalled step inherits GitHub's 6-hour
-//      default and the check sits "in progress" rather than failing.
-//   2. Every step that reaches apt — directly, or via `playwright install --with-deps` /
-//      `install-deps` — is bounded, by a step-level `timeout-minutes` or an inline `timeout N` wrapper.
+// The invariants themselves are the test names below — enumerating them here too drifted the
+// moment a third one landed.
 //
 // The PARSER is unit-tested against synthetic fixtures below, not only against the live files. An
 // earlier version of this guard passed while guarding nothing in four separate shapes (a job key with
@@ -101,6 +98,11 @@ export function aptSteps(body) {
   }))
 }
 
+/** Steps whose CODE (comments stripped) invokes `playwright install`. */
+export function playwrightInstallSteps(body) {
+  return stepBlocks(body).filter((b) => b.some((l) => /playwright\s+install\b/.test(stripComment(l))))
+}
+
 /**
  * Does this workflow's `on:` block name `deployment_status`?
  *
@@ -155,11 +157,25 @@ test('Playwright installs stay apt-free, and cache only where the cache can run 
   // The cache half is asserted in BOTH directions on purpose. Requiring the step everywhere was the
   // first shape of this test, and it passed on edge-e2e.yml while the step there restored nothing —
   // a text assertion cannot see that `actions/cache` declined to run.
-  const playwrightWorkflows = parsed.filter(({ text }) => text.includes('playwright install chromium'))
+  // Selected by a REAL install step, not by the literal appearing anywhere in the file: a workflow
+  // must not qualify on a comment, and deleting the run line must drop the count rather than leave an
+  // empty loop behind.
+  const playwrightWorkflows = parsed.filter(({ file, text }) =>
+    parseJobs(text, file).some((job) => playwrightInstallSteps(job.body).length > 0))
   assert.equal(playwrightWorkflows.length, 3, `expected the three Playwright workflows, found ${playwrightWorkflows.length}`)
   let inert = 0
   for (const { file, text } of playwrightWorkflows) {
-    assert.doesNotMatch(text, /playwright install --with-deps|playwright install-deps/, `${file}: Playwright install reintroduced apt`)
+    // APT over the step's own stripped code, not a fixed command string. `playwright install chromium
+    // --with-deps` is accepted by the CLI and reintroduces apt, but reads nothing like the documented
+    // spelling — an order-sensitive match was green on it.
+    let installSteps = 0
+    for (const job of parseJobs(text, file)) {
+      for (const block of playwrightInstallSteps(job.body)) {
+        installSteps++
+        assert.doesNotMatch(block.map(stripComment).join('\n'), APT, `${file}: the Playwright install step reaches apt`)
+      }
+    }
+    assert.equal(installSteps, 1, `${file}: expected exactly one \`playwright install\` step, found ${installSteps}`)
     const hasCache = /path: ~\/\.cache\/ms-playwright/.test(text)
     if (deploymentStatusTriggered(text)) {
       inert++
@@ -254,4 +270,24 @@ test('deploymentStatusTriggered: stops at the `on:` block, and ignores comments'
 
 test('deploymentStatusTriggered: throws on a file with no `on:` key rather than answering false', () => {
   assert.throws(() => deploymentStatusTriggered('jobs:\n  a:\n    runs-on: x\n'), /cannot read/)
+})
+
+test('playwrightInstallSteps: finds the step by its code, not by a comment or a lookalike', () => {
+  const body = [
+    '    steps:',
+    '      - name: Install Playwright npm package',
+    '        run: npm install --no-save playwright@1.58.2',   // not `playwright install`
+    '      - name: Install Chromium',
+    '        # once ran playwright install --with-deps chromium',
+    '        run: npx playwright install chromium',
+  ]
+  const found = playwrightInstallSteps(body)
+  assert.equal(found.length, 1, 'expected exactly the real install step')
+  assert.match(found[0].join('\n'), /Install Chromium/)
+})
+
+test('APT catches --with-deps in trailing position, which a command-string match does not', () => {
+  // The shape this guard was blind to: the CLI accepts the flag after the browser name.
+  assert.match('npx playwright install chromium --with-deps', APT)
+  assert.doesNotMatch('npx playwright install chromium --with-deps', /playwright install --with-deps/)
 })

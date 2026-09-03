@@ -15,12 +15,6 @@ import { PLUGIN_MARKETPLACE_ADD, PLUGIN_INSTALL_CMD } from '../api/_shared/plugi
 // `desktop` project's testIgnore (desktop points at Vite :5173, where these paths 404), AND
 // `--project=<name>` in package.json test:edge. The third is the one #1051 actually missed.
 // scripts/check-edge-e2e-coverage.mjs enforces all three.
-//
-// NOTE these projects run in CI only when Vercel actually BUILDS a Preview: edge-e2e.yml is
-// triggered by `deployment_status`, and vercel.json's `ignoreCommand` skips the build entirely for
-// a diff that touches none of its watched paths. A workflow-only or scripts-only PR therefore gets
-// no Preview, no deployment_status, and no Edge E2E — the check does not fail, it never appears at
-// all. Seen on PR #1324, whose Vercel check read "Canceled by Ignored Build Step" (#1253).
 
 // path → the title it must serve. Derived from the live pages, not guessed.
 const PAGES = [
