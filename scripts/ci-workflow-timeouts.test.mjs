@@ -101,6 +101,31 @@ export function aptSteps(body) {
   }))
 }
 
+/**
+ * Does this workflow's `on:` block name `deployment_status`?
+ *
+ * `actions/cache` refuses to run when the triggering event is not tied to a branch or tag ref, so a
+ * cache step in such a workflow is INERT — it restores nothing and saves nothing. Verified on run
+ * 33703810844: both the restore and the post-job save logged "Event Validation Error: The event type
+ * deployment_status is not supported because it's not tied to a branch or tag ref", no `Cache hit`
+ * line appeared, and the browser downloaded despite a live cache entry under the same key.
+ *
+ * Scoped to the ONE event we have a run to point at. This is deliberately not a list of which GitHub
+ * events are ref-bound: such a list is unbounded, untestable from here, and would drift silently.
+ */
+export function deploymentStatusTriggered(text) {
+  const lines = text.split('\n')
+  const start = lines.findIndex((l) => /^on:/.test(l))
+  if (start === -1) throw new Error('no top-level `on:` key — the parser cannot read this file')
+  const inline = stripComment(lines[start]).slice(3)
+  if (/deployment_status/.test(inline)) return true
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\S/.test(lines[i])) break
+    if (/deployment_status/.test(stripComment(lines[i]))) return true
+  }
+  return false
+}
+
 const files = readdirSync(DIR).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
 const parsed = files.map((f) => ({ file: f, text: readFileSync(join(DIR, f), 'utf8') }))
 
@@ -126,13 +151,26 @@ test('every apt-reaching step is bounded (#1253)', () => {
   assert.deepEqual(unbounded, [], `apt-reaching steps with no bound:\n${unbounded.join('\n')}`)
 })
 
-test('Playwright installs stay apt-free and cache the browser (#1253)', () => {
+test('Playwright installs stay apt-free, and cache only where the cache can run (#1253)', () => {
+  // The cache half is asserted in BOTH directions on purpose. Requiring the step everywhere was the
+  // first shape of this test, and it passed on edge-e2e.yml while the step there restored nothing —
+  // a text assertion cannot see that `actions/cache` declined to run.
   const playwrightWorkflows = parsed.filter(({ text }) => text.includes('playwright install chromium'))
   assert.equal(playwrightWorkflows.length, 3, `expected the three Playwright workflows, found ${playwrightWorkflows.length}`)
+  let inert = 0
   for (const { file, text } of playwrightWorkflows) {
     assert.doesNotMatch(text, /playwright install --with-deps|playwright install-deps/, `${file}: Playwright install reintroduced apt`)
-    assert.match(text, /path: ~\/\.cache\/ms-playwright/, `${file}: browser cache is missing`)
+    const hasCache = /path: ~\/\.cache\/ms-playwright/.test(text)
+    if (deploymentStatusTriggered(text)) {
+      inert++
+      assert.equal(hasCache, false, `${file}: triggered by deployment_status, where actions/cache cannot run — a cache step here is inert`)
+    } else {
+      assert.equal(hasCache, true, `${file}: browser cache is missing`)
+    }
   }
+  // Without this the whole deployment_status branch could stop being reached — by a trigger rename or
+  // a parser regression — and every workflow would silently fall through to the "cache required" arm.
+  assert.equal(inert, 1, `expected exactly one deployment_status-triggered Playwright workflow, found ${inert}`)
 })
 
 test('the parser sees every job that exists (#1253)', () => {
@@ -199,4 +237,21 @@ test('APT: matches playwright\'s other apt entry point, and not words containing
   assert.match('sudo apt-get update -qq', APT)
   assert.doesNotMatch('- name: Adapt the fixtures', APT)
   assert.doesNotMatch('node scripts/build.mjs --adapt', APT)
+})
+
+
+test('deploymentStatusTriggered: reads the mapping, inline and list forms', () => {
+  assert.equal(deploymentStatusTriggered('on:\n  deployment_status: {}\njobs:\n'), true)
+  assert.equal(deploymentStatusTriggered('on: [deployment_status]\njobs:\n'), true)
+  assert.equal(deploymentStatusTriggered('on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n'), false)
+})
+
+test('deploymentStatusTriggered: stops at the `on:` block, and ignores comments', () => {
+  // A `jobs:`-level mention must not be read as a trigger — that would exempt a workflow that can cache.
+  assert.equal(deploymentStatusTriggered('on:\n  push:\njobs:\n  a:\n    steps:\n      - run: echo deployment_status\n'), false)
+  assert.equal(deploymentStatusTriggered('on:\n  push:   # not deployment_status, that was removed\njobs:\n'), false)
+})
+
+test('deploymentStatusTriggered: throws on a file with no `on:` key rather than answering false', () => {
+  assert.throws(() => deploymentStatusTriggered('jobs:\n  a:\n    runs-on: x\n'), /cannot read/)
 })

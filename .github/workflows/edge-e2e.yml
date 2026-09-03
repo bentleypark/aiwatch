@@ -47,16 +47,18 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - name: Cache Playwright browsers
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-1.58.2-${{ runner.os }}
       # #1253 — install only the browser. `--with-deps` enters apt on every run and intermittently
-      # stalls on the runner's Ubuntu mirror; the browser cache is independent of that apt phase.
+      # stalls on the runner's Ubuntu mirror.
+      #
+      # NO browser cache here, unlike the repo's other two Playwright workflows: `actions/cache`
+      # refuses to run when the triggering event is not tied to a branch or tag ref, and this
+      # workflow's only trigger is `deployment_status`. Observed on run 33703810844 — the step logged
+      # "Event Validation Error: The event type deployment_status is not supported because it's not
+      # tied to a branch or tag ref" on BOTH restore and save, emitted no `Cache hit` line, and the
+      # browser downloaded anyway despite a live cache entry under the very same key. That download
+      # costs ~9s; an inert step costs more than that, because its presence reads as coverage.
       - name: Install Chromium
-        run: |
-          npx playwright install chromium
+        run: npx playwright install chromium
       - name: Wait for the deployment to be reachable (cold-start guard)
         env:
           EDGE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
