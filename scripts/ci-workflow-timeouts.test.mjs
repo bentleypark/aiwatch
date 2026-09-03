@@ -1,12 +1,9 @@
-// #1253 — structural guard for the two CI invariants a green run cannot establish.
+// #1253 — structural guard for the CI invariants a green run cannot establish.
 //
 // The apt stall this issue is about is INTERMITTENT: on 2026-08-19 the same install step both stalled
 // past 20 minutes and completed in seconds, within the same hour, on the same runner pool. So "CI went
 // green" carries no information about whether the bound is still in place — only a structural
 // assertion does.
-//
-// The invariants themselves are the test names below — enumerating them here too drifted the
-// moment a third one landed.
 //
 // The PARSER is unit-tested against synthetic fixtures below, not only against the live files. An
 // earlier version of this guard passed while guarding nothing in four separate shapes (a job key with
@@ -98,6 +95,14 @@ export function aptSteps(body) {
   }))
 }
 
+/** Steps whose CODE (comments stripped) are an `actions/cache` of Playwright's browser dir. */
+export function browserCacheSteps(body) {
+  return stepBlocks(body).filter((b) => {
+    const code = b.map(stripComment).join('\n')
+    return /uses:\s*actions\/cache@/.test(code) && /path:\s*~\/\.cache\/ms-playwright/.test(code)
+  })
+}
+
 /** Steps whose CODE (comments stripped) invokes `playwright install`. */
 export function playwrightInstallSteps(body) {
   return stepBlocks(body).filter((b) => b.some((l) => /playwright\s+install\b/.test(stripComment(l))))
@@ -127,6 +132,9 @@ export function deploymentStatusTriggered(text) {
   }
   return false
 }
+
+const LOCK = JSON.parse(readFileSync(join(repoRoot, 'package-lock.json'), 'utf8'))
+export const PLAYWRIGHT_VERSION = LOCK.packages?.['node_modules/playwright-core']?.version
 
 const files = readdirSync(DIR).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
 const parsed = files.map((f) => ({ file: f, text: readFileSync(join(DIR, f), 'utf8') }))
@@ -173,15 +181,22 @@ test('Playwright installs stay apt-free, and cache only where the cache can run 
       for (const block of playwrightInstallSteps(job.body)) {
         installSteps++
         assert.doesNotMatch(block.map(stripComment).join('\n'), APT, `${file}: the Playwright install step reaches apt`)
+        // Dropping apt did not make this step fast: it still downloads ~280 MiB from cdn.playwright.dev,
+        // and `aptSteps` no longer covers it, so the bound it used to carry needs its own assertion.
+        assert.ok(isBounded(block), `${file}: the Playwright install step carries no bound`)
       }
     }
     assert.equal(installSteps, 1, `${file}: expected exactly one \`playwright install\` step, found ${installSteps}`)
-    const hasCache = /path: ~\/\.cache\/ms-playwright/.test(text)
+    // Located the same structural way as the install step. A whole-file text match counted a
+    // commented-out step, and a prose mention of the path, as a cache.
+    let cacheSteps = 0
+    for (const job of parseJobs(text, file)) cacheSteps += browserCacheSteps(job.body).length
+    const hasCache = cacheSteps > 0
     if (deploymentStatusTriggered(text)) {
       inert++
       assert.equal(hasCache, false, `${file}: triggered by deployment_status, where actions/cache cannot run — a cache step here is inert`)
     } else {
-      assert.equal(hasCache, true, `${file}: browser cache is missing`)
+      assert.equal(cacheSteps, 1, `${file}: expected exactly one browser-cache step, found ${cacheSteps}`)
     }
   }
   // Without this the whole deployment_status branch could stop being reached — by a trigger rename or
@@ -290,4 +305,32 @@ test('APT catches --with-deps in trailing position, which a command-string match
   // The shape this guard was blind to: the CLI accepts the flag after the browser name.
   assert.match('npx playwright install chromium --with-deps', APT)
   assert.doesNotMatch('npx playwright install chromium --with-deps', /playwright install --with-deps/)
+})
+
+test('every pinned Playwright version matches the lockfile (#1253)', () => {
+  // A cache key naming a stale version does not fail — it restores the wrong browser dir, the install
+  // re-downloads, and the post-job step logs `Cache hit … not saving cache`, so the entry never
+  // refreshes. Green forever, cache dead forever. Nothing else in this repo couples the two.
+  assert.ok(PLAYWRIGHT_VERSION, 'package-lock.json has no playwright-core version — the parser cannot read it')
+  const pins = []
+  for (const { file, text } of parsed) {
+    for (const line of text.split('\n')) {
+      const code = stripComment(line)
+      if (!/playwright/i.test(code)) continue
+      for (const m of code.matchAll(/(\d+\.\d+\.\d+)/g)) pins.push({ file, version: m[1], code: code.trim() })
+    }
+  }
+  assert.ok(pins.length >= 3, `expected the cache keys plus the standalone install pin, found ${pins.length}`)
+  for (const { file, version, code } of pins) {
+    assert.equal(version, PLAYWRIGHT_VERSION, `${file}: pins ${version}, lockfile resolves ${PLAYWRIGHT_VERSION} — ${code}`)
+  }
+})
+
+test('browserCacheSteps: a commented-out step or a prose mention is not a cache', () => {
+  const commented = ['      # - uses: actions/cache@v6', '      #   with:', '      #     path: ~/.cache/ms-playwright']
+  assert.equal(browserCacheSteps(commented).length, 0)
+  const prose = ['      - name: Install', '        # we deliberately do not cache path: ~/.cache/ms-playwright here', '        run: npx playwright install chromium']
+  assert.equal(browserCacheSteps(prose).length, 0)
+  const real = ['      - uses: actions/cache@v6', '        with:', '          path: ~/.cache/ms-playwright', '          key: k']
+  assert.equal(browserCacheSteps(real).length, 1)
 })

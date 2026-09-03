@@ -156,8 +156,8 @@ jobs:
       # stalls in that phase; the browser cache is independent of it.
       - name: Install Playwright
         if: steps.changes.outputs.frontend == 'true'
-        run: |
-          npx playwright install chromium
+        timeout-minutes: 5
+        run: npx playwright install chromium
       - name: Run E2E tests
         if: steps.changes.outputs.frontend == 'true'
         run: npm test

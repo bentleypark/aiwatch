@@ -50,6 +50,7 @@ jobs:
       # #1253 — install only the browser. `--with-deps` enters apt on every run and intermittently
       # stalls in that phase; the cache above restores the browser artifact.
       - name: Install Chromium
+        timeout-minutes: 3
         run: npx playwright install chromium
       - name: Scrape DeepSeek feed + push to Worker
         run: node scripts/scrape-deepseek-feed.mjs
