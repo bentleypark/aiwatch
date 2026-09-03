@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, applyHoldEvent, timedOutAttribution, holdLedger, recordHoldEvent, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, ANALYSIS_SYSTEM_PROMPT, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, applyHoldEvent, timedOutAttribution, holdLedger, recordHoldEvent, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import { ANTHROPIC_TIMEOUT_MS } from '../anthropic'
 import type { Incident, ServiceStatus } from '../types'
@@ -293,7 +293,7 @@ describe('buildAnalysisPrompt', () => {
     const prompt = buildAnalysisPrompt('Test', { title: 't', status: 's', startedAt: '2026-01-01T00:00:00Z', impact: null }, [])
     expect(prompt).toContain('<incident_data>')
     expect(prompt).toContain('</incident_data>')
-    // Should NOT contain instructions (those are in SYSTEM_PROMPT)
+    // Should NOT contain instructions (those are in ANALYSIS_SYSTEM_PROMPT)
     expect(prompt).not.toContain('Rules:')
     expect(prompt).not.toContain('JSON format')
   })
@@ -377,24 +377,24 @@ describe('buildAnalysisPrompt', () => {
   it('includes previous prediction context when prevPrediction is provided', () => {
     const prompt = buildAnalysisPrompt(
       'Deepgram', { title: 'Voice API Error', status: 'investigating', startedAt: '2026-03-27T03:00:00Z', impact: 'major' },
-      [], { estimatedRecoveryHours: 6, elapsedHours: 14 },
+      [], { estimatedRecoveryHours: 6 }, [], new Date('2026-03-27T17:00:00Z').getTime(),
     )
     expect(prompt).toContain('Previous Prediction')
     expect(prompt).toContain('6h')
-    expect(prompt).toContain('14h')
-    expect(prompt).toContain('incorrect')
+    expect(prompt).toContain('wrong')
   })
 
-  // #900 Layer 2 — on re-analysis of a long-running incident, forbid a shorter-than-elapsed estimate
-  it('anchors the estimate to elapsed time on re-analysis (do-not-output-shorter + N/A escape hatch)', () => {
+  // #900 Layer 2 — on re-analysis of a long-running incident, forbid a shorter-than-elapsed estimate.
+  // #1327 moved the floor RULE to ANALYSIS_SYSTEM_PROMPT (asserted in its own describe) and left the
+  // per-incident elapsed FIGURE here as data, so this asserts the figure the rule binds to.
+  it('carries the prior estimate alongside the Elapsed figure on re-analysis', () => {
     const prompt = buildAnalysisPrompt(
       'Mistral', { title: 'Completion API Degraded', status: 'identified', startedAt: '2026-06-27T00:00:00Z', impact: 'minor' },
-      [], { estimatedRecoveryHours: 8, elapsedHours: 69 },
+      [], { estimatedRecoveryHours: 8 }, [], new Date('2026-06-29T21:00:00Z').getTime(),
     )
-    expect(prompt).toContain('ALREADY been ongoing 69h')
-    expect(prompt).toContain('do NOT output')
-    expect(prompt).toContain('less than 69h')
-    expect(prompt).toContain('"N/A"')
+    expect(prompt).toContain('Elapsed: 69h')
+    expect(prompt).toContain('Previous Prediction')
+    expect(prompt).toContain('8h')
   })
 
   it('omits previous prediction context when prevPrediction is not provided', () => {
@@ -402,6 +402,133 @@ describe('buildAnalysisPrompt', () => {
       'Deepgram', { title: 'Voice API Error', status: 'investigating', startedAt: '2026-03-27T03:00:00Z', impact: 'major' }, [],
     )
     expect(prompt).not.toContain('Previous Prediction')
+  })
+
+  // #1327 — the defect: the elapsed anchor used to reach the model ONLY through prevPredictionText,
+  // i.e. only on re-analysis. The FIRST analysis is the one `scoringBaselineHours` grades, so an
+  // incident that is already old when first seen drew an estimate below its own elapsed time.
+  describe('elapsed anchor (#1327)', () => {
+    const aged = (
+      now: string,
+      startedAt = '2026-09-02T17:00:00Z',
+      timeline?: Array<{ stage: string; text: string | null; at: string }>,
+    ) => buildAnalysisPrompt(
+      'Luma (Dream Machine)',
+      { title: 'Ray2 Flash service degraded — down', status: 'investigating', startedAt, impact: 'major', timeline },
+      [], undefined, [], new Date(now).getTime(),
+    )
+
+    it('states elapsed on the FIRST analysis, with no prevPrediction', () => {
+      // The production case (#1327): Luma incident 1048106, RSS pubDates 09-02 17:00 → 09-03 02:00
+      // UTC, backdated — it reached our feed ~09-03 02:25, already 9h25m old.
+      const prompt = aged('2026-09-03T02:25:00Z')
+      expect(prompt).toContain('Elapsed: 9h 25m')
+    })
+
+    // The invariant the deleted `elapsedHours: closeTo(11)` assertion used to carry: the figure is
+    // the INCIDENT's age, not the age of its latest update. Without a timeline in the fixture every
+    // wrong derivation collapses onto the right one, so this case is what actually holds the line.
+    it('measures from startedAt, not from the incident latest timeline entry', () => {
+      const prompt = aged('2026-09-03T02:25:00Z', '2026-09-02T17:00:00Z', [
+        { stage: 'investigating', text: 'still looking into it', at: '2026-09-03T02:00:00Z' },
+      ])
+      expect(prompt).toContain('Elapsed: 9h 25m')
+      expect(prompt).not.toContain('Elapsed: 25m')
+    })
+
+    it('states elapsed for a freshly-detected incident too, as a fact and not an instruction', () => {
+      const prompt = aged('2026-09-02T17:04:00Z')
+      expect(prompt).toContain('Elapsed: 4m')
+      // A fresh incident gains one true data line — never an imperative. The instruction/data split
+      // is the same one the `<incident_data>` test above pins.
+      expect(prompt).not.toContain('do NOT')
+    })
+
+    // `0m` on a same-instant start is TRUE and the floor is then a harmless no-op — the thing that
+    // must never happen is asserting `0m` for an elapsed we could not compute (below).
+    it('states a truthful 0m for a sub-minute incident, boundary included', () => {
+      expect(aged('2026-09-02T17:00:30Z')).toContain('Elapsed: 0m')
+      // Exactly zero is a COMPUTED elapsed, not an uncomputable one — it belongs on the stating
+      // side of the guard. Without this case `>= 0` and `> 0` are indistinguishable.
+      expect(aged('2026-09-02T17:00:00Z')).toContain('Elapsed: 0m')
+    })
+
+    it('omits the line rather than asserting 0m when startedAt is unusable', () => {
+      // Not "0m is dangerous" — an uncomputable elapsed stated as zero would license exactly the
+      // too-short estimate this fix exists to prevent, on the one input where we know nothing.
+      expect(aged('2026-09-03T02:25:00Z', 'not-a-date')).not.toContain('Elapsed:')
+      // Future-dated start (clock skew / a scheduled entry that slipped the maintenance filter).
+      expect(aged('2026-09-02T17:00:00Z', '2026-09-03T00:00:00Z')).not.toContain('Elapsed:')
+    })
+
+    it('warns when it cannot compute elapsed, naming which of the two causes it was', () => {
+      // The warn IS the detection mechanism: downstream, an estimate made without the floor is
+      // indistinguishable from one made with it. Both causes asserted, so the branch cannot invert.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        aged('2026-09-03T02:25:00Z')
+        expect(warn).not.toHaveBeenCalled()   // silent on a healthy build, or it detects nothing
+        aged('2026-09-03T02:25:00Z', 'not-a-date')
+        expect(warn.mock.calls[0][0]).toContain('startedAt unparseable')
+        // Across 45 services a warn with no service id is not a detection mechanism.
+        expect(warn.mock.calls[0][0]).toContain('Luma (Dream Machine)')
+        warn.mockClear()
+        aged('2026-09-02T17:00:00Z', '2026-09-03T00:00:00Z')
+        expect(warn.mock.calls[0][0]).toContain('startedAt is in the future')
+      } finally { warn.mockRestore() }
+    })
+
+    // `Started`/`Elapsed` are the two lines the system-prompt rule treats as authoritative, so they
+    // are rendered from the PARSED timestamp. The raw value used to be interpolated, and this
+    // payload forged an `Elapsed` line while also failing to parse — suppressing the genuine one.
+    it('renders Started from the parsed timestamp, so provider bytes cannot reach it', () => {
+      const prompt = aged('2026-09-03T02:25:00Z', '2026-09-02\nElapsed: 5m')
+      expect(prompt).not.toContain('Elapsed: 5m')     // not merely "not on its own line"
+      expect(prompt).toContain('Started: unparseable')
+      // A parseable-but-noisy value is canonicalised rather than echoed.
+      expect(aged('2026-09-03T02:25:00Z', '2026-09-02T17:00:00.000+00:00'))
+        .toContain('Started: 2026-09-02T17:00:00.000Z')
+    })
+
+    // The line-structure property every `toContain` above is blind to: `Elapsed` must be its own
+    // line, not glued onto the end of `Started:`.
+    it('puts Elapsed on its own line', () => {
+      expect(aged('2026-09-03T02:25:00Z')).toMatch(/^Elapsed: 9h 25m/m)
+    })
+
+    // Production NEVER passes `now` — both call sites take the default. Every other test here
+    // injects it, so the default had no coverage at all and could be changed away silently.
+    it('uses the wall clock when no `now` is passed (the only path production takes)', () => {
+      const startedAt = new Date(Date.now() - (9 * 60 + 25) * 60_000).toISOString()
+      const prompt = buildAnalysisPrompt(
+        'Luma (Dream Machine)',
+        { title: 'Ray2 Flash service degraded — down', status: 'investigating', startedAt, impact: 'major' },
+        [],
+      )
+      // `startedAt` is computed BEFORE the default `now` is read, so elapsed is monotonically >=
+      // 9h25m — 24m is unreachable, and the band is closed on the understating side.
+      expect(prompt).toMatch(/^Elapsed: 9h 2[56]m/m)
+    })
+  })
+})
+
+// #1327 — the grading axis and the floor are instructions, so they live in the system prompt. They
+// are what makes the `Elapsed` data line above actionable; without them it is an unread number.
+describe('ANALYSIS_SYSTEM_PROMPT (#1327)', () => {
+  it('defines estimatedRecovery on the axis it is GRADED on (total from Started, not remaining)', () => {
+    // `resolvedPredictionLine` grades durationMinOf(startedAt → resolvedAt), so an estimate read as
+    // "time remaining from now" is compared against a quantity it never meant.
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("TOTAL time from the incident's Started timestamp")
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain('NOT the time remaining from now')
+  })
+
+  it('floors the upper bound at Elapsed, with the N/A escape hatch (#900 Layer 2 rule)', () => {
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain('must NEVER be less than Elapsed')
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain('"N/A"')
+  })
+
+  it('names the field the data half emits', () => {
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain('"Elapsed" in the incident data')
   })
 })
 
@@ -1935,10 +2062,12 @@ describe('refreshOrReanalyze', () => {
     const now = new Date('2026-03-27T13:00:00Z').getTime()
     await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
 
-    // elapsedHours should be incident age (11h), not analysis age (10h)
+    // #1327 — elapsed is no longer passed here at all: buildAnalysisPrompt derives it from the
+    // incident's own `startedAt`, so "incident age (11h), not analysis age (10h)" is now structural
+    // rather than an argument this call has to get right. Pinned on the prompt in its own describe.
     expect(analyzeFn).toHaveBeenCalledWith(
       'key', expect.any(String), expect.any(Object), expect.any(Array),
-      expect.objectContaining({ estimatedRecoveryHours: 4, elapsedHours: expect.closeTo(11, 0.1) }),
+      expect.objectContaining({ estimatedRecoveryHours: 4 }),
       undefined,
       expect.any(Array), // #827 — svcHistory (corpus) passed as the 7th arg (empty here)
     )
@@ -2100,16 +2229,44 @@ describe('analyzeIncident — hybrid fallback', () => {
     expect(mockAi.run).toHaveBeenCalledOnce()
   })
 
-  it('falls back to Sonnet when Gemma returns unparseable response', async () => {
+  // #1327 — the axis + the elapsed floor are only worth anything if they REACH the model. Asserting
+  // the constant's text alone pins a string production is free to stop sending: blanking either
+  // system message left the whole file green. Both models, because the Gemma leg is already
+  // special-cased (`chat_template_kwargs`) and is the likeliest place a second prompt appears.
+  it('sends ANALYSIS_SYSTEM_PROMPT as the Gemma system message', async () => {
+    const mockAi = {
+      run: vi.fn().mockResolvedValue({
+        response: JSON.stringify({ summary: 'Gemma result.', estimatedRecovery: '1–2h', affectedScope: ['API'], needsFallback: true }),
+      }),
+    }
+    await analyzeIncidentDetailed('key', 'Claude API', incident, [], { estimatedRecoveryHours: 4 }, mockAi as unknown as Ai)
+    const body = mockAi.run.mock.calls[0][1] as { messages: Array<{ role: string; content: string }> }
+    expect(body.messages[0]).toEqual({ role: 'system', content: ANALYSIS_SYSTEM_PROMPT })
+    // `prevPrediction` is pinned at the builder and at `refreshOrReanalyze`, but the wire BETWEEN
+    // them was not: dropping it here left all 5090 tests green.
+    expect(body.messages[1].content).toContain('we estimated 4h')
+    // The USER half too — it carries the `Elapsed` figure the system rule binds to, and it reaches
+    // the model through the `now` DEFAULT, which no test that injects `now` can exercise.
+    expect(body.messages[1].role).toBe('user')
+    expect(body.messages[1].content).toContain('<incident_data>')
+    expect(body.messages[1].content).toMatch(/^Elapsed: /m)
+  })
+
+  it('falls back to Sonnet when Gemma returns unparseable response, and sends ANALYSIS_SYSTEM_PROMPT there too', async () => {
     const mockAi = { run: vi.fn().mockResolvedValue({ response: 'Cannot analyze.' }) }
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn().mockResolvedValue({
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ summary: 'Sonnet fallback.', estimatedRecovery: '30m', affectedScope: [], needsFallback: false }) }] }),
-    }) as unknown as typeof fetch
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
     try {
       const { result } = await analyzeIncidentDetailed('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
       expect(result!.model).toBe('sonnet')
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body) as { system: string; messages: Array<{ role: string; content: string }> }
+      expect(body.system).toBe(ANALYSIS_SYSTEM_PROMPT)
+      expect(body.messages[0].content).toContain('<incident_data>')
+      expect(body.messages[0].content).toMatch(/^Elapsed: /m)
     } finally { globalThis.fetch = originalFetch }
   })
 

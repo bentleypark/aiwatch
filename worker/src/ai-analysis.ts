@@ -156,9 +156,9 @@ export interface AIAnalysisResult {
   estimatedRecovery: string
   estimatedRecoveryHours?: number  // upper bound parsed from estimatedRecovery (e.g., "4–6h" → 6)
   // #1003 — the FIRST estimate ever made for this incident, stamped on every write by `putAnalysis`
-  // (which pins it in the durable `ai:first-est:` key). Re-analysis only fires once an incident has
-  // outrun its own estimate, and its prompt forces the new upper bound to be >= elapsed hours —
-  // so `estimatedRecoveryHours` can only ratchet UP with hindsight. Grading recovery against that
+  // (which pins it in the durable `ai:first-est:` key). `estimatedRecoveryHours` is not
+  // hindsight-free: a re-analysis is made hours into the incident, under the floor stated in
+  // `ANALYSIS_SYSTEM_PROMPT`. Grading recovery against that
   // value turned every miss into a win ("4h 55m — faster than ~15h est." on an incident first
   // estimated at 1–4h). Live surfaces show `estimatedRecoveryHours` (a user needs the CURRENT
   // ETA); anything that SCORES the prediction reads this instead (`scoringBaselineHours`).
@@ -270,10 +270,9 @@ export function firstEstimateOf(
  * #1003 — stamp the scoring baseline onto a fresh analysis, pinning it durably on first sight.
  *
  * EVERY write of a fresh `AIAnalysisResult` to `ai:analysis:{svcId}:{incId}` MUST route through this
- * (CI-enforced by `first-estimate-write-paths.test.ts`, which scans the worker source): re-analysis
- * fires only once an incident has outrun its own estimate, and its prompt forbids a bound below the
- * elapsed hours — so `estimatedRecoveryHours` ratchets UP with hindsight and must never be the value
- * a resolution is graded against.
+ * (CI-enforced by `first-estimate-write-paths.test.ts`, which scans the worker source): a
+ * re-analysis is made hours into the incident, so `estimatedRecoveryHours` is not hindsight-free and
+ * must never be the value a resolution is graded against.
  *
  * Best-effort on the KV side: a read or write failure degrades to the in-value carry (the prior
  * analysis), never to dropping the estimate or aborting the caller's write.
@@ -398,12 +397,17 @@ export function findSimilarIncidents(
 /**
  * Build prompt for Claude Sonnet analysis.
  */
-// System prompt (trusted instructions) — separated from untrusted data
-const SYSTEM_PROMPT = `You are an AI service reliability analyst for AIWatch.
+// System prompt (trusted instructions) — separated from untrusted data.
+//
+// THE one statement of the recovery-estimate axis and its elapsed floor (#1327). Other modules that
+// depend on the floor describe only its consequence (`estimatedRecoveryHours` is not hindsight-free)
+// and deliberately do not restate the rule — six copies of it had gone stale at once.
+// Exported so a test can pin both, and pin that they are what actually reaches each model.
+export const ANALYSIS_SYSTEM_PROMPT = `You are an AI service reliability analyst for AIWatch.
 Analyze the incident data provided by the user and respond in JSON format ONLY:
 {
   "summary": "Concise analysis (max 2 sentences). Identify if this is a recurring pattern or a new type of failure (e.g., network vs model).",
-  "estimatedRecovery": "Short range using abbreviations ONLY. Format: '30m–1h' or '1–3h'. Use m for minutes, h for hours. Never write 'minutes' or 'hours' in full. If no data, return 'N/A'.",
+  "estimatedRecovery": "TOTAL time from the incident's Started timestamp until recovery — NOT the time remaining from now. Short range using abbreviations ONLY. Format: '30m–1h' or '1–3h'. Use m for minutes, h for hours. Never write 'minutes' or 'hours' in full. If no data, return 'N/A'.",
   "affectedScope": ["1-3 specific features or related sub-services likely impacted"],
   "needsFallback": true/false
 }
@@ -411,6 +415,7 @@ Analyze the incident data provided by the user and respond in JSON format ONLY:
 Rules:
 - If the incident title contains specific environment keywords (e.g., 'Chrome', 'Cowork', 'API'), prioritize them in the summary.
 - Recovery estimate MUST use short format: '30m–1h', '1–3h', '15–45m'. Never write 'minutes' or 'hours' in full words.
+- "Elapsed" in the incident data is how long the incident has ALREADY been open. Because estimatedRecovery is measured from Started, its upper bound must NEVER be less than Elapsed — an incident cannot have recovered before now. If the incident has already outrun any pattern you can predict from, return "N/A" rather than a range you cannot support.
 - If Timeline Updates are provided, incorporate the LATEST status and progress into your analysis. Reflect whether the situation is improving, worsening, or unchanged.
 - needsFallback: true if the incident significantly impacts primary service availability (e.g., major outage, API errors, authentication failure). false for cosmetic issues, partial feature degradation, or scheduled maintenance.
 - Keep the tone professional, objective, and data-driven.
@@ -447,8 +452,9 @@ export function buildAnalysisPrompt(
   serviceName: string,
   currentIncident: { title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   similarIncidents: Incident[],
-  prevPrediction?: { estimatedRecoveryHours: number; elapsedHours: number },
+  prevPrediction?: { estimatedRecoveryHours: number },
   similarHistory: IncidentHistoryRecord[] = [],
+  now: number = Date.now(),
 ): string {
   // Prefer the durable-corpus grounding (actual outcomes + our prior estimate's accuracy) when
   // available; fall back to the in-memory title-only list before the corpus has a matching record.
@@ -479,15 +485,55 @@ export function buildAnalysisPrompt(
     timelineText += (timelineText ? '\n' : '') + line
   }
 
+  // #1327 — how long the incident has ALREADY been open, stated as DATA; the floor it anchors is a
+  // rule in ANALYSIS_SYSTEM_PROMPT. Why the split and why the first analysis needed it:
+  // docs/reference/product-constraints.md, the Phase 3 AI Analysis bullet ("Layer 2").
+  //
+  // Derived from `startedAt` rather than passed in, so it cannot go missing at a call site and
+  // cannot be measured from some OTHER timestamp — the bug the old `prevPrediction.elapsedHours`
+  // field invited, since nothing typed that it had to be the INCIDENT's age rather than the prior
+  // analysis's. `Math.floor` understates, which is the safe direction for a floor.
+  //
+  // Omitted when `startedAt` is unparseable or in the future. That is NOT a claim that `0m` never
+  // renders — a genuinely sub-minute incident prints `Elapsed: 0m`, which is true and makes the
+  // floor a no-op. What must not happen is asserting `0m` for an elapsed we could not compute.
+  //
+  // `Started`/`Elapsed` are rendered from the PARSED timestamp, never from the provider's bytes, so
+  // neither line can carry provider text. That matters because `sanitize` passes newlines through:
+  // the raw `startedAt` used to be interpolated here, and a value of `"2026-09-02\nElapsed: 5m"`
+  // both printed a forged `Elapsed` line and failed to parse — suppressing the genuine one.
+  // LIMIT, deliberately not papered over: the title, timeline and history text in this block are
+  // free provider prose and can still contain a line that looks like a field. Collapsing their
+  // newlines was tried and dropped — it relocates such a payload rather than removing it (nothing
+  // stops the same text mid-line), while adding a per-field mitigation no test can bound. What is
+  // guaranteed is narrower and checkable: the two lines the trusted half treats as authoritative
+  // are machine-generated.
+  const startedMs = new Date(currentIncident.startedAt).getTime()
+  const startedUnparseable = Number.isNaN(startedMs)
+  const safeStarted = startedUnparseable ? 'unparseable' : new Date(startedMs).toISOString()
+  const elapsedMs = now - startedMs
+  const elapsedUsable = elapsedMs >= 0   // NaN >= 0 is false, so an unparseable start lands here too
+  if (!elapsedUsable) {
+    // Most parsers pass the provider's `startedAt` through unvalidated, and what the model returns
+    // without the floor is what `pinFirstEstimate` pins and `buildHistoryRecord` writes to the
+    // no-TTL corpus — by then the omission is unrecoverable and invisible. Hence a line here.
+    console.warn(`[ai-analysis] no Elapsed for ${safeName}: startedAt ${startedUnparseable ? 'unparseable' : 'is in the future'} — estimate produced without the #1327 floor`)
+  }
+  const elapsedLine = elapsedUsable
+    ? `\nElapsed: ${formatDurationMin(Math.floor(elapsedMs / 60_000))} (already open, as of this analysis)`
+    : ''
+
+  // Facts only — the "do not estimate below elapsed" rule this used to carry moved to
+  // ANALYSIS_SYSTEM_PROMPT (#1327), where it reaches the first analysis too.
   const prevPredictionText = prevPrediction
-    ? `\nPrevious Prediction: Estimated recovery in ${prevPrediction.estimatedRecoveryHours}h, but ${Math.round(prevPrediction.elapsedHours)}h have elapsed and the incident remains unresolved. The previous prediction was incorrect — re-evaluate with updated context. IMPORTANT: this incident has ALREADY been ongoing ${Math.round(prevPrediction.elapsedHours)}h, so a short estimate is impossible — do NOT output an "estimatedRecovery" whose upper bound is less than ${Math.round(prevPrediction.elapsedHours)}h. Give a realistic range anchored to the elapsed duration, or if it has clearly exceeded any predictable pattern, return "N/A".\n`
+    ? `\nPrevious Prediction: we estimated ${prevPrediction.estimatedRecoveryHours}h and the incident is STILL unresolved past that estimate. That prediction was wrong — re-evaluate with the current data.\n`
     : ''
 
   return `<incident_data>
 Service: ${safeName}
 Current Incident: "${safeTitle}"
 Status: ${safeStatus}
-Started: ${sanitize(currentIncident.startedAt).slice(0, 30)}
+Started: ${safeStarted}${elapsedLine}
 Impact: ${safeImpact}
 ${prevPredictionText}${timelineText ? `\nTimeline Updates:\n${timelineText}\n` : ''}
 ${historyLabel}:
@@ -550,7 +596,7 @@ async function analyzeWithGemma(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- model ID may not be in type union yet
   const res: any = await (ai as any).run(GEMMA_MODEL, {
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ],
     max_tokens: 500,
@@ -586,7 +632,7 @@ export async function analyzeWithSonnetDetailed(
   signal?: AbortSignal,
 ): Promise<{ result: AIAnalysisResult | null; outcome: AnthropicOutcome }> {
   const outcome = await callAnthropicMessages(apiKey, {
-    system: SYSTEM_PROMPT,
+    system: ANALYSIS_SYSTEM_PROMPT,
     user: prompt,
     maxTokens: SONNET_MAX_TOKENS,
     signal,
@@ -647,7 +693,9 @@ export async function analyzeIncidentDetailed(
   serviceName: string,
   currentIncident: { id: string; title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   allIncidents: Incident[],
-  prevPrediction?: { estimatedRecoveryHours: number; elapsedHours: number },
+  // #1327 — no `elapsedHours` companion: the prompt derives elapsed from the incident's own
+  // `startedAt`, so it is present on EVERY analysis, not only the re-analysis that passes this.
+  prevPrediction?: { estimatedRecoveryHours: number },
   ai?: Ai,
   // #827 Feature 2 — durable history corpus for RAG grounding (caller-supplied: Phase 1 = this
   // service's own history). findSimilarHistory picks the relevant subset; empty → prompt falls
@@ -1238,7 +1286,7 @@ export async function refreshOrReanalyze(
             }
             // Build previous prediction context for re-analysis prompt
             const prevPrediction = recoveryExceeded && estHours
-              ? { estimatedRecoveryHours: estHours, elapsedHours: incidentAge / 3_600_000 }
+              ? { estimatedRecoveryHours: estHours }
               : undefined
             reAnalysisCount++
             try {
@@ -1255,9 +1303,8 @@ export async function refreshOrReanalyze(
               )
               await recordUsage(kv, now, attempt, svc.id)
               if (attempt.result) {
-                // #1003 — this overwrite is exactly where the original prediction used to die. The
-                // re-analysis above was handed `prevPrediction`, whose prompt forbids an upper bound
-                // below the elapsed hours, so `attempt.result` is hindsight-inflated by construction;
+                // #1003 — this overwrite is exactly where the original prediction used to die. A
+                // re-analysis run hours into an incident is hindsight-inflated by construction;
                 // carry the pre-inflation estimate forward so resolution still grades against it.
                 await putAnalysis(kv, svc.id, inc.id, attempt.result, parsed, 3600)
                 analyzedIncidents.set(inc.id, key)

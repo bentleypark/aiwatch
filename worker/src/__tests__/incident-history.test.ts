@@ -464,7 +464,7 @@ describe('scoringBaselineHours (#1003 — hindsight-free baseline)', () => {
 
 describe('#1003 regression — the Pinecone false win', () => {
   // The incident that surfaced the bug: first analysis "1–4h" (upper bound 4), re-analysis at the
-  // 4h mark forced the bound up to ~15h (its prompt forbids a bound below the elapsed hours), actual
+  // 4h mark forced the bound up to ~15h, actual
   // recovery 4h 55m. Grading against the 15h bound shipped "faster than ~15h est." — scoring a MISS
   // as a win, and writing 15 into the durable corpus that feeds the accuracy aggregate + RAG.
   const pineconeInc: Incident = {
