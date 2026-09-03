@@ -50,7 +50,25 @@ import type { AwsRssParseFailure, AwsHealthParseFailure } from './parsers/aws'
  * source's union on purpose, so an operator aggregating one reason over several services is never
  * summing two different parsers' failures — they take different fixes.
  */
-export type SourceParseFailure = InstatusParseFailure | OnlineOrNotParseFailure | AwsRssParseFailure | AwsHealthParseFailure
+export type SourceParseFailure = InstatusParseFailure | OnlineOrNotParseFailure | AwsRssParseFailure | AwsHealthParseFailure | ScrapeLegParseFailure
+
+/**
+ * #1234 — the generic path's two fetch legs: the scrape (one fetch, addressing either an RSS feed or
+ * gcloud's incidents.json) and BetterStack's index.json. Two legs, three reasons, because the scrape's
+ * two configurations take different fixes.
+ *
+ * Homed HERE rather than in a parser module, which is where every union above lives. NOT on the
+ * grounds that the caller sets them — `scrape-unreadable` and `fetch-unreadable` are caller-set too
+ * and live in `parsers/instatus.ts` / `parsers/onlineornot.ts`, so that would prove nothing. The
+ * reason is that these three span TWO parser modules: `parseRssIncidents` and the BetterStack readers
+ * are both in `parsers/betterstack.ts`, the gcloud reader is in `parsers/gcloud.ts`. Filing them by
+ * parser would split one concept across two files and leave neither able to state the rule, so the
+ * module that owns the vocabulary owns them instead.
+ */
+export type ScrapeLegParseFailure =
+  | 'rss-unreadable'          // the RSS scrape fetch failed or returned non-ok
+  | 'gcloud-unreadable'       // the gcloud incidents.json scrape fetch failed or returned non-ok
+  | 'betterstack-unreadable'  // the BetterStack index.json fetch failed or returned non-ok
 
 /** 30d — long enough that a weekly check sees the whole window, unlike `fetch-fail:daily`'s 48h. */
 export const PARSE_FAIL_TTL_S = 30 * 86400
