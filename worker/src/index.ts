@@ -5188,8 +5188,11 @@ export default {
       // never a 500 (mirrors the ext-claude reads).
       const briefAiSummary: Record<string, string> = {}
       await Promise.all(scoredAll
-        // #1233 — `isAffectedStatus`. An `unknown` service carries no incidents (the fetch is what
-        // failed), so this is behaviour-neutral today; it is spelled correctly so it stays that way.
+        // #1233 — `isAffectedStatus`. #1234 — an `unknown` service is no longer guaranteed to carry no
+        // incidents: on the generic path one incident source can fail while another is read fine, and
+        // those rows survive. So this filter can now skip a summary for a live incident. Left as-is
+        // deliberately — the verdict really is unreadable, and an AI summary attached to a service we
+        // cannot state the status of is the weaker of the two errors.
         .filter((svc) => isAffectedStatus(svc.status))
         .flatMap((svc) => (svc.incidents ?? [])
           .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')

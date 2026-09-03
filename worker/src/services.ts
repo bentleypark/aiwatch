@@ -2,7 +2,7 @@
 
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
-import { recordParseFailure } from './parse-failure-log'
+import { recordParseFailure, type ScrapeLegParseFailure } from './parse-failure-log'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type TrackingStateBlob } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
@@ -1704,10 +1704,17 @@ export function isStatuspageSummary(v: unknown): v is StatuspageResponse {
 
 /** #1268 — THE invariant, applied at a choke point rather than at each return.
  *
- *  `sourceUnknown` means the fetch leg could not read the source, and every one of the nine returns
- *  that sets it publishes `incidents: []` — so the Score, which reads the live `service.incidents`
- *  array and has no source-liveness input of its own, books an unread feed as a clean 30-day window:
- *  full Incidents + Recovery marks. Character.AI reached 75/100 ("good") that way.
+ *  `sourceUnknown` means the fetch leg could not read the source. Where the incident list is empty as a
+ *  RESULT — the usual case — the Score, which reads the live `service.incidents` array and has no
+ *  source-liveness input of its own, books an unread feed as a clean 30-day window: full Incidents +
+ *  Recovery marks. Character.AI reached 75/100 ("good") that way.
+ *
+ *  #1234 — the list is NOT always empty here. The generic path has more than one incident source, and
+ *  one can fail while another is read fine, so the flag can travel with rows we hold. Such a service
+ *  still leaves the rankings, which is the intended outcome: what the failed leg carried is missing
+ *  from the Score whether or not something else survived. Stated because the justification above reads
+ *  as if an empty list were guaranteed, and it no longer is. No list of the shapes that reach it —
+ *  the reachable set is `legFalseGreen` at the generic path's return, not a fact prose can hold.
  *
  *  Setting the ranking flag on the ONE branch that produced the reported bug would have left the class
  *  open — the 5xx return sits a few branches above it with an identical body, and the Instatus/OnlineOrNot
@@ -1788,6 +1795,12 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
   // CONSUMES (the payload also publishes a per-component `componentStatus`, which nothing reads
   // today), so an unreadable payload pins the card to `operational` with nothing to contradict it.
   let onlineOrNotParseFailure: OnlineOrNotParseFailure | null = null
+  // #1234 — the same distinction for the generic path's two independent legs: the scrape (ONE fetch,
+  // whose URL is the RSS feed or gcloud's incidents.json) and BetterStack's index.json. Two legs,
+  // three reasons. Unlike the two above, these do NOT early-return — see the accounting block near
+  // the end of that path for why.
+  let scrapeLegFailure: ScrapeLegParseFailure | null = null
+  let betterStackLegFailure: ScrapeLegParseFailure | null = null
   const base: ServiceStatus = {
     id: config.id,
     name: config.name,
@@ -2725,6 +2738,38 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // No parser matched — cancel unconsumed response bodies to free connections
         res.body?.cancel()
         scrapeRes?.body?.cancel()
+        // #1234 — reaching here with a scrape CONFIGURED means the incident source was unreadable.
+        // The arm immediately above is `else if (scrapeRes?.ok)` and every arm before it is guarded on
+        // an `onlineOrNotUrl`/`instatusUrl` this config does not carry, so a service with
+        // `rssFeedUrl`/`gcloudProduct` is here only because the scrape returned non-ok or its fetch
+        // threw (`.catch` → null). Before this,
+        // the branch booked nothing: `incidents` stayed `[]`, `hasOngoing` was false, and
+        // `derivedStatus` fell through to the MAIN page's HTTP code — a plain green badge with no
+        // `sourceUnknown`, while `parseErrors === 0` let `resetFetchFailure` clear the streak (and,
+        // since #1232, withdraw a live `failSince` pin) every cycle.
+        //
+        // A throw and a non-ok are the SAME verdict here — we could not read the source — and are
+        // treated alike, matching the Instatus arm's `scrapeRes?.ok` test, which is the reference
+        // implementation this mirrors (#1089). The throw already incremented `parseErrors` in the
+        // fetch's own `.catch`, but that arm DISCARDS `trackFetchFailure`'s return, so it could never
+        // reach `unknown` either. It gains the disclosure and the escalation together.
+        //
+        // A service with no scrape URL at all is NOT a failure and is left alone — that is the
+        // genuine "no parser matched" case this arm was written for.
+        //
+        // A 4xx stays `sourceUnknown` and is deliberately NOT routed through
+        // `classifyStatusPageFailure` the way #1212's legs are: there the failing URL IS the whole
+        // source, whereas here the feed and the status page are separate fetches, so a 404 feed beside
+        // a 200 page is #761's URL drift — a config error, not a retired service. `sourceDead` would
+        // publish `operational` while dropping it from the rankings. Reasoning: status-determination.md.
+        scrapeLegFailure = config.rssFeedUrl
+          ? 'rss-unreadable'
+          : config.gcloudProduct
+            ? 'gcloud-unreadable'
+            : null
+        if (scrapeLegFailure) {
+          console.warn(`[fetchService] ${config.id} scrape unreadable (${scrapeRes == null ? 'fetch failed' : `HTTP ${scrapeRes.status}`}) — NOT treating as "no incidents"`)
+        }
       }
 
       if (config.aistudioStatus) {
@@ -2746,9 +2791,17 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       let betterStackPartial = 0
       let betterStackComponents: ServiceComponent[] = []
       let bsDailyImpact: Record<string, DailyImpactLevel> | null = null
-      if (betterStackRes && !betterStackRes.ok) {
-        console.warn(`[fetchService] ${config.id} BetterStack index.json returned HTTP ${betterStackRes.status}`)
-        betterStackRes.body?.cancel()
+      // #1234 — an unreadable `index.json` is a lost STATUS VERDICT, not just lost uptime:
+      // `derivedStatus` below reads `betterStackStat ?? httpStatus`, so a null `betterStackStat`
+      // silently substitutes the marketing page's HTTP code for the provider's own aggregate state.
+      // The substitution stays (there is nothing better to publish), but it is no longer silent —
+      // the leg is booked here and the return carries `sourceUnknown`. Keyed on `betterStackUrl`
+      // rather than on `betterStackRes` being non-null so a THROWN fetch (`.catch` → null) books the
+      // same verdict as a non-ok one, as on the scrape leg above.
+      if (config.betterStackUrl && !betterStackRes?.ok) {
+        console.warn(`[fetchService] ${config.id} BetterStack index.json unreadable (${betterStackRes == null ? 'fetch failed' : `HTTP ${betterStackRes.status}`}) — the aggregate state is NOT readable this cycle`)
+        betterStackRes?.body?.cancel()
+        betterStackLegFailure = 'betterstack-unreadable'
       }
       if (betterStackRes?.ok) {
         try {
@@ -2801,7 +2854,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // (`helicone`, `together`) now parses a healthy 200 with zero items and publishes "no
           // incidents" over live downtime — and `score.ts` then pays out Incidents 25/25 and
           // Recovery 15/15 because both derive from `service.incidents`. Nothing books a failure,
-          // so this is NOT reachable by #1199/#1234 (both need a non-ok scrape).
+          // so this is NOT reachable by #1199/#1234 (those need a read that FAILED — a non-ok
+          // response or a thrown fetch — and this one succeeds).
           //
           // RSS stays AUTHORITATIVE: it carries real titles and intra-day granularity that
           // `status_history`'s per-day buckets cannot. Days the feed already accounts for are
@@ -2988,8 +3042,28 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         }
       }
 
-      // Successful fetch — reset or track based on parse errors
-      if (parseErrors > 0) {
+      // #1234 — ONE accounting site for this path's two legs. The scrape and `index.json` are
+      // independent fetches, so both can fail in a cycle, and the coalesce picks which reason is
+      // ATTRIBUTED. Ordered scrape-first because the scrape is the incident source — the thing whose
+      // absence makes an empty list read as health. The losing reason is not booked separately: two
+      // failed legs are ONE unreadable cycle, and counting them twice would make a two-leg service
+      // climb the ramp at a different rate than a one-leg service for the same outage.
+      const legFailure = scrapeLegFailure ?? betterStackLegFailure
+      let legShouldDegrade = false
+      // #1234 — an unreadable leg only reaches the WIRE where the verdict it leaves behind is a false
+      // green. See the return below for why the other verdicts are untouched.
+      const legFalseGreen = legFailure != null && derivedStatus === 'operational'
+
+      // Reset or track. Written as ONE chain rather than a guard beside the old `if` so that
+      // `resetFetchFailure` is structurally unreachable on a failed leg — the defect this issue is
+      // about was precisely that the reset ran while a leg was dead.
+      if (legFailure) {
+        // Book EVERY failure, not just the 3-strike crossings `trackFetchFailure` records — the same
+        // reasoning as the `sourceParseFailure` guard above: one failed cycle already publishes a
+        // service with no incidents, so a rising-edge counter cannot answer how often this fires.
+        await recordParseFailure(kv, Date.now(), config.id, legFailure)
+        legShouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+      } else if (parseErrors > 0) {
         console.warn(`[fetchService] ${config.id} completed with ${parseErrors} parse error(s)`)
         await trackFetchFailure(trackingStore, kv, config.id)
       } else {
@@ -3023,7 +3097,21 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
 
       return {
         ...base,
-        status: derivedStatus,
+        // #1234 — the wire disclosure is scoped to the FALSE GREEN, which is what this issue measured:
+        // all four services in its table published `operational` over a source nobody could read. A
+        // `degraded`/`down` verdict is left exactly as it was — it is not a false all-clear, it was
+        // never measured here, and touching it cost three defects across two review rounds (the
+        // retired `degraded` + `sourceUnknown` pair that `normalizeCachedService` rewrites; then a
+        // live corroborated outage collapsing to `unknown` at strike 1; then a readable provider
+        // `down` erased at strike 3). Publishing `shouldDegrade ? 'unknown' : 'operational'` is what
+        // every sibling arm does (#1089/#1123/#1212); this path's only difference is that it must
+        // first ask whether `operational` is even what it was about to say.
+        //
+        // The BOOKING above is deliberately NOT scoped: `recordParseFailure` + `trackFetchFailure` run
+        // on every unreadable leg whatever the verdict, so the durable counter still answers "how
+        // often does this happen" on paths where the badge says nothing about it.
+        status: legFalseGreen && legShouldDegrade ? 'unknown' : derivedStatus,
+        ...(legFalseGreen ? { sourceUnknown: true } : {}),
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         calendarDays: has30dCalendar ? 30 : 14,

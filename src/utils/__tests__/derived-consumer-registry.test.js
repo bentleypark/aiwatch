@@ -105,6 +105,7 @@ const SAFE = {
   'src/components/SkeletonUI.jsx': 'loading placeholder — renders no real incident data',
   'src/pages/Settings.jsx': 'subscription toggles keyed on service id',
   'src/pages/Uptime.jsx': 'uptime figures, not incident measurements',
+  'worker/src/parse-failure-log.ts': '#1234 — counts SOURCE-READ failures by reason; stores strings and integers and reads no incident field. Matches only through a doc mention of gcloud\'s incidents.json endpoint',
   'api/_is-down/seo-content.ts': 'static per-service SEO copy',
   'api/_methodology/html-template.ts': 'static prose describing the Score',
 
@@ -137,7 +138,7 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // Pinned at the count the widened detector finds, not a loose floor: the failure this whole file
     // guards against is the SCAN going quiet, and a floor of 40 stays green while a narrowed regex
     // drops 30 files. A legitimate change moves this number in the same diff.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(71)
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(72)
   })
 
   it('leaves none unclassified', () => {
