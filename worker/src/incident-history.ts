@@ -38,8 +38,8 @@ export interface IncidentHistoryRecord {
   /** AI-predicted recovery, upper bound of the range in hours — the FIRST estimate made for the
    *  incident (`scoringBaselineHours` → `AIAnalysisResult.firstEstimatedRecoveryHours`, falling back
    *  to `estimatedRecoveryHours` for pre-#1003 analyses). Explicitly NOT the current estimate: a
-   *  re-analysis only fires on an incident that outran its prediction and can only raise the bound,
-   *  so grading against it scored every miss as a win (#1003). Absent when no analysis. */
+   *  re-analysis is made hours in, so grading against it scored every miss as a win (#1003).
+   *  Absent when no analysis. */
   predictedRecoveryHours?: number
   /** AI summary text at resolution. Absent when no analysis. */
   predictedSummary?: string
@@ -77,10 +77,8 @@ export type AccuracyVerdict = 'accurate' | 'over-predicted' | 'under-predicted' 
 /**
  * #1003 — the estimate a resolved incident is SCORED against: the first, hindsight-free prediction.
  *
- * `estimatedRecoveryHours` is the CURRENT estimate, which re-analysis ratchets upward once an
- * incident outruns its own prediction (the re-analysis prompt forbids an upper bound below the
- * elapsed hours). Scoring against it inverted the verdict on exactly the incidents the model got
- * wrong: Pinecone was first estimated 1–4h, re-estimated ~15h at the 4h mark, recovered at 4h 55m,
+ * `estimatedRecoveryHours` is the CURRENT estimate, made hours into the incident and therefore not
+ * hindsight-free. Scoring against it inverted the verdict: Pinecone was first estimated 1–4h, re-estimated ~15h at the 4h mark, recovered at 4h 55m,
  * and shipped as "faster than ~15h est." — a win, when it was really a near-miss over the 4h bound.
  *
  * Every surface that compares predicted-vs-actual (Discord recovery embed, Slack /feed, the durable
