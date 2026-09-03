@@ -34,9 +34,7 @@ jobs:
       && github.event.deployment_status.environment_url != ''
       && github.event.deployment_status.environment == 'Preview'
     runs-on: ubuntu-latest
-    # #1253 — this job had no timeout, so a stalled step hung on GitHub's 6-hour default. A job timeout
-    # ends the run as `cancelled`, which this repo produces routinely via cancel-in-progress; the step
-    # timeouts below are what a stall should hit first.
+    # #1253 — this job had no timeout, so a stalled step hung on GitHub's 6-hour default.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -47,28 +45,19 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      # #1253 — `--with-deps` runs apt first, and that phase intermittently stops returning. Bound it,
-      # then install the browser without apt. On this image apt adds only font packages (every
-      # Playwright shared library reports `already the newest version`), so the degraded path costs
-      # fonts, not the ability to launch.
+      # #1253 — install only the browser. `--with-deps` enters apt on every run and intermittently
+      # stalls in that phase.
       #
-      # The fallback is ANNOTATED rather than silent: it triggers on any non-zero exit, not just a
-      # timeout, so without this a genuine apt failure — or a missing `timeout` binary, which means the
-      # bound never ran at all — would ship as a green step. Full evidence: #1253.
+      # NO browser cache here, unlike the repo's other two Playwright workflows: `actions/cache`
+      # refuses to run when the triggering event is not tied to a branch or tag ref, and this
+      # workflow's only trigger is `deployment_status`. Observed on run 33703810844 — the step logged
+      # "Event Validation Error: The event type deployment_status is not supported because it's not
+      # tied to a branch or tag ref" on BOTH restore and save, emitted no `Cache hit` line, and the
+      # browser downloaded anyway despite a live cache entry under the very same key. That download
+      # costs ~9s; an inert step costs more than that, because its presence reads as coverage.
       - name: Install Chromium
         timeout-minutes: 5
-        run: |
-          rc=0
-          timeout 120 npx playwright install --with-deps chromium || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            case $rc in
-              124) why="apt stalled and the bound fired (#1253)" ;;
-              127) why="\`timeout\` not found — THE BOUND DID NOT RUN" ;;
-              *)   why="a non-timeout apt failure (mirror / dpkg lock / disk)" ;;
-            esac
-            echo "::warning title=Playwright deps degraded::--with-deps exited $rc: $why. Installing the browser without apt; font packages will be missing."
-            npx playwright install chromium
-          fi
+        run: npx playwright install chromium
       - name: Wait for the deployment to be reachable (cold-start guard)
         env:
           EDGE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
