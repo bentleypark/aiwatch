@@ -395,7 +395,7 @@ test('the shared KEYED_STRING pattern survives a template-literal-escaped quote'
 test('the hook actually EMITS a reminder — not just logs that it fired', () => {
   // korean-copy-trigger.sh writes its audit line BEFORE printing, so a broken message leaves an audit
   // trail of a reminder the model never saw. The case-list sync test above would stay green through
-  // that. Spawn it the way the harness does and assert a non-empty systemMessage comes back.
+  // that. Spawn it the way the harness does and assert a non-empty PreToolUse additionalContext comes back.
   // Run a COPY of the hook from a temp dir. `_audit.sh` resolves its log as `$HOOK_DIR/../
   // hook-audit.jsonl` and honors no env override, so spawning the real file would append a `warn` line
   // to the real `.claude/hook-audit.jsonl` on every test run — and CLAUDE.md makes that log the
@@ -438,12 +438,12 @@ test('the hook actually EMITS a reminder — not just logs that it fired', () =>
   // fallback, or the next reader hunts a branch that is no longer there.
   assert.ok(existsSync(marker), "stub jq never intercepted — the escape is no longer spelled 'jq -Rs'")
   assert.equal(degraded.status, 0)
-  const degradedMsg = JSON.parse(degraded.stdout).systemMessage
+  const degradedMsg = JSON.parse(degraded.stdout).hookSpecificOutput?.additionalContext
   assert.ok(degradedMsg && degradedMsg.includes('lint:korean'), 'jq escape failed → hook went silent')
 
   const onTarget = fire(join(REPO, 'src/locales/ko.js'))
   assert.equal(onTarget.status, 0)
-  const msg = JSON.parse(onTarget.stdout).systemMessage
+  const msg = JSON.parse(onTarget.stdout).hookSpecificOutput?.additionalContext
   assert.ok(msg && msg.length > 0, 'hook fired but emitted no message')
   assert.match(msg, /lint:korean/, 'the reminder must name the command it is reminding about')
   // …and stays silent off-target (en.js is not a Korean copy surface):

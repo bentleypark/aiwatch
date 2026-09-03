@@ -43,7 +43,7 @@ function stage(dir, rel, body = 'x\n') {
   execFileSync('git', ['add', '--', rel], { cwd: dir })
 }
 
-// Run the copied hook with a crafted PreToolUse INPUT; return the systemMessage string.
+// Run the copied hook with a crafted PreToolUse INPUT; return the delivered advisory text.
 function runHook(dir, command = 'git commit -m "x"', cwdOverride) {
   const cwd = cwdOverride ?? dir
   const res = spawnSync('bash', [join(dir, '.claude', 'hooks', 'git-mutation-gate.sh')], {
@@ -53,7 +53,9 @@ function runHook(dir, command = 'git commit -m "x"', cwdOverride) {
   assert.equal(res.status, 0, `hook must exit 0 (soft); stderr: ${res.stderr}`)
   if (!res.stdout.trim()) return '' // non-matching command → no output
   const parsed = JSON.parse(res.stdout)
-  return parsed.systemMessage ?? ''
+  assert.deepEqual(Object.keys(parsed), ['hookSpecificOutput'])
+  assert.equal(parsed.hookSpecificOutput.hookEventName, 'PreToolUse')
+  return parsed.hookSpecificOutput.additionalContext ?? ''
 }
 
 const STATUSDET = 'docs/reference/status-determination.md'

@@ -46,7 +46,7 @@ AIWatch.)
 ## Which tool, when (the trigger map)
 
 `.claude/hooks/tooling-trigger.sh` (PreToolUse / `Edit|Write|MultiEdit`) inspects the target
-`file_path` and emits a **soft** `systemMessage` reminder (exit 0, never blocks) — the deterministic
+`file_path` and emits a **soft** `hookSpecificOutput.additionalContext` reminder (exit 0, never blocks) — the deterministic
 backstop for the two skills' probabilistic triggers:
 
 | Editing this surface | Run BEFORE coding |

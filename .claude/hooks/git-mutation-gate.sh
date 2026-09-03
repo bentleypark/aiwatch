@@ -3,7 +3,7 @@
 #
 # Fires before every Bash command; bails immediately unless the command is a
 # git mutation we care about (git commit / git push / gh pr create / gh pr merge).
-# When it does match it emits a SOFT reminder (systemMessage, exit 0 — does NOT
+# When it does match it emits a SOFT reminder (PreToolUse additionalContext, exit 0 — does NOT
 # block) covering:
 #   • CLAUDE.md step 3.5 — start the right dev server AND get the user's
 #     in-browser confirmation before code lands. "tests pass" ≠ "feature verified".
@@ -155,17 +155,17 @@ if [ -n "${truncated_id// /}" ]; then
   warnings+=("✂️ ${op}: a truncated identifier is recorded in an added backtick — ${truncated_id}(#1053). A \`…\`-elided id can't be checked against its source and invites a splice (#1053 shipped a chimera \`#f2c4fda9…c3310\`, one incident's head + another's tail). Record the FULL id, or if you don't need the id here (titles/timestamps usually justify a fixture, not ids) drop it. Keep the fact in one place a test asserts.")
 fi
 
-# Soft warning: surface a systemMessage, allow the tool to proceed.
+# Soft warning: surface PreToolUse additionalContext, allow the tool to proceed.
 msg="$(printf '%s\n' "${warnings[@]}")"
 note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}; docs_reminder=${docs_reminder}; methodology_reminder=${methodology_reminder}; truncated_id=$([ -n "${truncated_id// /}" ] && echo 1 || echo 0)"
 audit "warn" "$note"
 # jq -Rs . turns raw stdin into a properly-escaped JSON string literal.
 esc="$(printf '%s' "$msg" | jq -Rs . 2>/dev/null)"
 if [ -n "$esc" ] && [ "$esc" != "null" ]; then
-  printf '{"systemMessage":%s}\n' "$esc"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' "$esc"
 else
   # Defensive fallback (jq should always be present — checked above).
   safe="$(printf '%s' "$msg" | tr '\n"' '  ')"
-  printf '{"systemMessage":"%s"}\n' "$safe"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$safe"
 fi
 exit 0
