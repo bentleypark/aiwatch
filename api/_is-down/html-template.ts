@@ -203,9 +203,10 @@ function statusEmoji(status: string): string {
 //
 // #1233 — the fetch-failure case is now carried by the STATUS, so the first clause below is the whole
 // rule for a current payload. Two further clauses survive:
-//   - `sourceDead` (#689) is still flag-only — a 4xx page publishes `operational`, a false GREEN rather
-//     than a false outage. That is the other defect class, filed as #1234, and moving it is that issue's
-//     change to make, not a silent rider on this one.
+//   - `sourceDead` (#689) is still flag-only — a 4xx page publishes `operational` as its raw value, and
+//     `isStatusUnknown` below is where this page applies #689's rendering rule to it. Not every surface
+//     does; #1329 tracks those. Moving `sourceDead` into the status the way #1233 moved the
+//     fetch-failure case is that issue's change to make, not a silent rider on this one.
 //   - the `sourceUnknown` + `degraded` pair is a transitional read of a payload cached before #1233,
 //     not the rule (mirrors `normalizeCachedService` in `worker/src/status-verdict.ts`). Its window is
 //     NOT a cache TTL: `/api/status/cached` decodes on read, so once the worker is deployed this page can

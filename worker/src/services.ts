@@ -1741,7 +1741,8 @@ export function isStatuspageSummary(v: unknown): v is StatuspageResponse {
  *  of its way to preserve from an independent successful fetch, and gets stamped durably into the
  *  month-end archive. One unlucky timeout at archive time would mark a service stale for the whole
  *  month. The `sourceDead` (4xx) returns are unaffected: they set the flag inline and publish
- *  `operational`, which is #689's deliberate semantics.
+ *  `operational`, so they satisfy none of the three conjuncts above. How a surface is meant to render
+ *  that value is #689's rule, and #1329 tracks the surfaces that do not apply it.
  *
  *  Idempotent, and returns the SAME object when it changes nothing, so it cannot disturb
  *  `fetchService`'s identity-preserving return. */
@@ -2760,8 +2761,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // A 4xx stays `sourceUnknown` and is deliberately NOT routed through
         // `classifyStatusPageFailure` the way #1212's legs are: there the failing URL IS the whole
         // source, whereas here the feed and the status page are separate fetches, so a 404 feed beside
-        // a 200 page is #761's URL drift — a config error, not a retired service. `sourceDead` would
-        // publish `operational` while dropping it from the rankings. Reasoning: status-determination.md.
+        // a 200 page is #761's URL drift — a config error, not a retired service.
         scrapeLegFailure = config.rssFeedUrl
           ? 'rss-unreadable'
           : config.gcloudProduct
