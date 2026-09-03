@@ -15,19 +15,22 @@ Thank you for your interest in contributing to AIWatch!
 
 ## Development Workflow
 
-Use [AGENTS.md](./AGENTS.md) as the shared repository entrypoint.
+Use [AGENTS.md](./AGENTS.md) as the shared repository entrypoint and follow the
+[agent-neutral development workflow](./docs/reference/development-workflow.md).
 
 If you are working with Claude Code, also follow [CLAUDE.md](./CLAUDE.md) for Claude-specific
 workflow and automation details.
 
 Shared workflow — especially:
 
-1. **Build + Test** before committing
-2. **Code review** before committing
-3. **Fix all Critical/Important** review findings
-4. **Update the docs in the same PR.** The doc set is CLAUDE.md step 7 — README(.ko), the relevant
-   `docs/reference/*`, CLAUDE.md, this file, `index.html` SEO meta, `aiwatch-reports/`
-5. Include `closes #N` in commit messages when the work is fully verified
+1. Follow the branch, local verification, review, documentation, and approval gates in the shared
+   runbook.
+2. **Build + Test** before committing
+3. **Code review** before committing
+4. **Fix all Critical/Important** review findings
+5. **Update the docs in the same PR.** Update the relevant `README(.ko)`, `docs/reference/*`,
+   `CLAUDE.md`, `CONTRIBUTING.md`, `index.html` SEO meta, and `aiwatch-reports/` files as applicable.
+6. Include `closes #N` in commit messages when the work is fully verified
 
 ## Code Style
 

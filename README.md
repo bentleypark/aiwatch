@@ -448,14 +448,15 @@ worker/
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
-If you are using a non-Claude coding agent, start with [AGENTS.md](AGENTS.md). Claude Code
-contributors should also read [CLAUDE.md](CLAUDE.md) for the repo-specific workflow and automation
-rules.
+All coding agents should start with [AGENTS.md](AGENTS.md) and the
+[agent-neutral development workflow](docs/reference/development-workflow.md). Claude Code
+contributors should additionally read [CLAUDE.md](CLAUDE.md) for Claude-specific automation rules.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Follow the shared workflow in [AGENTS.md](AGENTS.md); Claude Code contributors should also
-   follow [CLAUDE.md](CLAUDE.md)
+3. Follow the shared workflow in [AGENTS.md](AGENTS.md) and
+   [docs/reference/development-workflow.md](docs/reference/development-workflow.md); Claude Code
+   contributors should also follow [CLAUDE.md](CLAUDE.md)
 4. Build + test: `npm run build && npm test && npm run test:src && npm run test:worker`
 5. Submit a pull request using the [PR template](.github/pull_request_template.md)
 

@@ -3,8 +3,10 @@
 This repository supports multiple coding agents. Keep this file short and use it as the neutral,
 agent-agnostic entrypoint.
 
-If you are using Claude Code, also read [CLAUDE.md](./CLAUDE.md) for Claude-specific workflow and
-project automation details.
+For the complete issue-to-release procedure, read
+[docs/reference/development-workflow.md](docs/reference/development-workflow.md) before starting
+work. Claude Code users should additionally read [CLAUDE.md](CLAUDE.md) for Claude-specific
+automation and skills.
 
 ## Project Overview
 
