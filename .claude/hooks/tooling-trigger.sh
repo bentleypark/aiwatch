@@ -5,7 +5,7 @@
 # their own model-invoked trigger descriptions, but those are passive context = probabilistic
 # compliance (the exact #415 failure mode that left chub "documented but unused"). This hook fires
 # DETERMINISTICALLY before a file edit and, only when the target path is a high-signal surface,
-# emits a SOFT reminder (systemMessage, exit 0 — never blocks) pointing at the right tool:
+# emits a SOFT reminder (PreToolUse additionalContext, exit 0 — never blocks) pointing at the right tool:
 #   • External integration (worker parsers / services / ai-analysis / changelog / security &
 #     platform monitors / reddit / package.json) → use the `get-api-docs` (chub) skill for the
 #     CURRENT API/SDK shape before trusting training knowledge.
@@ -49,9 +49,9 @@ audit "inject" "$note"
 # jq -Rs . turns the raw message into a properly-escaped JSON string literal.
 esc="$(printf '%s' "$msg" | jq -Rs . 2>/dev/null)"
 if [ -n "$esc" ] && [ "$esc" != "null" ]; then
-  printf '{"systemMessage":%s}\n' "$esc"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' "$esc"
 else
   safe="$(printf '%s' "$msg" | tr '\n"' '  ')"
-  printf '{"systemMessage":"%s"}\n' "$safe"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$safe"
 fi
 exit 0

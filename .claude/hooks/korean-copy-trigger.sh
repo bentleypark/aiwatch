@@ -5,7 +5,7 @@
 # CI fires only at PR time — after a multi-round edit has already gone sideways. The #1094 defect class
 # (dev-token leak, term drift) and the #1097 loop (editing the pointed-at sentence instead of re-reading
 # the whole card) both happen DURING the edit. This hook fires deterministically before a copy edit and
-# emits a SOFT reminder (systemMessage, exit 0 — never blocks) so the check is present at the moment the
+# emits a SOFT reminder (PreToolUse additionalContext, exit 0 — never blocks) so the check is present at the moment the
 # copy is being written, not just at the PR gate.
 #
 # Target surfaces = the reader-facing Korean copy the lint scans (ko.js, the methodology/intro Edge
@@ -37,9 +37,9 @@ audit "warn" "copy:${FP##*/}"
 # if jq fails, degrade to a tr-sanitized message rather than to silence.
 esc="$(printf '%s' "$msg" | jq -Rs . 2>/dev/null)"
 if [ -n "$esc" ] && [ "$esc" != "null" ]; then
-  printf '{"systemMessage":%s}\n' "$esc"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' "$esc"
 else
   safe="$(printf '%s' "$msg" | tr '\n"' '  ')"
-  printf '{"systemMessage":"%s"}\n' "$safe"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$safe"
 fi
 exit 0
