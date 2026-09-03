@@ -447,12 +447,12 @@ worker/
 
 자세한 가이드는 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요.
 
-Claude 외의 코딩 에이전트를 쓴다면 [AGENTS.md](AGENTS.md)부터 읽으세요. Claude Code 기여자는
-[CLAUDE.md](CLAUDE.md)의 저장소별 워크플로우 및 자동화 규칙도 함께 읽어야 합니다.
+모든 코딩 에이전트는 [AGENTS.md](AGENTS.md)와 [에이전트 공통 개발 워크플로우](docs/reference/development-workflow.md)부터
+읽으세요. Claude Code 기여자는 Claude 전용 자동화 규칙을 위해 [CLAUDE.md](CLAUDE.md)도 함께 읽어야 합니다.
 
 1. 레포지토리 포크
 2. 기능 브랜치 생성 (`git checkout -b feature/my-feature`)
-3. [AGENTS.md](AGENTS.md)의 공통 워크플로우 따르기 — Claude Code 기여자는 [CLAUDE.md](CLAUDE.md)도 함께
+3. [AGENTS.md](AGENTS.md)와 [에이전트 공통 개발 워크플로우](docs/reference/development-workflow.md) 따르기 — Claude Code 기여자는 [CLAUDE.md](CLAUDE.md)도 함께
 4. 빌드 + 테스트: `npm run build && npm test && npm run test:src && npm run test:worker`
 5. [PR 템플릿](.github/pull_request_template.md)으로 풀 리퀘스트 제출
 
