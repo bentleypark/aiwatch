@@ -3600,22 +3600,22 @@ export default {
             } catch (err) {
               console.error('[monthly-archive] could not read services:latest — skipping archive build:',
                 err instanceof Error ? err.message : err)
-              cachedRaw = null
               throw new Error('services:latest read failed')
             }
-            if (cachedRaw) {
-              try {
-                const p = JSON.parse(cachedRaw)
-                const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
-                if (!Array.isArray(services)) throw new Error('services:latest services is not an array')
-                const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
-                scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
-                for (const s of services) serviceNames[s.id] = s.name
-              } catch (parseErr) {
-                console.error('[monthly-archive] Failed to parse services:latest — skipping archive build:',
-                  parseErr instanceof Error ? parseErr.message : parseErr)
-                throw new Error('services:latest parse failed')
+            if (!cachedRaw) throw new Error('services:latest is absent')
+            try {
+              const p = JSON.parse(cachedRaw)
+              const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
+              if (!Array.isArray(services) || services.length === 0) {
+                throw new Error('services:latest has no services')
               }
+              const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
+              scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
+              for (const s of services) serviceNames[s.id] = s.name
+            } catch (parseErr) {
+              console.error('[monthly-archive] Failed to parse services:latest — skipping archive build:',
+                parseErr instanceof Error ? parseErr.message : parseErr)
+              throw new Error('services:latest parse failed')
             }
 
             // #1274 — read the duration-override list HERE, with the reader that can tell a fault

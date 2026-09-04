@@ -85,4 +85,24 @@ describe('month-end cron archive guards (#1317)', () => {
 
     expect(puts).not.toContain(ARCHIVE_KEY)
   })
+
+  it.each([
+    ['absent', null],
+    ['an empty services object', JSON.stringify({ services: [] })],
+    ['an empty services array', JSON.stringify([])],
+  ])('does not write an archive when services:latest is %s', async (_label, servicesLatest) => {
+    const { kv, puts } = makeKv({ servicesLatest })
+
+    await runCron(kv)
+
+    expect(puts).not.toContain(ARCHIVE_KEY)
+  })
+
+  it('does not overwrite an existing archive', async () => {
+    const { kv, puts } = makeKv({ archiveRaw: JSON.stringify({ period: '2026-07', services: {} }) })
+
+    await runCron(kv)
+
+    expect(puts).not.toContain(ARCHIVE_KEY)
+  })
 })
