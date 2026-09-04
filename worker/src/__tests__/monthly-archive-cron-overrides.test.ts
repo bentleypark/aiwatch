@@ -88,15 +88,15 @@ async function runCron(kv: KVNamespace) {
   return fetchSpy
 }
 
-/** The write this cron made to a permanent monthly-archive key. Matched by PREFIX rather than an
- *  exact period, because the handler derives the previous month with LOCAL date getters — so the
- *  exact key depends on the runner's timezone, while "did it archive" does not. */
+/** The write this cron made to a permanent monthly-archive key. */
 function archiveWrite(puts: Array<{ key: string; value: string }>) {
   const rows = puts.filter(p => p.key.startsWith('archive:monthly:'))
   expect(rows, 'exactly one permanent archive write per cycle').toHaveLength(1)
   const parsed = JSON.parse(rows[0].value)
-  // Self-consistency, which holds in every timezone: the key names the period the value declares.
-  expect(rows[0].key).toBe(`archive:monthly:${parsed.period}`)
+  // The event is 2026-08-01T00:07Z, so the archive must be the UTC previous month. Checking only
+  // key/value self-consistency would let a `getMonth()` mutation select the current month.
+  expect(rows[0].key).toBe('archive:monthly:2026-07')
+  expect(parsed.period).toBe('2026-07')
   return parsed
 }
 
