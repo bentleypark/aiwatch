@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { buildRssFeed, buildFeedWithMeta, weakFeedEtag, isFeedNotModified, feedHttpResponse, reportArchiveResponse, ARCHIVE_MAX_AGE_S, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, isActiveItemHeld, type RssAiAnalysisMap } from '../rss'
+import { describe, it, expect, vi } from 'vitest'
+import { OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S } from '../alerts'
+import { buildRssFeed, buildFeedWithMeta, weakFeedEtag, isFeedNotModified, feedHttpResponse, reportArchiveResponse, ARCHIVE_MAX_AGE_S, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, isActiveItemHeld, type RssAiAnalysisMap, feedAgeText } from '../rss'
 import { getFallbacks } from '../fallback'
 import type { ServiceStatus, Incident } from '../types'
 
@@ -559,6 +560,39 @@ describe('buildRssFeed — active item content is status-invariant (#768)', () =
       [service({ status: 'down', incidents: [incident({ id: 'k', title: 'Outage', impact: 'major', status, timeline: [{ stage: status, text, at: '2026-05-10T12:00:00.000Z' }] })] })],
       { scope: 'all' }, NOW, ai, { k: '2026-05-19T08:55:00.000Z' },
     )
+
+  // #1330 — the disclosure has to sit INSIDE this invariant, and until this case existed it sat in
+  // no stability fixture at all: the suite's own `startedAt`/`firstSeen` pair is ~8d21h apart, which
+  // the TTL guard suppresses, so every assertion above ran on a description the line never reached.
+  // A regression that made the sentence status-dependent would have been invisible here.
+  const buildDisclosedAt = (status: 'investigating' | 'identified' | 'monitoring', text: string) =>
+    buildRssFeed(
+      [service({ status: 'down', incidents: [incident({ id: 'k', title: 'Outage', impact: 'major', status, startedAt: '2026-05-18T23:20:00.000Z', timeline: [{ stage: status, text, at: '2026-05-19T08:00:00.000Z' }] })] })],
+      { scope: 'all' }, NOW, ai, { k: '2026-05-19T08:45:00.000Z' },
+    )
+
+  it('#1330 - the age disclosure is inside the invariant, not exempt from it', () => {
+    // investigating→identified, the pair this invariant actually covers. NOT monitoring: #724 drops
+    // the AI block there on purpose (rss.ts:670), so that transition changes the description by
+    // design and would make this assertion fail for a reason that has nothing to do with #1330.
+    const d1 = descOf(buildDisclosedAt('investigating', 'We are investigating'))
+    const d2 = descOf(buildDisclosedAt('identified', 'Root cause identified, fixing'))
+    // Discriminating: assert the line is actually PRESENT, else this passes on two renders without it.
+    expect(d1).toContain('The provider dates this incident')
+    expect(d1).toContain('9h 25m')
+    expect(d1).toBe(d2)
+    // Ordering: LAST, under the AI block - the position the Discord sibling uses (index.ts renders
+    // it after the fallback and region hints). Asserting only "below the severity label" was not
+    // enough: it held for both the second-paragraph and the last-paragraph placements, so the
+    // parity this comment claims went unpinned. Anchor on the AI block, which sits between them.
+    expect(d1).toContain('AI analysis')
+    expect(d1.indexOf('AI analysis')).toBeLessThan(d1.indexOf('The provider dates this incident'))
+    expect(d1.trimEnd().endsWith('</p>')).toBe(true)
+    expect(d1.lastIndexOf('<p>')).toBe(d1.indexOf('<p>📅'))   // it IS the final paragraph
+    // And it survives the transition #724 DOES change: the sentence is anchored on stored timestamps,
+    // so losing the AI block must not disturb it.
+    expect(descOf(buildDisclosedAt('monitoring', 'A fix has been applied'))).toContain('9h 25m')
+  })
 
   it('description is identical across investigating → identified (the common churn the user saw)', () => {
     const d1 = descOf(buildAt('investigating', 'We are investigating'))
@@ -1343,5 +1377,101 @@ describe('buildRssFeed - the AI block carries both prose halves (#1328)', () => 
     expect(d).toContain('\u{1F916} AI analysis: analysis text')
     expect(d).not.toContain('undefined')
     expect(d).not.toContain('<p></p>')
+  })
+})
+
+// #1330 - the Slack //feed carries the same two-clock gap the Discord alert does: an ACTIVE item's
+// pubDate is our first-seen (#750), while the resolved item reports `lasted <provider duration>`. So
+// a backdated incident shows up "now" and closes as "lasted 9h 0m" with nothing explaining the jump.
+//
+// Anchored on first-seen, NOT on `now`: a live-elapsed figure would change the description on every
+// poll and make Slack re-post the item, which is the #768 invariant this file exists to protect.
+describe('feed age disclosure (#1330)', () => {
+  const START = '2026-05-18T23:20:00.000Z'
+  // 9h25m after the provider's stated start, and >AI_HOLD_MS before NOW so the #759 hold does not
+  // suppress the analysis-less active item this case needs.
+  const SEEN_LATE = '2026-05-19T08:45:00.000Z'
+
+  it('discloses the gap on an ACTIVE item, attributed to the provider', () => {
+    const t = feedAgeText(START, SEEN_LATE)
+    expect(t).toContain('9h 25m')
+    expect(t).toContain('The provider dates this incident')
+    expect(t).toContain('duration will be measured from then')
+    // No detection claim: polling puts us structurally behind the source (#679/#705).
+    expect(t).not.toMatch(/detect/i)
+    expect(t).not.toMatch(/AIWatch/)
+  })
+
+  it('says nothing when the gap could be our own polling lag', () => {
+    const seen = new Date(Date.parse(START) + OWN_DETECTION_LAG_MS).toISOString()
+    expect(feedAgeText(START, seen)).toBeUndefined()
+    expect(feedAgeText(START, new Date(Date.parse(START) + OWN_DETECTION_LAG_MS + 60_000).toISOString())).toBeDefined()
+  })
+
+  it('says nothing once the gap reaches the first-seen TTL - the anchor may be a RE-stamp', () => {
+    // `feed:firstseen:{id}` expires on ALERTED_NEW_TTL_S, and `resolveFeedFirstSeen` re-stamps a
+    // clean miss with `now`. So on an incident a provider leaves open past that window the anchor
+    // silently becomes today, and the figure would report a week of OUR serving as the provider's
+    // backdating. Explicit dates, not `SEEN - ALERTED_NEW_TTL_S`: a fixture derived from the bound
+    // under test moves with it and would pass against any bound at all.
+    expect(feedAgeText('2026-05-12T08:45:00.000Z', SEEN_LATE)).toBeUndefined()   // exactly 7d
+    expect(feedAgeText('2026-05-11T08:45:00.000Z', SEEN_LATE)).toBeUndefined()   // 8d
+    expect(feedAgeText('2026-05-12T08:46:00.000Z', SEEN_LATE)).toBeDefined()     // 7d less a minute
+  })
+
+  it('is bounded by the TTL the feed:firstseen key is actually written with', () => {
+    // The two must not drift: the guard above is only correct while the KV puts in index.ts use this
+    // same constant. Both write sites read it directly, so this pins the value one level up.
+    expect(ALERTED_NEW_TTL_S).toBe(604800)
+  })
+
+  it('says nothing without a first-seen anchor', () => {
+    // Then `pubDate` IS `startedAt`, so the item already dates itself from the provider's start and
+    // there is no gap to explain. Also the only shape that could produce a moving value.
+    expect(feedAgeText(START, undefined)).toBeUndefined()
+  })
+
+  it('is FIXED for a given item - a moving value would make Slack re-post it (#768)', () => {
+    // MOVE THE CLOCK. Calling a pure function twice with the same arguments and asserting the two
+    // results match is a tautology that passes against any implementation, including one re-derived
+    // from `now` - which is the single mutation this test exists to catch. Only advancing the system
+    // clock between the calls can tell those apart.
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-05-19T09:00:00.000Z'))
+      const a = feedAgeText(START, SEEN_LATE)
+      vi.setSystemTime(new Date('2026-05-26T04:00:00.000Z'))   // ~7 days later, same stored inputs
+      const b = feedAgeText(START, SEEN_LATE)
+      expect(a).toBe(b)
+      expect(a).toContain('9h 25m')                            // still the STORED gap, not the live one
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does NOT cover a future-dated start that outlives the TTL - a known, bounded hole', () => {
+    // At the original stamp a start dated AHEAD of first-sight yields a negative gap, so nothing
+    // renders (correct). After the key expires and re-stamps, the gap is `TTL - offset`, which is
+    // BELOW the bound, so the line comes back describing a window that is entirely ours. Nothing in
+    // the stored data distinguishes that from a genuine 6-day backdate, so the guard cannot close
+    // it. Pinned rather than described: if a future change does close it, this test fails and says
+    // so, which a sentence in a docblock could never do.
+    const seen1 = '2026-05-01T00:00:00.000Z'
+    const started = '2026-05-01T02:00:00.000Z'                 // provider dated it 2h in the future
+    expect(feedAgeText(started, seen1)).toBeUndefined()        // original stamp: nothing to say
+    const reStamped = new Date(Date.parse(seen1) + ALERTED_NEW_TTL_S * 1000).toISOString()
+    expect(feedAgeText(started, reStamped)).toBeDefined()      // the hole: renders ~6d22h of OUR window
+  })
+
+  it('reaches the rendered ACTIVE item, and not the resolved one', () => {
+    const inc = incident({ id: 'k', title: 'Ray2 Flash service degraded', impact: 'major', status: 'identified', startedAt: START })
+    const active = buildRssFeed([service({ status: 'down', incidents: [inc] })], { scope: 'all' }, NOW, undefined, { k: SEEN_LATE })
+    expect(active).toContain('The provider dates this incident')
+    // The resolved item states `lasted <duration>` on its own line, so the disclosure would be noise.
+    const done = buildRssFeed(
+      [service({ status: 'operational', incidents: [incident({ id: 'k', title: 'Ray2 Flash service degraded', impact: 'major', status: 'resolved', startedAt: START, duration: '9h 0m' })] })],
+      { scope: 'all' }, NOW, undefined, { k: SEEN_LATE },
+    )
+    expect(done).not.toContain('The provider dates this incident')
   })
 })

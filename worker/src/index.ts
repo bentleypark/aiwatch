@@ -1534,7 +1534,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         }
         // Only stamp on a genuine clean miss (null), so the first cycle to detect the incident wins.
         if (fsExisting === null) {
-          await kvPut(env.STATUS_CACHE, fsKey, new Date().toISOString(), { expirationTtl: 604800 })
+          await kvPut(env.STATUS_CACHE, fsKey, new Date().toISOString(), { expirationTtl: ALERTED_NEW_TTL_S })
         }
       }))
     } else {
@@ -1687,6 +1687,10 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     // #422 — region-switch hint below the cross-service fallback. Cheaper first-line
     // action (same SDK/IAM) when the outage is region-specific with healthy regions left.
     if (alert.regionText) parts.push(`${DIV}\n${alert.regionText}`)
+    // #1330 — the line that keeps the pair coherent: a "New Incident" now and an "Incident
+    // Resolved (9h 0m)" twenty minutes later are measured on different clocks, and nothing else in
+    // the embed says so. When it is set, and the wording: see `ageText` on `AlertCandidate`.
+    if (alert.ageText) parts.push(`${DIV}\n${alert.ageText}`)
     // #936 — tag the primary CTA so alert clicks attribute to `discord/notification` instead of
     // collapsing to (direct). The per-user relay rewrites this to a tagged is-down link (toPerUserEntry).
     parts.push(`${DIV}\n[View on AIWatch](${appendUtm(alert.url, 'discord')})`)
@@ -4794,7 +4798,7 @@ export default {
               // #748 countNewFeedItems counts. Harmless: that metric is an explicit upper bound.
               const { use, stamp } = resolveFeedFirstSeen(existing, nowIso)
               if (stamp) {
-                const ok = await kvPut(env.STATUS_CACHE!, fsKey, use, { expirationTtl: 604800 })
+                const ok = await kvPut(env.STATUS_CACHE!, fsKey, use, { expirationTtl: ALERTED_NEW_TTL_S })
                 if (!ok) return // write failed → leave unanchored this cycle (retried next poll)
               }
               firstSeen[inc.id] = use

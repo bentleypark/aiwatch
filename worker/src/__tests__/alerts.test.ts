@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, buildTweetDrafts, buildTweetSearches, buildReplyDraft, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, FLAP_SUPPRESSION_ESCAPE_MS, incidentRunMs, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, PUSH_SCOPE, TIER1_IDS, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, buildTweetDrafts, buildTweetSearches, buildReplyDraft, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, FLAP_SUPPRESSION_ESCAPE_MS, incidentRunMs, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, PUSH_SCOPE, TIER1_IDS, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed, OWN_DETECTION_LAG_MS } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 import { SERVICES } from '../services'
@@ -2037,5 +2037,178 @@ describe('auto-monitor tagged incidents (#983)', () => {
       // Anchored: a longer human title that merely CONTAINS the phrase must not match.
       expect(matches('Some API features are experiencing issues after the migration')).toBe(false)
     })
+  })
+})
+
+// #1330 - a NEW-incident alert never said how long the incident had already been open, so a
+// late-published one read as a contradiction: "New Incident" at 11:27, then "Incident Resolved
+// (9h 0m)" at 11:47. The two are measured on DIFFERENT clocks - the alert fires when the item
+// reaches our feed, the duration comes from the provider's own timestamps.
+//
+// The threshold is `OWN_DETECTION_LAG_MS`; what it is derived from and what it does NOT establish is
+// stated once, on that constant. These tests pin the boundary in BOTH directions, because a threshold
+// that only ever fires (or never fires) would look identical on a happy path.
+describe('new-incident age disclosure (#1330)', () => {
+  const NOW = Date.parse('2026-09-03T02:25:00Z')
+  const startedAgo = (ms: number) => new Date(NOW - ms).toISOString()
+
+  const svc = (over: Record<string, unknown> = {}) => ({
+    id: 'luma', name: 'Luma (Dream Machine)', provider: 'Luma', category: 'api',
+    status: 'down', incidents: [], ...over,
+  }) as never
+
+  const inc = (startedAt: string, over: Record<string, unknown> = {}) => ({
+    id: 'inc-1', title: 'Ray2 Flash service degraded', status: 'investigating',
+    impact: 'major', startedAt, resolvedAt: null, duration: null, timeline: [], ...over,
+  })
+
+  const build = (startedAt: string) =>
+    buildIncidentAlerts([svc({ incidents: [inc(startedAt)] })], new Map(), NOW)
+      .find((a) => a.key.startsWith('alerted:new:'))
+
+  it('discloses the age when the provider says the incident predates our own worst-case lag', () => {
+    // The production case: Luma backdated the start, so it reached our feed already 9h25m old.
+    const a = build(startedAgo(9 * 3600_000 + 25 * 60_000))
+    expect(a!.ageText).toContain('9h 25m')
+    // The line attributes the gap to the PROVIDER's dating and names what the number will explain.
+    expect(a!.ageText).toContain('The provider dates this incident')
+    expect(a!.ageText).toContain('duration will be measured from then')
+    // It must make no claim about how fast AIWatch detected anything: polling puts us structurally
+    // behind the official source, so a detection-speed claim here is one we cannot honestly make
+    // (the metric #679/#705 removed for exactly that reason).
+    expect(a!.ageText).not.toMatch(/detect/i)
+    expect(a!.ageText).not.toMatch(/AIWatch/)
+  })
+
+  it('says nothing when the delay could be ours', () => {
+    // Just inside the bound: our own pipeline can produce this much lag, so a disclosure here would
+    // be blaming the provider for our latency.
+    expect(build(startedAgo(OWN_DETECTION_LAG_MS - 60_000))!.ageText).toBeUndefined()
+  })
+
+  it('the bound is DERIVED from the pipeline constants, not a picked number', () => {
+    // Every other test here builds its fixture from `OWN_DETECTION_LAG_MS`, so swapping it for a
+    // round literal moves the fixtures with it and all of them stay green. This is the only
+    // assertion that notices — and "derived, not picked" is the property the issue asked for.
+    // Each hold rounds UP to a cron tick: the predicate is `now - firstSeen < HOLD` evaluated once per
+    // 5-minute run, so a 9-minute window releases at +10, not +9. Summing the raw windows (24 min) left
+    // a ~1-minute band in which purely-our-lag rendered the line.
+    const tick = 5 * 60 * 1000
+    const upToTick = (ms: number) => Math.ceil(ms / tick) * tick
+    expect(OWN_DETECTION_LAG_MS).toBe(tick + upToTick(FLAP_HOLD_MS) + upToTick(AI_HOLD_MS))
+    expect(OWN_DETECTION_LAG_MS).toBe(25 * 60 * 1000)
+  })
+
+  it('the boundary is the derived bound itself, not a rounded literal', () => {
+    // Both sides of `OWN_DETECTION_LAG_MS`. Without this pair the threshold could drift to any value
+    // and every other test here would still pass.
+    expect(build(startedAgo(OWN_DETECTION_LAG_MS))!.ageText).toBeUndefined()
+    expect(build(startedAgo(OWN_DETECTION_LAG_MS + 60_000))!.ageText).toBeDefined()
+  })
+
+  it('declines to claim an age it could not compute', () => {
+    // Unparseable and future-dated both fail the `>` comparison rather than rendering "0m" or NaN -
+    // the same posture as the elapsed anchor in #1327.
+    expect(build('not-a-date')!.ageText).toBeUndefined()
+    expect(build(new Date(NOW + 3600_000).toISOString())!.ageText).toBeUndefined()
+  })
+
+  it('is absent on the RESOLVED alert - the duration is already in its title', () => {
+    const resolved = buildIncidentAlerts(
+      [svc({ status: 'operational', incidents: [inc(startedAgo(9 * 3600_000), { status: 'resolved', resolvedAt: new Date(NOW).toISOString(), duration: '9h 0m' })] })],
+      new Map([['inc-1', new Set(['luma'])]]), NOW,
+    ).find((a) => a.key.startsWith('alerted:res:'))
+    expect(resolved).toBeDefined()
+    expect(resolved!.ageText).toBeUndefined()
+  })
+})
+
+// #1330 - the merge sites. `buildIncidentAlerts` being green says nothing about whether a MERGED
+// alert carries or drops the line: the mutation audit found that dropping the carry went unnoticed -
+// the same carry-site class that had already bitten the feed's `descHtml` projection in this change.
+// Both merges are pinned here; an earlier version of this comment claimed that while covering only
+// Together, so reinstating the per-region attribution on the xAI side would have stayed green.
+describe('age disclosure does not survive a merge (#1330)', () => {
+  const NOW = Date.parse('2026-09-03T02:25:00Z')
+  const OLD = new Date(NOW - 9 * 3600_000).toISOString()
+
+  const inc = (id: string, title: string, startedAt: string) => ({
+    id, title, status: 'investigating', impact: 'major',
+    startedAt, resolvedAt: null, duration: null, timeline: [],
+  })
+
+  it('a Together merge drops it - the copy is singular, the alert is not', () => {
+    // "3 New Incidents" with three titles, so "The provider dates THIS incident" would attribute one
+    // member's age to all of them. Each unmerged member still carries its own line.
+    const svc = {
+      id: 'together', name: 'Together AI', provider: 'Together', category: 'api', status: 'down',
+      incidents: [inc('t1', 'Model A degraded', OLD), inc('t2', 'Model B degraded', OLD), inc('t3', 'Model C degraded', OLD)],
+    } as never
+    const raw = buildIncidentAlerts([svc], new Map(), NOW).filter((a) => a.key.startsWith('alerted:new:'))
+    expect(raw.length).toBe(3)
+    expect(raw.every((a) => a.ageText)).toBe(true)          // each one qualifies on its own...
+    const merged = mergeTogetherAlerts(raw).filter((a) => a.key.startsWith('alerted:new:'))
+    expect(merged.length).toBe(1)
+    expect(merged[0].title).toContain('New Incidents')
+    expect(merged[0].ageText).toBeUndefined()               // ...and the merge drops it
+  })
+
+  it('an xAI regional merge drops it too - one rule, no per-region attribution', () => {
+    // xAI merges one event split across regions. A shared age would be defensible, but the members'
+    // `startedAt` values are per-region and need not agree, so picking one is arbitrary attribution
+    // dressed as a fact. Reinstating `merged.ageText = arr[0].ageText` had nothing to fail against.
+    const svc = {
+      id: 'xai', name: 'xAI API', provider: 'xAI', category: 'api', status: 'down',
+      // Titles must carry the `[API (<region>.api.x.ai)]` tag `XAI_REGION_RE` groups on; the merge
+      // keys on the tag-stripped remainder, so both must describe the SAME event.
+      incidents: [
+        inc('x1', '[API (us-east-1.api.x.ai)] Elevated error rates', OLD),
+        inc('x2', '[API (us-west-2.api.x.ai)] Elevated error rates', OLD),
+      ],
+    } as never
+    const raw = buildIncidentAlerts([svc], new Map(), NOW).filter((a) => a.key.startsWith('alerted:new:'))
+    expect(raw.length).toBe(2)
+    expect(raw.every((a) => a.ageText)).toBe(true)          // each qualifies unmerged...
+    const merged = mergeXaiRegionalAlerts(raw).filter((a) => a.key.startsWith('alerted:new:'))
+    expect(merged.length).toBe(1)
+    expect(merged[0].ageText).toBeUndefined()               // ...and the merge drops it
+  })
+
+  it('a single Together incident is NOT merged, so it keeps its line', () => {
+    // The discriminating half: without it, "merged has no ageText" would also pass if the field never
+    // reached a Together alert at all.
+    const svc = {
+      id: 'together', name: 'Together AI', provider: 'Together', category: 'api', status: 'down',
+      incidents: [inc('t1', 'Model A degraded', OLD)],
+    } as never
+    const one = mergeTogetherAlerts(buildIncidentAlerts([svc], new Map(), NOW)).filter((a) => a.key.startsWith('alerted:new:'))
+    expect(one.length).toBe(1)
+    expect(one[0].ageText).toBeDefined()
+  })
+})
+
+// #1330 - an ADVISORY's paired alert carries no duration by design (#1021), so a line promising one
+// would dangle and would restore the outage framing that issue removed. Both sibling hints at this
+// site are advisory-gated; this one was not until review caught it.
+describe('age disclosure is not attached to an advisory (#1330)', () => {
+  const NOW = Date.parse('2026-09-03T02:25:00Z')
+  const OLD = new Date(NOW - 9 * 3600_000).toISOString()
+
+  const build = (title: string) => buildIncidentAlerts([{
+    id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', status: 'operational',
+    incidents: [{ id: 'a1', title, status: 'investigating', impact: 'major', startedAt: OLD, resolvedAt: null, duration: null, timeline: [] }],
+  } as never], new Map(), NOW).find((a) => a.key.startsWith('alerted:new:'))
+
+  it('an advisory gets no age line, however old the provider dates it', () => {
+    const a = build('Usage Limits Depleting Faster Than Expected')
+    expect(a!.advisory).toBe(true)
+    expect(a!.ageText).toBeUndefined()
+  })
+
+  it('a real outage on the same service and the same age still gets one', () => {
+    // Pins that the gate is the ADVISORY classification, not the service or the age.
+    const a = build('Elevated error rates')
+    expect(a!.advisory).toBeUndefined()
+    expect(a!.ageText).toBeDefined()
   })
 })
