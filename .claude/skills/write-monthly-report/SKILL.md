@@ -52,9 +52,11 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
        EXCEPT the generic `LLM APIs` (feeds the buyer-intent rows) and `AI apps` (consumer end-user apps,
        not a build-on pick). Do NOT hardcode a bucket list here — the header is the source, so the row set
        tracks the fleet as buckets change. The header label (e.g. `voice & transcription`, `inference &
-       infra`) identifies WHICH bucket earns a row; keep the row's reader-facing Use-Case cell in the
-       established polished form (`Voice / audio`, `Inference`, `Vector / embeddings`), NOT the raw header
-       string.
+       infra`) identifies WHICH bucket earns a row; keep the row's reader-facing Use-Case cell in a polished
+       human-readable form derived from THAT header label, not the raw header string — e.g. `voice &
+       transcription` → `Voice / audio`. Derive the polished form fresh from this month's own header label
+       each time; don't recall a bucket name from memory or a prior month, since the header is the only
+       current source of which buckets exist and what to call them.
      - **"Ranked" = appears in this month's Score Rankings table** (it passed the full-month-coverage gate
        — aiwatch#802 / aiwatch-reports#45); a mid-month-added or otherwise unranked service does **not**
        qualify. The Rankings table has no category column, so map a ranked service to its bucket via the
@@ -68,6 +70,28 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
    - **Key Insight** — opening sentence + **3 patterns**, EN, **AND** the KO mirror.
    - **Notable Incidents** — top incidents, each with `**Affected**` + `**Duration**`.
    - **Observations**.
+   - **Security Alerts — the one auto-generated section that still needs a manual check before publish.**
+     `buildSecuritySection` renders `archive.security.topFindings` verbatim with no re-classification, so a
+     misattribution baked into the archive ships as-is. Any finding whose **Source is `nvd`** is at risk:
+     `security-monitor.ts`'s NVD path matches a service by a free-text keyword search over the CVE
+     description (`strong: ['claude code']` etc.), so a CVE about a *third-party* tool that merely
+     integrates with or invokes a monitored product (e.g. "`@agenticmail/claudecode` ... resumes the operator's
+     Claude Code session") gets attributed to that product itself. Before publishing, open the NVD page (or
+     `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=<id>`) for every `nvd`-sourced Top Finding and
+     check its own `affected[].affectedData[].vendor`/`product` — if the vendor isn't the monitored service's
+     own vendor, the "Affected" attribution is wrong; drop the finding from Top Findings rather than relabel it
+     (it also fails the NVD source's own inclusion purpose — first-party product CVEs — not just the label).
+     **`OSV.dev`-sourced findings do NOT need this check** — `OSV_PACKAGES` queries by exact package
+     name + ecosystem (a curated list), which cannot produce this false-positive shape. Leave the aggregate
+     tables (Total alerts / By source / By severity / Most affected services) untouched even after dropping a
+     Top Finding — they're archive-level counts over the full month, not just the rendered Top 10, and there
+     is currently no correction tool for that data (unlike `archive-patch.ts`, which is scoped to
+     downtime/Score recomputation only). **Don't try to reconcile them, either** — `buildSecuritySection`'s
+     By-source table only ever renders `osv`/`hackernews` rows (no `nvd` row exists in the template at all),
+     so whenever any `nvd`-sourced alerts occurred that month, "Total alerts" will not equal the By-source sum
+     even before anything here is touched; that gap is a separate, pre-existing rendering omission, not
+     something dropping a Top Finding creates or something to patch by hand. Root-cause fix tracked at
+     aiwatch#1336; re-check whether it's resolved before repeating this by-hand workaround in a future cycle.
    - **Ground every claim in the report's own data tables** (Score Rankings / Incident Summary / Notable
      Movers / p75). Never invent a number, and never assert incident detail the archive doesn't carry —
      hedge a long-"open"-status artifact (a 264h open window ≠ a 264h hard outage; an Instatus/Nuxt
@@ -95,6 +119,18 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      appeared in prior months; do NOT re-explain it in full in the narrative every cycle (a regular reader has
      seen it). State it once in methodology; in the narrative mention it only where it's load-bearing for THIS
      month's specific point (e.g. the Notable Incident it directly explains), and briefly.
+     (3) *A stated fraction must name what it's a fraction OF, in the same sentence.* "93% of Mistral's 129h 28m"
+     forces the reader to find a nearby table to learn 129h 28m is *total downtime* (not one incident's duration,
+     not an uptime %); write "93% of Mistral's 129h 28m total downtime this month" so the sentence is
+     self-contained. Applies to any "N% of X's Yh Zm" / "N of X's M total" construction.
+     (4) *Component Reliability is a DIFFERENT measurement than the report's Uptime figure* — different scope
+     AND a different source (a poll ratio AIWatch computes from its own 5-minute status-page checks, not the
+     provider-published incident/outage records the 30-Day Uptime table is built from; see "About This Report →
+     Component Reliability" in `aiwatch-reports/_templates/monthly-report.md`, shipped as aiwatch#605) — never
+     call a Component Reliability percentage bare "uptime" / "업타임" in narrative prose, even though the
+     table's own column header says "Uptime." Name it "Component Reliability" (or qualify it, e.g. "on the
+     separate Component Reliability measure") so it isn't read as the same figure as the **30-Day Uptime**
+     table.
    - **No redundancy — two overlaps the aiwatch-reports#54/#55 gate CANNOT see (both recurring critiques).** The mechanical
      **aiwatch-reports#54** gate flags a repeated SERVICE in a slot; it is blind to a repeated STORY or FRAMING.
      (1) *Cross-section, within this report.* Each section has a distinct job (Summary = terse headline,
@@ -102,7 +138,27 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      tell the same service + numbers + Notable-Movers reference in two of them (e.g. a Summary "Biggest
      improvement" bullet and a Key Insight "improvements" pattern carrying the identical Copilot/Gemini
      figures). Avoid doubling two Key Insight patterns on one theme (two long-incident patterns) — unless the
-     month genuinely has one dominant story.
+     month genuinely has one dominant story. **The check is NOT limited to the Summary↔Key Insight pair** — a
+     month's headline story can also pick up a Notable Incidents entry (its own structural event-log slot) and
+     an Observations bullet (its own prescriptive slot), and the Observations slot in particular can just as
+     easily lapse into restating the same specific numbers rather than adding a genuinely new instruction
+     (2026-07 caught this: an Observations bullet fully re-derived the OpenAI multi-product incident's
+     27h58m/14h13m/"40m→58h33m" figures — already fully derived in Key Insight — instead of adding a new
+     prescriptive point, and was dropped).
+     **A story appearing in more than one section is not itself the problem — a second FULL telling is.**
+     Notable Incidents structurally requires `**Affected**` + `**Duration**` for its own entry, so that entry
+     inherently repeats the story's core facts — that repetition is mandated by the format, not a violation.
+     Only one section gets to fully derive a story end-to-end (usually Key Insight, when it's this month's
+     headline pattern, or Notable Incidents when it isn't). Everywhere else the story appears, it must either
+     (a) point at that section instead of re-deriving the same figures (a terse Summary mention ending "see Key
+     Insight", no repeated numbers), or (b) add a fact or instruction the full telling didn't carry — a
+     prescriptive Observations bullet earns its place only by saying what to *do*, not by restating what
+     happened. **Read this against a real report, not just this rule** — 2026-05's Notable Incidents #5 (the
+     Claude API/Claude Code/claude.ai IP-restriction incident, 18h 4m) is a MIXED example, not a clean one:
+     its paired Observations bullet opens by recapping the same fact and the same "18h 4m each" figure before
+     adding its one new prescriptive point ("you can't fail over from one Anthropic surface to another") — so
+     even a published report doesn't fully avoid this. Aim to do better than that mix (open on the new point,
+     don't lead with the recap), not to find a precedent that already got it perfectly clean.
      (2) *Cross-month framing.* Stock analytical lessons recur as pattern titles — "a few long outages hurt
      more than many short ones", "upstream dependencies inherit their provider's reliability risk". Lead each
      Key Insight pattern with what is SPECIFIC to THIS month (the actual movers/events), not a re-headline of a
@@ -115,12 +171,16 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      month it leads with that month's fresh degradations (specific services + counts, e.g. "Mistral 41, Replicate
      25") and links to the `#rtt-degradation-detection` detail section, not restated as a bare pitch with no new
      data. No other recurring framing gets this exemption.
-   - **Notation conventions — keep uniform report-wide.** Score `N/100` in the **Summary + Recommendations**
-     only (the two standalone-score sections); **bare `N`** in Key Insight / Notable Incidents / Observations
-     prose, and a Score change is bare both ends (`86 → 79`, never `86/100 → 79/100`). When a grade rides with
-     a score write it **score-first — `81 (Good)`, never `Good (81)`**; a grade word alone is fine as a tier
-     reference (`reached Excellent`, `the only Degrading grade`). Keep one unit form per kind of quantity —
-     durations, latencies (`45h 33m`, `2030 ms p75`). Same value → identical notation in EN and the KO mirror.
+   - **Notation conventions — keep uniform report-wide.** Score is **bare `N`**, no `/100` suffix anywhere —
+     Summary, Recommendations, Key Insight, Notable Incidents, Observations all use the same plain form, and
+     a Score change is bare both ends (`86 → 79`, never `86/100 → 79/100`). When a grade rides with a score,
+     **write the grade first with a bare score after it** (e.g. `Good 76`, `Fair 72`) — not `76 (Good)` and
+     not `Good (76)`. A grade word alone is also fine as a tier reference with no number (`reached Excellent`,
+     `the only Degrading grade`). Keep one unit form per kind of quantity — durations, latencies (`45h 33m`,
+     `2030 ms p75`). Same value → identical notation in EN and the KO mirror. This has drifted before (an
+     older `N/100` form in Summary was dropped without this rule being updated at the time) — if a future
+     report's notation looks like it no longer matches this bullet, that is a cue to update the rule, not to
+     silently follow whichever form feels current.
 
 3. **Heed the RECURRENCE CHECK block (aiwatch-reports#54).** If the generator injected a `⚠️ RECURRENCE CHECK` block
    above `## Summary`, a subject (e.g. Together AI) led the same slot in ≥2 recent months. **Do not restate
