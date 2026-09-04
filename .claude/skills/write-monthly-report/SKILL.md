@@ -52,9 +52,11 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
        EXCEPT the generic `LLM APIs` (feeds the buyer-intent rows) and `AI apps` (consumer end-user apps,
        not a build-on pick). Do NOT hardcode a bucket list here — the header is the source, so the row set
        tracks the fleet as buckets change. The header label (e.g. `voice & transcription`, `inference &
-       infra`) identifies WHICH bucket earns a row; keep the row's reader-facing Use-Case cell in the
-       established polished form (`Voice / audio`, `Inference`, `Vector / embeddings`), NOT the raw header
-       string.
+       infra`) identifies WHICH bucket earns a row; keep the row's reader-facing Use-Case cell in a polished
+       human-readable form derived from THAT header label, not the raw header string — e.g. `voice &
+       transcription` → `Voice / audio`. Derive the polished form fresh from this month's own header label
+       each time; don't recall a bucket name from memory or a prior month, since the header is the only
+       current source of which buckets exist and what to call them.
      - **"Ranked" = appears in this month's Score Rankings table** (it passed the full-month-coverage gate
        — aiwatch#802 / aiwatch-reports#45); a mid-month-added or otherwise unranked service does **not**
        qualify. The Rankings table has no category column, so map a ranked service to its bucket via the
@@ -138,10 +140,11 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      figures). Avoid doubling two Key Insight patterns on one theme (two long-incident patterns) — unless the
      month genuinely has one dominant story. **The check is NOT limited to the Summary↔Key Insight pair** — a
      month's headline story can also pick up a Notable Incidents entry (its own structural event-log slot) and
-     an Observations bullet (its own prescriptive slot), and each of those can just as easily lapse into
-     restating the same specific numbers rather than adding a genuinely new fact or a new instruction (2026-07
-     caught this 3 bullets deep: the OpenAI multi-product incident's 27h58m/14h13m/"40m→58h33m" figures, once
-     fully derived in Key Insight, were then repeated near-verbatim in both Notable Incidents and Observations).
+     an Observations bullet (its own prescriptive slot), and the Observations slot in particular can just as
+     easily lapse into restating the same specific numbers rather than adding a genuinely new instruction
+     (2026-07 caught this: an Observations bullet fully re-derived the OpenAI multi-product incident's
+     27h58m/14h13m/"40m→58h33m" figures — already fully derived in Key Insight — instead of adding a new
+     prescriptive point, and was dropped).
      **A story appearing in more than one section is not itself the problem — a second FULL telling is.**
      Notable Incidents structurally requires `**Affected**` + `**Duration**` for its own entry, so that entry
      inherently repeats the story's core facts — that repetition is mandated by the format, not a violation.
@@ -168,12 +171,16 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      month it leads with that month's fresh degradations (specific services + counts, e.g. "Mistral 41, Replicate
      25") and links to the `#rtt-degradation-detection` detail section, not restated as a bare pitch with no new
      data. No other recurring framing gets this exemption.
-   - **Notation conventions — keep uniform report-wide.** Score `N/100` in the **Summary + Recommendations**
-     only (the two standalone-score sections); **bare `N`** in Key Insight / Notable Incidents / Observations
-     prose, and a Score change is bare both ends (`86 → 79`, never `86/100 → 79/100`). When a grade rides with
-     a score write it **score-first — `81 (Good)`, never `Good (81)`**; a grade word alone is fine as a tier
-     reference (`reached Excellent`, `the only Degrading grade`). Keep one unit form per kind of quantity —
-     durations, latencies (`45h 33m`, `2030 ms p75`). Same value → identical notation in EN and the KO mirror.
+   - **Notation conventions — keep uniform report-wide.** Score is **bare `N`**, no `/100` suffix anywhere —
+     Summary, Recommendations, Key Insight, Notable Incidents, Observations all use the same plain form, and
+     a Score change is bare both ends (`86 → 79`, never `86/100 → 79/100`). When a grade rides with a score,
+     **write the grade first with a bare score after it** (e.g. `Good 76`, `Fair 72`) — not `76 (Good)` and
+     not `Good (76)`. A grade word alone is also fine as a tier reference with no number (`reached Excellent`,
+     `the only Degrading grade`). Keep one unit form per kind of quantity — durations, latencies (`45h 33m`,
+     `2030 ms p75`). Same value → identical notation in EN and the KO mirror. This has drifted before (an
+     older `N/100` form in Summary was dropped without this rule being updated at the time) — if a future
+     report's notation looks like it no longer matches this bullet, that is a cue to update the rule, not to
+     silently follow whichever form feels current.
 
 3. **Heed the RECURRENCE CHECK block (aiwatch-reports#54).** If the generator injected a `⚠️ RECURRENCE CHECK` block
    above `## Summary`, a subject (e.g. Together AI) led the same slot in ≥2 recent months. **Do not restate
