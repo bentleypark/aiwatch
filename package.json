@@ -28,6 +28,7 @@
     "lint:docs": "node scripts/check-doc-symbols.mjs",
     "lint:budget": "node scripts/check-instruction-budget.mjs",
     "lint:korean": "node scripts/lint-korean-copy.mjs",
+    "skills:install": "node scripts/install-codex-skills.mjs",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "dependencies": {

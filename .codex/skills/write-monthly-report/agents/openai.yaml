@@ -1,0 +1,6 @@
+interface:
+  display_name: "Write Monthly Report"
+  short_description: "Write an AIWatch monthly report"
+  default_prompt: "Use $write-monthly-report to draft and verify the AIWatch monthly report."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Memory Lint"
+  short_description: "Lint project memory health"
+  default_prompt: "Use $memory-lint to audit the project memory bundle."
+policy:
+  allow_implicit_invocation: true
