@@ -25,7 +25,7 @@ import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusU
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { mergeOnlineOrNotIncidents, parseOnlineOrNotIncidentHistory, parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
 import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
-import { mergeXaiRegionalIncidents } from './xai-regions'
+import { mergeXaiRegionalIncidents, mergeXaiGrokSurfaceIncidents } from './xai-regions'
 
 // #990 — OpenAI (openai/chatgpt/codex all share status.openai.com) occasionally posts a
 // "kitchen-sink" advisory scoped to a gov-compliance ENVIRONMENT (e.g. the 2026-07 "Codex, workspace
@@ -425,16 +425,21 @@ export const SERVICES: ServiceConfig[] = [
   // this feed through parseXaiRssIncidents, so no new parser code was needed, only this config entry.
   // parseXaiRssIncidents never sets componentNames (unlike a Statuspage/incident.io JSON source), so
   // filterIncidents' incidentKeywords match is TITLE-substring-only here — same as xai's own
-  // `['api']`. status.x.ai tags every incident title `[<Component>] ...`; 'grok (' (with the open
-  // paren) matches exactly the 3 app-surface tags `[Grok (iOS)]` / `[Grok (Android)]` / `[Grok (Web)]`
-  // and nothing else on the page (not '[Grok in X]' — no paren; not '[API...]', '[API Console]',
-  // '[Docs]', '[xAI Website]'). mergeXaiRegionalIncidents (xai's per-region dedup) is a safe no-op
-  // here: its regex only matches the `[API (<region>.api.x.ai)]` tag shape, never `[Grok (...)]` — and
-  // per-platform Grok incidents are deliberately NOT merged across iOS/Android/Web (unlike xai's API
-  // regions): the live feed shows genuinely platform-scoped incidents (e.g. "Partial Outage of Grok
-  // Android App" with no iOS/Web counterpart) alongside near-identical simultaneous ones, so merging
-  // by title would risk collapsing real per-platform outages — the same over-eager-merge failure class
-  // #940's own region merge was built to avoid, just on the opposite axis.
+  // `['api']`. status.x.ai tags every incident title `[<Component>] ...`, and 'grok (' — with the open
+  // paren — is what separates the Grok APP surfaces from the page's other Grok-prefixed tags. The
+  // paren is the whole rule: it admits the `[Grok (<surface>)]` app tags and excludes every other
+  // `[Grok …]` tag. The set of tags is the provider's and rotates, so it is not enumerated here — the
+  // shape is the contract.
+  // mergeXaiRegionalIncidents (xai's per-region dedup) is a safe no-op here: its regex only matches the
+  // `[API (<region>.api.x.ai)]` tag shape, never `[Grok (...)]`.
+  // #1337 — the surface axis IS now merged, by `mergeXaiGrokSurfaceIncidents`. #1165 declined to,
+  // reasoning that genuinely platform-scoped incidents exist ("Partial Outage of Grok Android App"
+  // with no iOS/Web counterpart) and merging *by surface* would collapse them. That case is real and
+  // still split — but it is handled by the KEY, not by declining: those titles differ once the surface
+  // tag is stripped, so a title-keyed merge never groups them. The merge that shipped keys on the
+  // stripped title within a 30-min window, which is the narrower rule #1165's objection actually
+  // pointed at. The `incidentKeywords` filter above is why its merged title must keep a `Grok (`
+  // marker; see the title note in `mergeSurfaceGroup`.
   { id: 'grok', name: 'Grok', provider: 'xAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok ('], addedAt: '2026-07-26' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
@@ -2725,7 +2730,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
             // ONE canonical incident at the source, so the dashboard list, Analyze modal, RSS/Slack
             // feed, and Discord new+resolved alerts all see a single incident (the older per-surface
             // merges were cycle-local and leaked duplicates across cron cycles).
-            ? mergeXaiRegionalIncidents(parseXaiRssIncidents(rssText))
+            // #1337 — the same collapse on the other axis status.x.ai splits an event across: one Grok
+            // app outage filed once per SURFACE (`[Grok (iOS)]` / `(Android)` / `(Web)` / …). The two
+            // operate on disjoint title shapes, so composing them is order-independent; nested this way
+            // only to keep the #940 call visually intact.
+            ? mergeXaiGrokSurfaceIncidents(mergeXaiRegionalIncidents(parseXaiRssIncidents(rssText)))
             : parseRssIncidents(rssText)
         } else if (config.gcloudProduct) {
           const data: GCloudIncident[] = await scrapeRes.json()
