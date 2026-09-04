@@ -123,6 +123,56 @@ describe('parseXaiRssIncidents impact mapping (#564)', () => {
     expect(parseXaiRssIncidents(xml)[0].impact).toBe('minor') // not major from the "offline" CSS class
   })
 
+  // #1337 — the resolution update's stage comes from the provider's `Resolved:` marker, not its prose.
+  describe('resolution stage (#1337)', () => {
+    /** An xAI item with two updates: an opening one and a closing one at `resolvedAt`. */
+    const xaiItem = (closingHeading: string, opts: { resolved?: string; closingAt?: string; status?: string } = {}) => {
+      const { resolved = 'Thu, 03 Sep 2026 17:08:11 GMT', closingAt = resolved, status = 'RESOLVED' } = opts
+      return `<rss><channel><item><title>[Grok (iOS)] Models outage</title><guid>INCc33a8af</guid>` +
+        `<description><![CDATA[` +
+        `<h3>Status: ${status}</h3><p>Resolved: ${resolved}</p>` +
+        `<div><strong>${closingAt}</strong><h3>${closingHeading}</h3>` +
+        `<p>We have resolved the situation, and traffic is healthy again.</p></div>` +
+        `<div><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong><h3>Investigating outage</h3>` +
+        `<p>Grok is experiencing issues.</p></div>` +
+        `]]></description></item></channel></rss>`
+    }
+    const stages = (xml: string) => parseXaiRssIncidents(xml)[0].timeline.map(t => t.stage)
+
+    it('marks the resolution update resolved even when the heading says nothing of the sort', () => {
+      // The real 2026-09-03 heading. Before #1337 this row rendered as "Investigating" while its own
+      // text said the service was back.
+      expect(stages(xaiItem('Traffic is healthy again'))).toEqual(['investigating', 'resolved'])
+    })
+
+    it('covers the other wordings the substring ladder missed', () => {
+      // Each previously fell through to `investigating`.
+      for (const heading of ['Issue fixed', 'Service Restored', 'Normal Operation Restored', 'Outage is Fixed', 'Solved']) {
+        expect(stages(xaiItem(heading)), heading).toEqual(['investigating', 'resolved'])
+      }
+    })
+
+    it('leaves a heading the ladder already handled unchanged', () => {
+      expect(stages(xaiItem('Incident has been resolved'))).toEqual(['investigating', 'resolved'])
+    })
+
+    it('does NOT touch an update that is not the resolution instant', () => {
+      // Only the entry AT `Resolved:` is stamped — the opening entry keeps the ladder's verdict.
+      expect(stages(xaiItem('Traffic is healthy again'))[0]).toBe('investigating')
+    })
+
+    it('changes nothing when no update matches the Resolved: instant', () => {
+      // Some resolved items carry a `Resolved:` that lines up with no update. They keep today's behaviour.
+      const xml = xaiItem('Traffic is healthy again', { closingAt: 'Thu, 03 Sep 2026 17:08:11 GMT', resolved: 'Thu, 03 Sep 2026 19:00:00 GMT' })
+      expect(stages(xml)).toEqual(['investigating', 'investigating'])
+    })
+
+    it('changes nothing for an incident the provider has not marked RESOLVED', () => {
+      const xml = xaiItem('Traffic is healthy again', { status: 'INVESTIGATING' })
+      expect(stages(xml)).toEqual(['investigating', 'investigating'])
+    })
+  })
+
   it('skips an xAI maintenance entry (#564 — no upstream maintenance filter on this path)', () => {
     const xml = `<rss><channel><item><title>[API] Scheduled maintenance</title>` +
       `<guid>xai-maint</guid>` +

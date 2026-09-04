@@ -167,6 +167,11 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
     const resolvedMatch = desc.match(/Resolved:\s*([^<]+)/)
     const isResolved = statusMatch?.[1] === 'RESOLVED'
 
+    // Parsed BEFORE the timeline because the timeline needs it — see the stage note below. The
+    // `isNaN` re-check is the same one the `resolvedAt` binding further down applies.
+    const resolvedDate = resolvedMatch ? new Date(resolvedMatch[1].trim()) : null
+    const resolvedIso = resolvedDate && !isNaN(resolvedDate.getTime()) ? resolvedDate.toISOString() : null
+
     // Extract timeline updates from description HTML (assumes flat <div> structure)
     const updateBlocks = desc.match(/<div>([\s\S]*?)<\/div>/g) ?? []
     const timeline: TimelineEntry[] = updateBlocks.flatMap((block) => {
@@ -177,7 +182,31 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
       const parsedDate = new Date(dateMatch[1])
       if (isNaN(parsedDate.getTime())) return []
       const at = parsedDate.toISOString()
-      const stage = titleMatch?.[1]?.toLowerCase().includes('resolved') ? 'resolved' as const
+      // #1337 — the RESOLUTION update is identified by the provider's own `Resolved:` marker, not by
+      // reading its prose. xAI writes the `<h3>` heading free-form, so the substring ladder below
+      // mislabels every wording it does not enumerate. "Traffic is healthy again" is the one that
+      // produced this bug report: the 2026-09-03 Grok and API outages rendered a row headed
+      // "Investigating" whose own text read "We have resolved the situation, and traffic is healthy
+      // again."
+      //
+      // Adding more substrings would repeat the mistake — the provider's wording is not ours to
+      // predict. `Status: RESOLVED` + `Resolved: <date>` are machine-readable and this function
+      // already reads both, so the entry whose instant IS the resolution instant is the resolution,
+      // whatever it calls itself. The ladder still handles every OTHER entry.
+      //
+      // Deliberately narrow. It fires only when the provider marked the incident RESOLVED and gave a
+      // parseable date, so an item whose `Resolved:` lines up with no update keeps today's behaviour
+      // and no unresolved incident is touched.
+      //
+      // `stage` is not display-only. It is part of the merge's timeline dedupe key; several callers
+      // fall back to the last `resolved` timeline entry when an incident carries no `resolvedAt`
+      // (`resolvedAtOf` in incident-history.ts, `getResolvedTime` in src/utils/incidentSort.js), which
+      // a partially-resolved surface group is — held closed only by those callers' own
+      // `status === 'resolved'` gate, which this change relies on and does not own; and
+      // `ai-analysis.ts` renders it into the model prompt, so such a group hands the model a
+      // `[resolved]` row for an incident it is simultaneously told is investigating.
+      const stage = (isResolved && resolvedIso && at === resolvedIso) ? 'resolved' as const
+        : titleMatch?.[1]?.toLowerCase().includes('resolved') ? 'resolved' as const
         : titleMatch?.[1]?.toLowerCase().includes('monitor') ? 'monitoring' as const
         : titleMatch?.[1]?.toLowerCase().includes('identif') ? 'identified' as const
         : 'investigating' as const
@@ -186,7 +215,6 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
     }).reverse() // oldest first
 
     const startedAt = timeline.length > 0 ? timeline[0].at : new Date().toISOString()
-    const resolvedDate = resolvedMatch ? new Date(resolvedMatch[1].trim()) : null
     const resolvedAt = (resolvedDate && !isNaN(resolvedDate.getTime())) ? resolvedDate : null
     const duration = (isResolved && resolvedAt && timeline.length > 0)
       ? formatDuration(new Date(startedAt), resolvedAt)
