@@ -151,6 +151,19 @@ describe('#1003 — ai:analysis writes are funnelled through putAnalysis', () =>
     expect(read('index.ts')).toMatch(/firstEstimatedRecoveryHours: a\.firstEstimatedRecoveryHours/)
   })
 
+  // LIMIT, stated rather than iterated on: this is a SOURCE scan, so it sees deletion and misspelling
+  // (the two modes its sibling above was written for) but not a break that keeps the text — a dead
+  // `false &&` guard, or a later `progress: undefined` shadowing the key. Closing that would need a
+  // `/feed` route test, which does not exist yet. Third round in a row on this seam; naming the gap
+  // is the proportionate stop.
+  it('the /feed projection carries the analysis prose halves (#1328)', () => {
+    // Same seam, same hazard: `progress` is spread conditionally, and object-literal excess-property
+    // checking does not reach through `...(a.progress && { progress: a.progress })` — a misspelled key
+    // there compiles clean and drops the field from the Slack feed forever. Deleting the line, and
+    // misspelling it, both passed the whole worker suite AND `tsc` before this.
+    expect(read('index.ts')).toMatch(/progress: a\.progress/)
+  })
+
   it('the SPA and Edge mirrors of the scoring baseline exist and prefer the first estimate', () => {
     // Three codebases score predicted-vs-actual off the same data; each needs its own baseline helper.
     // Pin their existence so a rewrite that reverts one to the current estimate has to delete an

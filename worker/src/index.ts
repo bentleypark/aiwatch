@@ -4817,6 +4817,9 @@ export default {
                 const a = JSON.parse(raw) as AIAnalysisResult
                 ;(analysis[svc.id] ??= []).push({
                   incidentId: inc.id, summary: a.summary,
+                  // #1328 — this projection picks fields by hand, so a new one has to be listed here
+                  // or the /feed block silently loses it.
+                  ...(a.progress && { progress: a.progress }),
                   estimatedRecovery: a.estimatedRecovery, affectedScope: a.affectedScope ?? [],
                   ...(a.estimatedRecoveryHours != null && { estimatedRecoveryHours: a.estimatedRecoveryHours }),
                   // #1003 — the resolved item scores against the FIRST estimate, so carry it too.
@@ -5201,7 +5204,12 @@ export default {
             if (!raw) return
             try {
               const a = JSON.parse(raw) as AIAnalysisResult
-              if (a.summary) briefAiSummary[`${svc.id}:${inc.id}`] = a.summary
+            // #1328 — both halves. These two surfaces consume ONE string and are already
+              // filtered to active incidents, so joining here restores the sentence they lost
+              // when `summary` stopped carrying the status clause — and it does so without a
+              // client change (the extension popup ships on its own release train). Doing it
+              // this way is what leaves the rule with NO exception list to drift.
+              if (a.summary) briefAiSummary[`${svc.id}:${inc.id}`] = [a.summary, a.progress].filter(Boolean).join(' ')
             } catch (err) {
               console.warn('[statusline-brief] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
             }
@@ -5326,7 +5334,12 @@ export default {
               if (!raw) return
               try {
                 const a = JSON.parse(raw) as AIAnalysisResult
-                if (a.summary) extAiSummary[`${svc.id}:${inc.id}`] = a.summary
+              // #1328 — both halves. These two surfaces consume ONE string and are already
+              // filtered to active incidents, so joining here restores the sentence they lost
+              // when `summary` stopped carrying the status clause — and it does so without a
+              // client change (the extension popup ships on its own release train). Doing it
+              // this way is what leaves the rule with NO exception list to drift.
+                if (a.summary) extAiSummary[`${svc.id}:${inc.id}`] = [a.summary, a.progress].filter(Boolean).join(' ')
               } catch (err) {
                 console.warn('[ext-claude] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
               }

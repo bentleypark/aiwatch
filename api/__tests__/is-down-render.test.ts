@@ -566,3 +566,58 @@ describe('#1292 — a reconstructed timestamp is not published at minute precisi
     expect(render(inc), 'a real incident still reports one').toContain('average recovery time')
   })
 })
+
+// #1328 - the is-down AI card renders the same analysis prose the dashboard modal does, and shares
+// its defect: nothing rewrites it at resolution, so a resolved card carried the status sentence
+// written while the incident was still being investigated. The card already gates its "Recovered"
+// line on `insight.resolvedAt`; the perishable half of the prose now uses the same gate.
+describe('is-down AI card summary/progress split (#1328)', () => {
+  const seo = getSEOContent('junie')!
+  const base = {
+    id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent',
+    latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
+    incidents: [], aiwatchScore: null, scoreGrade: null,
+  }
+  const ongoing = { id: 'i1', title: 'Image generation unavailable', status: 'identified', impact: 'major', startedAt: new Date(Date.now() - 4e6).toISOString(), duration: null }
+  const done = { ...ongoing, id: 'i2', status: 'resolved', duration: '1h 6m' }
+
+  const DURABLE = 'Elevated error rates on the Messages API.'
+  const PERISHABLE = 'Currently investigating, no improvement yet.'
+  const live = {
+    summary: DURABLE, progress: PERISHABLE,
+    estimatedRecovery: '~1h', affectedScope: ['Messages API'],
+    analyzedAt: new Date().toISOString(), needsFallback: true,
+    startedAt: ongoing.startedAt,
+  }
+  const resolved = { ...live, resolvedAt: new Date().toISOString(), estimatedRecoveryHours: 1, firstEstimatedRecoveryHours: 1 }
+  const render = (svc: object, insight: object) =>
+    renderPage('junie', svc as never, seo, [] as never, insight as never, null, undefined, null, null, null, [insight] as never)
+
+  it('a RESOLVED card drops the progress half and keeps the durable one', () => {
+    const html = render({ ...base, status: 'operational', incidents: [done] }, resolved)
+    expect(html).toContain(DURABLE)
+    expect(html).not.toContain(PERISHABLE)
+  })
+
+  it('a LIVE card still shows both halves', () => {
+    const html = render({ ...base, status: 'degraded', incidents: [ongoing] }, live)
+    expect(html).toContain(DURABLE)
+    expect(html).toContain(PERISHABLE)
+  })
+
+  it('an analysis written before the split renders unchanged in both states', () => {
+    // The legacy shape IS production until the worker redeploys and re-analyses, so this case has to
+    // detect its own failure mode — which is a stray SEPARATOR, not a leaked `undefined`: `esc()`
+    // returns '' for null, so `undefined` can never reach this HTML and asserting its absence would
+    // be a dead assertion. Expressed markup-tolerantly so a `<span>` around the summary does not
+    // turn it red.
+    // Scoped to the CARD paragraph, not the page: the summary also appears in the meta/share text,
+    // where a following space is normal — `not.toContain(DURABLE + ' ')` fails on the healthy page.
+    // `DURABLE + '</p>'` says the paragraph ends immediately after the summary, which is exactly the
+    // stray-separator defect. (`undefined` is unassertable here: `esc()` returns '' for null.)
+    const legacyLive = { ...live, progress: undefined }
+    expect(render({ ...base, status: 'degraded', incidents: [ongoing] }, legacyLive)).toContain(DURABLE + '</p>')
+    const legacyDone = { ...resolved, progress: undefined }
+    expect(render({ ...base, status: 'operational', incidents: [done] }, legacyDone)).toContain(DURABLE + '</p>')
+  })
+})

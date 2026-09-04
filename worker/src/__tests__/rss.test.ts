@@ -579,16 +579,21 @@ describe('buildRssFeed — active item content is status-invariant (#768)', () =
     expect(descOf(buildAt('monitoring', 'x'))).not.toContain('🤖 AI analysis')
   })
 
-  it('escapes markup in active-only fields (AI summary) — the active path stays injection-safe', () => {
+  it('escapes markup in active-only fields (AI summary + progress) — the active path stays injection-safe', () => {
     // The img-onerror/C0 tests moved to resolved items (timeline text is resolved-only now); cover
     // the fields that DO render on an active item (the AI summary) so the escaping path isn't lost.
-    const evil: RssAiAnalysisMap = { claude: [{ incidentId: 'k', summary: '<img src=x onerror=alert(1)>', estimatedRecovery: '1h', affectedScope: [] }] }
+    // #1328 — `progress` renders on the same line through the same two wrappers and had no assertion,
+    // while its sibling did. `sanitize()` in `parseAnalysisResponse` does NOT HTML-escape (it defangs
+    // mentions and code fences only), so `escHtml` is the sole encoder on this public path.
+    const evil: RssAiAnalysisMap = { claude: [{ incidentId: 'k', summary: '<img src=x onerror=alert(1)>', progress: '<svg onload=alert(2)>', estimatedRecovery: '1h', affectedScope: [] }] }
     const xml = buildRssFeed(
       [service({ status: 'down', incidents: [incident({ id: 'k', title: 'Outage', impact: 'major', status: 'identified' })] })],
       { scope: 'all' }, NOW, evil, { k: '2026-05-19T08:55:00.000Z' },
     )
     expect(xml).toContain('&lt;img src=x onerror=alert(1)&gt;')
     expect(xml).not.toContain('<img src=x')
+    expect(xml).toContain('&lt;svg onload=alert(2)&gt;')
+    expect(xml).not.toContain('<svg onload')
   })
 })
 
@@ -1306,5 +1311,37 @@ describe('#1292 — status_history-derived incidents never reach /feed', () => {
       startedAt: '2026-05-15T09:00:00.000Z', resolvedAt: '2026-05-16T02:18:00.000Z', duration: '17h 18m',
     })
     expect(buildRssFeed([service({ incidents: [ordinary] })], { scope: 'all' }, NOW)).toContain('inc-9')
+  })
+})
+
+// #1328 - the Slack //feed carries the analysis prose, and `progress` is threaded to it through TWO
+// hand-written seams: the `index.ts` projection that rebuilds `RssAiAnalysis` field-by-field (pinned
+// by a source scan in first-estimate-write-paths.test.ts) and this renderer. Deleting the render line
+// passed the entire 5096-test worker suite before this, so the feature could vanish from a public
+// surface with CI green.
+describe('buildRssFeed - the AI block carries both prose halves (#1328)', () => {
+  const descOf = (xml: string) => (xml.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || [])[1]
+  const build = (ai: RssAiAnalysisMap) =>
+    descOf(buildRssFeed(
+      [service({ status: 'down', incidents: [incident({ id: 'k', title: 'Outage', impact: 'major', status: 'investigating', timeline: [{ stage: 'investigating', text: 'We are investigating', at: '2026-05-10T12:00:00.000Z' }] })] })],
+      { scope: 'all' }, NOW, ai, { k: '2026-05-19T08:55:00.000Z' },
+    ))
+
+  it('renders progress beside the summary on an ACTIVE item', () => {
+    // The block is already gated on !isResolved, so an active item is the only state it renders in
+    // - and it is where `summary` alone is now one sentence shorter than readers used to get.
+    const d = build({ claude: [{ incidentId: 'k', summary: 'analysis text', progress: 'Currently identified and improving.', estimatedRecovery: '1h', affectedScope: ['Claude API'] }] })
+    expect(d).toContain('\u{1F916} AI analysis: analysis text')
+    expect(d).toContain('Currently identified and improving.')
+  })
+
+  it('an analysis written before the split emits no empty paragraph and no leaked undefined', () => {
+    // The legacy shape is production until the worker redeploys and re-analyses. Asserting the
+    // ABSENCE of a stray artifact, not just the presence of the summary: dropping the truthiness
+    // guard leaks the literal `undefined` into a public feed, which `toContain(summary)` misses.
+    const d = build({ claude: [{ incidentId: 'k', summary: 'analysis text', estimatedRecovery: '1h', affectedScope: ['Claude API'] }] })
+    expect(d).toContain('\u{1F916} AI analysis: analysis text')
+    expect(d).not.toContain('undefined')
+    expect(d).not.toContain('<p></p>')
   })
 })

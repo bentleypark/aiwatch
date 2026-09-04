@@ -85,12 +85,12 @@ export default async function handler(req: Request) {
     // #1062 facet B — set when the outage ROUTES to a capability tier (OpenAI 'Images' down → image tier),
     // so the Alternatives block heading names the affected capability ("… for image generation").
     let fallbackCapabilityLabel: string | undefined
-    let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null = null
+    let aiInsight: { summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null = null
     // #926 — the worker returns ONE analysis per active incident (aiAnalysis: Record<svcId, AIAnalysisResult[]>).
     // Keep the FULL array for the visible AI Analysis card (parity with the dashboard AnalysisModal, which
     // renders every incident); `aiInsight` above stays the primary [0] used by the meta/share/OG surfaces,
     // which can only carry a single summary.
-    let aiInsights: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> = []
+    let aiInsights: Array<{ summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> = []
     // #574 — supply-chain note for THIS service (set if it's in the banner's affectedNow/mayBeAffected).
     let supplyChainNote: SupplyChainNote | null = null
     let upstreamNote: UpstreamNote | null = null
@@ -124,7 +124,7 @@ export default async function handler(req: Request) {
           // #926 — the worker returns an ARRAY per service (one entry per active incident). The prior
           // non-array annotation was wrong (a runtime array was silently collapsed to [0]); the Array.isArray
           // guard below still tolerates a stray single object defensively.
-          aiAnalysis?: Record<string, Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number }>>
+          aiAnalysis?: Record<string, Array<{ summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number }>>
           // #574 — supply-chain banner: when this service is in affectedNow/mayBeAffected, render a note.
           // Shape declared once, next to the logic that reads it — two copies of one wire contract drift.
           supplyChainBanner?: SupplyChainBannerLike

@@ -114,6 +114,18 @@ describe('buildHistoryRecord', () => {
     expect(buildHistoryRecord(svc, { ...baseInc, startedAt: undefined }, null, NOW)).toBeNull()
   })
 
+  // #1328 - the corpus has NO TTL and `predictedSummary` is replayed into later prompts as
+  // `Prior read: "..."` by `buildHistorySection`, so what lands here outlives the incident by design.
+  // The perishable half must not: "currently investigating" is noise as grounding for a future
+  // incident. It stays out by construction (this copies `summary`, the durable half) - pinned so a
+  // later "let's store the whole prose" edit has to argue with a red test.
+  it('stores only the durable half - progress never reaches the no-TTL corpus (#1328)', () => {
+    const analysis = { estimatedRecoveryHours: 1, summary: 'Network errors', progress: 'Currently investigating, no improvement yet.', model: 'gemma' }
+    const rec = buildHistoryRecord(svc, baseInc, analysis, NOW)!
+    expect(rec.predictedSummary).toBe('Network errors')
+    expect(JSON.stringify(rec)).not.toContain('Currently investigating')
+  })
+
   it('joins prediction fields from the analysis and round-trips affectedScope', () => {
     const analysis = { estimatedRecoveryHours: 1, summary: 'Network errors', affectedScope: ['Messages API', 'Streaming'], model: 'gemma' }
     const rec = buildHistoryRecord(svc, baseInc, analysis, NOW)!

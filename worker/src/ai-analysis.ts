@@ -152,7 +152,15 @@ export function isBoilerplate(text: string | null | undefined): boolean {
 }
 
 export interface AIAnalysisResult {
+  // #1328 — the DURABLE half: what was wrong and why. Still true after the incident ends, so every
+  // surface renders it in both states and `buildHistoryRecord` copies it into the no-TTL corpus.
   summary: string
+  // #1328 — the PERISHABLE half: where the incident stood at analysis time. Split out of `summary`
+  // because nothing ever rewrites the prose at resolution (`markIncidentResolved` stamps `resolvedAt`
+  // and returns), so a resolved row used to read "currently in the initial investigation stage with
+  // no improvement reported yet" under its own Resolved badge. Surfaces drop it once `resolvedAt` is
+  // set. Optional: absent on every analysis written before this, and on one the model omitted it from.
+  progress?: string
   estimatedRecovery: string
   estimatedRecoveryHours?: number  // upper bound parsed from estimatedRecovery (e.g., "4–6h" → 6)
   // #1003 — the FIRST estimate ever made for this incident, stamped on every write by `putAnalysis`
@@ -351,6 +359,11 @@ export function parseAnalysis(raw: string | null): AIAnalysisResult | null {
   }
 }
 
+/** #1328 — how much of `progress` the Discord embed will carry. The prompt asks for ONE sentence;
+ *  this is the enforcement, because the section it feeds is inside the embed's untruncated base
+ *  description. Exported so the bound is pinnable rather than a literal buried in a template. */
+export const PROGRESS_EMBED_MAX = 200
+
 /**
  * #882 — render the Discord embed's 🤖 AI ANALYSIS section for one incident analysis. Pure so the two
  * cron paths that build it — the inline-success path and the KV-preferred path (an analysis backfilled
@@ -359,7 +372,18 @@ export function parseAnalysis(raw: string | null): AIAnalysisResult | null {
  */
 export function formatAnalysisEmbedSection(analysis: AIAnalysisResult, div: string): string {
   const scope = analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''
-  return `\n${div}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${formatRecoveryDisplay(analysis.estimatedRecovery)}${scope}`
+  // #1328 — this section is only ever built for a NEW-incident alert, i.e. an active incident, so
+  // both halves belong here. Rendering `progress` keeps the reader's text whole now that the model
+  // no longer packs the status clause into `summary`.
+  //
+  // Capped, unlike `summary`. This section lands in the embed's BASE description, which nothing
+  // truncates — `sendDiscordAlert` does no truncation and Discord 400s the whole alert past
+  // `DISCORD_EMBED_DESC_MAX`. `sanitize` allows 1000 chars per field, so an uncapped second field
+  // would roughly double this section's worst case, and the tweet/search/reddit sections budget
+  // against `description.length` — they get squeezed out first (the `#1182 … dropped (embed cap)`
+  // path). The cap is the prompt's own contract: one sentence.
+  const progress = analysis.progress ? `\n${analysis.progress.slice(0, PROGRESS_EMBED_MAX)}` : ''
+  return `\n${div}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}${progress}\n⏱ Est. recovery: ${formatRecoveryDisplay(analysis.estimatedRecovery)}${scope}`
 }
 
 /**
@@ -406,7 +430,8 @@ export function findSimilarIncidents(
 export const ANALYSIS_SYSTEM_PROMPT = `You are an AI service reliability analyst for AIWatch.
 Analyze the incident data provided by the user and respond in JSON format ONLY:
 {
-  "summary": "Concise analysis (max 2 sentences). Identify if this is a recurring pattern or a new type of failure (e.g., network vs model).",
+  "summary": "What is wrong and why, in one or two sentences. Identify if this is a recurring pattern or a new type of failure (e.g., network vs model). Must stay true after the incident ends — state no status, stage, or progress here.",
+  "progress": "Where the incident stands RIGHT NOW, in ONE sentence: which stage, and whether it is improving, worsening or unchanged. This is the perishable half and is dropped once the incident resolves. Omit the key if the timeline says nothing about progress.",
   "estimatedRecovery": "TOTAL time from the incident's Started timestamp until recovery — NOT the time remaining from now. Short range using abbreviations ONLY. Format: '30m–1h' or '1–3h'. Use m for minutes, h for hours. Never write 'minutes' or 'hours' in full. If no data, return 'N/A'.",
   "affectedScope": ["1-3 specific features or related sub-services likely impacted"],
   "needsFallback": true/false
@@ -414,9 +439,10 @@ Analyze the incident data provided by the user and respond in JSON format ONLY:
 
 Rules:
 - If the incident title contains specific environment keywords (e.g., 'Chrome', 'Cowork', 'API'), prioritize them in the summary.
+- "summary" and "progress" are separate on purpose: "summary" is read again after the incident is over, "progress" is not. Never put "currently", "so far", "no improvement yet" or a stage name in "summary".
 - Recovery estimate MUST use short format: '30m–1h', '1–3h', '15–45m'. Never write 'minutes' or 'hours' in full words.
 - "Elapsed" in the incident data is how long the incident has ALREADY been open. Because estimatedRecovery is measured from Started, its upper bound must NEVER be less than Elapsed — an incident cannot have recovered before now. If the incident has already outrun any pattern you can predict from, return "N/A" rather than a range you cannot support.
-- If Timeline Updates are provided, incorporate the LATEST status and progress into your analysis. Reflect whether the situation is improving, worsening, or unchanged.
+- If Timeline Updates are provided, base "progress" on the LATEST one.
 - needsFallback: true if the incident significantly impacts primary service availability (e.g., major outage, API errors, authentication failure). false for cosmetic issues, partial feature degradation, or scheduled maintenance.
 - Keep the tone professional, objective, and data-driven.
 - Do not include any text outside the JSON block.`
@@ -554,7 +580,7 @@ export function parseAnalysisResponse(
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) return null
 
-  let parsed: { summary?: string; estimatedRecovery?: string; affectedScope?: string[]; needsFallback?: boolean }
+  let parsed: { summary?: string; progress?: string; estimatedRecovery?: string; affectedScope?: string[]; needsFallback?: boolean }
   try {
     parsed = JSON.parse(jsonMatch[0])
   } catch (err) {
@@ -573,6 +599,9 @@ export function parseAnalysisResponse(
   const recoveryHours = parseRecoveryHours(recovery)
   return {
     summary: sanitize(parsed.summary),
+    // #1328 — absent when the model omitted it (the prompt allows that when the timeline says
+    // nothing about progress); never an empty string, so a consumer's truthiness check is enough.
+    ...(typeof parsed.progress === 'string' && parsed.progress.trim() && { progress: sanitize(parsed.progress) }),
     estimatedRecovery: recovery,
     ...(recoveryHours != null && { estimatedRecoveryHours: recoveryHours }),
     affectedScope: (parsed.affectedScope ?? []).map(s => sanitize(s)),

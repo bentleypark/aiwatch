@@ -213,8 +213,17 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                           {isRecovered ? '✅' : '🔸'} {inc.title}
                         </div>
                       )}
+                      {/* #1328 — `summary` is the durable half (what was wrong); `progress` is where
+                          the incident stood when the analysis ran. Nothing rewrites the prose at
+                          resolution — `markIncidentResolved` stamps `resolvedAt` and returns — so a
+                          resolved row used to read "currently in the initial investigation stage with
+                          no improvement reported yet" directly under its own Resolved badge. Dropping
+                          only the perishable half keeps the answer to "what was this outage about",
+                          which the structured lines below do not carry. Absent on older analyses. */}
+                      {/* The 500 cap is on the PAIR, not each half — slicing them separately would
+                          quietly double the bound a live row renders. */}
                       <p className="text-[12px] text-[var(--text1)]" style={{ lineHeight: 1.6, marginBottom: '8px' }}>
-                        {(analysis.summary ?? '').slice(0, 500)}
+                        {[analysis.summary, !isRecovered && analysis.progress].filter(Boolean).join(' ').slice(0, 500)}
                       </p>
                       <div className="mono text-[10px] text-[var(--text2)]" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         {outcome ? (

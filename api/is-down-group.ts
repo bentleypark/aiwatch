@@ -51,6 +51,12 @@ interface FamilyIncident {
    *  (matched by incidentId — the worker can hold analyses for other, unrelated incidents on the
    *  same member). Absent is normal (no incident, or not yet analyzed), not an error. */
   aiSummary?: string
+  /** #1328 — the perishable half of the prose (where the incident stood when the analysis ran).
+   *  Rendered only while the incident is live: this card shows a RESOLVED incident's analysis too
+   *  (the "Post-Incident Analysis" branch below), which is exactly where a status sentence written
+   *  during `investigating` contradicts the card it sits in. Absent on analyses written before the
+   *  split. */
+  aiProgress?: string
   aiEstimatedRecovery?: string
 }
 
@@ -238,7 +244,7 @@ function renderGroupPage(
       </div>${inc.aiSummary ? `
       <div class="incident-ai">
         <span class="incident-ai-badge">${inc.status === 'resolved' ? '🤖 Post-Incident Analysis' : '🤖 AI Analysis'}</span>
-        <p>${esc(inc.aiSummary)}</p>
+        <p>${esc(inc.aiSummary)}${inc.status !== 'resolved' && inc.aiProgress ? ' ' + esc(inc.aiProgress) : ''}</p>
         ${inc.status === 'resolved'
           ? '' /* #1164 review — a live "Estimated recovery" figure is stale once resolved (incidentMeta
                  above already states "resolved after {duration}"); the summary text alone is what an
@@ -513,7 +519,7 @@ export default async function handler(req: Request) {
             }>
           }>
           // #926 — one entry per active incident, keyed by service id (same shape is-down.ts reads).
-          aiAnalysis?: Record<string, Array<{ incidentId: string; summary: string; estimatedRecovery: string }>>
+          aiAnalysis?: Record<string, Array<{ incidentId: string; summary: string; progress?: string; estimatedRecovery: string }>>
         }
         const byId = new Map(data.services.map((s) => [s.id, s]))
         members = family.members.map((id) => {
@@ -549,7 +555,7 @@ export default async function handler(req: Request) {
         // happens to be iterated first for a given incident id — silently dropping a real analysis
         // filed under a different member. Build one incidentId → analysis map across EVERY member's
         // bucket up front instead, so the lookup is independent of which member is "first".
-        const analysisByIncidentId = new Map<string, { summary: string; estimatedRecovery: string }>()
+        const analysisByIncidentId = new Map<string, { summary: string; progress?: string; estimatedRecovery: string }>()
         for (const id of family.members) {
           for (const a of data.aiAnalysis?.[id] ?? []) {
             if (!analysisByIncidentId.has(a.incidentId)) analysisByIncidentId.set(a.incidentId, a)
@@ -602,7 +608,7 @@ export default async function handler(req: Request) {
               members: [{ name: memberName, slug }], title: inc.title, status: inc.status,
               startedAt: inc.startedAt, resolvedAt: inc.resolvedAt, duration: inc.duration,
               derived: inc.derived, derivedDay: inc.derivedDay,
-              aiSummary: analysis?.summary, aiEstimatedRecovery: analysis?.estimatedRecovery,
+              aiSummary: analysis?.summary, aiProgress: analysis?.progress, aiEstimatedRecovery: analysis?.estimatedRecovery,
             })
           }
         }

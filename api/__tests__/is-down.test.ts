@@ -343,3 +343,67 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     expect(order).not.toContain('Groq Cloud')
   })
 })
+
+// #1328 - `api/is-down.ts` is the only thing that carries `progress` from the worker payload into
+// `aiInsights`, and it does so by a wholesale spread (`{ ...a, ... }`). `is-down-render.test.ts` calls
+// `renderPage` directly and never touches this file, so replacing that spread with a hand-picked
+// object would drop the feature in production with every render test still green - the repo's
+// documented "tested twin vs called path" seam. Handler-level, so the wiring is what is pinned.
+describe('is-down.ts - the handler carries the analysis prose halves (#1328)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  afterEach(() => { fetchMock.mockRestore() })
+
+  const DURABLE = 'Auth overload caused login failures.'
+  const PERISHABLE = 'Currently identified and rolling out a fix.'
+
+  function makeWorker(opts: { resolved: boolean; progress?: string }): Response {
+    const now = new Date().toISOString()
+    const startedAt = new Date(Date.now() - 164 * 60000).toISOString()
+    const inc = opts.resolved
+      ? { id: 'cl-3', title: 'Login Issues', status: 'resolved', impact: 'major', startedAt, resolvedAt: now, duration: '2h 44m', timeline: [] }
+      : { id: 'cl-3', title: 'Login Issues', status: 'identified', impact: 'major', startedAt, duration: null, timeline: [] }
+    return new Response(JSON.stringify({
+      services: [{
+        id: 'claude', name: 'Claude API', category: 'api', status: opts.resolved ? 'operational' : 'down',
+        latency: 145, uptime30d: 99.9, lastChecked: now, aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high',
+        incidents: [inc],
+      }],
+      aiAnalysis: { claude: [{
+        summary: DURABLE,
+        ...(opts.progress ? { progress: opts.progress } : {}),
+        estimatedRecovery: '30m-1h', estimatedRecoveryHours: 1, affectedScope: ['Login'],
+        needsFallback: false, analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(),
+        incidentId: 'cl-3', ...(opts.resolved ? { resolvedAt: now } : {}),
+      }] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  it('a LIVE page shows the progress half - so the field survives the handler', async () => {
+    fetchMock.mockResolvedValueOnce(makeWorker({ resolved: false, progress: PERISHABLE }))
+    const html = await (await handler(makeReq('claude-api'))).text()
+    expect(html).toContain(DURABLE)
+    expect(html).toContain(PERISHABLE)
+  })
+
+  it('a RESOLVED page drops it - the defect this issue is about, end to end', async () => {
+    fetchMock.mockResolvedValueOnce(makeWorker({ resolved: true, progress: PERISHABLE }))
+    const html = await (await handler(makeReq('claude-api'))).text()
+    expect(html).toContain(DURABLE)
+    expect(html).not.toContain(PERISHABLE)
+  })
+
+  it('a pre-split payload appends no stray separator on either state', async () => {
+    // NOT `not.toContain('undefined')`: `esc()` returns '' for null, so that string can never reach
+    // this HTML and the assertion was structurally incapable of failing — it stayed green under
+    // every mutation of the guard it was meant to watch. The reachable artifact is a trailing space.
+    // Scoped to the CARD paragraph, not the page: the summary also appears in the meta/share text,
+    // where a following space is normal — `not.toContain(DURABLE + ' ')` fails on the healthy page.
+    // `DURABLE + '</p>'` says the paragraph ends immediately after the summary, which is exactly the
+    // stray-separator defect. (`undefined` is unassertable here: `esc()` returns '' for null.)
+    fetchMock.mockResolvedValueOnce(makeWorker({ resolved: false }))
+    expect(await (await handler(makeReq('claude-api'))).text()).toContain(DURABLE + '</p>')
+    fetchMock.mockResolvedValueOnce(makeWorker({ resolved: true }))
+    expect(await (await handler(makeReq('claude-api'))).text()).toContain(DURABLE + '</p>')
+  })
+})
