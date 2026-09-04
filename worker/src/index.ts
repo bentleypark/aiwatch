@@ -5652,6 +5652,16 @@ export default {
       })
     }
 
+    // #1224 Phase 2 — the cron census already attributes its own STATUS_CACHE reads. The remaining
+    // account volume is on this live fetch path, so wrap the binding once after all non-status routes
+    // have returned. This keeps admin/report/ingest traffic out of the series and covers every existing
+    // read in the status response without a per-call-site edit.
+    const kvCensus = createReadCensus()
+    const censusedKv = env.STATUS_CACHE ? kvCensus.wrapKv(env.STATUS_CACHE) : undefined
+    env = new Proxy(env, {
+      get: (target, prop) => (prop === 'STATUS_CACHE' && censusedKv) ? censusedKv : Reflect.get(target, prop),
+    })
+
     try {
       // Read probe data BEFORE fetchAllServices — needed for cross-validation of status page failures
       let latency24h: Array<{ t: string; data: Record<string, number> }> = []
@@ -5833,6 +5843,18 @@ export default {
         status: 500,
         headers: { ...cors, 'Content-Type': 'application/json' },
       })
+    } finally {
+      // One line per live status request, including fallback/error responses. The census is a scoped
+      // lower bound on account reads: other endpoints and concurrent requests share the namespace.
+      // Keep diagnostics fail-soft; a census failure must never replace the response or the original
+      // request exception.
+      try {
+        const snapshot = kvCensus.snapshot()
+        console.log('[fetch] #1224 kv read census —', `path=${url.pathname}`, `total=${snapshot.total}`, `distinct=${snapshot.distinct}`,
+          censusedKv ? `| family: ${formatCensus(snapshot.families)} | detail: ${formatCensus(snapshot.detail, 8)}` : '| uninstrumented (no STATUS_CACHE binding)')
+      } catch (censusErr) {
+        console.error('[fetch] #1224 kv read census FAILED', censusErr instanceof Error ? censusErr.message : censusErr)
+      }
     }
   },
 }
