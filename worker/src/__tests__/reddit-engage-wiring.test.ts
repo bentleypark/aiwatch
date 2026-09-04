@@ -77,3 +77,50 @@ describe('reddit engage wiring (#1182)', () => {
     expect(INDEX_SRC).not.toContain('buildFeedEntry(alert, operatorDescription')
   })
 })
+
+describe('#1330 - feedAgeText fails closed on the first-seen TTL, so the two must not drift', () => {
+  // `feedAgeText` suppresses the disclosure at or above ALERTED_NEW_TTL_S because that is exactly
+  // when `feed:firstseen:{id}` expires and gets re-stamped with `now`. That reasoning is only sound
+  // while the KV puts actually use that TTL. Mutating either put to a literal (`expirationTtl: 60`)
+  // left the ENTIRE 5122-test suite and `tsc` green - the guard would have gone silently wrong in
+  // production with nothing red. So pin the pairing here rather than assert a number twice.
+  const putSites = INDEX_SRC.split('\n')
+    .map((line, i) => ({ line, n: i + 1 }))
+    .filter((x) => /feed:firstseen|fsKey/.test(x.line) && /expirationTtl/.test(x.line))
+
+  it('both feed:firstseen write surfaces still exist', () => {
+    // Two by design: the cron alerted:new path and the #776 /feed feed-visibility path. A third
+    // appearing (or one vanishing) changes which incidents carry an anchor at all.
+    expect(putSites.length, `expected 2 feed:firstseen puts, found ${putSites.length}`).toBe(2)
+  })
+
+  it('neither writes a numeric TTL literal - both read the constant the guard bounds on', () => {
+    for (const { line, n } of putSites) {
+      expect(line, `index.ts:${n} writes feed:firstseen with a literal TTL; feedAgeText bounds on ALERTED_NEW_TTL_S`)
+        .toContain('expirationTtl: ALERTED_NEW_TTL_S')
+      expect(line, `index.ts:${n} still carries a numeric TTL literal`).not.toMatch(/expirationTtl:\s*\d/)
+    }
+  })
+})
+
+// #1330 - the age disclosure is computed in `alerts.ts` and RENDERED in index.ts. `buildIncidentAlerts`
+// being green proves nothing about whether the embed ever prints the field: deleting the render line
+// leaves `ageText` set on the candidate, every alerts.ts test passing, and tsc silent - the feature
+// dead in production with CI green. Same shape, same file, same reason as the Reddit wiring above.
+//
+// LIMIT, stated rather than papered over: this is a SOURCE scan, so it sees the line being deleted or
+// the field being renamed, but not a break that preserves the text (a dead `false &&`, or the push
+// moved somewhere unreachable). Closing that needs a test that drives the cron's alert assembly,
+// which does not exist yet.
+describe('#1330 - the age disclosure reaches the embed', () => {
+  it('index.ts renders alert.ageText into the description', () => {
+    expect(INDEX_SRC).toMatch(/if \(alert\.ageText\) parts\.push\(/)
+  })
+
+  it('it is rendered as its own divider-separated section, like every sibling hint', () => {
+    // Appended to `parts` with the same `${DIV}\n` prefix the fallback and region hints use, so it
+    // reads as a section rather than running into the line above it.
+    const line = /if \(alert\.ageText\) parts\.push\(`\$\{DIV\}\\n\$\{alert\.ageText\}`\)/
+    expect(INDEX_SRC).toMatch(line)
+  })
+})

@@ -336,6 +336,24 @@ export function shouldHoldNewIncident(
 // be edited without re-notifying, so completeness beats speed there.
 export const AI_HOLD_MS = 10 * 60 * 1000
 
+/** #1330 — an upper bound on the lag our own pipeline is DESIGNED to add between an incident
+ *  appearing in a source and its alert firing: one cron cadence to first see it, plus both holds it
+ *  may pass through. Summed rather than maxed because the holds are sequential stages — the flap hold
+ *  `continue`s while building the candidate list, and `pending:ai` is only stamped after it releases.
+ *
+ *  Each hold is rounded UP to a tick: the predicate is `now - firstSeen < HOLD`, evaluated once per
+ *  5-minute run, so the 9-minute flap window does not release until +10.
+ *
+ *  This bounds the DESIGNED delays only. It is NOT a proof that a longer gap is the provider's fault:
+ *  a source we could not read for hours (the reason `sourceLivenessOf` exists), a missed cron, or a
+ *  parser that starts surfacing an already-old incident all put our own lag past it. The rendered
+ *  line survives that, because it reports what the provider's timestamps say and attributes nothing;
+ *  the bound is only a heuristic for "worth mentioning".
+ */
+const CRON_CADENCE_MS = 5 * 60 * 1000
+const toTick = (ms: number) => Math.ceil(ms / CRON_CADENCE_MS) * CRON_CADENCE_MS
+export const OWN_DETECTION_LAG_MS = CRON_CADENCE_MS + toTick(FLAP_HOLD_MS) + toTick(AI_HOLD_MS)
+
 /** KV marker: first-seen epoch ms for the #882 AI-hold window, scoped to the incident id (write-once,
  *  get-or-set). Distinct from pendingNewKey so the two holds never clobber each other's window. */
 export function pendingAiKey(incId: string): string {
@@ -381,6 +399,16 @@ export interface AlertCandidate {
    *  on region-aware services with a region-specific partial outage. Rendered below the
    *  cross-service fallback. Absent on resolved alerts and non-region-aware services. */
   regionText?: string
+  /** #1330 — one sentence saying how long ago the PROVIDER dates this incident, set when that
+   *  predates `OWN_DETECTION_LAG_MS`. Without it the pair reads as a contradiction: a `New Incident`
+   *  at 11:27 and an `Incident Resolved (9h 0m)` at 11:47, measured on two different clocks.
+   *
+   *  Absent on resolved and status alerts; on ADVISORIES (their paired alert shows no duration at
+   *  all, #1021); on a MERGED alert (the copy is singular while the alert is not — see the merge
+   *  sites); and on anything young enough to be our own lag. For the exact wording read the producer,
+   *  not this block: quoting copy here is how a docblock ends up describing a draft that was
+   *  rejected. */
+  ageText?: string
   color: number
   url: string
   /** When alerts are merged (e.g., Together AI), contains all original dedup keys */
@@ -666,12 +694,43 @@ export function buildIncidentAlerts(
     const fallbackText = (!isAdvisory && isAffectedStatus(firstSvc.status) && !regionText)
       ? buildGroupedFallbackText(ids, services)
       : ''
+    // #1330 — where the duration in the eventual "Incident Resolved (9h 0m)" comes from, said at the
+    // moment the reader would otherwise be surprised by it. Threshold, and what it does and does not
+    // establish: see `OWN_DETECTION_LAG_MS`.
+    //
+    // Deliberately says nothing about DETECTION. An earlier draft read "already open 9h 25m when
+    // AIWatch detected it", which reads as "AIWatch was nine hours late" — the opposite of what
+    // happened: the item did not exist in the provider's feed until minutes before we alerted; the
+    // provider published it with a backdated start. Making a detection-speed claim here would also
+    // revive the metric #679/#705 removed, since polling means we are structurally always behind the
+    // official source and cannot honestly claim otherwise.
+    //
+    // Elapsed only, no absolute start: the embed already carries a Discord `timestamp`, which Discord
+    // renders in each READER's timezone. A hardcoded "02:00 KST" beside it would be the one fixed-
+    // timezone string in an otherwise localized embed — and elapsed is what reconciles the pair,
+    // since the resolved alert measures duration from this same `startedAt`.
+    //
+    // Omitted, not zeroed, when `startedAt` is unparseable or in the future: `startedMs` is NaN or
+    // ahead of `now`, and `elapsedMs > OWN_DETECTION_LAG_MS` is false for both, so a bad timestamp
+    // silently declines to make a claim rather than asserting an age we could not compute.
+    //
+    // Advisory-gated like both sibling hints above. An advisory's paired alert carries NO duration by
+    // design (#1021: "its duration is not downtime so it is omitted — showing it would re-imply an
+    // outage"), so promising one here would both dangle and restore the framing that issue removed —
+    // and quota/deprecation notices are exactly the class providers publish with a backdated start,
+    // so this is the common case for them, not an edge.
+    const startedMs = new Date(inc.startedAt).getTime()
+    const elapsedMs = now - startedMs
+    const ageText = !isAdvisory && elapsedMs > OWN_DETECTION_LAG_MS
+      ? `📅 The provider dates this incident ${formatDuration(new Date(startedMs), new Date(now))} before this alert — its duration will be measured from then, not from now.`
+      : undefined
     alerts.push({
       key: `alerted:new:${incId}`,
       title: isAdvisory ? `ℹ️ ${displayName} — Advisory` : `🔴 ${displayName} — New Incident`,
       description: sanitize(inc.title),
       fallbackText,
       regionText,
+      ...(ageText ? { ageText } : {}),
       color: isAdvisory ? 0x5865F2 : 0xED4245, // blurple (informational) vs red (outage)
       url: `https://ai-watch.dev/#${ids[0]}`,
       svcIds: ids, // #545 — the not-yet-alerted subset (all affected on first fire, only the joiner after)
@@ -816,6 +875,12 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
       description: descriptions.join('\n'),
       fallbackText: newAlerts[0].fallbackText,
       regionText: newAlerts[0].regionText, // Together has no region map → undefined; preserved for parity
+      // #1330 — deliberately NOT carried. This alert covers several DISTINCT incidents ("3 New
+      // Incidents", three titles in the description), and the line reads "The provider dates this
+      // incident …" — singular, attributing one member's age to all of them. Ranking the members to
+      // pick one was the first attempt; it needed a parser over the rendered sentence to recover a
+      // number the producer already had, which is the spelling-over-decision trap (#1224). Dropping
+      // the line on a merge removes the wrong attribution AND the parser.
       color: 0xED4245,
       url: 'https://ai-watch.dev/#together',
       _mergedKeys: newAlerts.map(a => a.key),
@@ -889,6 +954,10 @@ export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate
       if (kind === 'new') {
         merged.fallbackText = arr[0].fallbackText
         merged.regionText = arr[0].regionText
+        // #1330 — not carried, same rule as the Together merge. These members are one event split
+        // across regions rather than distinct incidents, so a shared age would be defensible; but
+        // their `startedAt` values are per-region and need not agree, so picking one is still an
+        // arbitrary attribution dressed as a fact. One rule for both merges, no ranking.
       }
       out.push(merged)
     }

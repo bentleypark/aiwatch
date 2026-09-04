@@ -9,9 +9,9 @@ import type { ServiceStatus, Incident } from './types'
 import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
 import { escapeXml } from './badge'
 import { getGroupedFallbacks } from './fallback'
-import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE } from './alerts'
+import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE, OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
-import { appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
+import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, formatDuration } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
 import { withdrawalHold, liveIncidentIds, type WithdrawnIncident } from './withdrawn'
 
@@ -419,10 +419,28 @@ function cap(s: string): string {
 // /feed, RSS readers, and the /feed.xsl browser page all render the HTML, so each fact lands on
 // its own line — far more scannable than the old single run-on string. Structural tags are raw;
 // every dynamic value is escHtml-escaped so nothing injects markup.
+/** #1330 — "the provider dates this incident N before it reached this feed", anchored on first-seen
+ *  rather than `now` because #768 makes an active item's description content-stable on purpose.
+ *  States no detection claim: polling puts us structurally behind the source (#679/#705).
+ *
+ *  Undefined below `OWN_DETECTION_LAG_MS` (the gap could be our own), with no first-seen to anchor
+ *  on, and — fail-closed — at or above `ALERTED_NEW_TTL_S`, because `feed:firstseen:{id}` expires on
+ *  exactly that TTL and is then re-stamped with `now`: past it the anchor may be a re-stamp, and the
+ *  sentence would report our own serving window as the provider's backdating. What that bound does
+ *  and does not cover is pinned in the tests, not argued here. */
+export function feedAgeText(startedAt: string, firstSeen: string | undefined): string | undefined {
+  if (!firstSeen) return undefined
+  const startedMs = new Date(startedAt).getTime()
+  const seenMs = new Date(firstSeen).getTime()
+  if (!(seenMs - startedMs > OWN_DETECTION_LAG_MS)) return undefined
+  if (seenMs - startedMs >= ALERTED_NEW_TTL_S * 1000) return undefined
+  return `\u{1F4C5} The provider dates this incident ${formatDuration(new Date(startedMs), new Date(seenMs))} before it reached this feed \u2014 its duration will be measured from then.`
+}
+
 function descHtml(
   service: ServiceStatus,
   inc: Incident,
-  opts: { kind: ItemKind; fallbackText?: string; analysis?: RssAiAnalysis },
+  opts: { kind: ItemKind; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string },
 ): string {
   const isResolved = opts.kind === 'resolved'
   const latest = inc.timeline.length > 0 ? inc.timeline[inc.timeline.length - 1] : null
@@ -496,6 +514,13 @@ function descHtml(
     lines.push(`<p>${detail.join(' · ')}</p>`)
   }
   if (opts.fallbackText) { lines.push(FEED_DIV); lines.push(`<p>↪ ${escHtml(opts.fallbackText)}</p>`) } // #760 — divider before Try-instead
+  // #1330 — LAST, under the AI and fallback blocks, which is where the Discord sibling puts the same
+  // sentence (index.ts renders it after the fallback and region hints, immediately before the CTA).
+  // It is a provenance footnote for a number the reader meets later, so it belongs under the content
+  // rather than over it. Carried only by the ACTIVE item — the build site sets it there and nowhere
+  // else, because a resolved item already states `lasted <duration>`. No `!isResolved` guard: it
+  // could never fire, and a guard that cannot fire reads as protection the code does not have.
+  if (opts.ageText) lines.push(`<p>${escHtml(opts.ageText)}</p>`)
   // Join with a newline, not '' (#479): block-level <p> render with a break in real RSS readers,
   // but Slack's /feed app FLATTENS the tags and would otherwise concatenate adjacent paragraphs
   // ("lasted 14m" + "Qwen3…" → "14mQwen3…"). The newline is insignificant whitespace between block
@@ -507,7 +532,7 @@ function itemXml(
   service: ServiceStatus,
   inc: Incident,
   incidentServices: Map<string, Array<{ id: string; name: string }>>,
-  opts: { kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis },
+  opts: { kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string },
 ): string {
   const isResolved = opts.kind === 'resolved'
   const isWithdrawn = opts.kind === 'withdrawn'
@@ -621,7 +646,7 @@ export function buildFeedWithMeta(
   // item (guid `aiwatch:svc:inc:resolved`, green). The guid flips on resolution, so RSS readers /
   // Slack /feed re-notify the recovery — without ever showing a contradictory "🔴 … resolved"
   // base row. Sort by each item's own pubDate (resolution time for resolved items).
-  type Entry = { svc: ServiceStatus; incident: Incident; kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis }
+  type Entry = { svc: ServiceStatus; incident: Incident; kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string }
   const items: Entry[] = []
   for (const svc of sources) {
     for (const incident of svc.incidents ?? []) {
@@ -653,6 +678,13 @@ export function buildFeedWithMeta(
           svc, incident, kind: 'active', pubDate: seen ?? incident.startedAt,
           fallbackText: fallbackLine(svc, incident, services),
           analysis,
+          // #1330 — the same two-clock gap the Discord alert discloses: this item's pubDate is our
+          // FIRST-SEEN (#750), while the resolved item will report `lasted <provider duration>`.
+          // Anchored on `seen` rather than `now` so the value is FIXED — a live-elapsed figure would
+          // change the description on every poll and make Slack re-post it, the #768 invariant this
+          // file is built around. Absent when `seen` is: without it `pubDate` IS `startedAt`, so the
+          // item already dates itself from the provider's start and there is no gap to disclose.
+          ageText: feedAgeText(incident.startedAt, seen),
         })
       }
     }
@@ -719,7 +751,7 @@ export function buildFeedWithMeta(
     opts.scope === 'service' ? `/feed/${feedSlug(opts.service.id)}` : '/feed.xml'
 
   const itemsXml = capped
-    .map((e) => itemXml(e.svc, e.incident, incidentServices, { kind: e.kind, pubDate: e.pubDate, fallbackText: e.fallbackText, analysis: e.analysis }))
+    .map((e) => itemXml(e.svc, e.incident, incidentServices, { kind: e.kind, pubDate: e.pubDate, fallbackText: e.fallbackText, analysis: e.analysis, ageText: e.ageText }))
     .join('\n')
 
   // #860 — content-derived feed timestamp. `capped` is sorted pubDate-DESC, so
