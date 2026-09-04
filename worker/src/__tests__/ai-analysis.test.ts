@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, ANALYSIS_SYSTEM_PROMPT, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, applyHoldEvent, timedOutAttribution, holdLedger, recordHoldEvent, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, ANALYSIS_SYSTEM_PROMPT, PROGRESS_EMBED_MAX, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, applyHoldEvent, timedOutAttribution, holdLedger, recordHoldEvent, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import { ANTHROPIC_TIMEOUT_MS } from '../anthropic'
 import type { Incident, ServiceStatus } from '../types'
@@ -2507,5 +2507,90 @@ describe('formatAnalysisEmbedSection (#882)', () => {
     const a = base
     const legacy = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${a.summary}\n⏱ Est. recovery: ${formatRecoveryDisplay(a.estimatedRecovery)}${a.affectedScope.length > 0 ? `\n📡 Scope: ${a.affectedScope.join(', ')}` : ''}`
     expect(formatAnalysisEmbedSection(a, DIV)).toBe(legacy)
+  })
+})
+
+// #1328 - the model's answer used to be one free-text blob: `summary` carried both "what is wrong"
+// (durable) and "where it stands" (perishable), and only the perishable half rots. Nothing rewrites
+// the prose at resolution - `markIncidentResolved` stamps `resolvedAt` and returns - so a resolved
+// row read "currently in the initial investigation stage with no improvement reported yet" under its
+// own Resolved badge. Splitting the field is what lets a surface drop one half and keep the other.
+describe('summary/progress split (#1328)', () => {
+  const body = (over: Record<string, unknown> = {}) => JSON.stringify({
+    summary: 'Elevated error rates on the Messages API.',
+    progress: 'Currently investigating, no improvement yet.',
+    estimatedRecovery: '30m\u20131h', affectedScope: ['Messages API'], needsFallback: true, ...over,
+  })
+
+  it('parses progress as its own field, through sanitize', () => {
+    const r = parseAnalysisResponse(body(), 'inc-1', 'gemma', '')
+    expect(r!.summary).toBe('Elevated error rates on the Messages API.')
+    expect(r!.progress).toBe('Currently investigating, no improvement yet.')
+    // `sanitize` is load-bearing on this field, not decoration: it reaches an operator Discord embed,
+    // and the embed-cap rationale is stated in terms of sanitize's 1000-char bound. Dropping the call
+    // survived every other assertion.
+    const mention = parseAnalysisResponse(body({ progress: 'Pinging @everyone about ```this```' }), 'i', 'gemma', '')!
+    expect(mention.progress).not.toContain('@everyone')
+    expect(mention.progress).not.toContain('```')
+  })
+
+  it('omits progress rather than storing an empty one, so a truthiness check is enough downstream', () => {
+    // The prompt lets the model skip the key when the timeline says nothing about progress; a blank
+    // string would render as a stray space on every surface that concatenates the two halves.
+    expect(parseAnalysisResponse(body({ progress: undefined }), 'i', 'gemma', '')).not.toHaveProperty('progress')
+    expect(parseAnalysisResponse(body({ progress: '   ' }), 'i', 'gemma', '')).not.toHaveProperty('progress')
+    expect(parseAnalysisResponse(body({ progress: 42 }), 'i', 'gemma', '')).not.toHaveProperty('progress')
+  })
+
+  it('the Discord embed carries BOTH halves - it is only ever built for an ACTIVE incident', () => {
+    // Parity: `summary` is one sentence shorter now, so a surface that renders it alone on a live
+    // incident would silently lose the status clause readers already had.
+    const a = parseAnalysisResponse(body(), 'inc-1', 'gemma', '')!
+    const section = formatAnalysisEmbedSection(a, '---')
+    expect(section).toContain('Elevated error rates on the Messages API.')
+    expect(section).toContain('Currently investigating, no improvement yet.')
+  })
+
+  it('caps progress in the embed - the base description is never truncated downstream', () => {
+    // `sendDiscordAlert` does no truncation and Discord 400s the WHOLE alert past
+    // DISCORD_EMBED_DESC_MAX; the tweet/search/reddit sections budget against `description.length`,
+    // so an uncapped second prose field squeezes them out first. `sanitize` permits 1000 chars, so
+    // without this cap the section's worst case roughly doubles.
+    // The VALUE, not just "some cap applies": asserting `repeat(PROGRESS_EMBED_MAX)` against a longer
+    // fixture passes for any bound below the fixture length, so 200 could drift to 900 unnoticed.
+    expect(PROGRESS_EMBED_MAX).toBe(200)
+    const a = parseAnalysisResponse(body({ progress: 'x'.repeat(900) }), 'inc-1', 'gemma', '')!
+    const section = formatAnalysisEmbedSection(a, '---')
+    expect(a.progress!.length).toBe(900)                       // stored in full...
+    expect(section.match(/x+/)![0].length).toBe(PROGRESS_EMBED_MAX)  // ...truncated only at the embed
+  })
+
+  it('the embed is byte-identical to the old output for a progress-less analysis', () => {
+    const a = parseAnalysisResponse(body({ progress: undefined }), 'inc-1', 'gemma', '')!
+    expect(formatAnalysisEmbedSection(a, '---'))
+      .toBe('\n---\n\u{1F916} **AI ANALYSIS** [Beta]\nElevated error rates on the Messages API.\n\u23F1 Est. recovery: 30m\u20131h\n\u{1F4E1} Scope: Messages API')
+  })
+
+  // There are TWO failure modes and they need different guards. (a) the perishable half rendered on
+  // a resolved row — carried by the surface gates, pinned in the SPA and Edge suites. (b) the status
+  // clause baked back INTO `summary` — the production defect verbatim, which no gate can see because
+  // the prose is then durable-looking by construction. Only the prompt can carry (b).
+  it('the system prompt declares progress in the SCHEMA, not merely in prose', () => {
+    // Anchored on the schema POSITION, not the sentence: `toContain('"progress"')` was satisfied by
+    // the two Rules lines that mention the key, so deleting the schema entry — the instruction that
+    // makes the model emit the field at all — passed the whole worker suite.
+    expect(ANALYSIS_SYSTEM_PROMPT).toMatch(/"progress":\s*"/)
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain('Must stay true after the incident ends')
+  })
+
+  it('no directive tells the model to fold status back into the analysis', () => {
+    // Failure mode (b). This catches a REVERT of the prompt edit — the likely regression — and not a
+    // creative reword, which no string assertion can catch; that limit is the reason the claim here
+    // is narrow. It was briefly deleted as "hollow", and restoring the pre-#1328 sentence verbatim
+    // then passed all 5100 worker tests, so "hollow" was worse than "narrow".
+    expect(ANALYSIS_SYSTEM_PROMPT).not.toContain('incorporate the LATEST status and progress into your analysis')
+    // ...and the affirmative half. Asserting only the absence of the old mitigation left the rule that
+    // actually instructs the model deletable by anyone tidying the Rules list, with CI green.
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain('Never put "currently"')
   })
 })

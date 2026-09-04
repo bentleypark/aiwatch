@@ -319,3 +319,70 @@ describe('#1227 source-scan guards', () => {
     for (const call of invocations) expect(call).not.toMatch(/undefined/)
   })
 })
+
+// #1328 - the statusline brief and the ext-claude payload each consume ONE prose string, built by a
+// hand-picked projection in `index.ts`. When `summary` stopped carrying the status clause, both
+// surfaces silently lost a sentence; the projections now join `summary` + `progress`. Dropping
+// either join passed the whole 5101-test worker suite, which is the same "pure fn green != wiring
+// green" gap this file exists for - and the same hand-picked-projection shape as the `/feed` seam.
+//
+// Driven through the real routes rather than the builders: the builders never see the two halves,
+// only the joined string, so a builder test cannot tell a dropped join from a missing field.
+describe('#1328 - both prose halves reach the single-string surfaces', () => {
+  const DURABLE = 'Elevated error rates on the Messages API.'
+  const PERISHABLE = 'Currently identified and rolling out a fix.'
+
+  const SNAP_WITH_INCIDENT = {
+    cachedAt: SNAPSHOT.cachedAt,
+    upstreamFeeds: [],
+    services: [
+      { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', status: 'down',
+        incidents: [{ id: 'inc-1', title: 'Elevated errors', status: 'investigating', impact: 'major', startedAt: '2026-09-03T05:00:00Z', duration: null, timeline: [] }] },
+    ] as unknown as ServiceStatus[],
+  }
+
+  /** Same fake-KV shape as `makeEnv`, plus the per-incident `ai:analysis:` key the projections read. */
+  function envWithAnalysis(analysis: Record<string, unknown>) {
+    const kv = {
+      get: vi.fn(async (key: string) => {
+        if (key === 'services:latest') return JSON.stringify(SNAP_WITH_INCIDENT)
+        if (key === 'ai:analysis:claude:inc-1') return JSON.stringify(analysis)
+        return null
+      }),
+      put: vi.fn(async () => undefined),
+      list: vi.fn(async () => ({ keys: [], list_complete: true })),
+    }
+    return { STATUS_CACHE: kv, ANALYTICS: { writeDataPoint: vi.fn() } } as unknown as Parameters<typeof workerModule.fetch>[1]
+  }
+
+  const ANALYSIS = {
+    incidentId: 'inc-1', summary: DURABLE, progress: PERISHABLE,
+    estimatedRecovery: '30m-1h', affectedScope: ['Messages API'], needsFallback: true,
+    analyzedAt: '2026-09-03T05:30:00Z',
+  }
+
+  it('the statusline brief carries both halves', async () => {
+    const text = await (await get(envWithAnalysis(ANALYSIS), '/api/statusline/brief')).text()
+    expect(text).toContain(DURABLE)
+    expect(text).toContain(PERISHABLE)
+  })
+
+  it('the ext-claude payload carries both halves', async () => {
+    stubCaches()
+    const body = await (await get(envWithAnalysis(ANALYSIS), '/api/status/cached?src=ext-claude', { waitUntil: () => {} })).text()
+    expect(body).toContain(DURABLE)
+    expect(body).toContain(PERISHABLE)
+  })
+
+  it('a pre-split analysis reaches both surfaces unchanged, with no stray separator', async () => {
+    // The legacy shape is production until the worker redeploys and re-analyses.
+    const legacy = { ...ANALYSIS, progress: undefined }
+    const text = await (await get(envWithAnalysis(legacy), '/api/statusline/brief')).text()
+    expect(text).toContain(DURABLE)
+    expect(text).not.toContain(DURABLE + ' ')
+    stubCaches()
+    const body = await (await get(envWithAnalysis(legacy), '/api/status/cached?src=ext-claude', { waitUntil: () => {} })).text()
+    expect(body).toContain(DURABLE)
+    expect(body).not.toContain(DURABLE + ' ')
+  })
+})

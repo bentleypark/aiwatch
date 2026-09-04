@@ -20,7 +20,7 @@ interface MockIncident {
 
 function statusResponse(
   services: Array<{ id: string; name: string; status: string; incidents?: MockIncident[] }>,
-  aiAnalysis?: Record<string, Array<{ incidentId: string; summary: string; estimatedRecovery: string }>>,
+  aiAnalysis?: Record<string, Array<{ incidentId: string; summary: string; progress?: string; estimatedRecovery: string }>>,
 ): Response {
   return new Response(
     JSON.stringify({ services, ...(aiAnalysis ? { aiAnalysis } : {}) }),
@@ -1231,5 +1231,52 @@ describe('is-down-group.ts — share paths the rendered assertions could not rea
     await Promise.resolve()
     expect(written).toEqual([expected])
     expect(expected).toContain('?e=degraded')
+  })
+})
+
+// #1328 - `/is-claude-down`, `/is-openai-down` and `/is-xai-down` are served by THIS handler, not by
+// `api/is-down.ts`, and it keeps its own hand-written analysis map. It renders a RESOLVED incident's
+// analysis too (the "Post-Incident Analysis" branch), which is precisely where a status sentence
+// written during `investigating` contradicts the card it sits in - and on a LIVE incident it would
+// otherwise show less prose than before the split, because `summary` no longer carries the status
+// clause. The individual-page render tests cannot see this file at all.
+describe('is-down-group.ts - the AI card splits durable from perishable prose (#1328)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn> | undefined
+  afterEach(() => { fetchMock?.mockRestore(); vi.useRealTimers() })
+
+  const NOW = Date.parse('2026-07-26T07:00:00Z')
+  const DURABLE = 'Elevated error rates on the Messages API.'
+  const PERISHABLE = 'Currently identified and rolling out a fix.'
+
+  const page = async (status: 'investigating' | 'resolved', progress?: string) => {
+    vi.useFakeTimers().setSystemTime(NOW)
+    const inc = status === 'resolved'
+      ? { id: 'inc-1', title: 'Elevated errors', status: 'resolved', startedAt: '2026-07-26T05:00:00Z', resolvedAt: '2026-07-26T06:30:00Z', duration: '1h 30m' }
+      : { id: 'inc-1', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null }
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+      [{ id: 'claude', name: 'Claude API', status: status === 'resolved' ? 'operational' : 'down', incidents: [inc] }],
+      { claude: [{ incidentId: 'inc-1', summary: DURABLE, ...(progress ? { progress } : {}), estimatedRecovery: '30m-1h' }] },
+    ))
+    const html = await (await handler(makeReq('claude'))).text()
+    vi.useRealTimers()
+    return html
+  }
+
+  it('a LIVE card carries both halves', async () => {
+    const html = await page('investigating', PERISHABLE)
+    expect(html).toContain(DURABLE)
+    expect(html).toContain(PERISHABLE)
+  })
+
+  it('a RESOLVED card drops the perishable half - the defect, on the highest-traffic routes', async () => {
+    const html = await page('resolved', PERISHABLE)
+    expect(html).toContain('Post-Incident Analysis')
+    expect(html).toContain(DURABLE)
+    expect(html).not.toContain(PERISHABLE)
+  })
+
+  it('a pre-split analysis appends no stray separator in either state', async () => {
+    expect(await page('investigating')).toContain(DURABLE + '</p>')
+    expect(await page('resolved')).toContain(DURABLE + '</p>')
   })
 })

@@ -24,6 +24,9 @@ const SITE = 'https://ai-watch.dev'
 export interface RssAiAnalysis {
   incidentId: string
   summary: string
+  // #1328 — the perishable half of the old single-blob summary. Absent on analyses written
+  // before the split and on ones the model omitted it from.
+  progress?: string
   estimatedRecovery: string
   affectedScope: string[]
   // #827 F4 — the numeric upper-bound estimate, carried so a RESOLVED item can render the
@@ -484,7 +487,10 @@ function descHtml(
   if (!isResolved && opts.analysis) {
     const a = opts.analysis
     lines.push(FEED_DIV) // #760 — divider before the 🤖 AI block (mirrors Discord)
+    // #1328 — `summary` is the durable half; `progress` is where it stood at analysis time. This
+    // block is already gated on `!isResolved`, so both belong here whenever the model gave one.
     lines.push(`<p>🤖 AI analysis: ${escHtml(defuseAutolinkDomain(a.summary))}</p>`)
+    if (a.progress) lines.push(`<p>${escHtml(defuseAutolinkDomain(a.progress))}</p>`)
     const detail = [`Est. recovery: ${escHtml(formatRecoveryDisplay(a.estimatedRecovery))}`]
     if (a.affectedScope.length > 0) detail.push(`Scope: ${escHtml(defuseAutolinkDomain(a.affectedScope.join(', ')))}`)
     lines.push(`<p>${detail.join(' · ')}</p>`)

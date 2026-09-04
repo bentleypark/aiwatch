@@ -356,7 +356,7 @@ export function renderPage(
   service: ServiceData | null,
   seo: ServiceSEO,
   fallbacks: Fallback[],
-  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null,
+  aiInsight?: { summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null,
   // Region recommendation (refs #422 Phase 2). When the affected service has
   // region-specific incidents AND at least one healthy region, surface an
   // actionable "Try region: X" line right under the AI Insight block. Null
@@ -386,7 +386,7 @@ export function renderPage(
   // multiple active incidents renders one card each (parity with the dashboard AnalysisModal). The scalar
   // `aiInsight` above remains the primary [0] for meta/share/OG. Omitted/empty → fall back to the single
   // `aiInsight` (older callers / single-incident path) so the card still renders.
-  aiInsights?: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> | null,
+  aiInsights?: Array<{ summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> | null,
   // #1053 — cross-provider upstream note for THIS service: its own status page names a provider that
   // is itself down. Set by api/is-down.ts from /api/status/cached's `upstreamLinks`; null when the
   // worker's gate did not fire OR when the worker predates #1053 (deploy skew — Vercel ships this on
@@ -812,7 +812,7 @@ function predictedVsActualEn(predictedHours: number, actualMin: number): string 
   return `${fmtMinEn(actualMin)} (${within})`
 }
 
-type AIInsight = { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }
+type AIInsight = { summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }
 
 /** #1104 — does the service still carry a LIVE incident? NOT the same predicate as the identically
  *  shaped `hasOngoingIncident` in `worker/src/alerts.ts` / `src/pages/ServiceDetails.jsx`, which count
@@ -924,7 +924,7 @@ function renderInsightBody(insight: AIInsight, multi: boolean, idx: number): str
     ? `<div class="mono" style="font-size:10px;color:#8b949e;font-weight:600;margin-bottom:4px">${insight.resolvedAt ? '✅' : '🔸'} ${esc(insight.incidentTitle)}</div>`
     : ''
   return `<div${sep ? ` style="${sep}"` : ''}>
-${titleLine}<p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}</p>
+${titleLine}<p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}${!insight.resolvedAt && insight.progress ? ' ' + esc(insight.progress) : ''}</p>
 <div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-direction:column;gap:4px">
 ${outcome
   ? `<span>🎯 <strong style="color:#c9d1d9">Predicted vs actual:</strong> ${esc(outcome)}</span>`
