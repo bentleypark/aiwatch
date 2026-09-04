@@ -53,10 +53,14 @@ function makeKv(options: {
   return { kv, puts }
 }
 
-async function runCron(kv: KVNamespace) {
+async function runCron(kv: KVNamespace, withDiscord = false) {
   vi.mocked(fetchAllServices).mockResolvedValue({ raw: OPERATIONAL, enriched: OPERATIONAL, pageComponents: {}, upstreamFeeds: [] })
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}', { status: 200 }))
-  await workerModule.scheduled(EVENT, { STATUS_CACHE: kv } as never, ctx)
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}', { status: 200 }))
+  await workerModule.scheduled(EVENT, {
+    STATUS_CACHE: kv,
+    ...(withDiscord ? { DISCORD_WEBHOOK_URL: 'https://example.invalid/hook' } : {}),
+  } as never, ctx)
+  return fetchMock
 }
 
 describe('month-end cron archive guards (#1317)', () => {
@@ -76,6 +80,18 @@ describe('month-end cron archive guards (#1317)', () => {
     await runCron(kv)
 
     expect(puts).not.toContain(ARCHIVE_KEY)
+  })
+
+  it('alerts Discord when the archive build is skipped', async () => {
+    const { kv, puts } = makeKv({ faultOnServicesLatest: true })
+
+    const fetchMock = await runCron(kv, true)
+
+    expect(puts).not.toContain(ARCHIVE_KEY)
+    expect(fetchMock).toHaveBeenCalledWith('https://example.invalid/hook', expect.objectContaining({
+      method: 'POST',
+      body: expect.stringContaining('Monthly archive NOT written'),
+    }))
   })
 
   it('does not write an archive when services:latest is malformed', async () => {

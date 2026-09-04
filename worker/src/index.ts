@@ -3665,7 +3665,18 @@ export default {
               console.log(`[monthly-archive] Archived ${archive.period}: ${Object.keys(archive.services).length} services, ${archive.daysCollected} days`)
             }
           } catch (err) {
-            console.error('[monthly-archive] Failed:', err)
+            const detail = err instanceof Error ? err.message : String(err)
+            console.error('[monthly-archive] Failed:', detail)
+            if (env.DISCORD_WEBHOOK_URL) {
+              const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+                title: '⚠️ Monthly archive NOT written',
+                description: '`' + archiveKey + '` was not written because its score inputs could not be established.'
+                  + `\nReason: \`${sanitize(detail)}\``
+                  + '\nRepair with `POST /api/admin/rebuild-archive` while `incidents:monthly` still exists (60d).',
+                color: 0xED4245,
+              })
+              if (!sent) console.error(`[monthly-archive] failure alert NOT delivered for ${archiveKey}`)
+            }
           }
         }
 
