@@ -26,8 +26,10 @@ function makeKv(options: {
   faultOnServicesLatest?: boolean
 } = {}) {
   const puts: string[] = []
+  const failureMarkers = new Set<string>()
   const kv = {
     get: async (key: string) => {
+      if (failureMarkers.has(key)) return '1'
       if (key === ARCHIVE_KEY && options.faultOnArchive) throw new Error('archive read unavailable')
       if (key === ARCHIVE_KEY) return options.archiveRaw ?? null
       if (key === 'services:latest' && options.faultOnServicesLatest) throw new Error('latest read unavailable')
@@ -46,7 +48,10 @@ function makeKv(options: {
       return null
     },
     getWithMetadata: async () => ({ value: null, metadata: null }),
-    put: async (key: string) => { puts.push(key) },
+    put: async (key: string) => {
+      puts.push(key)
+      if (key.startsWith('archive:failed:')) failureMarkers.add(key)
+    },
     delete: async () => {},
     list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
   } as unknown as KVNamespace
@@ -90,8 +95,20 @@ describe('month-end cron archive guards (#1317)', () => {
     expect(puts).not.toContain(ARCHIVE_KEY)
     expect(fetchMock).toHaveBeenCalledWith('https://example.invalid/hook', expect.objectContaining({
       method: 'POST',
-      body: expect.stringContaining('Monthly archive NOT written'),
+      body: expect.stringContaining('Monthly archive build failed'),
     }))
+    expect(puts).toContain('archive:failed:2026-07')
+  })
+
+  it('deduplicates failure alerts within the archive period', async () => {
+    const { kv, puts } = makeKv({ faultOnServicesLatest: true })
+
+    const fetchMock = await runCron(kv, true)
+    fetchMock.mockClear()
+    await runCron(kv, true)
+
+    expect(fetchMock.mock.calls.filter(([url]) => url === 'https://example.invalid/hook')).toHaveLength(0)
+    expect(puts.filter(key => key === 'archive:failed:2026-07')).toHaveLength(1)
   })
 
   it('does not write an archive when services:latest is malformed', async () => {

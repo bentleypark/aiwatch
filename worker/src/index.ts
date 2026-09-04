@@ -3666,16 +3666,25 @@ export default {
             }
           } catch (err) {
             const detail = err instanceof Error ? err.message : String(err)
-            console.error('[monthly-archive] Failed:', detail)
+            console.error('[monthly-archive] Failed:', err)
             if (env.DISCORD_WEBHOOK_URL) {
-              const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-                title: '⚠️ Monthly archive NOT written',
-                description: '`' + archiveKey + '` was not written because its score inputs could not be established.'
-                  + `\nReason: \`${sanitize(detail)}\``
-                  + '\nRepair with `POST /api/admin/rebuild-archive` while `incidents:monthly` still exists (60d).',
-                color: 0xED4245,
-              })
-              if (!sent) console.error(`[monthly-archive] failure alert NOT delivered for ${archiveKey}`)
+              const period = `${prevYear}-${String(prevMon).padStart(2, '0')}`
+              const failureNotifiedKey = `archive:failed:${period}`
+              const alreadyAlerted = await env.STATUS_CACHE.get(failureNotifiedKey).catch(() => null)
+              if (!alreadyAlerted) {
+                const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+                  title: '⚠️ Monthly archive build failed',
+                  description: '`' + archiveKey + '` was not written.'
+                    + `\nReason: \`${sanitize(detail)}\``
+                    + '\nRepair with `POST /api/admin/rebuild-archive` while `incidents:monthly` still exists (60d).',
+                  color: 0xED4245,
+                })
+                if (!sent) {
+                  console.error(`[monthly-archive] failure alert NOT delivered for ${archiveKey}`)
+                } else {
+                  await kvPut(env.STATUS_CACHE, failureNotifiedKey, '1', { expirationTtl: 60 * 24 * 60 * 60 })
+                }
+              }
             }
           }
         }
