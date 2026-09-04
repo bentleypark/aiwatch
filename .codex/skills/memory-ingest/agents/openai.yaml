@@ -1,0 +1,6 @@
+interface:
+  display_name: "Memory Ingest"
+  short_description: "Save durable project memory"
+  default_prompt: "Use $memory-ingest to save the durable knowledge from this session."
+policy:
+  allow_implicit_invocation: true

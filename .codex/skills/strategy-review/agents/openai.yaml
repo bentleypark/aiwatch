@@ -1,0 +1,6 @@
+interface:
+  display_name: "Strategy Review"
+  short_description: "Review AIWatch strategy state"
+  default_prompt: "Use $strategy-review to reconstruct the current AIWatch strategy and next actions."
+policy:
+  allow_implicit_invocation: true

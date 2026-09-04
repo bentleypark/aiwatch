@@ -1,0 +1,6 @@
+interface:
+  display_name: "Issue Triage"
+  short_description: "Triage and prioritize the AIWatch issue board"
+  default_prompt: "Use $issue-triage to review and prioritize the AIWatch open issues."
+policy:
+  allow_implicit_invocation: true

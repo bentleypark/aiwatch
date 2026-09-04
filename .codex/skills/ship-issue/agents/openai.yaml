@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ship Issue"
+  short_description: "Ship an AIWatch issue safely"
+  default_prompt: "Use $ship-issue to implement and verify this AIWatch issue."
+policy:
+  allow_implicit_invocation: true
