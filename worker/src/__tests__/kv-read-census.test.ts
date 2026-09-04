@@ -444,3 +444,57 @@ describe('cron wiring (#1224 Phase 2)', () => {
     expect(line).toContain('uninstrumented')
   }, 30_000)
 })
+
+// The account-level remainder is the live `/api/status` path, not the cron path. This test drives
+// the real fetch handler so a census added only around a helper, or skipped on the fallback return,
+// cannot claim to measure the request that pays the reads.
+describe('live status wiring (#1224 Phase 2)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('emits a conserved census line for the real /api/status handler', async () => {
+    const { kv, calls } = fakeKv()
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network disabled in test'))
+    const logs: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { logs.push(args.map(String).join(' ')) })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const response = await workerModule.fetch(
+      new Request('https://example.com/api/status'),
+      { ALLOWED_ORIGIN: '*', STATUS_CACHE: kv } as never,
+      { waitUntil: (promise: Promise<unknown>) => { void promise.catch(() => {}) }, passThroughOnException: () => {} } as never,
+    )
+
+    expect([200, 500]).toContain(response.status)
+    const line = logs.find(l => l.includes('[fetch] #1224 kv read census'))
+    expect(line, 'no live fetch census line was emitted').toBeDefined()
+    const total = Number(/total=(\d+)/.exec(line as string)?.[1])
+    expect(total).toBe(calls.get.length + calls.getWithMetadata.length)
+    expect(total).toBeGreaterThan(0)
+    expect(line).toContain('path=/api/status')
+  }, 60_000)
+
+  it('emits the census when the status handler falls back after an internal error', async () => {
+    const { kv, calls } = fakeKv()
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network disabled in test'))
+    const logs: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { logs.push(args.map(String).join(' ')) })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const env = { ALLOWED_ORIGIN: '*', STATUS_CACHE: kv } as Record<string, unknown>
+    Object.defineProperty(env, 'DISCORD_WEBHOOK_URL', {
+      get: () => { throw new Error('forced status-handler error') },
+    })
+    const response = await workerModule.fetch(
+      new Request('https://example.com/api/status'),
+      env as never,
+      { waitUntil: (promise: Promise<unknown>) => { void promise.catch(() => {}) }, passThroughOnException: () => {} } as never,
+    )
+
+    expect(response.status).toBe(500)
+    const line = logs.find(l => l.includes('[fetch] #1224 kv read census'))
+    expect(line).toBeDefined()
+    expect(Number(/total=(\d+)/.exec(line as string)?.[1])).toBe(calls.get.length + calls.getWithMetadata.length)
+  }, 60_000)
+})
