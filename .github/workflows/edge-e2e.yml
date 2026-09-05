@@ -44,7 +44,18 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
+      # #1348 — bounded, but deliberately NOT cached, unlike every `npm ci` in test.yml. Stated as
+      # what is and is not established: run 33703810844 recorded the `actions/cache` STEP refusing
+      # to restore or save under `deployment_status`, but that refusal comes from that action's own
+      # event guard, which `setup-node` does not contain — so the record next door says nothing
+      # either way about `cache: 'npm'` here. Nothing else does either. The cache is therefore not
+      # added: an inert one would read as coverage, and adding it on an untested inference is how
+      # this comment was wrong in the first place. Evidence that it works is what should reverse it.
+      #
+      # It does carry the same 8m bound as the cached installs, and this is the one job where that
+      # bound lands on a still-uncached install — the class the 422s worst case came from.
       - run: npm ci
+        timeout-minutes: 8
       # #1253 — install only the browser. `--with-deps` enters apt on every run and intermittently
       # stalls in that phase.
       #

@@ -33,7 +33,16 @@ jobs:
   unit:
     name: Worker Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10   # #1253 — never inherit the 6h default
+    # #1253 set this to 10 so a hung job could not inherit GitHub's 6h default. #1348 raises it,
+    # recorded rather than bumped silently, for the reason every cap-kill examined shows: no single
+    # step reached 8m in any of them — 33842800905 installed for 421s then 185s, 33846442889 for
+    # 200s then 321s, 33868432498 for 196s then 383s — so the job died on the SUM of steps that were
+    # each merely slow, and no per-step cap could have caught it. 18m lets that shape finish.
+    # #1253's invariant, that no job inherits 6h, is unchanged.
+    #
+    # Checkout, setup-node (which now also restores and saves a cache) and the two short
+    # deterministic steps carry no cap of their own; a stall there still ends as an anonymous kill.
+    timeout-minutes: 18
     # No `if:` — the previous one ended in a literal `|| true`, so it was a tautology that only made
     # the job LOOK conditional. Removed with #1285, which needs this job to be provably unskippable:
     # `npm run test:scripts` below is what runs scripts/check-instruction-budget.test.mjs.
@@ -42,13 +51,41 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
+          # #1348 — cache ~/.npm. An uncached `npm ci` refetches the whole tree from the registry
+          # every run, and that fetch, not the suite, is what put this job in a 4-10 minute band
+          # against a 10m cap. The measurement and its two controls are written ONCE, in the #1348
+          # block of scripts/ci-workflow-timeouts.test.mjs, which also asserts this line stays.
+          #
+          # BOTH lockfiles, because this job installs from both. A key hashed over the root one
+          # alone would restore a cache holding none of worker/'s tarballs and — since a cache HIT
+          # never saves — never correct itself: the green-forever/cache-dead-forever shape the
+          # Playwright version pin in that same file exists to prevent.
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            worker/package-lock.json
+      # #1348 — bound so a stalled install fails AS `npm ci`, named in the annotation, instead of
+      # spending the job's budget until the cap kills whichever step happened to be running.
+      #
+      # ONE number for every `npm ci` here, deliberately not sized per step: it is an ATTRIBUTION
+      # bound, not a budget. It has only to clear installs that are merely slow — the longest
+      # observed is 422s — and fail the ones that are stuck. Measurement in the #1348 block of
+      # scripts/ci-workflow-timeouts.test.mjs.
       - run: npm ci
+        timeout-minutes: 8
       # #533 Phase 4: the type-check gate type-checks worker source, which imports worker-only
       # runtime deps (@resvg/resvg-wasm) + worker type packages (@cloudflare/workers-types,
       # @types/node) that live in worker/node_modules. Root `npm ci` doesn't install them (no
       # workspaces), so install the worker package here or tsc fails with TS2307/TS2688.
       - run: npm ci --prefix worker
+        timeout-minutes: 8
+      # #1348 — bounded for the OTHER direction, so a suite that genuinely hangs is attributable and
+      # not only the installs. Same number as the installs for the same reason: it bounds a hang, and
+      # is not a budget derived from how long this step actually takes. It is the LAST bounded step,
+      # so two slow installs can still spend the job's budget ahead of it and end the run as an
+      # anonymous kill — the sum of the three bounds exceeds the job cap and is not claimed to fit.
       - run: npm run test:worker
+        timeout-minutes: 8
       # #533: full `tsc --noEmit` gate (Phase 4) — fails on ANY type error across worker source
       # incl tests; prod pass is workers-types-only so a node-API use (no nodejs_compat → runtime
       # crash, the #532 class) also fails. Two passes (prod strict / tests with @types/node).
@@ -115,7 +152,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
+          # #1348 — an uncached `npm ci` is a registry-bound step with no bound; every job in this
+          # file that runs one slowed together. Root lockfile only: this job does not install
+          # worker/. Measurement in scripts/ci-workflow-timeouts.test.mjs.
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
       - run: npm ci
+        timeout-minutes: 8
       - run: npm run test:src
 
   e2e:
@@ -130,7 +173,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
+          # #1348 — an uncached `npm ci` is a registry-bound step with no bound; every job in this
+          # file that runs one slowed together. Root lockfile only: this job does not install
+          # worker/. Measurement in scripts/ci-workflow-timeouts.test.mjs.
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
       - run: npm ci
+        timeout-minutes: 8
       - name: Check for frontend changes
         id: changes
         # #998 — `tests/` + `playwright` MUST be here: without them a tests-only PR (e.g. one that
@@ -177,7 +226,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
+          # #1348 — an uncached `npm ci` is a registry-bound step with no bound; every job in this
+          # file that runs one slowed together. Root lockfile only: this job does not install
+          # worker/. Measurement in scripts/ci-workflow-timeouts.test.mjs.
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
       - run: npm ci
+        timeout-minutes: 8
       - name: Check for frontend changes
         id: changes
         run: bash scripts/ci-detect-frontend.sh '^(src/|public/|index\.html|vite\.config|package\.json)'

@@ -70,8 +70,30 @@ export function parseJobs(text, label = '<text>') {
   return jobs
 }
 
-/** Split a job body into step blocks, each starting at a `- ` line. Never crosses the job boundary. */
+/**
+ * Split a job body into step blocks, each starting at a `- ` line. Never crosses the job boundary.
+ *
+ * Throws when the step list is at an indent this scanner cannot read. A 4- and an 8-space list are
+ * both valid YAML under a 4-space `steps:` key and neither yields a readable block, so every check
+ * routed through this function passes over the job in silence: the apt bound (#1253) and, since
+ * #1348, the `npm ci` bound and the cache requirement. `assert.equal(seen, 7)` cannot catch it either — that notices a
+ * step going MISSING, not an unseen one arriving. The header's rule: a parser that cannot read its
+ * input must FAIL, never silently shrink what it checks.
+ *
+ * The check reads the indent of the FIRST item under `steps:`, rather than counting blocks found
+ * anywhere in the body. Counting was the first shape and it was disarmed by any other 6-space
+ * block-sequence item in the same job — a `needs:` written in block form manufactures a phantom
+ * block, and a whole mis-indented step list then gets absorbed into it with no throw. Scoping the
+ * question to the list itself removes that coupling: nothing outside `steps:` can answer it.
+ */
 export function stepBlocks(body) {
+  const stepsAt = body.findIndex((l) => /^ {4}steps:\s*(#.*)?$/.test(l))
+  if (stepsAt >= 0) {
+    const first = body.slice(stepsAt + 1).find((l) => /^\s*- /.test(l))
+    if (first && !/^ {6}- /.test(first)) {
+      throw new Error(`stepBlocks: this job's step list is not indented at 6 spaces, so this scanner cannot read it and would report the job as having no steps to check: ${JSON.stringify(first)}`)
+    }
+  }
   const blocks = []
   let cur = null
   for (const line of body) {
@@ -131,6 +153,92 @@ export function deploymentStatusTriggered(text) {
     if (/deployment_status/.test(stripComment(lines[i]))) return true
   }
   return false
+}
+
+/** Steps whose CODE (comments stripped) uses `actions/setup-node`. */
+export function setupNodeSteps(body) {
+  return stepBlocks(body).filter((b) => b.some((l) => /uses:\s*actions\/setup-node@/.test(stripComment(l))))
+}
+
+/**
+ * npm's own alias list for `ci`, from `npm ci -h`: the last one is a typo alias npm actually ships.
+ * Matching only the literal `npm ci` left every spelling but the first invisible to the assertions
+ * below — not failing, SEEN AS NOTHING, which is the shape this file exists to prevent.
+ */
+export const NPM_CI_ALIASES = ['ci', 'clean-install', 'ic', 'install-clean', 'isntall-clean']
+
+/**
+ * Does this line invoke `npm ci` (under any alias)?
+ *
+ * Token-based rather than a fixed `npm ci` string, because npm's flags are positionally free:
+ * `npm --prefix worker ci` is the same command as `npm ci --prefix worker` and matched nothing under
+ * the old regex.
+ *
+ * Split on shell separators FIRST, and judge each command on its own: disqualifying a whole line on
+ * a `run`/`exec`/`x` token anywhere in it made `npm ci && npm run build` answer false.
+ *
+ * There is no disqualifier at all now. Scoping one correctly needs npm's flag-arity table, and
+ * without it the check read flag VALUES as subcommands — `npm ci --prefix x`, `npm ci -w x` and
+ * `npm ci --cache x` all answered false, hiding a real install. So the only spellings this can now
+ * get wrong are false POSITIVES: a script literally named after an alias (`npm run ci`) is treated
+ * as the builtin. That is the safe direction — it costs that step a bound and a cache check, where a
+ * false negative costs it both, silently.
+ */
+export function isNpmCiCommand(code) {
+  for (const segment of code.split(/&&|\|\||;|\||&/)) {
+    const m = /(?:^|[\s"'(/])npm(?:\s+(.*))?$/.exec(segment)
+    if (!m) continue
+    // Shell punctuation is stripped on BOTH sides of the command word, and the asymmetry was a real
+    // hole: tokens after `npm` were stripped from the start, so `(cd worker && npm ci)` was seen, but
+    // the anchor before `npm` accepted only whitespace, so `"npm ci"`, `(npm ci)`, `sh -c 'npm ci'`
+    // and `/usr/bin/npm ci` were not — and an unseen step is required to carry neither a bound nor a
+    // cache. This screen is deliberately over-broad: being seen costs a step only those two checks,
+    // while not being seen costs it both.
+    const tokens = (m[1] || '').trim().split(/\s+/).filter(Boolean).map((t) => t.replace(/[()'"`]/g, ''))
+    if (tokens.some((t) => NPM_CI_ALIASES.includes(t))) return true
+  }
+  return false
+}
+
+/**
+ * Steps whose CODE (comments stripped) runs `npm ci`. Prose about `npm ci` sits in comments all over
+ * these files, and a guard in this very file once counted a commented-out step as the real thing.
+ */
+export function npmCiSteps(body) {
+  return stepBlocks(body).filter((b) => b.some((l) => isNpmCiCommand(stripComment(l))))
+}
+
+/**
+ * `cache:` and `cache-dependency-path:` off a `setup-node` step, reading the block-scalar list form as
+ * well as the inline one. `cache` is `null` when the input is absent — the caller has to be able to
+ * tell "not configured" from "configured to something".
+ */
+export function npmCacheConfig(block) {
+  let cache = null
+  const paths = []
+  for (let i = 0; i < block.length; i++) {
+    const code = stripComment(block[i])
+    const c = /^\s*cache:\s*'?"?([A-Za-z]+)'?"?\s*$/.exec(code)
+    if (c) { cache = c[1]; continue }
+    const p = /^(\s*)cache-dependency-path:\s*(.*)$/.exec(code)
+    if (!p) continue
+    const rest = p[2].trim()
+    // ONLY `|` opens a multi-path list. A folded `>` joins its lines into one space-separated scalar,
+    // which setup-node then treats as a single unresolvable path — so reading it as a list would let
+    // this parser report paths the config does not actually declare.
+    if (/^>[-+]?$/.test(rest)) throw new Error('npmCacheConfig: cache-dependency-path uses a folded `>` scalar, which YAML joins into ONE path — only `|` is a list')
+    if (rest.startsWith('[')) throw new Error('npmCacheConfig: cache-dependency-path uses a flow sequence, which this scanner does not read — use a `|` block list')
+    if (rest === '') throw new Error('npmCacheConfig: cache-dependency-path has no value')
+    if (!/^\|[-+]?$/.test(rest)) { paths.push(rest.replace(/^['"]|['"]$/g, '')); continue }
+    const indent = p[1].length
+    for (let j = i + 1; j < block.length; j++) {
+      const item = stripComment(block[j])
+      if (item.trim() === '') continue
+      if (item.search(/\S/) <= indent) break
+      paths.push(item.trim().replace(/^['"]|['"]$/g, ''))
+    }
+  }
+  return { cache, paths: paths.sort() }
 }
 
 const LOCK = JSON.parse(readFileSync(join(repoRoot, 'package-lock.json'), 'utf8'))
@@ -230,6 +338,31 @@ test('parseJobs: `jobs:` with a trailing space or comment is still found', () =>
 
 test('parseJobs: throws on a 2-space key it cannot read, rather than dropping it', () => {
   assert.throws(() => parseJobs('jobs:\n  "quoted-job":\n    runs-on: x\n', 'f.yml'), /could not read/)
+})
+
+test('stepBlocks: throws when a job\'s steps are at an indent it cannot read (#1348)', () => {
+  // 4 and 8 spaces are both valid YAML under a 4-space `steps:` key, and both yielded zero blocks —
+  // so the job's `npm ci` was required to carry neither a bound nor a cache and its apt step went
+  // unchecked, silently. (2 is NOT valid there: a sequence item cannot out-dent its own key. It was
+  // pinned here once and removed — an unshippable shape proves nothing in either direction.)
+  const at = (n, extra = []) => [
+    ...extra, '    runs-on: ubuntu-latest', '    timeout-minutes: 10', '    steps:',
+    `${' '.repeat(n)}- run: npm ci`,
+  ]
+  for (const n of [4, 8]) {
+    assert.throws(() => stepBlocks(at(n)), /cannot read it/, `indent ${n} did not throw`)
+  }
+  assert.equal(stepBlocks(at(6)).length, 1)
+  // A block-form `needs:` puts a 6-space `- ` item in the body that is NOT a step. Counting blocks
+  // anywhere in the body let that one phantom disarm the check while a whole mis-indented step list
+  // was absorbed into it; the indent of the list itself cannot be answered from outside `steps:`.
+  const needs = ['    needs:', '      - unit']
+  for (const n of [4, 8]) {
+    assert.throws(() => stepBlocks(at(n, needs)), /cannot read it/, `indent ${n} with a block needs: did not throw`)
+  }
+  assert.equal(stepBlocks(at(6, needs)).length, 2, 'a 6-space needs: item is still counted as a block')
+  // A job with no `steps:` key at all is not a parse failure — several fixtures pass bare blocks.
+  assert.deepEqual(stepBlocks(['    runs-on: ubuntu-latest']), [])
 })
 
 test('stepBlocks: a step block never absorbs the next job\'s timeout-minutes', () => {
@@ -333,4 +466,206 @@ test('browserCacheSteps: a commented-out step or a prose mention is not a cache'
   assert.equal(browserCacheSteps(prose).length, 0)
   const real = ['      - uses: actions/cache@v6', '        with:', '          path: ~/.cache/ms-playwright', '          key: k']
   assert.equal(browserCacheSteps(real).length, 1)
+})
+
+// ── #1348 — `npm ci` is a network-bound step, and it was the whole 4-10 minute band ────────────────
+//
+// JOB level, as measured on 2026-09-04 over the test.yml runs back to 2026-08-19: `Worker Unit
+// Tests` held between 1.35m and 1.93m, then began landing anywhere from 4.10m to the 10m cap, which
+// it started hitting. Per-bucket run COUNTS are deliberately not recorded: the window ran up to the
+// day of measurement and keeps growing, so any count here is stale the next day — and the counts
+// were never what carried the point. The transition is BOUNDED, not observed: the last fast run
+// finished 2026-09-03 10:54 UTC and the first slow one started 2026-09-04 01:30 UTC, nothing between.
+//
+// STEP level, over EVERY step observation in those runs rather than a chosen few — the earlier
+// version of this block named three runs and mischaracterised them, which is what produced a cap
+// that had to be retracted. `npm run test:worker` never exceeded 59s, so the suite is not where the
+// time went; `npm ci` reached 422s against a 12s median. One further `npm ci` was still running at
+// 185s when a job cap ended it, so the tail is not fully observed. Observation counts are omitted
+// here for the same reason the run counts above are.
+//
+// Two controls sit in this repo's own history over the same hours. docs-lint.yml's `npm ci` — the one
+// that already carried `cache: 'npm'` — held a ~5s median on both sides of the transition. And the
+// awk-matrix job, the only one in test.yml with no `npm ci`, held its median across the same split.
+// Every job that installs moved; the cached one and the one that does not install did not.
+//
+// The edge-e2e arm below is a POLICY, not a mechanism claim: nothing here establishes whether
+// `cache: 'npm'` functions under `deployment_status`. Run 33703810844 recorded the `actions/cache`
+// step refusing to run under that event, but that guard belongs to that action, not to `setup-node`.
+// So the cache is not added there, and the assertion keeps an untested one from being added on the
+// same bad inference — it is not evidence that one would be inert.
+//
+// A green run carries no information about any of this — a pass and a kill differ only in which side
+// of the cap the registry happened to land on — so the bound and the cache are asserted structurally.
+//
+// NOT CHECKED, and deliberately so: that a job's `cache-dependency-path` names every lockfile the
+// job installs from. A guard for it shipped here and was removed. Deciding it means answering "which
+// lockfile does this command install from", which needs a parser for shell, for YAML scalars and for
+// npm's own CLI — and six consecutive review rounds each produced a REPRODUCED silent wrong answer
+// from it, every one on a shape the round before had declared closed: `--prefix` spellings, a `cd`,
+// `working-directory:`, a `\` continuation, chained commands, a subshell, npm's `-C` shorthand for
+// `--prefix`, a workflow-level `defaults:` above `jobs:`, and a folded `>` scalar. A guard that is
+// wrong in a new way every round is worse than no guard, because green reads as verified.
+//
+// What that costs: adding a THIRD package with its own `npm ci` and not extending the key would
+// leave that job's cache permanently incomplete, silently (a cache HIT never re-saves). The
+// mitigation is the `unit` job's own comment, which states the rule for a human adding one. The two
+// assertions that remain — the bound and the cache being declared — need only to know THAT a job
+// installs, never from where, so their parser can be over-broad in the safe direction.
+//
+// Scope, stated as a limit rather than left implicit: these assertions cover `npm ci` only.
+// `npm install --no-save playwright@1.58.2` in deepseek-feed.yml is the same registry-bound class —
+// it reifies the whole root tree, and its step ran 421s in the same window — but it is uncached,
+// unbounded, and sits under an 8m JOB cap that a 421s install nearly reaches on its own. Bounding it
+// without also caching it or raising that cap makes it MORE fragile, and it is a scheduled job that
+// feeds production, so it is left alone here and belongs in its own change.
+
+test('every `npm ci` step is bounded (#1348)', () => {
+  const unbounded = []
+  let seen = 0
+  for (const { file, text } of parsed) {
+    for (const job of parseJobs(text, file)) {
+      for (const block of npmCiSteps(job.body)) {
+        seen++
+        if (!isBounded(block)) unbounded.push(`${file}:${job.name}: ${block[0].trim().slice(0, 60)}`)
+      }
+    }
+  }
+  // A denominator, not a floor for its own sake: a matcher that stops seeing `npm ci` steps would
+  // make this pass over an empty loop, which is exactly how the apt guard once passed.
+  // The repo's actual count, not a slack floor. At `>= 6` the matcher could lose exactly one step
+  // and still pass — which is how a false negative stayed invisible. Adding a step raises this; a
+  // deliberate removal lowers it, in the same diff, where a reviewer sees it.
+  assert.equal(seen, 7, `expected the repo's 7 \`npm ci\` steps, found ${seen}`)
+  assert.deepEqual(unbounded, [], `\`npm ci\` steps with no bound (a registry stall then spends the JOB budget and the cap kills whichever step is running):\n${unbounded.join('\n')}`)
+})
+
+test('a job that runs `npm ci` caches ~/.npm — except where caching is unverified (#1348)', () => {
+  // Asserted in BOTH directions, following the Playwright cache test's shape. The second direction is
+  // a POLICY and says so: whether `cache: 'npm'` works under `deployment_status` is NOT established
+  // here (see the block above), so it is not added there, and this arm keeps one from being added on
+  // the inference that was already wrong once. Evidence that it works is what should reverse it.
+  let cached = 0
+  let unverified = 0
+  for (const { file, text } of parsed) {
+    const deploymentStatus = deploymentStatusTriggered(text)
+    for (const job of parseJobs(text, file)) {
+      if (npmCiSteps(job.body).length === 0) continue
+      const setups = setupNodeSteps(job.body)
+      assert.equal(setups.length, 1, `${file}:${job.name}: expected one setup-node step alongside its \`npm ci\`, found ${setups.length}`)
+      const { cache } = npmCacheConfig(setups[0])
+      if (deploymentStatus) {
+        unverified++
+        assert.equal(cache, null, `${file}:${job.name}: triggered by deployment_status, where this repo has NOT established that setup-node's cache works — do not add \`cache: '${cache}'\` here without evidence`)
+      } else {
+        cached++
+        assert.equal(cache, 'npm', `${file}:${job.name}: runs \`npm ci\` with no npm cache — every install then refetches the whole tree from the registry (#1348)`)
+      }
+    }
+  }
+  assert.ok(cached >= 5, `expected the cacheable npm-installing jobs, found ${cached}`)
+  // Without this the deployment_status arm could stop being reached — a trigger rename, a parser
+  // regression — and the file would silently hold only the easy half of the rule.
+  assert.equal(unverified, 1, `expected exactly one deployment_status-triggered job that runs \`npm ci\`, found ${unverified}`)
+})
+
+test('npmCiSteps: prose about `npm ci` is not an `npm ci` step', () => {
+  assert.equal(npmCiSteps(['      - run: echo hi', '        # deliberately no npm ci here']).length, 0)
+  assert.equal(npmCiSteps(['      # - run: npm ci']).length, 0)
+  assert.equal(npmCiSteps(['      - run: npm ci']).length, 1)
+  assert.equal(npmCiSteps(['      - run: npm ci --no-audit --fund=false']).length, 1)
+})
+
+test('npmCiSteps: a quoted or parenthesised command is still SEEN (#1348)', () => {
+  // Each of these returned 0 steps, so the step was required to carry neither a bound nor a cache.
+  assert.equal(npmCiSteps(['      - run: "npm ci"']).length, 1)
+  assert.equal(npmCiSteps(["      - run: 'npm ci'"]).length, 1)
+  assert.equal(npmCiSteps(['      - run: (npm ci)']).length, 1)
+  assert.equal(npmCiSteps(['      - run: bash -c "npm ci --prefix worker"']).length, 1)
+  assert.equal(npmCiSteps(['      - run: /usr/bin/npm ci']).length, 1)
+})
+
+test('npmCiSteps: an install inside a subshell is still SEEN (#1348)', () => {
+  // `(cd worker && npm ci)` left the last token as `ci)`, which matched no alias — so the step was
+  // invisible to the bound check and the cache check. Being seen is what makes both apply, and the
+  // screen is over-broad on purpose: being seen costs a step only those two checks.
+  assert.equal(npmCiSteps(['      - run: (cd worker && npm ci)']).length, 1)
+})
+
+test('npmCiSteps: a lookalike command is not `npm ci`', () => {
+  assert.equal(npmCiSteps(['      - run: npm cit']).length, 0)
+  assert.equal(npmCiSteps(['      - run: npm install --no-save playwright@1.58.2']).length, 0)
+  assert.equal(npmCiSteps(['      - run: npm run ci-something']).length, 0)
+  // A project script named exactly after an alias IS matched, deliberately: see isNpmCiCommand. The
+  // cost is a bound and a cache check on that step; the alternative cost a real install both.
+  assert.equal(npmCiSteps(['      - run: npm run ci']).length, 1)
+})
+
+test('isNpmCiCommand: a flag VALUE never hides a real install (#1348)', () => {
+  // Each of these answered FALSE while `run`/`exec`/`x` disqualified a line wherever they appeared —
+  // so the install was seen by nothing, which is the only fatal direction for the two assertions.
+  for (const cmd of ['npm ci --prefix x', 'npm ci -w x', 'npm ci --cache x', 'npm --prefix run ci', 'npm ci --prefix exec']) {
+    assert.equal(isNpmCiCommand(`        ${cmd}`), true, `${cmd} went unseen`)
+  }
+})
+
+test('npmCiSteps: a real `npm ci` chained with another npm command still counts (#1348)', () => {
+  // These answered FALSE while the disqualifier looked at the whole line, so the step disappeared
+  // from the bound check and the cache check at once.
+  assert.equal(npmCiSteps(['      - run: npm ci && npm run build']).length, 1)
+  assert.equal(npmCiSteps(['      - run: npm ci; npm run lint']).length, 1)
+  assert.equal(npmCiSteps(['      - run: npm ci --prefix worker && npm run test:worker']).length, 1)
+  // `npm run ci` is matched too — a deliberate false positive, see isNpmCiCommand.
+  assert.equal(npmCiSteps(['      - run: npm run ci && npm run build']).length, 1)
+})
+
+test('npmCiSteps: every npm alias for `ci`, and flags before the subcommand (#1348)', () => {
+  // These were SEEN AS NOTHING by the literal `npm ci` match — neither bound-checked nor
+  // cache-checked, so both assertions passed over them.
+  for (const alias of NPM_CI_ALIASES) {
+    assert.equal(npmCiSteps([`      - run: npm ${alias}`]).length, 1, `alias ${alias} not matched`)
+  }
+  // npm's flags are positionally free: this is the same command as `npm ci --prefix worker`.
+  assert.equal(npmCiSteps(['      - run: npm --prefix worker ci']).length, 1)
+})
+
+test('npmCacheConfig: throws on a value shape it cannot read, rather than answering (#1348)', () => {
+  const withPath = (v) => ['        with:', "          cache: 'npm'", `          cache-dependency-path: ${v}`, '            package-lock.json']
+  // A folded `>` reads identically to `|` to a line scanner, but YAML joins it into ONE path.
+  assert.throws(() => npmCacheConfig(withPath('>')), /folded/)
+  assert.throws(() => npmCacheConfig(withPath('>-')), /folded/)
+  assert.throws(() => npmCacheConfig(['        with:', '          cache-dependency-path: [a, b]']), /flow sequence/)
+  assert.throws(() => npmCacheConfig(['        with:', '          cache-dependency-path:']), /no value/)
+  // `|+` is still a literal block, so it must NOT throw.
+  assert.deepEqual(npmCacheConfig(withPath('|+')).paths, ['package-lock.json'])
+})
+
+test('npmCacheConfig: reads the block-scalar list, the inline form, and absence', () => {
+  const blockForm = [
+    '      - uses: actions/setup-node@v7',
+    '        with:',
+    '          node-version: 20',
+    "          cache: 'npm'",
+    '          cache-dependency-path: |',
+    '            package-lock.json',
+    '            worker/package-lock.json',
+  ]
+  assert.deepEqual(npmCacheConfig(blockForm), { cache: 'npm', paths: ['package-lock.json', 'worker/package-lock.json'] })
+  const inline = ['        with:', "          cache: 'npm'", '          cache-dependency-path: package-lock.json']
+  assert.deepEqual(npmCacheConfig(inline), { cache: 'npm', paths: ['package-lock.json'] })
+  assert.deepEqual(npmCacheConfig(['        with:', '          node-version: 20']), { cache: null, paths: [] })
+})
+
+test('npmCacheConfig: the list stops at the next key, and a commented-out cache is not a cache', () => {
+  // Absorbing the following key would let a job's declared paths pick up whatever text happened to
+  // sit underneath them.
+  const block = [
+    '        with:',
+    "          cache: 'npm'",
+    '          cache-dependency-path: |',
+    '            package-lock.json',
+    '          node-version: 20',
+  ]
+  assert.deepEqual(npmCacheConfig(block).paths, ['package-lock.json'])
+  assert.equal(npmCacheConfig(['        with:', "          # cache: 'npm' was removed", '          node-version: 20']).cache, null)
 })
