@@ -206,7 +206,7 @@ sequential** (single prod Worker/KV). Full workflow + launch-method table + port
 ### Workflow-gate hooks (#415/#657)
 
 Written rules are passive context — loaded once per session, dropped by compaction — so they get only
-probabilistic compliance. `.claude/settings.json` wires **seven** hooks (`.claude/hooks/`) that fire at
+probabilistic compliance. `.claude/settings.json` wires these hooks (`.claude/hooks/`) that fire at
 the decision moment instead:
 
 | Hook | Event | Enforces |
@@ -216,6 +216,7 @@ the decision moment instead:
 | `stop-nag-gate.sh` | Stop | Blocks a closing "shall I proceed / 진행할까요?" and re-prompts. |
 | `tooling-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | Reminds to run chub / modern-web-guidance by file path. Soft. |
 | `korean-copy-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | On a Korean-copy file (ko.js / methodology·intro templates / LegalContent·AnalysisModal), reminds to run `lint:korean` + re-read the whole card (#1094/#1097). Soft. |
+| `public-issue-figures-trigger.sh` | PreToolUse/Bash | This repo is PUBLIC: absolute adoption numbers (subscriber/browser/install counts, and any value that divides into one) belong in the private `aiwatch-wiki` bundle — a public issue carries the verdict, field name or ratio only (#1354). Fires on the command name, never on the text. Soft. |
 | **`step35-verify-gate.mjs`** | PreToolUse/Bash + Edit\|Write\|MultiEdit | **HARD** — DENIES a UI/Edge `git commit` with no transcript-confirmed user verification, denies `--no-verify`, denies unauthorized self-edits to `.claude/hooks/**` + `.claude/settings*.json`. Fail-closed. The COMMIT deny's override is a user turn saying `검증 생략하고 커밋`; a self-edit deny needs stated intent toward the gate instead (`훅 작업`), which that path checks separately. |
 | `review-loop-gate.mjs` | PreToolUse/Task\|Agent | **Telemetry, not a gate** (#1150) — records the round each review spawn declares (or that it declared none), plus the **branch** it ran on, from the session's cwd (#1245). Never blocks; read via `hook-audit`'s `🔁` section. Enforcing convergence stays `ship-issue` steps 5-6 — why, in workflow-hooks.md. |
 

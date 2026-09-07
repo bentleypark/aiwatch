@@ -39,8 +39,17 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  because they were raised from zero slack, so do not read a delta here as the constant's movement.
  *  The entry earns its place because that list names every guard `test:scripts` gates, and it is held
  *  to one line by keeping the WHY in the guard file's own header — the first draft cost +328, and the
- *  ratchet is what made that visible. */
-export const BUDGET_CHARS = 47_145
+ *  ratchet is what made that visible.
+ *
+ *  47_145 → 47_486 (#1354): the `public-issue-figures-trigger.sh` row in the hook table, +342 net of
+ *  two deletions the same PR made — the hard-coded hook count (`**seven**`, which this PR made wrong in
+ *  five places with no CI able to see it) and the row's own restatement of which `gh` subcommands the
+ *  hook fires on. That second deletion is the one worth noting: the trigger set was restated in several
+ *  places and review kept finding the copies drifting apart. The row earns its space
+ *  because the rule it states (absolute adoption numbers go to the private bundle; a public issue
+ *  carries the verdict, field name or ratio) has to be loaded while an issue is being written, not
+ *  looked up afterwards. Measured with 1 char of prior slack, which the ratchet consumes first. */
+export const BUDGET_CHARS = 47_486
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the
