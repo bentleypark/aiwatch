@@ -149,19 +149,24 @@ graph-speak ("게이트", "미게이트 슬라이스", "선점", `cost: 미상`)
 - **Check the provenance of every `Inputs (have)` item.** A `discovery/` artefact or a `project_*`
   page's recommendation is *exploratory*: it can make a **decision** executable, never an action. If the
   thread's premise has no `decision_*` page, that decision is the next step (vocabulary rule 4).
-- **Two measurement sources exist and answer different questions — do not swap them.** `growth:daily`
-  (consent-free KV) is the channel mix of **is-down page views only** (`direct`/`reddit`/`hn` %) — the
-  source `initiative_growth`'s numbers already cite. GA4 is event-level — what a
-  visitor clicked on a page — and is the source behind `[[decision_outage_cta_channel]]`'s "저마찰
-  18 : Discord 1". If a thread's `Next action` needs a **CTA/engagement-type** re-check rather than a
-  channel-mix number, re-run it live with the GA4 CLI instead of citing a dated hand measurement — but
-  **never use GA4 to re-derive a channel-mix number**: on is-down it's a much smaller sample than the
-  beacon and neither side is a clean population (GA4 drops bots, the beacon filters nothing) — the gap
-  between them has not been isolated. Commands for both
-  sources (GA4 CLI + the `growth:daily` KV read), the exact scoping pitfall, and the truncation trap on
-  a wide query are in `docs/reference/ga4-cli-access.md`. If the GA4 service-account key isn't on this
-  machine or a command errors, say so explicitly and fall back to the page's existing number rather
-  than silently reusing a stale one as if it were fresh.
+- **Read a live number, every review. This is a step, not an option.** Pull the current
+  `growth:daily:{YYYY-MM}` and state the channel mix **and its direction over the month** — not a
+  single day. A brief that cites only a figure dated in an initiative page has skipped this step; one
+  did on 2026-09-07, and the month's shape turned out to carry something the dated figure did not.
+
+- **Read both source documents before you compare anything, or before you read a trend.**
+  `docs/reference/ga4-cli-access.md` holds the commands and which comparisons across sources are
+  unsafe; the `growth:daily` cell of `docs/reference/kv-schema.md` holds what the row's own fields
+  mean — the windows differ **by field**, and the bucket vocabulary changed at deploy boundaries with
+  no backfill, so a same-source trend across one of those is not the comparison it looks like.
+
+  **Do not summarise either here.** Two attempts on 2026-09-07 restated their contents into this file;
+  the first contradicted the original before it was committed, and the second attributed both of its
+  facts to the document that held neither of them.
+
+- If a read errors or comes back empty, **say so explicitly**, check that document's failure notes
+  before concluding the data is absent, and fall back to the page's existing number rather than
+  silently reusing a stale one as if it were fresh.
 
 ### 3. Board pass — evidence only. Never a do-next.
 The board enters this brief in exactly **two roles**. Anything else about it belongs to `issue-triage`.
