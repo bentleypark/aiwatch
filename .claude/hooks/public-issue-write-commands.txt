@@ -1,0 +1,22 @@
+# The `gh` subcommands `public-issue-figures-trigger.sh` reminds before (#1354). One per line;
+# blank lines and `#` comments ignored. Matched as a substring of the Bash command, nothing more.
+#
+# This file exists so the set is DATA, read by both the hook and its test, rather than shell syntax one
+# of them has to parse. Three review rounds were spent on copies of this list drifting apart, and a
+# fourth on a regex that extracted `*"gh issue edit"*` but silently missed `*"gh api"*` — a guard whose
+# blind spot was exactly the arm most likely to be added next.
+#
+# NOT a complete list of what can publish to a public repo. `gh api repos/…/issues/N/comments -f body=…`
+# posts the same content and is deliberately absent: telling a read from a write there means parsing the
+# method and path, which is the act this hook exists not to perform.
+gh issue create
+gh issue edit
+gh issue comment
+gh issue close
+gh issue reopen
+gh pr create
+gh pr edit
+gh pr comment
+gh pr close
+gh pr reopen
+gh pr review

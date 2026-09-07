@@ -14,7 +14,7 @@ function run(name, input, mutate = false) {
   const hooks = join(dir, '.claude', 'hooks')
   const hook = join(hooks, name)
   try {
-    cpSync(join(HOOKS, '_audit.sh'), join(hooks, '_audit.sh'))
+    cpSync(HOOKS, hooks, { recursive: true })
     const source = readFileSync(join(HOOKS, name), 'utf8')
     writeFileSync(hook, mutate ? source.replaceAll('hookSpecificOutput', 'systemMessage') : source)
     const result = spawnSync('bash', [hook], { input: JSON.stringify(input), encoding: 'utf8' })
@@ -32,10 +32,11 @@ function assertPreToolUseAdvisory(output) {
   assert.ok(output.hookSpecificOutput.additionalContext.length > 0)
 }
 
-test('all three soft PreToolUse reminders use hookSpecificOutput.additionalContext', () => {
+test('all four soft PreToolUse reminders use hookSpecificOutput.additionalContext', () => {
   assertPreToolUseAdvisory(run('git-mutation-gate.sh', { tool_input: { command: 'git commit -m x' }, cwd: ROOT }))
   assertPreToolUseAdvisory(run('tooling-trigger.sh', { tool_input: { file_path: join(ROOT, 'worker/src/services.ts') } }))
   assertPreToolUseAdvisory(run('korean-copy-trigger.sh', { tool_input: { file_path: join(ROOT, 'src/locales/ko.js') } }))
+  assertPreToolUseAdvisory(run('public-issue-figures-trigger.sh', { tool_input: { command: 'gh issue comment 1 --body x' } }))
 })
 
 test('the channel contract catches a mutant that restores top-level systemMessage', () => {
@@ -43,6 +44,7 @@ test('the channel contract catches a mutant that restores top-level systemMessag
     ['git-mutation-gate.sh', { tool_input: { command: 'git commit -m x' }, cwd: ROOT }],
     ['tooling-trigger.sh', { tool_input: { file_path: join(ROOT, 'worker/src/services.ts') } }],
     ['korean-copy-trigger.sh', { tool_input: { file_path: join(ROOT, 'src/locales/ko.js') } }],
+    ['public-issue-figures-trigger.sh', { tool_input: { command: 'gh issue comment 1 --body x' } }],
   ]) {
     assert.throws(() => assertPreToolUseAdvisory(run(name, input, true)), /hookSpecificOutput/)
   }

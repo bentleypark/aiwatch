@@ -29,6 +29,12 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/public-issue-figures-trigger.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking public-issue disclosure trigger (#1354)..."
+          },
+          {
+            "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/git-mutation-gate.sh\"",
             "timeout": 10,
             "statusMessage": "Checking git-mutation gate (#415)..."
