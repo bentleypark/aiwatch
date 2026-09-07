@@ -8,6 +8,8 @@ import {
   isThirdPartyCloneSubject,
   isAiCreditedOssPatch,
   matchNvdFirstParty,
+  isVendorMismatch,
+  NVD_EXPECTED_VENDOR,
   nvdCveToAlert,
   filterNvdCves,
   fetchNvdAlerts,
@@ -17,9 +19,9 @@ import {
 } from '../security-monitor'
 import type { SecurityAlert } from '../security-monitor'
 
-// Real NVD 2.0 `cve` payloads — verified verbatim against the live API 2026-07-16.
-// CVE-2025-52882: genuine first-party Claude Code CVE (subject = Claude Code, mentions
-// Cursor/Windsurf only as forks). CVE-2026-14898: genuine OpenAI Codex desktop CVE.
+// NVD 2.0 `cve` payloads (descriptions shortened from the live API text). CVE-2025-52882:
+// genuine first-party Claude Code CVE (subject = Claude Code, mentions Cursor/Windsurf only as
+// forks). CVE-2026-14898: genuine OpenAI Codex desktop CVE.
 //
 // The Claude Code description deliberately retains the real remediation sentence "check the
 // plugin Claude Code [Beta]" — the SINGULAR "plugin". A bare `\bplugin\b` noise marker
@@ -28,18 +30,44 @@ import type { SecurityAlert } from '../security-monitor'
 // look correct while it discarded the signal (cf. #1021). Note the plural "Jetbrains IDE
 // plugins" does NOT reproduce it (`\bplugin\b` won't match "plugins") — the singular sentence
 // is what makes this fixture a real regression guard, verified by mutation. Do not trim it.
+// `affected[].affectedData` on both fixtures below is real, live-confirmed data (#1336) —
+// added so the `isVendorMismatch` "does not veto a genuine first-party CVE" tests exercise
+// the vendor-match branch itself, not the no-vendor-data fail-open branch. Before #1336
+// neither fixture carried `affected` at all; that made every "survives filterNvdCves"
+// assertion pass without exercising the branch this fix actually added.
 const claudeCodeCve = {
   id: 'CVE-2025-52882',
   vulnStatus: 'Deferred',
   descriptions: [{ lang: 'en', value: 'Claude Code is an agentic coding tool. Claude Code extensions in VSCode and forks (e.g., Cursor, Windsurf, and VSCodium) and JetBrains IDEs (e.g., IntelliJ, Pycharm, and Android Studio) are vulnerable to unauthorized websocket connections from an attacker when visiting attacker-controlled webpages. For Jetbrains IDE plugins, Claude Code [beta] versions 0.1.1 through 0.1.8 are vulnerable. For JetBrains IDEs including IntelliJ, PyCharm, and Android Studio, check the plugin Claude Code [Beta].' }],
   metrics: { cvssMetricV40: [{ cvssData: { baseScore: 8.8, baseSeverity: 'HIGH' } }] },
   weaknesses: [{ description: [{ lang: 'en', value: 'CWE-1385' }] }],
+  affected: [{ affectedData: [{ vendor: 'anthropics', product: 'claude-code' }] }],
 }
 const codexCve = {
   id: 'CVE-2026-14898',
   vulnStatus: 'Awaiting Analysis',
-  descriptions: [{ lang: 'en', value: 'The OpenAI Codex desktop app for macOS rendered remote images from Markdown in model responses, enabling indirect prompt injection.' }],
+  descriptions: [{ lang: 'en', value: 'The OpenAI Codex desktop app for macOS rendered remote images from Markdown in model responses.' }],
   metrics: { cvssMetricV31: [{ cvssData: { baseScore: 6.5, baseSeverity: 'MEDIUM' } }] },
+  affected: [{ affectedData: [{ vendor: 'OpenAI', product: 'Codex desktop app for macOS' }] }],
+}
+
+// NVD payload (#1336), description shortened from the live API text. A genuine third-party
+// bug — the vulnerable component is AgenticMail's own inbound-mail relay — whose
+// description says "resume the operator's Claude Code session", so `matchNvdFirstParty`
+// attributes it to Claude Code on text alone. The `affected[].affectedData[].vendor` is
+// `agenticmail` on every entry, none `anthropic`, which is what `isVendorMismatch` is for.
+const agenticMailCve = {
+  id: 'CVE-2026-57495',
+  descriptions: [{ lang: 'en', value: "AgenticMail gives AI agents real email addresses and phone numbers. In @agenticmail/claudecode prior to version 0.2.39... causes the dispatcher to resume the operator's Claude Code session with permissionMode: 'bypassPermissions'." }],
+  metrics: { cvssMetricV40: [{ cvssData: { baseScore: 8.2, baseSeverity: 'HIGH' } }] },
+  affected: [{
+    affectedData: [
+      { vendor: 'agenticmail', product: '@agenticmail/core' },
+      { vendor: 'agenticmail', product: '@agenticmail/claudecode' },
+      { vendor: 'agenticmail', product: '@agenticmail/codex' },
+      { vendor: 'agenticmail', product: '@agenticmail/openclaw' },
+    ],
+  }],
 }
 
 describe('NVD_FIRST_PARTY table', () => {
@@ -208,6 +236,61 @@ describe('matchNvdFirstParty (attribution gate)', () => {
   })
 })
 
+describe('NVD_EXPECTED_VENDOR keys', () => {
+  it('every key matches a real NVD_FIRST_PARTY service label (else the veto silently fails open)', () => {
+    const firstPartyServices = new Set(NVD_FIRST_PARTY.map(e => e.service))
+    for (const key of Object.keys(NVD_EXPECTED_VENDOR)) {
+      expect(firstPartyServices.has(key)).toBe(true)
+    }
+  })
+})
+
+describe('isVendorMismatch (#1336 noise class 4 — third-party bridge naming a first-party product)', () => {
+  it('vetoes a real CVE whose declared vendor contradicts the text-matched service', () => {
+    expect(isVendorMismatch(agenticMailCve, 'Claude Code')).toBe(true)
+  })
+  it('does not veto a genuine first-party CVE whose real declared vendor matches', () => {
+    // Both fixtures now carry their REAL live-confirmed `affected` data — this exercises the
+    // vendor-MATCH branch, not the no-data fail-open branch (#1336 finding: nearly every real
+    // CVE carries vendor data, so a fixture with none would test the rare case, not the norm).
+    expect(isVendorMismatch(claudeCodeCve, 'Claude Code')).toBe(false)
+    expect(isVendorMismatch(codexCve, 'OpenAI Codex')).toBe(false)
+  })
+  it('does not veto when there is no affected/vendor data at all', () => {
+    expect(isVendorMismatch({ id: 'CVE-X' }, 'Claude Code')).toBe(false)
+    expect(isVendorMismatch({ id: 'CVE-X', affected: [] }, 'Claude Code')).toBe(false)
+    expect(isVendorMismatch({ id: 'CVE-X', affected: [{ affectedData: [] }] }, 'Claude Code')).toBe(false)
+  })
+  it('does not veto when every declared vendor is a placeholder, not a real name', () => {
+    // Live-confirmed: MITRE's catch-all CNA writes literal "n/a" for "no vendor supplied"
+    // (CVE-2025-61260 "OpenAI Codex CLI", CVE-2024-40594 "OpenAI ChatGPT app", CVE-2025-50708
+    // "Perplexity AI") — treating that as a real, mismatching vendor silently drops genuine
+    // first-party CVEs, which is exactly what would have shipped without this test.
+    for (const placeholder of ['n/a', 'N/A', 'na', 'Unknown', 'unspecified', 'Not Applicable', 'none', '-']) {
+      const cve = { id: 'CVE-X', affected: [{ affectedData: [{ vendor: placeholder }] }] }
+      expect(isVendorMismatch(cve, 'OpenAI Codex')).toBe(false)
+    }
+  })
+  it('does not veto when a declared vendor matches, case- and format-insensitively', () => {
+    const cve = { id: 'CVE-X', affected: [{ affectedData: [{ vendor: 'Anthropic PBC' }] }] }
+    expect(isVendorMismatch(cve, 'Claude Code')).toBe(false)
+  })
+  it('does not veto a service with no known expected vendor', () => {
+    const cve = { id: 'CVE-X', affected: [{ affectedData: [{ vendor: 'some-vendor' }] }] }
+    expect(isVendorMismatch(cve, 'A Service Not In The Table')).toBe(false)
+  })
+  it('vetoes when ALL declared vendors mismatch, even several affected entries', () => {
+    const cve = {
+      id: 'CVE-X',
+      affected: [
+        { affectedData: [{ vendor: 'vercel' }] },
+        { affectedData: [{ vendor: 'some-other-vendor' }] },
+      ],
+    }
+    expect(isVendorMismatch(cve, 'OpenAI Codex')).toBe(true)
+  })
+})
+
 describe('nvdCveToAlert', () => {
   it('builds a well-formed alert from a real CVE', () => {
     const a = nvdCveToAlert(claudeCodeCve, 'Claude Code')
@@ -229,7 +312,7 @@ describe('nvdCveToAlert', () => {
 })
 
 describe('filterNvdCves (end-to-end candidate pipeline)', () => {
-  it('surfaces genuine first-party CVEs, drops all three noise classes + non-first-party', () => {
+  it('surfaces genuine first-party CVEs, drops all four noise classes + non-first-party', () => {
     const cves = [
       claudeCodeCve,
       codexCve,
@@ -237,6 +320,7 @@ describe('filterNvdCves (end-to-end candidate pipeline)', () => {
       { id: 'CVE-C', descriptions: [{ lang: 'en', value: 'Cloud CLI aka Claude Code UI leaks tokens' }] },
       { id: 'CVE-K', descriptions: [{ lang: 'en', value: 'In the Linux kernel, a flaw found by Claude Code was fixed' }] },
       { id: 'CVE-U', descriptions: [{ lang: 'en', value: 'A stored XSS in some unrelated CMS' }] },
+      agenticMailCve,
     ]
     const alerts = filterNvdCves(cves)
     expect(alerts.map(a => a.id)).toEqual(['CVE-2025-52882', 'CVE-2026-14898'])

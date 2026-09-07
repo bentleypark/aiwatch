@@ -441,7 +441,11 @@ export async function fetchOSVAlerts(kv: KVNamespace | null = null): Promise<Sec
 // needed. See NVD_WINDOW_MS below for why the window is fixed (and short) rather than
 // cursor-driven. The #949 PoC found precision ≈ 75-80% on the raw vendor match; three noise
 // classes — rejected CVEs, third-party clones/wrappers, and AI-authorship-credited
-// kernel patches — are filtered by the pure predicates below, measured live at 37 → 30.
+// kernel patches — are filtered by the pure predicates below, measured live at 37 → 30. A
+// fourth (#1336) — a genuine third-party CVE whose description merely NAMES a first-party
+// product it invokes or resumes (e.g. an email-bridge CVE that "resumes the operator's
+// Claude Code session") — is caught by `isVendorMismatch` against the CVE's own declared
+// `affected[].affectedData[].vendor`.
 
 const NVD_ENDPOINT = 'https://services.nvd.nist.gov/rest/json/cves/2.0'
 // Fixed rolling window, NO cursor — deliberately mirrors fetchOSVAlerts (a 7-day rolling
@@ -489,6 +493,7 @@ interface NvdCve {
   descriptions?: Array<{ lang: string; value: string }>
   metrics?: Record<string, Array<{ cvssData?: { baseScore?: number; baseSeverity?: string } }>>
   weaknesses?: Array<{ description?: Array<{ lang: string; value: string }> }>
+  affected?: Array<{ affectedData?: Array<{ vendor?: string; product?: string }> }>
 }
 
 // English description (NVD always ships `lang:'en'`; fall back to the first entry).
@@ -595,6 +600,60 @@ export function matchNvdFirstParty(description: string): string | null {
   return null
 }
 
+// The real vendor(s) a genuine first-party CVE should carry — case-insensitive substring
+// match, since NVD/GHSA vendor strings vary in format ("Anthropic", "anthropic-ai",
+// "anthropics" all contain "anthropic"; live-confirmed: 'anthropics' on CVE-2025-52882,
+// 'OpenAI' on CVE-2026-14898, 'Microsoft'/'Google Cloud' on others). Keys must exactly match
+// an `NVD_FIRST_PARTY[].service` label — pinned by the `describe('NVD_EXPECTED_VENDOR keys')`
+// test below, since nothing in the type system enforces that join and a key miss fails OPEN
+// (the veto is silently disabled for that service, not silently wrong).
+//
+// A WRONG substring is a different failure than a missing key: `isVendorMismatch` vetoes on
+// it, so an entry with no live-confirmed sample can silently drop a genuine first-party CVE
+// the day one exists — the same failure #1336 itself is about, just from this table instead
+// of from `matchNvdFirstParty`. So every entry here must be backed by a live-confirmed
+// vendor string (see the file-level comment above `filterNvdCves` for the mutation-tested
+// keeps-genuine convention this mirrors). Grok and Perplexity are deliberately NOT listed:
+// no Grok CVE has ever passed the weak+context gate, and both live Perplexity CVEs on
+// record carry a placeholder vendor, not a real one — add them once a real sample exists.
+export const NVD_EXPECTED_VENDOR: Record<string, string[]> = {
+  'Claude Code': ['anthropic'],
+  'Claude Desktop': ['anthropic'],
+  'OpenAI Codex': ['openai'],
+  ChatGPT: ['openai'],
+  'Azure OpenAI': ['microsoft', 'azure'],
+  Gemini: ['google'],
+}
+
+// NVD/CNA placeholder tokens for "no vendor supplied" — NOT a real vendor. Live-confirmed:
+// MITRE's catch-all CNA writes literal "n/a" (CVE-2025-61260, CVE-2024-40594, CVE-2025-50708).
+// Treating a placeholder as a real (mismatching) vendor would veto genuine first-party CVEs —
+// this table exists to keep the veto firing on ACTUAL third-party vendor names only.
+const NVD_VENDOR_PLACEHOLDER = /^(n\/?a|unknown|unspecified|not[ -]applicable|none|other|-)$/i
+
+// A CVE whose own declared vendor(s) contradict the first-party service `matchNvdFirstParty`
+// attributed it to from free text (#1336) — e.g. AgenticMail's `@agenticmail/claudecode`
+// bridge has a real CVE whose description says "resume the operator's Claude Code session",
+// but its NVD `affected[].affectedData[].vendor` is `agenticmail`, not `anthropic`.
+//
+// Deliberately a VETO on positive evidence, not a requirement for positive confirmation: a CVE
+// with no `affected` data, or whose only declared vendors are placeholders (above), does NOT
+// veto. Only a CVE that carries at least one REAL declared vendor, and whose every real vendor
+// fails to match, is dropped. The keeps-genuine test fixtures below now carry their own real
+// `affected` data specifically so "does not veto a genuine first-party CVE" exercises the
+// vendor-MATCH branch, not just the no-data fail-open branch.
+export function isVendorMismatch(cve: NvdCve, service: string): boolean {
+  const expected = NVD_EXPECTED_VENDOR[service]
+  if (!expected) return false
+  const vendors = (cve.affected ?? [])
+    .flatMap(a => a.affectedData ?? [])
+    .map(d => d.vendor?.trim())
+    .filter((v): v is string => !!v && !NVD_VENDOR_PLACEHOLDER.test(v))
+    .map(v => v.toLowerCase())
+  if (vendors.length === 0) return false
+  return !vendors.some(v => expected.some(e => v.includes(e)))
+}
+
 export function nvdCveToAlert(cve: NvdCve, service: string): SecurityAlert {
   const desc = extractNvdDescription(cve)
   // Title = CVE id + first sentence, capped — the long NVD description is unwieldy in a
@@ -625,6 +684,7 @@ export function filterNvdCves(cves: NvdCve[]): SecurityAlert[] {
     if (isAiCreditedOssPatch(desc)) continue
     const service = matchNvdFirstParty(desc)
     if (!service) continue
+    if (isVendorMismatch(cve, service)) continue
     alerts.push(nvdCveToAlert(cve, service))
   }
   return alerts
