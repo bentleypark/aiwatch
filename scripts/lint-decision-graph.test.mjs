@@ -1,12 +1,22 @@
 // Unit tests for the decision-graph structural lint (#967).
 //
-// The pure functions are the whole testable surface: the IO half reads a harness-global memory
-// bundle that CI cannot check out, so `npm run test:scripts` gates the logic and `npm run lint:graph`
+// The pure functions are the whole testable surface: the IO half reads a private-repo memory
+// bundle Actions has no credential for, so `npm run test:scripts` gates the logic and `npm run lint:graph`
 // gates the actual bundle locally.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync, readFileSync, copyFileSync, mkdirSync, realpathSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { tmpdir } from 'node:os'
+import { join, dirname } from 'node:path'
 import {
+  readBundle,
+  resolveMemoryDir,
+  pointerPathFor,
+  POINTER_FILE,
+  NON_PAGE_FILES,
   parseEdges,
   parseWikilinks,
   stripCode,
@@ -310,4 +320,121 @@ test('NOT_A_SLICE holds only pointer issues and Decision nodes — never adjudic
       'an adjudicated exclusion must keep surfacing as a candidate',
     )
   }
+})
+
+
+// ── #1353: where the bundle lives ────────────────────────────────────────────
+// Three inference schemes were tried and each was reproduced selecting a directory that was not the
+// bundle while printing `0 findings` at exit 0. Nothing is inferred any more, so what is left to pin is
+// the precedence of the two explicit sources and the two ways a misconfiguration must FAIL.
+
+test('resolveMemoryDir prefers the environment over the pointer file', () => {
+  assert.equal(resolveMemoryDir('/from/env', '/from/file'), '/from/env')
+})
+
+test('resolveMemoryDir falls back to the pointer file, trimming the trailing newline', () => {
+  // The file is written by hand or by `echo`, so a trailing newline is the normal case, not the edge.
+  assert.equal(resolveMemoryDir(undefined, '/from/file\n'), '/from/file')
+  assert.equal(resolveMemoryDir('', '  /from/file  \n'), '/from/file')
+})
+
+test('resolveMemoryDir returns null when neither source names a path', () => {
+  for (const [env, file] of [[undefined, undefined], ['', ''], ['   ', '\n'], [null, null]]) {
+    assert.equal(resolveMemoryDir(env, file), null, `${JSON.stringify([env, file])}`)
+  }
+})
+
+test('an EMPTY bundle exits 2 instead of reporting all clean', () => {
+  // End-to-end on the shipped script, because this guard is the amplifier: every misconfiguration
+  // used to arrive as `0 pages` followed by a green tick, which reads as "verified", not "no data".
+  const script = fileURLToPath(new URL('./lint-decision-graph.mjs', import.meta.url))
+  const empty = mkdtempSync(join(tmpdir(), 'empty-bundle-'))
+  let code = 0
+  let stderr = ''
+  try {
+    execFileSync('node', [script], { env: { ...process.env, MEMORY_DIR: empty }, encoding: 'utf8', stdio: 'pipe' })
+  } catch (err) {
+    code = err.status
+    stderr = String(err.stderr)
+  }
+  assert.equal(code, 2, `expected exit 2, got ${code}`)
+  assert.match(stderr, /has no pages/)
+})
+
+test('a MEMORY_DIR that does not exist exits 2 and echoes the path it was given', () => {
+  const script = fileURLToPath(new URL('./lint-decision-graph.mjs', import.meta.url))
+  const missing = join(tmpdir(), 'no-such-bundle-1353')
+  let code = 0
+  let stderr = ''
+  try {
+    execFileSync('node', [script], { env: { ...process.env, MEMORY_DIR: missing }, encoding: 'utf8', stdio: 'pipe' })
+  } catch (err) {
+    code = err.status
+    stderr = String(err.stderr)
+  }
+  assert.equal(code, 2)
+  // The path the operator supplied must appear: the previous message described a search that the
+  // override had skipped, and never showed what it had actually been handed.
+  assert.ok(stderr.includes(missing), stderr)
+})
+
+test('resolveMemoryDir expands a leading ~, which is the form every doc shows', () => {
+  assert.equal(resolveMemoryDir(undefined, '~/x/memory\n', '/home/u'), '/home/u/x/memory')
+  assert.equal(resolveMemoryDir('~', undefined, '/home/u'), '/home/u')
+  // Only a LEADING `~/` — a directory legitimately containing a tilde must survive untouched.
+  assert.equal(resolveMemoryDir(undefined, '/a/~b/memory', '/home/u'), '/a/~b/memory')
+  assert.equal(resolveMemoryDir(undefined, '~weird/memory', '/home/u'), '~weird/memory')
+})
+
+test('pointerPathFor resolves to the REPO ROOT, one level above scripts/', () => {
+  // Pins the level. Hardcoding the root, or dropping one `dirname`, left the whole suite green:
+  // every other test either passes MEMORY_DIR (which short-circuits the pointer) or calls a pure fn.
+  assert.equal(pointerPathFor('file:///r/scripts/lint-decision-graph.mjs'), `/r/${POINTER_FILE}`)
+})
+
+test('POINTER_FILE is the name .gitignore and .worktreeinclude actually carry', () => {
+  // The two files hardcode the literal. A rename here without renaming there leaves the pointer both
+  // untracked and un-ignored — i.e. committable, with one machine's absolute path inside it.
+  const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
+  for (const f of ['.gitignore', '.worktreeinclude']) {
+    const lines = readFileSync(join(repoRoot, f), 'utf8').split('\n').map((l) => l.trim())
+    assert.ok(lines.includes(POINTER_FILE), `${f} does not list ${POINTER_FILE}`)
+  }
+})
+
+test('main() resolves the bundle through .memory-dir when MEMORY_DIR is unset', () => {
+  // The pure `pointerPathFor` test pins the LEVEL; it does not pin that main() calls it. Applying the
+  // same one-`dirname` defect at the CALL SITE, helper untouched, left the whole suite green while the
+  // shipped script stopped finding the bundle. This runs the real script through the real pointer file.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'ptr-root-')))
+  mkdirSync(join(root, 'scripts'))
+  const script = join(root, 'scripts', 'lint-decision-graph.mjs')
+  copyFileSync(fileURLToPath(new URL('./lint-decision-graph.mjs', import.meta.url)), script)
+  const bundle = realpathSync(mkdtempSync(join(tmpdir(), 'ptr-bundle-')))
+  writeFileSync(join(bundle, 'decision_solo.md'), '---\nname: solo\n---\nNo edges, no links.')
+  writeFileSync(join(root, POINTER_FILE), `${bundle}\n`)
+
+  const env = { ...process.env }
+  delete env.MEMORY_DIR
+  const out = execFileSync('node', [script], { env, encoding: 'utf8', stdio: 'pipe' })
+  assert.match(out, /1 pages/, out)
+})
+
+test('NON_PAGE_FILES holds the bundle scaffolding and nothing that looks like a page', () => {
+  for (const f of ['MEMORY.md', 'log.md', 'README.md']) assert.ok(NON_PAGE_FILES.has(f), f)
+  for (const f of ['initiative_growth.md', 'decision_depth_not_breadth.md', 'constraint_solo_capacity.md']) {
+    assert.ok(!NON_PAGE_FILES.has(f), f)
+  }
+})
+
+test('readBundle APPLIES the NON_PAGE_FILES exclusion, not just declares it', () => {
+  // Asserting the Set's own literals left the call site unpinned: reverting `readBundle` to a
+  // hardcoded MEMORY.md/log.md test kept every test green while the real page count went 149 -> 150
+  // and README.md became an un-indexed orphan. This exercises the exclusion where it is applied.
+  const dir = mkdtempSync(join(tmpdir(), 'bundle-'))
+  writeFileSync(join(dir, 'decision_x.md'), '---\nname: x\n---\nbody')
+  for (const f of NON_PAGE_FILES) writeFileSync(join(dir, f), 'scaffolding')
+  writeFileSync(join(dir, 'notes.txt'), 'not markdown')
+  const stems = Object.keys(readBundle(dir))
+  assert.deepEqual(stems, ['decision_x'], `expected only the page, got ${JSON.stringify(stems)}`)
 })
