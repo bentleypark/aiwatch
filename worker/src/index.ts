@@ -3573,12 +3573,22 @@ export default {
       // Aggregates previous month's daily data into permanent archive:monthly:{YYYY-MM} KV key
       const { inWindow: inArchiveWindow, isCatchUp: isArchiveCatchUp } = isInMonthlyArchiveWindow(now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes())
       if (inArchiveWindow && env.STATUS_CACHE) {
-        const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-        const prevYear = prevMonth.getFullYear()
-        const prevMon = prevMonth.getMonth() + 1
+        const prevMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
+        const prevYear = prevMonth.getUTCFullYear()
+        const prevMon = prevMonth.getUTCMonth() + 1
         const archiveKey = `archive:monthly:${prevYear}-${String(prevMon).padStart(2, '0')}`
-        const existing = await env.STATUS_CACHE.get(archiveKey).catch(() => null)
-        if (!existing) {
+        let existing: string | null | undefined
+        try {
+          existing = await env.STATUS_CACHE.get(archiveKey)
+        } catch (err) {
+          // `null` means a genuine miss. A read fault must not re-enter the one-shot write path:
+          // this key is permanent, so a second pass could overwrite a good archive or make an
+          // existing archive appear absent to the notification path.
+          existing = undefined
+          console.error(`[monthly-archive] could not read ${archiveKey} — skipping archive build:`,
+            err instanceof Error ? err.message : err)
+        }
+        if (existing === null) {
           try {
             // Compute Score data inline from services:latest + probe:summaries.
             // services:latest stores raw ServiceStatus only — aiwatchScore/scoreGrade
@@ -3588,18 +3598,28 @@ export default {
             let scoreData: ArchiveScoreInput[] = []
             // service id → display name, for the AI narrative prompt (#426).
             const serviceNames: Record<string, string> = {}
-            const cachedRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
-            if (cachedRaw) {
-              try {
-                const p = JSON.parse(cachedRaw)
-                const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
-                const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
-                scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
-                for (const s of services) serviceNames[s.id] = s.name
-              } catch (parseErr) {
-                console.error('[monthly-archive] Failed to parse services:latest — archive will lack Score data:',
-                  parseErr instanceof Error ? parseErr.message : parseErr)
+            let cachedRaw: string | null
+            try {
+              cachedRaw = await env.STATUS_CACHE.get('services:latest')
+            } catch (err) {
+              console.error('[monthly-archive] could not read services:latest — skipping archive build:',
+                err instanceof Error ? err.message : err)
+              throw new Error('services:latest read failed')
+            }
+            if (!cachedRaw) throw new Error('services:latest is absent')
+            try {
+              const p = JSON.parse(cachedRaw)
+              const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
+              if (!Array.isArray(services) || services.length === 0) {
+                throw new Error('services:latest has no services')
               }
+              const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
+              scoreData = services.map((s) => toArchiveScoreInput(s, scoreFor(s, probeSummaries)))
+              for (const s of services) serviceNames[s.id] = s.name
+            } catch (parseErr) {
+              console.error('[monthly-archive] Failed to parse services:latest — skipping archive build:',
+                parseErr instanceof Error ? parseErr.message : parseErr)
+              throw new Error('services:latest parse failed')
             }
 
             // #1274 — read the duration-override list HERE, with the reader that can tell a fault
@@ -3649,7 +3669,27 @@ export default {
               console.log(`[monthly-archive] Archived ${archive.period}: ${Object.keys(archive.services).length} services, ${archive.daysCollected} days`)
             }
           } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err)
             console.error('[monthly-archive] Failed:', err)
+            if (env.DISCORD_WEBHOOK_URL) {
+              const period = `${prevYear}-${String(prevMon).padStart(2, '0')}`
+              const failureNotifiedKey = `archive:failed:${period}`
+              const alreadyAlerted = await env.STATUS_CACHE.get(failureNotifiedKey).catch(() => null)
+              if (!alreadyAlerted) {
+                const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+                  title: '⚠️ Monthly archive build failed',
+                  description: '`' + archiveKey + '` was not written.'
+                    + `\nReason: \`${sanitize(detail)}\``
+                    + '\nRepair with `POST /api/admin/rebuild-archive` while `incidents:monthly` still exists (60d).',
+                  color: 0xED4245,
+                })
+                if (!sent) {
+                  console.error(`[monthly-archive] failure alert NOT delivered for ${archiveKey}`)
+                } else {
+                  await kvPut(env.STATUS_CACHE, failureNotifiedKey, '1', { expirationTtl: 60 * 24 * 60 * 60 })
+                }
+              }
+            }
           }
         }
 
