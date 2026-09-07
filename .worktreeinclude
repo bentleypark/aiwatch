@@ -19,3 +19,7 @@
 # main checkout is linked to the same project and already carries it — and this repo never ships
 # the frontend via the CLI (`git push origin main` does). Worktrees just reach parity with main.
 .vercel/project.json
+
+# Points `npm run lint:graph` at this machine's aiwatch-wiki clone (#1353). Gitignored: the path
+# differs per machine. Without it the lint exits 2 telling you to write it.
+.memory-dir

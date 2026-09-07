@@ -11,7 +11,7 @@ description: >-
 
 # memory-ingest — write durable knowledge into the LLM Wiki
 
-The file memory (`~/.claude/projects/-Users-bentley-Desktop-bentely-aiwatch-aiwatch/memory/`) is the single
+The file memory (a clone of the private `aiwatch-wiki` repo; `docs/reference/decision-graph.md` says where) is the single
 persistent memory (MemPalace retired, #891). This skill is the **ingest** operation of the LLM-Wiki pattern.
 
 ## When to run

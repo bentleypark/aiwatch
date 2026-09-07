@@ -302,6 +302,30 @@ unpinned) at exit 0, exactly like unclaimed candidates.
 `advances::` to `delivered::` on the initiative page. One write, at the one moment the fact becomes
 true.
 
+## Where the bundle lives (#1353)
+
+The bundle is a clone of the **private `aiwatch-wiki` repo**, checked out into this machine's harness
+memory directory. It is not in this repo and never will be: it holds operator-only adoption
+figures (the subject of #1354), and it cannot be split — the 17 decision/constraint/initiative
+pages carry 72 wikilink crossings with the other 132, and strategy-bearing pages are typed `project`
+while graph pages link out to purely engineering ones.
+
+**`lint-decision-graph.mjs` is told the path; it never infers it.** `MEMORY_DIR`, else a gitignored
+`.memory-dir` file at the repo root holding the path (`.worktreeinclude` copies it into new worktrees).
+Neither present, or the path missing, or the directory holding no pages — all exit 2.
+
+The bundle is a git clone, so `memory-ingest` / `memory-lint` writes stay uncommitted until someone
+commits them, and a second machine needs a `pull` first. Neither skill prescribes those commands —
+they are ordinary git operations on a second repo, and three attempts to write a policy for them into
+the skills each contradicted either the workflow gates or the other skill.
+
+Three schemes for inferring the path were tried during review and each grew a new hole one round
+later: each added a predicate to a guard inspecting a filesystem this repo does not control.
+**Do not add a fourth** — the operator knows the path, and one gitignored line records it.
+
+Scaffolding in the bundle (its index, history log and README) is not a knowledge page. `NON_PAGE_FILES`
+is the one in-repo definition of that set; `memory-lint`'s index-drift pass is told to consult it.
+
 ## What is lint-able, and what is not (#967)
 
 The bundle splits the same way `index.md` splits the OKF bundle — **structural health** is mechanical,
@@ -323,8 +347,7 @@ each one is step 2 of `strategy-review`, not the lint's job. A brief must theref
 claims into one sentence: *"these 7 slices are OPEN"* is verified, *"these are the right 7"* is a dated
 reading.
 
-The lint **cannot run in CI** — the memory bundle is harness-global, not repo content, so there is
-nothing to check out. Its pure functions are CI-gated through `npm run test:scripts`; the bundle
+The lint **cannot run in CI** — the memory bundle is a private repo Actions has no credential for. Its pure functions are CI-gated through `npm run test:scripts`; the bundle
 assertion is local, invoked by the `memory-lint` skill.
 
 ## How strategy-review uses it

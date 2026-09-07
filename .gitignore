@@ -75,3 +75,4 @@ archive-before.json
 # #1295 — the accumulator backup is named after its KV key, so it cannot be overwritten by the
 # archive scripts' own archive-before.json in the same directory
 *-before.json
+.memory-dir

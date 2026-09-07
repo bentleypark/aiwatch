@@ -10,7 +10,7 @@
 //
 // SCOPE is deliberately narrow, because the value is precision not coverage:
 //   - Docs scanned: CLAUDE.md + docs/reference/*.md. In-repo docs about in-repo code — the CI-gatable,
-//     high-signal surface. NOT the harness-global memory bundle (cross-repo symbols, not CI-checkable).
+//     high-signal surface. NOT the private-repo memory bundle (cross-repo symbols, not CI-checkable).
 //   - Fenced code blocks (```…```) are stripped: those are examples, not claims about existing code.
 //   - Only CODE-SHAPED tokens are checked: camelCase or containing `_`. A bare lowercase word in
 //     backticks (`services`, `path`) is too ambiguous to flag; the point is to catch invented symbols,

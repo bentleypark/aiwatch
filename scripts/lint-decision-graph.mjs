@@ -13,8 +13,8 @@
 // A lint that adjudicates (c)/(d) manufactures false confidence. Same split `docs/reference/index.md`
 // already draws for the OKF bundle: structural health is mechanical, judgement health is a human pass.
 //
-// NOT CI-GATED, by construction: the memory bundle is harness-global (`~/.claude/.../memory/`), not
-// repo content, so Actions has nothing to check out. Unlike `lint-okf-bundle.mjs`, which lints the
+// NOT CI-GATED: the memory bundle is its own PRIVATE repo (`aiwatch-wiki` — #1353) that Actions has no
+// credential for. Unlike `lint-okf-bundle.mjs`, which lints the
 // in-repo `docs/reference/` bundle. The PURE functions below are CI-gated via `npm run test:scripts`;
 // the bundle assertion is a local `npm run lint:graph` invoked by the `memory-lint` skill.
 //
@@ -23,13 +23,35 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 
-const DEFAULT_MEMORY_DIR = join(
-  homedir(),
-  '.claude/projects/-Users-bentley-Desktop-bentely-aiwatch-aiwatch/memory',
-)
+/**
+ * Where the bundle is, as CONFIGURATION — `MEMORY_DIR`, else a gitignored `.memory-dir` file at the
+ * repo root holding the path. Nothing is inferred.
+ *
+ * Three schemes for inferring it were tried and reviewed away: rebuilding the harness's directory name
+ * from the checkout path, asking each candidate directory for its `origin` remote, and gating that on a
+ * `.git` entry. Each added one more predicate to a guard inspecting a filesystem this repo does not
+ * control, and the next round found the next hole. Do not add a fourth — the operator knows the path.
+ *
+ * Returns the path, or null. Pure.
+ */
+export function resolveMemoryDir(env, pointerFileText, home = homedir()) {
+  const fromEnv = typeof env === 'string' ? env.trim() : ''
+  const fromFile = typeof pointerFileText === 'string' ? pointerFileText.trim() : ''
+  const picked = fromEnv || fromFile
+  if (!picked) return null
+  // Every doc writes this path as `~/.claude/projects/<slug>/memory`. A shell expands that for
+  // `MEMORY_DIR=`; nothing expands it inside the pointer file, so the operator would copy the
+  // documented form into it and get "not found" printing back the path they know is right.
+  return picked === '~' || picked.startsWith('~/') ? join(home, picked.slice(1)) : picked
+}
+
+/** The pointer file sits at the repo ROOT, one level above `scripts/`. Pure, so the level is pinned. */
+export function pointerPathFor(scriptUrl) {
+  return join(dirname(dirname(fileURLToPath(scriptUrl))), POINTER_FILE)
+}
 
 /** Which page-name prefix may be the SUBJECT of each relation (decision-graph.md rules 1 + 1b). */
 export const SUBJECT_PREFIX = {
@@ -314,10 +336,20 @@ export function findUnclaimed(claimed, boardIssues, initiativeLabels = ['area:bi
 
 // ─── IO ────────────────────────────────────────────────────────────────────────
 
-function readBundle(dir) {
+/** Gitignored, one line, per machine; `.worktreeinclude` copies it into new worktrees. */
+export const POINTER_FILE = '.memory-dir'
+
+/**
+ * Bundle files that are NOT knowledge pages: the index, the history log, and the repo's own README.
+ * Exported, with `readBundle`, so the exclusion is pinned where it is APPLIED — asserting the Set's
+ * own literals left the call site free to drift, and it did.
+ */
+export const NON_PAGE_FILES = new Set(['MEMORY.md', 'log.md', 'README.md'])
+
+export function readBundle(dir) {
   const pages = {}
   for (const f of readdirSync(dir)) {
-    if (!f.endsWith('.md') || f === 'MEMORY.md' || f === 'log.md') continue
+    if (!f.endsWith('.md') || NON_PAGE_FILES.has(f)) continue
     pages[f.replace(/\.md$/, '')] = readFileSync(join(dir, f), 'utf8')
   }
   return pages
@@ -330,9 +362,15 @@ const printFindings = (findings) => {
 }
 
 function main(argv) {
-  const dir = process.env.MEMORY_DIR ?? DEFAULT_MEMORY_DIR
-  if (!existsSync(dir)) {
-    console.error(`memory bundle not found: ${dir}\nSet MEMORY_DIR to override.`)
+  const pointer = pointerPathFor(import.meta.url)
+  let pointerText = null
+  try { pointerText = readFileSync(pointer, 'utf8') } catch { /* absent is the normal first-run state */ }
+  const dir = resolveMemoryDir(process.env.MEMORY_DIR, pointerText)
+  if (!dir || !existsSync(dir)) {
+    console.error(dir
+      ? `memory bundle not found at: ${dir}`
+      : `memory bundle location not configured`)
+    console.error(`Set MEMORY_DIR, or write the bundle's path into ${pointer}.`)
     process.exit(2)
   }
   let pages
@@ -342,6 +380,12 @@ function main(argv) {
     // A read/permission error is a TOOL failure (exit 2), not a graph defect (exit 1) — do not let an
     // unreadable page masquerade as a structural finding.
     console.error(`could not read the memory bundle at ${dir}: ${err instanceof Error ? err.message : err}`)
+    process.exit(2)
+  }
+  if (Object.keys(pages).length === 0) {
+    // `0 pages` used to print a green tick. A bundle with no pages is a misconfiguration, and a lint
+    // that reports "all clean" for it is worse than one that reports nothing (#1353 review round 3).
+    console.error(`memory bundle at ${dir} has no pages — wrong directory, or an incomplete clone`)
     process.exit(2)
   }
   const findings = [
