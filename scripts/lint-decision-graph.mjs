@@ -336,7 +336,7 @@ export function findUnclaimed(claimed, boardIssues, initiativeLabels = ['area:bi
 
 // ─── IO ────────────────────────────────────────────────────────────────────────
 
-/** Gitignored, one line, per machine; `.worktreeinclude` copies it into new worktrees. */
+/** Gitignored, one line, per machine: the path to this machine's bundle. */
 export const POINTER_FILE = '.memory-dir'
 
 /**
