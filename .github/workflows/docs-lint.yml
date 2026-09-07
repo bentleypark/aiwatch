@@ -106,7 +106,12 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
+          # #1348 — named rather than left to the default lookup, so the key is explicit about the
+          # one lockfile this job installs from.
+          cache-dependency-path: package-lock.json
+      # #1348 — a stalled install must fail as `npm ci`, not as an anonymous job kill at the cap.
       - run: npm ci --no-audit --fund=false
+        timeout-minutes: 8
       - run: npx vitest run --config vitest.config.js api/__tests__/service-count-lockstep.test.ts
 
   doc-symbols:
