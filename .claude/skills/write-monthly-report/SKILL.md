@@ -105,6 +105,17 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      e.g. 「스택」 **when it means a product family** (not a genuine tech-stack reference) → 「제품군」. Do NOT
      nativize deliberate technical terms (MTTR, p75, granularity) — those stay. Match the register/tone of
      prior months' KO `<details>` blocks — but the calque-avoidance above wins if a prior month itself reads translated.
+     **Run the drift check rather than recalling the established wording** (aiwatch-reports#115).
+     `lint-recurrence.js` reads narrative structure, not wording, and aiwatch's `lint:korean` scans a
+     fixed list of surfaces in that repo which does not include the report. So before finalising the KO:
+     ```bash
+     node scripts/lint-korean-drift.js NNNN-NN/index.md     # from the checkout holding the draft
+     ```
+     **Run it from the checkout the draft is in, not a fixed path.** The script resolves the months it
+     compares against relative to its own location, so running the main checkout's copy while authoring
+     in a worktree compares against that checkout's committed text.
+     It prints each KO slot beside the same slot from the prior 3 months — the judgement stays yours.
+     Read how those months phrased the slot you are about to write, before you write it.
    - **Claims discipline — hedge, and don't re-teach a standing caveat every month.** (1) *Don't overclaim
      causation.* A reporting artifact doesn't disprove a real problem — say a high per-model count
      **overstates the disruption**, NOT that it is *"not instability" / "not availability loss"* (correlation
