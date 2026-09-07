@@ -160,7 +160,7 @@ session is active → branch in a NEW worktree, never in-place on the shared mai
 session can `git checkout` it out from under you, dragging its uncommitted WIP into your diff). **Launched from the VS Code
 extension button** (no `--worktree` flag)? Say **"work in a worktree"** right after the session
 starts — Claude relocates via the `EnterWorktree` tool (the Desktop app auto-creates one per
-session; the extension does not). `.worktreeinclude` copies `.env`/`.env.local`/`.dev.vars`/`.vercel/project.json`
+session; the extension does not). `.worktreeinclude` copies the gitignored local config it lists
 into every Claude-Code-created worktree (`--worktree`/`EnterWorktree` **and** subagent
 `isolation: worktree`), matching at any depth (`.dev.vars` → `worker/.dev.vars`) and creating missing
 dirs; it is read from the MAIN checkout, so an edit to it only takes effect once merged. Without the

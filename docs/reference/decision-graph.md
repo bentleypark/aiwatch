@@ -306,12 +306,13 @@ true.
 
 The bundle is a clone of the **private `aiwatch-wiki` repo**, checked out into this machine's harness
 memory directory. It is not in this repo and never will be: it holds operator-only adoption
-figures (the subject of #1354), and it cannot be split — the 17 decision/constraint/initiative
-pages carry 72 wikilink crossings with the other 132, and strategy-bearing pages are typed `project`
-while graph pages link out to purely engineering ones.
+figures (the subject of #1354), and it cannot be split — the decision/constraint/initiative pages and
+the rest are densely cross-linked in both directions, and strategy-bearing pages are typed `project`
+while graph pages link out to purely engineering ones. There is no cut line. (Counts were written here
+once and were wrong within three hours of the next `memory-ingest`; run the sweep if you need them.)
 
 **`lint-decision-graph.mjs` is told the path; it never infers it.** `MEMORY_DIR`, else a gitignored
-`.memory-dir` file at the repo root holding the path (`.worktreeinclude` copies it into new worktrees).
+`.memory-dir` file at the repo root holding the path.
 Neither present, or the path missing, or the directory holding no pages — all exit 2.
 
 The bundle is a git clone, so `memory-ingest` / `memory-lint` writes stay uncommitted until someone

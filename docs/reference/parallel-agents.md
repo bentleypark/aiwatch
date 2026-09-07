@@ -73,10 +73,10 @@ A worktree is a **fresh checkout**, so it starts without dependencies or gitigno
 config.
 
 1. **Local env** — handled automatically. [`.worktreeinclude`](../../.worktreeinclude) lists the
-   gitignored local config copied into every Claude-Code-created worktree: `.env`, `.env.local`,
-   `.dev.vars`, and `.vercel/project.json` (gitignore syntax; only gitignored matches are copied).
-   Both copiers — `--worktree` / `EnterWorktree` **and** subagent `isolation: worktree` — copy all
-   four. Manual `git worktree add` copies **nothing**; do it yourself.
+   gitignored local config copied into every Claude-Code-created worktree (gitignore syntax; only
+   gitignored matches are copied). Read that file for the entries. Both copiers — `--worktree` /
+   `EnterWorktree` **and** subagent `isolation: worktree` — copy every entry. Manual
+   `git worktree add` copies **nothing**; do it yourself.
 
    Two behaviours, common to both copiers, each established by probe rather than assumed:
    - **The list and the source files are read from the MAIN checkout**, not from the worktree you
@@ -93,8 +93,10 @@ config.
    > inside a live subagent: `worker/.dev.vars` and `.vercel/project.json` are both present. When
    > probing a worktree's contents, run the check **inside** the worktree's own session; a
    > post-mortem `ls` from outside proves nothing.
-2. **Dependencies** — **not** shared. Run `npm install` in each new worktree (`node_modules`
-   and Python venvs are per-directory).
+2. **Dependencies** — **not** shared. Run `npm install` in each new worktree, **and
+   `cd worker && npm install`** before `npm run typecheck:worker`, which fails without it. Which
+   packages are worker-only is stated once, in `.github/workflows/test.yml`'s comment on its
+   `npm ci --prefix worker` step. (`node_modules` and Python venvs are per-directory.)
 
 > **Why `.vercel/project.json` is on the list.** Verifying an Edge SSR page (`/intro`,
 > `/is-*-down`, `/methodology`, …) needs `vercel dev`. In an unlinked worktree `vercel dev --yes`
