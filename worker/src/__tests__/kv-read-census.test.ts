@@ -1,4 +1,4 @@
-// #1224 Phase 2 — tests for the cron's per-run KV read census. The failure this file guards is
+// #1224 — tests for the KV read census. The failure this file guards is
 // silent by construction: a census that misses reads reports smaller numbers, which read as "that
 // path is cheap" (`feedback_derived_signal_needs_scoped_diagnostic`).
 //
@@ -39,6 +39,24 @@ const VERBS = ['new', 'res', 'wd', 'down', 'recovered', 'degraded', 'fetch-persi
 /** `outer` ids each with `inner` ids beneath, e.g. recovered:{svcId}:{incId}. */
 const fanout = (prefix: string, outer: number, inner: number): Array<[string, number]> =>
   Array.from({ length: outer }, (_, i) => Array.from({ length: inner }, (_, j) => [`${prefix}:o${i}:i${j}`, 1] as [string, number])).flat()
+
+/** The one `family:`/`detail:` check every emission site shares. `snapshot()` pins which depth goes
+ *  in which FIELD; nothing pins which field is rendered under which LABEL, and both are
+ *  `Array<[string, number]>`, so a transposition typechecks and stays green. Depths are read off the
+ *  real emitted line, so it cannot pass against a hand-built fixture. */
+function expectFamilyDetailDepths(line: string | undefined) {
+  const parts = /\| family: (.*?) \| detail: (.*)$/.exec(line as string)
+  expect(parts, `line had no family:/detail: split: ${line}`).not.toBeNull()
+  const names = (half: string) => half.split(' ')
+    .map(p => p.split('=')[0]).filter(n => n && !n.startsWith('other') && !n.startsWith('<'))
+  // A depth-1 bucket names one segment before its `*`; a depth-2 bucket names two.
+  const depthOf = (n: string) => n.endsWith(':*') ? n.slice(0, -2).split(':').length : n.split(':').length
+  const fam = names((parts as RegExpExecArray)[1]), det = names((parts as RegExpExecArray)[2])
+  expect(fam.length, 'family: half was empty').toBeGreaterThan(0)
+  expect(det.length, 'detail: half was empty').toBeGreaterThan(0)
+  expect(fam.every(n => depthOf(n) === 1), `family: had a non-depth-1 bucket: ${fam.join(' ')}`).toBe(true)
+  expect(det.some(n => depthOf(n) === 2), `detail: had no depth-2 bucket: ${det.join(' ')}`).toBe(true)
+}
 
 describe('rollupByDepth — positional, so two runs are comparable', () => {
   it('folds a family onto its first segment at depth 1, and splits the vocabulary at depth 2', () => {
@@ -372,18 +390,7 @@ describe('cron wiring (#1224 Phase 2)', () => {
     // green — review reproduced exactly that. The consequence is the failure the fixed-depth design
     // was adopted to prevent: an operator subtracting two runs would subtract the wrong series.
     const { line } = await runCron({ DISCORD_WEBHOOK_URL: 'https://example.invalid/hook' })
-    const parts = /\| family: (.*?) \| detail: (.*)$/.exec(line as string)
-    expect(parts, `line had no family:/detail: split: ${line}`).not.toBeNull()
-    const names = (half: string) => half.split(' ')
-      .map(p => p.split('=')[0]).filter(n => n && !n.startsWith('other') && !n.startsWith('<'))
-    // A depth-1 bucket names one segment before its `*`; a depth-2 bucket names two. Read off the
-    // real emitted line, so it cannot pass against a hand-built fixture.
-    const depthOf = (n: string) => n.endsWith(':*') ? n.slice(0, -2).split(':').length : n.split(':').length
-    const fam = names((parts as RegExpExecArray)[1]), det = names((parts as RegExpExecArray)[2])
-    expect(fam.length, 'family: half was empty').toBeGreaterThan(0)
-    expect(det.length, 'detail: half was empty').toBeGreaterThan(0)
-    expect(fam.every(n => depthOf(n) === 1), `family: had a non-depth-1 bucket: ${fam.join(' ')}`).toBe(true)
-    expect(det.some(n => depthOf(n) === 2), `detail: had no depth-2 bucket: ${det.join(' ')}`).toBe(true)
+    expectFamilyDetailDepths(line)
   }, 60_000)
 
   it('reads MORE past the early return than before it — the contrast the previous test rests on', async () => {
@@ -472,6 +479,7 @@ describe('live status wiring (#1224 Phase 2)', () => {
     expect(total).toBe(calls.get.length + calls.getWithMetadata.length)
     expect(total).toBeGreaterThan(0)
     expect(line).toContain('path=/api/status')
+    expectFamilyDetailDepths(line)
   }, 60_000)
 
   it('emits the census when the status handler falls back after an internal error', async () => {
@@ -496,5 +504,63 @@ describe('live status wiring (#1224 Phase 2)', () => {
     const line = logs.find(l => l.includes('[fetch] #1224 kv read census'))
     expect(line).toBeDefined()
     expect(Number(/total=(\d+)/.exec(line as string)?.[1])).toBe(calls.get.length + calls.getWithMetadata.length)
+    expectFamilyDetailDepths(line)
+  }, 60_000)
+
+  // The wrap used to sit BELOW this route, so `/api/status/cached` read STATUS_CACHE uncensused while
+  // the wrap's own comment claimed it ran "after all non-status routes have returned".
+  // Behavioural, like its siblings above: moving the wrap back below the route emits no line here, and a rename changes nothing.
+  it('censuses /api/status/cached — the route the wrap used to sit below', async () => {
+    const { kv, calls } = fakeKv()
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network disabled in test'))
+    const logs: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { logs.push(args.map(String).join(' ')) })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const response = await workerModule.fetch(
+      new Request('https://example.com/api/status/cached'),
+      { ALLOWED_ORIGIN: '*', STATUS_CACHE: kv } as never,
+      { waitUntil: (promise: Promise<unknown>) => { void promise.catch(() => {}) }, passThroughOnException: () => {} } as never,
+    )
+
+    expect([200, 500, 503]).toContain(response.status)
+    const line = logs.find(l => l.includes('[fetch] #1224 kv read census'))
+    expect(line, 'no census line for /api/status/cached — the wrap is below the route again').toBeDefined()
+    expect(line).toContain('path=/api/status/cached')
+    expectFamilyDetailDepths(line)
+    // The census must equal what the binding actually served, not merely be non-zero: a wrap that
+    // attaches after some reads have already gone through would still emit a plausible line.
+    const total = Number(/total=(\d+)/.exec(line as string)?.[1])
+    expect(total).toBe(calls.get.length + calls.getWithMetadata.length)
+    expect(total).toBeGreaterThan(0)
+  }, 60_000)
+
+  // The `finally` exists because this route has MANY exits, and emitting at each is a rule the next
+  // exit added silently breaks. The test above drives the LAST exit only, so collapsing the
+  // `try/finally` to a single emission before that return keeps the whole suite green while the
+  // earlier exits go silent. `?src=statusline-*` returns ~170 lines earlier than it does.
+  it('emits on an EARLY exit of /api/status/cached, not only the final return', async () => {
+    const { kv, calls } = fakeKv()
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network disabled in test'))
+    const logs: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { logs.push(args.map(String).join(' ')) })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const response = await workerModule.fetch(
+      new Request('https://example.com/api/status/cached?src=statusline-branded'),
+      { ALLOWED_ORIGIN: '*', STATUS_CACHE: kv } as never,
+      { waitUntil: (promise: Promise<unknown>) => { void promise.catch(() => {}) }, passThroughOnException: () => {} } as never,
+    )
+
+    expect([200, 500, 503]).toContain(response.status)
+    const line = logs.find(l => l.includes('[fetch] #1224 kv read census'))
+    expect(line, 'no census line on the statusline exit — the emission is not on every exit').toBeDefined()
+    expect(line).toContain('path=/api/status/cached')
+    expectFamilyDetailDepths(line)
+    const total = Number(/total=(\d+)/.exec(line as string)?.[1])
+    expect(total).toBe(calls.get.length + calls.getWithMetadata.length)
+    expect(total).toBeGreaterThan(0)
   }, 60_000)
 })

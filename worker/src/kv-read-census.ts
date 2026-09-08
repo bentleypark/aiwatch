@@ -1,5 +1,5 @@
 /**
- * #1224 Phase 2 — per-run KV **read** attribution for the every-5-minute cron.
+ * #1224 — KV **read** attribution.
  *
  * ## Why key prefixes and not call sites
  *
@@ -10,9 +10,8 @@
  * ## What the numbers can and cannot be checked against
  *
  * It is **not** comparable to the account-level read count as an equality. The `fetch()` handler
- * reads the same namespace on every request (60s SPA polling, the is-down Edge pages), and none of
- * that is instrumented here. The honest check is a **one-directional bound**: for a given minute,
- * `census total <= account reads`.
+ * reads the same namespace on every request. The honest check is a **one-directional bound**:
+ * for a given minute, `census total <= account reads`.
  *
  * The invariant that is checkable from inside is conservation — every counted read lands in exactly
  * one bucket — so {@link ReadCensus.snapshot} verifies it on every call rather than trusting it.
@@ -159,7 +158,7 @@ export function reconcileBuckets(buckets: Array<[string, number]>, total: number
   const attributed = buckets.reduce((sum, [, n]) => sum + n, 0)
   const out = attributed === total ? [...buckets] : [...buckets, [UNATTRIBUTED_BUCKET, total - attributed] as [string, number]]
   if (attributed !== total) {
-    console.error('[cron] #1224 kv read census — BUCKETS DO NOT SUM TO TOTAL', `total=${total}`, `attributed=${attributed}`)
+    console.error('#1224 kv read census — BUCKETS DO NOT SUM TO TOTAL', `total=${total}`, `attributed=${attributed}`)
   }
   return out.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 }

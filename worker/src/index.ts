@@ -4320,8 +4320,7 @@ export default {
 
     } finally {
       // ONE line per cron run, unconditional. `total` is a LOWER BOUND on this minute's
-      // account-level `kvOperationsAdaptiveGroups` reads (the fetch() path reads the same
-      // namespace and is not instrumented). `snapshot()` reconciles both lists against `total`.
+      // account-level `kvOperationsAdaptiveGroups` reads (other paths read the same namespace). `snapshot()` reconciles both lists against `total`.
       // Self-guarded: a throw from inside a `finally` REPLACES the exception the body was raising, so
       // an instrument fault would erase the outage it was measuring. Diagnostics never outrank the
       // thing they diagnose.
@@ -5321,277 +5320,306 @@ export default {
       })
     }
 
+    // #1224 — wrap STATUS_CACHE here, above `/api/status/cached`, so that route's reads are
+    // attributed. The wrap used to sit below it while its own comment said it ran "after all
+    // non-status routes have returned" — `/api/status/cached` is a status route and was on the wrong
+    // side of it.
+    //
+    // A census total is NOT the namespace total: routes that return above this line are never counted,
+    // and some that read through the wrapped binding return before reaching an emission site, so their
+    // counts accumulate and are dropped. Neither is a regression. Reconcile against the account-level
+    // figure (#1224) rather than assuming a total here covers a route you have not traced.
+    const kvCensus = createReadCensus()
+    const censusedKv = env.STATUS_CACHE ? kvCensus.wrapKv(env.STATUS_CACHE) : undefined
+    env = new Proxy(env, {
+      get: (target, prop) => (prop === 'STATUS_CACHE' && censusedKv) ? censusedKv : Reflect.get(target, prop),
+    })
+
     // GET /api/status/cached — KV cache only (no live fetch), for Is X Down SSR pages
     if (request.method === 'GET' && url.pathname === '/api/status/cached') {
-      // Claude-only Chrome extension polls (#837, tagged ?src=ext-claude) need just
-      // the three Anthropic surfaces' status + Score + per-category fallback. Checked
-      // BEFORE the statusline branch (a distinct, narrower projection). Served from an
-      // in-worker edge cache (caches.default) so per-minute polls at scale collapse to
-      // ~1 KV/score recompute per PoP per s-maxage window — true zone-level request
-      // elimination is gated on a custom Worker subdomain (#439).
-      if (isExtClaudeRequest(url.searchParams)) {
-        // WAE tag (#494 pattern) — count EVERY ext-claude poll, BEFORE the cache-hit
-        // early-return below, so the #837 adoption metric reflects total poll volume
-        // (on workers.dev the Worker runs on every request regardless; caches.default
-        // only saves the KV read + score recompute, not the invocation). Otherwise it
-        // would record just the ~1/PoP/60s miss rate. Synchronous void; wrap so a WAE
-        // failure never aborts the response. Index entries cap at 32 bytes.
-        try {
-          env.ANALYTICS?.writeDataPoint({ blobs: [EXT_INDEX], doubles: [1], indexes: [EXT_INDEX] })
-        } catch (err) {
-          console.warn('[wae] ext-claude writeDataPoint failed:', err instanceof Error ? err.message : err)
+    try {
+        // Claude-only Chrome extension polls (#837, tagged ?src=ext-claude) need just
+        // the three Anthropic surfaces' status + Score + per-category fallback. Checked
+        // BEFORE the statusline branch (a distinct, narrower projection). Served from an
+        // in-worker edge cache (caches.default) so per-minute polls at scale collapse to
+        // ~1 KV/score recompute per PoP per s-maxage window — true zone-level request
+        // elimination is gated on a custom Worker subdomain (#439).
+        if (isExtClaudeRequest(url.searchParams)) {
+          // WAE tag (#494 pattern) — count EVERY ext-claude poll, BEFORE the cache-hit
+          // early-return below, so the #837 adoption metric reflects total poll volume
+          // (on workers.dev the Worker runs on every request regardless; caches.default
+          // only saves the KV read + score recompute, not the invocation). Otherwise it
+          // would record just the ~1/PoP/60s miss rate. Synchronous void; wrap so a WAE
+          // failure never aborts the response. Index entries cap at 32 bytes.
+          try {
+            env.ANALYTICS?.writeDataPoint({ blobs: [EXT_INDEX], doubles: [1], indexes: [EXT_INDEX] })
+          } catch (err) {
+            console.warn('[wae] ext-claude writeDataPoint failed:', err instanceof Error ? err.message : err)
+          }
+
+          // Canonical cache key — all ext-claude polls share ONE caches.default entry
+          // regardless of incidental query params (a versioned/cache-buster param would
+          // otherwise fork the cache and defeat the per-PoP collapse this branch exists for).
+          const cacheKey = new Request(`${url.origin}${url.pathname}?src=ext-claude`)
+          const cache = caches.default
+          const hit = await cache.match(cacheKey)
+          if (hit) return hit
+
+          const cacheData = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+          // #1227 — no snapshot ⇒ 503 + `no-store`, and NOT written into caches.default. The payload
+          // itself was already safe (the extension maps an empty projection to a grey `unknown`, not
+          // green — extension/lib/render.js), but the 60s edge cache is not: one unlucky poll pinned
+          // that no-evidence answer per-PoP for a minute after the snapshot came back, and the
+          // `cache.match` short-circuit above returns it without re-reading.
+          if (!cacheData) {
+            return new Response(JSON.stringify({ error: 'no status snapshot available' }), {
+              status: 503,
+              headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-store',
+              },
+            })
+          }
+          const summaries = await readProbeSummaries(env.STATUS_CACHE, 'ext-claude')
+          // Score the FULL set — getFallbacks needs the candidate pool — but emit only
+          // the three Claude surfaces (buildExtClaudePayload narrows).
+          const scoredAll = cacheData.services.map((svc) => {
+            const s = scoreFor(svc, summaries)
+            return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
+          })
+          // #837 PR2 — enrich so the popup shows what's actually happening, not just a color:
+          // (1) the GATED crowd-report map (same #575 gate as the dashboard — only corroborated
+          //     services appear, so crowd alone can never contradict an operational badge), and
+          // (2) the AI summary of any ACTIVE Claude incident (bounded: 3 services, usually 0 active).
+          // .catch parity with the ai:analysis reads below — a report-feed KV failure degrades
+          // to "no crowd reports", never 500s the whole projection response.
+          const extReportFeed = await buildReportFeedMap(env.STATUS_CACHE, cacheData.services).catch((err) => {
+            console.warn('[ext-claude] reportFeed map failed:', err instanceof Error ? err.message : err)
+            return {}
+          })
+          const extAiSummary: Record<string, string> = {}
+          await Promise.all(scoredAll
+            .filter((svc) => (EXT_CLAUDE_IDS as readonly string[]).includes(svc.id))
+            .flatMap((svc) => (svc.incidents ?? [])
+              .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
+              .map(async (inc) => {
+                const raw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+                if (!raw) return
+                try {
+                  const a = JSON.parse(raw) as AIAnalysisResult
+                // #1328 — both halves. These two surfaces consume ONE string and are already
+                // filtered to active incidents, so joining here restores the sentence they lost
+                // when `summary` stopped carrying the status clause — and it does so without a
+                // client change (the extension popup ships on its own release train). Doing it
+                // this way is what leaves the rule with NO exception list to drift.
+                  if (a.summary) extAiSummary[`${svc.id}:${inc.id}`] = [a.summary, a.progress].filter(Boolean).join(' ')
+                } catch (err) {
+                  console.warn('[ext-claude] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
+                }
+              })))
+          const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData.cachedAt, { reportFeedMap: extReportFeed, aiSummaryMap: extAiSummary })), {
+            headers: {
+              'Content-Type': 'application/json',
+              // Public, unauthenticated GET — extension fetches bypass CORS via MV3
+              // host_permissions; `*` also lets curl/tests hit it (mirrors statusline).
+              'Access-Control-Allow-Origin': '*',
+              'Cache-Control': 'public, max-age=30, s-maxage=60',
+            },
+          })
+          ctx.waitUntil(cache.put(cacheKey, res.clone()))
+          return res
         }
-
-        // Canonical cache key — all ext-claude polls share ONE caches.default entry
-        // regardless of incidental query params (a versioned/cache-buster param would
-        // otherwise fork the cache and defeat the per-PoP collapse this branch exists for).
-        const cacheKey = new Request(`${url.origin}${url.pathname}?src=ext-claude`)
-        const cache = caches.default
-        const hit = await cache.match(cacheKey)
-        if (hit) return hit
-
-        const cacheData = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
-        // #1227 — no snapshot ⇒ 503 + `no-store`, and NOT written into caches.default. The payload
-        // itself was already safe (the extension maps an empty projection to a grey `unknown`, not
-        // green — extension/lib/render.js), but the 60s edge cache is not: one unlucky poll pinned
-        // that no-evidence answer per-PoP for a minute after the snapshot came back, and the
-        // `cache.match` short-circuit above returns it without re-reading.
-        if (!cacheData) {
-          return new Response(JSON.stringify({ error: 'no status snapshot available' }), {
-            status: 503,
+        // Statusline polls (#438, tagged ?src=statusline-*) only need id/name/status.
+        // Return the ~KB lite projection and skip the ~2 MB probe/latency/AI reads —
+        // this path was the single largest Vercel Fast Data Transfer route. Freshly
+        // copied snippets hit the Worker domain directly (off Vercel); legacy installs
+        // still using ai-watch.dev get the small payload here via the rewrite.
+        if (isStatuslineRequest(url.searchParams)) {
+          const liteCache = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+          // Record per-preset statusline request count in WAE (#494) so we can
+          // isolate ?src=statusline-* traffic from regular cached-endpoint traffic
+          // when evaluating #400 Phase 1 distribution gates. writeDataPoint is
+          // synchronous (void return) but can throw on payload validation errors
+          // or binding misconfiguration — wrap in try/catch so a WAE failure never
+          // aborts the statusline response. WAE index entries are capped at 32 bytes.
+          const src = url.searchParams.get('src') // e.g. "statusline-compact_badge"
+          if (src && env.ANALYTICS) {
+            try {
+              const safeSrc = src.slice(0, 32)
+              env.ANALYTICS.writeDataPoint({
+                blobs: [safeSrc],   // blob1: full src tag (preset slug)
+                doubles: [1],       // double1: request counter
+                indexes: [safeSrc], // fast dimension filter (max 32 bytes)
+              })
+            } catch (err) {
+              console.warn('[wae] writeDataPoint failed:', err instanceof Error ? err.message : err)
+            }
+          }
+          // #1227 — 503, NOT the old "intentional 200 with empty services". That fail-silent contract
+          // was written on the belief that an empty array renders as "a clean statusline". It does not
+          // for a jq program of the shape `if ($d | length) == 0 then "🟢"` — an empty projection
+          // renders the green.
+          //
+          // This branch serves every apex `/api/status/cached` caller (vercel.json rewrites them here
+          // with `?src=statusline-proxy`), including jq snippets living in a user's settings.json that
+          // no deploy of ours can reach — so the status code is the only server-side lever. `curl -sf`
+          // drops a 503, jq then receives empty stdin and emits nothing. A blank statusline is honest;
+          // a green one is not. (The server-rendered presets get a ⚪ marker instead — they can,
+          // because #918 owns their rendering. See renderStatuslinePresetUnknown.)
+          if (!liteCache) {
+            return new Response('', {
+              status: 503,
+              headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' },
+            })
+          }
+          // CORS `*` since this is public, unauthenticated, GET-only status data hit by curl from any host.
+          return new Response(JSON.stringify(buildStatuslinePayload(liteCache)), {
             headers: {
               'Content-Type': 'application/json',
               'Access-Control-Allow-Origin': '*',
-              'Cache-Control': 'no-store',
+              'Cache-Control': 'public, max-age=30',
             },
           })
         }
-        const summaries = await readProbeSummaries(env.STATUS_CACHE, 'ext-claude')
-        // Score the FULL set — getFallbacks needs the candidate pool — but emit only
-        // the three Claude surfaces (buildExtClaudePayload narrows).
-        const scoredAll = cacheData.services.map((svc) => {
-          const s = scoreFor(svc, summaries)
-          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
-        })
-        // #837 PR2 — enrich so the popup shows what's actually happening, not just a color:
-        // (1) the GATED crowd-report map (same #575 gate as the dashboard — only corroborated
-        //     services appear, so crowd alone can never contradict an operational badge), and
-        // (2) the AI summary of any ACTIVE Claude incident (bounded: 3 services, usually 0 active).
-        // .catch parity with the ai:analysis reads below — a report-feed KV failure degrades
-        // to "no crowd reports", never 500s the whole projection response.
-        const extReportFeed = await buildReportFeedMap(env.STATUS_CACHE, cacheData.services).catch((err) => {
-          console.warn('[ext-claude] reportFeed map failed:', err instanceof Error ? err.message : err)
-          return {}
-        })
-        const extAiSummary: Record<string, string> = {}
-        await Promise.all(scoredAll
-          .filter((svc) => (EXT_CLAUDE_IDS as readonly string[]).includes(svc.id))
-          .flatMap((svc) => (svc.incidents ?? [])
-            .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
-            .map(async (inc) => {
-              const raw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+        const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+        if (cached) {
+          // Read latency + probe data first (needed for Mistral noise filtering before AI analysis)
+          let latency24h: Array<{ t: string; data: Record<string, number> }> = []
+          let probe24h: ProbeSnapshot[] = []
+          const [latRaw, probeRaw] = await Promise.all([
+            env.STATUS_CACHE!.get('latency:24h').catch(() => null),
+            env.STATUS_CACHE!.get('probe:24h').catch(() => null),
+          ])
+          if (latRaw) {
+            try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
+          }
+          if (probeRaw) {
+            try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
+          }
+
+          // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
+          // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly.
+
+          // Read AI analysis (per-incident keys) — uses live incident list
+          const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
+          const recentlyRecovered: Record<string, string[]> = {}
+          // Active incidents: read ai:analysis:{svcId}:{incId} for each
+          // monitoring = "recovery confirmed" — exclude from active analysis display
+          const withActiveInc = cached.services.filter(s =>
+            (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
+          )
+          await Promise.all(withActiveInc.flatMap(svc =>
+            (svc.incidents ?? []).filter(i => i.status !== 'resolved' && i.status !== 'monitoring').map(async (inc) => {
+              const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
               if (!raw) return
               try {
-                const a = JSON.parse(raw) as AIAnalysisResult
-              // #1328 — both halves. These two surfaces consume ONE string and are already
-              // filtered to active incidents, so joining here restores the sentence they lost
-              // when `summary` stopped carrying the status clause — and it does so without a
-              // client change (the extension popup ships on its own release train). Doing it
-              // this way is what leaves the rule with NO exception list to drift.
-                if (a.summary) extAiSummary[`${svc.id}:${inc.id}`] = [a.summary, a.progress].filter(Boolean).join(' ')
-              } catch (err) {
-                console.warn('[ext-claude] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
-              }
-            })))
-        const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData.cachedAt, { reportFeedMap: extReportFeed, aiSummaryMap: extAiSummary })), {
-          headers: {
-            'Content-Type': 'application/json',
-            // Public, unauthenticated GET — extension fetches bypass CORS via MV3
-            // host_permissions; `*` also lets curl/tests hit it (mirrors statusline).
-            'Access-Control-Allow-Origin': '*',
-            'Cache-Control': 'public, max-age=30, s-maxage=60',
-          },
-        })
-        ctx.waitUntil(cache.put(cacheKey, res.clone()))
-        return res
-      }
-      // Statusline polls (#438, tagged ?src=statusline-*) only need id/name/status.
-      // Return the ~KB lite projection and skip the ~2 MB probe/latency/AI reads —
-      // this path was the single largest Vercel Fast Data Transfer route. Freshly
-      // copied snippets hit the Worker domain directly (off Vercel); legacy installs
-      // still using ai-watch.dev get the small payload here via the rewrite.
-      if (isStatuslineRequest(url.searchParams)) {
-        const liteCache = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
-        // Record per-preset statusline request count in WAE (#494) so we can
-        // isolate ?src=statusline-* traffic from regular cached-endpoint traffic
-        // when evaluating #400 Phase 1 distribution gates. writeDataPoint is
-        // synchronous (void return) but can throw on payload validation errors
-        // or binding misconfiguration — wrap in try/catch so a WAE failure never
-        // aborts the statusline response. WAE index entries are capped at 32 bytes.
-        const src = url.searchParams.get('src') // e.g. "statusline-compact_badge"
-        if (src && env.ANALYTICS) {
-          try {
-            const safeSrc = src.slice(0, 32)
-            env.ANALYTICS.writeDataPoint({
-              blobs: [safeSrc],   // blob1: full src tag (preset slug)
-              doubles: [1],       // double1: request counter
-              indexes: [safeSrc], // fast dimension filter (max 32 bytes)
-            })
-          } catch (err) {
-            console.warn('[wae] writeDataPoint failed:', err instanceof Error ? err.message : err)
-          }
-        }
-        // #1227 — 503, NOT the old "intentional 200 with empty services". That fail-silent contract
-        // was written on the belief that an empty array renders as "a clean statusline". It does not
-        // for a jq program of the shape `if ($d | length) == 0 then "🟢"` — an empty projection
-        // renders the green.
-        //
-        // This branch serves every apex `/api/status/cached` caller (vercel.json rewrites them here
-        // with `?src=statusline-proxy`), including jq snippets living in a user's settings.json that
-        // no deploy of ours can reach — so the status code is the only server-side lever. `curl -sf`
-        // drops a 503, jq then receives empty stdin and emits nothing. A blank statusline is honest;
-        // a green one is not. (The server-rendered presets get a ⚪ marker instead — they can,
-        // because #918 owns their rendering. See renderStatuslinePresetUnknown.)
-        if (!liteCache) {
-          return new Response('', {
-            status: 503,
-            headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' },
-          })
-        }
-        // CORS `*` since this is public, unauthenticated, GET-only status data hit by curl from any host.
-        return new Response(JSON.stringify(buildStatuslinePayload(liteCache)), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Cache-Control': 'public, max-age=30',
-          },
-        })
-      }
-      const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
-      if (cached) {
-        // Read latency + probe data first (needed for Mistral noise filtering before AI analysis)
-        let latency24h: Array<{ t: string; data: Record<string, number> }> = []
-        let probe24h: ProbeSnapshot[] = []
-        const [latRaw, probeRaw] = await Promise.all([
-          env.STATUS_CACHE!.get('latency:24h').catch(() => null),
-          env.STATUS_CACHE!.get('probe:24h').catch(() => null),
-        ])
-        if (latRaw) {
-          try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
-        }
-        if (probeRaw) {
-          try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
-        }
-
-        // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
-        // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly.
-
-        // Read AI analysis (per-incident keys) — uses live incident list
-        const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
-        const recentlyRecovered: Record<string, string[]> = {}
-        // Active incidents: read ai:analysis:{svcId}:{incId} for each
-        // monitoring = "recovery confirmed" — exclude from active analysis display
-        const withActiveInc = cached.services.filter(s =>
-          (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
-        )
-        await Promise.all(withActiveInc.flatMap(svc =>
-          (svc.incidents ?? []).filter(i => i.status !== 'resolved' && i.status !== 'monitoring').map(async (inc) => {
-            const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
-            if (!raw) return
-            try {
-              const parsed = JSON.parse(raw) as AIAnalysisResult
-              if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
-              aiAnalysis[svc.id].push(parsed)
-            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
-          })
-        ))
-        // Recently recovered: operational services with recovered:{svcId}:{incId} KV (independent of AI analysis)
-        // Also check ai:analysis keys for enrichment (resolved analysis data for modal display)
-        const recoveryCutoff = Date.now() - 3 * 3600_000
-        const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
-        await Promise.all(operationalCached.flatMap(svc =>
-          // #1292 — a synthesized incident can never have a `recovered:` marker (isMarkableOnStatusEdge
-          // refuses it, and it never alerts), so probing for one is a guaranteed miss. It would fire for
-          // ~3h/day per day-bucket, since a full-day bucket "resolves" at the next day's local noon.
-          // Same skip the /feed handler applies for the same reason.
-          (svc.incidents ?? []).filter(i => i.derived !== 'status_history' && i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
-            // Check independent recovery marker first
-            const recoveredRaw = await env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null)
-            if (recoveredRaw) {
-              if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
-              if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
-            }
-            // Also check AI analysis for enrichment (optional — banner shows regardless)
-            const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
-            if (!raw) return
-            try {
-              const parsed = JSON.parse(raw) as AIAnalysisResult
-              if (parsed.resolvedAt) {
+                const parsed = JSON.parse(raw) as AIAnalysisResult
                 if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
                 aiAnalysis[svc.id].push(parsed)
+              } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
+            })
+          ))
+          // Recently recovered: operational services with recovered:{svcId}:{incId} KV (independent of AI analysis)
+          // Also check ai:analysis keys for enrichment (resolved analysis data for modal display)
+          const recoveryCutoff = Date.now() - 3 * 3600_000
+          const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
+          await Promise.all(operationalCached.flatMap(svc =>
+            // #1292 — a synthesized incident can never have a `recovered:` marker (isMarkableOnStatusEdge
+            // refuses it, and it never alerts), so probing for one is a guaranteed miss. It would fire for
+            // ~3h/day per day-bucket, since a full-day bucket "resolves" at the next day's local noon.
+            // Same skip the /feed handler applies for the same reason.
+            (svc.incidents ?? []).filter(i => i.derived !== 'status_history' && i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
+              // Check independent recovery marker first
+              const recoveredRaw = await env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null)
+              if (recoveredRaw) {
                 if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
                 if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
               }
-            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
+              // Also check AI analysis for enrichment (optional — banner shows regardless)
+              const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
+              if (!raw) return
+              try {
+                const parsed = JSON.parse(raw) as AIAnalysisResult
+                if (parsed.resolvedAt) {
+                  if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
+                  aiAnalysis[svc.id].push(parsed)
+                  if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
+                  if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
+                }
+              } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
+            })
+          ))
+
+          // See readRecentSecurityAlerts — both endpoints must emit this field.
+          const securityAlerts = await readRecentSecurityAlerts(env.STATUS_CACHE!)
+
+          // #475 — canonical per-user alert feed (see /api/status). Both endpoints emit it.
+          const alertFeed = await readAlertFeed(env.STATUS_CACHE!)
+          // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
+          const reportFeed = await buildReportFeedMap(env.STATUS_CACHE!, cached.services)
+
+          // Calculate scores for cached services (same as /api/status)
+          const cachedProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-cached')
+          const scoredCached = cached.services.map((svc) => {
+            const s = scoreFor(svc, cachedProbeSummaries)
+            return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}) }
           })
-        ))
 
-        // See readRecentSecurityAlerts — both endpoints must emit this field.
-        const securityAlerts = await readRecentSecurityAlerts(env.STATUS_CACHE!)
+          // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
+          const supplyChainBanner = buildSupplyChainBanner(scoredCached)
+          // #1053 — cross-provider upstream links. THIS is the path is-down reads; omitting it here
+          // would leave the SSR page permanently linkless while the dashboard worked.
+          //
+          // Emitted UNCONDITIONALLY (an empty array when the gate stays quiet), unlike the
+          // alertFeed/reportFeed/supplyChainBanner neighbours below which omit their key. Deliberate:
+          // this gate fires only during a live cross-provider outage — a handful of times a year — and
+          // the worker deploy is manual + batched, so with a conditional key `upstreamLinks ===
+          // undefined` would mean EITHER "no #1053 worker deployed" OR "deployed and correctly quiet",
+          // with no observable separating them, ever. The feature could be dead on arrival for weeks
+          // with zero signal (#1032's stale-branch deploy is a live way for that to happen). Presence of
+          // the key now means "the #1053 code is live", which is both the cheapest deploy check and what
+          // makes a #873 `assert:` clause possible on this issue — the gate RESULT is not assertable
+          // because it is outage-timed. #574's banner has the conditional shape and has sat
+          // verify-blocked ever since; that is the outcome this avoids.
+          // #1072 — feeds ride in the same snapshot (see cacheRead: absent on a pre-#1072 snapshot).
+          const upstreamLinks = buildUpstreamLinks(scoredCached, cached.upstreamFeeds ?? [], Date.now())
 
-        // #475 — canonical per-user alert feed (see /api/status). Both endpoints emit it.
-        const alertFeed = await readAlertFeed(env.STATUS_CACHE!)
-        // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
-        const reportFeed = await buildReportFeedMap(env.STATUS_CACHE!, cached.services)
-
-        // Calculate scores for cached services (same as /api/status)
-        const cachedProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-cached')
-        const scoredCached = cached.services.map((svc) => {
-          const s = scoreFor(svc, cachedProbeSummaries)
-          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}) }
+          return new Response(JSON.stringify({
+            services: scoredCached,
+            lastUpdated: cached.cachedAt,
+            cached: true,
+            latency24h,
+            ...(probe24h.length > 0 ? { probe24h } : {}),
+            ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
+            ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
+            ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
+            ...(alertFeed.length > 0 ? { alertFeed } : {}),
+            ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
+            ...(supplyChainBanner ? { supplyChainBanner } : {}),
+            upstreamLinks,
+          }), {
+            status: 200,
+            headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
+          })
+        }
+        return new Response(JSON.stringify({ error: 'no cached data' }), {
+          status: 503,
+          headers: { ...cors, 'Content-Type': 'application/json' },
         })
-
-        // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
-        const supplyChainBanner = buildSupplyChainBanner(scoredCached)
-        // #1053 — cross-provider upstream links. THIS is the path is-down reads; omitting it here
-        // would leave the SSR page permanently linkless while the dashboard worked.
-        //
-        // Emitted UNCONDITIONALLY (an empty array when the gate stays quiet), unlike the
-        // alertFeed/reportFeed/supplyChainBanner neighbours below which omit their key. Deliberate:
-        // this gate fires only during a live cross-provider outage — a handful of times a year — and
-        // the worker deploy is manual + batched, so with a conditional key `upstreamLinks ===
-        // undefined` would mean EITHER "no #1053 worker deployed" OR "deployed and correctly quiet",
-        // with no observable separating them, ever. The feature could be dead on arrival for weeks
-        // with zero signal (#1032's stale-branch deploy is a live way for that to happen). Presence of
-        // the key now means "the #1053 code is live", which is both the cheapest deploy check and what
-        // makes a #873 `assert:` clause possible on this issue — the gate RESULT is not assertable
-        // because it is outage-timed. #574's banner has the conditional shape and has sat
-        // verify-blocked ever since; that is the outcome this avoids.
-        // #1072 — feeds ride in the same snapshot (see cacheRead: absent on a pre-#1072 snapshot).
-        const upstreamLinks = buildUpstreamLinks(scoredCached, cached.upstreamFeeds ?? [], Date.now())
-
-        return new Response(JSON.stringify({
-          services: scoredCached,
-          lastUpdated: cached.cachedAt,
-          cached: true,
-          latency24h,
-          ...(probe24h.length > 0 ? { probe24h } : {}),
-          ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
-          ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
-          ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
-          ...(alertFeed.length > 0 ? { alertFeed } : {}),
-          ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
-          ...(supplyChainBanner ? { supplyChainBanner } : {}),
-          upstreamLinks,
-        }), {
-          status: 200,
-          headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
-        })
+    } finally {
+      // #1224 — one line per request on this route, on EVERY exit. The route has many exits,
+      // so emitting at each is a rule the next one added silently breaks; the census is read in
+      // `finally` instead. Fail-soft: a census failure must never replace the response or the
+      // original request exception.
+      try {
+        const snapshot = kvCensus.snapshot()
+        console.log('[fetch] #1224 kv read census —', `path=${url.pathname}`, `total=${snapshot.total}`, `distinct=${snapshot.distinct}`,
+          censusedKv ? `| family: ${formatCensus(snapshot.families)} | detail: ${formatCensus(snapshot.detail, 8)}` : '| uninstrumented (no STATUS_CACHE binding)')
+      } catch (censusErr) {
+        console.error('[fetch] #1224 kv read census FAILED', censusErr instanceof Error ? censusErr.message : censusErr)
       }
-      return new Response(JSON.stringify({ error: 'no cached data' }), {
-        status: 503,
-        headers: { ...cors, 'Content-Type': 'application/json' },
-      })
+    }
     }
 
     // GET /api/probe/history — return daily probe RTT history
@@ -5710,16 +5738,6 @@ export default {
         headers: { ...cors, 'Content-Type': 'application/json' },
       })
     }
-
-    // #1224 Phase 2 — the cron census already attributes its own STATUS_CACHE reads. The remaining
-    // account volume is on this live fetch path, so wrap the binding once after all non-status routes
-    // have returned. This keeps admin/report/ingest traffic out of the series and covers every existing
-    // read in the status response without a per-call-site edit.
-    const kvCensus = createReadCensus()
-    const censusedKv = env.STATUS_CACHE ? kvCensus.wrapKv(env.STATUS_CACHE) : undefined
-    env = new Proxy(env, {
-      get: (target, prop) => (prop === 'STATUS_CACHE' && censusedKv) ? censusedKv : Reflect.get(target, prop),
-    })
 
     try {
       // Read probe data BEFORE fetchAllServices — needed for cross-validation of status page failures
