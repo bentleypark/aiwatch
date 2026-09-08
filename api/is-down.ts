@@ -4,6 +4,7 @@ import { SLUG_TO_SERVICE } from './_is-down/slug-map'
 import { getSEOContent } from './_is-down/seo-content'
 import { renderPage } from './_is-down/html-template'
 import { cspForHtml } from './_shared/csp-hash'
+import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { computeRankPosition } from './_is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
 import { buildSupplyChainNote, type SupplyChainBannerLike, type SupplyChainNote } from './_is-down/supply-chain-note'
@@ -15,31 +16,13 @@ const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
 const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
 
-// #378: notify the Worker when this Edge Function falls back to a degraded
-// render so an operator Discord alert fires. Worker handles 5-min KV dedup, so
-// fan-out across concurrent requests collapses to a single notice per surface
-// per slug per 5min. Awaited with a tight timeout so the user-facing fallback
-// response isn't blocked when the Worker is the very thing that's unhealthy —
-// 500ms is enough for a healthy Worker to respond from the same edge region
-// and short enough that a fully-down Worker doesn't compound the user wait.
-const ALERT_TIMEOUT_MS = 500
-
-async function notifyEdgeFallback(slug: string, reason: string): Promise<void> {
-  const token = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.EDGE_ALERT_TOKEN
-  if (!token) return  // not configured → skip silently in local/preview
-  try {
-    await fetch(`${WORKER_API}/api/internal/edge-fallback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ surface: 'is-down', slug, reason }),
-      signal: AbortSignal.timeout(ALERT_TIMEOUT_MS),
-    })
-  } catch (err) {
-    // Swallow — the alert is best-effort. The user-facing fallback render is
-    // unaffected; if alerting itself is broken, that is a separate signal.
-    console.warn(`[is-down/${slug}] edge-fallback alert dispatch failed:`, err instanceof Error ? err.message : err)
-  }
-}
+// #378: notify the Worker when this Edge Function falls back to a degraded render so an operator
+// Discord alert fires. Worker handles 5-min KV dedup, so fan-out across concurrent requests
+// collapses to a single notice per surface per slug per 5min. Awaited with a tight timeout so the
+// user-facing fallback response isn't blocked when the Worker is the very thing that's unhealthy.
+//
+// #1368 — the body moved to `_shared/edge-fallback-alert.ts`; that module carries the history and
+// the reasons. `WORKER_API` stays declared here and is passed in.
 
 // Per-isolate dedup for repeated ops signals — re-fires on cold start / per isolate in
 // the fleet, which gives operators enough visibility on deploy without log-volume
@@ -454,8 +437,12 @@ export default async function handler(req: Request) {
       console.error(`[is-down/${slug}] API returned HTTP ${result[0].value.status}`)
     } else if (result[0].status === 'rejected') {
       const err = result[0].reason
-      fallbackReason = err?.name === 'AbortError' ? 'worker_timeout' : 'worker_unreachable'
-      console.error(`[is-down/${slug}] API fetch ${err?.name === 'AbortError' ? 'timeout' : 'failed'}:`, err?.message)
+      // #1368 — `AbortSignal.timeout()` rejects with TimeoutError; AbortError is what an explicit
+      // `AbortController.abort()` produces. Both are accepted because this branch cannot tell which
+      // the running engine emits, and keying on one of them mislabels a real timeout.
+      const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+      fallbackReason = timedOut ? 'worker_timeout' : 'worker_unreachable'
+      console.error(`[is-down/${slug}] API fetch ${timedOut ? 'timeout' : 'failed'}:`, err?.message)
     }
 
     // Region recommendation (refs #422 Phase 2). regionStatusOf returns null
@@ -512,7 +499,7 @@ export default async function handler(req: Request) {
     // and the Cache-Control so a retry gets a fresh fetch, and notify the
     // Worker so the operator gets a Discord alert.
     const isFallback = serviceData === null
-    if (isFallback) await notifyEdgeFallback(slug, fallbackReason)
+    if (isFallback) await notifyEdgeFallback(WORKER_API, { surface: 'is-down', slug, reason: fallbackReason }, `is-down/${slug}`)
     // #482 — HASH-based CSP (not nonce): hash THIS response's inline scripts so the policy is
     // derived from the served content. Unlike a random nonce, a content hash stays valid when the
     // page is edge-cached (the cached header's hashes match the cached body), so /is-down keeps its

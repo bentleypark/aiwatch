@@ -82,18 +82,19 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     // and we want to assert the `reason` field encodes the class (not collapsed into
     // a generic 'parse_error' for HTTP-success-but-missing-target, etc).
     process.env.EDGE_ALERT_TOKEN = 'test-token'
-    const alertReasons: string[] = []
+    const alerts: Array<{ surface: string; slug: string; reason: string }> = []
     fetchMock.mockImplementation(async (url, init) => {
       if (typeof url === 'string' && url.includes('/api/internal/edge-fallback')) {
-        const body = JSON.parse((init?.body as string) ?? '{}')
-        alertReasons.push(body.reason)
+        alerts.push(JSON.parse((init?.body as string) ?? '{}'))
         return new Response(null, { status: 200 })
       }
       throw new Error('upstream-side mock not configured for this case')
     })
 
-    // Worker timeout (AbortError)
-    fetchMock.mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
+    // Worker timeout, in the shape `AbortSignal.timeout()` actually rejects with (#1368). The
+    // previous mock used `AbortError`, which the classifier keyed on — so the test certified a label
+    // a real timeout could not reach.
+    fetchMock.mockRejectedValueOnce(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }))
     await handler(makeReq('claude-api'))
     // Worker non-2xx
     fetchMock.mockResolvedValueOnce(new Response('upstream', { status: 502 }))
@@ -104,7 +105,16 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     }))
     await handler(makeReq('gemini'))
 
-    expect(alertReasons).toEqual(['worker_timeout', 'worker_http_502', 'service_missing'])
+    // #1368 — surface and slug are asserted alongside reason, not just reason. The Worker keys its
+    // 5-minute dedup on `surface:slug`, so a call site passing a constant slug (or transposing slug
+    // and reason, which the object-shaped signature makes cheap) would collapse all 43 `/is-*-down`
+    // pages into ONE dedup window: a single Discord line per five minutes for a fleet-wide outage,
+    // everything else suppressed — with every test still green.
+    expect(alerts).toEqual([
+      { surface: 'is-down', slug: 'claude-api', reason: 'worker_timeout' },
+      { surface: 'is-down', slug: 'openai-api', reason: 'worker_http_502' },
+      { surface: 'is-down', slug: 'gemini', reason: 'service_missing' },
+    ])
   })
 
   it('returns 404 for an unknown slug regardless of Worker state', async () => {
