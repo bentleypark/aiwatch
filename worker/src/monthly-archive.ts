@@ -1522,6 +1522,7 @@ export async function buildMonthlyArchive(
   const dailyData: Record<string, DailyCounters> = {}
   let daysCollected = 0
   let parseErrors = 0
+  const missingHistoryIdx: number[] = []
   uptimeResults.forEach((raw, i) => {
     if (raw) {
       try {
@@ -1531,8 +1532,37 @@ export async function buildMonthlyArchive(
         parseErrors++
         console.warn(`[monthly-archive] corrupt daily data for ${dates[i]}:`, err instanceof Error ? err.message : err)
       }
+    } else {
+      missingHistoryIdx.push(i)
     }
   })
+  // #1355 — `history:{date}` is written lazily by the traffic-dependent /api/status request path
+  // (index.ts cacheWrite), not by cron, so the month's final day(s) can still be missing here when
+  // this build runs at 00:00-00:14 UTC on the 1st. `daily:{date}` (2-day TTL) is written directly
+  // by every request throughout that day and is very likely still live at that point, so fall back
+  // to it for whichever dates `history:` missed rather than let an un-archived day silently shrink
+  // `daysCollected`. Scoped to only the missing dates, not every date — `daily:`'s 2-day TTL means
+  // this can only ever hit for the last day or two of the range regardless.
+  if (missingHistoryIdx.length > 0) {
+    const fallbackResults = await Promise.all(missingHistoryIdx.map(i => kv.get(`daily:${dates[i]}`).catch(() => null)))
+    let fallbackHits = 0
+    fallbackResults.forEach((raw, j) => {
+      const i = missingHistoryIdx[j]
+      if (raw) {
+        try {
+          dailyData[dates[i]] = JSON.parse(raw)
+          daysCollected++
+          fallbackHits++
+        } catch (err) {
+          parseErrors++
+          console.warn(`[monthly-archive] corrupt daily: fallback data for ${dates[i]}:`, err instanceof Error ? err.message : err)
+        }
+      }
+    })
+    if (fallbackHits > 0) {
+      console.log(`[monthly-archive] ${fallbackHits} day(s) for ${period} recovered via daily: fallback (history: not yet archived)`)
+    }
+  }
   if (parseErrors > 0) {
     console.error(`[monthly-archive] ${parseErrors} days had corrupt data for ${period}`)
   }
@@ -1973,10 +2003,15 @@ export function archiveNotifiedKey(period: string): string {
  * Invalid periods fall back to the raw string so a malformed call still produces a
  * readable embed rather than `"Invalid Date"`.
  */
+// #1355 — `expectedDays` defaults to `daysCollected` (no mismatch reported) so an existing 3-arg
+// caller is unaffected; the cron call site passes the month's actual calendar-day count. Stays a
+// pure string-then-compare so the embed shape is testable independently of how the caller derives
+// `expectedDays` (see `maybeNotifyArchiveReady` in index.ts for that derivation's own rationale).
 export function buildArchiveReadyEmbed(
   period: string,
   serviceCount: number,
   daysCollected: number,
+  expectedDays: number = daysCollected,
 ): { title: string; description: string; color: number } {
   let monthLabel = period
   const match = /^(\d{4})-(\d{2})$/.exec(period)
@@ -1989,11 +2024,19 @@ export function buildArchiveReadyEmbed(
       })
     }
   }
+  const isShort = daysCollected < expectedDays
   const description = [
     `**${monthLabel}** archive is now available in KV (\`archive:monthly:${period}\`).`,
     ``,
     `• Services: ${serviceCount}`,
-    `• Days collected: ${daysCollected}`,
+    `• Days collected: ${daysCollected}${isShort ? ` of ${expectedDays}` : ''}`,
+    // `rebuild-archive` is safe here ONLY while acted on promptly (#1260's `:prev:` backup +
+    // regression refusal protect the overwrite itself, but `resolveArchiveOfficialUptime`'s
+    // docstring and kv-schema.md both warn it is NOT idempotent on an OLDER month — it re-snapshots
+    // score/uptime from CURRENT `services:latest`, which can shift figures for a service whose
+    // source has since changed). Said explicitly rather than a bare pointer at the endpoint, so this
+    // message does not read as contradicting those two warnings.
+    ...(isShort ? [``, `⚠️ Short by ${expectedDays - daysCollected} day(s) — a day this month failed to archive. \`POST /api/admin/rebuild-archive\` recovers it, but re-snapshots score/uptime from CURRENT data — safest run promptly, before those drift from what this month actually saw.`] : []),
     ``,
     `🚀 [**Generate report draft →**](${REPORTS_WORKFLOW_URL})`,
     ``,
@@ -2002,6 +2045,6 @@ export function buildArchiveReadyEmbed(
   return {
     title: `📦 Monthly Archive Ready — ${period}`,
     description,
-    color: 0x9B59B6, // purple — consistent with daily summary / monthly ops
+    color: isShort ? 0xd29922 : 0x9B59B6, // amber when short, purple otherwise (daily summary / monthly ops)
   }
 }

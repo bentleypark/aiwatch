@@ -789,7 +789,22 @@ async function maybeNotifyArchiveReady(env: Env, archiveKey: string, period: str
     return
   }
 
-  const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildArchiveReadyEmbed(period, serviceCount, daysCollected))
+  // #1355 — flag a short `daysCollected` unconditionally. An earlier version of this check tried to
+  // suppress the warning for "this service's first month of archiving", using the PRIOR period's
+  // archive existing as a proxy — but `daysCollected` counts DATES site-wide (each `history:`/
+  // `daily:` value is one day's counters for every monitored service at once), not a per-service
+  // count, so a service onboarding mid-month can never lower it; there is no such thing as "this
+  // service's first partial month" in this field. The one real historical case (AIWatch's OWN first
+  // month of archiving ever, which started partway through — aiwatch-reports#113) is a fixed past
+  // event, not a recurring one, so there is no live case left to suppress for. Warning unconditionally
+  // also removes a load-bearing failure mode the proxy had: a genuinely missed PRIOR month (both its
+  // archive windows skipped) made ITS OWN prior-period check read "absent" too, silencing the warning
+  // exactly when two consecutive months had gone wrong — the opposite of what #1355 needs.
+  const periodMatch = /^(\d{4})-(\d{2})$/.exec(period)
+  const calendarDays = periodMatch ? getMonthDates(Number(periodMatch[1]), Number(periodMatch[2])).length : daysCollected
+  const expectedDays = Math.max(daysCollected, calendarDays)
+
+  const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildArchiveReadyEmbed(period, serviceCount, daysCollected, expectedDays))
   if (!sent) {
     console.warn(`[monthly-archive] notification send failed for ${period} — will retry next cron cycle`)
     return
@@ -2093,7 +2108,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, getMonthDates } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
