@@ -2084,6 +2084,76 @@ describe('buildMonthlyArchive', () => {
   })
 })
 
+// #1355 — `daily:{date}` fallback when `history:{date}` is still missing (the traffic-dependent
+// write hasn't landed yet). Uses only 2026-03-01/02/03 so the "which day fell back" assertions
+// stay legible; the rest of the month's dates simply have no data on either prefix, same as today.
+describe('buildMonthlyArchive — #1355 daily: fallback for a not-yet-archived history: day', () => {
+  it('recovers a day from daily: when history: is absent for it', async () => {
+    const kv = {
+      get: async (key: string) => {
+        const store: Record<string, string> = {
+          'history:2026-03-01': JSON.stringify({ claude: { ok: 288, total: 288 } }),
+          // 2026-03-02 has NO history: entry — simulates the race — but daily: still holds it.
+          'daily:2026-03-02': JSON.stringify({ claude: { ok: 280, total: 288 } }),
+        }
+        return store[key] ?? null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [])
+    expect(archive.daysCollected).toBe(2) // both days recovered — one via history:, one via daily: fallback
+    expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0) // (288+280)/(288+288)
+  })
+
+  it('does NOT read daily: for a date whose history: is already present (fallback stays scoped)', async () => {
+    let dailyReadCount = 0
+    const kv = {
+      get: async (key: string) => {
+        if (key.startsWith('daily:')) dailyReadCount++
+        return key === 'history:2026-03-01' ? JSON.stringify({ claude: { ok: 288, total: 288 } }) : null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    await buildMonthlyArchive(kv, 2026, 3, [])
+    // 30 of March's 31 dates have no history:, so the fallback batch reads daily: for those 30 —
+    // but never for 2026-03-01, which already resolved via history:. If the fallback stopped
+    // being scoped to only the missing dates, this would be 31.
+    expect(dailyReadCount).toBe(30)
+  })
+
+  it('leaves a day uncollected when BOTH history: and daily: are absent (fallback is not a floor)', async () => {
+    const kv = {
+      get: async () => null, // nothing on either prefix, for any date
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [])
+    expect(archive.daysCollected).toBe(0)
+  })
+
+  it('counts a corrupt daily: fallback value as a parse error, not a silent success', async () => {
+    const kv = {
+      get: async (key: string) => (key === 'daily:2026-03-01' ? '{not json' : null),
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [])
+    // The corrupt fallback value must not be counted as a collected day.
+    expect(archive.daysCollected).toBe(0)
+    expect(Object.keys(archive.services)).toEqual([]) // no service data derived from it either
+  })
+})
+
 // ── Phase 2: Archive-ready notification (aiwatch-reports#4) ──────────
 
 describe('archiveNotifiedKey', () => {
@@ -2150,6 +2220,41 @@ describe('buildArchiveReadyEmbed', () => {
   it('always embeds the archive KV key path for traceability', () => {
     const embed = buildArchiveReadyEmbed('2026-04', 31, 30)
     expect(embed.description).toContain('`archive:monthly:2026-04`')
+  })
+
+  // #1355 — the short-archive warning. `expectedDays` defaults to `daysCollected` (no mismatch), so
+  // every pre-existing call above (3 args) stays silent — the caller opts IN to the warning by
+  // passing a real calendar length, which is what `maybeNotifyArchiveReady` (index.ts) always does
+  // when the count is short. These tests exercise the pure builder's own parameter contract
+  // (including the `expectedDays === daysCollected` boundary a caller COULD still pass), not a
+  // suppression behavior the real caller uses — it does not.
+  it('warns when daysCollected is short of the explicit expectedDays', () => {
+    const embed = buildArchiveReadyEmbed('2026-08', 45, 30, 31)
+    expect(embed.color).toBe(0xd29922) // amber
+    expect(embed.description).toContain('Days collected: 30 of 31')
+    expect(embed.description).toContain('⚠️ Short by 1 day(s)')
+  })
+  it('does not warn when daysCollected equals expectedDays', () => {
+    const embed = buildArchiveReadyEmbed('2026-08', 45, 31, 31)
+    expect(embed.color).toBe(0x9B59B6)
+    expect(embed.description).toContain('Days collected: 31')
+    expect(embed.description).not.toContain('of 31')
+    expect(embed.description).not.toContain('⚠️')
+  })
+  it('does not warn when the caller omits expectedDays (the pre-#1355 call shape)', () => {
+    const embed = buildArchiveReadyEmbed('2026-08', 45, 12)
+    expect(embed.color).toBe(0x9B59B6)
+    expect(embed.description).toContain('Days collected: 12')
+    expect(embed.description).not.toContain('⚠️')
+  })
+  it('does not warn when the caller passes daysCollected as expectedDays (a no-mismatch call)', () => {
+    const embed = buildArchiveReadyEmbed('2026-03', 27, 12, 12)
+    expect(embed.color).toBe(0x9B59B6)
+    expect(embed.description).not.toContain('⚠️')
+  })
+  it('pluralizes the shortfall correctly for a multi-day gap', () => {
+    const embed = buildArchiveReadyEmbed('2026-08', 45, 28, 31)
+    expect(embed.description).toContain('⚠️ Short by 3 day(s)')
   })
 })
 
