@@ -1,7 +1,7 @@
 ---
 type: architecture
 title: "Discord Alert Delivery Paths"
-description: "How operator + per-user Discord alerts are delivered server-side by the cron — single-source alert feed, per-user filters, channel-control opt-in, tweet-draft exception."
+description: "How operator + per-user Discord alerts are delivered server-side — single-source alert feed, per-user filters, channel-control opt-in, tweet-draft exception, and the request-path Edge SSR fallback alert."
 tags: [worker, alerts, discord]
 ---
 
@@ -57,6 +57,46 @@ The third member of the component-drift family, and the one the other two could 
 **Writes.** Refreshes are throttled to `PARTIAL_RESOLVE_REFRESH_MS`, so a drift does not write on every poll, and a steady state with every id resolving costs nothing at all. `missing` is stored as the **union** of every id seen unresolved since `since`, and `viaSummary` latches on rather than flapping, so neither a rotating window nor an intermittent `components.json` turns an observation into a per-poll rewrite. Both latch, which is why the alert body scopes its claims to the window rather than asserting a present-tense blind spot for every id it lists. `trackPartialResolve` **fails closed on a KV read fault** — reading a rejected `get` as "no record" would rewrite `since` to now every failing cycle, so the clock could never mature (same hazard and same posture as the #992 detector's `component-seen` read). `detectPartialResolves` takes the opposite posture on each of its two reads, deliberately: a fault on the *record* read skips that service (silently reading it as "no drift" would disarm the alert itself), while a fault on the *dedup* read re-pages rather than dropping the page. Both are logged.
 
 **Coverage and body.** The roster (`PARTIAL_COMPONENT_SERVICES`) is derived from `SERVICES`, so any service configuring a non-empty `statusComponentIds` enrolls itself — both the `componentsUrl` group and the group resolving against `summary.json`. `formatPartialResolveAlert` names the ids that did not resolve, because the badge value cannot. It claims **#1175 has reverted** only when the resolve was *observed* falling back to the summary window (`viaSummary`, recorded by `fetchService`) — not from the mere presence of a `componentsUrl` in config, since a provider deleting one id from a perfectly readable `components.json` produces the same missing set and would send the operator to debug a working fetch. The Discord send gates its 24h dedup key on success (`sendDiscordAlert` returns `false` rather than throwing, so an unconditional write would swallow the page on a 429), matching #500/#992. Pure fns + the `fetchService`/cron wiring are unit-tested in `partial-component-resolve.test.ts` — including an end-to-end flap simulation, since "an intermittent drift still pages" is the property this mechanism was rebuilt around and no unit of it demonstrates that alone. The degraded path itself stays pinned in `page-components-source.test.ts`.
+
+### Edge SSR fallback (#378) — operator ops alert
+A Vercel Edge Function fires this from the REQUEST path, not the Worker's cron: it POSTs to the
+Worker's `/api/internal/edge-fallback` (bearer `EDGE_ALERT_TOKEN`), which dedups on a 5-minute KV
+cooldown per surface+slug and sends the message. Callers are `api/is-down.ts` and `api/reports.ts`,
+both through `api/_shared/edge-fallback-alert.ts`. Their triggers differ: is-down alerts when its
+status read leaves no service data (the same flag that makes the response a 503), while the reports
+proxy alerts both when the upstream is unreachable and when it ANSWERS with a 5xx it passes through.
+
+**#1368 — it never fired.** The production `EDGE_ALERT_TOKEN` was measured empty on 2026-09-08, and
+the guard returned silently on a falsy token in every environment — correct for local and preview,
+catastrophic in production, and indistinguishable between them. What established "never fired" was an
+operator search of the Discord channel returning no `Edge SSR fallback` message since May 2026, the
+month #378 shipped, while a real production fallback on 2026-07-28 is on record. **That search is the
+only evidence for it and Discord search is not a durable artifact**, which is why it is written here.
+
+Two things are worth carrying forward. **A variable's presence in `vercel env ls` is not evidence it
+is set** — observed 2026-09-08 on CLI v50, an empty value rendered `Encrypted` exactly like a real
+one, so a value has to be pulled and measured with other variables in the same file as a control.
+And **a silent alarm is not evidence of quiet**: before reading its silence as health, establish that
+it has ever fired.
+
+The fix distinguishes *misconfigured in production* from *absent outside production*, prints the
+observed `VERCEL_ENV` in both lines so an unreadable one is visible rather than silent, and inspects
+the response — the Worker RETURNS 401 (its own copy of the secret absent, or disagreeing with the
+caller's) and 400 rather than throwing, so a discarded `Response` would have left the next likely
+failure, a secret rotated on one end only, exactly as silent as the empty token. Not covered: the
+Worker can answer 200 while reporting `dispatched: false` in its body, so an OK response is not proof
+of delivery.
+
+**The 500ms dispatch budget was justified against the wrong work.** Its inherited comment sized it for
+a Worker hop, but on a dedup miss `handleEdgeFallbackAlert` awaits a KV read, then `sendDiscordAlert`
+— which sets no timeout of its own — then a KV write, before responding. Whether 500ms suffices is
+unmeasured, and so is what a timeout costs. It is not retuned here.
+
+**Not wired: `api/is-down-group.ts`.** It serves `/is-claude-down`, `/is-openai-down` and
+`/is-xai-down` (`vercel.json`), returns the same 503 + `no-store` degraded render, and alerts nothing
+— so on those URLs a 503 with no alert is the normal state, and the is-down inference above does not
+hold there. That gap is #1250's scope; it is named here so the next investigation does not start from
+the wrong premise.
 
 ### Single source of truth (#475)
 The cron appends every embed it sends the operator to a rolling KV feed (`alert:feed:recent`, built in `worker/src/alert-feed.ts`), surfaced as the `alertFeed` field on `/api/status` (+`/cached`) for external readers. In the same cron cycle it fans those exact entries out to confirmed subscribers, so operator/user alerts are **byte-identical** (Detection Lead, AI analysis, grouping, fallback, region all included) and duplicate suppression — incl. the #473 cross-poll status↔incident race — lives server-side.

@@ -14,7 +14,7 @@ Read this index first, then load only the pages you need.
 ## architecture — how the system works
 - [Status Data Flow](data-flow.md) — browser polling → `/api/status` fetch/normalize/KV → React, plus the `*/5` cron + Web Vitals pipeline.
 - [Service Status Determination](status-determination.md) — the ordered per-service status resolution chain in `services.ts`, with #-rationale.
-- [Discord Alert Delivery Paths](discord-alert-paths.md) — operator + per-user alerts delivered server-side by the cron.
+- [Discord Alert Delivery Paths](discord-alert-paths.md) — operator + per-user alerts delivered server-side, incl. the request-path Edge SSR fallback alert.
 
 ## runbook — step-by-step procedures
 - [Adding a New Service — Full Checklist](adding-a-service.md) — the lockstep files + the Step-0 data-richness audit.

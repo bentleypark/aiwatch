@@ -17,6 +17,8 @@
 //   /reports/2026-03/  → bentleypark.github.io/aiwatch-reports/2026-03/
 //   /reports/assets/x  → bentleypark.github.io/aiwatch-reports/assets/x
 
+import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
+
 export const config = { runtime: 'edge' }
 
 // Direct GH Pages URL — bypasses the public reports.ai-watch.dev hostname so
@@ -32,27 +34,28 @@ export const config = { runtime: 'edge' }
 // 'error' without first verifying the CNAME has been removed.
 const UPSTREAM_ORIGIN = 'https://bentleypark.github.io/aiwatch-reports'
 
-// #378: notify the Worker when the proxy serves the fallback so an operator
-// Discord alert fires. Worker dedups via 5-min KV. See api/is-down.ts for the
-// rationale on the awaited 500ms timeout.
+// #378: notify the Worker when the proxy serves the fallback so an operator Discord alert fires.
+// Worker dedups via 5-min KV.
+//
+// #1368 — the dispatch moved to `_shared/edge-fallback-alert.ts`, shared with `is-down.ts`; only the
+// path→slug sanitization is proxy-specific and stays. `WORKER_API` is still declared here and passed
+// in — see that module's #1268 note.
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
-const ALERT_TIMEOUT_MS = 500
+
+/**
+ * Sanitize a request path into the `slug` half of the alert's dedup key. Lowercase + alphanum /
+ * hyphen / slash so casing variants share a dedup window, then collapse slashes to dashes and trim.
+ *
+ * Exported so it can be tested (it runs on the alert path; nothing else imports it). The slash
+ * collapse is the clause worth pinning: the Worker's own sanitizer STRIPS slashes rather than
+ * collapsing them, so dropping it here silently changes the dedup key with no error anywhere.
+ */
+export function reportsAlertSlug(path: string): string {
+  return path.toLowerCase().replace(/[^a-z0-9/-]/g, '').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '-').slice(0, 64) || 'index'
+}
+
 async function notifyReportsFallback(path: string, reason: string): Promise<void> {
-  const token = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.EDGE_ALERT_TOKEN
-  if (!token) return
-  // Sanitize path → safe slug. Lowercase + alphanum/hyphen/slash so casing variants
-  // share a dedup window, then collapse slashes to dashes and trim length.
-  const safe = path.toLowerCase().replace(/[^a-z0-9/-]/g, '').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '-').slice(0, 64) || 'index'
-  try {
-    await fetch(`${WORKER_API}/api/internal/edge-fallback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ surface: 'reports', slug: safe, reason }),
-      signal: AbortSignal.timeout(ALERT_TIMEOUT_MS),
-    })
-  } catch (err) {
-    console.warn('[api/reports] edge-fallback alert dispatch failed:', err instanceof Error ? err.message : err)
-  }
+  await notifyEdgeFallback(WORKER_API, { surface: 'reports', slug: reportsAlertSlug(path), reason }, 'api/reports')
 }
 
 // Strip /reports prefix and normalize: missing trailing slash on home becomes '/'.
@@ -168,7 +171,9 @@ export default async function handler(req: Request): Promise<Response> {
     // Don't mask failure with the dashboard SPA — return an honest error page
     // so operators can tell the difference between "report not found" and
     // "proxy is broken". Status 502 is semantically correct for upstream fail.
-    const reason = err instanceof Error && err.name === 'AbortError' ? 'upstream_timeout' : 'upstream_unreachable'
+    // #1368 — both names accepted; see the same branch in `api/is-down.ts`.
+    const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    const reason = timedOut ? 'upstream_timeout' : 'upstream_unreachable'
     const failedPath = (() => { try { return new URL(req.url).pathname } catch { return '/' } })()
     await notifyReportsFallback(failedPath, reason)
     return new Response(
