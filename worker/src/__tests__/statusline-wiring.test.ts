@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import workerModule, { shouldPersistSnapshot } from '../index'
+import workerModule from '../index'
+import { shouldPersistSnapshot } from '../cache-refresh'
 import { CACHE_READ_INDEX, type CacheReadOutcome } from '../api-traffic'
 import type { ServiceStatus } from '../types'
 

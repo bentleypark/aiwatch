@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { refreshStatusCacheOnChange, writeStatusCache, hasStatusEdge, refreshStatusCacheOnLiveEdge, refreshStatusCacheOnUnusableSnapshot } from '../cache-refresh'
+import { refreshStatusCacheOnChange, writeStatusCache, hasStatusEdge, refreshStatusCacheOnLiveEdge, refreshStatusCacheAfterCronFetch } from '../cache-refresh'
 import type { ServiceStatus } from '../services'
 import type { UpstreamCandidate } from '../upstream-feed'
 
@@ -100,10 +100,12 @@ describe('refreshStatusCacheOnChange (#488)', () => {
   })
 })
 
-describe('refreshStatusCacheOnUnusableSnapshot (#1227 follow-up)', () => {
-  it('writes the fresh snapshot when no usable snapshot existed and the live fetch succeeded', async () => {
+describe('refreshStatusCacheAfterCronFetch (#1371, widening #1227)', () => {
+  it('writes whatever the cron live-fetched — not only when the key was already gone', async () => {
+    // The whole point of #1371: the old gate wrote only on a genuine miss, so a present-but-stale
+    // snapshot ran out its TTL with nobody refreshing it and the key went absent on schedule.
     const kv = makeKV()
-    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, true, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
+    const ok = await refreshStatusCacheAfterCronFetch(kv, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
     expect(ok).toBe(true)
     const parsed = JSON.parse(kv._store.get(CACHE_KEY)!)
     expect(parsed.services).toEqual(SERVICES)
@@ -111,42 +113,36 @@ describe('refreshStatusCacheOnUnusableSnapshot (#1227 follow-up)', () => {
     expect(kv.put).toHaveBeenCalledWith(CACHE_KEY, expect.any(String), { expirationTtl: TTL })
   })
 
-  it('does NOT write when a usable snapshot already existed (merely stale-but-present) — the normal-aging case', async () => {
+  it('returns false (does not throw) when the KV write fails — the caller logs on exactly this', async () => {
+    // Deleted by accident while widening this block and restored in review round 2. It is the SOLE
+    // input to the failure logging at the call site: without it, changing the function to `await
+    // writeStatusCache(...); return true` makes `if (!persisted)` dead code and every failed cron
+    // write goes silent, with nothing red.
     const kv = makeKV()
-    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, false, SERVICES, FEEDS, CACHE_KEY, TTL)
-    expect(ok).toBe(false)
-    expect(kv.put).not.toHaveBeenCalled()
+    kv.put = vi.fn().mockRejectedValue(new Error('KV down'))
+    await expect(refreshStatusCacheAfterCronFetch(kv, SERVICES, FEEDS, CACHE_KEY, TTL)).resolves.toBe(false)
   })
 
-  it('does NOT write when the live fetch produced zero services, even if no usable snapshot existed', async () => {
-    const kv = makeKV()
-    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, true, [], FEEDS, CACHE_KEY, TTL)
-    expect(ok).toBe(false)
-    expect(kv.put).not.toHaveBeenCalled()
-  })
 
-  it('is agnostic to WHY no usable snapshot existed — the caller collapses miss/threw/unparsed/empty into one flag', async () => {
-    // The gate is a plain boolean; the function has no opinion on which of cacheRead's five outcomes
-    // produced it. This pins that indifference so a future caller can't assume a narrower contract.
-    const kv = makeKV()
-    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, true, SERVICES, FEEDS, CACHE_KEY, TTL)
-    expect(ok).toBe(true)
-  })
 
   it('routes through the shared writeStatusCache primitive — same bytes as the #488/#1057 writers', async () => {
+    // Removed by accident while widening this block for #1371 and restored: it is the guard that stops
+    // a second snapshot writer drifting from the one shape every reader parses.
     const a = makeKV()
     const b = makeKV()
-    await refreshStatusCacheOnUnusableSnapshot(a, true, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
+    await refreshStatusCacheAfterCronFetch(a, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
     await writeStatusCache(b, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
     expect(a._store.get(CACHE_KEY)).toBe(b._store.get(CACHE_KEY))
   })
 
-  it('returns false (does not throw) when the KV write fails', async () => {
+  it('does NOT write when the live fetch produced zero services', async () => {
+    // The one remaining guard: an empty fetch must never overwrite a good snapshot with nothing.
     const kv = makeKV()
-    kv.put.mockRejectedValueOnce(new Error('kv down'))
-    const ok = await refreshStatusCacheOnUnusableSnapshot(kv, true, SERVICES, FEEDS, CACHE_KEY, TTL)
+    const ok = await refreshStatusCacheAfterCronFetch(kv, [], FEEDS, CACHE_KEY, TTL)
     expect(ok).toBe(false)
+    expect(kv.put).not.toHaveBeenCalled()
   })
+
 })
 
 describe('hasStatusEdge (#1057)', () => {
@@ -287,3 +283,5 @@ describe('refreshStatusCacheOnLiveEdge (#1057 — the /api/status wiring)', () =
   // handler call+log inside `ctx.waitUntil`. All the decision logic they feed is exported + tested here,
   // so the residual is argument-binding + log strings only.
 })
+
+

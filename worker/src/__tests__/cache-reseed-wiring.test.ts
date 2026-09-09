@@ -8,6 +8,7 @@
 // (no incidental status-diff alert, no service-count-drop alert) and the KV write is the only signal.
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { CACHE_TTL_SECONDS } from '../cache-ttl'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ServiceStatus } from '../services'
@@ -44,9 +45,13 @@ describe('source — cron derives snapshotUnusable from cachedServices, not a pr
     expect(staleIdx).toBeLessThan(unusableIdx)
   })
 
-  it('awaits refreshStatusCacheOnUnusableSnapshot with the derived flag, not `stale` or a literal', () => {
+  it('awaits the persist with the FRESHLY FETCHED services, not the cached ones (#1371)', () => {
+    // #1371 widened this from a re-seed-on-miss to a persist-after-fetch, so the old `snapshotUnusable`
+    // argument is gone. What still has to hold is that it writes `freshServices` — passing `services`
+    // (the possibly-cached array) would rewrite the stale snapshot with a fresh timestamp, extending
+    // its life while leaving the data old, which is worse than the gap this closes.
     expect(cronBody).toMatch(
-      /await refreshStatusCacheOnUnusableSnapshot\(\s*env\.STATUS_CACHE,\s*snapshotUnusable,\s*freshServices,\s*freshFeeds,\s*CACHE_KEY,\s*CACHE_TTL_SECONDS\s*\)/,
+      /await refreshStatusCacheAfterCronFetch\(\s*env\.STATUS_CACHE,\s*freshServices,\s*freshFeeds,\s*CACHE_KEY,\s*CACHE_TTL_SECONDS\s*\)/,
     )
   })
 
@@ -62,23 +67,44 @@ describe('source — cron derives snapshotUnusable from cachedServices, not a pr
     expect(branchEnd, 'unbalanced braces in the freshServices branch').toBeGreaterThan(-1)
     const branch = cronBody.slice(branchStart, branchEnd + 1)
     const adoptIdx = branch.indexOf('services = freshServices')
-    const reseedIdx = branch.indexOf('refreshStatusCacheOnUnusableSnapshot(')
+    const reseedIdx = branch.indexOf('refreshStatusCacheAfterCronFetch(')
     expect(adoptIdx, 'services = freshServices not found in branch').toBeGreaterThan(-1)
-    expect(reseedIdx, 'refreshStatusCacheOnUnusableSnapshot call not found in branch').toBeGreaterThan(-1)
+    expect(reseedIdx, 'refreshStatusCacheAfterCronFetch call not found in branch').toBeGreaterThan(-1)
     expect(adoptIdx).toBeLessThan(reseedIdx)
   })
 
   it('has exactly one call site', () => {
-    const occurrences = cronBody.split('refreshStatusCacheOnUnusableSnapshot(').length - 1
+    const occurrences = cronBody.split('refreshStatusCacheAfterCronFetch(').length - 1
     expect(occurrences).toBe(1)
   })
 
-  it('logs on a failed re-seed, gated on snapshotUnusable — not on every no-op call', () => {
-    expect(cronBody).toMatch(/if \(snapshotUnusable && !reseeded\)/)
+  it('logs a failed write at ERROR — never warn — and says which of the two states it is (#1371)', () => {
+    // Review round 1 caught this branch at `console.warn` while both in-file siblings (#488 at the
+    // alert edge, #1057 on the live path) use `console.error` for the same class of failure — and
+    // theirs has the weaker symptom (a stale OG card) against this one's 503 across 43 pages.
+    // The property pinned here is the severity, plus that the two states are distinguishable; the
+    // shape of the branch is not, so a ternary or an if/else both satisfy it.
+    // Round 2 caught the positive assertion reading to the END of cronAlertCheck, where later unrelated
+    // console.error calls satisfied it — a console.log mutant here survived the whole suite. Scoping it
+    // by a character count then broke the moment a comment grew, so the window is the BRACE-MATCHED
+    // block: it cannot drift with the length of what is inside it.
+    expect(cronBody, 'the failed-write branch must exist').toContain('if (!persisted)')
+    const block = (() => {
+      const start = cronBody.indexOf('if (!persisted)')
+      let depth = 0
+      for (let j = cronBody.indexOf('{', start); j < cronBody.length; j++) {
+        if (cronBody[j] === '{') depth++
+        else if (cronBody[j] === '}' && --depth === 0) return cronBody.slice(start, j + 1)
+      }
+      throw new Error('unbalanced braces in the !persisted block')
+    })()
+    expect(block, 'a failed CACHE_KEY write must never be logged below error').not.toMatch(/console\.(warn|log|info|debug)/)
+    expect(block).toMatch(/console\.error/)
+    expect(block).toMatch(/snapshotUnusable/)
   })
 })
 
-describe('behavior — the real scheduled() handler re-seeds only on a genuine miss (#1227 follow-up)', () => {
+describe('behavior — the real scheduled() handler persists whatever it live-fetched (#1371, widening #1227)', () => {
   afterEach(() => { vi.restoreAllMocks() })
 
   const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
@@ -105,11 +131,14 @@ describe('behavior — the real scheduled() handler re-seeds only on a genuine m
   function fakeKv(cachedRaw: string | null) {
     const store = new Map<string, string>()
     if (cachedRaw !== null) store.set(CACHE_KEY, cachedRaw)
-    const puts: Array<{ key: string; value: string }> = []
+    // #1371 round 2 — options captured too: without them no BEHAVIOUR test pinned that the derived
+    // TTL is what actually reaches KV, leaving that to a source-text regex, and this file's own
+    // header records a source-text assertion once being satisfied by an unwired variant.
+    const puts: Array<{ key: string; value: string; options?: { expirationTtl?: number } }> = []
     const kv = {
       get: async (key: string) => store.get(key) ?? null,
       getWithMetadata: async () => ({ value: null, metadata: null }),
-      put: async (key: string, value: string) => { puts.push({ key, value }); store.set(key, value) },
+      put: async (key: string, value: string, options?: { expirationTtl?: number }) => { puts.push({ key, value, options }); store.set(key, value) },
       delete: async (key: string) => { store.delete(key) },
       list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
     } as unknown as KVNamespace
@@ -142,10 +171,17 @@ describe('behavior — the real scheduled() handler re-seeds only on a genuine m
     expect(puts.length, 'no CACHE_KEY write should happen on a fresh, unchanged snapshot').toBe(0)
   })
 
-  it('does NOT re-seed when the cached snapshot is stale-but-present — only a genuine miss qualifies', async () => {
+  it('DOES write when the cached snapshot is stale-but-present — the #1371 fix', async () => {
+    // Inverted from what this asserted before #1371, and the inversion IS the fix. The old contract
+    // ("only a genuine miss qualifies") is what let the key run out its TTL: on a stale tick the cron
+    // live-fetches for its alert decisions and used to DISCARD the result, so nothing refreshed the key
+    // before it expired and every is-down page served a 503 until the next tick noticed the miss.
     const stale = JSON.stringify({ services: OPERATIONAL, upstreamFeeds: [], cachedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString() })
     const { puts } = await runCron(stale)
     expect(fetchAllServices, 'a stale cache should still trigger the alert-decision live fetch').toHaveBeenCalled()
-    expect(puts.length, 'a stale-but-present snapshot must not be treated as a miss').toBe(0)
+    expect(puts.length, 'the freshly fetched snapshot must be persisted, not discarded').toBe(1)
+    const parsed = JSON.parse(puts[0].value)
+    expect(parsed.services, 'and it must be the FRESH services, not the stale ones written back').toHaveLength(SERVICES.length)
+    expect(puts[0].options?.expirationTtl, 'the derived TTL must be what reaches KV').toBe(CACHE_TTL_SECONDS)
   })
 })
