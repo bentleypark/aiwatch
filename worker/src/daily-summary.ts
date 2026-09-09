@@ -10,6 +10,7 @@ import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
 import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
+import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth } from './monthly-archive'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
 import { FAMILY_OF_SERVICE } from './alerts'
 import { clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from './api-traffic'
@@ -143,6 +144,12 @@ export interface DailySummaryData {
   // #575 Phase A — crowd "Report an issue" counts today (svcId → count). Internal demand signal
   // only (coverage priority); never a public "N reporting" verdict. Empty/absent → section omitted.
   reportCounts?: Record<string, number>
+  // #1355 — what the daily check found about the previous month's permanent archive (short, or never
+  // written). Re-derived from the archive itself every day rather than stored, so a repair clears it
+  // with no bookkeeping on the repair path and no stored fact can outlive the condition it describes.
+  // `null`/absent = no verdict — the archive is fine, OR it could not be read, which is logged rather
+  // than rendered because an unread archive supports no claim in either direction.
+  archiveHealth?: ArchiveHealth | null
 }
 
 /** How long the source has been dark, for the #820 warning. Coarse on purpose — the operator needs
@@ -188,6 +195,11 @@ export function buildDailySummary(data: DailySummaryData): string {
     }).join('\n')
     lines.push(`\n🔔 **Active Issues**\n${issueList}`)
   }
+
+  // #1355 — directly under Active Issues on purpose: an operator ACTION item, not a metric. Below the
+  // traffic / observability sections it would be read at the same glance-rate as a poll count.
+  const archiveHealthLine = formatArchiveHealthLine(data.archiveHealth)
+  if (archiveHealthLine) lines.push(archiveHealthLine)
 
   // Section 3: AI Analysis usage
   const aiUsageLine = formatAiUsageSection(aiUsage)
@@ -810,6 +822,24 @@ export function formatDegradationSection(
     })
     .join('\n')
   return `\n📈 **RTT Degradations (~48h)** — ${totalSpikes} total · ${totalNoStatus} not on official status pages\n${items}`
+}
+
+/**
+ * #1355 — the previous month's permanent archive is not right: short of the month it claims, or never
+ * written at all. Repeats DAILY, unlike the month-end ping, which fires once and then dedups itself
+ * via `archive:notified:{period}` for 60 days.
+ *
+ * The rebuild tradeoff is `ARCHIVE_REBUILD_CAVEAT`, shared with that ping so the two cannot drift.
+ */
+export function formatArchiveHealthLine(health: ArchiveHealth | null | undefined): string {
+  if (!health) return ''
+  if (health.state === 'missing') {
+    return `\n⚠️ **Monthly archive MISSING** — \`${health.period}\` was never written`
+      + `\n   \`POST /api/admin/rebuild-archive\` while \`incidents:monthly\` still exists (60d).`
+  }
+  const days = health.missingDays === 1 ? 'day' : 'days'
+  return `\n⚠️ **Monthly archive short** — \`${health.period}\`: ${health.daysCollected} of ${health.expectedDays} days (missing ${health.missingDays} ${days})`
+    + `\n   This is the permanent record. ${ARCHIVE_REBUILD_CAVEAT}`
 }
 
 /**

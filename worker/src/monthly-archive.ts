@@ -1995,6 +1995,56 @@ export function archiveNotifiedKey(period: string): string {
   return `archive:notified:${period}`
 }
 
+// ── Short-archive verdict (#1355) ────────────────────────────────────
+//
+// "Is this archive short of the month it claims to cover?" — in ONE place. Two consumers ask it, and
+// they are deliberately different in cadence: the month-end "archive ready" ping asks once, at build
+// time; the daily summary asks every day until it is repaired. Computing it twice off the same two
+// numbers is the second-copy point `feedback_shared_primitive_over_parallel_copies` names, so it is a
+// primitive rather than an inline comparison at each site.
+//
+// Returns `null` — no verdict — rather than a "not short" record, so a caller cannot accidentally
+// render a reassuring line from a period it could not evaluate. An unparseable or out-of-range period
+// is one such case: `getMonthDates` happily answers for month 13 (`new Date(y, 13, 0)` rolls into the
+// next year), and inventing an `expectedDays` from that would manufacture a mismatch out of a typo.
+export interface ShortArchive {
+  period: string
+  daysCollected: number
+  /** The month's calendar-day count — what `daysCollected` should equal for a complete archive. */
+  expectedDays: number
+  missingDays: number
+}
+
+// What the daily check found about the previous month's permanent record. `missing` is a SEPARATE
+// state, not an absence of verdict: a `kvPut` write failure returns `false` rather than throwing
+// (utils.ts), so the archive-build `catch` — the only thing that writes `archive:failed:{period}` and
+// pings Discord — is not entered on that path. A month that was never written can therefore reach this
+// check unannounced, and it is worse than one short by a day.
+export type ArchiveHealth =
+  | ({ state: 'short' } & ShortArchive)
+  | { state: 'missing'; period: string }
+
+// #1355 — the rebuild tradeoff, stated ONCE. Two operator messages carry it (the month-end embed
+// below and the daily summary line), and they contradicted each other the moment one was corrected in
+// isolation. `buildMonthlyArchive` re-reads the same source keys, and the #1260 guard refuses only a
+// result that DECREASED, so an equal-and-still-short rebuild is accepted and written — after
+// re-snapshotting score/uptime from current data (`resolveArchiveOfficialUptime`).
+export const ARCHIVE_REBUILD_CAVEAT =
+  '`POST /api/admin/rebuild-archive` re-reads the same source keys, so it only helps while the lost day is still readable — and it re-snapshots score/uptime from CURRENT data into that month. Check before running one.'
+
+export function shortArchiveOf(period: string, daysCollected: number): ShortArchive | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(period)
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  if (month < 1 || month > 12) return null
+  if (!Number.isFinite(daysCollected)) return null
+  const expectedDays = getMonthDates(year, month).length
+  if (expectedDays === 0) return null
+  if (daysCollected >= expectedDays) return null
+  return { period, daysCollected, expectedDays, missingDays: expectedDays - daysCollected }
+}
+
 /**
  * Build the Discord embed for "monthly archive ready — go generate the draft" pings.
  * Pure function for testability; the cron handler owns KV dedup + the send itself.
@@ -2036,7 +2086,7 @@ export function buildArchiveReadyEmbed(
     // score/uptime from CURRENT `services:latest`, which can shift figures for a service whose
     // source has since changed). Said explicitly rather than a bare pointer at the endpoint, so this
     // message does not read as contradicting those two warnings.
-    ...(isShort ? [``, `⚠️ Short by ${expectedDays - daysCollected} day(s) — a day this month failed to archive. \`POST /api/admin/rebuild-archive\` recovers it, but re-snapshots score/uptime from CURRENT data — safest run promptly, before those drift from what this month actually saw.`] : []),
+    ...(isShort ? [``, `⚠️ Short by ${expectedDays - daysCollected} day(s) — a day this month failed to archive. ${ARCHIVE_REBUILD_CAVEAT}`] : []),
     ``,
     `🚀 [**Generate report draft →**](${REPORTS_WORKFLOW_URL})`,
     ``,

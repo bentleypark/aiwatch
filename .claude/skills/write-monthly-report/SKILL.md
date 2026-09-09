@@ -39,17 +39,15 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
    (the month's final day missing at build time — aiwatch#1355) can get a "Partial month" footnote on
    the `N-Month Trend` chart (`generate-charts.js`'s `daysCollected < daysInMonth` check) — but the
    Uptime table, Component Reliability, and the Score's uptime input carry no such marker at all. The
-   archive-ready Discord ping (aiwatch#1355) does warn unconditionally, but only once, at build time on
-   the 1st — easy to miss if authoring starts later. Check independently of both, before running the
-   generator:
+   archive-ready Discord ping (aiwatch#1355) does warn unconditionally. Check independently of both,
+   before running the generator:
    ```bash
    curl -s "https://aiwatch-worker.p2c2kbf.workers.dev/api/report?month=NNNN-NN" | jq '.daysCollected, .period'
    ```
    Compare `daysCollected` against the calendar day count for that month (28-31; a leading partial month
    like 2026-03 is the one legitimate exception — see aiwatch-reports#113). If short, decide BEFORE
-   generating whether to `POST /api/admin/rebuild-archive` first (only safe if done promptly — the
-   longer the delay, the more `services:latest` has drifted from what the month actually saw; see the
-   archive-ready embed's own wording for the same tradeoff) or explicitly accept and note the gap.
+   generating whether to `POST /api/admin/rebuild-archive` first — the Discord line states the
+   tradeoff — or explicitly accept and note the gap.
 
 1. **Branch** in the reports repo: `git checkout main && git pull && git checkout -b report/NNNN-NN`
    (or the generator's draft PR branch). Never author on `main`. `git status` must show only the intended
@@ -258,7 +256,7 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
 ## Companions
 - **aiwatch-reports#54** — generate-time RECURRENCE CHECK block (authoring-time surfacing + MoM auto-draft).
 - **aiwatch-reports#55** — pre-publish CI recurrence lint (publish-time hard gate for leaked fences).
-- **aiwatch#1355 / #1365** — a short archive already gets a build-time Discord ping (one-shot) and a
+- **aiwatch#1355 / #1365** — a short archive already gets a Discord ping and a
   gated, trend-chart-only footnote from `generate-report.js`; this skill's step-0 preflight is the
   authoring-time check that doesn't depend on either firing.
 - **ship-issue** / **issue-triage** — the aiwatch-side per-issue + board runbooks this mirrors.
