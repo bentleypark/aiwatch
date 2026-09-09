@@ -275,6 +275,30 @@ const REPORTS_INDEX_HREF = '/reports/'
 // swap to http://localhost:8788/api/report-issue is the only change needed for local verification.
 const REPORT_ENDPOINT = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/report-issue'
 
+/**
+ * #1369 — the client-side "already reported this service TODAY?" guard, as browser source.
+ *
+ * The server (`worker/src/report.ts`) counts one report per IP per service per UTC day. This mirrors
+ * that in the UI. It used to store a bare `'1'`, which localStorage never expires, so a single report
+ * disabled this page's FAB on that browser forever — while the SPA copy promised "today".
+ *
+ * Stored value is the UTC date; the gate is equality with today. UTC because the server's
+ * `reportDateKey` is `toISOString().slice(0, 10)`, and a local-date client would disagree with it for
+ * part of every day outside UTC. Browsers already locked out self-heal on first load: `'1'` is not a
+ * date, so it fails equality and the guard opens — no migration.
+ *
+ * Emitted as SOURCE TEXT, not imported: this runs in the visitor's browser inside an inline
+ * `<script>`, and the Edge page and the SPA share no bundle. `src/utils/reportGuard.js` is the SPA's
+ * copy of the same rule. `report-guard-sync.test.ts` EXECUTES this exact string against that module,
+ * so the two cannot drift silently — the failure mode a `'1'`-vs-date divergence already caused once.
+ */
+export const REPORT_GUARD_CLIENT_JS = `
+function reportGuardKey(svc){return 'aiwatch-reported-'+svc}
+function reportGuardDay(){return new Date().toISOString().slice(0,10)}
+function reportGuardHasToday(svc){try{return localStorage.getItem(reportGuardKey(svc))===reportGuardDay()}catch(e){return false}}
+function reportGuardMarkToday(svc){try{localStorage.setItem(reportGuardKey(svc),reportGuardDay())}catch(e){}}
+`
+
 // Category labels for the gated report display. KEEP IN SYNC with worker/src/report.ts
 // REPORT_CATEGORY_LABELS (the worker validates the ids; this only labels them for display).
 const REPORT_CATEGORY_LABELS: Record<string, string> = {
@@ -1285,7 +1309,7 @@ function renderReportFeed(reports: Array<{ cat: string; desc: string; ts: number
 <div class="card"><p class="report-feed-note">Visitor-submitted and shown only because an independent signal also indicates a problem &mdash; not an official AIWatch verdict.</p><div id="report-feed-list">${preview}${more}</div></div>`
 }
 
-function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string): string {
+export function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string): string {
   const isDown = status === 'down' || status === 'degraded'
   // Positioned directly below the status header (#297) so the alert-subscription
   // prompt catches the visitor at peak intent — before they bounce after reading
@@ -1364,18 +1388,19 @@ function copySlackFeed(b){
   else{prompt('Copy Slack command:',c)}
 }
 // #575 crowd-report modal (no framework — plain DOM). The honest feedback NEVER shows a count; the
-// localStorage guard mirrors the server's per-IP/day dedup. NOTE this adds an inline <script> like
+// localStorage guard mirrors the server's per-IP/day dedup — one report per service per UTC DAY
+// (#1369), inlined from REPORT_GUARD_CLIENT_JS. NOTE this adds an inline <script> like
 // the existing copyRss/copySlackFeed ones — fine under today's report-only CSP, but it's part of the
 // Phase-3 inline-handler refactor debt tracked in docs/reference/reference-csp.md.
-(function(){
+(function(){${REPORT_GUARD_CLIENT_JS}
   var modal=document.getElementById('report-modal'), openBtn=document.getElementById('report-open');
   if(!modal||!openBtn) return;
   var submit=document.getElementById('report-submit'), cancel=document.getElementById('report-cancel');
   var cat=document.getElementById('report-cat'), desc=document.getElementById('report-desc');
   var descN=document.getElementById('report-desc-n'), msg=document.getElementById('report-msg');
-  var svc=submit.dataset.svc, k='aiwatch-reported-'+svc;
-  function reported(){try{return !!localStorage.getItem(k)}catch(e){return false}}
-  function markDone(){openBtn.textContent='✓ Already reported — thanks';openBtn.disabled=true;}
+  var svc=submit.dataset.svc;
+  function reported(){return reportGuardHasToday(svc)}
+  function markDone(){openBtn.textContent='✓ Already reported today — thanks';openBtn.disabled=true;}
   function close(){modal.hidden=true;}
   // Optimistic, XSS-safe prepend of the just-submitted report to the gated feed (only when the
   // feed is already on the page — i.e. an independent signal corroborated, so the gate holds).
@@ -1398,7 +1423,7 @@ function copySlackFeed(b){
     submit.disabled=true;
     fetch(${JSON.stringify(REPORT_ENDPOINT)},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({svcId:svc,category:cat.value,description:desc.value})})
       .then(function(r){return r.ok?r.json().catch(function(){return{}}):Promise.reject()})
-      .then(function(){try{localStorage.setItem(k,'1')}catch(e){}prependReport(cat.value,desc.value.trim());msg.hidden=false;msg.textContent='✓ Thanks — we factor this into our monitoring';typeof gtag==='function'&&gtag('event','report_issue',{location:'is_down_page',service_id:svc,category:cat.value});markDone();setTimeout(close,1400);})
+      .then(function(){reportGuardMarkToday(svc);prependReport(cat.value,desc.value.trim());msg.hidden=false;msg.textContent='✓ Thanks — we factor this into our monitoring';typeof gtag==='function'&&gtag('event','report_issue',{location:'is_down_page',service_id:svc,category:cat.value});markDone();setTimeout(close,1400);})
       .catch(function(){msg.hidden=false;msg.textContent='Could not send — please try again later';submit.disabled=false;});
   });
   if(reported())markDone();

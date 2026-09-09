@@ -48,8 +48,15 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  places and review kept finding the copies drifting apart. The row earns its space
  *  because the rule it states (absolute adoption numbers go to the private bundle; a public issue
  *  carries the verdict, field name or ratio) has to be loaded while an issue is being written, not
- *  looked up afterwards. Measured with 1 char of prior slack, which the ratchet consumes first. */
-export const BUDGET_CHARS = 47_486
+ *  looked up afterwards. Measured with 1 char of prior slack, which the ratchet consumes first.
+ *
+ *  47_486 → 47_551 (#1369): the `reportGuard` entry in the Directory Layout `utils/` line, +65 net of
+ *  the slack the ratchet consumed first (the clause itself is 124 chars). A new shared module has to
+ *  be listed there by CLAUDE.md's own rule. It is held to one clause by keeping the whole why —
+ *  what the value stores, why the date is in the value and not the key, how the Edge copy is pinned —
+ *  in directory-map.md, which loads on demand; a first draft that named the server's dedup as well
+ *  cost 178. */
+export const BUDGET_CHARS = 47_551
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

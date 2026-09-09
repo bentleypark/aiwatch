@@ -3,12 +3,14 @@
 //   - ServiceDetails: opened with `presetServiceId` → the service is fixed (dropdown locked).
 // Posts {svcId, category, description} to the worker /api/report-issue. Honest feedback only — NEVER
 // a "N reporting" count (the load-bearing #575 constraint; the gated display is a separate surface).
-// A localStorage guard mirrors the server's per-IP/day dedup so the UI reflects an already-sent report.
+// A localStorage guard mirrors the server's per-IP/day dedup so the UI reflects an already-sent report:
+// one report per service per UTC DAY, not forever (#1369). The rule lives in src/utils/reportGuard.js.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from './Modal'
 import { useLang } from '../hooks/useLang'
 import { trackEvent } from '../utils/analytics'
+import { hasReportedToday, markReportedToday } from '../utils/reportGuard'
 
 // Derive the worker origin from VITE_API_URL (points at /api/status) — mirrors useMonthlyArchives.
 const API_BASE = (() => {
@@ -39,16 +41,12 @@ export default function ReportModal({ isOpen, onClose, services, presetServiceId
     setSvcId(initial)
     setCategory('outage')
     setDesc('')
-    setState(initial && alreadyReported(initial) ? 'already' : 'idle')
+    setState(initial && hasReportedToday(initial) ? 'already' : 'idle')
   }, [isOpen, presetServiceId])
-
-  function alreadyReported(id) {
-    try { return !!localStorage.getItem(`aiwatch-reported-${id}`) } catch { return false }
-  }
 
   async function submit() {
     if (!svcId || state === 'sending') return
-    if (alreadyReported(svcId)) { setState('already'); return }
+    if (hasReportedToday(svcId)) { setState('already'); return }
     setState('sending')
     try {
       const res = await fetch(`${API_BASE}/api/report-issue`, {
@@ -58,7 +56,7 @@ export default function ReportModal({ isOpen, onClose, services, presetServiceId
       })
       if (res.status === 429) { setState('rateLimited'); return }  // per-IP/hour cap — actionable hint
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      try { localStorage.setItem(`aiwatch-reported-${svcId}`, '1') } catch { /* private mode */ }
+      markReportedToday(svcId)
       trackEvent('report_issue', { location: 'dashboard', service_id: svcId, category })
       setState('done')
       setTimeout(onClose, 1400)
@@ -87,7 +85,7 @@ export default function ReportModal({ isOpen, onClose, services, presetServiceId
               <select
                 id="report-svc"
                 value={svcId}
-                onChange={(e) => { setSvcId(e.target.value); setState(alreadyReported(e.target.value) ? 'already' : 'idle') }}
+                onChange={(e) => { setSvcId(e.target.value); setState(hasReportedToday(e.target.value) ? 'already' : 'idle') }}
                 className="w-full bg-[var(--bg0)] border border-[var(--border)] rounded text-[var(--text0)] text-sm"
                 style={{ marginTop: '6px', padding: '9px 11px' }}
               >
