@@ -795,11 +795,13 @@ async function maybeNotifyArchiveReady(env: Env, archiveKey: string, period: str
   // also removes a load-bearing failure mode the proxy had: a genuinely missed PRIOR month (both its
   // archive windows skipped) made ITS OWN prior-period check read "absent" too, silencing the warning
   // exactly when two consecutive months had gone wrong — the opposite of what #1355 needs.
-  const periodMatch = /^(\d{4})-(\d{2})$/.exec(period)
-  const calendarDays = periodMatch ? getMonthDates(Number(periodMatch[1]), Number(periodMatch[2])).length : daysCollected
-  const expectedDays = Math.max(daysCollected, calendarDays)
+  // The verdict itself lives in `shortArchiveOf` (#1355) because the daily summary asks the same
+  // question every day until the archive is repaired — see the short-archive block in the daily-summary
+  // window below. `null` (not short, or an unevaluable period) leaves `expectedDays` at its default of
+  // `daysCollected`, which `buildArchiveReadyEmbed` renders as no mismatch.
+  const short = shortArchiveOf(period, daysCollected)
 
-  const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildArchiveReadyEmbed(period, serviceCount, daysCollected, expectedDays))
+  const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildArchiveReadyEmbed(period, serviceCount, daysCollected, short?.expectedDays ?? daysCollected))
   if (!sent) {
     console.warn(`[monthly-archive] notification send failed for ${period} — will retry next cron cycle`)
     return
@@ -2114,7 +2116,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, getMonthDates } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -4082,6 +4084,46 @@ export default {
               console.warn('[daily-summary] accuracy aggregate failed:', err instanceof Error ? err.message : err)
             }
 
+            // #1355 — re-assert a SHORT previous-month archive every day until it is repaired.
+            //
+            // The month-end warning fires exactly once and is then deduped by `archive:notified:{period}`
+            // for 60 days, so an operator who misses that single Discord message never hears about it
+            // again — while the archive itself is permanent and TTL-less.
+            //
+            // Deliberately NO marker key. The verdict is re-derived from the archive itself each day,
+            // so a `POST /api/admin/rebuild-archive` repair clears this line with no bookkeeping on the
+            // repair path, and there is no stored fact that can outlive the condition it describes.
+            //
+            // Scoped to the PREVIOUS UTC month, so the line stops at the next month rollover.
+            let archiveHealth: ArchiveHealth | null = null
+            const shortArchiveMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
+            const shortArchivePeriod = `${shortArchiveMonth.getUTCFullYear()}-${String(shortArchiveMonth.getUTCMonth() + 1).padStart(2, '0')}`
+            try {
+              const raw = await env.STATUS_CACHE.get(`archive:monthly:${shortArchivePeriod}`)
+              if (raw === null) {
+                // ABSENT is reported, not skipped. The build path can fail silently: `kvPut` returns
+                // `false` instead of throwing, so the `catch` that writes `archive:failed:` and pings
+                // Discord is never entered; a read fault on the archive key skips the build with only a
+                // `console.error`; and a cron that misses both windows never revisits the month. Any of
+                // those leaves no archive AND no alert. This runs at 09:0x UTC, after both archive
+                // windows, so on the 1st it cannot fire merely because the build has not happened yet.
+                archiveHealth = { state: 'missing', period: shortArchivePeriod }
+              } else {
+                const parsed = JSON.parse(raw)
+                if (typeof parsed?.daysCollected === 'number') {
+                  const short = shortArchiveOf(shortArchivePeriod, parsed.daysCollected)
+                  if (short) archiveHealth = { state: 'short', ...short }
+                } else {
+                  // Present but unreadable as an archive — NOT 'missing' (something is stored) and not
+                  // 'fine'. No claim either way; the log is the trace.
+                  console.warn(`[daily-summary] archive:monthly:${shortArchivePeriod} has no numeric daysCollected — no archive verdict today`)
+                }
+              }
+            } catch (err) {
+              // A read/parse FAULT is not evidence of absence, so it must not render as 'missing'.
+              console.warn(`[daily-summary] archive health check could not read archive:monthly:${shortArchivePeriod} — no verdict today:`, err instanceof Error ? err.message : err)
+            }
+
             const description = buildDailySummary({
               services: dailyServices,
               aiUsage,
@@ -4110,6 +4152,7 @@ export default {
               statuslineTraffic,
               pluginTraffic,
               reportCounts,
+              archiveHealth,
             })
 
             // #986 — mirror today's consent-free growth counters into the permanent monthly series.

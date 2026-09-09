@@ -75,6 +75,16 @@ count/downtime/longest from survivors, **without deleting the accumulator KV** (
 is unaffected (suppression runs after status determination — it only removes the incident from the LIST +
 Score inputs).
 
+**The daily summary reports a PREVIOUS month that is short or missing (#1355)** — only the previous
+month, so an unrepaired archive stops being mentioned at the next month rollover.
+
+**A rebuild does not reliably repair a SHORT month — check before running one.** `buildMonthlyArchive`
+re-reads the same `history:{date}` keys that were absent, and the #1260 guard refuses only a result that
+went *down*, so an equal-and-still-short rebuild is accepted and written — after re-snapshotting
+score/uptime from CURRENT data into that past month. Rebuild when the lost day is genuinely readable
+again; otherwise record the gap and leave the archive alone. For a month never written at all, rebuild
+IS the remedy (while `incidents:monthly` still exists, 60d).
+
 **After adding a suppression for a past month**, run `POST /api/admin/rebuild-archive` for that month so the
 archive + dashboard 90-day history reflect it. (The CURRENT month's 90-day view + weekly briefing filter the
 raw accumulator live — no rebuild needed there.) The rebuild reads the suppression list, so this shrink is
