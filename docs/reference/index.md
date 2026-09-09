@@ -27,6 +27,7 @@ Read this index first, then load only the pages you need.
 - [Fallback Tier Priority](fallback-tiers.md) — tier membership + candidate eligibility rules.
 - [GA4 Analytics & Consent Flow](ga4-events.md) — cross-surface consent + event catalog.
 - [GA4 CLI access (#998)](ga4-cli-access.md) — querying GA4 reports from the command line via a service account + the Data API, what's provisioned, what's UI-only.
+- [Bluesky outage-chatter measurement (#1374)](bluesky-measurement.md) — counting "is X down" posts per day: app-password auth, which appview host actually serves `searchPosts`, and the 2026-09-09 baseline.
 - [Content-Security-Policy (CSP) — #482](reference-csp.md) — per-surface enforcement (nonce vs content-hash) + SPA policy.
 - [Workflow-gate hooks (#415/#657)](workflow-hooks.md) — the workflow hooks, hard vs soft, the audit log + how to tune the step-3.5 hard gate; why the review loop is telemetry-only, and the instruction-budget ratchet.
 - [Agent-neutral development workflow](development-workflow.md) — the shared issue-to-release procedure for Codex, Claude Code, and other coding agents.
