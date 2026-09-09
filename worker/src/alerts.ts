@@ -2,6 +2,7 @@
 // Used by cronAlertCheck in index.ts
 
 import { buildGroupedFallbackText, API_TIER } from './fallback'
+import { CRON_CADENCE_MS } from './cache-ttl'
 import { isAffectedStatus } from './status-verdict'
 import { sanitize, formatDuration, appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
@@ -350,7 +351,6 @@ export const AI_HOLD_MS = 10 * 60 * 1000
  *  line survives that, because it reports what the provider's timestamps say and attributes nothing;
  *  the bound is only a heuristic for "worth mentioning".
  */
-const CRON_CADENCE_MS = 5 * 60 * 1000
 const toTick = (ms: number) => Math.ceil(ms / CRON_CADENCE_MS) * CRON_CADENCE_MS
 export const OWN_DETECTION_LAG_MS = CRON_CADENCE_MS + toTick(FLAP_HOLD_MS) + toTick(AI_HOLD_MS)
 

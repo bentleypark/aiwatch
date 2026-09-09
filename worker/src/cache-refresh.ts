@@ -25,6 +25,17 @@ import { kvPut } from './utils'
 import type { ServiceStatus } from './services'
 import type { UpstreamCandidate } from './upstream-feed'
 
+
+/** The snapshot-side write guard used by `cacheWrite` (the traffic writer) and, since #1371, by the
+ *  cron writer below. Moved here from `index.ts` so the second caller does not need an import cycle.
+ *  The other two CACHE_KEY writers still inline their own length check.
+ *
+ *  `cacheWrite` consults this BEFORE the throttle, so refusing costs no write slot.
+ */
+export function shouldPersistSnapshot(services: ServiceStatus[]): boolean {
+  return services.length > 0
+}
+
 /** The shared CACHE_KEY writer (#488 + #1057). Stores RAW ServiceStatus[] under
  *  { services, upstreamFeeds, cachedAt }.
  *  A single primitive so the two event-driven refreshes write byte-identical snapshots — a second copy
@@ -98,39 +109,43 @@ export function hasStatusEdge(
   return false
 }
 
-/** #1227 follow-up — re-seed CACHE_KEY when the cron's own read found NO usable snapshot to serve
- *  (`snapshotUnusable`): the key was absent, the read itself failed, or what was stored didn't parse
- *  into a non-empty services array — the same four DATA outcomes `cacheRead()` reports for every other
- *  reader (`miss`/`threw`/`unparsed`/`empty`; its fifth, `no-binding`, can't reach the cron). Not a
- *  perfect overlap — the caller's parser tolerates a legacy bare-array payload `cacheRead` rejects, a
- *  gap with ~nil production impact — but close enough that fixing this fixes what `cacheRead()` sees
- *  too. Distinct from "present but older than the alert-decision staleness threshold", which needs no
- *  repair here.
+/** #1371 (widening #1227) — persist the snapshot the cron just live-fetched.
  *
- *  The only unconditional CACHE_KEY writer is the traffic-throttled /api/status handler (`cacheWrite`),
- *  so a quiet period can let the key expire with nothing to re-seed it — every `cacheRead()` caller
- *  (badge, statusline, v1 API, ...) then sees a miss until a real visitor happens to hit /api/status.
- *  The measured volume + read date that justified adding this (rather than leaving the `warn` +
- *  fail-closed behaviour as-is) is recorded on the #1227 issue's verify-after comment, not restated
- *  here where it would go stale.
+ *  WHY THE #1227 SHAPE WAS NOT ENOUGH. This used to write only when the cron's read found NO usable
+ *  snapshot (`snapshotUnusable`). That closes the window *after* the key is already gone, but nothing
+ *  stops it going gone: on a tick where the snapshot is present-but-stale the cron live-fetches for its
+ *  alert decisions and then DISCARDS the result, so `CACHE_KEY` runs out its TTL with no writer, and
+ *  every `cacheRead()` caller — the 43 Edge is-down pages among them — serves its degraded 503 render
+ *  until the next tick notices the miss. Raising the TTL only moves that window later; the gap exists
+ *  because the fresh data in hand was not written, not because the TTL was short.
  *
- *  Fires only inside the cron's own stale-triggered live-fetch branch, so it adds no fetch of its own —
- *  only a conditional extra write, gated on `snapshotUnusable`. Routes through the same
- *  `writeStatusCache` primitive as the #488/#1057 edge refreshes (CACHE_KEY only, never the daily
- *  uptime counters — a cron-driven re-seed must not bias the uptime sampling `cacheWrite` does on real
- *  traffic). Like #1057 (and unlike #488, which deliberately does), this one does NOT align the
- *  caller's `lastKvWrite` throttle clock — doing so would suppress the next traffic-driven `cacheWrite`
- *  and, with it, the uptime counter sample this change exists to leave undisturbed. */
-export async function refreshStatusCacheOnUnusableSnapshot(
+ *  So the condition is now "the cron has fresh services that it could actually READ". The old gate was
+ *  a strict subset of this one, which is why it is replaced rather than kept alongside — two writers
+ *  with overlapping conditions is the drift this file already warns about elsewhere.
+ *
+ *  THE GUARD IS THE SHARED ONE, and three review rounds went into learning why it should be. Each
+ *  earlier attempt was a bespoke predicate over the fetched roster — "is this snapshot trustworthy?" —
+ *  and each leaked, because that judgement is not exported by the producer and cannot be reconstructed
+ *  from its output: `services.length === 0` is unreachable (a thrown batch is padded to full length),
+ *  the published status lags a read failure by two strikes, and `sourceUnknown` is unset on the paths
+ *  that return a bare `base` or set `sourceDead` instead. The third leak is the signal: this writer was
+ *  trying to hold a line no other CACHE_KEY writer holds. `cacheWrite` (the traffic writer, which in a
+ *  busy window writes far more often than this one) and #488 both gate on length alone, so persisting a
+ *  snapshot in which nothing was read is a STANDING property of the system, not something this change
+ *  introduces — and it is consistent with what the live `/api/status` response already tells users,
+ *  since `trackFetchFailure`'s 3-strike threshold is the system's deliberate answer to "do not publish a
+ *  blip as an outage". Whether that answer is right is a real question about ALL FOUR writers, and it
+ *  does not belong in the one that was added to close a TTL gap.
+ */
+export async function refreshStatusCacheAfterCronFetch(
   kv: KVNamespace,
-  snapshotUnusable: boolean,
   services: ServiceStatus[],
   upstreamFeeds: UpstreamCandidate[],
   cacheKey: string,
   ttlSeconds: number,
   now: number = Date.now(),
 ): Promise<boolean> {
-  if (!snapshotUnusable || services.length === 0) return false
+  if (!shouldPersistSnapshot(services)) return false
   return writeStatusCache(kv, services, upstreamFeeds, cacheKey, ttlSeconds, now)
 }
 

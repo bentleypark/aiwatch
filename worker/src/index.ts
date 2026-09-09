@@ -26,7 +26,7 @@ import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForA
 import { buildSupplyChainBanner } from './supply-chain'
 import { buildUpstreamLinks } from './upstream-link'
 import type { UpstreamCandidate } from './upstream-feed'
-import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge, refreshStatusCacheOnUnusableSnapshot } from './cache-refresh'
+import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge, refreshStatusCacheAfterCronFetch, shouldPersistSnapshot } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders, matchOrigin } from './cors'
@@ -35,6 +35,7 @@ import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext
 import type { FeedTrafficCounts, StatuslineTrafficCounts } from './api-traffic'
 import { EXT_INDEX, PLUGIN_MONITOR_INDEX, PLUGIN_BRIEF_INDEX, recordCacheReadOutcome, recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, readFeedPolls, readExtPolls, readPluginPolls, readStatuslinePolls, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
+import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
 import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, extReportCountKey, isExtReportSource, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
@@ -97,7 +98,6 @@ interface Env {
 
 // ── KV Cache + Daily Counters ──
 
-const CACHE_TTL_SECONDS = 900 // 15 min — must exceed KV_WRITE_INTERVAL_MS (10 min) to avoid cache gaps
 let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day (cost hygiene on Workers Paid 1M/month inclusion)
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
@@ -265,10 +265,6 @@ export async function restoreArchivedCalendars(kv: KVNamespace, services: Servic
 // every read surface fail closed (cacheRead collapses a zero-services snapshot to `null`) until the
 // next throttled write. Defence in depth rather than a live hole: `fetchAllServices` pads its results
 // to `SERVICES.length` even when a batch throws, so no writer produces an empty array today.
-// `cacheWrite` consults this BEFORE the throttle, so refusing costs no write slot.
-export function shouldPersistSnapshot(services: ServiceStatus[]): boolean {
-  return services.length > 0
-}
 
 async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFeeds: UpstreamCandidate[], discordUrl?: string): Promise<boolean> {
   if (!shouldPersistSnapshot(services)) {
@@ -574,12 +570,11 @@ async function cacheRead(
     return null
   }
   if (!raw) {
-    // Severity is deliberately below the others: the key can expire legitimately (TTL 900s, and the
-    // only unconditional writer is the traffic-throttled /api/status handler), so a quiet period can
-    // produce this. #1227 follow-up: the `cache-read` index measurement answered "how often" and the
-    // cron now re-seeds on exactly this outcome (and its `unparsed`/`empty` siblings below) —
-    // `refreshStatusCacheOnUnusableSnapshot` in cronAlertCheck. Stays a `warn` because it now
-    // self-heals within one cron tick instead of persisting until the next throttled write.
+    // Severity is deliberately below the others: this self-heals within one cron tick — the cron
+    // persists whatever it live-fetched (`refreshStatusCacheAfterCronFetch` in cronAlertCheck), so a
+    // miss no longer waits for a real visitor to hit the throttled /api/status writer. #1371 narrowed
+    // how often it can happen at all: the cron now refreshes the key BEFORE it expires rather than only
+    // re-seeding it afterwards, so reaching this branch means a write failed or the cron is not running.
     console.warn('[kv] CACHE_KEY read returned NO VALUE — the key is absent or expired')
     recordCacheReadOutcome(analytics, 'miss')
     return null
@@ -852,8 +847,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 
   // Read cached service data — fetch live if cache is stale or missing
   const raw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
-  const STALE_THRESHOLD_MS = 10 * 60 * 1000
-  const { stale, services: cachedServices, upstreamFeeds: cachedFeeds } = isCacheStale(raw, STALE_THRESHOLD_MS)
+  const { stale, services: cachedServices, upstreamFeeds: cachedFeeds } = isCacheStale(raw, CACHE_STALE_THRESHOLD_MS)
   // #1227 follow-up — isCacheStale normalizes a missing key, a read that threw, unparsed JSON, and a
   // parsed-but-empty services array all down to `services: []` (it's the cron's one parser of the
   // snapshot shape). That's the same four DATA outcomes `cacheRead()` reports for every OTHER reader
@@ -881,8 +875,8 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 
   // If cache is stale (>10min) or empty, fetch live data to avoid alert decisions on outdated status.
   // The routine writer stays the throttled /api/status handler's cacheWrite() (10-min throttle). The
-  // ONE write in this block is the #1227 re-seed below, and it fires only when there was no usable
-  // snapshot to begin with — never on a merely-stale-but-present one.
+  // ONE write in this block persists whatever THIS fetch read (#1371) — on any stale tick, not only
+  // after the key has already gone. Discarding it is what let the key expire with no writer.
   let cronProbes: ProbeSnapshot[] = []
   // #992 — per-page raw components from the live fetch, for the new-component detector below. Only
   // populated on a stale-triggered live fetch (a fresh-cache cycle skips detection — it runs next cycle).
@@ -901,9 +895,9 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         // from the SAME cycle. A mixed snapshot (fresh feeds beside stale services) would let the
         // upstream gate reason about two different moments in time.
         upstreamFeeds = freshFeeds
-        // #1227 follow-up — re-seed CACHE_KEY when there was no usable snapshot to serve, so
-        // cacheRead() callers (badge, statusline, v1 API, ...) don't sit on a miss until the next
-        // throttled /api/status write. No-op (and no write) when the key merely existed-but-stale.
+        // #1371 (widening #1227) — persist what this fetch just read, so the key is refreshed BEFORE
+        // it expires rather than only re-seeded afterwards. Refuses only when the fetch read nothing
+        // (see the function's doc: an all-unreadable fetch still arrives full-length).
         // Deliberately not aligned with `lastKvWrite` — see the function's own doc comment.
         //
         // This DOES reset the cron's own 10-min staleness clock, so a fully quiet window live-fetches
@@ -911,9 +905,21 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         // fetch's own latency lands `cachedAt` relative to the tick boundary) — bounded by the same
         // 10-min tolerance the threshold already declares acceptable. Up to two consecutive ticks can
         // skip #992 new-component detection this way; it resumes on the next stale-triggered fetch.
-        const reseeded = await refreshStatusCacheOnUnusableSnapshot(env.STATUS_CACHE, snapshotUnusable, freshServices, freshFeeds, CACHE_KEY, CACHE_TTL_SECONDS)
-        if (snapshotUnusable && !reseeded) {
-          console.error('[cron] #1227 CACHE_KEY re-seed FAILED after a genuine miss — badge/statusline/v1 keep failing closed until the next throttled /api/status write')
+        const persisted = await refreshStatusCacheAfterCronFetch(env.STATUS_CACHE, freshServices, freshFeeds, CACHE_KEY, CACHE_TTL_SECONDS)
+        if (!persisted) {
+          // #1371 — `error`, not `warn`, in BOTH cases. A write that does not land is what lets the TTL
+          // run out unrefreshed, which reinstates the exact defect this issue fixes; the #488 sibling
+          // a thousand lines down escalates its own failed refresh for the weaker symptom of a stale OG
+          // card, and #1057 does the same. Review round 1 caught this at `warn` on the branch whose
+          // symptom is a 503 across 43 pages. The `snapshotUnusable` half only adds that readers are
+          // already failing closed rather than about to.
+          // Reached only by a failed KV put: the guard's own refusal cannot fire here, since this call
+          // sits inside `freshServices.length > 0` and the guard is that same length check.
+          console.error(
+            snapshotUnusable
+              ? '[cron] CACHE_KEY NOT refreshed after a live fetch, and there was no usable snapshot — badge/statusline/v1/is-down are failing closed right now (refs #1371)'
+              : '[cron] CACHE_KEY NOT refreshed after a live fetch (refs #1371)',
+          )
         }
       }
       cronPageComponents = pageComponents
