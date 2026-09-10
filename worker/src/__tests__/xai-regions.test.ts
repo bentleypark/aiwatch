@@ -118,7 +118,8 @@ describe('xai-regions (#686/#703)', () => {
         fullInc({ id: 'us1', title: `[API (us-east-1.api.x.ai)] ${T}` }),
         fullInc({ id: 'eu1', title: `[API (eu-west-1.api.x.ai)] ${T}` }),
       ])
-      // same event key → same id whether 1 or 2 regions present (survives partial resolution / late join)
+      // Same key + group anchor → same id whether 1 or 2 regions are present (survives partial
+      // resolution / a later-starting region joining).
       expect(single[0].id).toBe(multi[0].id)
     })
 
@@ -169,11 +170,7 @@ describe('xai-regions (#686/#703)', () => {
       ])
     })
 
-    // #1337 — the region axis keeps its per-region echo. Its groups have NO time bound, so members
-    // can come from outages months apart, where a repeated boilerplate sentence is two separate
-    // announcements rather than one echoed; collapsing them there deleted a whole later outage's
-    // timeline. The echo collapse is therefore scoped to the surface axis, whose groups are bounded.
-    it('leaves a per-region echo alone — collapsing it is unsound without a time bound', () => {
+    it('collapses a per-region echo once the group is time-bounded', () => {
       const RESOLVED = 'We have resolved the situation, and traffic is healthy again.'
       const out = mergeXaiRegionalIncidents([
         fullInc({ id: 'us1', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:00.000Z', timeline: [
@@ -183,20 +180,37 @@ describe('xai-regions (#686/#703)', () => {
           { stage: 'investigating', text: RESOLVED, at: '2026-09-03T17:07:20.000Z' },
         ] }),
       ])
-      expect(out[0].timeline).toHaveLength(2)
+      expect(out[0].timeline).toHaveLength(1)
     })
 
-    it('does not delete a later outage\'s rows when two same-title outages fuse', () => {
-      // The region merge fuses same-title outages across time (pre-existing #940). Whatever else that
-      // does, the fused incident must still carry both outages' updates.
+    it('splits the real recurring Models unavailable pair, preserving plausible durations and ids', () => {
       const SAME = 'We are investigating an issue.'
       const out = mergeXaiRegionalIncidents([
-        fullInc({ id: 'jan-us', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-01-21T11:19:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-21T11:19:00.000Z' }] }),
-        fullInc({ id: 'jan-uw', title: `[API (us-west-2.api.x.ai)] ${T}`, startedAt: '2026-01-21T11:19:30.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-21T11:19:30.000Z' }] }),
-        fullInc({ id: 'mar-us', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-03-15T09:00:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-03-15T09:00:00.000Z' }] }),
-        fullInc({ id: 'mar-uw', title: `[API (us-west-2.api.x.ai)] ${T}`, startedAt: '2026-03-15T09:02:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-03-15T09:02:00.000Z' }] }),
+        fullInc({ id: 'jan14-us', title: '[API (us-east-1.api.x.ai)] Models unavailable', status: 'resolved', startedAt: '2026-01-14T18:53:15.000Z', resolvedAt: '2026-01-14T19:30:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-14T18:53:15.000Z' }] }),
+        fullInc({ id: 'jan14-eu', title: '[API (eu-west-1.api.x.ai)] Models unavailable', status: 'resolved', startedAt: '2026-01-14T18:55:00.000Z', resolvedAt: '2026-01-14T19:32:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-14T18:55:00.000Z' }] }),
+        fullInc({ id: 'jan21-us', title: '[API (us-east-1.api.x.ai)] Models unavailable', status: 'resolved', startedAt: '2026-01-21T11:19:00.000Z', resolvedAt: '2026-01-21T13:02:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-21T11:19:00.000Z' }] }),
+        fullInc({ id: 'jan21-eu', title: '[API (eu-west-1.api.x.ai)] Models unavailable', status: 'resolved', startedAt: '2026-01-21T11:21:00.000Z', resolvedAt: '2026-01-21T13:01:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-21T11:21:00.000Z' }] }),
       ])
-      expect(out[0].timeline).toHaveLength(4)
+      expect(out).toHaveLength(2)
+      expect(out.map(i => i.duration)).toEqual(['39m', '1h 43m'])
+      expect(new Set(out.map(i => i.id)).size).toBe(2)
+    })
+
+    it('refuses to fuse two same-region incidents even inside the time window', () => {
+      const out = mergeXaiRegionalIncidents([
+        fullInc({ id: 'first', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:00.000Z' }),
+        fullInc({ id: 'second', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:35:00.000Z' }),
+      ])
+      expect(out).toHaveLength(2)
+      expect(new Set(out.map(i => i.id)).size).toBe(2)
+    })
+
+    it('keeps the canonical id stable when same-event regions arrive in another feed order', () => {
+      const event = [
+        fullInc({ id: 'us', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:00.000Z' }),
+        fullInc({ id: 'eu', title: `[API (eu-west-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:34:00.000Z' }),
+      ]
+      expect(mergeXaiRegionalIncidents(event)[0].id).toBe(mergeXaiRegionalIncidents([...event].reverse())[0].id)
     })
 
     it('keeps DISTINCT events separate (different canonical ids)', () => {
@@ -423,7 +437,7 @@ describe('xai Grok surface merge (#1337)', () => {
         fullInc({ id: 'uw', title: '[API (us-west-2.api.x.ai)] Models outage', startedAt: '2026-09-03T13:30:00.000Z' }),
       ])
       const grok = mergeXaiGrokSurfaceIncidents(QUARTET_2026_09_03)
-      expect(api[0].id).toBe('xai-evt:1sc6h22')
+      expect(api[0].id).toMatch(/^xai-evt:/)
       expect(grok[0].id).toMatch(/^xai-grok:/) // namespace
       expect(grok[0].id.split(':')[1]).not.toBe(api[0].id.split(':')[1]) // hash payload
     })

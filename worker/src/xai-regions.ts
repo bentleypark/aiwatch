@@ -14,7 +14,8 @@
 //
 // #1337 adds the SECOND axis on the same page: xAI files one Grok app outage as a separate incident per
 // SURFACE, tagged `[Grok (<surface>)] `. Same failure, different prefix — see `mergeXaiGrokSurfaceIncidents`
-// for why it needs a time window that the region merge does not.
+// for why it needs a time window. #1349 later applied the same bounded grouping discipline to the
+// region axis after xAI reused an API title for separate outages.
 
 import type { Incident, TimelineEntry } from './types'
 import { formatDuration } from './utils'
@@ -108,46 +109,79 @@ function fnv1aHex(s: string): string {
  *
  * Per-field merge semantics are `mergeXaiEventGroup`'s, shared with the surface merge. This function
  * owns only the GROUPING and the IDENTITY:
- *  - **grouping**: the region-stripped title, across the whole feed with no time bound. Safe here
- *    because an API event title is specific enough not to recur (contrast `xaiGrokEventKey`, whose
- *    titles do recur and which therefore needs a window).
- *  - **id**: a canonical `xai-evt:<fnv1a(eventKey)>` derived from the region-stripped title, so the id
- *    survives partial resolution (region A resolves while B is active) AND a single→multi-region
- *    transition WITHOUT re-keying → no phantom re-alert mid-incident. Two accepted re-key cases, each
- *    still far fewer alerts than the pre-#940 per-region behavior: (a) an xAI incident already active at
- *    DEPLOY re-keys once from its RSS guid (deploy while xAI is clean to avoid it); (b) if xAI EDITS an
- *    active incident's summary text the eventKey changes → one duplicate "new incident" alert.
+ *  - **grouping**: the region-stripped title, a start within REGION_WINDOW_MS of the group anchor, and
+ *    no repeated region in the group. The title alone is not an event identity: xAI reused "Models
+ *    unavailable" seven days apart in January 2026, which fabricated a 162-hour outage (#1349).
+ *  - **id**: a canonical `xai-evt:<fnv1a(eventKey|startedAt)>`, so recurrences cannot collide in the
+ *    SPA's raw-id dedupe. It remains stable across a partial resolution and a late *later-starting*
+ *    region. A late member with an earlier start re-keys once because this pure snapshot merge has no
+ *    durable first-seen identity; that bounded alert/archive duplicate is preferable to fusing distinct
+ *    outages.
  *  - **title**: single region keeps its original `[API (<region>)] …`; multi-region →
  *    `[API] <eventKey> (regions: a, b, …)` — see the `[API]` marker note at the title itself.
  */
+const REGION_WINDOW_MS = 30 * 60 * 1000
+
+interface RegionGroup {
+  key: string
+  anchorMs: number
+  regions: Set<string>
+  members: Incident[]
+}
+
 export function mergeXaiRegionalIncidents(incidents: Incident[]): Incident[] {
-  const groups = new Map<string, Incident[]>()
-  for (const inc of incidents) {
-    if (!XAI_REGION_RE.test(inc.title)) continue
+  const groups: RegionGroup[] = []
+  const groupOfIndex = new Map<number, RegionGroup>()
+  incidents.forEach((inc, idx) => {
+    const region = xaiRegionOf(inc.title)
+    if (!region) return
+    const startedMs = Date.parse(inc.startedAt)
+    if (Number.isNaN(startedMs)) {
+      console.warn('[xai-regions] #1349 unparseable startedAt — leaving incident unmerged:', inc.startedAt)
+      return
+    }
     const key = xaiEventKey(inc.title)
-    const arr = groups.get(key)
-    if (arr) arr.push(inc)
-    else groups.set(key, [inc])
+    const group = groups.find((g) =>
+      g.key === key && !g.regions.has(region) && Math.abs(startedMs - g.anchorMs) <= REGION_WINDOW_MS)
+    if (group) {
+      group.regions.add(region)
+      group.members.push(inc)
+      groupOfIndex.set(idx, group)
+    } else {
+      const created: RegionGroup = { key, anchorMs: startedMs, regions: new Set([region]), members: [inc] }
+      groups.push(created)
+      groupOfIndex.set(idx, created)
+    }
+  })
+
+  const emitted = new Set<RegionGroup>()
+  const usedIds = new Set<string>()
+  const uniqueId = (id: string): string => {
+    if (!usedIds.has(id)) { usedIds.add(id); return id }
+    for (let n = 2; ; n++) {
+      const candidate = `${id}-${n}`
+      if (!usedIds.has(candidate)) { usedIds.add(candidate); return candidate }
+    }
   }
-  const emitted = new Set<string>()
   const out: Incident[] = []
-  for (const inc of incidents) {
-    if (!XAI_REGION_RE.test(inc.title)) { out.push(inc); continue }
-    const key = xaiEventKey(inc.title)
-    if (emitted.has(key)) continue
-    emitted.add(key)
-    const members = groups.get(key)!
-    const regions = [...new Set(members.map(m => xaiRegionOf(m.title)).filter((r): r is string => !!r))]
-    out.push(mergeXaiEventGroup(members, {
-      id: `xai-evt:${fnv1aHex(key)}`,
+  incidents.forEach((inc, idx) => {
+    const group = groupOfIndex.get(idx)
+    if (!group) { out.push(inc); return }
+    if (emitted.has(group)) return
+    emitted.add(group)
+    const members = collapseCrossMemberEchoes(group.members)
+    const startedAt = members.reduce((min, m) => (m.startedAt < min ? m.startedAt : min), members[0].startedAt)
+    const id = uniqueId(`xai-evt:${fnv1aHex(`${group.key}|${startedAt}`)}`)
+    out.push({ ...mergeXaiEventGroup(members, {
+      id,
       // A single-region event keeps its original `[API (<region>.api.x.ai)] …` title; a multi-region
       // event drops the per-region prefixes for `<eventKey> (regions: …)` — but MUST retain an `[API]`
       // marker so it still passes `filterIncidents`, which keeps an xAI incident only when its title
       // carries the `api` keyword (xAI incidents have no componentNames to match on). Without it a real
       // multi-region outage would be silently filtered out → the service would read operational (#940 review).
-      title: members.length === 1 ? members[0].title : `[API] ${key} (regions: ${regions.join(', ')})`,
-    }))
-  }
+      title: members.length === 1 ? members[0].title : `[API] ${group.key} (regions: ${[...group.regions].join(', ')})`,
+    }), id })
+  })
   return out
 }
 
