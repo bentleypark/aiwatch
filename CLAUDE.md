@@ -277,6 +277,7 @@ src/                 # React 19 SPA (Vite, no router — hash routing in App.jsx
   hooks/             # usePolling, useTheme, useLang, useSettings, useGitHubStars
   utils/             # analytics, calendar, time, pageContext, constants, hashRoute, webhookSubscription, liveIncident (#1104 — the one "is this service still carrying a live incident?" rule the SPA's resolved-claims share), reportGuard (#1369 — one crowd report per service per UTC day; the Edge is-down page carries the same rule as inline source)
   locales/           # ko.js, en.js — flat key→string maps
+  sw/                # PWA service worker → /sw.js (#1386); policy.js = cache decisions
 worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts, AI analysis
   index.ts           # Entry: CORS, routing, /api/*, /badge, /feed, Cron scheduled handler
   services.ts        # Service configs + fetch orchestrator + status determination
@@ -364,5 +365,5 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 - **Cron `*/5`** — incident detection + Discord alerts (KV ID dedup), AI analysis inline (cancellable 15s budget), holds, cache refresh on a status edge (#488 cron edge + #1057 live-poll edge — so the is-down/OG card flips ahead of the alert, not in lockstep; see product-constraints.md). Alert paths: [docs/reference/discord-alert-paths.md](docs/reference/discord-alert-paths.md).
 - **Frontend deployment** — Vercel, `ai-watch.dev`; `git push origin main` auto-deploys. `npm run build` is local only. `api/` files count against the Hobby **12-Serverless-Function cap** unless edge-runtime or `_`-prefixed (#862/#867; CI guard `check-vercel-function-count`).
 - **CSP (#482)** — enforced on the SPA (`vercel.json`, hash-locked) and per-response on every Edge SSR page (nonce for no-store surfaces, content-hash for cached is-down). Policy + rationale: [docs/reference/reference-csp.md](docs/reference/reference-csp.md).
-- **PWA** — `public/manifest.json` + `public/sw.js` (stale-while-revalidate); the cache name auto-derives from `asset-manifest.json` (an md5 of the content-hashed asset filenames), so there is **nothing to bump by hand** — a version bump invalidates it too, via the inlined `__APP_VERSION__`; registered in production only (#432).
+- **PWA** — `public/manifest.json` + `src/sw/` → `/sw.js` (#1386); navigations **network-first**, assets stale-while-revalidate. Cache name auto-derives from `asset-manifest.json` — **nothing to bump by hand**; registered in prod only (#432).
 - **Edge SSR surfaces** — is-down (SEO, `?e=`/`?i=` social-card pinning), intro, methodology, plugin, plugin-privacy, badges, reports proxy.

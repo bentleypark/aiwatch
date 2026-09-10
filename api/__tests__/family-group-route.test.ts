@@ -33,9 +33,12 @@ describe('FAMILY_GROUPS ↔ vercel.json group routes', () => {
 
   it('every family rewrite outranks the SPA catch-all', () => {
     // Vercel matches rewrites in array order. Appending is the natural way to "add a line", and an
-    // entry added below the `/(.*)` catch-all is dead: the URL serves the SPA shell at 200, the
-    // existence assertion above still passes, and the operator has already pasted the link.
-    const catchAll = vercelConfig.rewrites.findIndex((r) => r.source === '/(.*)')
+    // entry added below the catch-all is dead: the URL serves the SPA shell at 200, the existence
+    // assertion above still passes, and the operator has already pasted the link.
+    // Identified by where it sends traffic, not by how its source is spelled: #1386 narrowed that
+    // source to exclude `/assets/`, and a test pinned to the literal string went stale on a change
+    // that left the catch-all exactly as load-bearing as before.
+    const catchAll = vercelConfig.rewrites.findIndex((r) => r.destination === '/index.html')
     expect(catchAll, 'no SPA catch-all rewrite found — this assertion is stale').toBeGreaterThanOrEqual(0)
     for (const family of Object.values(FAMILY_GROUPS)) {
       const i = vercelConfig.rewrites.findIndex((r) => r.source === `/is-${family.slug}-down`)

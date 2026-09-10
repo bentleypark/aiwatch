@@ -406,8 +406,7 @@ api/                   # 헬퍼는 `_` 접두 디렉터리에, 핸들러는 edge
   reports.ts           # /reports/* 프록시 → Jekyll 사이트   _shared/      # 공유 Edge 헬퍼
   confirm.ts csp-report.ts plugin-privacy.ts extension-privacy.ts
 public/
-  manifest.json        # PWA 매니페스트
-  sw.js                # Service Worker (stale-while-revalidate)
+  manifest.json        # PWA 매니페스트  (Service Worker는 src/sw/ 에서 /sw.js 로 빌드)
   icon-192.png         # PWA 아이콘 192x192
   icon-512.png         # PWA 아이콘 512x512
 scripts/               # 빌드/CI/운영 스크립트 (OG 생성, CI 린트 게이트, verify-reminders 등)

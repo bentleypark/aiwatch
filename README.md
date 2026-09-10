@@ -407,8 +407,7 @@ api/                   # Helpers live in `_`-prefixed dirs and handlers run on t
   reports.ts           # /reports/* proxy → Jekyll site     _shared/      # shared Edge helpers
   confirm.ts csp-report.ts plugin-privacy.ts extension-privacy.ts
 public/
-  manifest.json        # PWA manifest
-  sw.js                # Service Worker (stale-while-revalidate)
+  manifest.json        # PWA manifest  (the Service Worker is built from src/sw/ → /sw.js)
   icon-192.png         # PWA icon 192x192
   icon-512.png         # PWA icon 512x512
 scripts/               # Build/CI/ops scripts (OG generation, CI lint gates, verify-reminders, …)

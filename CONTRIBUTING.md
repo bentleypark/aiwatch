@@ -67,7 +67,7 @@ All tests must pass before submitting a PR — CI gates `test:src`, `test:worker
 ```
 src/           # React frontend (pages, components, hooks, utils, locales)
 api/           # Vercel Edge Functions — "Is X Down?" SSR pages, landing page, Monthly Reports proxy
-public/        # Static assets (manifest.json, sw.js, icons)
+public/        # Static assets (manifest.json, icons) — the Service Worker is built from src/sw/
 scripts/       # Build/asset scripts (OG image generator)
 worker/        # Cloudflare Workers backend (parsers, types, utils, vitals)
 tests/         # Playwright E2E tests
