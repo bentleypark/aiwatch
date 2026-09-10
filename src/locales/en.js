@@ -246,6 +246,8 @@ const en = {
   'score.incidents': 'Incidents',
   'score.recovery': 'Recovery',
   'score.responsiveness': 'Resp.',
+  'score.responsiveness.speed': 'Speed',
+  'score.responsiveness.stability': 'Stability',
   'score.responsiveness.insufficient': 'Building data (<7 days)',
   'score.coverage.insufficient': 'Building data (<30 days) — not yet ranked',
   'score.bar.label': 'Score',

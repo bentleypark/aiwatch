@@ -367,6 +367,49 @@ describe('calculateAIWatchScore', () => {
     expect(result.breakdown.responsivenessStatus).toBe('available')
   })
 
+  // #1002 — `responsiveness` is speed+stability summed and the two axes discarded; these pin that
+  // the split is exposed instead, and that it isn't a second, independently-drifting computation.
+  it('exposes the speed/stability split, and it sums to the merged responsiveness figure', () => {
+    const result = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 200, cvCombined: 0.3 }))
+
+    expect(result.breakdown.speed).not.toBeNull()
+    expect(result.breakdown.stability).not.toBeNull()
+    // speed = 10 * exp(-200/400) ≈ 6.07; stability = 10 * exp(-0.3/0.5) ≈ 5.49
+    expect(result.breakdown.speed!).toBeCloseTo(6.1, 1)
+    expect(result.breakdown.stability!).toBeCloseTo(5.5, 1)
+    // `responsiveness` is DEFINED as `round(speed + stability, 1dp)` (not an independent rounding
+    // of the raw total) — so a plain `+` of the two displayed numbers lands within float noise
+    // (~1e-15) of the parent, not necessarily `===` it (IEEE-754: e.g. 6.4 + 3.7 = 10.100000000000001).
+    // toBeCloseTo(x, 1) (tolerance 0.05) absorbs that noise while still failing on a REAL regression
+    // to independent rounding, whose gap is up to 0.1 — see the next test for that case pinned exactly.
+    expect(result.breakdown.speed! + result.breakdown.stability!).toBeCloseTo(result.breakdown.responsiveness!, 1)
+  })
+
+  it('sum-equals-parent holds even where rounding speed/stability independently would disagree with rounding their raw total', () => {
+    // p50=50 (floored), cvCombined=0.04: raw speed≈8.82497, raw stability≈9.23116, raw sum≈18.0561.
+    // round(raw sum)=18.1, but round(speed)+round(stability)=8.8+9.2=18.0 — a real 0.1 disagreement
+    // if `responsiveness` were rounded independently of the parts. This fixture is chosen SPECIFICALLY
+    // to fail under that (previous, rejected) approach, unlike the p50:200/cv:0.3 fixture above, whose
+    // two roundings happen to agree — a regression to independent rounding would slip past that one.
+    const result = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 50, cvCombined: 0.04 }))
+
+    expect(result.breakdown.speed).toBeCloseTo(8.8, 1)
+    expect(result.breakdown.stability).toBeCloseTo(9.2, 1)
+    // Exact here (unlike the tolerant check above) — this fixture's whole point is to be the case
+    // that WOULD disagree by 0.1 under independent rounding, so pin it without any slack.
+    expect(result.breakdown.responsiveness).toBe(18)
+    expect(result.breakdown.speed! + result.breakdown.stability!).toBeCloseTo(result.breakdown.responsiveness!, 1)
+  })
+
+  it('speed/stability are null under the same conditions responsiveness is (insufficient/unavailable/unsupported)', () => {
+    for (const probe of [probeInsufficient, probeUnavailable, probeUnsupported]) {
+      const result = scoreWithProbe(makeSvc({ uptime30d: 100 }), probe)
+      expect(result.breakdown.responsiveness).toBeNull()
+      expect(result.breakdown.speed).toBeNull()
+      expect(result.breakdown.stability).toBeNull()
+    }
+  })
+
   it('floors p50 at 50ms in Speed calculation (bimodal protection)', () => {
     // p50=10ms (Claude-like bimodal) should not score higher than p50=50ms
     const fast = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 10, cvCombined: 0.2 }))

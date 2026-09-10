@@ -120,6 +120,8 @@ describe('/api/status/cached scoreBreakdown (probe-less projection)', () => {
       incidents: expect.any(Number),
       recovery: expect.any(Number),
       responsiveness: null,
+      speed: null,
+      stability: null,
       responsivenessStatus: 'unsupported',
     })
   })
@@ -162,6 +164,12 @@ describe('/api/status/cached scoreBreakdown (probed services)', () => {
     const result = buildProbedResponse({ p50: 178, p95: 311, cvCombined: 0.596, validDays: 7 })
     expect(result.scoreBreakdown.responsivenessStatus).toBe('available')
     expect(result.scoreBreakdown.responsiveness).not.toBeNull()
+    // #1002 — the projected shape on the wire, symmetric with the probe-less contract test below:
+    // speed/stability ship alongside responsiveness, and the parent is their sum (within float
+    // noise — see the same tolerance note in score.test.ts).
+    expect(result.scoreBreakdown.speed).not.toBeNull()
+    expect(result.scoreBreakdown.stability).not.toBeNull()
+    expect(result.scoreBreakdown.speed! + result.scoreBreakdown.stability!).toBeCloseTo(result.scoreBreakdown.responsiveness!, 1)
     expect(result.scoreMetrics.probe).toEqual({ p50: 178, p95: 311, cvCombined: 0.596, validDays: 7 })
   })
 

@@ -1043,12 +1043,31 @@ export default function ServiceDetails({ serviceId }) {
                 </div>
               ))}
               {service.scoreBreakdown?.responsivenessStatus === 'available' && service.scoreBreakdown?.responsiveness != null && (
-                <div className="flex items-center gap-3">
-                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.responsiveness')}</span>
-                  <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
-                    <div className="bg-[var(--purple)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.responsiveness / 20) * 100}%` }} />
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-3">
+                    <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.responsiveness')}</span>
+                    <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
+                      <div className="bg-[var(--purple)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.responsiveness / 20) * 100}%` }} />
+                    </div>
+                    <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.responsiveness}/20</span>
                   </div>
-                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.responsiveness}/20</span>
+                  {/* #1002 — speed vs stability are two distinct axes (fast-but-jittery vs slow-but-steady)
+                      that `responsiveness` sums and hides; show the split, parent bar stays authoritative. */}
+                  {[
+                    { label: t('score.responsiveness.speed'), value: service.scoreBreakdown?.speed },
+                    { label: t('score.responsiveness.stability'), value: service.scoreBreakdown?.stability },
+                  ].map(({ label, value }) => value != null && (
+                    // Same label/bar/value column widths as the parent row above, so the bar TRACK
+                    // stays aligned with every other row's — only the label text carries the "child
+                    // of Resp." signal (└ prefix), never a row-level offset that breaks the grid.
+                    <div key={label} className="flex items-center gap-3">
+                      <span className="w-16 shrink-0 mono text-[9px] text-[var(--text2)]">└ {label}</span>
+                      <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '4px' }}>
+                        <div className="bg-[var(--purple)] rounded-full" style={{ height: '4px', width: `${(value / 10) * 100}%`, opacity: 0.7 }} />
+                      </div>
+                      <span className="w-10 shrink-0 text-right mono text-[9px] text-[var(--text2)]">{value}/10</span>
+                    </div>
+                  ))}
                 </div>
               )}
               {/* 'insufficient' has actionable info ("data accumulating <7d"); 'unavailable' is a transient
