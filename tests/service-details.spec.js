@@ -88,7 +88,7 @@ test.describe('#581 Recovery card — ongoing (unresolved) incident', () => {
     status: incidents.some(i => i.status !== 'resolved') ? 'degraded' : 'operational',
     latency: 120, uptime30d: 99.5, uptimeSource: 'official', calendarDays: 30, incidents,
     aiwatchScore: 80, scoreGrade: 'good', scoreConfidence: 'high',
-    scoreBreakdown: { uptime: 39, incidents: 22, recovery: 15, responsiveness: 12, responsivenessStatus: 'available' },
+    scoreBreakdown: { uptime: 39, incidents: 22, recovery: 15, responsiveness: 12, speed: 6, stability: 6, responsivenessStatus: 'available' },
     scoreMetrics: { uptimePct: 99.5, incidents30d: incidents.length, affectedDays30d: 1, mttrHours: null, probe: { p50: 178, p95: 311, cvCombined: 0.5, validDays: 7 } },
   })
   const mount = async (page, incidents) => {
@@ -132,7 +132,7 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
           status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official',
           calendarDays: 30, incidents: [],
           aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high',
-          scoreBreakdown: { uptime: 39.6, incidents: 25, recovery: 15, responsiveness: 12.4, responsivenessStatus: 'available' },
+          scoreBreakdown: { uptime: 39.6, incidents: 25, recovery: 15, responsiveness: 12.4, speed: 6.2, stability: 6.2, responsivenessStatus: 'available' },
           scoreMetrics: { uptimePct: 99.95, incidents30d: 0, affectedDays30d: 0, mttrHours: null, probe: { p50: 178, p95: 311, cvCombined: 0.5, validDays: 7 } },
         },
       ],
@@ -148,6 +148,8 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
     await expect(main.getByText(/\b25\s*\/\s*25\b/)).toBeVisible()
     await expect(main.getByText(/\b15\s*\/\s*15\b/)).toBeVisible()
     await expect(main.getByText(/12\.4\s*\/\s*20/)).toBeVisible()
+    // #1002 — the speed/stability split renders as two /10 sub-rows under the parent
+    await expect(main.getByText(/6\.2\s*\/\s*10/)).toHaveCount(2)
     // Old denominators must not appear
     await expect(main.getByText(/\/\s*50\b/)).not.toBeVisible()
     await expect(main.getByText(/\/\s*30\b/)).not.toBeVisible()
@@ -171,7 +173,12 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
     await page.route('**/api/status/cached', async (route) => { await route.fulfill(unsupportedMock) })
     await page.goto('/#chatgpt')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
-    // No /20 denominator should render
+    // No /20 denominator should render. (A `/10` assertion here would be vacuous, not a
+    // regression guard: this fixture carries no speed/stability — matching the real server
+    // contract, score.test.ts pins speed/stability null whenever responsivenessStatus isn't
+    // 'available' — so ServiceDetails.jsx's per-row `value != null` guard hides the sub-rows
+    // regardless of where the outer gate sits; an e2e fixture that gave them non-null values here
+    // would itself be an impossible, unfaithful state.)
     await expect(page.locator('main').getByText('/20')).not.toBeVisible()
   })
 
@@ -710,7 +717,7 @@ test.describe('Incident History — preview + show-more (#incident-history-colla
     id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
     status: 'operational', latency: 120, uptime30d: 99.5, uptimeSource: 'official',
     calendarDays: 30, incidents, aiwatchScore: 80, scoreGrade: 'good', scoreConfidence: 'high',
-    scoreBreakdown: { uptime: 39, incidents: 22, recovery: 15, responsiveness: 12, responsivenessStatus: 'available' },
+    scoreBreakdown: { uptime: 39, incidents: 22, recovery: 15, responsiveness: 12, speed: 6, stability: 6, responsivenessStatus: 'available' },
     scoreMetrics: { uptimePct: 99.5, incidents30d: incidents.length, affectedDays30d: 1, mttrHours: null, probe: { p50: 178, p95: 311, cvCombined: 0.5, validDays: 7 } },
   })
   const mount = async (page, incidents) => {

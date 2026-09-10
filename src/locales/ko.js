@@ -245,6 +245,8 @@ const ko = {
   'score.incidents': 'Incidents',
   'score.recovery': 'Recovery',
   'score.responsiveness': '응답성',
+  'score.responsiveness.speed': '속도',
+  'score.responsiveness.stability': '안정성',
   'score.responsiveness.insufficient': '데이터 누적 중 (7일 미만)',
   'score.coverage.insufficient': '데이터 수집 중 (30일 미만) — 아직 랭킹 제외',
   'score.bar.label': 'Score',

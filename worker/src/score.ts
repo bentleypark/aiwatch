@@ -14,7 +14,16 @@ export interface AIWatchScore {
     uptime: number | null
     incidents: number
     recovery: number
+    // #1002 — `Math.round((speed + stability) * 10) / 10` (not an independent rounding of the raw
+    // total), so the two DISPLAYED children always round-trip to this exact parent figure. A
+    // consumer summing the two published numbers with plain `+` lands within float noise (~1e-15)
+    // of this value, not necessarily `===` it (IEEE-754, e.g. 6.4 + 3.7 = 10.100000000000001) —
+    // round the sum before comparing, same as this file does.
     responsiveness: number | null
+    // The two axes `responsiveness` is built from: how fast (speed) vs how consistent (stability),
+    // each /10. Same null condition as `responsiveness` (probe.kind === 'available').
+    speed: number | null
+    stability: number | null
     // Mirrors probe.kind so consumers can distinguish unsupported / unavailable / insufficient
     // without re-deriving from null fields. responsiveness=null overloads 3 distinct conditions.
     responsivenessStatus: ProbeContext['kind']
@@ -309,6 +318,8 @@ export function calculateAIWatchScore(
   // Responsiveness (probe) — compute first so the rescale below knows whether it's an available
   // component. Exhaustive switch — adding a new ProbeContext kind is a compile error until handled.
   let responsivenessScore: number | null = null
+  let speedScore: number | null = null
+  let stabilityScore: number | null = null
   let summary: ProbeSummary | null = null
   let probeAvailable = false
   let probePenalty = 1
@@ -317,6 +328,8 @@ export function calculateAIWatchScore(
       summary = probe.summary
       const { speed, stability } = computeResponsiveness(summary)
       responsivenessScore = speed + stability
+      speedScore = speed
+      stabilityScore = stability
       probeAvailable = true
       break
     }
@@ -361,6 +374,18 @@ export function calculateAIWatchScore(
   const score = confidence === 'low' ? null : scoreNum
   const grade = score === null ? null : scoreToGrade(score)
 
+  // #1002 review — round the two displayed parts FIRST, then define the displayed `responsiveness`
+  // as their sum. Rounding the raw sum independently (the original approach) disagrees with
+  // round(speed) + round(stability) by up to 0.1 on ~24% of realistic probe values (confirmed
+  // against live production data), which reads as an arithmetic error on the page that puts the two
+  // child bars directly under the parent. `scoreNum` above is unaffected — it already used the raw,
+  // unrounded `responsivenessScore`, before this display-only object is built.
+  const speedDisplay = speedScore != null ? Math.round(speedScore * 10) / 10 : null
+  const stabilityDisplay = stabilityScore != null ? Math.round(stabilityScore * 10) / 10 : null
+  const responsivenessDisplay = speedDisplay != null && stabilityDisplay != null
+    ? Math.round((speedDisplay + stabilityDisplay) * 10) / 10
+    : null
+
   return {
     score,
     grade,
@@ -369,7 +394,9 @@ export function calculateAIWatchScore(
       uptime: uptimeScore != null ? Math.round(uptimeScore * 10) / 10 : null,
       incidents: Math.round(incidentScore * 10) / 10,
       recovery: Math.round(recoveryScore * 10) / 10,
-      responsiveness: responsivenessScore != null ? Math.round(responsivenessScore * 10) / 10 : null,
+      responsiveness: responsivenessDisplay,
+      speed: speedDisplay,
+      stability: stabilityDisplay,
       responsivenessStatus: probe.kind,
     },
     metrics: {

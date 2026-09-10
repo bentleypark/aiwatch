@@ -226,7 +226,7 @@ test.describe('Mobile viewport', () => {
       { id: 'bfl', category: 'api', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs',
         status: 'operational', latency: 700, uptime30d: 100, aiwatchScore: 95, scoreGrade: 'excellent',
         scoreConfidence: 'high', coverageDays: 4, calendarDays: 30, incidents: [],
-        scoreBreakdown: { uptime: 40, incidents: 25, recovery: 15, responsiveness: 15, responsivenessStatus: 'available' } },
+        scoreBreakdown: { uptime: 40, incidents: 25, recovery: 15, responsiveness: 15, speed: 7.5, stability: 7.5, responsivenessStatus: 'available' } },
     ], lastUpdated: new Date().toISOString() } }
     await page.route('**/api/status**', (route) => route.fulfill(mock))
     await page.route('**/api/status/cached', (route) => route.fulfill(mock))
