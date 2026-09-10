@@ -253,6 +253,18 @@ jobs:
           fi
           echo "✓ chart.js chunk: $(du -h "$CHART_CHUNK" | cut -f1)"
 
+          # #1386 — the service worker is a build artifact now, not a file in public/. Asserted from
+          # OUTSIDE vite.config.js on purpose: the plugin's own guard cannot fire if the plugin stops
+          # being registered, and nothing else in the repo observes /sw.js (Playwright runs against
+          # the dev server, where src/main.jsx does not register it). A missing /sw.js is silent —
+          # it is not under /assets/, so the SPA catch-all answers it with index.html at 200
+          # text/html and register() fails its MIME check into an empty .catch.
+          if [ ! -f dist/sw.js ]; then
+            echo "::error::dist/sw.js not emitted — the PWA service worker would 404 in production"
+            exit 1
+          fi
+          echo "✓ service worker: $(du -h dist/sw.js | cut -f1)"
+
           # Main bundle should be under 400KB
           MAIN_CHUNK=$(ls dist/assets/index-*.js)
           MAIN_SIZE=$(stat -c%s "$MAIN_CHUNK" 2>/dev/null || stat -f%z "$MAIN_CHUNK")

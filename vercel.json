@@ -1,6 +1,6 @@
 {
   "framework": "vite",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- src/ public/ index.html api/ vercel.json tests/",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- src/ public/ index.html api/ vercel.json vite.config.js tests/",
   "headers": [
     {
       "source": "/((?!is-[^/]+-down(?:/|$)|(?:intro|badges|methodology|plugin|plugin-privacy|extension-privacy|reports|confirm|api)(?:/|$)|feed(?:[./]|$)).*)",
@@ -85,6 +85,6 @@
     { "source": "/feed.xml", "destination": "https://aiwatch-worker.p2c2kbf.workers.dev/feed.xml" },
     { "source": "/feed.xsl", "destination": "https://aiwatch-worker.p2c2kbf.workers.dev/feed.xsl" },
     { "source": "/feed/:slug", "destination": "https://aiwatch-worker.p2c2kbf.workers.dev/feed/:slug" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ]
 }

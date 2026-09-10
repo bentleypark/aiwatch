@@ -38,3 +38,4 @@ kv_limit_alert      # KV key name in the kv-schema table (data key column, not a
 workers_kv          # Cloudflare wrangler OAuth token scope name (whoami output), not ours
 page_location       # GA4 auto-collected event parameter, not a symbol in this tree (#1243)
 PostToolUse         # Claude Code hook event name; no code cites it since the #1304 recorder was withdrawn (#1298)
+not_found_handling  # Cloudflare Workers Assets config key in wrangler.jsonc, which this lint does not scan (#1386)
