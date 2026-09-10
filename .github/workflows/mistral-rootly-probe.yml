@@ -5,18 +5,24 @@
 # matrix that decides the verdict all live in scripts/mistral-rootly-probe.mjs — this file only
 # supplies a display and a Chrome.
 #
-# `on.push` is pinned to the probe branch, so this cannot fire anywhere else. There is deliberately
-# no `workflow_dispatch`: GitHub only exposes that for workflows present on the DEFAULT branch, so on
-# a probe branch the button and `gh workflow run` are both inert — declaring it would advertise a
-# re-run path that does not exist. To re-run, push another commit to the branch.
+# STATUS: the question is ANSWERED — run 34421800205 on `chore/mistral-rootly-probe` (since deleted)
+# returned plain fetch 403 / headless 403 / xvfb-headed 200 with 14 uptime charts. The file is kept
+# here only as the launch recipe #1381 Part 2's real scraper needs: the runner's preinstalled Chrome
+# driven headed under `xvfb-run`, no `playwright install`, npm install confined to a scratch dir.
+# Part 2 replaces it; it is not meant to reach main as a workflow.
+#
+# It is deliberately INERT on this branch. The original `on.push` named the probe branch, which no
+# longer exists, and re-pointing it here would re-run a settled experiment on every commit. Only
+# `workflow_dispatch` is declared, and GitHub exposes that only for workflows on the DEFAULT branch —
+# so nothing fires from a feature branch. To re-run the probe, point `on.push.branches` at the
+# working branch for one commit.
 #
 # It also does NOT run `playwright install` — it drives the runner's preinstalled Chrome — so it
 # stays outside the #1253 invariant that pins how many workflows install a browser and requires each
 # of those to carry a browser cache.
 
 on:
-  push:
-    branches: [chore/mistral-rootly-probe]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
