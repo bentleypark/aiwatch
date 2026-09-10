@@ -1,0 +1,64 @@
+# TEMPORARY probe — delete this workflow, its script and its branch once the question is answered.
+#
+# Question: does a HEADED Chrome under a virtual display (xvfb) on a GitHub Ubuntu runner clear
+# status.mistral.ai's Cloudflare *managed challenge*? The rationale, the two controls and the outcome
+# matrix that decides the verdict all live in scripts/mistral-rootly-probe.mjs — this file only
+# supplies a display and a Chrome.
+#
+# `on.push` is pinned to the probe branch, so this cannot fire anywhere else. There is deliberately
+# no `workflow_dispatch`: GitHub only exposes that for workflows present on the DEFAULT branch, so on
+# a probe branch the button and `gh workflow run` are both inert — declaring it would advertise a
+# re-run path that does not exist. To re-run, push another commit to the branch.
+#
+# It also does NOT run `playwright install` — it drives the runner's preinstalled Chrome — so it
+# stays outside the #1253 invariant that pins how many workflows install a browser and requires each
+# of those to carry a browser cache.
+
+on:
+  push:
+    branches: [chore/mistral-rootly-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Cloudflare challenge — plain fetch vs headless vs xvfb-headed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      # Informational only. A missing Chrome does not need to fail here — the probe reports it as
+      # `error` and the outcome matrix prints INCONCLUSIVE rather than a claim about Cloudflare.
+      - name: Runner egress IP and Chrome build (for the record)
+        run: |
+          curl -s --max-time 15 https://api.ipify.org || echo "(ip lookup failed)"
+          echo
+          google-chrome --version || echo "(no system Chrome)"
+
+      # Installed in a SCRATCH dir with its own package.json, deliberately not against the repo root.
+      # Run from the root, `npm install --no-save playwright@1.58.2` reifies the entire devDependency
+      # tree — scripts/ci-workflow-timeouts.test.mjs records that exact command taking 421s in
+      # deepseek-feed.yml, which would blow any sane step cap here and kill the job before the
+      # question is asked. In a scratch dir only Playwright's own tree is fetched (and no browser:
+      # the package declares no install script — that needs a separate `playwright install`).
+      # The probe then runs FROM that dir so Node's ESM resolution finds the package.
+      - name: Install the Playwright package into a scratch dir
+        timeout-minutes: 6
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw"
+          cd "$RUNNER_TEMP/pw"
+          npm init -y > /dev/null
+          npm install --no-save playwright@1.58.2
+
+      # The whole experiment, under a virtual display. Exits non-zero when the run was INCONCLUSIVE,
+      # so a red job means the instrument had a problem — not that the answer was "no".
+      - name: Probe — plain fetch, headless Chrome, xvfb-headed Chrome
+        run: |
+          cp scripts/mistral-rootly-probe.mjs "$RUNNER_TEMP/pw/probe.mjs"
+          cd "$RUNNER_TEMP/pw"
+          xvfb-run -a node probe.mjs
