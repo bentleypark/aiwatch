@@ -200,11 +200,11 @@ describe('parseUptimeData', () => {
     const result = parseUptimeData(makeHtml({ compA: { days } }), 'typoed-id')
     expect(result.uptimePercent).toBeNull()
     expect(warn).toHaveBeenCalledOnce()
-    expect(warn.mock.calls[0][0]).toContain("'typoed-id' absent from window.uptimeData")
+    expect(warn.mock.calls[0][0]).toContain("'typoed-id' absent from the page's uptime timelines")
     warn.mockRestore()
   })
 
-  it('#989 — does NOT warn when window.uptimeData is genuinely empty (no false alarm)', () => {
+  it('#989 — does NOT warn when the parsed uptime timelines are genuinely empty (no false alarm)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     parseUptimeData(makeHtml({}), 'compA') // empty uptimeData object → quiet
     expect(warn).not.toHaveBeenCalled()

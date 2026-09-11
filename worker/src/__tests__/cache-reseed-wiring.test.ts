@@ -12,6 +12,7 @@ import { CACHE_TTL_SECONDS } from '../cache-ttl'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ServiceStatus } from '../services'
+import { TEST_TIMEOUT_MS } from './helpers/unreadable-source'
 
 vi.mock('../services', async () => {
   const actual = await vi.importActual<typeof import('../services')>('../services')
@@ -104,6 +105,21 @@ describe('source — cron derives snapshotUnusable from cachedServices, not a pr
   })
 })
 
+// Each case here drives the WHOLE `scheduled()` handler, which is the most expensive thing any test in
+// this suite does, and `worker/vitest.config.ts` sets no `testTimeout` — so they ran on vitest's 5s
+// default and intermittently died as `Test timed out in 5000ms`, a red at a location with nothing to do
+// with whatever change triggered it (this file's own header records an earlier incarnation of the same
+// symptom). They now take the same explicit 30s budget every other integration test in this suite
+// already uses. The budget is a guard against a hang, not a performance assertion.
+//
+// Measured rather than assumed, because #1389's review asked whether the raise was masking a slowdown
+// that PR introduced. Isolated runs of the first case, no neighbouring file, n=7 each:
+//   - on that branch:                          median 3980ms, 2/7 over 5000ms
+//   - with its new cron call neutered:         median 3209ms, 1/7 over 5000ms
+// So both are true and neither alone is the whole story: this case exceeds the default budget on its
+// own, which is what justifies the raise — and #1389 does add measurably to it (~0.8s at the median,
+// one extra KV read and an empty sweep in `scheduled()`). Small n, wide overlap; treat the medians as
+// indicative and the crossing counts as the finding.
 describe('behavior — the real scheduled() handler persists whatever it live-fetched (#1371, widening #1227)', () => {
   afterEach(() => { vi.restoreAllMocks() })
 
@@ -160,7 +176,7 @@ describe('behavior — the real scheduled() handler persists whatever it live-fe
     expect(puts.length, 'expected exactly one CACHE_KEY write on a genuine miss').toBe(1)
     const parsed = JSON.parse(puts[0].value)
     expect(parsed.services).toHaveLength(SERVICES.length)
-  })
+  }, TEST_TIMEOUT_MS)
 
   it('does NOT re-seed when the cached snapshot is fresh and unchanged', async () => {
     // NOTE: `scheduled()` has its own unconditional fetchAllServices call outside cronAlertCheck (probe
@@ -169,7 +185,7 @@ describe('behavior — the real scheduled() handler persists whatever it live-fe
     const fresh = JSON.stringify({ services: OPERATIONAL, upstreamFeeds: [], cachedAt: new Date().toISOString() })
     const { puts } = await runCron(fresh)
     expect(puts.length, 'no CACHE_KEY write should happen on a fresh, unchanged snapshot').toBe(0)
-  })
+  }, TEST_TIMEOUT_MS)
 
   it('DOES write when the cached snapshot is stale-but-present — the #1371 fix', async () => {
     // Inverted from what this asserted before #1371, and the inversion IS the fix. The old contract
@@ -183,5 +199,5 @@ describe('behavior — the real scheduled() handler persists whatever it live-fe
     const parsed = JSON.parse(puts[0].value)
     expect(parsed.services, 'and it must be the FRESH services, not the stale ones written back').toHaveLength(SERVICES.length)
     expect(puts[0].options?.expirationTtl, 'the derived TTL must be what reaches KV').toBe(CACHE_TTL_SECONDS)
-  })
+  }, TEST_TIMEOUT_MS)
 })

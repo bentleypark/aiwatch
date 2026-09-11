@@ -183,6 +183,20 @@ export interface ServiceTrackingState {
   // `component-missing:{id}` key's own 30-min `expirationTtl`, and is what `detectComponentMismatches`
   // checks so a miss count frozen by a dead source doesn't re-alert forever either.
   componentMissAt?: string
+  // #1389/#957 — the pair that makes "this service STOPPED publishing uptime" detectable.
+  //
+  // Why a pair and not just the null: an absent value alone cannot tell a REGRESSION from a service
+  // that has never published uptime at all, and alerting on those would page forever about a
+  // documented, permanent state (#713). `uptimeSeenAt` is the evidence that there was something to
+  // lose, and it is OBSERVED rather than configured — so a new service, a source migration, and a
+  // provider that starts publishing are all judged correctly with no list to maintain.
+  //
+  // `uptimeSeenAt` is the last DAY a reading was published (`YYYY-MM-DD`), not a timestamp: the
+  // decision only needs "was there recently something to lose", and a full timestamp refreshed every
+  // cycle would make the blob differ on every poll (see `trackUptimeReading`).
+  uptimeSeenAt?: string
+  // When the nulls started — a full ISO timestamp, because the alert threshold is measured in hours.
+  uptimeMissingSince?: string
 }
 export type TrackingStateBlob = Record<string, ServiceTrackingState>
 
@@ -215,6 +229,14 @@ function sanitizeTrackingState(parsed: Record<string, unknown>): TrackingStateBl
       entry.componentMissCount = v.componentMissCount
       entry.componentMissAt = v.componentMissAt
     }
+    // #1389 — sanitized independently, unlike the count/timestamp pairs above, because there is no
+    // arithmetic here to corrupt: both are plain strings, and `uptimeSeenAt` alone is the steady state
+    // of a healthy service. (`trackUptimeReading` never produces `uptimeMissingSince` without
+    // `uptimeSeenAt` — every delete path removes both — but a hand-edited KV value can, and
+    // `shouldAlertUptimeMissing` reads only the former, so such an entry would alert with an unknown
+    // last-reading date rather than be rejected.)
+    if (typeof v.uptimeSeenAt === 'string') entry.uptimeSeenAt = v.uptimeSeenAt
+    if (typeof v.uptimeMissingSince === 'string') entry.uptimeMissingSince = v.uptimeMissingSince
     if (Object.keys(entry).length > 0) clean[svcId] = entry
   }
   return clean
@@ -225,7 +247,16 @@ function sanitizeTrackingState(parsed: Record<string, unknown>): TrackingStateBl
  *  (a failed `kv.get` there also defaulted to count=0 via `?? '0'`). Since #1232 that also drops
  *  `failSince`, and the blob is written back without it — so a mid-outage read hiccup publishes
  *  `operational` + `sourceUnknown` for the cycles the streak takes to re-climb. It withdraws the
- *  verdict; it does not just delay an escalation. */
+ *  verdict; it does not just delay an escalation.
+ *
+ *  #1389 — it also drops every `uptimeSeenAt`, and the blob is written back without it. For a service
+ *  still publishing, the same cycle re-stamps it. For one whose uptime is GENUINELY gone — the state
+ *  this detector exists to catch — it does not: with no `uptimeSeenAt`, `trackUptimeReading` takes its
+ *  never-published early return, and no later reading can restore it, because the missing reading IS
+ *  the condition. That service becomes permanently unalertable until it publishes again. Same
+ *  fail-toward-silence direction as the rest of this function, and not self-healing; the operator-facing
+ *  consequence of a corrupt or unreadable `tracking:state` is one detector going quiet, not a wrong
+ *  alert. */
 export async function readTrackingState(kv: KVLike | undefined): Promise<TrackingStateBlob> {
   if (!kv) return {}
   try {
@@ -239,8 +270,16 @@ export async function readTrackingState(kv: KVLike | undefined): Promise<Trackin
   }
 }
 
-/** Writes the blob back ONLY if it changed since `before` — the common case (every service already
- *  healthy) costs zero writes. No TTL on the KEY itself: `failCount`/`componentMissCount` decay
+/** Writes the blob back ONLY if it changed since `before`.
+ *
+ *  #1389 changed the steady-state cost, which used to be zero on an all-healthy cycle: `uptimeSeenAt`
+ *  flips for every uptime-publishing service on the first cycle after each UTC midnight, so a fully
+ *  healthy DAY now costs at least one write (plus a small burst from invocations that overlap the
+ *  rollover, each reading the pre-rollover blob). A transient one-cycle uptime blank costs two — arm
+ *  and clear — where it previously cost none. Both are bounded and day-scaled; the day granularity of
+ *  `uptimeSeenAt` is the reason it is not per-poll.
+ *
+ *  No TTL on the KEY itself: `failCount`/`componentMissCount` decay
  *  in-value against their own `*At` timestamp (see `TRACKING_COUNT_DECAY_MS`), `failSince` is bounded
  *  by the same `*At` field going stale (see `TRACKING_ALERT_STALE_MS`), and an orphaned per-service
  *  entry (a retired/renamed service id) is pruned by the caller before this ever sees it — see
@@ -255,8 +294,14 @@ function entryFor(store: TrackingStateBlob, svcId: string): ServiceTrackingState
   return store[svcId] ?? (store[svcId] = {})
 }
 
-/** A service with no fail/miss state left is dropped from the blob entirely, so a long-healthy
- *  service costs nothing in the serialized size. */
+/** A service with no state left is dropped from the blob entirely.
+ *
+ *  #1389 narrowed what that buys: a healthy service still carries `uptimeSeenAt` (a `YYYY-MM-DD`
+ *  string), because "this service was publishing uptime yesterday" is only knowable from a record kept
+ *  while things were fine. So the blob now holds one small entry per uptime-publishing service instead
+ *  of being empty on a quiet day — a bounded, day-granular cost, which is why that field stores a DATE
+ *  and not a timestamp. Pruning still governs everything else, and a service that publishes no uptime
+ *  and is not failing is still absent entirely. */
 function pruneIfEmpty(store: TrackingStateBlob, svcId: string): void {
   const entry = store[svcId]
   if (entry && Object.keys(entry).length === 0) delete store[svcId]
@@ -468,6 +513,101 @@ export function trackComponentMiss(store: TrackingStateBlob, svcId: string, thre
   }
   pruneIfEmpty(store, svcId) // see trackFetchFailure's identical guard — threshold <= 0 only
   return next >= threshold
+}
+
+/** #1389 — how long `uptime30d` must be CONTINUOUSLY absent from a service that was publishing it
+ *  before the operator is told. Wall-clock, not a cycle count: `/api/status` runs this tracker on every
+ *  browser poll as well as on the five-minute cron, so a count would mean something different on a busy
+ *  day than on a quiet one.
+ *
+ *  6h is sized against the known false-positive class, not against detection speed: a single status-page
+ *  HTML fetch losing its race blanks `uptime30d` for ONE cycle and self-heals immediately (observed
+ *  2026-08-14 — four consecutive re-queries returned the value). 6h is ~72 consecutive failed cron
+ *  cycles, which no transient produces, while still surfacing a real shape change the same day. The
+ *  2026-09-10 Atlassian rollout would have paged within 6h of its first null instead of being noticed a
+ *  day later by a human looking at the dashboard. */
+export const UPTIME_MISSING_ALERT_MS = 21_600_000 // 6h
+
+/** #1389 — after this long with no reading at all, a service stops being tracked as "lost its uptime"
+ *  and becomes simply a service that does not publish one.
+ *
+ *  This is the ONLY bound on the alert loop, which is what makes it load-bearing rather than tidy-up:
+ *  `uptimeMissingSince` is never cleared except by a real reading, and the sweep re-fires whenever its
+ *  7-day dedup key expires — so without this prune a permanently-stopped source is alerted every 7 days
+ *  forever. With it the operator gets roughly five (≈6h, then 7/14/21/28 days) and then silence, which
+ *  is the right shape for something whose fix is a code change: loud enough not to be missed, bounded
+ *  enough not to be muted. */
+export const UPTIME_SEEN_RETENTION_MS = 2_592_000_000 // 30d
+
+/**
+ * #1389/#957 — record whether this cycle produced an uptime figure, so that a service which STOPS
+ * publishing becomes detectable. Called on every fetch, cron and live poll alike, unconditionally.
+ *
+ * `hasUptime` is the published `uptime30d`, not any one parser's opinion: what matters is whether the
+ * READER got a number, whichever of the six sources produced it. That is what makes this catch a vendor
+ * migration with the same machinery as a payload shape change, and why it lives here rather than in any
+ * single parser.
+ *
+ * It records only WHEN the number went missing, never why. Whether an absence is worth reporting — in
+ * particular whether another alert is already carrying the service — is decided at alert time by
+ * `checkUptimeLiveness`. Do not move that judgement back in here; see its header.
+ *
+ * `uptimeSeenAt` is stored at DAY granularity on purpose. The decision only needs "was there recently
+ * something to lose", and a full timestamp refreshed every cycle would make the tracking blob differ on
+ * every single poll — `writeTrackingStateIfChanged` would then write it to KV on every `/api/status`
+ * request rather than once a day.
+ */
+export function trackUptimeReading(store: TrackingStateBlob, svcId: string, hasUptime: boolean, nowMs: number = Date.now()): void {
+  const today = new Date(nowMs).toISOString().split('T')[0]
+  if (hasUptime) {
+    const entry = entryFor(store, svcId)
+    if (entry.uptimeSeenAt !== today) entry.uptimeSeenAt = today
+    delete entry.uptimeMissingSince
+    pruneIfEmpty(store, svcId)
+    return
+  }
+  const entry = store[svcId]
+  // Never seen publishing → nothing was lost. This is the whole reason a service that simply does not
+  // publish uptime is silent here, with no allowlist to maintain — and why that set is never named in
+  // this file: it is an external, rotating fact, and a written copy of it goes stale the day a provider
+  // starts or stops publishing.
+  if (!entry?.uptimeSeenAt) return
+  const seenMs = new Date(entry.uptimeSeenAt).getTime()
+  if (isNaN(seenMs) || nowMs - seenMs > UPTIME_SEEN_RETENTION_MS) {
+    delete entry.uptimeSeenAt
+    delete entry.uptimeMissingSince
+    pruneIfEmpty(store, svcId)
+    return
+  }
+  // Set once, on the leading edge — this is a "since", so re-stamping it every cycle would reset the
+  // clock the alert reads and the threshold could never be crossed.
+  if (!entry.uptimeMissingSince) entry.uptimeMissingSince = new Date(nowMs).toISOString()
+}
+
+/** #1389 — pure decision: has this service's uptime been missing long enough to tell the operator? */
+export function shouldAlertUptimeMissing(
+  entry: ServiceTrackingState,
+  nowMs: number,
+  thresholdMs: number = UPTIME_MISSING_ALERT_MS,
+): boolean {
+  return elapsedAtLeast(entry.uptimeMissingSince, nowMs, thresholdMs)
+}
+
+/** #1389 — operator Discord alert body for a service that stopped publishing uptime.
+ *
+ *  `missingSinceIso` is a parameter rather than read off the entry, mirroring `formatPersistentFailureAlert`:
+ *  the caller has already established it is set (that is what `shouldAlertUptimeMissing` decides), and
+ *  passing it makes the precondition a type instead of a non-null assertion that a second caller could
+ *  violate into a `NaN h+` operator alert.
+ *
+ *  WHAT is missing, since when, and where to look. Nothing about why it is missing or what it cost the
+ *  Score — four review rounds each found the added clause false (the source's readability is not
+ *  established here, and an unprobed service's Score is WITHHELD rather than rescaled, `score.ts`), so
+ *  the clause is gone and a test pins its absence rather than its wording. */
+export function formatUptimeMissingAlert(serviceName: string, missingSinceIso: string, lastSeenDay: string | undefined, statusUrl: string, nowMs: number): string {
+  const elapsedH = Math.floor((nowMs - new Date(missingSinceIso).getTime()) / 3_600_000)
+  return `📉 **${serviceName}** has published no uptime figure for **${elapsedH}h+** (last reading ${lastSeenDay ?? 'unknown'}). ` +
+    `Check the status page — moved, payload shape changed, or component id rotated: ${statusUrl}`
 }
 
 /**

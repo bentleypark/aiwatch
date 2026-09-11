@@ -202,9 +202,20 @@ export interface UptimeDataResult {
  *  incident list beside a spotless 100% uptime; the same gap exists on the Atlassian side for every
  *  multi-component service (cursor / copilot / windsurf / bfl / runway). */
 export function parseUptimeData(html: string, componentId: string | string[], windowDays = 30, nowMs: number = Date.now()): UptimeDataResult {
+  return computeUptimeData(extractInlineUptimeData(html), componentId, windowDays, nowMs)
+}
+
+/** #1389 — the same computation, over timelines that did NOT come from the page's inline blob.
+ *  Atlassian's `LAZY_UPTIME_SHOWCASE` rollout (2026-09-10) moved that payload to a separate
+ *  `/uptime_showcase` endpoint whose `timelines` object has the identical `{code: {days:[…]}}` shape,
+ *  so the two sources differ only in TRANSPORT. Split here rather than at the call site so there is
+ *  exactly one implementation of the window/weights/worst-of rules — a second copy is where the
+ *  Atlassian and showcase numbers would start to drift. `null` in (no payload at all) is the same
+ *  "nothing to compute" as an empty object: an all-null result. */
+export function computeUptimeData(data: UptimeTimelines | null, componentId: string | string[], windowDays = 30, nowMs: number = Date.now()): UptimeDataResult {
   const ids = Array.isArray(componentId) ? componentId : [componentId]
   if (ids.length > 1) {
-    const results = ids.map((id) => parseUptimeDataSingle(html, id, windowDays, false, nowMs)).filter((r) => r.uptimePercent != null)
+    const results = ids.map((id) => computeUptimeDataSingle(data, id, windowDays, false, nowMs)).filter((r) => r.uptimePercent != null)
     if (results.length === 0) return { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null, todayWeightedOutageSec: null }
     if (results.length < ids.length) {
       // A configured badge component no longer resolves on the page (renamed/rotated id, page
@@ -241,22 +252,39 @@ export function parseUptimeData(html: string, componentId: string | string[], wi
   }
   // #989 — warnOnMiss only on the genuine single-component path; the multi-id branch above owns its own
   // aggregate "N/M configured components absent" warn, so per-id warns here would double-count it.
-  return parseUptimeDataSingle(html, ids[0], windowDays, true, nowMs)
+  return computeUptimeDataSingle(data, ids[0], windowDays, true, nowMs)
 }
 
-function parseUptimeDataSingle(html: string, componentId: string, windowDays = 30, warnOnMiss = false, nowMs: number = Date.now()): UptimeDataResult {
-  const result: UptimeDataResult = { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null, todayWeightedOutageSec: null }
-  // Locate the uptimeData JSON object, then extract it by brace counting (50KB+ object).
-  // #868 — Atlassian Statuspage now embeds it as `window.uptimeData = {…}` with a
-  // `var uptimeData = window.uptimeData;` ALIAS line. The old `html.indexOf('var uptimeData = ')`
-  // matched the alias, so JSON.parse got `window.uptimeData;…` → "Unexpected token 'w'" → uptime null
-  // (claude.ai, Cursor, Windsurf, Junie, Voyage AI all dropped from the ranking). Match the assignment
-  // whose RHS is the JSON object — `\s*=\s*\{` requires `{` (modulo whitespace) right after `=`, so the
-  // alias (RHS `window…`, not `{`) never matches, and legacy `var uptimeData = {…}` still does. The
-  // whitespace-tolerant identifier match also survives a minified `window.uptimeData={…}` — hardening
-  // against the next embed-shape change, which is exactly the bug class that caused #868.
+/**
+ * The per-component uptime timelines an Atlassian status page publishes, keyed by component code.
+ * Shape: `{ componentId: { component: {...}, days: [{date, outages: {p, m}}] } }` — `outages.p`/`.m`
+ * are SECONDS of partial / major outage on that UTC day. Identical whether it arrives inline in the
+ * page (`window.uptimeData`) or from `/uptime_showcase`'s `timelines` (#1389).
+ */
+export type UptimeTimelines = Record<string, { days?: UptimeDayEntry[] }>
+
+/**
+ * Pull the inline `window.uptimeData` blob out of a status page, or `null` when the page carries none.
+ *
+ * #868 — Atlassian Statuspage embeds it as `window.uptimeData = {…}` with a
+ * `var uptimeData = window.uptimeData;` ALIAS line. The old `html.indexOf('var uptimeData = ')`
+ * matched the alias, so JSON.parse got `window.uptimeData;…` → "Unexpected token 'w'" → uptime null
+ * (claude.ai, Cursor, Windsurf, Junie, Voyage AI all dropped from the ranking). Match the assignment
+ * whose RHS is the JSON object — `\s*=\s*\{` requires `{` (modulo whitespace) right after `=`, so the
+ * alias (RHS `window…`, not `{`) never matches, and legacy `var uptimeData = {…}` still does. The
+ * whitespace-tolerant identifier match also survives a minified `window.uptimeData={…}`.
+ *
+ * #1389 — since the `LAZY_UPTIME_SHOWCASE` rollout there is normally NO blob to find: the only
+ * `window.uptimeData` left on the page is the loader's `= window.uptimeData || {}` seed, whose RHS is
+ * not `{`, so this correctly returns null rather than parsing the loader's own scratch object. Returning
+ * null is not an error here — `hasLazyUptimeShowcase` is what distinguishes "this page moved its data"
+ * from "this is not an Atlassian page at all" (parseUptimeData runs against incident.io HTML too, where
+ * finding nothing is the expected, silent outcome).
+ */
+export function extractInlineUptimeData(html: string): UptimeTimelines | null {
   const assign = /(?:window\.|var\s+)uptimeData\s*=\s*\{/.exec(html)
-  if (!assign) return result
+  if (!assign) return null
+  // Locate the uptimeData JSON object, then extract it by brace counting (50KB+ object).
   const jsonStart = assign.index + assign[0].length - 1  // index of the opening `{`
   let depth = 0
   let jsonEnd = -1
@@ -264,10 +292,60 @@ function parseUptimeDataSingle(html: string, componentId: string, windowDays = 3
     if (html[i] === '{') depth++
     else if (html[i] === '}') { depth--; if (depth === 0) { jsonEnd = i + 1; break } }
   }
-  if (jsonEnd === -1) return result
+  if (jsonEnd === -1) return null
   try {
-    // Structure: { componentId: { component: {...}, days: [{date, outages: {p, m}}] } }
-    const data = JSON.parse(html.substring(jsonStart, jsonEnd)) as Record<string, { days?: UptimeDayEntry[] }>
+    return JSON.parse(html.substring(jsonStart, jsonEnd)) as UptimeTimelines
+  } catch (err) {
+    console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+/**
+ * #1389 — does this page defer its uptime timelines to the `/uptime_showcase` endpoint?
+ *
+ * Atlassian's lazy showcase renders each eligible component as `[data-uptime-lazy="<code>"]` and has
+ * the browser fetch the bars on scroll. This is the STRUCTURAL marker of that page shape — deliberately
+ * not a list of which providers rolled it out, which would be a hand-maintained mirror of someone
+ * else's deploy schedule.
+ *
+ * The attribute value is required to look like a component code, because the pages that shipped this
+ * inline the loader's own ES5 source in the same document, and it contains the literals
+ * `data-uptime-lazy="<code>"` and `data-uptime-lazy="' + code + '"` (observed on status.claude.com,
+ * 2026-09-10). Both carry characters no component code does, so the charset check is what separates a
+ * real placeholder from the script that builds one. `helpers/lazy-status-page.ts` reproduces both
+ * literals in its fixture, which is what makes that rule load-bearing rather than decorative.
+ */
+const LAZY_UPTIME_PLACEHOLDER = /data-uptime-lazy="([A-Za-z0-9_-]+)"/
+export function hasLazyUptimeShowcase(html: string): boolean {
+  return LAZY_UPTIME_PLACEHOLDER.test(html)
+}
+
+/**
+ * #1389 — read the `timelines` map out of an `/uptime_showcase` response body.
+ *
+ * The response also carries `components` (pre-rendered SVG) and `values` (the provider's own
+ * 30/60/90-day percentages). `values` is deliberately IGNORED: #1006/#1110 — `uptime30d` is a figure
+ * AIWatch computes from the per-day outage seconds, and dropping a provider-computed aggregate into it
+ * would put a differently-defined number in a field the Reliability Ranking compares across services.
+ *
+ * Returns null unless `timelines` is present and is an object, so an error envelope or a future
+ * response that drops the field reads as "we could not read this" rather than as an empty timeline set.
+ * The distinction is load-bearing at the call site: an EMPTY `{}` is a real answer (the page publishes
+ * nothing for the requested components, and the inline blob should still be consulted), whereas null
+ * means the transport failed and deserves a warn.
+ */
+export function parseUptimeShowcase(payload: unknown): UptimeTimelines | null {
+  if (!payload || typeof payload !== 'object') return null
+  const timelines = (payload as Record<string, unknown>).timelines
+  if (!timelines || typeof timelines !== 'object' || Array.isArray(timelines)) return null
+  return timelines as UptimeTimelines
+}
+
+function computeUptimeDataSingle(data: UptimeTimelines | null, componentId: string, windowDays = 30, warnOnMiss = false, nowMs: number = Date.now()): UptimeDataResult {
+  const result: UptimeDataResult = { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null, todayWeightedOutageSec: null }
+  if (!data) return result
+  try {
     const comp = data[componentId]
     if (!comp?.days || !Array.isArray(comp.days)) {
       // #989 — a configured single `statusComponentId` that resolves to nothing (typo, or upstream id
@@ -275,7 +353,7 @@ function parseUptimeDataSingle(html: string, componentId: string, windowDays = 3
       // operator signal (the #956/#958 silent-null trap). The multi-id branch already warns on a missed
       // id; mirror it here. Guarded on a non-empty parse so a genuinely empty uptimeData stays quiet.
       if (warnOnMiss && Object.keys(data).length > 0) {
-        console.warn(`[parseUptimeData] component id '${componentId}' absent from window.uptimeData (${Object.keys(data).length} components present) — uptime will be null; check statusComponentId for upstream id rotation`)
+        console.warn(`[parseUptimeData] component id '${componentId}' absent from the page's uptime timelines (${Object.keys(data).length} components present) — uptime will be null; check statusComponentId for upstream id rotation`)
       }
       return result
     }
@@ -323,7 +401,12 @@ function parseUptimeDataSingle(html: string, componentId: string, windowDays = 3
     const todayStr = new Date(nowMs).toISOString().split('T')[0]
     if (latest && latest.date === todayStr) result.todayWeightedOutageSec = weighted(latest)
   } catch (err) {
-    console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
+    // The JSON.parse moved out to `extractInlineUptimeData` (#1389), but this is NOT therefore dead: the
+    // timelines are upstream JSON of an unpinned shape, and the guards above only check that `days` is
+    // an array — `{days: [null]}` passes `Array.isArray` and then dereferences a null element right
+    // here. Without the catch, `fetchService`'s outer catch would turn that into a whole-service
+    // failure (one bad component blanking the badge and the incident list) instead of one null field.
+    console.warn('[parseUptimeData] failed to compute uptime from timelines:', err instanceof Error ? err.message : err)
   }
   return result
 }

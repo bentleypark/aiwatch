@@ -21,6 +21,7 @@ import { recordRestoreObservations, type RestoreObservation } from './uptime-arc
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved, isMarkableOnStatusEdge } from './recovery-mark'
 import { checkPersistentFetchFailures } from './persistent-failure'
+import { checkUptimeLiveness } from './uptime-liveness'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
 import { buildSupplyChainBanner } from './supply-chain'
@@ -1970,6 +1971,20 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // #800 — skip the daily persistent-failure warning for KNOWN-deactivated sources (operator-acknowledged).
   const deactivatedSourceIds = new Set(SERVICES.filter(c => c.statusSourceDeactivated).map(c => c.id))
   await checkPersistentFetchFailures(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, services, Date.now(), sendDiscordAlert, deactivatedSourceIds)
+
+  // #1389/#957 — the twin of the sweep above for the failure it CANNOT see: a status source that still
+  // answers 200 but has stopped publishing an uptime NUMBER. Reads the same tracking blob (the
+  // `uptimeSeenAt`/`uptimeMissingSince` pair `trackUptimeReading` writes on every fetch) and warns once
+  // per service per 7 days. Same `deactivatedSourceIds` suppression — an acknowledged dead page does not
+  // need a second alert saying its uptime is gone too.
+  await checkUptimeLiveness(
+    env.STATUS_CACHE,
+    env.DISCORD_WEBHOOK_URL,
+    SERVICES.map((c) => ({ id: c.id, name: c.name, statusUrl: c.statusUrl })),
+    Date.now(),
+    sendDiscordAlert,
+    deactivatedSourceIds,
+  )
 
   // Refresh TTL on existing AI analyses / re-analyze missing ones (max 2 per cron)
   // monitoring = "recovery confirmed, verifying" — treat as inactive (no TTL refresh)

@@ -3,12 +3,13 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure } from './parse-failure-log'
-import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type TrackingStateBlob } from './utils'
+import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type TrackingStateBlob } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
-import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
+import { type StatuspageResponse, type UptimeTimelines, type UptimeDataResult, normalizeStatus, parseIncidents, parseUptimeData, computeUptimeData, hasLazyUptimeShowcase } from './parsers/statuspage'
+import { fetchUptimeShowcase } from './uptime-showcase'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
@@ -905,6 +906,45 @@ export const TRACKED_COMPONENT_IDS: ReadonlySet<string> = new Set(
 )
 
 /**
+ * #1389 — every component code the `/uptime_showcase` request for one status page must ask for: the
+ * union of the UPTIME SCOPE of each service sharing that page.
+ *
+ * The scope per service is `statusComponentIds ?? statusComponentId` — deliberately the exact
+ * expression the `parseUptimeData` call site passes, and NOT `displayComponentIds`. The badge worst-of
+ * is what uptime is computed over (#1006/#379), and asking for the display roster instead would fetch
+ * up to 11 extra timelines per page that nothing reads. Services with no `statusComponentId` contribute
+ * nothing: the uptime branch is gated on that field, so a code fetched for them could not be used.
+ *
+ * Union'd across the page because claude/claudeai/claudecode (and cursor's four badge components) share
+ * one document; one request per page is the same dedup `uniqueApiUrls` already does for summary.json.
+ * Order follows SERVICES so the request URL is stable cycle to cycle.
+ */
+export function uptimeScopeForPage(apiUrl: string): string[] {
+  const codes = new Set<string>()
+  for (const s of SERVICES) {
+    if (s.apiUrl !== apiUrl) continue
+    for (const id of uptimeScopeOf(s)) codes.add(id)
+  }
+  return [...codes]
+}
+
+/**
+ * #1006/#379 — the component scope a service's uptime is computed over: its badge worst-of when it has
+ * one, else its single primary component. Empty when the service has no `statusComponentId`, which is
+ * the gate the uptime branch itself applies.
+ *
+ * ONE definition, two readers (#1389): the `parseUptimeData`/`computeUptimeData` call site, and
+ * `uptimeScopeForPage`, which turns it into the `/uptime_showcase` request. Written inline in both
+ * places these would drift — the prefetch would request codes A,B while the call site computed a
+ * worst-of over A,B,C, and the symptom would be a silently too-optimistic uptime rather than an error
+ * (`feedback_shared_primitive_over_parallel_copies`; the second copy is the moment to extract).
+ */
+export function uptimeScopeOf(config: Pick<ServiceConfig, 'statusComponentId' | 'statusComponentIds'>): string[] {
+  if (!config.statusComponentId) return []
+  return config.statusComponentIds ?? [config.statusComponentId]
+}
+
+/**
  * #992/#1125 — per-page component list (apiUrl → `{id,name}[]`) harvested from the prefetch, the input
  * to the cron's new-component change detector (`diffPageComponents`). The detector iterates this record,
  * so a page absent from it is skipped for the cycle, not diffed.
@@ -1598,6 +1638,12 @@ interface PrefetchedData {
   incidents: StatuspageResponse | null
   latency: number
   uptimeHtml?: string  // Status page HTML for uptimeData parsing
+  // #1389 — per-component uptime timelines fetched from `/uptime_showcase`, for an Atlassian page that
+  // has moved them off the status document (`hasLazyUptimeShowcase`). ABSENT on a page still carrying
+  // the inline blob, and on every non-Atlassian page — so its presence, not a service flag, is what
+  // routes `fetchService` to it. Fetched ONCE per page here for the same reason `uptimeHtml` is:
+  // claude/claudeai/claudecode share one status page and would otherwise ask for it three times.
+  uptimeTimelines?: UptimeTimelines
   // #1125 — outcome of this page's `componentsUrl` (components.json) fetch, done ONCE per page here
   // instead of once per service. ABSENT = no service on this page configures a componentsUrl.
   // `{ok:false}` = it was configured and we could not read it (network / HTTP / parse / not an array),
@@ -1779,6 +1825,24 @@ export function withUnreadFeedFlag<T extends { sourceUnknown?: boolean; incident
 // re-empties the derived set" shape). Callers with nothing to track pass `{}` explicitly.
 export async function fetchService(config: ServiceConfig, prefetched: PrefetchedData | undefined, kv: KVNamespace | undefined, trackingStore: TrackingStateBlob): Promise<ServiceStatus> {
   const svc = await fetchServiceUntagged(config, prefetched, kv, trackingStore)
+  // #1389 — record whether official uptime survived THIS cycle, at this choke point for the same
+  // reason the tagging is here: what the #957 detector needs to know is whether the READER got a
+  // number, not which of the six uptime sources was asked. Placed here, a vendor migration and a
+  // payload shape change look identical — which is what they are from the outside.
+  //
+  // The predicate is the PUBLISHED value, with no `uptimeSource === 'official'` conjunct: Better
+  // Stack's five services publish `platform_avg`, a genuinely different computation (#1110) but a real
+  // number that the card shows and the Score consumes. Requiring 'official' would classify all five as
+  // having never had uptime, which is the one state this tracker treats as permanently unalertable.
+  //
+  // Unconditional, and deliberately ignorant of WHY the number is absent. `base` carries
+  // `uptime30d: null` and every failure return spreads it, so an unreachable page looks identical here
+  // to one that stopped publishing — and the two earlier attempts to tell them apart at this line both
+  // failed (see `trackUptimeReading`). The distinction is not available here anyway: `sourceUnknown` /
+  // `sourceDead` describe the summary.json leg, while the status-page HTML and `/uptime_showcase` legs
+  // — the only ones that produce `uptime30d` for an Atlassian service — can fail on their own without
+  // setting either. Whether an absence is worth reporting is `checkUptimeLiveness`'s call, at alert time.
+  trackUptimeReading(trackingStore, config.id, svc.uptime30d != null)
   const tagged = tagAutoMonitorIncidents(svc.incidents, config)  // matches ORIGINAL (e.g. Chinese) titles
   const incidents = applyTitleMap(tagged, config)                // THEN rewrite to English
   // #1268 — the unread-feed invariant rides the same choke point, for the same reason the tagging does:
@@ -1951,6 +2015,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // calendar, the #135 miss-tracker) runs unchanged. Done here, before the incidents parse, so the
       // rebuilt `incidents` are what parseIncidents reads.
       let uptimeHtml = prefetched?.uptimeHtml
+      // #1389 — prefetch-only, deliberately: the direct-fetch fallbacks below re-fetch the HTML for
+      // INCIDENT-attribution correctness (#1004/#1032), which is an incident.io concern, and no
+      // incident.io page serves the showcase. A prefetch miss therefore costs one cycle of null uptime
+      // — exactly what a prefetch miss already cost when the payload was inline in that same HTML.
+      const uptimeTimelines = prefetched?.uptimeTimelines
       if (config.incidentIoGlobalPage) {
         if (!uptimeHtml) {
           try {
@@ -2136,12 +2205,53 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
 
       // Compute daily impact for calendar from uptimeData HTML (Statuspage services only).
       // Daily impact for calendar: Statuspage uptimeData OR incident.io component_impacts
-      const uptimeResult = (uptimeHtml && config.statusComponentId)
-        // #1006 — the same scope the badge + calendar use (worst-of, #379), not the single primary
-        // component: a multi-component service showed outages in its incident list while uptime, read
-        // from one component, sat at 100%.
-        ? parseUptimeData(uptimeHtml, config.statusComponentIds ?? config.statusComponentId)
-        : null
+      // #1006 — the same scope the badge + calendar use (worst-of, #379), not the single primary
+      // component: a multi-component service showed outages in its incident list while uptime, read
+      // from one component, sat at 100%.
+      //
+      // #1389 — two transports, ONE computation. `uptimeTimelines` is present only when the prefetch
+      // found this page had moved its payload to `/uptime_showcase` and read it; on every other page the
+      // inline blob in `uptimeHtml` is still where the data lives.
+      //
+      // The timelines win only when NON-EMPTY. A `{}` (the response shape for a component the page does
+      // not publish — verified live: 200, `{"components":{},"timelines":{},"values":[]}`) is truthy, so
+      // taking mere presence as the signal would let an empty response shadow an inline blob that has
+      // data: uptime goes null, and neither the parser's warn (guarded on a non-empty map) nor the warn
+      // below (guarded on the timelines being absent) can fire. That is the #1389 failure shape exactly.
+      // An earlier draft of this line called the overlap impossible "by construction" because a lazy
+      // page carries no blob — but that is an assumption about someone else's rollout, not an invariant
+      // we hold, and the transition window of the NEXT rollout is when both coexist.
+      const uptimeScope = uptimeScopeOf(config)
+      let uptimeResult: UptimeDataResult | null = null
+      if (uptimeScope.length > 0) {
+        uptimeResult = (uptimeTimelines && Object.keys(uptimeTimelines).length > 0)
+          ? computeUptimeData(uptimeTimelines, uptimeScope)
+          : uptimeHtml
+            ? parseUptimeData(uptimeHtml, uptimeScope)
+            : null
+      }
+      // The failure this issue exists to make un-repeatable: the page advertises lazy uptime
+      // placeholders (so its timelines live at `/uptime_showcase`) and we could not read them at all.
+      // Before #1389 the parser returned null here without a word, because "no inline blob" is also the
+      // correct, silent outcome on an incident.io page — so a platform-wide Atlassian shape change read
+      // exactly like business as usual, and 14 services sat at `uptime30d: null` for a day with no log
+      // line.
+      //
+      // Scoped to the TRANSPORT failure (`!uptimeTimelines`) rather than to "uptime came out null",
+      // because those are different diagnoses and only one of them is ours: a page can advertise
+      // placeholders for components it publishes while publishing nothing for the one we track, and a
+      // null-uptime condition would then warn every cycle forever about a source behaving correctly.
+      // The component-absent case has its own, better-informed warn inside the parser (#989 — it names
+      // the id), and an empty `timelines: {}` leaves both quiet.
+      //
+      // Note what this canNOT catch, plainly: it lives inside `hasLazyUptimeShowcase`, so if Atlassian
+      // renames the attribute this predicate goes false and the warn goes with it. That is deliberate
+      // layering, not an oversight — every log-level signal here is a backstop for a transport failure
+      // on a page shape we already recognise. Detection of the NEXT unrecognised shape rests entirely
+      // on `trackUptimeReading` below, which reads the published value and knows nothing about pages.
+      if (uptimeScope.length > 0 && uptimeHtml && !uptimeTimelines && hasLazyUptimeShowcase(uptimeHtml)) {
+        console.warn(`[fetchService] ${config.id}: status page advertises lazy uptime placeholders but its /uptime_showcase timelines could not be read — uptime30d will be null`)
+      }
       // Aggregate the impact calendar over the whole badge group (statusComponentIds) when set, so a
       // multi-component service's calendar matches its badge scope + the official group calendar
       // (#693 follow-up); else the single primary component. incident.io HTML carries impacts for ALL
@@ -3428,7 +3538,23 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
           else htmlRes.body?.cancel()
         } catch (err) { console.warn(`[prefetch] HTML fetch failed for ${statusUrl}:`, err instanceof Error ? err.message : err) }
       }
-      prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml, componentsFetch: await componentsFetch })
+      // #1389 — the page moved its uptime timelines to `/uptime_showcase`. Gated on the page's own
+      // structural marker rather than on a list of which providers rolled the change out: that list is
+      // Atlassian's deploy schedule, not ours, and a stale copy of it is what makes the next rollout
+      // silent all over again. Measured 2026-09-11: 13 of the 19 Atlassian pages match, and no
+      // incident.io page does — which is what keeps the extra subrequest off them.
+      //
+      // COST, stated rather than buried: this is a THIRD serial round-trip in this page's chain, on
+      // every `/api/status` poll as well as the cron, for every page that both matches and tracks a
+      // component. 3s, not the prefetch's 5s, for the reason the in-service re-fetch below gives —
+      // the page has already been waited on twice this cycle, and the one that is slow is the one that
+      // would eat the batch budget. `scope` is computed first so a lazy page on which we track nothing
+      // costs no request at all.
+      const scope = uptimeScopeForPage(apiUrl)
+      const uptimeTimelines = (uptimeHtml && scope.length > 0 && hasLazyUptimeShowcase(uptimeHtml))
+        ? await fetchUptimeShowcase(statusUrl, scope, 3000)
+        : undefined
+      prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml, uptimeTimelines: uptimeTimelines ?? undefined, componentsFetch: await componentsFetch })
     } catch (err) {
       const isJsonErr = err instanceof SyntaxError
       console.warn(`[prefetch] ${isJsonErr ? 'JSON parse' : 'network'} failure for ${baseUrl}:`, err instanceof Error ? err.message : err)
@@ -3677,8 +3803,9 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // accumulator never count a quota notice as downtime. Applied in the same one place as #904, for the same
   // "every downstream consumer, once" reason.
 
-  // #1224 — write the tracking blob back once, only if any service actually changed state this cycle
-  // (the common all-healthy case costs zero writes).
+  // #1224 — write the tracking blob back once, only if any service actually changed state this cycle.
+  // #1389 — an all-healthy cycle is no longer free: see `writeTrackingStateIfChanged` for the per-day
+  // `uptimeSeenAt` flip that now costs one write per UTC day.
   await writeTrackingStateIfChanged(kv, trackingBefore, trackingStore)
 
   return {
