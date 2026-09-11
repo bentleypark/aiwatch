@@ -41,19 +41,20 @@ describe('#1177 perplexity config — one decision, two fields', () => {
     }
   })
 
-  it('does not sweep the sibling Instatus services along', () => {
-    // fal and mistral are deliberately API-surface cards: keyword-scoped incidents + single-component
-    // uptime. A blanket "display scope == incident scope" rule would have moved their badges + Scores.
-    // Values pinned, not mere presence: `incidentKeywords ?? incidentExclude` being *defined* would
-    // still pass if fal swapped one scoping mechanism for a weaker one.
+  it('does not sweep the sibling Instatus service along', () => {
+    // fal is deliberately an API-surface card: keyword-scoped incidents + single-component uptime. A
+    // blanket "display scope == incident scope" rule would have moved its badge + Score. Values
+    // pinned, not mere presence: `incidentKeywords` being *defined* would still pass if fal swapped
+    // one scoping mechanism for a weaker one.
+    //
+    // Mistral used to be asserted here as the second sibling. #1381 moved it to Rootly, where its
+    // uptime is a worst-of across 13 components and it carries no `statusComponent` at all — so its
+    // three assertions described a service that no longer exists on this axis. Dropped rather than
+    // corrected: this test's subject is the Instatus sweep, and Mistral is not in it.
     const fal = SERVICES.find((x) => x.id === 'fal')!
     expect(fal.uptimeOverDisplayComponents).toBeUndefined()
     expect(fal.incidentKeywords).toEqual(['api'])
     expect(fal.statusComponent).toBe('API')
-    const mistral = SERVICES.find((x) => x.id === 'mistral')!
-    expect(mistral.uptimeOverDisplayComponents).toBeUndefined()
-    expect(mistral.incidentExclude).toContain('website')
-    expect(mistral.statusComponent).toBe('API')
   })
 })
 

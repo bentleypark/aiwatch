@@ -38,6 +38,7 @@ import { EXT_INDEX, PLUGIN_MONITOR_INDEX, PLUGIN_BRIEF_INDEX, recordCacheReadOut
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
+import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, type StoredRootlyFeed } from './parsers/rootly'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
 import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, extReportCountKey, isExtReportSource, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
 
@@ -68,6 +69,10 @@ interface Env {
   // this. Set via `wrangler secret put DEEPSEEK_FEED_TOKEN` and the same value as a GH Action
   // secret. Absent secret → endpoint always 401.
   DEEPSEEK_FEED_TOKEN?: string
+  // #1381: Bearer token for POST /api/internal/mistral-feed — the Action that browser-renders
+  // status.mistral.ai (Rootly, behind a Cloudflare managed challenge no server-side fetch clears).
+  // Set via `wrangler secret put MISTRAL_FEED_TOKEN` and the same value as a GH Action secret.
+  MISTRAL_FEED_TOKEN?: string
   // #629: fine-grained GitHub PAT (actions: write on this repo) so the */5 cron can reliably
   // workflow_dispatch the deepseek-feed Action (GitHub's own schedule is throttled to ~2h). Set via
   // `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the worker skips dispatch (GH schedule backup only).
@@ -2449,6 +2454,47 @@ export async function handleDeepseekFeed(request: Request, env: Env, cors: Recor
   return json(200, { ok: true, stored: true, fetchedAt: stored.fetchedAt, incidents: incidentCount, active: activeCount })
 }
 
+// ── POST /api/internal/mistral-feed ──────────────────────
+// #1381: status.mistral.ai moved from Instatus to Rootly and now sits behind a Cloudflare MANAGED
+// challenge. Unlike DeepSeek's TLS-fingerprint wall (#618), a headless browser does not clear it
+// either — only a headed one, which on a runner means xvfb. So a scheduled Action reads the page and
+// POSTs what it saw; we cache it and `fetchService('mistral')` normalizes at READ time via
+// parsers/rootly.ts, so a malformed push cannot corrupt the served status mid-write.
+//
+// The gate is `isStorableRootlyFeed`, and it is a REJECTION test rather than a coercion: the cached
+// feed is the only copy, so a push that parses but means nothing ("scraper ran, read nothing") would
+// replace a good feed with an authoritative-looking blank. That is the shape that destroyed records
+// in #1256 — the values that parsed successfully.
+export async function handleMistralFeed(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.MISTRAL_FEED_TOKEN) return json(401, { ok: false, error: 'unauthorized' })
+  const auth = request.headers.get('Authorization') ?? ''
+  if (!constantTimeEqual(auth, `Bearer ${env.MISTRAL_FEED_TOKEN}`)) return json(401, { ok: false, error: 'unauthorized' })
+
+  let body: unknown
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  // Scoped by the SAME ids the badge is derived from, so the gate refuses exactly what would publish
+  // `unknown`. Read from SERVICES rather than restated here — a second copy of the id list is the
+  // drift that would let ingest accept a feed the read path then rejects.
+  const mistralScope = SERVICES.find((s) => s.id === 'mistral')?.displayComponentIds
+  if (!isStorableRootlyFeed(body, mistralScope, Date.now())) {
+    return json(400, { ok: false, error: 'feed rejected: incomplete or unreadable scrape' })
+  }
+
+  const stored: StoredRootlyFeed = { fetchedAt: new Date().toISOString(), feed: body }
+  await kvPut(env.STATUS_CACHE, MISTRAL_FEED_KV_KEY, JSON.stringify(stored), { expirationTtl: MISTRAL_FEED_TTL_S })
+
+  return json(200, {
+    ok: true, stored: true, fetchedAt: stored.fetchedAt,
+    components: body.components.length,
+    incidents: body.incidents.length,
+    coverage: body.coverage,
+  })
+}
+
 // ── POST /api/admin/rebuild-archive ─────────────────────────────
 // Operator tool to regenerate a specific month's archive:monthly:{YYYY-MM} key.
 // Motivated by the discovery that earlier archive cron runs persisted score: null /
@@ -4649,6 +4695,12 @@ export default {
     // Flashduty feed for DeepSeek (#618), cached in KV for fetchService to normalize.
     if (request.method === 'POST' && url.pathname === '/api/internal/deepseek-feed') {
       return handleDeepseekFeed(request, env, cors)
+    }
+
+    // POST /api/internal/mistral-feed — Action scraper pushes what it read from the Rootly page
+    // for Mistral (#1381), cached in KV for fetchService to normalize.
+    if (request.method === 'POST' && url.pathname === '/api/internal/mistral-feed') {
+      return handleMistralFeed(request, env, cors)
     }
 
     // POST /api/admin/rebuild-archive — operator tool to regenerate a specific month's

@@ -1,0 +1,64 @@
+name: Mistral status feed
+
+# #1381 — status.mistral.ai moved from Instatus to Rootly and now sits behind a Cloudflare MANAGED
+# CHALLENGE, so the Worker cannot read it at all. This Action browses the page and POSTs what it read
+# to /api/internal/mistral-feed → KV, which fetchService('mistral') then normalizes.
+#
+# It is NOT a copy of deepseek-feed.yml, and the difference is load-bearing. DeepSeek's page blocks on
+# TLS FINGERPRINT, which any browser context clears — so that job runs headless. Mistral's challenge
+# refuses every headless variant (bundled Chromium, full-Chromium new-headless, real Chrome channel:
+# all 403) and admits only a HEADED browser, which on a runner means `xvfb-run`. Measured end to end
+# on a runner in run 34421800205: plain fetch 403, headless 403, xvfb-headed 200 with 14 uptime charts.
+#
+# No `playwright install`: the script drives the runner's preinstalled Chrome via `channel: 'chrome'`,
+# so there is no ~280MB browser download and no cache to keep warm.
+
+on:
+  schedule:
+    - cron: '23 * * * *'      # the only automatic trigger; off-the-hour to dodge GitHub's
+                              # top-of-hour scheduling congestion. The KV feed's TTL is 3h, so an
+                              # hourly best-effort schedule has room to miss runs.
+  workflow_dispatch: {}       # manual runs
+
+# A scheduled run and a dispatch must not double-push.
+concurrency:
+  group: mistral-feed
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    name: Scrape + push Rootly feed
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      # Installed into a scratch dir with its own package.json rather than against the repo root:
+      # `npm install --no-save playwright` at the root reifies the whole devDependency tree, which
+      # scripts/ci-workflow-timeouts.test.mjs records at 421s for deepseek-feed.yml. Only Playwright's
+      # own tree is fetched here, and the script runs from that dir so ESM resolution finds it.
+      - name: Install the Playwright package into a scratch dir
+        timeout-minutes: 6
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw"
+          cd "$RUNNER_TEMP/pw"
+          npm init -y > /dev/null
+          npm install --no-save playwright@1.58.2
+
+      - name: Scrape status.mistral.ai + push to Worker
+        run: |
+          # Filename preserved deliberately: the script only runs main() when argv[1] ends with its
+          # own name, so that the pure helpers stay importable by the unit test. Renaming the copy
+          # would make this step exit 0 having done nothing.
+          cp scripts/scrape-mistral-status.mjs "$RUNNER_TEMP/pw/scrape-mistral-status.mjs"
+          cd "$RUNNER_TEMP/pw"
+          xvfb-run -a node scrape-mistral-status.mjs
+        env:
+          WORKER_URL: ${{ secrets.DEEPSEEK_FEED_WORKER_URL }}   # same Worker origin as #618's job
+          MISTRAL_FEED_TOKEN: ${{ secrets.MISTRAL_FEED_TOKEN }} # must equal the Worker secret of the same name

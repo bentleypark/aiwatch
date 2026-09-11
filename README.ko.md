@@ -74,7 +74,7 @@
 | Claude API | Anthropic | Atlassian Statuspage |
 | OpenAI API | OpenAI | incident.io (Atlassian 호환) |
 | Gemini API | Google | Google Cloud incidents.json |
-| Mistral API | Mistral AI | Instatus (Nuxt SSR) |
+| Mistral API | Mistral AI | Rootly (브라우저 렌더링) |
 | Cohere API | Cohere | incident.io (Atlassian 호환) |
 | Groq Cloud | Groq | incident.io (Atlassian 호환) |
 | Together AI | Together | Better Stack RSS + 가동률 API |
