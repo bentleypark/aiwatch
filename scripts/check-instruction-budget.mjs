@@ -55,8 +55,16 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  be listed there by CLAUDE.md's own rule. It is held to one clause by keeping the whole why —
  *  what the value stores, why the date is in the value and not the key, how the Edge copy is pinned —
  *  in directory-map.md, which loads on demand; a first draft that named the server's dedup as well
- *  cost 178. */
-export const BUDGET_CHARS = 47_551
+ *  cost 178.
+ *
+ *  47_551 → 47_696 (#1389): two Directory Layout lines for `worker/src/uptime-showcase.ts` and
+ *  `uptime-liveness.ts`, +145. Same shape as the #1369 raise above — CLAUDE.md's own rule says a new
+ *  module gets a line here AND its annotation in directory-map.md, so the alternative to paying this
+ *  is leaving two modules undocumented, which is the rule the change exists to satisfy. Held to a bare
+ *  path → purpose in both cases: the whole why (the `LAZY_UPTIME_SHOWCASE` rollout, the empty-map
+ *  distinction, why an unreadable cycle is a no-op) is in directory-map.md, which loads on demand. A
+ *  first draft of the same two lines that named the failure they were built for cost 257. */
+export const BUDGET_CHARS = 47_696
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

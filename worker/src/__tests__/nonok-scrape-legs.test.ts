@@ -322,7 +322,15 @@ describe('#1234 — the BetterStack index.json leg (together)', () => {
 
     expect(svc.status).toBe('operational')
     expect(svc.sourceUnknown).toBeUndefined()
-    expect(trackingStore.together).toBeUndefined()
+    // #1389 — a healthy cycle no longer empties the entry: `trackUptimeReading` records `uptimeSeenAt`
+    // for any service that published an uptime figure, and Together publishes Better Stack's
+    // `platform_avg`. Asserted as the WHOLE key set rather than as absent fail fields, which keeps the
+    // original assertion's full strength (no OTHER tracker booked anything on a healthy cycle) and adds
+    // the new invariant. It is also what pins the tracker's predicate: narrowing it to
+    // `uptimeSource === 'official'` would exclude all five Better Stack services from ever having a
+    // reading — permanently unalertable, and invisible, since "no prior reading" is exactly the state
+    // this tracker treats as silent.
+    expect(Object.keys(trackingStore.together ?? {}), 'a readable source clears the streak and records the reading').toEqual(['uptimeSeenAt'])
     expect(keysStartingWith(store, 'instatus-parse-fail:')).toEqual([])
   })
 })
@@ -496,6 +504,7 @@ describe('#1234 — a MISSING scrape configuration is not a failed read', () => 
 
     expect(svc.sourceUnknown, 'nothing was unreadable — there was simply nothing to scrape').toBeUndefined()
     expect(keysStartingWith(store, 'instatus-parse-fail:')).toEqual([])
-    expect(trackingStore['bs-only-fixture'], 'a healthy cycle clears rather than tracks').toBeUndefined()
+    // #1389 — whole key set, for the reasons given on the `together` case above.
+    expect(Object.keys(trackingStore['bs-only-fixture'] ?? {}), 'a healthy cycle books no failure, only the reading').toEqual(['uptimeSeenAt'])
   })
 })
