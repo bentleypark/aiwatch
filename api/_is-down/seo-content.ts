@@ -334,13 +334,13 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   replicate: {
     displayName: 'Replicate',
     description: 'Replicate runs open-source models (FLUX, Stable Diffusion, Llama, Whisper, etc.) via a simple HTTP API with per-second billing. It is widely used for image generation, video models, and serverless ML inference.',
-    insight: 'Replicate hosts thousands of community-contributed models, so individual model issues are common but rarely affect the whole platform. AIWatch tracks platform-level availability — model-specific failures may not show as incidents but can still affect specific apps.',
+    insight: 'Replicate is now monitored through Cloudflare Status. AIWatch uses the exact Replicate component for its current health and only active incidents explicitly attached to that component; page-wide Cloudflare incidents and title matches are not attributed to Replicate. Cloudflare Status does not publish comparable rolling uptime or historical incident data for this service.',
     whenDown: 'When Replicate is down, apps using its API for image generation, video synthesis, audio transcription, or custom model inference will fail. Production apps built on Replicate\'s simple API often have no fallback configured.',
     faqs: [
       { q: 'Is Replicate down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Replicate every 5 minutes and shows real-time operational status.' },
       { q: 'Why is my Replicate prediction stuck?', a: 'Replicate predictions can queue during capacity spikes. Check this page for active platform incidents; if the platform is healthy, the issue may be specific to your chosen model.' },
       { q: 'What are alternatives to Replicate?', a: 'For image generation, Stability AI offers direct API access. For general inference, Hugging Face Inference or Modal are alternatives. AIWatch shows current availability.' },
-      { q: 'How do I check Replicate status?', a: 'You can check Replicate status on this page, on the official Replicate status page at replicatestatus.com, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'How do I check Replicate status?', a: 'You can check Replicate status on this page, on Cloudflare Status, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
   fal: {

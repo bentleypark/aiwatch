@@ -590,9 +590,9 @@ test.describe('No-official-uptime services (Bedrock, Azure OpenAI)', () => {
     await page.goto('/#bedrock')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
     // No invented uptime; #713 — a service with no official uptime reads "No official uptime —
-    // incident-tracked" (NOT a number, NOT the misleading "Not provided").
+    // published" (NOT a number, NOT the misleading "Not provided").
     await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
-    await expect(page.locator('main').getByText(/No official uptime — incident-tracked|공식 uptime 미제공 — 인시던트 추적/).first()).toBeVisible()
+    await expect(page.locator('main').getByText(/No official uptime published|공식 uptime 미공개/).first()).toBeVisible()
     // AIWatch Score section hidden — the worker withheld the score (aiwatchScore null for a
     // low-confidence service), so the card gates it out (#713).
     await expect(page.locator('main').getByText(/AIWatch Score/)).not.toBeVisible()
@@ -616,9 +616,9 @@ test.describe('No-official-uptime services (Bedrock, Azure OpenAI)', () => {
     await page.route('**/api/status**', async (route) => { await route.fulfill({ json: mock }) })
     await page.goto('/#bedrock')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
-    // #713 — uptime reads "No official uptime — incident-tracked" (no invented value)
+    // #713 — uptime reads "No official uptime published" (no invented value)
     await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
-    await expect(page.locator('main').getByText(/No official uptime — incident-tracked|공식 uptime 미제공 — 인시던트 추적/).first()).toBeVisible()
+    await expect(page.locator('main').getByText(/No official uptime published|공식 uptime 미공개/).first()).toBeVisible()
     // The informational incident MUST appear in the Incident History (not blanked by the no-uptime state)
     await expect(page.locator('main').getByText(/Service impact: Fable 5 Access/)).toBeVisible()
   })
@@ -634,7 +634,7 @@ test.describe('No-official-uptime services (Bedrock, Azure OpenAI)', () => {
     await page.goto('/#gemini')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
     // uptime % blanked (no official uptime)
-    await expect(page.locator('main').getByText(/No official uptime — incident-tracked|공식 uptime 미제공 — 인시던트 추적/).first()).toBeVisible()
+    await expect(page.locator('main').getByText(/No official uptime published|공식 uptime 미공개/).first()).toBeVisible()
     // but the AIWatch Score breakdown IS visible, with its measured score
     await expect(page.locator('main').getByText(/AIWatch Score/).first()).toBeVisible()
     await expect(page.locator('main').getByText('80', { exact: true }).first()).toBeVisible()

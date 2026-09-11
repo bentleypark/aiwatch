@@ -248,6 +248,16 @@ export interface ServiceConfig {
   category: 'api' | 'app' | 'agent'
   statusUrl: string
   apiUrl: string | null
+  /** Public Cloudflare Status v3 summary endpoint and the exact component ids this service owns.
+   * The v3 schema is not Statuspage-compatible, so it has a dedicated parser path. */
+  cloudflareStatusComponentIds?: [string, ...string[]]
+  /**
+   * A status-source migration can remove resolved incidents that AIWatch already collected inside
+   * its live 30-day score window. Until this instant, retain those monthly-archive rows alongside
+   * the new source's active incidents. Absent for ordinary sources: this is a finite migration
+   * bridge, not a second permanent incident feed.
+   */
+  retainIncidentHistoryUntil?: string
   instatusUrl?: string
   gcloudProduct?: string
   gcloudProductId?: string

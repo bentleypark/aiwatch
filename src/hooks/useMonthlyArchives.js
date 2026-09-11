@@ -6,10 +6,14 @@
 
 import { useEffect, useState } from 'react'
 
-// Derive the API origin from VITE_API_URL (which points at /api/status). Strip the
-// trailing path so we can build sibling endpoints like /api/report. Mirrors usePolling.
+// Derive the API origin from VITE_API_URL (which points at /api/status). A separate
+// archive origin is useful in local development: the local Worker can exercise a
+// source migration while the read-only production monthly archive supplies the
+// already-collected history. Production leaves VITE_ARCHIVE_API_URL unset, so both
+// requests retain the same origin. Strip the trailing path so we can build sibling
+// endpoints like /api/report. Mirrors usePolling.
 const API_BASE = (() => {
-  const raw = import.meta.env.VITE_API_URL || 'https://aiwatch-worker.p2c2kbf.workers.dev/api/status'
+  const raw = import.meta.env.VITE_ARCHIVE_API_URL || import.meta.env.VITE_API_URL || 'https://aiwatch-worker.p2c2kbf.workers.dev/api/status'
   return raw.replace(/\/api\/status\/?(?:cached\/?)?$/, '')
 })()
 

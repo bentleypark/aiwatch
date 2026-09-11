@@ -258,7 +258,7 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     // otherwise. Enumerate by PHRASING, and let the anchors below be the count.
     expectCount(renderMethodologyPage(), '/methodology probe', n, [
       ['s1.src.probe KO', /(\d+)개 AI 서비스의 엔드포인트 직접 측정/, 2],
-      ['s1.src.probe EN', /direct measurement of (\d+) AI services/],
+      ['s1.src.probe EN', /direct measurement of (\d+) AI service endpoints/],
       ['s5.lead KO', /(\d+)개 AI 서비스의 엔드포인트를/, 2],
       ['s5.lead EN', /We measure the endpoints of (\d+) AI services/],
       ['s4.resp.desc KO', /(\d+)개 AI 서비스\)/, 2],
@@ -404,7 +404,7 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     // holds structurally, so assert the probe sentences are anchored separately rather than equal.
     const html = renderMethodologyPage()
     expect(html).toMatch(/(\d+)개 AI 서비스의 엔드포인트 직접 측정/)
-    expect(html).toMatch(/direct measurement of (\d+) AI services\\' endpoints/) // escaped: inside an inline-script string
+    expect(html).toMatch(/direct measurement of (\d+) AI service endpoints/)
     // The probe count itself is asserted against PROBE_TARGETS in the test above; this one only
     // asserts the two counts stay TEXTUALLY distinguishable, which is what keeps the anchors honest.
   })

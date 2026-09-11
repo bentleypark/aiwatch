@@ -83,6 +83,18 @@ function serviceWorkerPlugin() {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), cloudflare(), assetManifestPlugin(), serviceWorkerPlugin()],
+  // Local-only read proxy for the production monthly archive. The production Worker
+  // intentionally serves /api/report same-origin; this lets a local source-migration
+  // Worker be verified against the already-collected archive without weakening CORS.
+  server: {
+    proxy: {
+      '/__aiwatch_archive': {
+        target: 'https://aiwatch-worker.p2c2kbf.workers.dev',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/__aiwatch_archive/, ''),
+      },
+    },
+  },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },

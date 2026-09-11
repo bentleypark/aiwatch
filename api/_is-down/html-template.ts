@@ -160,7 +160,7 @@ export interface ServiceData {
    *  preserved by the worker; `group` (e.g. 'Models') marks components that collapse together. */
   components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
   /** When true, the breakdown renders its sections in component-array order (groups interleaved among
-   *  surface rows), instead of surfaces-first-then-groups (replicate). */
+   *  surface rows), instead of surfaces-first-then-groups. */
   componentGroupsInline?: boolean
 }
 
@@ -778,7 +778,7 @@ function renderBreadcrumbJsonLd(slug: string, seo: ServiceSEO): string {
 
 // Linkify the curated status/dashboard URLs in an FAQ answer for the ON-PAGE render only (the JSON-LD
 // FAQ answer must stay plain text per schema.org). Targeted prefixes — ai-watch.dev / aistudio.google.com
-// / status.<provider>.<tld> / <provider>status.com (groqstatus.com, replicatestatus.com) — so bare BRAND
+// / status.<provider>.<tld> / <provider>status.com (groqstatus.com) — so bare BRAND
 // mentions in the prose (e.g. "claude.ai", "character.ai") are NOT turned into links. esc()s the non-URL
 // segments; the matched URLs are our own curated content. `(?<!\/\/)` skips a domain already preceded by
 // a scheme so we never emit a stray "https://" before the anchor (current FAQ answers use bare domains).
@@ -1231,8 +1231,7 @@ function componentGroup(name: string, members: Comp[]): string {
 
 // #604/#606 — per-component breakdown. Reads service.components (curated subset or the dynamic
 // displayAllComponents set). Ungrouped "surface" components render as individual rows; grouped
-// components (group: any official-page group label — 'Models' for cohere/groq, or replicate's
-// API / Inference and Training / Website / Support via componentGroups) collapse under a <details>
+// components (group: any official-page group label — e.g. 'Models' for cohere/groq) collapse under a <details>
 // header. With componentGroupsInline the sections render in component-array order (see below).
 export function renderComponents(service: ServiceData | null): string {
   const components = service?.components as Comp[] | undefined
@@ -1242,7 +1241,7 @@ export function renderComponents(service: ServiceData | null): string {
   const anyIssue = components.some((c) => c.status !== 'operational')
   const border = anyIssue ? '#e86235' : '#3fb950'
 
-  // Default: surface rows first, then all group blocks. componentGroupsInline (replicate): walk the
+  // Default: surface rows first, then all group blocks. componentGroupsInline: walk the
   // component array, emitting each group block + each consecutive run of surface rows where it first
   // appears — so the curated array order IS the layout (mirrors the dashboard ComponentBreakdown).
   let body: string
@@ -1631,7 +1630,7 @@ ${summary ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;backg
 <p style="font-size:14px;margin-bottom:12px">${esc(seo.description)}</p>
 ${seo.insight ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;background:#161b22;border-left:3px solid #58a6ff;border-radius:0 4px 4px 0"><strong>AIWatch Insight:</strong> ${esc(seo.insight)}</p>` : ''}
 <p style="font-size:14px;color:#8b949e">${esc(seo.whenDown)}</p>
-<p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status, uptime history, and recent incident details &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
+<p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status and recent incident details; uptime history is shown only when the official source publishes sufficient comparable records &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
 </div>`
 }
 

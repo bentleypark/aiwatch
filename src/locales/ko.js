@@ -222,8 +222,8 @@ const ko = {
   'uptime.unavailable.tooltip': '이 서비스는 공식 uptime 데이터를 제공하지 않습니다',
   // #713 — 공식 uptime%가 없는 서비스(Bedrock/Azure 등): 수치를 만들지 않고 인시던트로 추적하며
   // 인시던트·복구로 점수를 산정한다.
-  'uptime.noOfficial': '공식 uptime 미제공 — 인시던트 추적',
-  'uptime.noOfficial.tooltip': '공식 uptime%를 제공하지 않는 서비스 — 인시던트로 추적하고 인시던트·복구로 점수 산정',
+  'uptime.noOfficial': '공식 uptime 미공개',
+  'uptime.noOfficial.tooltip': '공식 uptime%를 제공하지 않는 서비스입니다. AIWatch는 수치를 추정하지 않고 이용 가능한 신뢰성 신호로 점수를 산정합니다',
   'score.tooltip': 'Uptime, 인시던트 영향 일수, 복구 시간 기반 종합 점수',
   'uptime.sla.label': 'SLA 기준',
   'svc.mttr.none': '최근 7일 인시던트 없음',

@@ -273,16 +273,19 @@ ${consentInitScript(nonce)}
   <h2 data-i18n="s1.title">측정 대상</h2>
   <p class="lead" data-i18n="s1.lead">AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 5개 — 총 45개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.</p>
   <h3 data-i18n="s1.sourcesTitle">데이터 출처</h3>
-  <p data-i18n="s1.sourcesDesc">상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다.</p>
+  <p data-i18n="s1.sourcesDesc">상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다. 목록은 해당 출처를 사용하는 모니터링 서비스 수가 많은 순서입니다.</p>
   <ul>
-    <li><strong>Atlassian Statuspage</strong> <span data-i18n="s1.src.atlassian">— 다수의 주요 제공사</span></li>
-    <li><strong>incident.io</strong> <span data-i18n="s1.src.incidentio">— 컴포넌트 단위 인시던트 + 영향도</span></li>
-    <li><strong>Google Cloud Status · AI Studio Status</strong> <span data-i18n="s1.src.gcloud">— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)</span></li>
-    <li><strong>Better Stack</strong>, <strong>Instatus</strong>, <strong>OnlineOrNot</strong> <span data-i18n="s1.src.others">— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)</span></li>
-    <li><strong>Flashduty</strong> <span data-i18n="s1.src.flashduty">— DeepSeek 상태 피드 정규화 (status.deepseek.com)</span></li>
-    <li><strong>Rootly</strong> <span data-i18n="s1.src.rootly">— Mistral (status.mistral.ai) — 인시던트와 일별 장애 구간을 <strong>브라우저로 읽어</strong> 수집합니다</span></li>
-    <li><strong>AWS Health Dashboard</strong> <span data-i18n="s1.src.awshealth">— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음</span></li>
-    <li><strong>RSS incident feeds</strong> <span data-i18n="s1.src.rss">— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집</span></li>
+    <li><strong>Atlassian Statuspage</strong> <span data-i18n="s1.src.atlassian">— 18개 서비스</span></li>
+    <li><strong>incident.io</strong> <span data-i18n="s1.src.incidentio">— 11개 서비스, 컴포넌트 단위 인시던트 + 영향도</span></li>
+    <li><strong>Better Stack</strong> <span data-i18n="s1.src.betterstack">— 5개 서비스, 인시던트 RSS + 가동률 JSON</span></li>
+    <li><strong>Instatus</strong> <span data-i18n="s1.src.instatus">— 2개 서비스, 컴포넌트 상태 + 가동률</span></li>
+    <li><strong>RSS incident feeds</strong> <span data-i18n="s1.src.rss">— 2개 서비스: Azure Status (Azure OpenAI) · xAI (status.x.ai)</span></li>
+    <li><strong>Flashduty</strong> <span data-i18n="s1.src.flashduty">— 2개 서비스: DeepSeek API · DeepSeek App 상태 피드 정규화</span></li>
+    <li><strong>AWS Health Dashboard</strong> <span data-i18n="s1.src.awshealth">— 1개 서비스: Amazon Bedrock 공개 이벤트 JSON API</span></li>
+    <li><strong>Rootly</strong> <span data-i18n="s1.src.rootly">— 1개 서비스: Mistral의 인시던트와 일별 장애 구간을 <strong>브라우저로 읽어</strong> 수집</span></li>
+    <li><strong>Cloudflare Status v3</strong> <span data-i18n="s1.src.cloudflare">— 1개 서비스: Replicate의 정확한 컴포넌트 상태와 귀속된 활성 인시던트</span></li>
+    <li><strong>Google Cloud Status · AI Studio Status</strong> <span data-i18n="s1.src.gcloud">— 1개 서비스: Gemini API</span></li>
+    <li><strong>OnlineOrNot</strong> <span data-i18n="s1.src.onlineornot">— 1개 서비스: OpenRouter 컴포넌트 상태 + 이력</span></li>
     <li><strong>Direct RTT probes</strong> <span data-i18n="s1.src.probe">— 33개 AI 서비스의 엔드포인트 직접 측정</span></li>
   </ul>
   <h3 data-i18n="s1.secTitle">보안 이슈 모니터링</h3>
@@ -354,13 +357,14 @@ ${consentInitScript(nonce)}
 
   <div class="limits">
     <div class="limits-label">⚠ <span data-i18n="s3.limits.label">측정 한계와 그 이유</span></div>
-    <p data-i18n="s3.limits.intro">아래 서비스는 상태 페이지에 <strong>계산할 장애 기록 자체가 없습니다</strong>. 임의로 추측해 채우지 않고 "— Not provided"로 표시하며, 인시던트와 복구 시간만으로 점수를 냅니다.</p>
+    <p data-i18n="s3.limits.intro">아래 서비스는 상태 페이지가 <strong>비교 가능한 롤링 30일 uptime 근거를 공개하지 않습니다</strong>. 임의로 추측해 채우지 않고 "— Not provided"로 표시합니다. 직접 probe가 충분히 쌓인 서비스만 인시던트·복구·응답성으로 별도 점수를 산정하며, 그렇지 않으면 점수를 표시하지 않습니다.</p>
     <div class="tbl-wrap">
       <table class="tbl">
         <thead><tr><th data-i18n="s3.limits.col1">서비스</th><th data-i18n="s3.limits.col2">측정 불가 사유</th></tr></thead>
         <tbody>
           <tr><td>Amazon Bedrock · Azure OpenAI</td><td data-i18n="s3.limits.estimate">공식 롤링 uptime% 미공개 — 인시던트 피드만 존재</td></tr>
           <tr><td>Gemini · Deepgram</td><td data-i18n="s3.limits.norolling">상태 페이지가 비교 가능한 롤링 30일 % 미노출</td></tr>
+          <tr><td>Replicate</td><td data-i18n="s3.limits.cloudflare">Cloudflare Status v3는 현재 컴포넌트 상태와 귀속된 활성 인시던트만 제공 — 롤링 uptime·이력 피드 없음</td></tr>
           <tr><td>xAI API · Grok</td><td data-i18n="s3.limits.xai">재시작 이후 컴포넌트별 성공률만 노출 — 30일 수치와 비교 불가</td></tr>
           <tr><td>Character.AI</td><td data-i18n="s3.limits.deadsource">공식 상태 페이지가 비활성화됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)</td></tr>
         </tbody>
@@ -486,7 +490,8 @@ ${consentInitScript(nonce)}
   <!-- No uptime data -->
   <div class="subscore">
     <h3 data-i18n="s4.noUptime.title">Uptime 미제공 서비스</h3>
-    <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 화면에 표시되는 uptime %는 추정하지 않습니다. 다만 계산 방식에는 차이가 있습니다. uptime 컴포넌트(40점)를 빼고 나머지 컴포넌트만으로 100점을 환산하는데, 이는 수학적으로 uptime 자리에 나머지 세 컴포넌트 합의 고정 비율(40/60)에 해당하는 값을 대입한 것과 동일한 결과를 냅니다 — 그래서 이렇게 산정된 점수는 공식 uptime이 있는 서비스와 같은 기준이 아닙니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정하되, 랭킹에서는 공식 uptime 서비스와 섞지 않고 별도 표로 분리해 보여줍니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.</p>
+    <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini·xAI·Replicate·Bedrock 등)는 공식 uptime 수치가 없습니다. 화면에 표시되는 uptime %는 추정하지 않습니다. 다만 계산 방식에는 차이가 있습니다. uptime 컴포넌트(40점)를 빼고 나머지 컴포넌트만으로 100점을 환산하는데, 이는 수학적으로 uptime 자리에 나머지 세 컴포넌트 합의 고정 비율(40/60)에 해당하는 값을 대입한 것과 동일한 결과를 냅니다 — 그래서 이렇게 산정된 점수는 공식 uptime이 있는 서비스와 같은 기준이 아닙니다. probe가 있는 서비스(Gemini·xAI·Replicate 등)는 7일 이상 유효한 probe 데이터가 있을 때만 인시던트·복구·응답성으로 점수를 산정하고, 랭킹에서는 공식 uptime 서비스와 섞지 않고 별도 표로 분리해 보여줍니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.</p>
+    <p class="note" data-i18n="s4.replicateProbe">Replicate는 상태 페이지가 바뀌어도 기존 직접 probe 이력을 유지합니다. 이미 유효한 probe 요약이 있으면 점수를 다시 수집할 때까지 기다리지 않고 즉시 medium 신뢰도로 표시합니다.</p>
     <div class="formula"><span data-i18n="s4.noUptime.formula">Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100</span> <span class="fl-sub" data-i18n="s4.noUptime.formulaSub">— uptime 40점 제외</span></div>
   </div>
 
@@ -557,8 +562,8 @@ const i18n = {
     's1.title': '측정 대상',
     's1.lead': 'AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 5개 — 총 45개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.',
     's1.sourcesTitle': '데이터 출처',
-    's1.sourcesDesc': '상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다.',
-    's1.src.atlassian': '— 다수의 주요 제공사', 's1.src.incidentio': '— 컴포넌트 단위 인시던트 + 영향도', 's1.src.gcloud': '— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)', 's1.src.others': '— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)', 's1.src.flashduty': '— DeepSeek 상태 피드 정규화 (status.deepseek.com)', 's1.src.rootly': '— Mistral (status.mistral.ai) — 인시던트와 일별 장애 구간을 <strong>브라우저로 읽어</strong> 수집합니다', 's1.src.awshealth': '— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음', 's1.src.rss': '— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집', 's1.src.probe': '— 33개 AI 서비스의 엔드포인트 직접 측정',
+    's1.sourcesDesc': '상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다. 제공사 상태 출처는 이를 사용하는 모니터링 서비스 수가 많은 순서이며, AIWatch 직접 측정은 별도로 마지막에 둡니다.',
+    's1.src.atlassian': '— 18개 서비스', 's1.src.incidentio': '— 11개 서비스, 컴포넌트 단위 인시던트 + 영향도', 's1.src.betterstack': '— 5개 서비스, 인시던트 RSS + 가동률 JSON', 's1.src.instatus': '— 2개 서비스, 컴포넌트 상태 + 가동률', 's1.src.rootly': '— 1개 서비스: Mistral의 인시던트와 일별 장애 구간을 <strong>브라우저로 읽어</strong> 수집', 's1.src.cloudflare': '— 1개 서비스: Replicate의 정확한 컴포넌트 상태와 귀속된 활성 인시던트', 's1.src.gcloud': '— 1개 서비스: Gemini API', 's1.src.onlineornot': '— 1개 서비스: OpenRouter 컴포넌트 상태 + 이력', 's1.src.flashduty': '— 2개 서비스: DeepSeek API · DeepSeek App 상태 피드 정규화', 's1.src.awshealth': '— 1개 서비스: Amazon Bedrock 공개 이벤트 JSON API', 's1.src.rss': '— 2개 서비스: Azure Status (Azure OpenAI) · xAI (status.x.ai)', 's1.src.probe': '— 33개 AI 서비스의 엔드포인트 직접 측정',
     's1.secTitle': '보안 이슈 모니터링',
     's1.secDesc': '상태·신뢰도 측정과는 별개로, AI 스택에 영향을 주는 보안 이슈도 함께 추적해 <strong>월간 리포트</strong>에 집계합니다. 이 데이터는 AIWatch Score나 인시던트 집계에는 반영되지 않습니다.',
     's1.sec.osv': '— SDK 취약점 (PyPI · npm 24개 추적 패키지), GitHub Advisories로 상세 보강', 's1.sec.nvd': '— 자사 제품 CVE (Claude Code · Codex · ChatGPT 앱 등)', 's1.sec.hn': '— AI 서비스 관련 보안 뉴스 (Algolia 검색 API)',
@@ -581,10 +586,11 @@ const i18n = {
     's3.weighted': '<strong>장애 시간 가중 집계:</strong> 다운타임은 인시던트 건수가 아니라 <strong>영향받은 시간</strong>으로 셉니다. 심각도에 따라 전면 장애는 1.0, 부분 장애·성능 저하는 0.3을 기본값으로 가중하고, 정보성 공지와 <strong>사전 공지된 정기 점검은 빼줍니다</strong>(미리 알린 점검까지 감점할 이유는 없습니다). Platform 라벨에는 이 가중을 적용하지 않습니다 — 위 단서를 함께 보세요.',
     's3.incidentGap': '인시던트 건수와 uptime은 서로 다를 수 있습니다. 일부 제공사는 짧은 성능 저하를 <strong>가용성 기록에는 남기되 별도 인시던트로는 발행하지 않습니다</strong>(예: fal · Hugging Face의 수분~1시간 degraded). uptime은 그 실제 다운타임 시간을 반영하므로, "최근 인시던트 없음"인데도 uptime이 100%보다 낮게 나올 수 있습니다 — 제공사가 공식 발표하지 않았을 뿐 장애는 실제로 있었기 때문입니다.',
     's3.limits.label': '측정 한계와 그 이유',
-    's3.limits.intro': '아래 서비스는 상태 페이지에 <strong>계산할 장애 기록 자체가 없습니다</strong>. 임의로 추측해 채우지 않고 "— Not provided"로 표시하며, 인시던트와 복구 시간만으로 점수를 냅니다.',
+    's3.limits.intro': '아래 서비스는 상태 페이지가 <strong>비교 가능한 롤링 30일 uptime 근거를 공개하지 않습니다</strong>. 임의로 추측해 채우지 않고 "— Not provided"로 표시합니다. 직접 probe가 충분히 쌓인 서비스만 인시던트·복구·응답성으로 별도 점수를 산정하며, 그렇지 않으면 점수를 표시하지 않습니다.',
     's3.limits.col1': '서비스', 's3.limits.col2': '측정 불가 사유',
     's3.limits.estimate': '공식 롤링 uptime% 미공개 — 인시던트 피드만 존재',
     's3.limits.norolling': '상태 페이지가 비교 가능한 롤링 30일 % 미노출',
+    's3.limits.cloudflare': 'Cloudflare Status v3는 현재 컴포넌트 상태와 귀속된 활성 인시던트만 제공 — 롤링 uptime·이력 피드 없음',
     's3.limits.xai': '재시작 이후 컴포넌트별 성공률만 노출 — 30일 수치와 비교 불가',
     's3.limits.deadsource': '공식 상태 페이지가 비활성화됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)',
     's4.title': 'AIWatch Score',
@@ -606,7 +612,8 @@ const i18n = {
     's4.resp.naFormula': 'probe-less: base 80 → 100 환산',
     's4.resp.insufficient': '새로 추가된 probe 대상 서비스는 7일치 데이터가 쌓이기 전까지 5% 페널티를 적용합니다.',
     's4.noUptime.title': 'Uptime 미제공 서비스',
-    's4.noUptime.desc': '일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 화면에 표시되는 uptime %는 추정하지 않습니다. 다만 계산 방식에는 차이가 있습니다. uptime 컴포넌트(40점)를 빼고 나머지 컴포넌트만으로 100점을 환산하는데, 이는 수학적으로 uptime 자리에 나머지 세 컴포넌트 합의 고정 비율(40/60)에 해당하는 값을 대입한 것과 동일한 결과를 냅니다 — 그래서 이렇게 산정된 점수는 공식 uptime이 있는 서비스와 같은 기준이 아닙니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정하되, 랭킹에서는 공식 uptime 서비스와 섞지 않고 별도 표로 분리해 보여줍니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
+    's4.noUptime.desc': '일부 서비스(Gemini·xAI·Replicate·Bedrock 등)는 공식 uptime 수치가 없습니다. 화면에 표시되는 uptime %는 추정하지 않습니다. 다만 계산 방식에는 차이가 있습니다. uptime 컴포넌트(40점)를 빼고 나머지 컴포넌트만으로 100점을 환산하는데, 이는 수학적으로 uptime 자리에 나머지 세 컴포넌트 합의 고정 비율(40/60)에 해당하는 값을 대입한 것과 동일한 결과를 냅니다 — 그래서 이렇게 산정된 점수는 공식 uptime이 있는 서비스와 같은 기준이 아닙니다. probe가 있는 서비스(Gemini·xAI·Replicate 등)는 7일 이상 유효한 probe 데이터가 있을 때만 인시던트·복구·응답성으로 점수를 산정하고, 랭킹에서는 공식 uptime 서비스와 섞지 않고 별도 표로 분리해 보여줍니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
+    's4.replicateProbe': 'Replicate는 상태 페이지가 바뀌어도 기존 직접 probe 이력을 유지합니다. 이미 유효한 probe 요약이 있으면 점수를 다시 수집할 때까지 기다리지 않고 즉시 medium 신뢰도로 표시합니다.',
     's4.noUptime.formula': 'Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100',
     's4.noUptime.formulaSub': '— uptime 40점 제외',
     's4.grades.title': '등급 기준',
@@ -645,8 +652,8 @@ const i18n = {
     's1.title': 'What we measure',
     's1.lead': 'AIWatch polls 45 AI services — 16 LLM APIs, 6 coding agents, 3 voice, 8 inference & infra, 3 observability, 2 video, 2 image, and 5 AI apps — up to every 5 minutes. All timestamps are in UTC.',
     's1.sourcesTitle': 'Data sources',
-    's1.sourcesDesc': 'Status, incident, and uptime data are all collected from each service\\\'s official status page. The provider\\\'s published data is the primary source, and we never fill a missing value with our own estimate — how a missing official uptime is handled is covered in the <a href="#uptime">Uptime section</a> below.',
-    's1.src.atlassian': '— many major providers', 's1.src.incidentio': '— per-component incidents + impact', 's1.src.gcloud': '— Gemini API (Google Cloud status + AI Studio component incidents, merged)', 's1.src.others': '— additional status-page platforms (incident RSS + uptime JSON)', 's1.src.flashduty': '— normalized DeepSeek status feed (status.deepseek.com)', 's1.src.rootly': '— Mistral (status.mistral.ai) — incidents and per-day outage spans, read <strong>through a browser</strong>', 's1.src.awshealth': '— Amazon Bedrock — public events JSON API (incident start/end), no uptime API', 's1.src.rss': '— Azure Status (Azure OpenAI) · xAI (status.x.ai) — incident RSS only, no uptime API', 's1.src.probe': '— direct measurement of 33 AI services\\\' endpoints',
+    's1.sourcesDesc': 'Status, incident, and uptime data are all collected from each service\\\'s official status page. The provider\\\'s published data is the primary source, and we never fill a missing value with our own estimate — how a missing official uptime is handled is covered in the <a href="#uptime">Uptime section</a> below. Provider status sources are ordered by the number of monitored services that use them; AIWatch direct measurement is listed separately at the end.',
+    's1.src.atlassian': '— 18 services', 's1.src.incidentio': '— 11 services, per-component incidents + impact', 's1.src.betterstack': '— 5 services, incident RSS + uptime JSON', 's1.src.instatus': '— 2 services, component health + uptime', 's1.src.rootly': '— 1 service: Mistral, incidents and per-day outage segments read through a <strong>browser</strong>', 's1.src.cloudflare': '— 1 service: Replicate exact-component health and attributed active incidents', 's1.src.gcloud': '— 1 service: Gemini API', 's1.src.onlineornot': '— 1 service: OpenRouter component health + history', 's1.src.flashduty': '— 2 services: normalized DeepSeek API · DeepSeek App feed', 's1.src.awshealth': '— 1 service: Amazon Bedrock public events JSON API', 's1.src.rss': '— 2 services: Azure Status (Azure OpenAI) · xAI (status.x.ai)', 's1.src.probe': '— direct measurement of 33 AI service endpoints',
     's1.secTitle': 'Security-issue monitoring',
     's1.secDesc': 'On a track separate from status & reliability, we also track security issues affecting the AI stack, aggregated into the <strong>monthly report</strong>. This data does not feed the AIWatch Score or incident counts.',
     's1.sec.osv': '— SDK vulnerabilities (24 tracked PyPI · npm packages), enriched via GitHub Advisories', 's1.sec.nvd': '— first-party product CVEs (Claude Code, Codex, ChatGPT app, …)', 's1.sec.hn': '— security news about AI services (Algolia search API)',
@@ -673,6 +680,7 @@ const i18n = {
     's3.limits.col1': 'Service', 's3.limits.col2': 'Reason',
     's3.limits.estimate': 'No official rolling uptime — incident feed only',
     's3.limits.norolling': 'Status page exposes no comparable rolling-30d %',
+    's3.limits.cloudflare': 'Cloudflare Status v3 exposes only current component health and attributed active incidents — no rolling uptime or history feed',
     's3.limits.xai': 'Exposes a since-restart per-component success rate — not comparable to a 30-day figure',
     's3.limits.deadsource': 'Official status page deactivated — no records to read (the API is checked by direct probe instead)',
     's4.title': 'AIWatch Score',
@@ -694,7 +702,8 @@ const i18n = {
     's4.resp.naFormula': 'probe-less: rescale base 80 → 100',
     's4.resp.insufficient': 'Newly added probed services receive a 5% penalty until 7 days of probe data accumulate.',
     's4.noUptime.title': 'Services without uptime data',
-    's4.noUptime.desc': 'Some services (Gemini, xAI, Bedrock, etc.) publish no official uptime. We never estimate the displayed uptime % — but rescaling the score over the remaining available components (dropping the 40-point uptime component) is mathematically equivalent to filling that component with a fixed 40/60 of the sum of the other three — not a measured value — so a rescaled score is not on the same scale as one with real uptime measured. Services that ARE probed (Gemini, xAI, etc.) are scored on incidents + recovery + responsiveness and shown in a separate ranking table — never mixed with services that have official uptime. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
+    's4.noUptime.desc': 'Some services (Gemini, xAI, Replicate, Bedrock, etc.) publish no official uptime. We never estimate the displayed uptime % — but rescaling the score over the remaining available components (dropping the 40-point uptime component) is mathematically equivalent to filling that component with a fixed 40/60 of the sum of the other three — not a measured value — so a rescaled score is not on the same scale as one with real uptime measured. Services that ARE probed (Gemini, xAI, Replicate, etc.) are scored on incidents + recovery + responsiveness only after 7+ valid probe days, and shown in a separate ranking table — never mixed with services that have official uptime. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
+    's4.replicateProbe': 'Replicate retains its existing direct-probe history when its status-page source changes. If a valid probe summary already exists, its score is shown immediately at medium confidence; the migration does not reset that eligibility.',
     's4.noUptime.formula': 'Score = (sum of available component scores) / (sum of their maxima) × 100',
     's4.noUptime.formulaSub': '— uptime 40 points excluded',
     's4.grades.title': 'Grade thresholds',

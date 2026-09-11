@@ -32,7 +32,9 @@ import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusU
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { mergeOnlineOrNotIncidents, parseOnlineOrNotIncidentHistory, parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
 import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
+import { parseCloudflareStatusSummary } from './parsers/cloudflare-status'
 import { mergeXaiRegionalIncidents, mergeXaiGrokSurfaceIncidents } from './xai-regions'
+import type { MonthlyArchive, MonthlyIncidentEntry, MonthlyIncidents } from './monthly-archive'
 
 // #990 — OpenAI (openai/chatgpt/codex all share status.openai.com) occasionally posts a
 // "kitchen-sink" advisory scoped to a gov-compliance ENVIRONMENT (e.g. the 2026-07 "Codex, workspace
@@ -229,20 +231,12 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
   // Inference / Infrastructure
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true, componentDenylist: ['Website'] },
-  // displayComponentIds (#606): mirrors the official replicatestatus.com component groups (the v2 JSON
-  // omits group membership, so it's curated here). Array order = DISPLAY order; with componentGroupsInline
-  // the breakdown renders each section where its first member sits in the array:
-  //   API = HTTP API, Streaming API
-  //   Inference and Training = H100/A100/L40S/T4/CPU Hardware (so a GPU-capacity degradation shows)
-  //   Website = Playground
-  //   (ungrouped surfaces) = Replicate Registry (r8.im), Official Models
-  //   Support = Billing, Support Tickets  (renders AFTER the surface rows, per the official page)
-  // Excludes Home Page. Display-only (decoupled from the worst-of badge).
-  // #1006 — uptime is a worst-of over the SAME components the badge + detail page show
-  // (displayComponentIds), not the single HTTP API component. Its GPU hardware (H100/A100/L40S/T4) is
-  // core availability — a model can't run without it — but uptime read only HTTP API, so a multi-day
-  // H100 degradation showed in the incident list beside a spotless 100%.
-  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], componentGroups: { '01JRJYHBWCXHFZ0NHMP1N7T2G3': 'API', '01JRJYHBWC358ZXKRXZD0BENPD': 'API', '01JRG9WZ84ABEY9ZJBB72CJBS8': 'Inference and Training', '01JRGA5ZQKJX2NMG45VCFP9Y9C': 'Inference and Training', '01JRGA5ZQKF3SW674WMFD92PAC': 'Inference and Training', '01JS0A88GKRF5DNW74REX185D3': 'Inference and Training', '01JS0A88GKZAMP8BD3W9BCCBWX': 'Inference and Training', '01J5NNACBNTG5GR693P6RH5Q6J': 'Website', '01JS0AB43BH206N6Z4WNSB0Z0F': 'Support', '01JS0AB43BNHTEGYYQBSWS3KDP': 'Support' }, componentGroupsInline: true },
+  // #1384 — Replicate joined Cloudflare and the retired Statuspage v2 URL now 301s to HTML. The
+  // Cloudflare v3 source exposes one Replicate component. It has no compatible 30-day uptime or
+  // historical incident feed, so this route publishes current health and exactly-attributed active
+  // incidents only. The finite retention bridge preserves AIWatch's pre-migration records while
+  // they still fall inside the rolling score window.
+  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.cloudflarestatus.com/services?search=replicate', apiUrl: null, cloudflareStatusComponentIds: ['fvgfcmy66tdr'], retainIncidentHistoryUntil: '2026-10-11T00:00:00.000Z' },
   // fal.ai (#758) — generative-media inference platform (image/video/audio/3D, 600+ models incl.
   // FLUX/Kling/Hailuo). Peer of Replicate/Hugging Face. Instatus (Next.js) page like Perplexity:
   // `statusComponent: 'API'` selects the Instatus "API" group component for the official uptime%
@@ -2063,6 +2057,33 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       if (!config.apiUrl) return base
     }
 
+    if (config.cloudflareStatusComponentIds) {
+      const start = Date.now()
+      const summaryRes = await fetchWithRetry('https://www.cloudflarestatus.com/api/v3/summary', { svcId: config.id })
+      const latency = Date.now() - start
+      if (!summaryRes.ok) {
+        console.error(`[fetchService] ${config.id} Cloudflare Status summary returned HTTP ${summaryRes.status}`)
+        summaryRes.body?.cancel()
+        // The v3 API is a machine endpoint, but 403/429 can still be an egress restriction rather
+        // than a retired source. Only unambiguous gone/auth statuses become a dead-source verdict.
+        if (GONE_STATUSES.has(summaryRes.status)) {
+          return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency }
+        }
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+      }
+      const raw = await summaryRes.json().catch(() => null)
+      const parsed = parseCloudflareStatusSummary(raw, config.cloudflareStatusComponentIds)
+      if (!parsed.ok) {
+        console.warn(`[fetchService] ${config.id} Cloudflare Status summary unreadable (${parsed.reason})`)
+        await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+      }
+      resetFetchFailure(trackingStore, config.id)
+      return { ...base, status: parsed.summary.status, latency, incidents: parsed.summary.incidents }
+    }
+
     if (config.apiUrl) {
       // Atlassian Statuspage API — use pre-fetched data when available, else fetch directly
       let summaryData: StatuspageResponse
@@ -3597,6 +3618,89 @@ export function downclassifyAdvisoryIncidents(services: ServiceStatus[]): Servic
   })
 }
 
+/** Format the durable monthly-archive duration back into the live Incident wire shape. */
+function archivedDuration(durationMin: number): string | null {
+  if (!Number.isFinite(durationMin) || durationMin <= 0) return null
+  const hours = Math.floor(durationMin / 60)
+  const minutes = durationMin % 60
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
+}
+
+/**
+ * #1384 — Cloudflare Status v3 supplies current health and active incidents only. During a source
+ * migration that would erase already-collected, resolved incidents from the rolling live window,
+ * which in turn awards them full Incident + Recovery score and makes the is-down page say "zero
+ * incidents". Convert the durable monthly shape once, then let the normal live consumers (score,
+ * SEO, cache, and monthly accumulator) see one deduplicated Incident array.
+ *
+ * The bridge is explicitly time-bounded in ServiceConfig. It never turns the archive into a general
+ * second source: live rows win on an id collision because they carry the newest timeline/components.
+ */
+export function mergeRetainedIncidentHistory(live: Incident[], retained: MonthlyIncidentEntry[], cutoffISO: string): Incident[] {
+  const byId = new Map(live.map((incident) => [incident.id, incident]))
+  for (const entry of retained) {
+    if (entry.startedAt < cutoffISO || byId.has(entry.id)) continue
+    byId.set(entry.id, {
+      id: entry.id,
+      title: entry.title,
+      status: entry.finalStatus,
+      impact: entry.impact ?? null,
+      startedAt: entry.startedAt,
+      resolvedAt: entry.resolvedAt,
+      duration: archivedDuration(entry.durationMin),
+      timeline: [],
+      ...(entry.autoMonitor ? { autoMonitor: true } : {}),
+      ...(entry.derived ? { derived: entry.derived, ...(entry.derivedDay ? { derivedDay: entry.derivedDay } : {}) } : {}),
+    })
+  }
+  return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+}
+
+function parseRetainedJson<T>(raw: string | null, key: string): T | null {
+  if (!raw) return null
+  try { return JSON.parse(raw) as T } catch {
+    console.warn(`[fetchAllServices] corrupt retained incident history at ${key}`)
+    return null
+  }
+}
+
+/** Preserve a retiring source's recent AIWatch records until its last possible 30-day contribution
+ * has expired. The current-month accumulator is still mutable; the preceding permanent archive
+ * completes the rolling window across a month boundary. */
+export async function retainMigratedIncidentHistory(services: ServiceStatus[], kv: KVNamespace | undefined, now: Date): Promise<void> {
+  if (!kv) return
+  const configs = SERVICES.filter((config) =>
+    config.retainIncidentHistoryUntil != null && Date.parse(config.retainIncidentHistoryUntil) > now.getTime(),
+  )
+  if (configs.length === 0) return
+
+  const currentMonth = now.toISOString().slice(0, 7)
+  const previousMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7)
+  const [previousRaw, currentRaw] = await Promise.all([
+    kv.get(`archive:monthly:${previousMonth}`).catch((err) => {
+      console.warn(`[fetchAllServices] retained incident archive read failed for ${previousMonth}:`, err instanceof Error ? err.message : err)
+      return null
+    }),
+    kv.get(`incidents:monthly:${currentMonth}`).catch((err) => {
+      console.warn(`[fetchAllServices] retained incident accumulator read failed for ${currentMonth}:`, err instanceof Error ? err.message : err)
+      return null
+    }),
+  ])
+  const previous = parseRetainedJson<MonthlyArchive>(previousRaw, `archive:monthly:${previousMonth}`)
+  const current = parseRetainedJson<MonthlyIncidents>(currentRaw, `incidents:monthly:${currentMonth}`)
+  const cutoffISO = new Date(now.getTime() - 30 * 86_400_000).toISOString()
+
+  for (const config of configs) {
+    const service = services.find((candidate) => candidate.id === config.id)
+    if (!service) continue
+    const retained = [
+      ...(previous?.services[config.id]?.incidentList ?? []),
+      ...(current?.services[config.id]?.incidents ?? []),
+    ]
+    if (retained.length > 0) service.incidents = mergeRetainedIncidentHistory(service.incidents, retained, cutoffISO)
+  }
+}
+
 export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>>; upstreamFeeds: UpstreamCandidate[] }> {
   // #1224 — read the consolidated per-service tracking blob ONCE for this whole invocation (1 KV
   // read regardless of service count), thread the SAME mutable object through every batched
@@ -3903,6 +4007,11 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       else if (svc.id in probedNow) console.log(`[cross-validation] ${svc.id}: source dead and probe does not confirm reachability — no probeConfirmed`)
     }
   }
+
+  // #1384 — retain recent Replicate incidents AIWatch collected before Cloudflare Status replaced
+  // the provider feed. This runs before scoring/cache consumers receive `raw`; it is a finite bridge
+  // (configured through retainIncidentHistoryUntil), not an archive-backed source for new incidents.
+  await retainMigratedIncidentHistory(raw, kv, new Date())
 
   // Read cached snapshot for fallback (only if needed)
   let cachedServices: ServiceStatus[] | null = null

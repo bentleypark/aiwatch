@@ -17,7 +17,7 @@ export const STATUS_URL = {
   cerebras:    'https://status.cerebras.ai',
   perplexity:  'https://status.perplexity.ai',
   huggingface: 'https://status.huggingface.co',
-  replicate:   'https://www.replicatestatus.com',
+  replicate:   'https://www.cloudflarestatus.com/services?search=replicate',
   fal:         'https://status.fal.ai',
   elevenlabs:  'https://status.elevenlabs.io',
   xai:         'https://status.x.ai',

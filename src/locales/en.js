@@ -223,8 +223,8 @@ const en = {
   'uptime.unavailable.tooltip': 'This service does not provide public uptime data',
   // #713 — service with no official uptime % (Bedrock/Azure etc.): we don't invent a number; it's
   // tracked by incidents and scored on incidents + recovery.
-  'uptime.noOfficial': 'No official uptime — incident-tracked',
-  'uptime.noOfficial.tooltip': 'This service publishes no official uptime %; it is incident-tracked and scored on incidents + recovery',
+  'uptime.noOfficial': 'No official uptime published',
+  'uptime.noOfficial.tooltip': 'This service publishes no official uptime %; AIWatch does not estimate one and scores the available reliability signals',
   'score.tooltip': 'Based on uptime, incident affected days, and recovery time',
   'uptime.sla.label': 'SLA threshold',
   'svc.mttr.none': 'No incidents in 7 days',

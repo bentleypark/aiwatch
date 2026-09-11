@@ -13,6 +13,9 @@ import { buildUpstreamNote, type UpstreamLinkLike, type UpstreamNote } from './_
 export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
+// Allows local SSR verification against a locally running Worker without
+// changing the production default.
+const workerApi = process.env.AIWATCH_WORKER_API || WORKER_API
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
 const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
 
@@ -84,7 +87,7 @@ export default async function handler(req: Request) {
     let fallbackReason: string = 'unknown'
 
     const result = await Promise.allSettled([
-      fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(5000) }),
+      fetch(`${workerApi}/api/status/cached`, { signal: AbortSignal.timeout(5000) }),
     ])
 
     if (result[0].status === 'fulfilled' && result[0].value.ok) {
@@ -102,7 +105,7 @@ export default async function handler(req: Request) {
             sourceDead?: boolean; sourceUnknown?: boolean
             probeConfirmed?: boolean; probeContradicted?: boolean
             components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
-            componentGroupsInline?: boolean // array-order (groups interleaved) breakdown layout (replicate)
+            componentGroupsInline?: boolean // array-order (groups interleaved) breakdown layout
           }>
           // #926 — the worker returns an ARRAY per service (one entry per active incident). The prior
           // non-array annotation was wrong (a runtime array was silently collapsed to [0]); the Array.isArray
