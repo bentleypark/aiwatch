@@ -20,7 +20,22 @@ describe('stale-source config (#591)', () => {
     expect(app!.incidentSourceStale).toBe(true)
   })
 
-  it('the flag is opt-in — only the two DeepSeek (Flashduty) services are stale-flagged today', () => {
+  it('mistral does NOT carry the flag — its source is readable again (#1381)', () => {
+    // It DID, while the Instatus→Rootly migration left no readable source at all. #1381 restored one
+    // (a browser scrape pushed to KV), and the flag's own copy then becomes a lie: `/is-mistral-down`
+    // renders "AIWatch can't currently read Mistral API's status source" beneath a badge derived
+    // from that feed. Asserted here rather than left to the roster test below so a revert says why.
+    //
+    // What the flag would have been standing in for — "this read may be lossy" — is expressed
+    // PER CYCLE instead: the KV gate refuses a feed it cannot fully read, and the response for that
+    // cycle carries `incidentSourceStale` from `withUnreadFeedFlag`. A config flag cannot stop being
+    // true; a response can. Precedent: junie/langsmith/fireworks each migrated sources, none took it.
+    const mistral = SERVICES.find((s) => s.id === 'mistral')
+    expect(mistral).toBeDefined()
+    expect(mistral!.incidentSourceStale).toBeUndefined()
+  })
+
+  it('the flag is opt-in — exactly the services whose source we cannot read carry it', () => {
     const flagged = SERVICES.filter((s) => s.incidentSourceStale).map((s) => s.id)
     expect(flagged).toEqual(['deepseek', 'deepseekapp'])
   })

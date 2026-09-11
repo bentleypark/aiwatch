@@ -63,8 +63,20 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  is leaving two modules undocumented, which is the rule the change exists to satisfy. Held to a bare
  *  path → purpose in both cases: the whole why (the `LAZY_UPTIME_SHOWCASE` rollout, the empty-map
  *  distinction, why an unreadable cycle is a no-op) is in directory-map.md, which loads on demand. A
- *  first draft of the same two lines that named the failure they were built for cost 257. */
-export const BUDGET_CHARS = 47_696
+ *  first draft of the same two lines that named the failure they were built for cost 257.
+ *
+ *  47_696 → 47_703 (#1381): +7 NET, from two changes that pull opposite ways. `, rootly` in the
+ *  Directory Layout `parsers/` line is +8 — the whole cost of a new parser module CLAUDE.md's own
+ *  rule requires listing. The uptime paragraph is −1: review found it still enumerating which parser
+ *  serves the Official path and which paths emit `uptimeWindowDays`, both of which this PR made
+ *  false, so both enumerations were replaced by grep pointers. That second change is the one worth
+ *  recording — the enumeration had been corrected in two other files earlier in the same PR and this
+ *  third copy survived, which is why the replacement is a pointer rather than a corrected list.
+ *  A first draft instead ADDED a sentence describing the Rootly path (browser-read, the only source
+ *  that WITHHOLDS the figure when a scrape loses a day); that cost 278 and it is per-source detail,
+ *  so it went to status-determination.md — which is what the uptime paragraph already points at.
+ *  Measured from zero prior slack, so here the constant's movement equals the entry's cost. */
+export const BUDGET_CHARS = 47_703
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

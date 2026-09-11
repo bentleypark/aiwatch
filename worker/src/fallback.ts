@@ -120,8 +120,7 @@ interface FallbackCandidate {
   /** #1062 facet B — per-component status snapshot (ServiceStatus.components, #604). Read by
    *  `routingTier` to detect a secondary-capability-only outage (OpenAI 'Images' down while 'Chat
    *  Completions' operational) and route the fallback to that capability's tier. Absent for services
-   *  with <2 matched components; those fall to the default. Mistral's Nuxt page now supplies 12
-   *  (#761 — derived from its component tree + ongoing-incident attribution). */
+   *  with <2 matched components; those fall to the default. */
   components?: Array<{ name: string; status: string }>
   /** #554 — provider is intentionally NOT read by selection here: the worker has no same-provider
    *  exclusion (the dashboard dropped its dashboard-only one for parity). Carried only so the #554
@@ -297,18 +296,11 @@ export function isCapabilityProvider(candidateId: string, sourceTier: number): b
 // set is emergent (any service whose components[] names a surface COMPONENT_CAPABILITY matches), the
 // two previous attempts to list it were both wrong, and a stale list reads as a guarantee. Derive it
 // from SERVICES × COMPONENT_CAPABILITY if you need it.
-// Mistral (#761) is worth one note because its components[] is DERIVED, not published: its Nuxt page
-// exposes no component status, so the snapshot comes from the component tree overlaid with each
-// ongoing incident's own `services[]` attribution. A live "Audio API Degraded" therefore routes to
-// the Voice tier — the case #1062 originally reported.
 // CAVEAT: components[] is sourced from `displayComponentIds` while the OVERALL status that gates
-// anchoring is resolved separately (statusComponentIds, or — for Mistral — from incidents). When the
-// two disagree, the component that drove the outage can be ABSENT from components[] → degraded.size
-// === 0 → default tier. This is live for Mistral, not hypothetical: displayComponentIds covers only
-// its 12 "API"-group components, so an incident on the "Services" group's `Vibe` or `Document
-// Library` (neither of which `incidentExclude` drops) degrades the badge while every listed component
-// still reads operational. Acceptable — it fails to the default, never to a wrong capability — but do
-// not assume the two sets agree; verify when adding a service.
+// anchoring is resolved separately (statusComponentIds, or from incidents). When the two disagree,
+// the component that drove the outage can be ABSENT from components[] → degraded.size === 0 →
+// default tier. Acceptable — it fails to the default, never to a wrong capability — but do not
+// assume the two sets agree; verify when adding a service.
 export function routingTier(svc: FallbackCandidate | undefined): number | null {
   const comps = svc?.components
   if (!comps || comps.length === 0) return null

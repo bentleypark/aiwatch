@@ -10,6 +10,12 @@ import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './up
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, type UptimeTimelines, type UptimeDataResult, normalizeStatus, parseIncidents, parseUptimeData, computeUptimeData, hasLazyUptimeShowcase } from './parsers/statuspage'
 import { fetchUptimeShowcase } from './uptime-showcase'
+import {
+  MISTRAL_FEED_KV_KEY, isStorableRootlyFeed, normalizeRootlyIncidents,
+  rootlyOverallStatus, mapRootlyComponentStatus, computeRootlyUptime, attachRootlyImpact,
+  rootlyDayImpactMap, rootlyTodayWeightedOutageSec, rootlyWindowTruncated, rootlyWindowCutoffDay,
+  type StoredRootlyFeed,
+} from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
@@ -70,43 +76,34 @@ export const SERVICES: ServiceConfig[] = [
     // replaces the per-region RSS that floored resolved durations to 1m + double-counted incidents.
     awsHealthApi: { url: 'https://health.aws.amazon.com/public/events', service: 'BEDROCK' } },
   { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
-  // #623 — status.mistral.ai (Instatus, Nuxt) lists API components ("Chat Completions API", …)
-  // alongside non-API surfaces (Le Chat consumer app, Le Console, Documentation, Website). The Nuxt
-  // parser appends the affected component to the incident title ("… · Le Chat"), so a denylist scopes
-  // the "Mistral API" badge/incidents/Score to the API only — the api-vs-app split (cf. OpenAI API
-  // excludes ChatGPT). Denylist (not an `['api']` allowlist) so a real API incident is never dropped.
-  // Known limitation: the Nuxt parser tags the title with only servicesArr[0] (first affected
-  // component) and doesn't populate componentNames, so a *combined* Le-Chat+API incident that lists
-  // Le Chat first would be dropped despite affecting the API. Low-probability; revisit if observed.
-  // #627 — statusComponent 'API' selects the Instatus "API" group component for the official uptime%
-  // (status.mistral.ai groups all API endpoints under it; → ~99.6% instead of "Not provided").
-  // #929 — holdShortIncidents: the Instatus auto-monitor posts frequent very short-lived
-  // "○○ API Degraded" MEDIUM (→ minor) incidents that self-resolve in seconds/minutes and are then
-  // pruned from the page, so the */5 cron fired a phantom "New Incident" alert on each (e.g. the
-  // 2026-07-03 AI Registry Prompts/Skills flaps). Same knob Langfuse uses (#792): a non-major NEW
-  // incident is held ~2 cron cycles before alerting, so a self-resolving flap never fires while a
-  // genuine longer incident (e.g. the 120h Fine Tuning degradation) still alerts.
-  // #761 — instatusUrl points at `/activity/page/1`, the incidents listing's CURRENT home. Mistral
-  // moved it: `/incidents/page/1` now 301s there (verified 2026-07-20). `fetchWithTimeout` follows
-  // redirects, so the stale URL still parsed and the drift was invisible. Fixed because the scrape
-  // fetch fails SILENTLY, not loudly: it has its own `.catch` (→ `null`, `parseErrors++`), and the
-  // Instatus return path calls `trackFetchFailure` but DISCARDS its `shouldDegrade` — the status it
-  // returns is derived from the ROOT `statusUrl` response instead. So a throwing scrape URL doesn't
-  // degrade the service; it empties `incidents`, risking a false RECOVERY (an ongoing incident
-  // vanishing) plus the loss of uptime + the components snapshot. Removing the hop also removes that
-  // exposure on the */5 cron. The root `statusUrl` still serves the component tree + uptime.
-  // #761 — displayComponentIds: the 12 components of Mistral's own "API" group. The 5 "Services"
-  // components (Le Console/Documentation/Vibe/Document Library/Website) are omitted so the breakdown
-  // stays an API-surface card — NOT because incidentExclude covers them: it is a substring match on
-  // the incident TITLE (['le chat','le console','documentation','website']) and drops only 3 of the 5
-  // ('Vibe' matches nothing; 'documentation' is not a substring of 'document library'). See the
-  // CAVEAT on routingTier in fallback.ts for what that divergence costs. NO
-  // componentGroups: a single group label would collapse all 12 into one row (ServiceDetails groups
-  // by label), destroying the per-component visibility this card exists for — the 12 names are
-  // already self-describing. Display-only (#606): components[] never feeds the badge — on this branch the
-  // badge is `hasOngoing ? 'degraded' : httpStatus` (the filtered incident list + the root page's
-  // HTTP status); statusComponent feeds only the uptime% and the #359 exclude-bypass.
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/activity/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API', holdShortIncidents: true, displayComponentIds: ['c4869a5a-054c-4c1b-88d1-3d195ba58511', '6d1417e5-81f5-44f4-bfd4-d2eb44d95988', '09f74bbf-a6e6-4751-a057-70da6c502c06', 'd7e0541d-b743-4cad-96cb-dd1395422904', '9f01cfda-c067-426b-b1aa-081541169174', 'd8e1e02e-48a4-4d97-8168-a8aabc1c51fb', '033ab409-a16e-4574-aef5-f2f0afc1f6cd', '4051fbf9-fea4-434a-90c1-b347c16e02ba', '78e74758-aa8f-4067-9147-d7f1ab90849a', '02a249ad-72d5-432a-8937-a5ab69a0b7f8', '7fadf202-f02f-40a2-84a4-c4f4041b7865', 'bd64fd4f-286c-4a86-bd31-006a7ea5aa03'] },
+  // #929 — holdShortIncidents: a non-major NEW incident is held ~2 cron cycles before alerting, so a
+  // self-resolving flap never fires while a genuine longer incident still alerts. Same knob Langfuse
+  // uses (#792), and it reads no source-specific field, so it keeps working across the migration.
+  // The behaviour that EARNED it was Instatus's auto-monitor posting very short-lived "○○ API
+  // Degraded" incidents and then pruning them (observed 2026-07-03). Whether Rootly does the same is
+  // not established — the knob is kept because removing it can only re-open phantom alerts, not
+  // because the premise was re-checked.
+  // #1381 — Rootly. `displayComponentIds` is the API-surface scope, and on this path it is load-
+  // bearing three times over: the badge (`rootlyOverallStatus` worst-of), the uptime denominator, and
+  // the breakdown card all read it, and a configured id ABSENT from the feed makes the badge
+  // `unknown` rather than silently narrowing the scope — which is how the Instatus→Rootly rotation
+  // went unnoticed. NO componentGroups: one shared label collapses the whole card into a single row.
+  //
+  // KNOWN LIMIT — `incidentExclude` has no bypass here. The exclude is a substring match on the
+  // incident TITLE, and the #359/#1032 escape hatches both need per-incident component attribution;
+  // the Rootly incident pages publish none (checked on a real one: no affected-component list at
+  // all), so `normalizeRootlyIncidents` sets neither `componentNames` nor `componentIds` and the
+  // bypass legs are structurally unreachable. An incident whose title carries an excluded word
+  // alongside a genuine API impact is therefore dropped with no recovery path. Narrowing the exclude
+  // list is the only lever. NO `statusComponent` for the same reason: the #359 leg is the only thing
+  // on this path that would have read it, so carrying it meant a field whose deletion nothing but a
+  // stale test assertion noticed.
+  //
+  // The list is SOURCE VOCABULARY, so a vendor rotation silently inverts it. The entry was
+  // `le console` for the Instatus page, which appended the component to the title; Rootly publishes
+  // the raw title and names that component `Console`, so the old entry could not match and
+  // "Console Degraded" reached the API card. Pinned by a wiring test against the real title.
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, rootlyFeed: true, incidentExclude: ['console', 'le chat', 'documentation', 'website'], holdShortIncidents: true, displayComponentIds: ['304d5895-4dde-47be-b2e1-b7ebeb28dd4d', '719fdf28-3a3d-48f9-bfe3-7766e55091b4', 'ba3a6e31-16e8-48c1-9a0e-dc09d9f65b68', 'a4b27297-cd30-47b8-8ac0-1d1081fe905a', '4b32fcf7-6173-4456-85ba-048d384ae4a6', '74350cee-8e18-44bb-be49-9a5ae3f8f218', '951414e5-fcd1-4c1d-9f2f-acaf726bd245', '3e804d64-e876-488f-ba91-69913a2d54f9', '7ea6517b-2d19-42f8-b90f-39607552a60b', 'd16850a6-af05-4366-abc2-65d89959305d', '3abd6dd4-8de0-44ad-a65c-e11280a66ca9', '2b40e771-7a56-40b3-8e96-792740c301f4', '974aefe0-ee25-48a2-ac3d-4f12cc788c2d'] },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
@@ -1717,6 +1714,151 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
   return result
 }
 
+// #1381 — read the browser-rendered Rootly feed (pushed to KV by the mistral-feed Action) and
+// normalize it into a ServiceStatus. Returns null when the key is absent/expired/corrupt; what the
+// caller does with that is stated at the call site, which is the only place it is decidable.
+//
+// Mistral is feed-ONLY: there is no apiUrl mirror to fall back to, because the Cloudflare managed
+// challenge in front of the page refuses the Worker outright.
+async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: ServiceStatus, now: string): Promise<ServiceStatus | null> {
+  let raw: string | null
+  try {
+    raw = await kv.get(MISTRAL_FEED_KV_KEY)
+  } catch (err) {
+    console.warn(`[fetchService] ${base.id} rootly KV read failed:`, err instanceof Error ? err.message : err)
+    return null
+  }
+  if (!raw) return null
+
+  let stored: StoredRootlyFeed
+  try {
+    stored = JSON.parse(raw) as StoredRootlyFeed
+  } catch (err) {
+    console.warn(`[fetchService] ${base.id} rootly feed JSON parse failed:`, err instanceof Error ? err.message : err)
+    return null
+  }
+  // The same rejection test the ingest endpoint applies, re-run at READ time: a value that got into KV
+  // some other way (an older writer, a hand-edited key) must not be trusted just because it is stored.
+  if (!isStorableRootlyFeed(stored.feed, config.displayComponentIds, Date.parse(now))) {
+    console.warn(`[fetchService] ${base.id} rootly feed in KV failed the storable check — ignoring`)
+    return null
+  }
+
+  const norm = normalizeRootlyIncidents(stored.feed)
+  // The uptime chart is read in the SAME scrape as the incidents, because it is the only place this
+  // source states severity — the incident titles carry none (verified across all 93 impacted days).
+  // Without it every incident stays `impact: null`, and `score.ts`'s `isReliabilityIncident` gates
+  // affected-days AND the MTTR sample on `impact != null`: a month with a dozen real incidents would
+  // score as if it were clean. That is why this is not deferred.
+  const up = computeRootlyUptime(stored.feed.uptime ?? [], config.displayComponentIds, Date.parse(now))
+  // Filter BEFORE attributing. `incidentExclude` drops the page's non-API incidents (Console today),
+  // and those components are outside `displayComponentIds`, so their chart days never enter
+  // `up.days` — attributing them first counted every one of them as a lost read, permanently. The
+  // published list is the filtered one either way, so this is also the only order in which the
+  // counter describes the incidents we actually ship.
+  const ours = filterIncidents(norm.incidents, config)
+  const attributed = attachRootlyImpact(ours, up, rootlyWindowCutoffDay(Date.parse(now)))
+  const todaySec = rootlyTodayWeightedOutageSec(up, Date.parse(now))
+  // Whether the incident cap cost us days INSIDE the window — not whether it bit, which it does on
+  // every run by design. See `rootlyWindowTruncated`.
+  const truncated = rootlyWindowTruncated(stored.feed.coverage, norm.incidents, Date.parse(now))
+  // Scoped diagnostics, not decoration: the page publishes timestamps only as English prose, so a
+  // format change degrades silently into "fewer incidents". These counters are the only way that is
+  // visible before the Score moves.
+  // Only the INCIDENT-side counters are reported here, and that is not an omission. Every uptime
+  // counter (`unreadableDays`, `unreadBars`, `incompleteComponents`, `missingComponents`,
+  // `unreadableComponents`) and the withheld-figure case are conditions the storability gate above
+  // already refused: a feed that reaches this line satisfied `pct != null`, which by construction
+  // means all five are zero. They were printed here for a while, always as `=0`, next to a comment
+  // claiming this warn was the operator's only signal for them — it never was. An unread chart's
+  // signal is the ingest 400 and the Action's non-zero exit.
+  //
+  // What IS reachable is the incident side, which no gate covers: the page publishes timestamps only
+  // as English prose, so a format change degrades silently into "fewer incidents".
+  if (norm.unparsedTimestamps > 0 || norm.droppedIncidents > 0 || norm.unknownStatuses > 0
+      || attributed.unattributed > 0
+      || stored.feed.coverage.fetched < stored.feed.coverage.listed
+      || truncated) {
+    console.warn(
+      `[fetchService] ${base.id} rootly read: unparsedTimestamps=${norm.unparsedTimestamps} ` +
+      `droppedIncidents=${norm.droppedIncidents} unknownStatuses=${norm.unknownStatuses} ` +
+      `unattributedIncidents=${attributed.unattributed} ` +
+      `incidents=${stored.feed.coverage.fetched}/${stored.feed.coverage.listed}` +
+      (truncated ? ' — WINDOW TRUNCATED by the incident cap' : ''),
+    )
+  }
+
+  const status = rootlyOverallStatus(stored.feed.components, config.displayComponentIds)
+  // Scoped by the SAME ids as the badge. The breakdown card is an API-surface card (#761), so the
+  // page's non-API components — Console today — stay out of it; letting the card show a wider set
+  // than the badge is derived from puts two different answers on one screen.
+  const scope = config.displayComponentIds
+  const components = stored.feed.components
+    .filter((c) => !scope?.length || scope.includes(c.id))
+    .map((c) => ({ id: c.id, name: c.name, status: mapRootlyComponentStatus(c.status) }))
+    .filter((c): c is { id: string; name: string; status: 'operational' | 'degraded' | 'down' } =>
+      c.status != null && !!c.name)
+
+  const result: ServiceStatus = {
+    ...base,
+    status,
+    lastChecked: now,
+    // `filterIncidents` runs on this path as it does on every other branch — above, before
+    // attribution. Without it `incidentExclude` was inert here alone, so a page-wide "Le Chat
+    // Degraded" reached the API-surface card the component scope goes out of its way to keep clean.
+    //
+    // No `status === 'unknown'` guard here, and #1233 is not being ignored: the read-time
+    // `isStorableRootlyFeed` above refuses every feed `rootlyOverallStatus` could answer `unknown`
+    // for, so the guard was unreachable. An unreadable feed becomes `unknown` at the CALLER, which
+    // ships no incidents at all.
+    incidents: attributed.incidents,
+    // COMPUTED over the trailing 30 days from the chart's own per-day segments, weighted with the
+    // SHARED table (major 1.0 / minor 0.3), so a Rootly figure is comparable with every other
+    // source (#259/#1006). Withheld entirely when the read was incomplete — see computeRootlyUptime.
+    // #1017 — `todayWeightedOutageSec` rides the SAME object as `uptime30d`, one spread, so the two
+    // cannot drift apart. Without it `index.ts` writes a null counter every cycle and the calendar
+    // this service will need after its NEXT migration has no durable input.
+    ...(up.pct != null
+      ? {
+          uptime30d: up.pct,
+          uptimeSource: 'official' as const,
+          ...(up.windowDays != null && up.windowDays < 30 ? { uptimeWindowDays: up.windowDays } : {}),
+          ...(todaySec != null ? { todayWeightedOutageSec: todaySec } : {}),
+        }
+      : {}),
+    // Gated on the SAME completeness as the percentage. A lost tooltip leaves its day absent, and an
+    // absent day renders as a clean one — the identical "every gap fails toward no downtime"
+    // asymmetry, on a surface that also outranks the archive (`uptime-archive.ts`).
+    ...(up.pct != null && Object.keys(up.days).length > 0
+      ? { dailyImpact: rootlyDayImpactMap(up.days) }
+      : {}),
+    ...(components.length >= 2 ? { components } : {}),
+  }
+
+  // NO `incidentSourceStale` on this path, and the reason is worth recording because four review
+  // rounds were spent on the opposite assumption.
+  //
+  // The flag was set while the migration had left us with no readable source at all. Once the feed
+  // lands we CAN read the source, and the flag's own copy then becomes false: `/is-mistral-down`
+  // renders "AIWatch can't currently read Mistral API's status source" directly beneath a badge
+  // derived from that very feed. A public page contradicting itself is worse than a conservative
+  // gate, and no read-completeness conjunction fixes it — the sentence is false whenever the read
+  // SUCCEEDS, which is the common case.
+  //
+  // The flag is a CONFIG statement — "this service's source is unreadable, always" — and that is what
+  // stopped being true. A per-cycle unreadable source is a different thing and is expressed
+  // per-cycle: `isStorableRootlyFeed` refuses a feed it cannot fully read, this function returns
+  // null, and the caller publishes `unknown` with `withUnreadFeedFlag` stamping
+  // `incidentSourceStale` on that RESPONSE. So the is-down sentence still appears exactly when it is
+  // true, and stops appearing when it is not — which the config flag could not do.
+  //
+  // Precedent agrees: junie (#1004), langsmith (#1066) and fireworks (#1198) each migrated status
+  // sources and none took this flag — and #1007's title is literally "stop rendering an unreadable
+  // source as an outage". The flag's remaining users are the two DeepSeek services, whose Flashduty
+  // mirror really is frozen.
+  return result
+}
+
 /** #689 — Classify a non-OK status-page API response (a real HTTP status from `summaryRes.status`).
  *  A 4xx means the page is gone / deactivated / misconfigured (the SOURCE is dead, not the service) →
  *  treat as a stale dead-source (operational, out of rankings), NOT degraded. A 5xx is transient → the
@@ -1895,6 +2037,23 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
     // #618 — DeepSeek: prefer the browser-rendered Flashduty feed cached in KV by the scraper Action.
     // Fresh feed supersedes the frozen Atlassian mirror and clears incidentSourceStale; missing/
     // expired feed falls through to the apiUrl path below (which keeps the stale flag from base).
+    // #1381 — Mistral: the Rootly page is unreadable server-side, so the only source is the feed the
+    // Action pushes. Feed-only (no apiUrl mirror), so this branch resolves the absent case itself
+    // rather than falling through to the challenged statusUrl below.
+    if (config.rootlyFeed && kv) {
+      const fed = await readRootlyStatus(kv, config, base, now)
+      if (fed) return fed
+      // No feed: the KV key expired, the Action stopped pushing, or nothing has pushed yet. `base`
+      // says `operational`, which for a feed-ONLY service would publish a green pill for a service we
+      // have no reading of at all — and the Action's hourly schedule is best-effort, so expiry
+      // against the 3h TTL is a realistic state rather than a corner (`deepseek-dispatch.ts` records a
+      // `*/10` GitHub cron observed running only ~every 2h). #1233's `unknown` is what this is:
+      // neither an outage nor an all-clear. Warned as well, because every OTHER failure on this path
+      // warns and a silent one is indistinguishable in the logs from a healthy quiet page.
+      console.warn(`[fetchService] ${config.id} rootly feed absent from KV — publishing unknown`)
+      return { ...base, status: 'unknown' as const, sourceUnknown: true }
+    }
+
     if (config.flashdutyFeed && kv) {
       const fed = await readFlashdutyStatus(kv, config, base, now)
       if (fed) return fed
@@ -2808,9 +2967,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           if (instatusComps.length > 0) {
             instatusComponents = resolveSvcComponents(config, { components: instatusComps })
             // #761 — the #606 curated-id drift signal above is inside the ATLASSIAN branch and gates on
-            // `breakdownComponents`, so it never sees Instatus services (fal/perplexity/mistral) even
-            // though they carry the same hand-maintained `displayComponentIds`. Mistral's is another
-            // hand-maintained 12-id list; a rotated/renamed id would drop the breakdown
+            // `breakdownComponents`, so it never sees the Instatus services even though they carry the
+            // same hand-maintained `displayComponentIds`. A rotated/renamed id would drop the breakdown
             // under the ≥2 gate AND silently revert #1062 routing (components.length === 0 →
             // routingTier null). Same warn, applied to the branch that actually produced these.
             if (config.displayComponentIds) {

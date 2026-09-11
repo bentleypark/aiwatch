@@ -119,10 +119,11 @@ export async function readArchivedWeightedOutageSec(
  *  render, i.e. is there a gap only the archive can fill? A window at or wider than the calendar
  *  leaves nothing to restore.
  *
- *  ABSENT does NOT mean "full window" — only the Statuspage and incident.io paths emit
- *  `uptimeWindowDays` at all, so an Instatus / OnlineOrNot / Flashduty service publishes a short
- *  history silently and is never eligible here. That is a real coverage limit of this gate, not an
- *  all-clear.
+ *  ABSENT does NOT mean "full window": only SOME parser paths emit `uptimeWindowDays` at all, so a
+ *  service on one of the others publishes a short history silently and is never eligible here. That
+ *  is a real coverage limit of this gate, not an all-clear. Which paths emit it is deliberately not
+ *  listed — the enumeration went stale the first time a parser was added (#1381) and nothing pins it;
+ *  `grep -n uptimeWindowDays worker/src/services.ts` is the answer that cannot drift.
  *
  *  Exported because `restoreArchivedCalendars` (index.ts) needs the SAME verdict to decide whether to
  *  record a trace observation (#1017 follow-up). Two copies of this predicate would drift the moment

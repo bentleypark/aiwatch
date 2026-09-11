@@ -127,7 +127,11 @@ describe('#1089 follow-up — durable per-service parse-failure counter', () => 
 // ── wiring + write budget: a pure-fn test sees neither ──
 
 describe('#1089 follow-up — the guard books into the counter, once per cycle', () => {
-  const mistral = SERVICES.find((s) => s.id === 'mistral')!
+// #1381 — the fixture service is PERPLEXITY, not Mistral. Mistral was this suite's canonical
+// Instatus service until it migrated to Rootly; a test that keeps driving it stops exercising the
+// Instatus wiring it exists to guard while still passing, for the wrong reason. Perplexity and fal
+// are the two services still on Instatus.
+  const instatusSvc = SERVICES.find((s) => s.id === 'perplexity')!
   afterEach(() => vi.unstubAllGlobals())
 
   const failStub = () => vi.stubGlobal('fetch', vi.fn(async () => new Response('<html><body>redesigned</body></html>', { status: 200 })))
@@ -136,14 +140,14 @@ describe('#1089 follow-up — the guard books into the counter, once per cycle',
     // Drives the production entry point, so parse → flag → guard → counter runs end to end.
     failStub()
     const store: Record<string, string> = {}
-    const svc = await fetchService(mistral, undefined, mockKV(store) as never, {})
+    const svc = await fetchService(instatusSvc, undefined, mockKV(store) as never, {})
     expect(svc.sourceUnknown, 'precondition: the guard must have fired').toBe(true)
 
     const key = Object.keys(store).find((k) => k.startsWith('instatus-parse-fail:'))
     expect(key, `expected a counter key, got: ${Object.keys(store).join(', ')}`).toBeDefined()
     const day = parseParseFailDay(store[key!])
-    expect(totalFor(day, 'mistral')).toBe(1)
-    expect(Object.keys(day.counts.mistral), 'must carry a reason, not a bare count').toHaveLength(1)
+    expect(totalFor(day, 'perplexity')).toBe(1)
+    expect(Object.keys(day.counts.perplexity), 'must carry a reason, not a bare count').toHaveLength(1)
   })
 
   // THE regression this file exists for. `fetchService` runs on every `/api/status` request, not only
@@ -154,10 +158,10 @@ describe('#1089 follow-up — the guard books into the counter, once per cycle',
     failStub()
     const store: Record<string, string> = {}, meta = { puts: 0, ttls: {} as Record<string, number | undefined> }
     const kv = mockKV(store, meta)
-    for (let i = 0; i < 10; i++) await fetchService(mistral, undefined, kv as never, {})
+    for (let i = 0; i < 10; i++) await fetchService(instatusSvc, undefined, kv as never, {})
 
     const key = Object.keys(store).find((k) => k.startsWith('instatus-parse-fail:'))!
-    expect(totalFor(parseParseFailDay(store[key]), 'mistral'), '10 invocations in one slot = 1 cycle').toBe(1)
+    expect(totalFor(parseParseFailDay(store[key]), 'perplexity'), '10 invocations in one slot = 1 cycle').toBe(1)
     // `puts` includes trackFetchFailure's own bounded writes; what matters is that it does not grow
     // linearly with invocations the way an unbounded counter would. Removing the dedup makes this
     // assertion fail — that is the guarantee, rather than any figure from a tree that no longer exists.
@@ -174,7 +178,7 @@ describe('#1089 follow-up — the guard books into the counter, once per cycle',
     ]
     vi.stubGlobal('fetch', vi.fn(async () => new Response(`<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`, { status: 200 })))
     const store: Record<string, string> = {}
-    const svc = await fetchService(mistral, undefined, mockKV(store) as never, {})
+    const svc = await fetchService(instatusSvc, undefined, mockKV(store) as never, {})
     expect(svc.sourceUnknown).toBeUndefined()
     expect(Object.keys(store).filter((k) => k.startsWith('instatus-parse-fail:'))).toEqual([])
   })

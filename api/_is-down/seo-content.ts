@@ -135,7 +135,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   mistral: {
     displayName: 'Mistral',
     description: 'Mistral API provides access to open-weight and proprietary language models from Mistral AI, a Paris-based research lab. Models include Mistral Large, Codestral, and various smaller open-source releases.',
-    insight: 'Mistral status page is hosted on Instatus rather than Atlassian Statuspage, so AIWatch parses incidents from a different source than most US-based providers. Mistral typically reports a smaller incident volume, but its status page granularity is also lower — short outages may be aggregated into longer incident windows.',
+    insight: 'Mistral runs its status page on Rootly, and publishes at an unusually fine grain: individual model endpoints get their own entries. Its raw incident count therefore looks high next to providers that fold everything into one record per event, and the two numbers are not comparable. AIWatch weighs the days a service was affected rather than the number of entries it filed.',
     whenDown: 'When Mistral API is down, developers using Mistral Large, Codestral, or open-source model endpoints will see request failures. Le Chat and other Mistral-powered apps may also be affected.',
     faqs: [
       { q: 'Is Mistral API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Mistral every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },

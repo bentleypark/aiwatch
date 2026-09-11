@@ -62,6 +62,7 @@ const SAFE = {
   'worker/src/parsers/aistudio.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/gcloud.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/flashduty.ts': 'producer — parses an upstream payload',
+  'worker/src/parsers/rootly.ts': 'producer — parses an upstream payload (#1381)',
   'worker/src/xai-regions.ts': 'xAI-only region collapsing; xAI is not a BetterStack service',
   'worker/src/services.ts': 'the orchestrator that CREATES them and computes the claim set',
   'worker/src/types.ts': 'declares the Incident shape, including the derived tag itself',
@@ -138,7 +139,9 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // Pinned at the count the widened detector finds, not a loose floor: the failure this whole file
     // guards against is the SCAN going quiet, and a floor of 40 stays green while a narrowed regex
     // drops 30 files. A legitimate change moves this number in the same diff.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(72)
+    // 72 → 73: #1381 added worker/src/parsers/rootly.ts, a producer (classified SAFE alongside the
+    // other parsers). Moving it in the same diff is the point — the number is the scan's own health.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(73)
   })
 
   it('leaves none unclassified', () => {

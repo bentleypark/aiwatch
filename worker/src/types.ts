@@ -278,10 +278,9 @@ export interface ServiceConfig {
   // incidentKeywords/incidentComponents) keeps an incident in filterByComponentStatus only if the
   // incident named a component in THIS service's badge group. Prevents a sibling-component-only
   // incident (e.g. a Claude-Code-only "GitHub failures" incident, componentNames: ['Claude Code'])
-  // from cross-attributing to Claude API. Set on `claude` ONLY — single-tenant services
-  // (mistral/perplexity/fal) have no sibling to leak from and a broad statusComponent ('API') would
-  // wrongly drop a specific-component incident; keyword-scoped siblings (claudeai/claudecode) already
-  // scope upstream and could drop 'across surfaces' incidents. Off by default.
+  // from cross-attributing to Claude API. Set on `claude` ONLY — single-tenant services have no
+  // sibling to leak from; keyword-scoped siblings (claudeai/claudecode) already scope upstream and
+  // could drop 'across surfaces' incidents. Off by default.
   //
   // #934 named this `scopeResolvedToComponent` and applied it to resolved/monitoring incidents only,
   // because it lived inside filterByComponentStatus's `componentStatus === 'operational'` gate. So
@@ -450,6 +449,14 @@ export interface ServiceConfig {
   // clears incidentSourceStale, while a missing/expired feed falls through to apiUrl (the frozen
   // Atlassian mirror) keeping incidentSourceStale. Pairs with incidentSourceStale (the fallback).
   flashdutyFeed?: boolean
+  // #1381 — the service's live status comes from a browser-rendered ROOTLY page pushed to KV by the
+  // mistral-feed Action. Distinct from `flashdutyFeed` in the wall it works around, which is why it
+  // is a separate flag rather than a shared "fed" boolean: DeepSeek's page blocks on TLS fingerprint
+  // (any browser context clears it, so that Action runs headless), while Rootly's Cloudflare managed
+  // challenge admits only a HEADED browser under xvfb. The two cannot share a scraper.
+  // When set, fetchService reads MISTRAL_FEED_KV_KEY; there is no apiUrl mirror to fall through to.
+  // This path never clears `incidentSourceStale`; the reason is on `readRootlyStatus`.
+  rootlyFeed?: boolean
   // #618 option A — scope the Flashduty feed to a component id, or a SET of ids (worst-of — #1171,
   // when the provider's status page splits one surface into several components, e.g. DeepSeek's V4
   // reorg turning one "API Service" into "V4 Pro API" + "V4 Flash API"), excluding sibling

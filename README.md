@@ -75,7 +75,7 @@ Grouped by the dashboard's category taxonomy (45 total — sidebar filters / Ove
 | Claude API | Anthropic | Atlassian Statuspage |
 | OpenAI API | OpenAI | incident.io (Atlassian compat) |
 | Gemini API | Google | Google Cloud incidents.json |
-| Mistral API | Mistral AI | Instatus (Nuxt SSR) |
+| Mistral API | Mistral AI | Rootly (browser-rendered) |
 | Cohere API | Cohere | incident.io (Atlassian compat) |
 | Groq Cloud | Groq | incident.io (Atlassian compat) |
 | Together AI | Together | Better Stack RSS + uptime API |
