@@ -59,9 +59,9 @@ DeepSeek's status page migrated to Flashduty (`status.deepseek.com`, #507), whic
 IP (a real Chromium from the same IP succeeds → JA3/bot wall, not an IP block). The Worker therefore
 cannot read it directly. A GitHub Action acts as a **browser-fingerprint proxy**, and the Worker's
 `*/5` cron also TRIGGERS it directly, in addition to GitHub's own `schedule` (#629 — see
-`deepseek-dispatch.ts`'s module header). #1395 wires
-`mistral-feed.yml` into the same mechanism with its own ~55min cooldown (`MISTRAL_DISPATCH_CONFIG`)
-instead of `*/5` — see that config's comment for why a faster cadence would be counterproductive there:
+`deepseek-dispatch.ts`'s module header). #1395/#1397 wires
+`mistral-feed.yml` into the same mechanism with its own 15min cooldown (`MISTRAL_DISPATCH_CONFIG`)
+instead of `*/5` — see that config's comment for the cooldown shape and its phase-locking caveat:
 
 ```
 [Worker cron */5]  maybeDispatchWorkflow(env, DEEPSEEK_DISPATCH_CONFIG) (deepseek-dispatch.ts, #629)

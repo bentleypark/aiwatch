@@ -63,22 +63,34 @@ export const DEEPSEEK_DISPATCH_CONFIG: WorkflowDispatchConfig = {
 // scraping — run 34581851025), and the source's one measured pacing-sensitive failure mode is
 // rate-limiting (150ms pacing lost 3/93 tooltips, 700ms lost 0, measured 2026-09-10 —
 // scripts/scrape-mistral-status.mjs). Dispatching on every `*/5` tick (12x/hour) would multiply
-// request volume against exactly the throttling the pacing exists to avoid, for a job whose own
-// 12min timeout already fits several runs inside one hour. cooldownS (55min) is chosen to land
-// roughly once an hour; a dispatch can only actually occur on the worker's own `*/5` tick, and this
-// value sits exactly on a tick boundary (3300s = 11 × 300s) rather than clear of one, so do not derive
-// a precise realized interval or write-count from it — that boundary makes the actual cadence a
-// function of intra-cycle timing this file doesn't control, not of this constant alone.
+// request volume against exactly the throttling the pacing exists to avoid.
 //
-// failCooldownS matches cooldownS, not a longer back-off like DeepSeek's: 55min is already the target
-// interval here, not a back-off from a shorter one the way DeepSeek's 900s is from its 240s, so there
-// is no shorter interval to fall back toward. Backing off further on a failure would only reduce how
-// many attempts land inside `MISTRAL_FEED_TTL_S` (3h, parsers/rootly.ts) for no offsetting benefit.
+// #1397 — cooldownS was originally 55min, chosen to land ~once/hour; that traded away incident-
+// detection latency (an actual Mistral outage could go up to ~1h unseen) without weighing it against
+// the alternative, and the "more often risks worse rate-limiting" reasoning above is itself an
+// extrapolation from within-run tooltip pacing, not a measurement of repeated-run frequency — see
+// #1397 for the full reasoning, not restated here. 15min is chosen specifically because the
+// workflow's own `timeout-minutes: 12` (mistral-feed.yml) is the real worst-case run length to design
+// against: at 15min cooldown, even a full-timeout run finishes with margin before the next dispatch,
+// so it cannot overlap and cost a cancelled run the way a cooldown shorter than the timeout could.
+//
+// A dispatch can only actually occur on the worker's own `*/5` tick, and 900s is — like the prior
+// 55min value — an exact multiple of the 300s tick period (3×) rather than clear of one. That is what
+// phase-locked the prior value to a realized 60min in production instead of the intended ~55min
+// (observed via 12 consecutive hourly-timestamped dispatches, #1397). Do not derive a precise
+// realized interval or write-count from cooldownS alone for this reason; it is a function of
+// intra-cycle timing this file doesn't control.
+//
+// failCooldownS matches cooldownS, not a longer back-off like DeepSeek's: this interval is already
+// the target cadence here, not a back-off from a shorter one the way DeepSeek's 900s is from its
+// 240s, so there is no shorter interval to fall back toward. Backing off further on a failure would
+// only reduce how many attempts land inside `MISTRAL_FEED_TTL_S` (3h, parsers/rootly.ts) for no
+// offsetting benefit.
 export const MISTRAL_DISPATCH_CONFIG: WorkflowDispatchConfig = {
   workflowFile: 'mistral-feed.yml',
   cooldownKey: 'mistral:dispatch:cooldown',
-  cooldownS: 55 * 60,
-  failCooldownS: 55 * 60,
+  cooldownS: 15 * 60,
+  failCooldownS: 15 * 60,
 }
 
 interface DispatchEnv {
