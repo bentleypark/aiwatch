@@ -151,13 +151,14 @@ export interface StoredFlashdutyFeed {
 export const DEEPSEEK_FEED_KV_KEY = 'deepseek:feed'
 // KV TTL. #1268 — the cadence this comment used to state ("~every 10 min", "~18 consecutive missed
 // runs") predates #629 and is wrong in a way that matters, because both windows below are read as
-// tolerances against it. The PRIMARY trigger is the Worker's own */5 cron dispatching the Action, so a
-// healthy pipeline refreshes every 5 min and never reaches the soft-stale gate; GitHub's `schedule` is
-// an hourly BACKUP that #629 measured as throttled to ~2h in practice. So the graded windows are not a
-// buffer against a few missed 10-minute runs — they are the behaviour when the WORKER is the thing that
-// is unavailable, which is also when the backup alone is running. Reaching the 1-3h band is the normal
-// shape of that failure, not an outlier. Past 3h the key expires and fetchService falls back to the
-// frozen Atlassian mirror (with incidentSourceStale).
+// tolerances against it. The Worker's own `*/5` cron dispatches the Action directly (deepseek-dispatch.ts
+// — #629/#1395), so a healthy pipeline refreshes every 5 min and never reaches the soft-stale gate;
+// `deepseek-feed.yml`'s `schedule: '17 * * * *'` fires at most once per hour by construction and is the
+// only thing still triggering the Action when the Worker itself is not. So the graded windows are not a
+// buffer against a few missed 10-minute runs — they are sized for that scenario (the Worker down, only
+// the once-an-hour-at-most schedule left), where reaching the 1-3h band is the normal shape of the
+// failure, not an outlier. Past 3h the key expires and fetchService falls back to the frozen Atlassian
+// mirror (with incidentSourceStale).
 export const DEEPSEEK_FEED_TTL_S = 3 * 60 * 60
 // Soft-staleness gate: a feed older than this still SERVES (badge/incidents stay live) but re-asserts
 // incidentSourceStale so the aging snapshot is excluded from Score ranking until a fresh push lands.

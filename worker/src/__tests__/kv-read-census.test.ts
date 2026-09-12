@@ -173,7 +173,7 @@ describe('createReadCensus — counting', () => {
   })
 
   it('counts a read at the CALL, not at the settle — the invariant waitUntil safety rests on', async () => {
-    // `ctx.waitUntil(maybeDispatchDeepseekFeed(env))` issues `deepseek:dispatch:cooldown` and can
+    // `ctx.waitUntil(maybeDispatchWorkflow(env, config))` issues its `config.cooldownKey` read and can
     // outlive the handler. It is counted because `record()` runs before the underlying call. A
     // "count only successful/settled reads" change would silently make that read escape.
     let release!: (v: unknown) => void

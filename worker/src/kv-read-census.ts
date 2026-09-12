@@ -22,8 +22,9 @@
  *
  * {@link createReadCensus} records the key synchronously, before invoking the underlying method. So a
  * read whose promise settles after the run's line is logged is still counted, which is what makes
- * `ctx.waitUntil(maybeDispatchDeepseekFeed(env))` safe: its one read (`deepseek:dispatch:cooldown`)
- * is issued synchronously and counted, even though the dispatch it guards outlives the handler. The
+ * `ctx.waitUntil(maybeDispatchWorkflow(env, config))` safe: its one read (`config.cooldownKey`,
+ * e.g. `deepseek:dispatch:cooldown` / `mistral:dispatch:cooldown` — #1395) is issued synchronously
+ * and counted, even though the dispatch it guards outlives the handler. The
  * ordering is an invariant, not an accident — a "count only successful reads" change would break it.
  */
 

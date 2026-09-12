@@ -7,9 +7,10 @@ name: DeepSeek status feed
 # Score re-includes DeepSeek (incidentSourceStale lifts while the feed is fresh; 3h KV TTL else falls
 # back to the frozen Atlassian mirror).
 #
-# #629 — the PRIMARY trigger is now the Worker's reliable */5 cron, which workflow_dispatches this
-# (GitHub's own `schedule` is throttled to ~2h, which let the feed expire / go soft-stale). The
-# schedule below is just a low-frequency BACKUP for when the Worker is unavailable.
+# #629 — the PRIMARY trigger is now the Worker's `*/5 * * * *` cron, which workflow_dispatches this in
+# addition to the schedule below (see worker/src/deepseek-dispatch.ts's header, #629/#1395). The
+# schedule below (`17 * * * *`, at most once/hour by construction) fires independently of the Worker,
+# e.g. when the Worker itself is unavailable.
 
 on:
   schedule:

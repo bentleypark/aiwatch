@@ -39,7 +39,7 @@ import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edg
 import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, type StoredRootlyFeed } from './parsers/rootly'
-import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
+import { maybeDispatchWorkflow, DEEPSEEK_DISPATCH_CONFIG, MISTRAL_DISPATCH_CONFIG } from './deepseek-dispatch'
 import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, extReportCountKey, isExtReportSource, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
 
 interface Env {
@@ -73,9 +73,10 @@ interface Env {
   // status.mistral.ai (Rootly, behind a Cloudflare managed challenge no server-side fetch clears).
   // Set via `wrangler secret put MISTRAL_FEED_TOKEN` and the same value as a GH Action secret.
   MISTRAL_FEED_TOKEN?: string
-  // #629: fine-grained GitHub PAT (actions: write on this repo) so the */5 cron can reliably
-  // workflow_dispatch the deepseek-feed Action (GitHub's own schedule is throttled to ~2h). Set via
-  // `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the worker skips dispatch (GH schedule backup only).
+  // #629/#1395: fine-grained GitHub PAT (actions: write on this repo) so the */5 cron can dispatch
+  // deepseek-feed AND mistral-feed itself rather than relying on GitHub's own `schedule` alone (see
+  // deepseek-dispatch.ts's header). Set via `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the
+  // worker skips both dispatches.
   GH_DISPATCH_TOKEN?: string
   // #1158: classic GitHub PAT (public_repo scope) for the weekly badge-repo-discovery sweep
   // (GitHub Code Search API — which public repos embed an AIWatch badge). Distinct from
@@ -3029,12 +3030,19 @@ export default {
     // `git diff -w` shows only the real edits.
     try {
 
-      // #629 — reliably trigger the deepseek-feed Action each */5 cycle (GitHub's own schedule is
-      // throttled to ~2h, expiring the Flashduty feed). waitUntil so the GitHub POST runs concurrently
-      // with the rest of the cron instead of serially delaying it; .catch so it can never break the cron.
+      // #629 — dispatch the deepseek-feed Action each */5 cycle in addition to its own `schedule`
+      // trigger (see deepseek-dispatch.ts's header for the mechanism). waitUntil so the GitHub POST
+      // runs concurrently with the rest of the cron instead of serially delaying it; .catch so it can
+      // never break the cron.
       ctx.waitUntil(
-        maybeDispatchDeepseekFeed(env).catch((err) =>
+        maybeDispatchWorkflow(env, DEEPSEEK_DISPATCH_CONFIG).catch((err) =>
           console.warn('[cron] deepseek dispatch failed:', err instanceof Error ? err.message : err)
+        )
+      )
+      // #1395 — same mechanism, ~hourly cadence (its own cooldown, not */5) — see MISTRAL_DISPATCH_CONFIG.
+      ctx.waitUntil(
+        maybeDispatchWorkflow(env, MISTRAL_DISPATCH_CONFIG).catch((err) =>
+          console.warn('[cron] mistral dispatch failed:', err instanceof Error ? err.message : err)
         )
       )
 
