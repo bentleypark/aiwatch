@@ -12,13 +12,17 @@ name: Mistral status feed
 #
 # No `playwright install`: the script drives the runner's preinstalled Chrome via `channel: 'chrome'`,
 # so there is no ~280MB browser download and no cache to keep warm.
+#
+# #1395 — in addition to the schedule below, the Worker's */5 cron also workflow_dispatches this, on
+# a ~55min KV cooldown (MISTRAL_DISPATCH_CONFIG in worker/src/deepseek-dispatch.ts — full reasoning
+# for the cooldown shape, and for why it differs from DEEPSEEK_DISPATCH_CONFIG's, is there — not
+# restated here).
 
 on:
   schedule:
-    - cron: '23 * * * *'      # the only automatic trigger; off-the-hour to dodge GitHub's
-                              # top-of-hour scheduling congestion. The KV feed's TTL is 3h, so an
-                              # hourly best-effort schedule has room to miss runs.
-  workflow_dispatch: {}       # manual runs
+    - cron: '23 * * * *'      # also triggers independently of the Worker cron dispatch above;
+                              # off-the-hour to dodge GitHub's top-of-hour congestion.
+  workflow_dispatch: {}       # dispatched by the Worker cron, and available for manual runs
 
 # A scheduled run and a dispatch must not double-push.
 concurrency:

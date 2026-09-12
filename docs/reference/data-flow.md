@@ -58,15 +58,18 @@ DeepSeek's status page migrated to Flashduty (`status.deepseek.com`, #507), whic
 **non-browser TLS fingerprints** — a Worker `fetch()` is reset at the TLS layer regardless of egress
 IP (a real Chromium from the same IP succeeds → JA3/bot wall, not an IP block). The Worker therefore
 cannot read it directly. A GitHub Action acts as a **browser-fingerprint proxy**, and the Worker's
-reliable `*/5` cron is what TRIGGERS it (#629 — GitHub's own `schedule` is throttled to ~2h, so it's
-demoted to an hourly backup):
+`*/5` cron also TRIGGERS it directly, in addition to GitHub's own `schedule` (#629 — see
+`deepseek-dispatch.ts`'s module header). #1395 wires
+`mistral-feed.yml` into the same mechanism with its own ~55min cooldown (`MISTRAL_DISPATCH_CONFIG`)
+instead of `*/5` — see that config's comment for why a faster cadence would be counterproductive there:
 
 ```
-[Worker cron */5]  maybeDispatchDeepseekFeed (deepseek-dispatch.ts, #629)
+[Worker cron */5]  maybeDispatchWorkflow(env, DEEPSEEK_DISPATCH_CONFIG) (deepseek-dispatch.ts, #629)
   → ~240s KV cooldown (deepseek:dispatch:cooldown) spaces it to one dispatch/cycle; the workflow's
-    `concurrency` group is the real pile-up guard (KV is eventually consistent). 15-min back-off on failure.
+    `concurrency` group is the real pile-up guard (KV is eventually consistent). 15-min back-off on
+    failure OR a thrown fetch (#1395).
   → POST api.github.com /actions/workflows/deepseek-feed.yml/dispatches  (Bearer GH_DISPATCH_TOKEN)
-                                  │  (GitHub `schedule: 17 * * * *` is a hourly BACKUP only)
+                                  │  (GitHub `schedule: 17 * * * *` also triggers this independently)
                                   ▼
 [GitHub Action]  Playwright headless Chromium (ubuntu-latest + `npx playwright install chromium`, cached;
                  #668 dropped the mcr.microsoft.com/playwright container — its image pull was intermittently edge-blocked)
@@ -93,9 +96,10 @@ demoted to an hourly backup):
 ```
 
 The Worker cron `*/5` both **dispatches** the Action (refreshing the `deepseek:feed` source) and
-**reads** it (recomputing `services:latest`), so DeepSeek is a first-class `*/5` service — the feed is
-always <~5min old (fresh → ranked), no longer soft-stale most of the time as it was under the throttled
-GitHub schedule (#629). DeepSeek **API RTT degradation** is also caught at `*/5` by the direct probe
+**reads** it (recomputing `services:latest`), so DeepSeek is a first-class `*/5` service — normally
+fresh → ranked, rather than depending on the GitHub schedule alone the way it did before #629 added
+the Worker-cron dispatch (a failed dispatch still backs off per `DEEPSEEK_DISPATCH_CONFIG`, so this is
+usual-case behavior, not a bound). DeepSeek **API RTT degradation** is also caught at `*/5` by the direct probe
 (`api.deepseek.com`, which bypasses the bot-walled status host). Shared incidents (a "Web/API" outage)
 carry the same `flashduty:{change_id}` id across both services, so the existing cross-surface grouping
 (Incidents page dedup→affectedNames, Analyze modal, RSS `dedupeSharedIncidents`) collapses them to one.
