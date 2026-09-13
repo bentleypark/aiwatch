@@ -35,20 +35,84 @@ function toLocalDateKey(d) {
 export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, currentStatus = undefined) {
   const today = new Date()
   const dayStatus = {}
+  const todayKey = toLocalDateKey(today)
 
-  // Phase 1: Apply dailyImpact (keys are UTC dates from Worker — remap to local). dailyImpact values
-  // are impact names (critical/major/minor), which now equal the cell keys — so map via the shared
-  // impactToCellStatus (skips any unknown impact by returning 'minor', but dailyImpact only emits the
-  // three known levels).
+  // A day with no reliable time-of-day (a bare-UTC-date dailyImpact entry, or a `status_history`-
+  // derived incident's `derivedDay` — see `incidentLocalDay` below) is anchored at noon UTC as the
+  // best available guess, clamped to local "today": for a viewer west of UTC early in a UTC day, the
+  // guessed local day can otherwise land in their future and vanish from the rendered window. Returns
+  // null on an unparseable `dateStr` — the caller must skip the entry rather than paint anything: an
+  // invalid `Date` stringifies to `"NaN-NaN-NaN"`, which compares as GREATER than any real date key,
+  // so an un-nulled clamp would silently redirect a garbled key onto "today" (#1400 review finding).
+  function dayOnlyLocalKey(dateStr) {
+    const anchor = new Date(`${dateStr}T12:00:00Z`)
+    if (isNaN(anchor.getTime())) return null
+    const guessed = toLocalDateKey(anchor)
+    return guessed > todayKey ? todayKey : guessed
+  }
+
+  // The local day a SPECIFIC incident belongs to, or null if it cannot be determined. A
+  // `status_history`-derived incident's `startedAt` is a SYNTHETIC anchor timestamp — Better Stack/
+  // aiStudio publish only a daily record with no real start/end time, so AIWatch invents one purely
+  // to have a sortable field (#1400 — Together AI's "Kimi K3 — recovered", `startedAt: "…19:00:00Z"`,
+  // is not when anything actually happened; its real information is `derivedDay`, day-only like a
+  // bare dailyImpact entry). A genuine incident's `startedAt` IS a real instant — safe, and in fact
+  // more precise than a bare-date dailyImpact entry for the same day (see Phase 1 below).
+  function incidentLocalDay(inc) {
+    if (inc.derived === 'status_history') return inc.derivedDay ? dayOnlyLocalKey(inc.derivedDay) : null
+    const start = new Date(inc.startedAt)
+    return isNaN(start.getTime()) ? null : toLocalDateKey(start)
+  }
+
+  // A bare-UTC-date dailyImpact entry (statuspage/betterstack/flashduty/rootly) carries no exact
+  // instant of its own — Phase 1 below has to GUESS a local day for it (the noon-UTC anchor above).
+  // That guess is never needed when a GENUINE incident's precise timestamp is available for the SAME
+  // UTC day and every such incident AGREES on which local day it is: an incident's own local time is
+  // exact, not a guess, and it is also what the Incident History card already displays — so the
+  // calendar should agree with it rather than with a synthetic UTC-noon anchor (#1400 — an incident
+  // whose Incident History card read "Sep 11, 01:50 GMT+9" was previously calendar-painted on
+  // "Sep 10", the UTC day, purely from the noon-anchor guess). Requiring AGREEMENT (a single-member
+  // Set, not just "the first incident found") matters because several unrelated incidents can share
+  // one UTC day yet straddle a local midnight between them — picking an arbitrary one previously
+  // misattributed Mistral's own 2026-09-04 dailyImpact entry onto 2026-09-05 (#1400 review finding),
+  // because the incidents list happened to be ordered with a late-UTC-evening entry first. When they
+  // disagree, there is no single incident dailyImpact's day-level aggregate can be said to belong to
+  // — the noon-UTC guess is the honest answer, same as when there is no incident at all. Derived
+  // incidents never enter this map (their `startedAt` isn't a real instant — see `incidentLocalDay`),
+  // which correctly leaves their matching dailyImpact day to the noon-UTC guess, the right treatment
+  // for a source that itself only publishes a day-level record.
+  const localDaysByUtcDay = new Map()
+  for (const inc of incidents ?? []) {
+    if (!inc.startedAt || inc.derived === 'status_history') continue
+    const start = new Date(inc.startedAt)
+    if (isNaN(start.getTime())) continue
+    const utcDay = start.toISOString().slice(0, 10)
+    if (!localDaysByUtcDay.has(utcDay)) localDaysByUtcDay.set(utcDay, new Set())
+    localDaysByUtcDay.get(utcDay).add(toLocalDateKey(start))
+  }
+
+  // Phase 1: Apply dailyImpact — bare keys are the SOURCE's own displayed day (Rootly/Flashduty: UTC;
+  // Better Stack/aiStudio: whatever day their own API groups by), remapped to local below; full-ISO
+  // keys are a real instant (incident.io). dailyImpact values are impact names (critical/major/minor),
+  // which now equal the cell keys — so map via the shared impactToCellStatus (skips any unknown impact
+  // by returning 'minor', but dailyImpact only emits the three known levels).
   if (dailyImpact) {
     const KNOWN_IMPACT = new Set(['critical', 'major', 'minor'])
     for (const [key, impact] of Object.entries(dailyImpact)) {
       if (!KNOWN_IMPACT.has(impact)) continue
-      // incident.io emits full ISO timestamps → bucket the REAL instant to the viewer's local day
-      // (fixes the UTC-vs-local off-by-one, #693 follow-up). statuspage/betterstack emit bare UTC
-      // dates (already the source's daily bucket) → anchor at noon UTC to keep the same local day.
-      const d = key.includes('T') ? new Date(key) : new Date(key + 'T12:00:00Z')
-      escalate(dayStatus, toLocalDateKey(d), impactToCellStatus(impact))
+      let localKey
+      if (key.includes('T')) {
+        // incident.io emits full ISO timestamps → bucket the REAL instant to the viewer's local day
+        // (fixes the UTC-vs-local off-by-one, #693 follow-up).
+        const d = new Date(key)
+        if (isNaN(d.getTime())) continue
+        localKey = toLocalDateKey(d)
+      } else {
+        const agreedDays = localDaysByUtcDay.get(key)
+        localKey = agreedDays && agreedDays.size === 1 ? [...agreedDays][0] : dayOnlyLocalKey(key)
+        if (localKey === null) continue // unparseable key — drop rather than guess "today"
+      }
+      escalate(dayStatus, localKey, impactToCellStatus(impact))
     }
   }
 
@@ -70,7 +134,8 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
       // per-day record, so the incident must span its OWN days startedAt→resolvedAt (window-clamped),
       // else a multi-day outage shows only its start day (#691 — surfaced by #677's real durations).
       if (dailyImpact || !inc.resolvedAt) {
-        escalate(dayStatus, toLocalDateKey(start), status)
+        const localDay = incidentLocalDay(inc)
+        if (localDay !== null) escalate(dayStatus, localDay, status)
         return
       }
       const end = new Date(inc.resolvedAt)
@@ -107,7 +172,6 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   // service, so treating it as one would forward-fill today's calendar cell (and the Overview 30-bar
   // strip) as an outage day, from an incident list we could not refresh.
   if (currentStatus && currentStatus !== 'operational' && currentStatus !== 'unknown') {
-    const todayKey = toLocalDateKey(today)
     const windowStart = new Date(today.getTime() - (days - 1) * 86_400_000)
     ;(incidents ?? []).forEach((inc) => {
       if (inc.status === 'resolved' || !inc.startedAt) return
