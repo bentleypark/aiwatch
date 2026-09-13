@@ -2046,7 +2046,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // No feed: the KV key expired, the Action stopped pushing, or nothing has pushed yet. `base`
       // says `operational`, which for a feed-ONLY service would publish a green pill for a service we
       // have no reading of at all — so expiry against the 3h TTL is a realistic state to handle,
-      // rather than a corner (see `deepseek-dispatch.ts` for how this feed is triggered).
+      // rather than a corner (see `workflow-dispatch.ts` for how this feed is triggered).
       // #1233's `unknown` is what this is:
       // neither an outage nor an all-clear. Warned as well, because every OTHER failure on this path
       // warns and a silent one is indistinguishable in the logs from a healthy quiet page.
