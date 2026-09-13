@@ -69,17 +69,23 @@ export const DEEPSEEK_DISPATCH_CONFIG: WorkflowDispatchConfig = {
 // detection latency (an actual Mistral outage could go up to ~1h unseen) without weighing it against
 // the alternative, and the "more often risks worse rate-limiting" reasoning above is itself an
 // extrapolation from within-run tooltip pacing, not a measurement of repeated-run frequency — see
-// #1397 for the full reasoning, not restated here. 15min is chosen specifically because the
-// workflow's own `timeout-minutes: 12` (mistral-feed.yml) is the real worst-case run length to design
-// against: at 15min cooldown, even a full-timeout run finishes with margin before the next dispatch,
-// so it cannot overlap and cost a cancelled run the way a cooldown shorter than the timeout could.
+// #1397 for the full reasoning, not restated here. The `timeout-minutes: 12` ceiling on
+// `mistral-feed.yml` is the real worst-case run length to design a cooldown against: whatever value
+// is chosen, the realized dispatch-to-dispatch interval must clear 12min so a full-timeout run cannot
+// still be running when the next dispatch lands (which would cost a cancelled pending run under the
+// workflow's `concurrency` group).
 //
-// A dispatch can only actually occur on the worker's own `*/5` tick, and 900s is — like the prior
-// 55min value — an exact multiple of the 300s tick period (3×) rather than clear of one. That is what
-// phase-locked the prior value to a realized 60min in production instead of the intended ~55min
-// (observed via 12 consecutive hourly-timestamped dispatches, #1397). Do not derive a precise
-// realized interval or write-count from cooldownS alone for this reason; it is a function of
-// intra-cycle timing this file doesn't control.
+// A dispatch can only actually occur on the worker's own `*/5` tick (300s). The first attempt at this
+// (900s = 15min, an exact multiple of 300s, like the prior 3300s/55min value) phase-locked to an
+// observed realized 20min instead of 15 — one tick (300s) more than nominal, the same relationship
+// the 3300s→3600s lock showed (#1397). cooldownS is now 780s (13min), chosen
+// specifically to NOT be an exact multiple of 300s (600 < 780 < 900): the hypothesis is that the
+// tie-breaking at an EXACT tick boundary is what forces the extra tick, and a value that expires
+// strictly between two ticks avoids that ambiguity, landing on the very next tick (900s = 15min)
+// instead. This is NOT yet confirmed — there are only two prior data points and both were exact
+// multiples — so treat 780s as an experiment with a verify-after check (#1397), not a proven fix. It
+// cannot make the realized interval WORSE than the current 20min: if the hypothesis is wrong and the
+// extra-tick behavior is unconditional, 780s still ceils to 1200s (20min), identical to today.
 //
 // failCooldownS matches cooldownS, not a longer back-off like DeepSeek's: this interval is already
 // the target cadence here, not a back-off from a shorter one the way DeepSeek's 900s is from its
@@ -89,8 +95,8 @@ export const DEEPSEEK_DISPATCH_CONFIG: WorkflowDispatchConfig = {
 export const MISTRAL_DISPATCH_CONFIG: WorkflowDispatchConfig = {
   workflowFile: 'mistral-feed.yml',
   cooldownKey: 'mistral:dispatch:cooldown',
-  cooldownS: 15 * 60,
-  failCooldownS: 15 * 60,
+  cooldownS: 13 * 60,
+  failCooldownS: 13 * 60,
 }
 
 interface DispatchEnv {

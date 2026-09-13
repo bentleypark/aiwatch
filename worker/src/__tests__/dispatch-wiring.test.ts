@@ -8,7 +8,7 @@ import { join } from 'node:path'
 // ALREADY COVERED WITHOUT THIS FILE, and deliberately not re-asserted:
 //   - The dispatch/cooldown LOGIC (independent cooldown keys, fail-cooldown on a thrown fetch,
 //     per-config cooldown values) is unit-tested against `maybeDispatchWorkflow` directly in
-//     `deepseek-dispatch.test.ts`. What that function is CALLED WITH from the actual cron handler is
+//     `workflow-dispatch.test.ts`. What that function is CALLED WITH from the actual cron handler is
 //     not — see the source scan below.
 //
 // WHY THE SOURCE SCAN: this is a cron-only side effect with no return value and no observable
@@ -59,8 +59,8 @@ describe('#1395 dispatch call-site wiring (scheduled handler)', () => {
   })
 
   it('the module-level import brings in both configs (a partial import would still let one config-name typo through as a ReferenceError only at runtime)', () => {
-    const importLine = CODE.split('\n').find((l) => l.includes("from './deepseek-dispatch'"))
-    expect(importLine, 'no import from deepseek-dispatch').toBeTruthy()
+    const importLine = CODE.split('\n').find((l) => l.includes("from './workflow-dispatch'"))
+    expect(importLine, 'no import from workflow-dispatch').toBeTruthy()
     expect(importLine).toContain('DEEPSEEK_DISPATCH_CONFIG')
     expect(importLine).toContain('MISTRAL_DISPATCH_CONFIG')
     expect(importLine).toContain('maybeDispatchWorkflow')

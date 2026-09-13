@@ -4,7 +4,7 @@ import {
   maybeDispatchWorkflow,
   DEEPSEEK_DISPATCH_CONFIG,
   MISTRAL_DISPATCH_CONFIG,
-} from '../deepseek-dispatch'
+} from '../workflow-dispatch'
 
 describe('buildWorkflowDispatchRequest (#629/#1395)', () => {
   it('builds the GitHub workflow_dispatch POST with auth + required headers, for the given workflow file', () => {
@@ -30,7 +30,7 @@ describe('DEEPSEEK_DISPATCH_CONFIG / MISTRAL_DISPATCH_CONFIG (#1395)', () => {
     expect(DEEPSEEK_DISPATCH_CONFIG.cooldownKey).not.toBe(MISTRAL_DISPATCH_CONFIG.cooldownKey)
   })
 
-  it('Mistral does not back off past its normal cadence on failure (15min already IS the normal cadence, not a back-off to shorten further)', () => {
+  it('Mistral does not back off past its normal cadence on failure (that cadence already IS the target, not a back-off to shorten further)', () => {
     expect(MISTRAL_DISPATCH_CONFIG.failCooldownS).toBe(MISTRAL_DISPATCH_CONFIG.cooldownS)
   })
 
@@ -130,18 +130,18 @@ describe('maybeDispatchWorkflow (#629/#1395)', () => {
   })
 
   describe('MISTRAL_DISPATCH_CONFIG', () => {
-    it('dispatches + sets a 15min cooldown on HTTP 204', async () => {
+    it('dispatches + sets a 13min cooldown on HTTP 204', async () => {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })))
       const kv = mockKV()
       await maybeDispatchWorkflow({ GH_DISPATCH_TOKEN: 't', STATUS_CACHE: kv as unknown as KVNamespace }, MISTRAL_DISPATCH_CONFIG)
-      expect(kv.put).toHaveBeenCalledWith(MISTRAL_DISPATCH_CONFIG.cooldownKey, '1', { expirationTtl: 15 * 60 })
+      expect(kv.put).toHaveBeenCalledWith(MISTRAL_DISPATCH_CONFIG.cooldownKey, '1', { expirationTtl: 13 * 60 })
     })
 
-    it('on failure, backs off to the SAME cooldown as success — not further (#1397: 15min is already the normal cadence, not a back-off)', async () => {
+    it('on failure, backs off to the SAME cooldown as success — not further (#1397: 13min is already the normal cadence, not a back-off)', async () => {
       vi.stubGlobal('fetch', vi.fn(async () => new Response('bad', { status: 401 })))
       const kv = mockKV()
       await maybeDispatchWorkflow({ GH_DISPATCH_TOKEN: 't', STATUS_CACHE: kv as unknown as KVNamespace }, MISTRAL_DISPATCH_CONFIG)
-      expect(kv.put).toHaveBeenCalledWith(MISTRAL_DISPATCH_CONFIG.cooldownKey, '1', { expirationTtl: 15 * 60 })
+      expect(kv.put).toHaveBeenCalledWith(MISTRAL_DISPATCH_CONFIG.cooldownKey, '1', { expirationTtl: 13 * 60 })
     })
   })
 })

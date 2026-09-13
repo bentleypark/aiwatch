@@ -151,7 +151,7 @@ export interface StoredFlashdutyFeed {
 export const DEEPSEEK_FEED_KV_KEY = 'deepseek:feed'
 // KV TTL. #1268 — the cadence this comment used to state ("~every 10 min", "~18 consecutive missed
 // runs") predates #629 and is wrong in a way that matters, because both windows below are read as
-// tolerances against it. The Worker's own `*/5` cron dispatches the Action directly (deepseek-dispatch.ts
+// tolerances against it. The Worker's own `*/5` cron dispatches the Action directly (workflow-dispatch.ts
 // — #629/#1395), so a healthy pipeline refreshes every 5 min and never reaches the soft-stale gate;
 // `deepseek-feed.yml`'s `schedule: '17 * * * *'` fires at most once per hour by construction and is the
 // only thing still triggering the Action when the Worker itself is not. So the graded windows are not a

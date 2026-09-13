@@ -85,7 +85,7 @@ describe('#1381 — fetchService reads the Rootly feed', () => {
   it('an ABSENT feed publishes `unknown`, not a green pill, and never fetches the challenged page', async () => {
     // Round 5: `base` says `operational`, so a feed-ONLY service with an expired key published a
     // green badge for a service we have no reading of at all — a realistic state against a 3h TTL
-    // (see `deepseek-dispatch.ts` — #629/#1395). #1233's `unknown` is neither an outage nor an all-clear.
+    // (see `workflow-dispatch.ts` — #629/#1395). #1233's `unknown` is neither an outage nor an all-clear.
     const fetchSpy = vi.fn(async () => new Response('', { status: 403 }))
     vi.stubGlobal('fetch', fetchSpy)
     const { kv } = kvWith(null)

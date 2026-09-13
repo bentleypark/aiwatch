@@ -14,7 +14,7 @@ name: Mistral status feed
 # so there is no ~280MB browser download and no cache to keep warm.
 #
 # #1395/#1397 — in addition to the schedule below, the Worker's */5 cron also workflow_dispatches
-# this, on a 15min KV cooldown (MISTRAL_DISPATCH_CONFIG in worker/src/deepseek-dispatch.ts — full
+# this, on a 13min KV cooldown (MISTRAL_DISPATCH_CONFIG in worker/src/workflow-dispatch.ts — full
 # reasoning for the cooldown shape, and for why it differs from DEEPSEEK_DISPATCH_CONFIG's, is
 # there — not restated here).
 
