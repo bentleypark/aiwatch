@@ -4953,12 +4953,21 @@ export default {
             return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
           }),
         }
+        // #1224 — scope every per-incident KV-read loop below to the service(s) THIS feed actually
+        // serves: a /feed/openai poll has no business reading langfuse's `feed:firstseen`/analysis
+        // KV state. Computed once, up front, and reused by every per-incident loop below — the
+        // `feed:firstseen`/analysis loops previously ignored it and paid for all 45 services on
+        // every poll regardless of scope.
+        const servedSvcIds: Set<string> | null = feedReq.scope === 'all'
+          ? null // null = all services served
+          : (() => { const s = resolveFeedService(cached.services, feedReq.segment); return s ? new Set([s.id]) : new Set<string>() })()
+        const inServedScope = (svcId: string) => servedSvcIds === null || servedSvcIds.has(svcId)
         // #750 — first-detected stamp for each ACTIVE incident → a FRESH active-item pubDate (a
         // backdated provider startedAt makes Slack /feed skip the outage post). Written once by the
         // cron's alerted:new path; absent → rss.ts falls back to startedAt (legacy behavior).
         const firstSeen: Record<string, string> = {}
         const nowIso = new Date().toISOString()
-        await Promise.all(cached.services.flatMap((svc) =>
+        await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
           (svc.incidents ?? [])
             .filter((i) => i.status !== 'resolved')
             .map(async (inc) => {
@@ -4984,7 +4993,7 @@ export default {
         ))
         if (Object.keys(firstSeen).length > 0) feedFirstSeen = firstSeen
         const analysis: RssAiAnalysisMap = {}
-        await Promise.all(cached.services.flatMap((svc) =>
+        await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
           (svc.incidents ?? [])
             // #827 F4 — also load RESOLVED analyses (still present for 2h post-resolution) so the
             // resolved feed item can render "predicted vs actual". `monitoring` stays excluded (#724).
@@ -5017,13 +5026,9 @@ export default {
         // suppresses a resolved item whose active item was never served, so a short blip whose entire
         // active window fell between reader polls doesn't post a lone "Resolved · 19m" with no prior
         // outage post (the Slack orphan-resolution). 7d TTL, get-or-set (one write per incident).
-        // Scope the marker to the services THIS feed actually serves: a /feed/openai poll does NOT carry
-        // langfuse's active item, so it must not stamp langfuse's marker (else langfuse-feed subscribers
-        // still get an orphan). All-scope serves every service; service-scope serves the resolved one only.
-        const servedSvcIds: Set<string> | null = feedReq.scope === 'all'
-          ? null // null = all services served
-          : (() => { const s = resolveFeedService(cached.services, feedReq.segment); return s ? new Set([s.id]) : new Set<string>() })()
-        const inServedScope = (svcId: string) => servedSvcIds === null || servedSvcIds.has(svcId)
+        // `servedSvcIds`/`inServedScope` (computed above, #1224) scope this the same way: a /feed/openai
+        // poll does NOT carry langfuse's active item, so it must not stamp langfuse's marker (else
+        // langfuse-feed subscribers still get an orphan).
         await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
           (svc.incidents ?? [])
             .filter((i) => i.status !== 'resolved')
