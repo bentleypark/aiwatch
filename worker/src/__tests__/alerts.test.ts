@@ -305,6 +305,35 @@ describe('buildIncidentAlerts', () => {
     })
   })
 
+  describe('#1384 — a retainedBridge entry does not fire a spurious "New Incident" push', () => {
+    // Round-7 review repro: a still-unresolved bridged entry (services.ts
+    // `mergeRetainedIncidentHistory`) can fall inside the 24h alert-age window right after a migration
+    // ships, and has no `alerted:new:` roster entry yet — without this exclusion it would read as a
+    // brand-new outage and produce a real Discord "New Incident" push for an incident that isn't new.
+    it('produces no new-incident alert for an unresolved bridged entry', () => {
+      const svc = mockService({
+        incidents: [inc({ id: 'legacy-1', title: 'Ongoing at cutover', status: 'investigating', startedAt: recentDate, impact: 'major', retainedBridge: true })],
+      })
+      expect(buildIncidentAlerts([svc], alertedMap(), NOW)).toHaveLength(0)
+    })
+
+    it('CONTROL — an ordinary unresolved incident still alerts on that same path', () => {
+      const svc = mockService({
+        incidents: [inc({ id: 'inc-native', title: 'Native incident', status: 'investigating', startedAt: recentDate, impact: 'major' })],
+      })
+      expect(buildIncidentAlerts([svc], alertedMap(), NOW)).toHaveLength(1)
+    })
+
+    it('a RESOLVED bridged entry still fires its resolved alert if it was already rostered — the bridge closing a loop it opened pre-migration is not a hazard', () => {
+      const svc = mockService({
+        incidents: [inc({ id: 'legacy-1', title: 'Ongoing at cutover', status: 'resolved', startedAt: recentDate, duration: '2h', impact: 'major', retainedBridge: true })],
+      })
+      const alerts = buildIncidentAlerts([svc], alertedMap({ 'legacy-1': ['openai'] }), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:res:legacy-1')
+    })
+  })
+
   it('skips already-alerted new incidents', () => {
     const svc = mockService({
       incidents: [inc({ id: 'inc1', title: 'API Error', status: 'investigating', startedAt: recentDate, impact: 'major' })],

@@ -488,6 +488,18 @@ describe('causalIncidents (#1053 — the primitive shared with supply-chain.ts)'
   it('tolerates a service with no incidents array at all', () => {
     expect(causalIncidents({ id: 'x', name: 'X', status: 'operational' } as ServiceStatus)).toEqual([])
   })
+
+  it('#1384 — drops a retainedBridge entry too, alongside resolved and impact:null', () => {
+    // A `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) is forwarded from
+    // AIWatch's own prior collection under a retiring source, not read from the current source this
+    // cycle. Its text describes an old, pre-migration incident and must never lend its tokens to an
+    // upstream-attribution claim about what is happening right now.
+    const s = svc('replicate', 'degraded', [
+      inc('a', 'live', '2026-07-16T00:00:00Z'),
+      { ...inc('ghost', 'Ongoing at cutover', '2026-06-01T00:00:00Z'), retainedBridge: true } as Incident,
+    ])
+    expect(causalIncidents(s).map(({ inc: i }) => i.id)).toEqual(['a'])
+  })
 })
 
 // --- #1072: a NON-CARDED feed as the upstream ---------------------------------------------------

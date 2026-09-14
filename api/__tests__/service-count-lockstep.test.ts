@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { GROUP_MEMBERS } from '../../worker/src/service-groups'
+import { servicesByStatusSource } from '../../worker/src/services'
 import { PROBE_TARGETS } from '../../worker/src/probe'
 import { OSV_PACKAGES } from '../../worker/src/security-monitor'
 import { renderMethodologyPage } from '../_methodology/html-template'
@@ -407,5 +408,107 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     expect(html).toMatch(/direct measurement of (\d+) AI service endpoints/)
     // The probe count itself is asserted against PROBE_TARGETS in the test above; this one only
     // asserts the two counts stay TEXTUALLY distinguishable, which is what keeps the anchors honest.
+  })
+})
+
+// ── per-SOURCE counts (#1384) ────────────────────────────────────────────────────────────────────
+// `/methodology` §1 lists each status-page platform with the number of services it serves. Those
+// numbers were hand-written, and two of them shipped wrong: Atlassian read 18 for 17, RSS read 2 for
+// 3. The errors were +1 and −1, so the list still summed to 45 and the TOTAL assertions above stayed
+// green — a count can be wrong in this list while every existing test passes.
+//
+// Derived from `servicesByStatusSource()` rather than restated here. That function is its OWN
+// precedence order — round-4 review caught this comment claiming it mirrors `fetchServiceUntagged`'s
+// dispatch order, which `statusSourceOf`'s own docblock (services.ts) already disclaims: the dispatch
+// checks `apiUrl` before `incidentIoBaseUrl`, `statusSourceOf` checks the opposite, and that is
+// correct FOR THIS PAGE — it answers "whose status page is this", not "which branch fetches it". The
+// part a hand count gets wrong either way: `turbopuffer` carries an `incidentIoComponentId` but no
+// `incidentIoBaseUrl` (Statuspage, not incident.io), and `grok` carries an `rssFeedUrl` with no uptime
+// API (RSS, not Statuspage).
+//
+// NOTE this test imports `SERVICES` transitively, which the header above warns against for the
+// TEMPLATE bundle. That warning is about what the Edge function ships; a test already pays for it
+// (`service-groups-sync.test.ts` imports SERVICES directly) and nothing here reaches the bundle.
+describe('#1384 /methodology per-source service counts are derived, not stated', () => {
+  const BY_SOURCE = servicesByStatusSource()
+  const html = renderMethodologyPage({ lang: 'ko' } as never)
+
+  // i18n key -> the source name `statusSourceOf` returns. One row per key the page renders.
+  const ROWS: Array<[key: string, source: string]> = [
+    ['s1.src.atlassian', 'Atlassian Statuspage'],
+    ['s1.src.incidentio', 'incident.io'],
+    ['s1.src.betterstack', 'Better Stack'],
+    ['s1.src.instatus', 'Instatus'],
+    ['s1.src.rss', 'RSS incident feeds'],
+    ['s1.src.flashduty', 'Flashduty'],
+    ['s1.src.awshealth', 'AWS Health Dashboard'],
+    ['s1.src.cloudflare', 'Cloudflare Status v3'],
+    ['s1.src.gcloud', 'Google Cloud Status \u00b7 AI Studio Status'],
+    ['s1.src.onlineornot', 'OnlineOrNot'],
+    ['s1.src.rootly', 'Rootly'],
+  ]
+
+  // The RENDERED rows only — anchored on `<li>…<strong>Name</strong>` so an i18n map entry cannot
+  // satisfy it. The first version of this matched the key anywhere in the page, which the inlined
+  // i18n maps also contain: deleting a whole `<li>` from the list left the suite green, because the
+  // map entry alone answered for it. The map values are checked separately below.
+  const renderedRows = () => new Map(
+    [...html.matchAll(/<li><strong>([^<]+)<\/strong> <span data-i18n="(s1\.src\.[a-z]+)">— (\d+)개 서비스/g)]
+      .map((m) => [m[2], { label: m[1], count: Number(m[3]) }]),
+  )
+
+  it('every row is internally consistent — label, count, and BOTH locale maps agree with the config', () => {
+    // ONE check per row, not one assertion per field. The prior shape split a row across two tests —
+    // one asserting only `row.count`, another asserting only the ko map against that same count — so
+    // neither test ever compared `row.label` to the source name, and neither read the en map at all.
+    // A swapped Instatus/Flashduty `<strong>` label passed (equal counts, unchecked label), and
+    // reverting the en map's numbers to stale values (18/12/2) passed too (never read). Checking the
+    // whole row — label, render, ko, en — against the one `expected` value in a single pass is what
+    // makes a field impossible to add without also making it fail alongside its row.
+    const rows = renderedRows()
+    for (const [key, source] of ROWS) {
+      const expected = (BY_SOURCE[source] ?? []).length
+      expect(expected, `${source}: no service resolves to it — the row or the rule is stale`).toBeGreaterThan(0)
+
+      const row = rows.get(key)
+      expect(row, `${key}: no rendered <li> for it — the row was deleted, or its markup changed`).toBeDefined()
+      expect(row!.label, `${key} renders label "${row!.label}", config source is "${source}"`).toBe(source)
+      expect(row!.count, `${key} renders ${row!.count}, config assigns ${expected}`).toBe(expected)
+
+      // Both locale maps carry the number, and a reader sees the map value replace the inline
+      // default at runtime — so a fix applied to the render and one locale, but not the other,
+      // visibly rewrites the sentence in whichever locale it missed.
+      const koMatch = html.match(new RegExp(`'${key}': '— (\\d+)개 서비스`))
+      expect(koMatch, `${key}: no ko map entry`).not.toBeNull()
+      expect(Number(koMatch![1]), `${key}: ko map says ${koMatch![1]}, config assigns ${expected}`).toBe(expected)
+
+      // English distinguishes singular "1 service" from plural "N services"; ko does not.
+      const enMatch = html.match(new RegExp(`'${key}': '— (\\d+) services?\\b`))
+      expect(enMatch, `${key}: no en map entry`).not.toBeNull()
+      expect(Number(enMatch![1]), `${key}: en map says ${enMatch![1]}, config assigns ${expected}`).toBe(expected)
+    }
+    // And nothing is rendered that the config does not serve.
+    expect([...rows.keys()].sort(), 'a rendered row names a source no service uses')
+      .toEqual(ROWS.map(([k]) => k).sort())
+  })
+
+  it('the list is ordered by service count, which the page claims in its own lead', () => {
+    // The lead says the sources are listed most-served first. Correcting RSS from 2 to 3 broke that
+    // silently — it sat below Instatus's 2 — so the claim is pinned rather than trusted. Without
+    // this the sentence is prose describing data, which is what drifted in the first place.
+    const rendered = [...html.matchAll(/<li><strong>[^<]+<\/strong> <span data-i18n="s1\.src\.[a-z]+">— (\d+)개 서비스/g)]
+      .map((m) => Number(m[1]))
+    expect(rendered.length, 'no counted source rows matched — the markup shape changed').toBeGreaterThan(5)
+    expect(rendered).toEqual([...rendered].sort((a, b) => b - a))
+  })
+
+  it('the listed sources cover every monitored service exactly once', () => {
+    // Catches the other direction: a new source added to the config with no row on the page, which
+    // would otherwise be invisible — the per-row check above only sees rows that exist.
+    const listed = ROWS.map(([, src]) => src)
+    const configured = Object.keys(BY_SOURCE)
+    expect([...configured].sort()).toEqual([...listed].sort())
+    const total = listed.reduce((n, src) => n + (BY_SOURCE[src] ?? []).length, 0)
+    expect(total, 'per-source counts must sum to the monitored total').toBe(TOTAL)
   })
 })

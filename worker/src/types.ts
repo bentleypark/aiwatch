@@ -60,6 +60,19 @@ export interface Incident {
   // date somewhere; carrying the day removes the arithmetic instead of relocating its error. Absent on
   // every parsed incident — those have a real timestamp and no such ambiguity.
   derivedDay?: string
+  // #1384 — this incident was forwarded into the live list by the finite migration bridge
+  // (`mergeRetainedIncidentHistory` in services.ts), not read from the CURRENT status source this
+  // cycle. Its timestamps are real (unlike `derived: 'status_history'`, this is not a synthesized
+  // anchor). ELEVEN readers act on it — the full list + reasons is in `mergeRetainedIncidentHistory`'s
+  // docblock (services.ts). Six were found one at a time across PR review rounds 4-9 (each a
+  // different real defect: false withdrawal, false "new incident" push, a stuck AI card, a re-lit
+  // "Recently Resolved" banner, a poisoned crowd-report window); the other five were found by then
+  // auditing every OTHER `.incidents`-reading file for the same shape before shipping, rather than
+  // waiting for a tenth review round to find them one by one. That audit is now `src/utils/__tests__/
+  // derived-consumer-registry.test.js` (#1292)'s second axis — CI-enforced, so a twelfth consumer
+  // fails the build instead of shipping silently, the same way that file already guards
+  // `derived: 'status_history'`. Absent on every ordinarily-parsed incident.
+  retainedBridge?: true
 }
 
 /** A single status-page component preserved for the per-component breakdown (#604).
@@ -254,8 +267,10 @@ export interface ServiceConfig {
   /**
    * A status-source migration can remove resolved incidents that AIWatch already collected inside
    * its live 30-day score window. Until this instant, retain those monthly-archive rows alongside
-   * the new source's active incidents. Absent for ordinary sources: this is a finite migration
-   * bridge, not a second permanent incident feed.
+   * whatever the new source itself reports. Absent for ordinary sources: this is a finite migration
+   * bridge, not a second permanent incident feed. Every retained row within the window is forwarded,
+   * resolved or not — see `mergeRetainedIncidentHistory` in services.ts for why an unresolved one is
+   * deliberately NOT excluded.
    */
   retainIncidentHistoryUntil?: string
   instatusUrl?: string

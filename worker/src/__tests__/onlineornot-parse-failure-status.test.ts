@@ -9,7 +9,7 @@ import { parseFailKey, parseParseFailDay } from '../parse-failure-log'
 // nothing about whether `fetchService` acts on either. Both halves of this fix live in the acting:
 //
 //   1. a genuinely clean page must publish uptime 100 + 'official' provenance — the production
-//      symptom was `uptime30d: null`, rendered as "No official uptime — incident-tracked", which is
+//      symptom was `uptime30d: null`, rendered as "No official uptime published", which is
 //      indistinguishable from a service we deliberately have no uptime for (#713);
 //   2. an unreadable page must NOT publish "operational, no incidents". The OnlineOrNot path reads
 //      no status field of its own — incidents are the only signal it consumes — so an empty list

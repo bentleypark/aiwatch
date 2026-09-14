@@ -666,6 +666,13 @@ export function buildFeedWithMeta(
         // "predicted vs actual"; absent → the line is simply omitted.
         items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident), analysis: analysisFor(aiAnalysis, svc.id, incident.id) })
       } else {
+        // #1384 — never emit a `retainedBridge` entry as an active item. Unlike a `status_history`
+        // entry (always already-resolved by construction, so it never reaches this branch), an
+        // unresolved bridged row DOES reach here every cron cycle for the life of the migration
+        // bridge — and `feed:firstseen:`'s 7-day TTL (rss.ts get-or-set) would re-stamp it as freshly
+        // seen once that key expires, repeatedly re-announcing a weeks-old ghost as a brand-new 🔴
+        // incident on RSS/Slack, found by round-6 review.
+        if (incident.retainedBridge) continue
         // #724 — no AI block for a `monitoring` incident (recovery already confirmed). Gating HERE
         // (not only in the /feed handler) keeps rss.ts self-consistent regardless of the map passed.
         const analysis = incident.status === 'monitoring' ? undefined : analysisFor(aiAnalysis, svc.id, incident.id)

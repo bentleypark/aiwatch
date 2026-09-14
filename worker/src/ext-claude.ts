@@ -88,7 +88,13 @@ export function isExtClaudeRequest(searchParams: URLSearchParams): boolean {
 // endpoint's AI-analysis filter: resolved = done, monitoring = recovery confirmed —
 // both excluded so the popup shows only incidents that are actually ongoing.
 function activeIncidents(svc: ScoredService): Incident[] {
-  return (svc.incidents ?? []).filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
+  // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) unresolved at
+  // migration time never resolves for the life of the finite migration bridge, so without this
+  // exclusion the extension popup would show a stale ghost from a retiring source as the "current
+  // issue" indefinitely. Currently inert (Replicate is not in `EXT_CLAUDE_IDS`) — not a durable
+  // reason, so excluded here directly rather than relying on that list never changing (round-9
+  // structural pass, #1384).
+  return (svc.incidents ?? []).filter((i) => i.status !== 'resolved' && i.status !== 'monitoring' && !i.retainedBridge)
 }
 
 // Build the projection: filter to the three Anthropic surfaces (preserving

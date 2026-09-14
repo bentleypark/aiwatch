@@ -360,7 +360,10 @@ function isIsoish(v: unknown): v is string {
  *      guard, and it is stronger than "the service reported at least one incident this cycle": it
  *      proves the feed window has not truncated *past* our entry, so absence means deletion rather
  *      than truncation. It is also vacuously false when the live list is empty, so a failed fetch —
- *      which yields no incidents — can never prune anything.
+ *      which yields no incidents — can never prune anything. #1384 — an entry forwarded by a
+ *      migration's finite retained-history bridge (`retainedBridge: true`) does not count as evidence
+ *      here either, for the same reason a `status_history`-derived entry does not: it did not come
+ *      from THIS cycle's feed, so it cannot prove that feed's reach (see the `oldestLiveStart` loop).
  *   4. 1-3 have held for `PHANTOM_PRUNE_AFTER_MISSED_RUNS` consecutive runs (`missedRuns`), so one
  *      transient hiccup cannot delete real data. The counter resets the moment the entry reappears.
  *
@@ -441,12 +444,24 @@ export function prunePhantomIncidents(
     // `String(...)` on both sides: a strict-equality miss would read a PRESENT incident as absent and
     // eventually delete it, so the id comparison must not depend on a parser emitting the declared
     // `string` type. Falsy ids are dropped here and skipped below, never matched by accident.
+    //
+    // `retainedBridge` entries (services.ts `mergeRetainedIncidentHistory`, #1384) DO count here — a
+    // still-open bridged entry must stay `seen` for its OWN accumulator row (that is the round-4 fix:
+    // excluding it here would un-attribute it into a false public withdrawal, same as `status_history`
+    // above but reached through the bridge). They are however NOT allowed to stand as evidence about
+    // how far the CURRENT feed reaches for OTHER entries — see the `oldestLiveStart` loop below, where
+    // a round-5 review found a resolved bridged row pushing the watermark back to a date the new
+    // source's own (often shallow) feed never covered, satisfying guard 3 for an unrelated,
+    // genuinely-unresolved incident that had simply fallen outside that shallow feed.
     const liveIds = new Set(live.map((i) => i?.id).filter(Boolean).map(String))
-    // Earliest start among live incidents — the truncation watermark for guard 3. Compared as ISO
-    // strings, which sort lexicographically. Non-ISO values are ignored, which can only move the
-    // watermark LATER, making guard 3 harder to satisfy — i.e. it fails toward not pruning.
+    // Earliest start among live incidents that are actual evidence about the CURRENT feed's reach —
+    // excludes `retainedBridge` per the note above, in addition to `status_history` (already excluded
+    // from `live` itself). Compared as ISO strings, which sort lexicographically. Non-ISO values are
+    // ignored, which can only move the watermark LATER, making guard 3 harder to satisfy — i.e. it
+    // fails toward not pruning.
     let oldestLiveStart: string | null = null
     for (const i of live) {
+      if (i?.retainedBridge) continue
       const s = i?.startedAt
       if (isIsoish(s) && (oldestLiveStart === null || s < oldestLiveStart)) oldestLiveStart = s
     }

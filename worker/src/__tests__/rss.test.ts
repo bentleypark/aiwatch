@@ -1348,6 +1348,30 @@ describe('#1292 — status_history-derived incidents never reach /feed', () => {
   })
 })
 
+describe('#1384 — a retainedBridge ghost is never emitted as an active item', () => {
+  // Unlike a `status_history` entry (always already-resolved by construction, so it never reaches the
+  // active branch), an unresolved `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`)
+  // DOES reach here every cron cycle for the life of the migration bridge. Without this exclusion,
+  // `feed:firstseen:`'s 7-day TTL would eventually lapse and re-stamp a weeks-old ghost as freshly
+  // seen, repeatedly re-announcing it as a brand-new incident (round-6 review finding).
+  const ghost = incident({
+    id: 'legacy-replicate-ghost', title: 'Ongoing at cutover', status: 'investigating',
+    startedAt: '2026-05-01T00:00:00.000Z', retainedBridge: true,
+  })
+
+  it('is suppressed unconditionally, before the AI-hold check ever runs', () => {
+    const xml = buildFeedWithMeta([service({ incidents: [ghost] })], { scope: 'all' }, NOW).xml
+    expect(xml).not.toContain('legacy-replicate-ghost')
+    expect(xml).not.toContain('Ongoing at cutover')
+  })
+
+  it('CONTROL — an ordinary active incident still publishes on that same path', () => {
+    const ordinary = incident({ id: 'inc-10', title: 'Native active incident' })
+    const xml = buildFeedWithMeta([service({ incidents: [ordinary] })], { scope: 'all' }, NOW).xml
+    expect(xml).toContain('inc-10')
+  })
+})
+
 // #1328 - the Slack //feed carries the analysis prose, and `progress` is threaded to it through TWO
 // hand-written seams: the `index.ts` projection that rebuilds `RssAiAnalysis` field-by-field (pinned
 // by a source scan in first-estimate-write-paths.test.ts) and this renderer. Deleting the render line

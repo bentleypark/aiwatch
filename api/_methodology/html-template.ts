@@ -273,17 +273,17 @@ ${consentInitScript(nonce)}
   <h2 data-i18n="s1.title">측정 대상</h2>
   <p class="lead" data-i18n="s1.lead">AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 5개 — 총 45개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.</p>
   <h3 data-i18n="s1.sourcesTitle">데이터 출처</h3>
-  <p data-i18n="s1.sourcesDesc">상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다. 목록은 해당 출처를 사용하는 모니터링 서비스 수가 많은 순서입니다.</p>
+  <p data-i18n="s1.sourcesDesc">상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다. 제공사 상태 출처는 이를 사용하는 모니터링 서비스 수가 많은 순서이며, AIWatch 직접 측정은 별도로 마지막에 둡니다.</p>
   <ul>
-    <li><strong>Atlassian Statuspage</strong> <span data-i18n="s1.src.atlassian">— 18개 서비스</span></li>
+    <li><strong>Atlassian Statuspage</strong> <span data-i18n="s1.src.atlassian">— 17개 서비스</span></li>
     <li><strong>incident.io</strong> <span data-i18n="s1.src.incidentio">— 11개 서비스, 컴포넌트 단위 인시던트 + 영향도</span></li>
     <li><strong>Better Stack</strong> <span data-i18n="s1.src.betterstack">— 5개 서비스, 인시던트 RSS + 가동률 JSON</span></li>
+    <li><strong>RSS incident feeds</strong> <span data-i18n="s1.src.rss">— 3개 서비스: Azure Status (Azure OpenAI) · xAI (status.x.ai) · Grok</span></li>
     <li><strong>Instatus</strong> <span data-i18n="s1.src.instatus">— 2개 서비스, 컴포넌트 상태 + 가동률</span></li>
-    <li><strong>RSS incident feeds</strong> <span data-i18n="s1.src.rss">— 2개 서비스: Azure Status (Azure OpenAI) · xAI (status.x.ai)</span></li>
     <li><strong>Flashduty</strong> <span data-i18n="s1.src.flashduty">— 2개 서비스: DeepSeek API · DeepSeek App 상태 피드 정규화</span></li>
     <li><strong>AWS Health Dashboard</strong> <span data-i18n="s1.src.awshealth">— 1개 서비스: Amazon Bedrock 공개 이벤트 JSON API</span></li>
     <li><strong>Rootly</strong> <span data-i18n="s1.src.rootly">— 1개 서비스: Mistral의 인시던트와 일별 장애 구간을 <strong>브라우저로 읽어</strong> 수집</span></li>
-    <li><strong>Cloudflare Status v3</strong> <span data-i18n="s1.src.cloudflare">— 1개 서비스: Replicate의 정확한 컴포넌트 상태와 귀속된 활성 인시던트</span></li>
+    <li><strong>Cloudflare Status v3</strong> <span data-i18n="s1.src.cloudflare">— 1개 서비스: Replicate의 정확한 컴포넌트 상태와 귀속된 인시던트(진행 중 + 해결됨)</span></li>
     <li><strong>Google Cloud Status · AI Studio Status</strong> <span data-i18n="s1.src.gcloud">— 1개 서비스: Gemini API</span></li>
     <li><strong>OnlineOrNot</strong> <span data-i18n="s1.src.onlineornot">— 1개 서비스: OpenRouter 컴포넌트 상태 + 이력</span></li>
     <li><strong>Direct RTT probes</strong> <span data-i18n="s1.src.probe">— 33개 AI 서비스의 엔드포인트 직접 측정</span></li>
@@ -364,9 +364,9 @@ ${consentInitScript(nonce)}
         <tbody>
           <tr><td>Amazon Bedrock · Azure OpenAI</td><td data-i18n="s3.limits.estimate">공식 롤링 uptime% 미공개 — 인시던트 피드만 존재</td></tr>
           <tr><td>Gemini · Deepgram</td><td data-i18n="s3.limits.norolling">상태 페이지가 비교 가능한 롤링 30일 % 미노출</td></tr>
-          <tr><td>Replicate</td><td data-i18n="s3.limits.cloudflare">Cloudflare Status v3는 현재 컴포넌트 상태와 귀속된 활성 인시던트만 제공 — 롤링 uptime·이력 피드 없음</td></tr>
-          <tr><td>xAI API · Grok</td><td data-i18n="s3.limits.xai">재시작 이후 컴포넌트별 성공률만 노출 — 30일 수치와 비교 불가</td></tr>
-          <tr><td>Character.AI</td><td data-i18n="s3.limits.deadsource">공식 상태 페이지가 비활성화됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)</td></tr>
+          <tr><td>Replicate</td><td data-i18n="s3.limits.cloudflare">Cloudflare Status v3는 uptime 데이터를 전혀 제공하지 않음 — 롤링 30일 수치도, 그것을 계산할 컴포넌트별 이력도 없음</td></tr>
+          <tr><td>xAI API · Grok</td><td data-i18n="s3.limits.xai">프로브당 최근 60개 샘플 롤링 윈도우(수 분~수 시간, 재시작 누적 아님) 성공률만 노출 — 30일 수치와 비교 불가</td></tr>
+          <tr><td>Character.AI</td><td data-i18n="s3.limits.deadsource">공식 상태 페이지가 삭제됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)</td></tr>
         </tbody>
       </table>
     </div>
@@ -563,7 +563,7 @@ const i18n = {
     's1.lead': 'AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 5개 — 총 45개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.',
     's1.sourcesTitle': '데이터 출처',
     's1.sourcesDesc': '상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다. 제공사 상태 출처는 이를 사용하는 모니터링 서비스 수가 많은 순서이며, AIWatch 직접 측정은 별도로 마지막에 둡니다.',
-    's1.src.atlassian': '— 18개 서비스', 's1.src.incidentio': '— 11개 서비스, 컴포넌트 단위 인시던트 + 영향도', 's1.src.betterstack': '— 5개 서비스, 인시던트 RSS + 가동률 JSON', 's1.src.instatus': '— 2개 서비스, 컴포넌트 상태 + 가동률', 's1.src.rootly': '— 1개 서비스: Mistral의 인시던트와 일별 장애 구간을 <strong>브라우저로 읽어</strong> 수집', 's1.src.cloudflare': '— 1개 서비스: Replicate의 정확한 컴포넌트 상태와 귀속된 활성 인시던트', 's1.src.gcloud': '— 1개 서비스: Gemini API', 's1.src.onlineornot': '— 1개 서비스: OpenRouter 컴포넌트 상태 + 이력', 's1.src.flashduty': '— 2개 서비스: DeepSeek API · DeepSeek App 상태 피드 정규화', 's1.src.awshealth': '— 1개 서비스: Amazon Bedrock 공개 이벤트 JSON API', 's1.src.rss': '— 2개 서비스: Azure Status (Azure OpenAI) · xAI (status.x.ai)', 's1.src.probe': '— 33개 AI 서비스의 엔드포인트 직접 측정',
+    's1.src.atlassian': '— 17개 서비스', 's1.src.incidentio': '— 11개 서비스, 컴포넌트 단위 인시던트 + 영향도', 's1.src.betterstack': '— 5개 서비스, 인시던트 RSS + 가동률 JSON', 's1.src.instatus': '— 2개 서비스, 컴포넌트 상태 + 가동률', 's1.src.rootly': '— 1개 서비스: Mistral의 인시던트와 일별 장애 구간을 <strong>브라우저로 읽어</strong> 수집', 's1.src.cloudflare': '— 1개 서비스: Replicate의 정확한 컴포넌트 상태와 귀속된 인시던트(진행 중 + 해결됨)', 's1.src.gcloud': '— 1개 서비스: Gemini API', 's1.src.onlineornot': '— 1개 서비스: OpenRouter 컴포넌트 상태 + 이력', 's1.src.flashduty': '— 2개 서비스: DeepSeek API · DeepSeek App 상태 피드 정규화', 's1.src.awshealth': '— 1개 서비스: Amazon Bedrock 공개 이벤트 JSON API', 's1.src.rss': '— 3개 서비스: Azure Status (Azure OpenAI) · xAI (status.x.ai) · Grok', 's1.src.probe': '— 33개 AI 서비스의 엔드포인트 직접 측정',
     's1.secTitle': '보안 이슈 모니터링',
     's1.secDesc': '상태·신뢰도 측정과는 별개로, AI 스택에 영향을 주는 보안 이슈도 함께 추적해 <strong>월간 리포트</strong>에 집계합니다. 이 데이터는 AIWatch Score나 인시던트 집계에는 반영되지 않습니다.',
     's1.sec.osv': '— SDK 취약점 (PyPI · npm 24개 추적 패키지), GitHub Advisories로 상세 보강', 's1.sec.nvd': '— 자사 제품 CVE (Claude Code · Codex · ChatGPT 앱 등)', 's1.sec.hn': '— AI 서비스 관련 보안 뉴스 (Algolia 검색 API)',
@@ -590,9 +590,9 @@ const i18n = {
     's3.limits.col1': '서비스', 's3.limits.col2': '측정 불가 사유',
     's3.limits.estimate': '공식 롤링 uptime% 미공개 — 인시던트 피드만 존재',
     's3.limits.norolling': '상태 페이지가 비교 가능한 롤링 30일 % 미노출',
-    's3.limits.cloudflare': 'Cloudflare Status v3는 현재 컴포넌트 상태와 귀속된 활성 인시던트만 제공 — 롤링 uptime·이력 피드 없음',
-    's3.limits.xai': '재시작 이후 컴포넌트별 성공률만 노출 — 30일 수치와 비교 불가',
-    's3.limits.deadsource': '공식 상태 페이지가 비활성화됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)',
+    's3.limits.cloudflare': 'Cloudflare Status v3는 uptime 데이터를 전혀 제공하지 않음 — 롤링 30일 수치도, 그것을 계산할 컴포넌트별 이력도 없음',
+    's3.limits.xai': '프로브당 최근 60개 샘플 롤링 윈도우(수 분~수 시간, 재시작 누적 아님) 성공률만 노출 — 30일 수치와 비교 불가',
+    's3.limits.deadsource': '공식 상태 페이지가 삭제됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)',
     's4.title': 'AIWatch Score',
     's4.intro': 'AIWatch Score는 uptime, 인시던트 영향 일수, 복구 시간, (probe 대상 API 서비스의 경우) 응답성을 종합한 0~100점 신뢰도 지표입니다. 30일 데이터를 기준으로 합니다.',
     's4.formulaStr': 'AIWatch Score = Uptime + Incidents + Recovery + Responsiveness',
@@ -653,7 +653,7 @@ const i18n = {
     's1.lead': 'AIWatch polls 45 AI services — 16 LLM APIs, 6 coding agents, 3 voice, 8 inference & infra, 3 observability, 2 video, 2 image, and 5 AI apps — up to every 5 minutes. All timestamps are in UTC.',
     's1.sourcesTitle': 'Data sources',
     's1.sourcesDesc': 'Status, incident, and uptime data are all collected from each service\\\'s official status page. The provider\\\'s published data is the primary source, and we never fill a missing value with our own estimate — how a missing official uptime is handled is covered in the <a href="#uptime">Uptime section</a> below. Provider status sources are ordered by the number of monitored services that use them; AIWatch direct measurement is listed separately at the end.',
-    's1.src.atlassian': '— 18 services', 's1.src.incidentio': '— 11 services, per-component incidents + impact', 's1.src.betterstack': '— 5 services, incident RSS + uptime JSON', 's1.src.instatus': '— 2 services, component health + uptime', 's1.src.rootly': '— 1 service: Mistral, incidents and per-day outage segments read through a <strong>browser</strong>', 's1.src.cloudflare': '— 1 service: Replicate exact-component health and attributed active incidents', 's1.src.gcloud': '— 1 service: Gemini API', 's1.src.onlineornot': '— 1 service: OpenRouter component health + history', 's1.src.flashduty': '— 2 services: normalized DeepSeek API · DeepSeek App feed', 's1.src.awshealth': '— 1 service: Amazon Bedrock public events JSON API', 's1.src.rss': '— 2 services: Azure Status (Azure OpenAI) · xAI (status.x.ai)', 's1.src.probe': '— direct measurement of 33 AI service endpoints',
+    's1.src.atlassian': '— 17 services', 's1.src.incidentio': '— 11 services, per-component incidents + impact', 's1.src.betterstack': '— 5 services, incident RSS + uptime JSON', 's1.src.instatus': '— 2 services, component health + uptime', 's1.src.rootly': '— 1 service: Mistral, incidents and per-day outage segments read through a <strong>browser</strong>', 's1.src.cloudflare': '— 1 service: Replicate exact-component health and attributed incidents (active + resolved)', 's1.src.gcloud': '— 1 service: Gemini API', 's1.src.onlineornot': '— 1 service: OpenRouter component health + history', 's1.src.flashduty': '— 2 services: normalized DeepSeek API · DeepSeek App feed', 's1.src.awshealth': '— 1 service: Amazon Bedrock public events JSON API', 's1.src.rss': '— 3 services: Azure Status (Azure OpenAI) · xAI (status.x.ai) · Grok', 's1.src.probe': '— direct measurement of 33 AI service endpoints',
     's1.secTitle': 'Security-issue monitoring',
     's1.secDesc': 'On a track separate from status & reliability, we also track security issues affecting the AI stack, aggregated into the <strong>monthly report</strong>. This data does not feed the AIWatch Score or incident counts.',
     's1.sec.osv': '— SDK vulnerabilities (24 tracked PyPI · npm packages), enriched via GitHub Advisories', 's1.sec.nvd': '— first-party product CVEs (Claude Code, Codex, ChatGPT app, …)', 's1.sec.hn': '— security news about AI services (Algolia search API)',
@@ -680,9 +680,9 @@ const i18n = {
     's3.limits.col1': 'Service', 's3.limits.col2': 'Reason',
     's3.limits.estimate': 'No official rolling uptime — incident feed only',
     's3.limits.norolling': 'Status page exposes no comparable rolling-30d %',
-    's3.limits.cloudflare': 'Cloudflare Status v3 exposes only current component health and attributed active incidents — no rolling uptime or history feed',
-    's3.limits.xai': 'Exposes a since-restart per-component success rate — not comparable to a 30-day figure',
-    's3.limits.deadsource': 'Official status page deactivated — no records to read (the API is checked by direct probe instead)',
+    's3.limits.cloudflare': 'Cloudflare Status v3 exposes no uptime data at all — no rolling 30-day figure, and no per-component history to compute one from',
+    's3.limits.xai': 'Exposes a per-probe success rate over a rolling 60-sample window (minutes to a few hours, not since restart) — not comparable to a 30-day figure',
+    's3.limits.deadsource': 'Official status page deleted — no records to read (the API is checked by direct probe instead)',
     's4.title': 'AIWatch Score',
     's4.intro': 'AIWatch Score is a composite 0–100 reliability metric combining uptime, incident affected days, recovery time, and (for probed API services) responsiveness. It is based on 30-day data.',
     's4.formulaStr': 'AIWatch Score = Uptime + Incidents + Recovery + Responsiveness',

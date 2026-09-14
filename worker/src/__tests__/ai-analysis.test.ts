@@ -1266,6 +1266,33 @@ describe('refreshOrReanalyze', () => {
     )
   })
 
+  it('#1384 — a retainedBridge ghost incident is never re-analyzed, even long after its old analysis went stale', async () => {
+    // A migration-bridge-forwarded incident (services.ts `mergeRetainedIncidentHistory`) carries an
+    // empty `timeline: []` forever — it is a frozen snapshot, not a feed that publishes updates. Both
+    // skip-guards below key off timeline content (`timelineHash`/`latestTime`, `newEntries.length`),
+    // so without excluding it from `activeIncs` up front, it would fall through to a full API
+    // re-analysis every 2 hours for the entire life of the bridge, burning one of the `cap` slots.
+    const oldAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-20T00:00:00Z' }
+    const kv = mockKV({ [analysisKey('replicate', 'legacy-1')]: JSON.stringify(oldAnalysis) })
+    const svc: ServiceStatus = {
+      id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', status: 'operational',
+      latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
+      incidents: [{
+        id: 'legacy-1', title: 'Ongoing at cutover', status: 'investigating', impact: 'major',
+        startedAt: '2026-03-20T00:00:00Z', resolvedAt: null, duration: null, timeline: [],
+        retainedBridge: true,
+      }],
+    }
+    const analyzeFn = vi.fn()
+    const now = new Date('2026-03-27T00:00:00Z').getTime() // days past the 2h re-analysis threshold
+
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.reanalyzed).toEqual([])
+    expect(result.refreshed).toEqual([])
+  })
+
   it('skips TTL refresh when analysis is recent (< 30min)', async () => {
     const recentAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-27T05:50:00Z' }
     const kv = mockKV({ [analysisKey('claude', 'inc-1')]: JSON.stringify(recentAnalysis) })

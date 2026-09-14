@@ -424,6 +424,23 @@ describe('withdrawalHold (#1106)', () => {
     expect(withdrawalHold('xqp5fkvlyg6t', replaced, liveIncidentIds([replaced]))).toBe('incident-running')
   })
 
+  // #1384 — round-9 review repro. A `retainedBridge` entry (services.ts
+  // `mergeRetainedIncidentHistory`) unresolved at migration time never resolves for the life of the
+  // finite migration bridge — without excluding it here, it reads as "an incident is running" FOREVER
+  // and holds the withdrawal notice for a COMPLETELY UNRELATED, genuinely-withdrawn incident on the
+  // same service well past the 6-day tombstone roster life: a silent, permanent loss of the notice.
+  it('does NOT hold on a stale retainedBridge ghost — an unrelated withdrawal must still go out', () => {
+    const ghost = { ...inc('legacy-ghost', '2026-08-01T00:00:00Z'), retainedBridge: true as const }
+    const replicate = svc('replicate', [ghost], { status: 'operational' })
+    expect(withdrawalHold('some-other-withdrawn-id', replicate, liveIncidentIds([replicate]))).toBeNull()
+  })
+
+  it('CONTROL — the same ghost, without the tag, correctly holds (proves the tag is load-bearing)', () => {
+    const notTagged = inc('legacy-ghost', '2026-08-01T00:00:00Z')
+    const replicate = svc('replicate', [notTagged], { status: 'operational' })
+    expect(withdrawalHold('some-other-withdrawn-id', replicate, liveIncidentIds([replicate]))).toBe('incident-running')
+  })
+
   // The prune's OTHER documented residual: a still-open incident retitled out of filterIncidents
   // attribution is ABSENT from `incidents` by definition, so only the status can catch it.
   it('holds when the service is visibly impaired with no incident to show for it', () => {

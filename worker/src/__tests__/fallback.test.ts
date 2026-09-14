@@ -54,6 +54,19 @@ describe('getFallbacks', () => {
     expect(result.find(f => f.name === 'Together AI')).toBeDefined()     // only a resolved incident → eligible
   })
 
+  it('#1384 — a retainedBridge ghost does not disqualify an otherwise-healthy candidate', () => {
+    // A `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) unresolved at migration
+    // time never resolves for the life of the finite migration bridge — without excluding it here, a
+    // service could be permanently unable to serve as a fallback candidate over a stale ghost from a
+    // retiring source, even though its real, current status source shows it healthy.
+    const services = [
+      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 76 },
+      { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 93, incidents: [{ status: 'investigating', retainedBridge: true }] },
+    ]
+    const result = getFallbacks('mistral', 'api', services)
+    expect(result.find(f => f.name === 'Groq Cloud')).toBeDefined()
+  })
+
   it('#811 — a non-reliability ADVISORY (Claude model-access suspension) does NOT disqualify an operational candidate', () => {
     // The live 2026-06-27 case: Claude carries "We've suspended access to Claude Mythos 5 and Claude
     // Fable 5" (status monitoring, badge operational — an access advisory, not an outage). Pre-#811 the

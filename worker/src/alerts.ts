@@ -647,7 +647,17 @@ export function buildIncidentAlerts(
       if (inc.status === 'monitoring' && !alertedNewMap.get(inc.id)?.has(svc.id)) {
         console.log(`[alerts] #1039 ${svc.id}: ${inc.id} is 'monitoring' and was never alerted — withholding the new alert (provider applied a fix; /feed still carries it)`)
       }
-      if (inc.status !== 'resolved' && inc.status !== 'monitoring' && !alertedNewMap.get(inc.id)?.has(svc.id)) {
+      // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) is forwarded
+      // from AIWatch's own prior collection under a retiring source, not read from this cycle's feed.
+      // An unresolved one can fall inside `INCIDENT_ALERT_MAX_AGE_MS` right after a migration ships
+      // and has no `alerted:new:` roster entry yet, so without this it can produce a spurious "New
+      // Incident" Discord push for an incident that is not new — round-7 review, the fourth consumer
+      // found needing this exclusion (prunePhantomIncidents ×2, refreshOrReanalyze, buildFeedWithMeta
+      // already fixed in rounds 4-6). Scoped to the NEW-incident branch only, not a blanket skip of
+      // the whole loop iteration: a RESOLVED bridged entry that WAS already alerted as new before the
+      // migration (same id, `alertedNewMap.has(inc.id)` true) must still be able to fire its matching
+      // "Resolved" alert below — closing that loop is the bridge working as intended, not a hazard.
+      if (inc.status !== 'resolved' && inc.status !== 'monitoring' && !inc.retainedBridge && !alertedNewMap.get(inc.id)?.has(svc.id)) {
         const existing = newIncidents.get(inc.id)
         if (existing) {
           if (!existing.names.includes(svc.name)) existing.names.push(svc.name)

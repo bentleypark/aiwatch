@@ -13,9 +13,23 @@ import { buildUpstreamNote, type UpstreamLinkLike, type UpstreamNote } from './_
 export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
-// Allows local SSR verification against a locally running Worker without
-// changing the production default.
-const workerApi = process.env.AIWATCH_WORKER_API || WORKER_API
+
+/** Optional-chained rather than `process.env.X`, matching `_shared/edge-fallback-alert.ts`'s
+ *  `readEnv` and for the reason stated there: a runtime without the global yields `undefined`
+ *  instead of a throw. At MODULE scope that distinction is the whole page — a throw here happens
+ *  before any handler runs and takes out all 43 `/is-*-down` routes at once, and nothing would
+ *  catch it first (`api/` has no tsc gate, and vitest runs under Node where `process` exists). */
+function readEnv(name: string): string | undefined {
+  return (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name]
+}
+
+// Lets a local SSR check read a locally running Worker without editing this file. Ignored when
+// `VERCEL_ENV` says production: the override silently repoints every is-down page's data source, so
+// a stray value on the production project would be invisible — the pages would render normally, off
+// the wrong Worker. A local-verification affordance should not be reachable in production at all.
+const workerApi = readEnv('VERCEL_ENV') === 'production'
+  ? WORKER_API
+  : readEnv('AIWATCH_WORKER_API') || WORKER_API
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
 const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
 
@@ -389,7 +403,13 @@ export default async function handler(req: Request) {
             .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id
               && (routedCross ? inSourceTier(s.id) : s.category === entry.category)
               && s.status === 'operational'
-              && !(s.incidents ?? []).some(i => (i as { status?: string }).status !== 'resolved')
+              // #1384 — a `retainedBridge` entry (worker/src/services.ts `mergeRetainedIncidentHistory`)
+              // unresolved at migration time never resolves for the life of the finite migration
+              // bridge, so without this exclusion a candidate could be permanently unrecommendable as
+              // a fallback over a stale ghost from a retiring source (the SAME gap found and fixed in
+              // worker/src/fallback.ts's `hasActiveIncident` — this is is-down's own parallel copy of
+              // that check, round-9 structural pass).
+              && !(s.incidents ?? []).some(i => (i as { status?: string; retainedBridge?: boolean }).status !== 'resolved' && !(i as { retainedBridge?: boolean }).retainedBridge)
               && !s.incidentSourceStale
               // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
               && (!sameTierOnly || admittedBySubTier(s.id))

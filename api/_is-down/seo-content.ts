@@ -334,7 +334,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   replicate: {
     displayName: 'Replicate',
     description: 'Replicate runs open-source models (FLUX, Stable Diffusion, Llama, Whisper, etc.) via a simple HTTP API with per-second billing. It is widely used for image generation, video models, and serverless ML inference.',
-    insight: 'Replicate is now monitored through Cloudflare Status. AIWatch uses the exact Replicate component for its current health and only active incidents explicitly attached to that component; page-wide Cloudflare incidents and title matches are not attributed to Replicate. Cloudflare Status does not publish comparable rolling uptime or historical incident data for this service.',
+    insight: 'Replicate is now monitored through Cloudflare Status. AIWatch uses the exact Replicate component for its current health and only active or resolved incidents explicitly attached to that component; page-wide Cloudflare incidents and title matches are not attributed to Replicate. Cloudflare Status publishes no uptime data for this service, so AIWatch shows no uptime percentage for it.',
     whenDown: 'When Replicate is down, apps using its API for image generation, video synthesis, audio transcription, or custom model inference will fail. Production apps built on Replicate\'s simple API often have no fallback configured.',
     faqs: [
       { q: 'Is Replicate down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Replicate every 5 minutes and shows real-time operational status.' },

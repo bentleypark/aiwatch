@@ -36,6 +36,20 @@ describe('isMarkableOnStatusEdge', () => {
       expect(isMarkableOnStatusEdge({ status, derived: 'status_history' }), status).toBe(false)
     }
   })
+
+  // #1384 — round-9 (structural pass) repro. This path has no `alertedNewMap` gate, unlike
+  // `alerted:res:` — so a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`),
+  // already resolved before it was ever forwarded, would otherwise get its "Recently Resolved" banner
+  // re-lit and its history record rewritten every time ANY OTHER incident on the same service resolves.
+  it('REFUSES a retainedBridge entry even though it is resolved', () => {
+    expect(isMarkableOnStatusEdge({ ...base, retainedBridge: true })).toBe(false)
+  })
+
+  it('the retainedBridge exclusion is independent of status, like the derived one', () => {
+    for (const status of ['resolved', 'monitoring', 'investigating']) {
+      expect(isMarkableOnStatusEdge({ status, retainedBridge: true }), status).toBe(false)
+    }
+  })
 })
 
 /**

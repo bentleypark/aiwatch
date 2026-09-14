@@ -39,6 +39,12 @@ export function causalIncidents(svc: Pick<ServiceStatus, 'incidents'>): CausalIn
   for (const inc of svc.incidents ?? []) {
     if (inc.status === 'resolved') continue
     if (inc.impact === null) continue // provider claims no availability impact → not a cause
+    // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) is forwarded from
+    // AIWatch's own prior collection under a retiring source, not read from the current source this
+    // cycle. Its text describes an old, pre-migration incident, so it must never lend its tokens to an
+    // upstream-attribution claim about what is happening RIGHT NOW — the same "stale reads as current"
+    // shape found on six other consumers already (round-9 structural pass, #1384).
+    if (inc.retainedBridge) continue
     out.push({ inc, text: incidentText(inc) })
   }
   return out

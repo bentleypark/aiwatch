@@ -102,7 +102,7 @@ interface FallbackCandidate {
   /** #550 — used to exclude candidates with an unresolved incident (operational-but-incident).
    *  #811 — `title` lets `hasActiveIncident` ignore a non-reliability ADVISORY (access suspension /
    *  compliance / deprecation), which must NOT disqualify an otherwise-operational candidate. */
-  incidents?: Array<{ status: string; title?: string }>
+  incidents?: Array<{ status: string; title?: string; retainedBridge?: boolean }>
   /** #616 — stale incident source (#591). Excluded from Score ranking, so it must also be excluded
    *  as a fallback candidate: recommending a service we don't trust enough to rank contradicts the
    *  same product surface. */
@@ -136,7 +136,14 @@ interface FallbackCandidate {
  *  correct even while Anthropic carries a Mythos/Fable access-suspension notice. An outage-signal title
  *  still counts (isNonReliabilityAdvisory returns false for it), preserving #550 for genuine degradations. */
 function hasActiveIncident(s: FallbackCandidate): boolean {
-  return (s.incidents ?? []).some(i => i.status !== 'resolved' && !isNonReliabilityAdvisory(i.title ?? ''))
+  // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) unresolved at
+  // migration time never resolves for the life of the finite migration bridge, so without this
+  // exclusion a service could be disqualified as a fallback candidate FOREVER over a stale ghost from
+  // a retiring source, even though its real, current status source shows it healthy. Currently inert
+  // for Replicate specifically (EXCLUDE_FALLBACK membership, checked elsewhere) — not a durable
+  // reason, so excluded here directly rather than relying on that list never changing (round-9
+  // structural pass, #1384).
+  return (s.incidents ?? []).some(i => i.status !== 'resolved' && !i.retainedBridge && !isNonReliabilityAdvisory(i.title ?? ''))
 }
 
 // #859 — a specialized non-LLM API sub-tier only recommends its OWN tier. Cross-tier fill (fill top-2

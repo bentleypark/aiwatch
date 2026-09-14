@@ -214,6 +214,34 @@ describe('reportWindowFloor (#772) — anchor surfaced reports to the current in
     expect(floor).toBe(s2 - REPORT_PRE_INCIDENT_BUFFER_MS)
   })
 
+  it('#1384 — a stale retainedBridge ghost does not poison the floor for an unrelated NEW incident', () => {
+    // Round-8 review repro. A `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`)
+    // unresolved at migration time never resolves — `status !== 'resolved'` for the life of the
+    // bridge. Without excluding it, `Math.min` over active starts anchors the floor to its ancient
+    // startedAt, resurrecting a report from an unrelated, weeks-old thread during today's incident —
+    // exactly the #772 bug this function exists to prevent, reached through the bridge.
+    const ghostStart = NOW - 30 * 24 * H // a month-old bridged ghost, still "active"
+    const newStart = NOW - 3 * H // a genuinely new, unrelated incident today
+    const floor = reportWindowFloor({
+      incidents: [
+        { status: 'investigating', startedAt: new Date(ghostStart).toISOString(), retainedBridge: true },
+        active(new Date(newStart).toISOString()),
+      ],
+    }, NOW)
+    expect(floor).toBe(newStart - REPORT_PRE_INCIDENT_BUFFER_MS)
+    // A report from 10h ago (well before today's incident + its 2h buffer) must NOT resurface —
+    // the bug this guards against would instead anchor the floor near the month-old ghost and let it.
+    const priorReport = NOW - 10 * H
+    expect(priorReport >= floor).toBe(false)
+  })
+
+  it('CONTROL — a resolved retainedBridge entry does not affect the floor either way (already excluded as resolved)', () => {
+    const floor = reportWindowFloor({
+      incidents: [{ status: 'resolved', startedAt: new Date(NOW - 1 * H).toISOString(), retainedBridge: true }],
+    }, NOW)
+    expect(floor).toBe(NOW - REPORT_SPIKE_FALLBACK_MS)
+  })
+
   it('ignores resolved incidents (only active anchor the window)', () => {
     const floor = reportWindowFloor({ incidents: [resolved(new Date(NOW - 1 * H).toISOString())] }, NOW)
     expect(floor).toBe(NOW - REPORT_SPIKE_FALLBACK_MS) // no ACTIVE incident → fallback
