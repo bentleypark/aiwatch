@@ -352,6 +352,27 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     expect(order).toEqual(['Mistral API', 'Cohere API'])
     expect(order).not.toContain('Groq Cloud')
   })
+
+  it('#1384 — a retainedBridge ghost does not disqualify an otherwise-healthy candidate', async () => {
+    // A `retainedBridge` entry (worker/src/services.ts `mergeRetainedIncidentHistory`) unresolved at
+    // migration time never resolves for the life of the finite migration bridge — without excluding
+    // it here, a candidate could be permanently unrecommendable as a fallback over a stale ghost from
+    // a retiring source. This file's inline filter is a SEPARATE copy of worker/src/fallback.ts's
+    // `hasActiveIncident` check and needed the same exclusion independently (round-9 structural pass).
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'mistral', name: 'Mistral API', scoreConfidence: 'high', aiwatchScore: 95, incidents: [{ id: 'ghost', title: 'Ongoing at cutover', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [], retainedBridge: true }] }),
+        svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const res = await handler(makeReq('together'))
+    const html = await res.text()
+    const order = bulletOrder(html)
+    expect(order).toContain('Mistral API')
+  })
 })
 
 // #1328 - `api/is-down.ts` is the only thing that carries `progress` from the worker payload into

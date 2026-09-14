@@ -1144,9 +1144,9 @@ describe('renderComponents (#604)', () => {
     expect(summary).not.toContain('Degraded Performance')
   })
 
-  // componentGroupsInline (replicate): sections render in component-ARRAY order — group blocks and
+  // componentGroupsInline: sections render in component-ARRAY order — group blocks and
   // surface-row runs interleaved where each first appears, NOT surfaces-first-then-groups.
-  it('componentGroupsInline interleaves groups + surface runs in array order (replicate layout)', () => {
+  it('componentGroupsInline interleaves groups + surface runs in array order', () => {
     const html = renderComponents(mkService({
       componentGroupsInline: true,
       components: [

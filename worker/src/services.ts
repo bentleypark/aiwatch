@@ -32,7 +32,9 @@ import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusU
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { mergeOnlineOrNotIncidents, parseOnlineOrNotIncidentHistory, parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
 import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
+import { parseCloudflareStatusSummary } from './parsers/cloudflare-status'
 import { mergeXaiRegionalIncidents, mergeXaiGrokSurfaceIncidents } from './xai-regions'
+import type { MonthlyArchive, MonthlyIncidentEntry, MonthlyIncidents } from './monthly-archive'
 
 // #990 — OpenAI (openai/chatgpt/codex all share status.openai.com) occasionally posts a
 // "kitchen-sink" advisory scoped to a gov-compliance ENVIRONMENT (e.g. the 2026-07 "Codex, workspace
@@ -51,6 +53,64 @@ import { mergeXaiRegionalIncidents, mergeXaiGrokSurfaceIncidents } from './xai-r
 // title (leak guard, #693), so excluding 'fedramp' there is safe. Vetoed BEFORE incidentKeywords;
 // neither sets statusComponent so the #359 exclude-bypass can't fire → clean drop.
 export const ENVIRONMENT_SCOPE_EXCLUDE = ['fedramp']
+
+/**
+ * Which status source a service is served from.
+ *
+ * #1384 — `/methodology` publishes a per-source SERVICE COUNT, and those counts were hand-written
+ * prose mirroring this config. Two of them were wrong on arrival (Atlassian read 18 for 17, RSS read
+ * 2 for 3) and the errors cancelled, so the total still summed to 45 and the #1074 lockstep test —
+ * which pins the TOTAL — stayed green. Derived here instead, so the page cannot disagree with the
+ * config it describes.
+ *
+ * This is a DISPLAY taxonomy — "whose status page is this" — and NOT a mirror of
+ * `fetchServiceUntagged`'s dispatch. A first version claimed it was, and that was wrong in a way
+ * worth recording: the dispatch has no `incidentIoBaseUrl` branch at all. Every incident.io service
+ * is fetched inside the `apiUrl` branch, because an incident.io page serves a Statuspage-compatible
+ * `summary.json`. Eleven services carry both fields, so a reader who believed the mirror claim would
+ * conclude the page lists them under the wrong heading.
+ *
+ * They are listed under incident.io because that is the vendor whose page it is, which is what §1 of
+ * `/methodology` is telling a reader. `getServicePlatform` below groups the same eleven under
+ * `atlassian` and is also right — it answers a different question ("whose infrastructure would take
+ * many services down at once", for the quorum check), and the API shape is the thing that matters
+ * there. Two taxonomies, two purposes; neither is the other's source of truth.
+ *
+ * The ORDER still matters, just not for the reason first given: a config carrying several source
+ * fields lands on the row for its most specific one. `turbopuffer` has an `incidentIoComponentId`
+ * with no `incidentIoBaseUrl` — a Statuspage-compatible page, so Statuspage — and `grok` has an
+ * `rssFeedUrl` and no uptime API, so RSS. `services-by-source.test.ts` pins that every service
+ * resolves to exactly one row, which is what the counts on the page are summed from.
+ */
+export type StatusSourceName =
+  | 'Rootly' | 'Flashduty' | 'Cloudflare Status v3' | 'AWS Health Dashboard'
+  | 'Google Cloud Status \u00b7 AI Studio Status' | 'Instatus' | 'OnlineOrNot' | 'Better Stack'
+  | 'incident.io' | 'Atlassian Statuspage' | 'RSS incident feeds'
+
+export function statusSourceOf(config: ServiceConfig): StatusSourceName | null {
+  if (config.rootlyFeed) return 'Rootly'
+  if (config.flashdutyFeed) return 'Flashduty'
+  if (config.cloudflareStatusComponentIds?.length) return 'Cloudflare Status v3'
+  if (config.awsHealthApi) return 'AWS Health Dashboard'
+  if (config.gcloudProduct || config.aistudioStatus) return 'Google Cloud Status \u00b7 AI Studio Status'
+  if (config.instatusUrl) return 'Instatus'
+  if (config.onlineOrNotUrl) return 'OnlineOrNot'
+  if (config.betterStackUrl) return 'Better Stack'
+  if (config.incidentIoBaseUrl) return 'incident.io'
+  if (config.apiUrl) return 'Atlassian Statuspage'
+  if (config.azureRssUrl || config.rssFeedUrl) return 'RSS incident feeds'
+  return null
+}
+
+/** source name -> the ids it serves, in `SERVICES` order. Empty sources are absent. */
+export function servicesByStatusSource(): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const c of SERVICES) {
+    const src = statusSourceOf(c)
+    if (src) (out[src] ??= []).push(c.id)
+  }
+  return out
+}
 
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
@@ -229,20 +289,14 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
   // Inference / Infrastructure
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true, componentDenylist: ['Website'] },
-  // displayComponentIds (#606): mirrors the official replicatestatus.com component groups (the v2 JSON
-  // omits group membership, so it's curated here). Array order = DISPLAY order; with componentGroupsInline
-  // the breakdown renders each section where its first member sits in the array:
-  //   API = HTTP API, Streaming API
-  //   Inference and Training = H100/A100/L40S/T4/CPU Hardware (so a GPU-capacity degradation shows)
-  //   Website = Playground
-  //   (ungrouped surfaces) = Replicate Registry (r8.im), Official Models
-  //   Support = Billing, Support Tickets  (renders AFTER the surface rows, per the official page)
-  // Excludes Home Page. Display-only (decoupled from the worst-of badge).
-  // #1006 — uptime is a worst-of over the SAME components the badge + detail page show
-  // (displayComponentIds), not the single HTTP API component. Its GPU hardware (H100/A100/L40S/T4) is
-  // core availability — a model can't run without it — but uptime read only HTTP API, so a multi-day
-  // H100 degradation showed in the incident list beside a spotless 100%.
-  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], componentGroups: { '01JRJYHBWCXHFZ0NHMP1N7T2G3': 'API', '01JRJYHBWC358ZXKRXZD0BENPD': 'API', '01JRG9WZ84ABEY9ZJBB72CJBS8': 'Inference and Training', '01JRGA5ZQKJX2NMG45VCFP9Y9C': 'Inference and Training', '01JRGA5ZQKF3SW674WMFD92PAC': 'Inference and Training', '01JS0A88GKRF5DNW74REX185D3': 'Inference and Training', '01JS0A88GKZAMP8BD3W9BCCBWX': 'Inference and Training', '01J5NNACBNTG5GR693P6RH5Q6J': 'Website', '01JS0AB43BH206N6Z4WNSB0Z0F': 'Support', '01JS0AB43BNHTEGYYQBSWS3KDP': 'Support' }, componentGroupsInline: true },
+  // #1384 — Replicate joined Cloudflare and the retired Statuspage v2 URL now 301s to HTML. The
+  // Cloudflare v3 source exposes one Replicate component. It publishes no uptime data at all, so
+  // `uptime30d` stays null. Incidents come from BOTH `active_incidents` and `recent_incidents`,
+  // exactly attributed by component id: the second is not history import, it is the only place a
+  // resolution appears, because an active entry carries no `resolved_at` and Cloudflare moves an
+  // incident out of that list the moment it ends. The finite retention bridge preserves AIWatch's
+  // pre-migration records while they still fall inside the rolling score window.
+  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.cloudflarestatus.com/services?search=replicate', apiUrl: null, cloudflareStatusComponentIds: ['fvgfcmy66tdr'], retainIncidentHistoryUntil: '2026-10-11T00:00:00.000Z' },
   // fal.ai (#758) — generative-media inference platform (image/video/audio/3D, 600+ models incl.
   // FLUX/Kling/Hailuo). Peer of Replicate/Hugging Face. Instatus (Next.js) page like Perplexity:
   // `statusComponent: 'API'` selects the Instatus "API" group component for the official uptime%
@@ -2063,6 +2117,33 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       if (!config.apiUrl) return base
     }
 
+    if (config.cloudflareStatusComponentIds) {
+      const start = Date.now()
+      const summaryRes = await fetchWithRetry('https://www.cloudflarestatus.com/api/v3/summary', { svcId: config.id })
+      const latency = Date.now() - start
+      if (!summaryRes.ok) {
+        console.error(`[fetchService] ${config.id} Cloudflare Status summary returned HTTP ${summaryRes.status}`)
+        summaryRes.body?.cancel()
+        // The v3 API is a machine endpoint, but 403/429 can still be an egress restriction rather
+        // than a retired source. Only unambiguous gone/auth statuses become a dead-source verdict.
+        if (GONE_STATUSES.has(summaryRes.status)) {
+          return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency }
+        }
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+      }
+      const raw = await summaryRes.json().catch(() => null)
+      const parsed = parseCloudflareStatusSummary(raw, config.cloudflareStatusComponentIds)
+      if (!parsed.ok) {
+        console.warn(`[fetchService] ${config.id} Cloudflare Status summary unreadable (${parsed.reason})`)
+        await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+      }
+      resetFetchFailure(trackingStore, config.id)
+      return { ...base, status: parsed.summary.status, latency, incidents: parsed.summary.incidents }
+    }
+
     if (config.apiUrl) {
       // Atlassian Statuspage API — use pre-fetched data when available, else fetch directly
       let summaryData: StatuspageResponse
@@ -2667,7 +2748,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // attached to bedrock so the supply-chain banner can correlate without an extra fetch.
         const awsRegionHealth = config.id === 'bedrock' ? parseAwsRegionHealth(json) : undefined
         // #713 — AWS Health is an incident feed, NOT a rolling uptime %. We do NOT invent an estimate:
-        // uptime stays null (display: "No official uptime — incident-tracked") and the Score is computed
+        // uptime stays null (display: "No official uptime published") and the Score is computed
         // on incidents + recovery only. The honest "official-first, no fabricated value" position.
         return {
           ...base,
@@ -2740,7 +2821,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // of anyone's.
         const filtered = ours.slice(0, PUBLISHED_INCIDENT_CAP)
         // #713 — Azure RSS is an incident feed, not a rolling uptime %. No invented estimate: uptime
-        // stays null ("No official uptime — incident-tracked"), Score computed on incidents + recovery.
+        // stays null ("No official uptime published"), Score computed on incidents + recovery.
         return {
           ...base,
           status: deriveAwsStatus(ours),
@@ -3597,6 +3678,189 @@ export function downclassifyAdvisoryIncidents(services: ServiceStatus[]): Servic
   })
 }
 
+/** Format the durable monthly-archive duration back into the live Incident wire shape. */
+function archivedDuration(durationMin: number): string | null {
+  if (!Number.isFinite(durationMin) || durationMin <= 0) return null
+  const hours = Math.floor(durationMin / 60)
+  const minutes = durationMin % 60
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
+}
+
+/**
+ * #1384 — Cloudflare Status v3 supplies current health and incidents from BOTH `active_incidents`
+ * and `recent_incidents` (attributed by component id) — but the second is Cloudflare-wide and shallow
+ * (~10 entries across every component on the page, observed spanning about four days), nowhere near
+ * a 30-day history. A source migration can therefore still erase already-collected, resolved
+ * incidents that AIWatch's own prior collection holds inside its live 30-day score window, which in
+ * turn awards them full Incident + Recovery score and makes the is-down page say "zero incidents".
+ * Convert the durable monthly shape once, then let the normal live consumers (score, SEO, cache, and
+ * monthly accumulator) see one deduplicated Incident array.
+ *
+ * The bridge is explicitly time-bounded in ServiceConfig. It never turns the archive into a general
+ * second source: live rows win on an id collision because they carry the newest timeline/components.
+ *
+ * EVERY retained entry within the cutoff window is forwarded, resolved or not — this is deliberate,
+ * and NOT the obvious choice. An entry the OLD source still had open at the moment of migration
+ * (`finalStatus: 'investigating'`, `resolvedAt: null`) can never be genuinely closed by this bridge:
+ * the old source stops being read the instant the migration ships, so nothing will ever write a
+ * `resolvedAt` onto that record, and it is forwarded as a stuck 'investigating' incident every cron
+ * cycle until `retainIncidentHistoryUntil` lapses and the whole bridge stops running for this service.
+ * A prior version of this function excluded such an entry instead (skip on `resolvedAt == null`) on
+ * the reasoning that a stale ongoing incident is worse than none — but excluding it removes the ONE
+ * thing that kept it `seen` by `prunePhantomIncidents` (monthly-archive.ts): after
+ * `PHANTOM_PRUNE_AFTER_MISSED_RUNS` cron cycles of confident absence it was deleted from the durable
+ * accumulator and `diffPrunedIncidents` published a public "Incident Withdrawn" notice (Discord + RSS)
+ * — a claim that is actively FALSE (the provider never withdrew anything; AIWatch simply stopped
+ * reading their page). A stale ongoing status that self-corrects the moment `retainIncidentHistoryUntil`
+ * lapses is a strictly smaller harm than a false public claim broadcast to subscribers, so forwarding
+ * unconditionally is the accepted trade — see KNOWN LIMIT 1.
+ *
+ * Every forwarded entry carries `retainedBridge: true` (types.ts). ELEVEN readers act on it, each
+ * excluding it from a different "is this fresh/current" judgment while still letting it satisfy its
+ * OWN accumulator row's guard-2 presence check where relevant — it must count as itself, never as
+ * evidence about anything else. Six were found in a SEPARATE review round each (4 through 9), one
+ * `service.incidents` consumer at a time. Rounds 7 and 8 flagged that enumeration itself as the risk;
+ * round 9's sixth find (reader 6 below, worse in kind — a silent PERMANENT loss, not a transient false
+ * signal) settled the question: rather than trust a tenth review round to find a seventh, every OTHER
+ * file matching this project's `.incidents`/`startedAt`/`duration`/etc. consumer scan was audited for
+ * the same shape before shipping — which is where readers 7-11 came from — and
+ * `src/utils/__tests__/derived-consumer-registry.test.js` (#1292) was extended with a SECOND axis so a
+ * twelfth consumer fails CI instead of shipping silently, the same way that file already guards
+ * `derived: 'status_history'`. That registry, not this list, is the ongoing source of truth for
+ * completeness; this list is the record of what each one was and why.
+ *   1. `prunePhantomIncidents` (monthly-archive.ts) still counts it in `liveIds` (guard 2: is THIS
+ *      entry's own id present at all) — that is what keeps a still-open bridged entry `seen` and
+ *      un-pruned, the round-4 fix. But it is excluded from the SEPARATE `oldestLiveStart` computation
+ *      (guard 3: does the live list prove how far the CURRENT feed reaches for OTHER entries) — a
+ *      round-5 review found that without this second exclusion, a RESOLVED forwarded row (real, but
+ *      from AIWatch's own prior collection, not this cycle's feed) pushed that watermark back to a
+ *      date the new source's feed never reached, which wrongly satisfied guard 3 for an unrelated,
+ *      genuinely-unresolved incident that had simply fallen outside that shallow feed — the #1292
+ *      false-withdrawal shape, reached through this bridge instead of a `status_history`-derived one.
+ *   2. `refreshOrReanalyze` (ai-analysis.ts) excludes it from the active-incident set entirely, so a
+ *      stuck-open entry does not draw a fresh Gemma/Sonnet re-analysis every 2 hours for the life of
+ *      the bridge — it has no fresh timeline to analyze, only a frozen migration-time snapshot. One
+ *      side effect: its `ai:analysis:` KV key (1h TTL) is then never refreshed, so any is-down AI card
+ *      for it disappears within about an hour rather than growing indefinitely — see KNOWN LIMIT 1.
+ *   3. `buildFeedWithMeta` (rss.ts) never emits it as an active RSS/Slack item — round-6 review found
+ *      that without this, `feed:firstseen:`'s 7-day TTL would re-stamp a weeks-old bridged ghost as
+ *      freshly seen once that key lapsed, repeatedly re-announcing it as a brand-new incident.
+ *   4. `buildIncidentAlerts` (alerts.ts) excludes it from the NEW-incident trigger only (not a blanket
+ *      skip) — round-7 review found that a still-unresolved bridged entry can fall inside
+ *      `INCIDENT_ALERT_MAX_AGE_MS` right after a migration ships, producing a spurious "New Incident"
+ *      Discord push. The RESOLVED-alert branch is deliberately left reachable: a bridged entry that WAS
+ *      already alerted as new before the migration (same id, already in the alerted-roster) should
+ *      still fire its matching "Resolved" alert — that is the bridge working as intended, not a hazard.
+ *   5. `reportWindowFloor` (report.ts) excludes it from the `Math.min` earliest-active-start
+ *      computation — round-8 review found that a stale bridged ghost (never resolved, per KNOWN LIMIT
+ *      1) otherwise poisons the crowd-report surfacing floor for every OTHER, unrelated incident on
+ *      the same service, resurrecting a prior-incident report during a new one (the exact #772 bug).
+ *   6. `withdrawalHold` (withdrawn.ts) excludes it from its "is an incident running on this service"
+ *      check — round-9 review found that a stale bridged ghost otherwise holds the PUBLIC WITHDRAWAL
+ *      NOTICE for a completely unrelated, genuinely-withdrawn incident on the same service for as long
+ *      as the bridge runs (up to 30 days), which outlasts the 6-day tombstone roster life and turns
+ *      this function's documented "delay, not a loss" guarantee into a silent, permanent loss.
+ *   7. `isMarkableOnStatusEdge` (recovery-mark.ts) refuses one outright — this path has no
+ *      `alertedNewMap` gate (unlike `alerted:res:`, which only processes legitimately-tracked ids), so
+ *      an old resolved bridged row would otherwise get its "Recently Resolved" banner re-lit, and its
+ *      history record rewritten, every time ANY OTHER incident on the same service resolves.
+ *   8. `hasActiveIncident` (fallback.ts) excludes it — otherwise a candidate could be permanently
+ *      unrecommendable as a fallback over a stale ghost from a retiring source, while its real, current
+ *      status source shows it healthy.
+ *   9. `activeIncidents` (ext-claude.ts) excludes it from the extension popup's "current issue" list,
+ *      for the same reason as 8.
+ *   10. `causalIncidents` (incident-text.ts) excludes it — a stale ghost's text must never lend its
+ *      tokens to an upstream-attribution claim ("X is down because of Y") about what is happening now.
+ *   11. The inline Alternatives fallback-candidate filter in `api/is-down.ts` excludes it — the Edge's
+ *      own separate copy of reader 8's check, needing the same exclusion independently.
+ * Readers 7-11 were found by audit (this file's own review, before merge), not by a numbered PR round.
+ *
+ * KNOWN LIMIT 1 — an entry unresolved at the migration instant is displayed as an ongoing
+ * 'investigating' incident for as long as the bridge runs, contributing to Score as such AND visible
+ * on the is-down page's "Recent Incidents" list and its "(ongoing)" header line. This is not an
+ * internal-only status — a prior version of this comment said so, which was wrong on the one axis the
+ * accepted trade above is judged on. (It is NOT re-announced on RSS/Slack or Discord, and its AI card
+ * fades within about an hour rather than growing — readers 2-4 above.) It has no way to ever display
+ * as resolved. Bounded: it disappears the moment `retainIncidentHistoryUntil` passes, same as every
+ * other retained row. Not fixed further here — see the paragraph above for why excluding it outright
+ * is worse, not better.
+ *
+ * KNOWN LIMIT 2 — dedup among forwarded entries is by ID, and the two sides mint ids independently.
+ * The archive holds pre-migration rows under the OLD provider's ids while the live list carries
+ * `cloudflare:<id>`, so one real, RESOLVED outage seen by both sources cannot be matched and would be
+ * counted twice in the rolling window: twice in `affectedDays30d`, twice on the is-down page. The
+ * exposure is the overlap of this bridge's window with the new source's resolved history, which for
+ * Cloudflare v3 is shallow, per above. Not fixed here on purpose: the only id-free match available is
+ * a heuristic on start time and title, and a wrong merge (two genuine same-day outages collapsed into
+ * one) is a quieter failure than a visible double entry. If an instance is observed, the fix is to
+ * bound the retained set at the migration instant rather than to guess at equality.
+ */
+export function mergeRetainedIncidentHistory(live: Incident[], retained: MonthlyIncidentEntry[], cutoffISO: string): Incident[] {
+  const byId = new Map(live.map((incident) => [incident.id, incident]))
+  for (const entry of retained) {
+    if (entry.startedAt < cutoffISO || byId.has(entry.id)) continue
+    byId.set(entry.id, {
+      id: entry.id,
+      title: entry.title,
+      status: entry.finalStatus,
+      impact: entry.impact ?? null,
+      startedAt: entry.startedAt,
+      resolvedAt: entry.resolvedAt,
+      duration: archivedDuration(entry.durationMin),
+      timeline: [],
+      retainedBridge: true,
+      ...(entry.autoMonitor ? { autoMonitor: true } : {}),
+      ...(entry.derived ? { derived: entry.derived, ...(entry.derivedDay ? { derivedDay: entry.derivedDay } : {}) } : {}),
+    })
+  }
+  return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+}
+
+function parseRetainedJson<T>(raw: string | null, key: string): T | null {
+  if (!raw) return null
+  try { return JSON.parse(raw) as T } catch {
+    console.warn(`[fetchAllServices] corrupt retained incident history at ${key}`)
+    return null
+  }
+}
+
+/** Preserve a retiring source's recent AIWatch records until its last possible 30-day contribution
+ * has expired. The current-month accumulator is still mutable; the preceding permanent archive
+ * completes the rolling window across a month boundary. */
+export async function retainMigratedIncidentHistory(services: ServiceStatus[], kv: KVNamespace | undefined, now: Date): Promise<void> {
+  if (!kv) return
+  const configs = SERVICES.filter((config) =>
+    config.retainIncidentHistoryUntil != null && Date.parse(config.retainIncidentHistoryUntil) > now.getTime(),
+  )
+  if (configs.length === 0) return
+
+  const currentMonth = now.toISOString().slice(0, 7)
+  const previousMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7)
+  const [previousRaw, currentRaw] = await Promise.all([
+    kv.get(`archive:monthly:${previousMonth}`).catch((err) => {
+      console.warn(`[fetchAllServices] retained incident archive read failed for ${previousMonth}:`, err instanceof Error ? err.message : err)
+      return null
+    }),
+    kv.get(`incidents:monthly:${currentMonth}`).catch((err) => {
+      console.warn(`[fetchAllServices] retained incident accumulator read failed for ${currentMonth}:`, err instanceof Error ? err.message : err)
+      return null
+    }),
+  ])
+  const previous = parseRetainedJson<MonthlyArchive>(previousRaw, `archive:monthly:${previousMonth}`)
+  const current = parseRetainedJson<MonthlyIncidents>(currentRaw, `incidents:monthly:${currentMonth}`)
+  const cutoffISO = new Date(now.getTime() - 30 * 86_400_000).toISOString()
+
+  for (const config of configs) {
+    const service = services.find((candidate) => candidate.id === config.id)
+    if (!service) continue
+    const retained = [
+      ...(previous?.services[config.id]?.incidentList ?? []),
+      ...(current?.services[config.id]?.incidents ?? []),
+    ]
+    if (retained.length > 0) service.incidents = mergeRetainedIncidentHistory(service.incidents, retained, cutoffISO)
+  }
+}
+
 export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>>; upstreamFeeds: UpstreamCandidate[] }> {
   // #1224 — read the consolidated per-service tracking blob ONCE for this whole invocation (1 KV
   // read regardless of service count), thread the SAME mutable object through every batched
@@ -3903,6 +4167,11 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       else if (svc.id in probedNow) console.log(`[cross-validation] ${svc.id}: source dead and probe does not confirm reachability — no probeConfirmed`)
     }
   }
+
+  // #1384 — retain recent Replicate incidents AIWatch collected before Cloudflare Status replaced
+  // the provider feed. This runs before scoring/cache consumers receive `raw`; it is a finite bridge
+  // (configured through retainIncidentHistoryUntil), not an archive-backed source for new incidents.
+  await retainMigratedIncidentHistory(raw, kv, new Date())
 
   // Read cached snapshot for fallback (only if needed)
   let cachedServices: ServiceStatus[] | null = null

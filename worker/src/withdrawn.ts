@@ -187,7 +187,15 @@ export function withdrawalHold(
   // and a cached payload written before #1233 carries only the flag.
   if (svc.status === 'unknown' || svc.sourceDead || svc.sourceUnknown) return 'source-unreadable'
   const live = svc.incidents ?? []
-  if (live.some((i) => i.status !== 'resolved')) return 'incident-running'
+  // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) unresolved at
+  // migration time never resolves for the life of the finite migration bridge (KNOWN LIMIT 1 there).
+  // Without this exclusion it reads as "an incident is running" FOREVER, holding a public withdrawal
+  // notice for a completely different, genuinely-withdrawn incident on the same service well past
+  // the 6-day tombstone roster life — converting this function's documented "delay, not a loss"
+  // guarantee into a silent, permanent loss. Round-9 review, the sixth `service.incidents` consumer
+  // found needing this exclusion (see the reader list in services.ts's `mergeRetainedIncidentHistory`
+  // docblock).
+  if (live.some((i) => i.status !== 'resolved' && !i.retainedBridge)) return 'incident-running'
   if (svc.status !== 'operational') return 'incident-running'
   return null
 }

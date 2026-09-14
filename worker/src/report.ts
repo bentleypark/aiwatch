@@ -140,13 +140,23 @@ export const REPORT_SPIKE_FALLBACK_MS = 3 * 3_600_000       // 3h — probeSpike
  *    report IS the early signal here, so surface only genuinely recent ones (not the full 24h).
  */
 export function reportWindowFloor(
-  svc: { incidents?: Array<{ status: string; startedAt?: string | null }> },
+  svc: { incidents?: Array<{ status: string; startedAt?: string | null; retainedBridge?: boolean }> },
   now: number,
   bufferMs: number = REPORT_PRE_INCIDENT_BUFFER_MS,
   fallbackMs: number = REPORT_SPIKE_FALLBACK_MS,
 ): number {
+  // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) is forwarded from
+  // AIWatch's own prior collection under a retiring source and, if unresolved at migration time, can
+  // never close (`status !== 'resolved'` for the whole life of the bridge — up to 30 days). Taking
+  // `Math.min` over ALL active starts below means one such stale entry poisons the floor for every
+  // OTHER, unrelated incident on the same service: exactly the "prior-incident report resurfaces
+  // during a new incident" bug #772 exists to prevent, reached through the bridge instead of the flat
+  // 24h retention. Round-8 review found this as the fifth `service.incidents` consumer needing the
+  // exclusion (prunePhantomIncidents ×2, refreshOrReanalyze, buildFeedWithMeta, buildIncidentAlerts
+  // already fixed in rounds 4-7) — see the reader list in services.ts's `mergeRetainedIncidentHistory`
+  // docblock.
   const activeStarts = (svc.incidents ?? [])
-    .filter((i) => i.status !== 'resolved')
+    .filter((i) => i.status !== 'resolved' && !i.retainedBridge)
     .map((i) => (i.startedAt ? new Date(i.startedAt).getTime() : NaN))
     .filter((t) => Number.isFinite(t)) as number[]
   if (activeStarts.length === 0) return now - fallbackMs

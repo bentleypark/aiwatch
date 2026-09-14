@@ -617,11 +617,9 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
 describe('displayComponentIds config sanity (#606)', () => {
   // Exact curated counts — guards against a careless edit truncating the list
   // (the doc comments enumerate the excluded components, so the count is intentional).
-  // replicate: API(HTTP/Streaming) + Inference and Training(5 hardware) + Website(Playground)
-  //            + 2 ungrouped surfaces (Registry/Official Models) + Support(Billing/Support Tickets) = 12
-  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 7, replicate: 12 }
+  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 7 }
 
-  it('elevenlabs + replicate carry the exact curated displayComponentIds count and NO statusComponentIds (badge unchanged)', () => {
+  it('elevenlabs carries the exact curated displayComponentIds count and NO statusComponentIds (badge unchanged)', () => {
     for (const [id, count] of Object.entries(EXPECTED_COUNT)) {
       const svc = SERVICES.find((s) => s.id === id)!
       expect(svc.displayComponentIds, id).toBeDefined()
@@ -646,21 +644,12 @@ describe('displayComponentIds config sanity (#606)', () => {
     }
   })
 
-  it('replicate componentGroups maps the official-page groups onto the right components', () => {
+  it('#1384 — Replicate uses the Cloudflare v3 component, not its retired Statuspage roster', () => {
     const replicate = SERVICES.find((s) => s.id === 'replicate')!
-    expect(replicate.componentGroupsInline, 'replicate uses array-order interleave').toBe(true)
-    // The 2 ungrouped surfaces (Registry, Official Models) are the only displayComponentIds entries
-    // absent from componentGroups; the other 10 carry an official group label.
-    const grouped = new Set(Object.keys(replicate.componentGroups!))
-    const ungrouped = replicate.displayComponentIds!.filter((id) => !grouped.has(id))
-    expect(ungrouped).toEqual(['01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2']) // Registry, Official Models
-    // The 5 hardware ids all carry the "Inference and Training" label.
-    const hardware = ['01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX']
-    for (const id of hardware) expect(replicate.componentGroups![id]).toBe('Inference and Training')
-    // The official group SET matches the page (API / Inference and Training / Website / Support).
-    expect(new Set(Object.values(replicate.componentGroups!))).toEqual(
-      new Set(['API', 'Inference and Training', 'Website', 'Support']),
-    )
+    expect(replicate.cloudflareStatusComponentIds).toEqual(['fvgfcmy66tdr'])
+    expect(replicate.apiUrl).toBeNull()
+    expect(JSON.stringify(replicate)).not.toContain('replicatestatus.com')
+    expect(replicate.uptimeOverDisplayComponents).toBeUndefined()
   })
 
   it('#685 — surfaces a degraded ElevenCreative in the elevenlabs breakdown (no more all-green-while-badge-degraded)', () => {

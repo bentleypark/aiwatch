@@ -355,7 +355,7 @@ export const MOCK_SERVICES = [
   },
   {
     id: 'replicate', category: 'api', name: 'Replicate', provider: 'Replicate', status: 'operational',
-    latency: 267, uptime30d: 99.61,
+    latency: 267, uptime30d: null,
     history30d: hist([3]),
     history3m: [{ month: '2026-01', uptime: 99.80 }, { month: '2026-02', uptime: 99.70 }, { month: '2026-03', uptime: 99.61 }],
     incidents: [

@@ -1253,8 +1253,19 @@ export async function refreshOrReanalyze(
     // #703 — collapse xAI per-region incidents (same event, different region) to ONE, so a 2-region
     // xAI event is analyzed once (not twice) and the Analyze modal shows a single entry. No-op for
     // every non-xAI service (only xAI titles carry the `[API (<region>.api.x.ai)]` prefix).
+    //
+    // #1384 — `retainedBridge` entries (services.ts `mergeRetainedIncidentHistory`) are excluded too.
+    // An unresolved one is a frozen migration-time snapshot with no fresh timeline ever coming — the
+    // empty `timeline: []` it carries defeats both skip-guards below, independently: `latestTime` is
+    // pinned at 0 (no entries to read `.at(-1)` from), so the `hashTime === latestTime` guard holds
+    // only if `hashTime` is ALSO 0 — true only when `parsed.timelineHash` is itself falsy, which
+    // independently fails that guard's leading `&&` anyway; a stored hash from before migration is a
+    // real nonzero timestamp, so the equality fails outright. And the boilerplate guard's `newEntries`
+    // is an empty-array filter of an empty timeline, always `[]`, so its `.length > 0` never holds
+    // either. Without this exclusion, EITHER path falls through to a full re-analysis API call every
+    // 2 hours for the entire life of the bridge.
     const activeIncs = collapseXaiRegionalIncidents(
-      (svc.incidents ?? []).filter(i => i.status !== 'resolved' && !heldIncIds.has(i.id)),
+      (svc.incidents ?? []).filter(i => i.status !== 'resolved' && !heldIncIds.has(i.id) && !i.retainedBridge),
     )
     if (activeIncs.length === 0) continue
 

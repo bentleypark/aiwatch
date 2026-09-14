@@ -3,8 +3,8 @@ import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData, hasSufficie
 
 // #713 — AIWatch no longer invents a uptime % for services without an official figure (the old
 // `uptimeSource: 'estimate'` was removed). A no-official-uptime service carries `uptime30d: null` and
-// is incident-tracked + scored on its measured components: shown as "No official uptime —
-// incident-tracked". A frozen/stale feed is a separate case. Ranking uses `scoreConfidence`:
+// is scored on the available measured components: shown as "No official uptime published". A
+// frozen/stale feed is a separate case. Ranking uses `scoreConfidence`:
 //   high   = has an official uptime %
 //   medium = no uptime, but a real probe (responsiveness) signal  → still rankable
 //   low    = NEITHER uptime nor probe (only incidents+recovery)    → over-scores, NOT ranked

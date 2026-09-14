@@ -94,10 +94,11 @@ describe('renderMethodologyPage', () => {
     // the no-uptime-records services must be named with the honest "Not provided" treatment.
     // Mistral + Perplexity were removed once their Instatus pages were read (#1006); OpenRouter followed
     // once AIWatch computed its uptime from the OnlineOrNot incident records (#1006).
-    for (const svc of ['Bedrock', 'Azure', 'Gemini', 'xAI', 'Deepgram', 'Character']) {
+    for (const svc of ['Bedrock', 'Azure', 'Gemini', 'xAI', 'Deepgram', 'Replicate', 'Character']) {
       expect(html, `limits table should name ${svc}`).toContain(svc)
     }
     expect(html).toMatch(/Not provided|not provided|미제공|제공.*않/)
+    expect(html).toMatch(/Replicate.*(existing direct-probe|기존 직접 probe)/s)
   })
 
   it('no .formula div leaks untranslated Korean onto the English page (#974)', () => {
@@ -158,8 +159,8 @@ describe('renderMethodologyPage', () => {
     // The §1 "Data sources" list must cover the real parser set — Google AI Studio (aistudio.ts,
     // #310) and Flashduty/DeepSeek (flashduty.ts, #618) were missing on first ship.
     for (const src of [
-      'Atlassian Statuspage', 'incident.io', 'Google Cloud Status', 'AI Studio',
-      'Better Stack', 'Instatus', 'OnlineOrNot', 'Flashduty', 'AWS Health Dashboard',
+      'Atlassian Statuspage', 'incident.io', 'Cloudflare Status v3', 'Google Cloud Status', 'AI Studio',
+      'Better Stack', 'Instatus', 'Rootly', 'OnlineOrNot', 'Flashduty', 'AWS Health Dashboard',
       'Azure Status', 'xAI', 'Direct RTT probes',
     ]) {
       expect(html, `data sources should name ${src}`).toContain(src)

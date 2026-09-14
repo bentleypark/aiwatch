@@ -14,7 +14,7 @@
 //     per-service by the worker via ServiceStatus.incidentSourceStale.
 
 /** No official uptime % to show — `uptime30d` is null and the feed is NOT frozen/stale. The honest
- *  "official-first, no invented value" state (#713): display "No official uptime — incident-tracked". */
+ *  "official-first, no invented value" state (#713): display "No official uptime published". */
 export const noOfficialUptime = (s) => s.uptime30d == null && !s.incidentSourceStale
 
 /** Uptime30d is not a reliable current figure — either no official uptime, or a frozen stale source.

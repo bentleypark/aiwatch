@@ -454,7 +454,7 @@ export function ComponentBreakdown({ service, t }) {
   )
   const groupBlock = (g) => <ComponentGroup key={g} name={g} members={components.filter((c) => c.group === g)} t={t} />
   // ordered = the breakdown sections. Default: one surfaces grid first, then all groups.
-  // componentGroupsInline (replicate): walk the component array, emitting each group block + each
+  // componentGroupsInline: walk the component array, emitting each group block + each
   // consecutive run of surface rows where it first appears — so the curated array order IS the layout.
   let ordered
   if (service.componentGroupsInline) {
@@ -806,7 +806,7 @@ export default function ServiceDetails({ serviceId }) {
   // #1004 — the same source-flag derivation the Overview cards + banner use, so this page can't
   // disagree with them about whether the status source is readable.
   const [sourceDead, sourceUnknown] = sourceFlagsOf(service)
-  // #713 — distinguish "no official uptime source" (honest: "No official uptime — incident-tracked")
+  // #713 — distinguish "no official uptime source" (honest: "No official uptime published")
   // from the frozen-stale case ("Not provided"). No invented uptime % for these services.
   const noOfficialUptimeFlag = noOfficialUptime(service)
   // #653 — incident displays (count card, MTTR, Incident History) reflect the LIVE incident list and

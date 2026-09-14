@@ -14,7 +14,7 @@ const { ComponentBreakdown } = await import('../ServiceDetails')
 const t = (k) => k // identity — assert structure, not localized copy
 const render = (service) => renderToStaticMarkup(createElement(ComponentBreakdown, { service, t }))
 
-describe('ComponentBreakdown — componentGroupsInline interleave (replicate layout)', () => {
+describe('ComponentBreakdown — componentGroupsInline interleave (ordered layout)', () => {
   const replicateLike = {
     componentGroupsInline: true,
     components: [

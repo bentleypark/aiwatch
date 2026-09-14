@@ -75,8 +75,19 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  A first draft instead ADDED a sentence describing the Rootly path (browser-read, the only source
  *  that WITHHOLDS the figure when a scrape loses a day); that cost 278 and it is per-source detail,
  *  so it went to status-determination.md — which is what the uptime paragraph already points at.
- *  Measured from zero prior slack, so here the constant's movement equals the entry's cost. */
-export const BUDGET_CHARS = 47_703
+ *  Measured from zero prior slack, so here the constant's movement equals the entry's cost.
+ *
+ *  47_703 → 47_695 (#1384): −8 NET. `, cloudflare-status` in the Directory Layout `parsers/` line is +19,
+ *  the whole cost of a new parser module CLAUDE.md's own rule requires listing. Review caught the
+ *  omission, not a lint: nothing checks that a module in `worker/src/parsers/` appears in that line.
+ *  The annotation went to directory-map.md, which loads on demand, so the rationale (why v3's
+ *  component ids are the only attribution, why announced maintenance is not an outage here, why the
+ *  resolved history is read for our components only) costs nothing here. Measured from zero prior
+ *  slack. The −27 is the `(bedrock, azureopenai)` enumeration removed from the no-official-uptime
+ *  bullet: review found it wrong (Replicate joined that set in this PR and the line did not follow),
+ *  and a list of services that keeps changing is verification debt no lint can see. The set is
+ *  published on `/methodology` §3 with each one's reason, which is where a reader needs it. */
+export const BUDGET_CHARS = 47_695
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

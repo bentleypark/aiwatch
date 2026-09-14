@@ -48,9 +48,18 @@ export const RESOLVED_TTL_S = 7200
  *  - `status_history`-derived (#1292) — synthesized from a per-day downtime bucket and born `resolved`,
  *    so up to 30 of them sit on the list at once. Marking them would light the "Recently Resolved"
  *    banner for every one, each naming a recovery MOMENT the source never stated.
+ *  - `retainedBridge` (#1384) — forwarded from AIWatch's own prior collection under a retiring source
+ *    (services.ts `mergeRetainedIncidentHistory`), already resolved BEFORE it was ever forwarded. This
+ *    path has no `alertedNewMap` gate (unlike `alerted:res:`, which only ever processes ids legitimately
+ *    tracked start-to-finish), so without this exclusion an old, genuinely-resolved bridged row would
+ *    get its "Recently Resolved" banner re-lit and its history record rewritten every time ANY OTHER
+ *    incident on the same service resolves — the exact "stale data reads as fresh news" shape found on
+ *    five other consumers already (prunePhantomIncidents ×2, ai-analysis.ts, rss.ts, alerts.ts,
+ *    report.ts, withdrawn.ts).
  */
-export function isMarkableOnStatusEdge(inc: { status?: string; derived?: string }): boolean {
+export function isMarkableOnStatusEdge(inc: { status?: string; derived?: string; retainedBridge?: boolean }): boolean {
   if (inc.status !== 'resolved' && inc.status !== 'monitoring') return false
+  if (inc.retainedBridge) return false
   return inc.derived !== 'status_history'
 }
 

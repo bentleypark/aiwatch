@@ -185,6 +185,23 @@ describe('buildExtClaudePayload — incidents + gated reports (#837 PR2)', () =>
     expect(claude.incidents[0]).toMatchObject({ title: 'API errors', status: 'investigating', impact: 'major' })
   })
 
+  it('#1384 — excludes a retainedBridge ghost from the "current issue" list too', () => {
+    // A `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) unresolved at migration
+    // time never resolves for the life of the finite migration bridge, so without this exclusion the
+    // extension popup would show a stale ghost from a retiring source as the "current issue"
+    // indefinitely. Currently inert (Replicate is not in EXT_CLAUDE_IDS) but pinned generically here.
+    const set = [
+      svc({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', aiwatchScore: 50, scoreGrade: 'degrading', incidents: [
+        inc({ id: 'i-inv', status: 'investigating', title: 'API errors', impact: 'major' }),
+        inc({ id: 'i-ghost', status: 'investigating', title: 'Ongoing at cutover', retainedBridge: true }),
+      ] }),
+      svc({ id: 'claudeai', category: 'app', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+      svc({ id: 'claudecode', category: 'agent', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+    ]
+    const claude = buildExtClaudePayload(set, 't').services.find((s) => s.id === 'claude')!
+    expect(claude.incidents.map((i) => i.id)).toEqual(['i-inv'])
+  })
+
   it('attaches aiSummary to the matching active incident only', () => {
     const set = [
       svc({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', aiwatchScore: 50, scoreGrade: 'degrading', incidents: [inc({ id: 'i-act' })] }),
