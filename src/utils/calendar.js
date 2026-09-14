@@ -32,7 +32,7 @@ function toLocalDateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, currentStatus = undefined) {
+export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, currentStatus = undefined, dailyImpactComplete = undefined) {
   const today = new Date()
   const dayStatus = {}
   const todayKey = toLocalDateKey(today)
@@ -117,10 +117,23 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   }
 
   // Phase 2: Apply per-incident data.
-  // Statuspage (30-day, dailyImpact from uptimeData): skip — Phase 1 is 100% accurate,
-  // adding incidents would introduce noise from unrelated components.
-  // incident.io (14-day) and others: supplement Phase 1 with keyword-filtered incidents.
-  if (!(dailyImpact && days === 30)) {
+  // Skipped only when `dailyImpact` already accounts for EVERY day — which the WORKER states per
+  // service (`dailyImpactComplete`), because only it knows which branch built the map. There, Phase 1
+  // is complete and adding incidents would introduce noise from unrelated components.
+  // Everything else supplements Phase 1 with the service's own incidents.
+  //
+  // #1390 — this used to read `days === 30`, i.e. a window LENGTH standing in for a provenance fact.
+  // That held only while every 30-day service happened to be Atlassian. Giving perplexity a
+  // `statusComponentId` flipped its window to 30, and with it this gate — so an incident.io incident
+  // that the provider published with NO `component_impacts` row (perplexity's `Computer Tasks
+  // Degraded`, 2026-09-01) stopped being painted at all, on a card that lists it one section below.
+  // Six services were already in that state (openai/chatgpt/codex/langsmith/langfuse/junie). The
+  // worker now states the fact; `days` decides only how many cells to draw.
+  //
+  // `undefined` falls back to the old derivation so a payload cached before the field existed renders
+  // exactly as it did — every fresh payload carries it within one cycle.
+  const impactOwnsEveryDay = !!dailyImpact && (dailyImpactComplete ?? days === 30)
+  if (!impactOwnsEveryDay) {
     const windowStart = new Date(today.getTime() - (days - 1) * 86_400_000)
     ;(incidents ?? []).forEach((inc) => {
       if (!inc.startedAt) return

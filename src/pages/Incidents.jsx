@@ -9,7 +9,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useMonthlyArchives } from '../hooks/useMonthlyArchives'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
-import { getResolvedTime, getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText } from '../utils/incidentSort'
+import { getResolvedTime, getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText } from '../utils/incidentSort'
 import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService, isWithinPeriod } from '../utils/archiveMerge'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
@@ -104,7 +104,8 @@ function DetailPanel({ incident, onClose, hideHeader, t, lang }) {
       title={`${incident.serviceName} — ${incident.title}`}
       subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}  ·  ${t('incidents.col.duration')}: ${incidentDurationText(incident, t, t('incidents.duration.ongoing'))}`}
       timeline={incident.timeline}
-      note={incident.derived === 'status_history' ? t('incidents.derived.note') : undefined}
+      note={incident.derived === 'status_history' ? t('incidents.derived.note')
+        : incident.startUnknown ? t('incidents.startUnknown.note') : undefined}
       onClose={onClose}
       hideHeader={hideHeader}
       t={t}
@@ -140,7 +141,7 @@ function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>
           {incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName}
         </span>
-        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{incident.duration ?? t('incidents.duration.ongoing')}</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{incidentDurationText(incident, t, t('incidents.duration.ongoing'))}</span>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{t(`incidents.status.${incident.status}`)}</span>
       </div>
       {isSelected && <DetailPanel incident={incident} onClose={onClose} t={t} lang={lang} />}
@@ -172,7 +173,7 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
           <span>·</span>
           <span>{incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName}</span>
           <span>·</span>
-          <span>{incident.duration ?? t('incidents.duration.ongoing')}</span>
+          <span>{incidentDurationText(incident, t, t('incidents.duration.ongoing'))}</span>
         </div>
       </button>
       {isSelected && <DetailPanel incident={incident} onClose={onClose} hideHeader t={t} lang={lang} />}
@@ -191,11 +192,7 @@ function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onC
   const firstEntry = group.entries[0]
   const serviceLabel = firstEntry.affectedNames?.length > 1 ? firstEntry.affectedNames.join(', ') : firstEntry.serviceName
   const summed = sumGroupDuration(group)
-  const durationLabel = summed.resolvedCount === 0 && summed.hasOngoing
-    ? t('incidents.duration.ongoing')
-    : summed.hasOngoing
-      ? `${formatDurationMs(summed.totalMs)} + ${t('incidents.duration.ongoing')}`
-      : formatDurationMs(summed.totalMs)
+  const durationLabel = groupDurationText(summed, t)
   return (
     <>
       <div
@@ -257,11 +254,7 @@ function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSelect, on
   const firstEntry = group.entries[0]
   const serviceLabel = firstEntry.affectedNames?.length > 1 ? firstEntry.affectedNames.join(', ') : firstEntry.serviceName
   const summed = sumGroupDuration(group)
-  const durationLabel = summed.resolvedCount === 0 && summed.hasOngoing
-    ? t('incidents.duration.ongoing')
-    : summed.hasOngoing
-      ? `${formatDurationMs(summed.totalMs)} + ${t('incidents.duration.ongoing')}`
-      : formatDurationMs(summed.totalMs)
+  const durationLabel = groupDurationText(summed, t)
   return (
     <div>
       <button

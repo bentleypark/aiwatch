@@ -71,8 +71,20 @@ export const MTTR_PRIOR_WEIGHT = 2
  *  are pinned together by `src/utils/__tests__/derived-tag-sync.test.js`, the same treatment
  *  `service-groups.ts` gets against `SERVICE_CATEGORIES`. Both mirrors were missed on the first pass
  *  and published a day-bucket AS a recovery time while this file reported none. */
-export function carriesRecoveryTime<T extends { derived?: string }>(i: T): boolean {
-  return i.derived !== 'status_history'
+export function carriesRecoveryTime<T extends { derived?: string; startUnknown?: boolean }>(i: T): boolean {
+  // #1390 — `startUnknown` is the SECOND way an incident can be impactful, resolved and in-window while
+  // carrying no measurable recovery time: the provider published a record whose recovery predates its
+  // start, and its page had no impact window to recover the real one, so `startedAt` is anchored on
+  // `resolvedAt` and `duration` is null. Dropping it from `durations` alone is the trap the paragraph
+  // above names — `recoveryCandidates` would still be non-empty, `mttrHours` null, and the default
+  // below scores Recovery **0**: a fabricated worst-possible recovery replacing the fabricated `1m` the
+  // repair removed, measured at -19 Score on a service whose only in-window incident is anchored. So it
+  // leaves the SAMPLE, not just the durations, and Recovery abstains at full marks exactly as it does
+  // when the window holds no impactful incident at all.
+  //
+  // The two mirrors named above need no change on this axis: `src/utils/recovery.js` and the is-down
+  // MTTR line both already require a truthy `duration`, which an anchored incident does not have.
+  return i.derived !== 'status_history' && !i.startUnknown
 }
 
 /** MTTR (hours) from resolved-impactful incident durations (minutes). ≥3 → the robust MEDIAN (one

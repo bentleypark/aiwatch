@@ -1,4 +1,6 @@
-// Instatus (Next.js SSR + Nuxt SSR) Parser — for status pages like Perplexity, Mistral
+// Instatus (Next.js SSR + Nuxt SSR) Parser. Which services sit on it changes with each vendor
+// migration — `grep -n instatusUrl services.ts` for today's set; the historical names below record
+// where each behaviour was OBSERVED, not who is on the parser now.
 
 import type { TimelineEntry, Incident } from '../types'
 import { formatDuration } from '../utils'
@@ -35,8 +37,8 @@ export function mapInstatusImpact(raw: string | null | undefined): Incident['imp
 // each notice's `components: [{id}]` can be resolved to names (set on Incident.componentNames). That
 // lets a service like fal scope its API badge with `incidentKeywords: ['api']` (matched against
 // componentNames): a Website-only incident is dropped, a Website+API incident kept.
-// (Perplexity was the original example and no longer keyword-scopes — #1177 widened its scope to every
-// component its card displays. The name map still feeds its incidents, uptime and breakdown alike.)
+// (Perplexity was the original example, until #1177 widened its scope to every component its card
+// displays and #1390 moved it off Instatus entirely.)
 //
 // #911 — three object shapes coexist in the payload and must be told apart to map ONLY top-level
 // component id→name:
@@ -320,9 +322,9 @@ function wouldYieldIncident(notice: unknown): boolean {
 }
 
 /**
- * #1089 — Next.js counterpart of `parseInstatusIncidentsResult`. Kept in the same shape so the fix
- * covers `perplexity` / `fal` (Next format) and not just `mistral` (Nuxt) — a status-source guard that
- * protects one of three Instatus services would read as protection while two stayed exposed.
+ * #1089 — Next.js counterpart of `parseInstatusIncidentsResult`, kept in the same shape so the fix
+ * covers BOTH SSR formats. A status-source guard written against only the format the service in front
+ * of you happens to serve reads as protection while the other format stays exposed.
  */
 function parseInstatusNextIncidentsResult(html: string): InstatusIncidentsResult {
   const incidents = parseInstatusNextIncidents(html)
@@ -415,8 +417,7 @@ function parseInstatusNextIncidents(html: string): Incident[] {
       }
 
       // #623 — resolve affected component ids → names for component-aware filtering (e.g. fal's
-      // incidentKeywords:['api'] keeps a Website+API incident but drops a Website-only one; perplexity
-      // dropped that scoping in #1177 and keeps every component's incidents).
+      // incidentKeywords:['api'] keeps a Website+API incident but drops a Website-only one).
       const componentRefs = notice.components ?? []
       const componentNames = componentRefs
         .map((c) => componentNameById.get(c.id))
@@ -494,13 +495,8 @@ function matchBrace(s: string, open: number): number {
  *  over the page's own period (these pages declare `maxUptimeDays: 90`). Not the metric — we compute a
  *  30-day figure from the outage records — but shown beside ours on the detail page when they differ, so
  *  the reader can check us against the provider (the same disclosure Atlassian + incident.io get). */
-/** Takes ONE component name only — deliberately not widened alongside `parseInstatusUptime` (#1177).
- *  This value is attributed to the PROVIDER ("status page shows X% over 90d"), so it has to be a figure
- *  the provider actually published. A multi-component card has no such figure: a min across components
- *  would be a number we synthesized and labelled as theirs, and it need not even come from the same
- *  component our own worst-of picked (measured on status.perplexity.com 2026-07-28: our 30-day worst was
- *  Computer at 99.7, the page's worst was Website at 99.82). The caller withholds the disclosure for a
- *  multi-component scope instead — the #713 "invent no uptime value" rule applied to attribution. */
+/** Takes ONE component name only: this value is attributed to the PROVIDER ("status page shows X% over
+ *  90d"), so it has to be a figure the provider actually published. */
 export function parseInstatusReportedUptime(html: string, componentName: string | undefined): number | null {
   if (!componentName) return null
   if (html.includes('__NUXT_DATA__')) {
@@ -559,44 +555,11 @@ export interface InstatusUptime {
 
 export function parseInstatusUptime(
   html: string,
-  componentName: string | string[] | undefined,
+  componentName: string | undefined,
   nowMs: number = Date.now(),
   windowDays = 30,
 ): InstatusUptime | null {
   if (!componentName) return null
-  // #1177 — a MULTI-component scope: the service's uptime is the worst of the named components, the
-  // same #379 convention the badge uses and the same aggregation the Nuxt GROUP path below already
-  // applies to its members. Used by perplexity, whose card represents API + Website + Computer — its
-  // uptime must move when any of the three has an outage, or the card shows an incident next to 100%.
-  // `pct` takes the worst component and `todayWeightedOutageSec` worst-of's INDEPENDENTLY: the
-  // most-affected-today component can differ from the 30-day-worst one (same reasoning as the
-  // incident.io / Statuspage aggregations).
-  // A member that yields no figure contributes nothing rather than nulling the whole result — losing
-  // one component should not turn the service's uptime into "Not provided". But a PARTIAL scope can
-  // only ever look BETTER than reality (the missing member is the one that might have been down), so
-  // it warns: this is the one way the fix for #1177 could silently re-create #1177, and it is not
-  // covered by fetchService's `displayComponentIds` drift-warn, which fires on an id missing from the
-  // component TREE. The case that lands here is the opposite — the component exists (its chip renders)
-  // but carries no `componentsUptime` entry, e.g. the provider turns off its `showUptime`, or a newly
-  // added component's series is not backfilled yet (the #1004/#1025 young-component precedent).
-  // Silence would also be permanent: `todayWeightedOutageSec` rides this result into the `daily:{date}`
-  // counter and the 90-day `history:` archive, so an under-counted day cannot be reconstructed later.
-  if (Array.isArray(componentName)) {
-    let worst: InstatusUptime | null = null
-    const unresolved: string[] = []
-    for (const name of componentName) {
-      const one = parseInstatusUptime(html, name, nowMs, windowDays)
-      if (one === null) { unresolved.push(name); continue }
-      worst = worst === null ? one : {
-        pct: Math.min(worst.pct, one.pct),
-        todayWeightedOutageSec: Math.max(worst.todayWeightedOutageSec, one.todayWeightedOutageSec),
-      }
-    }
-    // Only when something DID resolve: an all-null scope already returns null (visible as "Not
-    // provided"), and the per-component `warnNextUptimeShape` has covered the shape-change case.
-    if (worst !== null && unresolved.length > 0) warnPartialUptimeScope(componentName, unresolved)
-    return worst
-  }
   if (html.includes('__NUXT_DATA__')) return parseInstatusNuxtUptime(html, componentName, nowMs, windowDays)
   if (html.includes('__next_f')) return parseInstatusNextUptime(html, componentName, nowMs, windowDays)
   return null
@@ -700,22 +663,9 @@ function instatusSeverityWeight(severity: string): number {
 // reverting to "Not provided" is diagnosable, matching the warn-once convention of mapInstatusImpact /
 // parseInstatusNextIncidents. A component that simply has no aggregate uptime is a legitimate null and
 // stays silent (not a shape change).
-// #1177 — warn-once per (scope, missing member) pair: a multi-component uptime scope published a
-// figure from only PART of its components. Separate from `warnNextUptimeShape` on purpose — that one
-// says "component X has no uptime", which reads as a benign per-component null; this one says the
-// SERVICE's uptime now covers less than the card claims, which is the operator-actionable fact.
-const warnedPartialUptimeScope = new Set<string>()
-function warnPartialUptimeScope(scope: string[], unresolved: string[]): void {
-  const key = `${scope.join('|')}→${unresolved.join('|')}`
-  if (warnedPartialUptimeScope.has(key)) return
-  warnedPartialUptimeScope.add(key)
-  console.warn(`[parseInstatusUptime] #1177 PARTIAL uptime scope: ${unresolved.join(', ')} of [${scope.join(', ')}] yielded no uptime — the published figure covers only the remaining component(s) and can only look better than reality`)
-}
-
 /** Test-only: reset the warn-once sets so a test can assert the warn fires (module state otherwise
  *  makes the second test in a file silent). */
 export function __resetInstatusUptimeWarnings(): void {
-  warnedPartialUptimeScope.clear()
   warnedInstatusNextUptime.clear()
 }
 

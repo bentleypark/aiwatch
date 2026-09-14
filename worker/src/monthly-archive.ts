@@ -54,6 +54,13 @@ export interface MonthlyIncidentEntry {
   // (e.g. Chinese) title, but the archive stores the English `titleMap` output. Absent on pre-#989
   // archives → treated as false (those blips count, same transition behaviour as #653/#1021).
   autoMonitor?: boolean
+  // #1390 — persisted for the same reason `derived` is, and it is equally un-re-derivable from the
+  // stored row: `startedAt` here is an ANCHOR on the incident's own `resolvedAt`, written because the
+  // provider published a record whose recovery predated its start and its page carried no impact
+  // window to recover the real one. `durationMin` is therefore 0 meaning UNKNOWN, not 0 meaning
+  // instant — and once frozen, nothing else in the row can tell those apart. Absent on pre-#1390
+  // archives → treated as a normal incident, as before.
+  startUnknown?: boolean
   // #1292 — persisted for the same reason `autoMonitor` is, and it is even less re-derivable: it is a
   // property of HOW the incident was obtained (synthesized from a per-day `status_history` bucket
   // rather than read from a feed item), which nothing in the stored row reveals. Without it every
@@ -655,6 +662,24 @@ export function accumulateMonthlyIncidents(
           existingDetail.finalStatus = finalStatus
           existingDetail.resolvedAt = inc.resolvedAt ?? existingDetail.resolvedAt
           existingDetail.impact = inc.impact ?? existingDetail.impact ?? null // #653 — snapshot/refresh impact
+          // #1390 — `startedAt` and `startUnknown` belong to the SAME measured shape as the two fields
+          // above and must move with them. `correctIncidentIoImpossibleTimes` produces one of two shapes
+          // for a given id depending on whether the status-page HTML was readable THAT cycle (a fetch
+          // failure at services.ts's `status-page HTML returned/fetch failed` leg is enough), so an
+          // incident can arrive repaired on one tick and anchored on the next. Refreshing half the shape
+          // freezes a row that is false in whichever direction it flipped: anchored→repaired left a
+          // 140-minute duration on a 0.672-second span still flagged `startUnknown` (so excluded from
+          // the avg-recovery divisor it had every right to be in), and repaired→anchored left
+          // `durationMin: 0` with NO flag — which is the `"0h 0m"` counted as a real recovery that this
+          // whole issue exists to remove. Reproduced on perplexity's live September records.
+          existingDetail.startedAt = inc.startedAt
+          if (inc.startUnknown) existingDetail.startUnknown = true
+          else delete existingDetail.startUnknown
+          // KNOWN LIMIT, two parts. `data.dates` was banked from the FIRST shape's `incidentDay(inc)`
+          // and is not revisited, so a flip crossing a UTC day leaves the banked date stale. And a flip
+          // crossing a MONTH never reaches this block at all — the period filter above drops the
+          // incident, so the row keeps the first shape entirely and the repaired incident is banked in
+          // no month. Both need the old day/month to be removable, which this accumulator cannot do.
         }
         continue
       }
@@ -689,6 +714,7 @@ export function accumulateMonthlyIncidents(
         impact: inc.impact ?? null, // #653 — for archive-window estimate-uptime weighting
         ...(inc.autoMonitor ? { autoMonitor: true } : {}), // #989 — so the monthly Score excludes it too
         ...(inc.derived ? { derived: inc.derived, ...(inc.derivedDay ? { derivedDay: inc.derivedDay } : {}) } : {}), // #1292 — guard + the exact day survive the round-trip
+        ...(inc.startUnknown ? { startUnknown: true } : {}), // #1390 — so the frozen row can still say "unknown", not "0 minutes"
       })
 
       const date = incidentDay(inc)
@@ -1111,7 +1137,11 @@ export function computeMonthlyScore(
     derivedDay: e.derivedDay,
     startedAt: e.startedAt,
     resolvedAt: e.resolvedAt,
-    duration: e.finalStatus === 'resolved' ? minutesToDurationString(e.durationMin) : null,
+    // #1390 — `minutesToDurationString(0)` is "0h 0m", which would publish a stated duration for a row
+    // whose duration we declined to state. Null is what every reader already renders as unknown, and it
+    // is what keeps the monthly Score's Recovery abstaining exactly as the live one does.
+    duration: e.startUnknown || e.finalStatus !== 'resolved' ? null : minutesToDurationString(e.durationMin),
+    ...(e.startUnknown ? { startUnknown: true } : {}),
     timeline: [],
   }))
   const service: ServiceStatus = {
@@ -1418,7 +1448,7 @@ export function aggregateIncidentDurations(
   count: number,
   accumulatorTotal: number,
   accumulatorLongest: number,
-): { totalMin: number | null; countedTotalMin: number | null; longestMin: number | null; countedCount: number | null; excludedAutoMonitor: number; excludedAutoMonitorMin: number; excludedDerived: number; excludedDerivedMin: number } {
+): { totalMin: number | null; countedTotalMin: number | null; longestMin: number | null; countedCount: number | null; excludedAutoMonitor: number; excludedAutoMonitorMin: number; excludedDerived: number; excludedDerivedMin: number; excludedStartUnknown: number } {
   if (!incidents || incidents.length === 0 || incidents.length < count) {
     // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source. It is a
     // pre-summed total that cannot be re-filtered per-incident, so NEITHER per-entry exclusion (#1021
@@ -1438,6 +1468,7 @@ export function aggregateIncidentDurations(
       excludedAutoMonitorMin: 0,
       excludedDerived: 0,
       excludedDerivedMin: 0,
+      excludedStartUnknown: 0,
     }
   }
   // #1021 — EXCLUDE non-reliability advisories (usage-limits / quota / billing / deprecation / model-access,
@@ -1482,6 +1513,7 @@ export function aggregateIncidentDurations(
   //                    rows and would report a 24h longest, a figure no incident ever had.
   let excludedDerived = 0
   let excludedDerivedMin = 0
+  let excludedStartUnknown = 0
   for (const e of incidents) {
     if (e.derived === 'status_history') {
       const d = typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
@@ -1497,6 +1529,17 @@ export function aggregateIncidentDurations(
       continue
     }
     if (isNonReliabilityAdvisory(e.title ?? '')) continue
+    // #1390 — an anchored row lands in the DIVISOR while contributing 0 to the numerator, which is the
+    // exact corruption the block above argues against for day buckets. Its duration is unknown, not
+    // zero. So: out of `countedCount` and `longest`, and — like a day bucket — still added to `total`,
+    // which is why the increment runs before the `continue` rather than after it. `total` is numerically
+    // unchanged while `durationMin` is 0, but an operator #1019 override rewrites that field (and clears
+    // this flag, see overrides.ts) so the ordering has to be right before it matters.
+    if (e.startUnknown) {
+      total += typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
+      excludedStartUnknown++
+      continue
+    }
     countedCount++
     const d = typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
     total += d
@@ -1508,6 +1551,10 @@ export function aggregateIncidentDurations(
     countedTotalMin: countedTotal > 0 ? countedTotal : null,
     longestMin: longest > 0 ? longest : null,
     countedCount, excludedAutoMonitor, excludedAutoMonitorMin, excludedDerived, excludedDerivedMin,
+    // #1390 — a derived signal that fails toward "everything is fine" needs a scoped diagnostic, the
+    // rule this function's own siblings above state. Counted, so an unexplained drop in countedCount is
+    // attributable rather than a mystery.
+    excludedStartUnknown,
   }
 }
 
@@ -1723,7 +1770,7 @@ export async function buildMonthlyArchive(
     // shorter — Deepgram June read 176h42m/141h10m vs the real 45h33m/27h). The per-incident
     // durationMin is updated to the final value, so it's the source of truth; the accumulator is the
     // fallback only when the list was truncated (>MAX cap, no longer full-population).
-    const { totalMin, countedTotalMin, longestMin, countedCount, excludedAutoMonitor, excludedAutoMonitorMin, excludedDerived, excludedDerivedMin } = aggregateIncidentDurations(
+    const { totalMin, countedTotalMin, longestMin, countedCount, excludedAutoMonitor, excludedAutoMonitorMin, excludedDerived, excludedDerivedMin, excludedStartUnknown } = aggregateIncidentDurations(
       incidentList, incSvc?.count ?? 0, incSvc?.totalMinutes ?? 0, incSvc?.longestMinutes ?? 0,
     )
     // #1210 — the exclusion withholds three numbers, and a fully-excluded service archives
@@ -1742,6 +1789,13 @@ export async function buildMonthlyArchive(
       // `avgResolutionMin: null` — on a permanent record the reports site publishes. Without the line
       // nothing in the archive explains it.
       console.warn(`[monthly-archive] #1292-EXCLUDED ${id}: ${excludedDerived}/${incidentList?.length ?? 0} status_history-derived day-bucket(s) (${excludedDerivedMin}m) count toward downtime but NOT toward the longest-incident or avg-recovery figures — they carry no recovery time`)
+    }
+    if (excludedStartUnknown > 0) {
+      // Own prefix, same discipline as the two above. Without it the row silently leaves `countedCount`
+      // and `longestIncidentMin` while still counting toward `totalDowntimeMin` — the same
+      // fails-toward-fine combination #1292 needed a line for, and nothing else in the archive explains
+      // a divisor that dropped.
+      console.warn(`[monthly-archive] #1390-EXCLUDED ${id}: ${excludedStartUnknown}/${incidentList?.length ?? 0} incident(s) with no derivable duration count toward downtime but NOT toward the longest-incident or avg-recovery figures — their start is an anchor on their own resolvedAt`)
     }
     if (countedCount == null && (incSvc?.count ?? 0) > 0) {
       // Keyed on the BRANCH, not on flags among the surviving rows: truncation splices the OLDEST

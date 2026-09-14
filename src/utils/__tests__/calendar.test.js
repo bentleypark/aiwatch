@@ -271,3 +271,58 @@ describe('status badge ↔ calendar impact label disjointness (#674 anti-collisi
       .toEqual(['Operational', 'Minor', 'Major', 'Critical'])
   })
 })
+
+// #1390 — Phase 2 (the per-incident supplement) used to be gated on `days === 30`, a window LENGTH
+// standing in for a provenance fact. It held only while every 30-day service was Atlassian. Giving
+// perplexity a `statusComponentId` flipped its window to 30 and switched the gate with it, so an
+// incident.io incident the provider published with NO `component_impacts` row vanished from the
+// calendar while the Incident History card one section below still listed it. Six services were
+// already in that state: openai, chatgpt, codex, langsmith, langfuse, junie.
+describe('buildCalendarFromIncidents — the Phase 2 gate asks provenance, not window length (#1390)', () => {
+  const day = (n) => { const d = new Date(Date.now() - n * 86_400_000); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+  const at = (n, h = 9) => { const d = new Date(Date.now() - n * 86_400_000); d.setHours(h, 30, 0, 0); return d.toISOString() }
+  /** The real shape: an incident.io service whose provider wrote no impact row for THIS incident, so
+   *  `dailyImpact` (built from `component_impacts`) knows nothing about the day it happened. */
+  const incidents = [{ id: 'i1', title: 'Computer Tasks Degraded', status: 'resolved', impact: null, startedAt: at(13), resolvedAt: at(13, 10) }]
+  const dailyImpact = { [at(3)]: 'critical' }   // a DIFFERENT day, which the impact rows do cover
+  const cellFor = (cal, daysAgo, windowDays) => cal[windowDays - 1 - daysAgo]
+
+  it('paints the incident day when dailyImpact is INCOMPLETE, even on a 30-day window', () => {
+    // The regression. `days` is 30 here — exactly what used to disable the supplement.
+    const cal = buildCalendarFromIncidents(incidents, dailyImpact, 30, 'operational', false)
+    expect(cal).toHaveLength(30)
+    expect(cellFor(cal, 13, 30)).toBe('minor')
+    expect(cellFor(cal, 3, 30), 'the impact-row day is unaffected').toBe('critical')
+  })
+
+  it('still skips the supplement when dailyImpact IS complete', () => {
+    // Atlassian / Better Stack / AI Studio: Phase 1 owns every day and incidents would add noise from
+    // unrelated components. Pinned so the fix does not quietly widen into them.
+    const cal = buildCalendarFromIncidents(incidents, dailyImpact, 30, 'operational', true)
+    expect(cellFor(cal, 13, 30)).toBe('operational')
+    expect(cellFor(cal, 3, 30)).toBe('critical')
+  })
+
+  it('window length no longer decides it — 14 and 30 agree for the same source', () => {
+    // The defect in one assertion: these two disagreed before, purely because of `days`.
+    const wide = buildCalendarFromIncidents(incidents, dailyImpact, 30, 'operational', false)
+    const narrow = buildCalendarFromIncidents(incidents, dailyImpact, 14, 'operational', false)
+    expect(cellFor(wide, 13, 30)).toBe(cellFor(narrow, 13, 14))
+    expect(cellFor(wide, 13, 30)).toBe('minor')
+  })
+
+  it('an absent flag reproduces the old derivation exactly (payloads cached before the field)', () => {
+    // Not a preference — a cached `services:latest` written before the worker shipped this field must
+    // render as it did, rather than flipping every complete-record calendar on a deploy.
+    expect(cellFor(buildCalendarFromIncidents(incidents, dailyImpact, 30, 'operational'), 13, 30)).toBe('operational')
+    expect(cellFor(buildCalendarFromIncidents(incidents, dailyImpact, 14, 'operational'), 13, 14)).toBe('minor')
+  })
+
+  it('no dailyImpact at all still supplements, whatever the flag says', () => {
+    // RSS/JSON-only services (Bedrock/Azure) have no per-day record to be complete or incomplete.
+    for (const flag of [undefined, false, true]) {
+      const cal = buildCalendarFromIncidents(incidents, undefined, 30, 'operational', flag)
+      expect(cellFor(cal, 13, 30), `flag=${String(flag)}`).toBe('minor')
+    }
+  })
+})

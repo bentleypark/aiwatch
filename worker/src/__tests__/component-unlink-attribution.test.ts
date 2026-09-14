@@ -654,7 +654,7 @@ describe('#1038 Part B filterByComponentStatus — a canIdBypass service never n
   it('the NAME fallback STILL serves a name-scoped service (Part B killed it only for id-scoped)', () => {
     // The witness is `claudeai`, which GENUINELY flows through filterByComponentStatus in production
     // (apiUrl status.claude.com + statusComponent 'claude.ai', not canIdBypass) — NOT a `statusComponent`
-    // service with `apiUrl: null` like mistral/perplexity/fal, which never reach this gate at all (they
+    // service with `apiUrl: null` (`fal` today), which never reaches this gate at all (it
     // would be a tested twin, #966). An impact:none active incident naming claude.ai is kept via the name
     // fallback — proving Part B removed the name axis ONLY for canIdBypass services, not for these.
     expect(canIdBypass(cfg('claudeai'))).toBe(false)

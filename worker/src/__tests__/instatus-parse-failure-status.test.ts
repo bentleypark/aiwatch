@@ -10,11 +10,14 @@ import { fetchService, SERVICES } from '../services'
 // Drives the real `fetchService` entry point (the `auto-monitor-tag.test.ts` harness pattern) so the
 // call chain parse → flag → derive is exercised, not a hand-assembled imitation of it.
 
-// #1381 — the fixture service is PERPLEXITY, not Mistral. Mistral was this suite's canonical
-// Instatus service until it migrated to Rootly; a test that keeps driving it stops exercising the
-// Instatus wiring it exists to guard while still passing, for the wrong reason. Perplexity and fal
-// are the two services still on Instatus.
-const instatusSvc = SERVICES.find((s) => s.id === 'perplexity')!
+// #1381 → #1390 — the fixture service is FAL. This suite has now been re-pointed twice for the same
+// reason: Mistral migrated to Rootly, then Perplexity to incident.io, and a test that keeps driving a
+// service which has left Instatus stops exercising the wiring it exists to guard while still passing.
+// fal is the last service on Instatus, so the next such migration ends this suite rather than moving it.
+// The payload flavour is incidental — `parseInstatusUptime` dispatches on the `__NUXT_DATA__` /
+// `__next_f` marker in the BYTES, not on the service — and what is under test is what fetchService does
+// with the parse RESULT. fal shares the `statusComponent: 'API'` the fixtures below name.
+const instatusSvc = SERVICES.find((s) => s.id === 'fal')!
 
 /** A structurally VALID Nuxt payload carrying one ONGOING incident. */
 function healthyNuxtHtml() {
@@ -174,7 +177,7 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
     const mainPage = `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
 
     // This test used a 404-on-`/activity/` stub to stage "main page parses, scrape does not". That
-    // predicate has been dead since the suite moved to perplexity, and staging it by call order does
+    // predicate has been dead since the suite moved off Mistral, and staging it by call order does
     // not help either: `mainPage` is a components/uptime payload, so the scrape half fails to parse
     // whichever response it gets, and the 404 arm changed nothing. Removed rather than restaged —
     // whether a FAILED scrape fetch flags the source is the `#1089` block's question, asserted there

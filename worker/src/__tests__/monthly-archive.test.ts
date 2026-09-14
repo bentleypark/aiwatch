@@ -1152,13 +1152,13 @@ describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
   })
 
   it('returns null/null when there are no incidents', () => {
-    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0 })
-    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0 })
+    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0 })
+    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0 })
   })
 
   it('treats a full list of zero-duration incidents as null (no downtime)', () => {
     const r = aggregateIncidentDurations([entry(0), entry(0)], 2, 0, 0)
-    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0 })
+    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0 })
   })
 })
 
@@ -1234,7 +1234,7 @@ describe('aggregateIncidentDurations (#1210 — autoMonitor exclusion)', () => {
     // The other 43 services carry no autoMonitor entries — the fix must be a no-op for them.
     const unflagged = REAL_DURATIONS.map(real)
     const r = aggregateIncidentDurations(unflagged, unflagged.length, 0, 0)
-    expect(r).toEqual({ totalMin: 47, countedTotalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0 })
+    expect(r).toEqual({ totalMin: 47, countedTotalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0 })
   })
 
   it('treats an ABSENT flag as false, so pre-#989 archives still count (no retroactive deflation)', () => {
@@ -2968,5 +2968,55 @@ describe('toArchiveScoreInput (#1006)', () => {
     // vanishes from the archive instead of appearing with a withheld figure.
     const out = toArchiveScoreInput({ id: 'bedrock' }, { score: null, grade: null, confidence: 'low' })
     expect(out).toEqual({ id: 'bedrock', aiwatchScore: null, scoreGrade: null, scoreConfidence: 'low' })
+  })
+})
+
+// #1390 — `correctIncidentIoImpossibleTimes` produces ONE OF TWO shapes for the same incident id
+// depending on whether the status-page HTML was readable that cycle (a fetch failure is enough), so a
+// row can arrive repaired on one tick and anchored on the next. The accumulator's update path used to
+// refresh `durationMin`/`resolvedAt`/`finalStatus`/`impact` and leave `startedAt`/`startUnknown` at
+// whatever the first tick wrote — freezing a row that is false in whichever direction it flipped, on a
+// permanent record. Reproduced on perplexity's live September records.
+describe('#1390 accumulator — a repaired/anchored flip re-snapshots the WHOLE measured shape', () => {
+  const ID = '01M1Z156VYPETMR4QRNMQMF3AM'
+  const svc = (inc: Record<string, unknown>) => ({
+    id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api' as const,
+    status: 'operational' as const, latency: null, uptime30d: 99.81, lastChecked: '',
+    incidents: [{ id: ID, title: 'connectors', status: 'resolved' as const, impact: 'major' as const, timeline: [], ...inc }],
+  })
+  const repaired = { startedAt: '2026-09-05T04:50:00Z', resolvedAt: '2026-09-05T07:09:00.672Z', duration: '2h 20m' }
+  const anchored = { startedAt: '2026-09-05T07:09:00.672Z', resolvedAt: '2026-09-05T07:09:00.672Z', duration: null, startUnknown: true }
+  const entry = (d: ReturnType<typeof accumulateMonthlyIncidents>) => d.services.perplexity.incidents!.find(e => e.id === ID)!
+
+  it('anchored tick then repaired tick: the flag is cleared and the real start lands', () => {
+    // Before: 140 minutes claimed across a 0.672-second span, still flagged — so a fully measured
+    // incident was excluded from the avg-recovery divisor it belonged in.
+    const first = accumulateMonthlyIncidents(null, [svc(anchored) as never], '2026-09', [])
+    expect(entry(first).startUnknown).toBe(true)
+    const second = accumulateMonthlyIncidents(first, [svc(repaired) as never], '2026-09', [])
+    const e = entry(second)
+    expect(e.startUnknown, 'a repaired row must not stay flagged').toBeUndefined()
+    expect(e.startedAt).toBe('2026-09-05T04:50:00Z')
+    expect(e.durationMin).toBe(140)
+  })
+
+  it('repaired tick then anchored tick: the flag is set, so the row leaves the divisor', () => {
+    // Before: `durationMin: 0` with NO flag — the `"0h 0m"` counted as a real recovery that this whole
+    // issue exists to remove.
+    const first = accumulateMonthlyIncidents(null, [svc(repaired) as never], '2026-09', [])
+    expect(entry(first).startUnknown).toBeUndefined()
+    const second = accumulateMonthlyIncidents(first, [svc(anchored) as never], '2026-09', [])
+    const e = entry(second)
+    expect(e.startUnknown, 'an anchored row must be flagged, whatever it was before').toBe(true)
+    expect(e.startedAt).toBe('2026-09-05T07:09:00.672Z')
+    expect(aggregateIncidentDurations([e], 1, 0, 0).countedCount, 'and therefore leaves the avg-recovery divisor').toBe(0)
+  })
+
+  it('an ordinary incident is untouched by the re-snapshot', () => {
+    // The control: `startedAt` is re-read every tick now, which must be a no-op for a stable record.
+    const ok = { startedAt: '2026-09-05T04:50:00Z', resolvedAt: '2026-09-05T05:50:00Z', duration: '1h 0m' }
+    const first = accumulateMonthlyIncidents(null, [svc(ok) as never], '2026-09', [])
+    const second = accumulateMonthlyIncidents(first, [svc(ok) as never], '2026-09', [])
+    expect(entry(second)).toEqual(entry(first))
   })
 })

@@ -18,7 +18,7 @@
 // can never abort the cron's recovery flow.
 
 import type { KVLike } from './utils'
-import { kvPut } from './utils'
+import { kvPut, isTimeOrderImpossible } from './utils'
 import type { Incident } from './types'
 
 /** One durable resolved-incident record. `predicted*`/`affectedScope`/`model`
@@ -144,7 +144,7 @@ const MAX_SUMMARY = 500
  */
 export function buildHistoryRecord(
   svc: { id: string; provider: string; category: 'api' | 'app' | 'agent' },
-  inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null; derived?: string },
+  inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null; derived?: string; startUnknown?: boolean },
   analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; summary?: string; affectedScope?: string[]; model?: string } | null,
   now: string,
 ): IncidentHistoryRecord | null {
@@ -158,6 +158,27 @@ export function buildHistoryRecord(
   // permanently. Gated HERE rather than at the call sites: both cron resolution paths funnel through
   // this function, and the status-edge one has no `alertedNewMap` gate to piggyback on.
   if (inc.derived === 'status_history') return null
+  // #1390 — a record that recovered BEFORE it started must not enter this corpus. `durationMinOf`
+  // clamps such a pair to 0, and 0 here is not a harmless zero: `accuracyOf` grades every prediction
+  // against a 0-hour actual (always `over-predicted`, and that ratio is published daily to Discord and
+  // monthly in `MonthlyArchive.predictionAccuracy`), and `findSimilarHistory` grounds the AI's NEXT
+  // estimate on it — teaching the model that an incident with this title recovers instantly. The store
+  // has NO TTL, so a single bad write is permanent. Same reasoning as the `status_history` gate above,
+  // and gated here for the same reason: both cron resolution paths funnel through this function.
+  //
+  // Belt-and-braces with the `correctIncidentIoImpossibleTimes` repair in `fetchService`, deliberately:
+  // that one runs only in the `apiUrl` branch, and this store is the one that cannot be re-derived if
+  // an unrepaired record ever reaches it from another branch. The production corpus was swept before
+  // this shipped and held no such record, so this closes the path before it is taken, not after.
+  // Both halves of the #1390 repair are refused here, because both would write a 0: an UNrepaired
+  // record still ordered backwards (`durationMinOf` clamps it), and a repaired-but-unrecoverable one,
+  // whose `startedAt` is `resolvedAt` by construction and whose `startUnknown` says so out loud. The
+  // second is why this cannot simply re-test the ordering — after the repair that record is perfectly
+  // well-ordered and perfectly zero-length.
+  if (inc.startUnknown || isTimeOrderImpossible(inc.startedAt, inc.resolvedAt)) {
+    console.warn(`[buildHistoryRecord] ${svc.id}/${inc.id}: no trustworthy start (${inc.startUnknown ? 'startUnknown' : 'recovery predates start'}) — refusing to write a 0-minute record into the no-TTL corpus`)
+    return null
+  }
   const resolvedAt = inc.resolvedAt ?? now
   // #1003 — the durable record is the ledger the accuracy aggregate AND the RAG grounding are built
   // from, so it must store the hindsight-free baseline, not the re-analysis-inflated current estimate.

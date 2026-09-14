@@ -17,7 +17,7 @@ import {
   type StoredRootlyFeed,
 } from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -214,21 +214,41 @@ export const SERVICES: ServiceConfig[] = [
   // componentDenylist mirrors the cohere/groq convention — a future non-availability component
   // (Website/Docs) must not enter the dynamic worst-of badge or the breakdown.
   { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', displayAllComponents: true, componentSurfaces: ['Developer Console'], componentDenylist: ['Website', 'Docs'] },
-  // #623 — status.perplexity.com (Instatus, Next.js) has 3 components: "API" (Sonar) + "Website"
-  // (the consumer perplexity.ai) + "Computer" (agentic/computer-use surface, added #911), all three
-  // shown on the breakdown card (displayComponentIds, #761/#911).
-  // #1177 — the card therefore represents ALL THREE, so the incident list and uptime cover all three
-  // too. #623's `incidentKeywords: ['api']` scoped incidents to the API component while the card kept
-  // displaying the other two: on 2026-07-23 `Computer sandbox issues` (MAJOROUTAGE, tagged onto
-  // Computer) was dropped, so the card read "Computer chip Major Outage · Recent Incidents empty ·
-  // uptime 100%". Dropping the keyword scoping is the fix — this is a SINGLE-OWNER page, so every
-  // notice on it is a Perplexity incident and there is no sibling product to leak in (the reason
-  // keyword scoping exists for a shared page like status.openai.com).
-  // `uptimeOverDisplayComponents` moves uptime onto the same three components (worst-of); without it
-  // the Computer outage would show as an incident while uptime still read the API component's 100%.
-  // #635 — statusComponent 'API' stays as the PRIMARY component: the uptime fallback for the cycle
-  // where the page's component list can't be parsed.
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l'], uptimeOverDisplayComponents: true },
+  // #623/#1177 → #1390 — status.perplexity.com moved from Instatus to incident.io. The page carries
+  // its own migration notice: announced 2026-09-07, cut over by DNS on 2026-09-10 21:00 UTC — the very
+  // cycle our `officialUptime` snapshot went null. The Instatus parser cannot read an incident.io page,
+  // so the integration was dead: parse failure → `trackFetchFailure` → #500's "unreachable 1h+" alert,
+  // which misdescribes it (the page answered 200 in 0.7s; the FETCH succeeded and the PARSE failed).
+  //
+  // The old roster was API + Website + Computer; the new one is Website + App + Computer, flat, no
+  // groups, no descriptions. There is no `API` component any more and nothing succeeds it, so #635's
+  // `statusComponent: 'API'` primary had nothing left to point at. That costs nothing here, because
+  // #1177 had ALREADY widened this card to every component it displays — incidents unscoped (this is a
+  // SINGLE-OWNER page, so every notice on it is a Perplexity incident) and uptime worst-of over the
+  // displayed set. The page-wide scope below carries that same decision across rather than making a new
+  // one: statusComponentIds == displayComponentIds == the whole roster, so badge, uptime (#1006) and
+  // impact calendar share one scope.
+  //
+  // `incidentIoComponentId` stays SINGLE while that scope is a list. It is what
+  // `parseIncidentIoReportedUptime` reads for the provider-ATTRIBUTED disclosure, and over a list that
+  // function returns the min across components — our own aggregate wearing the provider's label, the
+  // number #1177 refused to publish. App is the primary: the page tagged its `Investigating API issue`
+  // (2026-08-13) onto App, and the primary also drives the #135 component-miss alert.
+  //
+  // A SECOND consequence, disclosed rather than left to be found: `calendarDays` is derived as
+  // `statusComponentId ? 30 : 14`, so giving perplexity a primary moved its Status Calendar from 14 days
+  // to 30. Kept, not reverted — all three components' `data_available_since` clear 30 days, the page
+  // itself draws 90, and 30 matches the uptime and Score windows as well as the six other incident.io
+  // services that carry a `statusComponentId`. But the derivation is a config flag standing in for "how
+  // much per-day record exists", which is a defect in its own right (#1406, with the measurement:
+  // `fireworks` publishes 57 days and draws 14). When that rule is redone, re-decide this with it.
+  // One behaviour this migration DOES change, worth knowing rather than discovering: the Instatus
+  // branch never reached `filterByComponentStatus`, and the Atlassian/incident.io branch does. So an
+  // ACTIVE incident whose components have all returned to operational is now dropped (perplexity sets
+  // no `incidentExclude`, so `canIdBypass` is false and the #1104 id-keep route is off). That is the
+  // same regime every other incident.io service here already runs under — not a perplexity-specific
+  // concession.
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: 'https://status.perplexity.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.perplexity.com/incidents', incidentIoComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6'], displayComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6'] },
   // #1165 — renamed 'xAI (Grok)' → 'xAI API': now that Grok's consumer app is its own service
   // ('grok', in the Apps section below), "(Grok)" on this card would misname the API surface.
   { id: 'xai', name: 'xAI API', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
@@ -298,7 +318,7 @@ export const SERVICES: ServiceConfig[] = [
   // pre-migration records while they still fall inside the rolling score window.
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.cloudflarestatus.com/services?search=replicate', apiUrl: null, cloudflareStatusComponentIds: ['fvgfcmy66tdr'], retainIncidentHistoryUntil: '2026-10-11T00:00:00.000Z' },
   // fal.ai (#758) — generative-media inference platform (image/video/audio/3D, 600+ models incl.
-  // FLUX/Kling/Hailuo). Peer of Replicate/Hugging Face. Instatus (Next.js) page like Perplexity:
+  // FLUX/Kling/Hailuo). Peer of Replicate/Hugging Face. Instatus (Next.js) page:
   // `statusComponent: 'API'` selects the Instatus "API" group component for the official uptime%
   // (parseInstatusNextUptime), and `incidentKeywords: ['api']` (matched against componentNames, #623)
   // scopes the badge + incident list to API-affecting incidents — a Website/Dashboard-only incident is
@@ -1318,8 +1338,8 @@ export function __resetMissingJoinWarnThrottle(): void { warnedMissingJoin.clear
  * of which prefix-match — so the widening is latent until a future opt-in sets `statusComponentIds` ALONGSIDE a `statusComponent`
  * name — ids alone leave rule 1 inactive entirely (see the INACTIVE warn below).
  *
- * Rule 1 is default-off so single-tenant services (mistral/perplexity/fal, whose broad
- * `statusComponent: 'API'` would wrongly drop a specific-component incident) and keyword-scoped
+ * Rule 1 is default-off so a single-tenant service whose broad `statusComponent: 'API'` would wrongly
+ * drop a specific-component incident (`fal` today) and keyword-scoped
  * siblings (claudeai/claudecode) are byte-unchanged in BOTH branches. Rule 2 is NOT flag-gated, so it
  * does apply to claudeai/claudecode — they set `apiUrl` + `statusComponentId` and so reach this guard.
  *
@@ -1755,7 +1775,9 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
     ...(parsed.reportedUptime != null && parsed.reportedUptime !== parsed.flashdutyUptime?.pct
       ? { uptimeReported: parsed.reportedUptime, uptimeReportedDays: 90 }
       : {}),
-    ...(Object.keys(parsed.dailyImpact).length > 0 ? { dailyImpact: parsed.dailyImpact } : {}),
+    // #1390 — Flashduty publishes its own per-day record, the same class as Atlassian's buckets, so
+    // the calendar owns every day and must not also paint individual incidents onto it.
+    ...(Object.keys(parsed.dailyImpact).length > 0 ? { dailyImpact: parsed.dailyImpact, dailyImpactComplete: true } : {}),
     ...(parsed.components.length >= 2 ? { components: parsed.components } : {}),
   }
   // A FRESH feed (≤ soft-stale window) → no longer stale: strip the config's incidentSourceStale so
@@ -1883,8 +1905,11 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
     // Gated on the SAME completeness as the percentage. A lost tooltip leaves its day absent, and an
     // absent day renders as a clean one — the identical "every gap fails toward no downtime"
     // asymmetry, on a surface that also outranks the archive (`uptime-archive.ts`).
+    // #1390 — same as Flashduty: `up.days` IS Rootly's own per-day record, so the calendar owns every
+    // day. Stating it here is what keeps `days === 30` from deciding for this service the next time
+    // someone touches its `calendarDays`.
     ...(up.pct != null && Object.keys(up.days).length > 0
-      ? { dailyImpact: rootlyDayImpactMap(up.days) }
+      ? { dailyImpact: rootlyDayImpactMap(up.days), dailyImpactComplete: true }
       : {}),
     ...(components.length >= 2 ? { components } : {}),
   }
@@ -2342,6 +2367,24 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           console.warn(`[fetchService] ${config.id} status-page HTML fetch failed:`, err instanceof Error ? err.message : err)
         }
       }
+      // #1390 — repair incidents whose published record recovered BEFORE it started, before anything
+      // reads their dates. Must precede filterIncidents for the #940 reason the tag attachers below
+      // give, and it must precede `score.ts` / `buildIncidentAlerts` too: the fabricated `1m` it
+      // removes is exactly what MTTR is computed from.
+      //
+      // NOT gated on a service or platform flag. The first cut gated on `incidentIoBaseUrl` and
+      // thereby skipped `turbopuffer` — an incident.io page configured without that field (see the
+      // dispatch note above), and one of the four services measurably carrying the defect today. The
+      // impossible ordering IS the gate; a config predicate beside it can only ever exclude someone.
+      // It costs one `.some()` per service per cycle and returns the same array when nothing is
+      // impossible, which is every service on every ordinary cycle.
+      //
+      // Reach, stated rather than assumed: this is the `apiUrl` branch, so the Instatus / Rootly / RSS
+      // / gcloud branches do not call it. Every service measured to carry the defect on 2026-09-14
+      // (turbopuffer, elevenlabs, groq, junie, and perplexity once #1390 lands) arrives here, and those
+      // other branches produced zero impossible records — but that is a measurement, not a guarantee,
+      // and `buildHistoryRecord`'s own gate is what covers them for the store that cannot be re-derived.
+      incidents = correctIncidentIoImpossibleTimes(incidents, uptimeHtml)
       if (tagsNeedHtml) {
         // Must precede filterIncidents: a transform after the filter can't resurrect what it dropped (#940).
         const tagged = uptimeHtml
@@ -2505,9 +2548,14 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // must NOT clobber the incident.io impacts (the #693-follow-up calendar-blank regression). So
       // fall through to ioDailyImpact unless the Statuspage map is non-empty.
       const statuspageDaily = uptimeResult?.dailyImpact
-      const dailyImpact = (statuspageDaily && Object.keys(statuspageDaily).length > 0)
+      const usedStatuspageDaily = !!(statuspageDaily && Object.keys(statuspageDaily).length > 0)
+      const dailyImpact = usedStatuspageDaily
         ? statuspageDaily
         : (ioDailyImpact && Object.keys(ioDailyImpact).length > 0 ? ioDailyImpact : null)
+      // #1390 — WHICH branch won is the fact the calendar needs, so publish it rather than leaving the
+      // client to infer provenance from the window length. Atlassian's buckets cover every day;
+      // incident.io's `component_impacts` can omit an incident entirely.
+      const dailyImpactComplete = usedStatuspageDaily
 
       // Uptime% — AIWatch COMPUTES it, from the provider's own published records. The two branches below
       // (Atlassian + incident.io) share ONE formula and ONE window (30 days); #1110 — the other sources
@@ -2672,7 +2720,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         ...(components.length > 0 ? { components } : {}),
-        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
+        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete } : {}),
         calendarDays: config.statusComponentId ? 30 : 14,
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
         ...(uptimeWindow != null ? { uptimeWindowDays: uptimeWindow } : {}),
@@ -2999,51 +3047,20 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         if (res.ok) {
           const mainHtml = await res.text()
           const instatusComps = parseInstatusComponents(mainHtml)
-          // #1177 — the uptime SCOPE. Default: the single `statusComponent`. With
-          // `uptimeOverDisplayComponents` (perplexity), the whole displayed set instead, so uptime
-          // covers exactly what the card shows and what the incident list now carries.
-          // The parser addresses components by NAME, so the ids are joined to names through THIS page's
-          // own component list — no second hand-maintained mapping to drift. An empty join (component
-          // parse failed / every id renamed) falls back to `statusComponent`: losing the wider scope is
-          // a worse-but-correct number, losing uptime entirely is a blank card.
-          const uptimeScope = ((): string | string[] | undefined => {
-            if (!config.uptimeOverDisplayComponents) return config.statusComponent
-            // Half-applied config, not upstream drift: the flag is on but there is no set to widen to,
-            // so uptime silently reverts to the single component while the incident list stays wide —
-            // the "1 incident listed, uptime 100%" split the flag exists to prevent. It cannot happen
-            // in-repo (`perplexity-scope.test.ts` sweeps SERVICES), so this is the runtime backstop for
-            // a config edited outside that guard.
-            if (!config.displayComponentIds?.length) {
-              console.warn(`[fetchService] ${config.id} sets uptimeOverDisplayComponents but has no displayComponentIds — uptime stays scoped to statusComponent "${config.statusComponent}" while incidents cover the whole page`)
-              return config.statusComponent
-            }
-            const names = config.displayComponentIds
-              .map((id) => instatusComps.find((c) => c.id === id)?.name)
-              .filter((n): n is string => !!n)
-            if (names.length > 0) return names
-            // Every configured id is gone from the page (or the component parse yielded nothing). Say
-            // what the reader gets, not just what we tried: with no `statusComponent` there is no
-            // fallback at all and the service loses its uptime — an operator reading "falling back"
-            // would otherwise stop looking.
-            console.warn(config.statusComponent
-              ? `[fetchService] ${config.id} uptimeOverDisplayComponents: no displayComponentIds resolved to a component name — falling back to statusComponent "${config.statusComponent}"`
-              : `[fetchService] ${config.id} uptimeOverDisplayComponents: no displayComponentIds resolved to a component name and no statusComponent is configured — NO uptime will be computed this cycle`)
-            return config.statusComponent
-          })()
-          if (uptimeScope) {
-            const instatusResult = parseInstatusUptime(mainHtml, uptimeScope)
+          // The uptime SCOPE is the single `statusComponent`. #1177 once widened it to the whole
+          // `displayComponentIds` set for perplexity (`uptimeOverDisplayComponents`); #1390 moved
+          // perplexity to incident.io, where `statusComponentIds` expresses that same scope, leaving
+          // `fal` — a deliberately single-component API-surface card — as the only Instatus service.
+          // The flag, its multi-name parser branch and their tests were deleted with it rather than
+          // left as a config path no service takes.
+          if (config.statusComponent) {
+            const instatusResult = parseInstatusUptime(mainHtml, config.statusComponent)
             instatusUptime = instatusResult?.pct ?? null
             instatusTodayWeightedOutageSec = instatusResult?.todayWeightedOutageSec ?? null // #1017
             // #1006 — the % the page itself shows (over its own ~90-day period), for the side-by-side
             // disclosure. Only kept when it differs from our computed figure.
-            // #1177 — WITHHELD for a multi-component scope: this number is attributed to the provider,
-            // and the page publishes one per COMPONENT, never one for a card that spans three. Any
-            // aggregate we formed would be ours wearing their label — and would not even be the same
-            // component our own worst-of picked. No disclosure beats a mis-attributed one (#713).
-            if (typeof uptimeScope === 'string') {
-              instatusReported = parseInstatusReportedUptime(mainHtml, uptimeScope)
-              instatusReportedDays = parseInstatusUptimeDays(mainHtml)
-            }
+            instatusReported = parseInstatusReportedUptime(mainHtml, config.statusComponent)
+            instatusReportedDays = parseInstatusUptimeDays(mainHtml)
           }
           if (instatusComps.length > 0) {
             instatusComponents = resolveSvcComponents(config, { components: instatusComps })
@@ -3473,7 +3490,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         calendarDays: has30dCalendar ? 30 : 14,
-        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
+        // Better Stack / AI Studio publish their own per-day record, the same class as Atlassian's
+        // buckets — so the calendar keeps owning every day here, unchanged by #1390.
+        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete: true } : {}),
         ...(betterStackUptime != null
           ? {
               uptime30d: betterStackUptime,
@@ -3795,6 +3814,24 @@ function archivedDuration(durationMin: number): string | null {
  * one) is a quieter failure than a visible double entry. If an instance is observed, the fix is to
  * bound the retained set at the migration instant rather than to guess at equality.
  */
+/** #1390 — the tags a stored `MonthlyIncidentEntry` carries that QUALIFY its measured fields, as one
+ *  object an archive→live rehydration can spread. Each says the same kind of thing — "do not read these
+ *  timestamps or this duration at face value" — and each has guards downstream that go quiet the moment
+ *  it is dropped. `retainedBridge` is NOT here: it is stamped by the bridge itself, not carried from the
+ *  entry. Pinned by `worker/src/__tests__/retained-tag-forwarding.test.ts`, which reads the entry type's
+ *  own field list, so a tag added to the type in the ordinary `foo?: T` form and not added here fails CI.
+ *
+ *  SCOPE, stated rather than implied: this covers the WORKER-side rehydration. `src/utils/archiveMerge.js`
+ *  rebuilds the same stored type for the SPA and cannot import this — it lists its tags inline, and it
+ *  does not carry `autoMonitor`. That drop predates this issue and is left alone here. */
+export function carriedIncidentTags(entry: MonthlyIncidentEntry): Partial<Incident> {
+  return {
+    ...(entry.autoMonitor ? { autoMonitor: true } : {}),
+    ...(entry.derived ? { derived: entry.derived, ...(entry.derivedDay ? { derivedDay: entry.derivedDay } : {}) } : {}),
+    ...(entry.startUnknown ? { startUnknown: true } : {}),
+  }
+}
+
 export function mergeRetainedIncidentHistory(live: Incident[], retained: MonthlyIncidentEntry[], cutoffISO: string): Incident[] {
   const byId = new Map(live.map((incident) => [incident.id, incident]))
   for (const entry of retained) {
@@ -3809,8 +3846,11 @@ export function mergeRetainedIncidentHistory(live: Incident[], retained: Monthly
       duration: archivedDuration(entry.durationMin),
       timeline: [],
       retainedBridge: true,
-      ...(entry.autoMonitor ? { autoMonitor: true } : {}),
-      ...(entry.derived ? { derived: entry.derived, ...(entry.derivedDay ? { derivedDay: entry.derivedDay } : {}) } : {}),
+      // Every qualifying tag on the stored entry, from ONE place. Listing them inline here is what let
+      // #1390's `startUnknown` be forgotten: the row round-tripped through the bridge with the flag
+      // silently gone, and the accumulator's `else delete` then erased it from the permanent archive.
+      // A tag that qualifies a measured field and is not carried here stops every guard keyed on it.
+      ...carriedIncidentTags(entry),
     })
   }
   return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt))

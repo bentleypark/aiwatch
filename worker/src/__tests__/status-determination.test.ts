@@ -649,7 +649,6 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(replicate.cloudflareStatusComponentIds).toEqual(['fvgfcmy66tdr'])
     expect(replicate.apiUrl).toBeNull()
     expect(JSON.stringify(replicate)).not.toContain('replicatestatus.com')
-    expect(replicate.uptimeOverDisplayComponents).toBeUndefined()
   })
 
   it('#685 — surfaces a degraded ElevenCreative in the elevenlabs breakdown (no more all-green-while-badge-degraded)', () => {

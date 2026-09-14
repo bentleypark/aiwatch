@@ -468,7 +468,11 @@ function descHtml(
     // #1003 — scored against the FIRST estimate (scoringBaselineHours), not the re-analysis-inflated
     // current one, so this line matches the Discord recovery embed and the durable corpus.
     const predicted = scoringBaselineHours(opts.analysis)
-    if (predicted != null) {
+    // #1390 — `durationMinOf` on an anchored incident (`startedAt` set to its own `resolvedAt`) is 0,
+    // so this would publish "predicted 2h, actual 0m" in a PUBLIC feed — grading a real estimate
+    // against a duration we have explicitly declined to state. Same refusal `buildHistoryRecord` makes
+    // about the same pair; the "lasted" line above is already safe because it reads `inc.duration`.
+    if (predicted != null && !inc.startUnknown) {
       const pva = predictedVsActualText({ predictedRecoveryHours: predicted, durationMin: durationMinOf(inc.startedAt, resolvedAtOf(inc)) })
       if (pva) lines.push(`<p>🎯 AI prediction: ${escHtml(pva)}</p>`)
     }

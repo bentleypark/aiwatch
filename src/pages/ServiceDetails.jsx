@@ -262,7 +262,8 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
             title={incident.title}
             subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: isDerived, day: incident.derivedDay })}  ·  ${incidentDurationText(incident, t, t('incidents.duration.ongoing'))}`}
             timeline={incident.timeline}
-            note={isDerived ? t('incidents.derived.note') : undefined}
+            note={isDerived ? t('incidents.derived.note')
+              : incident.startUnknown ? t('incidents.startUnknown.note') : undefined}
             onClose={() => setExpanded(false)}
             hideHeader
             t={t}
@@ -819,7 +820,7 @@ export default function ServiceDetails({ serviceId }) {
   const incidentsBlanked = !!service.incidentSourceStale
   const calendarDays = service.calendarDays ?? 14
 
-  const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays, service.status)
+  const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays, service.status, service.dailyImpactComplete)
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>

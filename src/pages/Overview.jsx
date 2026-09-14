@@ -157,7 +157,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
             {!incidentsBlanked && scoreStr && <>{' · '}{scoreStr}</>}
           </span>
         </div>
-        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status)} compact />
+        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status, service.dailyImpactComplete)} compact />
       </div>
 
       {/* ── Desktop full layout ── */}
@@ -206,7 +206,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           </div>
         )}
 
-        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status)} />
+        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status, service.dailyImpactComplete)} />
       </div>
     </button>
   )
@@ -309,10 +309,12 @@ export function GroupIncidentItem({ group, lang, t }) {
   // Reuses the canonical sumGroupDuration/formatDurationMs shared with Incidents.jsx;
   // null when nothing has resolved yet → falls back to the monitoring/ongoing label.
   const summed = sumGroupDuration(group)
+  // #1390 — `null` here falls through to the "ongoing" label below, so a group whose entries are all
+  // resolved-with-unrecoverable-start used to read as running. It is stated, not fallen through.
   const totalDuration = summed.resolvedCount === 0
-    ? null
-    : summed.hasOngoing
-      ? `${t('overview.incidents.total').replace('{d}', formatDurationMs(summed.totalMs))} + ${t('incidents.duration.ongoing')}`
+    ? (summed.unknownCount > 0 && !summed.hasOngoing ? t('incidents.duration.unknown') : null)
+    : summed.hasOngoing || summed.unknownCount > 0
+      ? `${t('overview.incidents.total').replace('{d}', formatDurationMs(summed.totalMs))} + ${t(summed.hasOngoing ? 'incidents.duration.ongoing' : 'incidents.duration.unknown')}`
       : t('overview.incidents.total').replace('{d}', formatDurationMs(summed.totalMs))
   return (
     <div style={{ marginBottom: '8px' }}>

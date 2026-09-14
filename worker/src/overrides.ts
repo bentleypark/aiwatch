@@ -110,6 +110,13 @@ export function applyDurationOverrides(data: MonthlyIncidents, list: DurationOve
       if (!byId.has(e.id)) return e
       const durationMin = byId.get(e.id)!
       const next = { ...e, durationMin }
+      // #1390 — KNOWN LIMIT, deliberately not "fixed" here. An override on a `startUnknown` row is
+      // discarded downstream (the Score's Recovery sample, the avg-recovery divisor, the narrative
+      // candidates all skip the row). Clearing the flag was tried and is worse: `startedAt` on such a
+      // row is the instant the outage ENDED, so the `resolvedAt` rewrite below anchors the corrected
+      // window to the end and shifts BOTH endpoints forward by the pinned duration — enough to move a
+      // row out of its own archive month. Pinning a duration needs a START the operator means, which
+      // this layer has no way to ask for. Left to a future issue rather than papered over.
       // Keep resolvedAt consistent with the pinned duration so consumers that derive length from
       // `resolvedAt − startedAt` (not `durationMin`) agree. Only for an already-resolved entry with a
       // parseable start — never fabricate a resolution for a still-open incident.

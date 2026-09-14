@@ -35,6 +35,19 @@ export interface Incident {
   componentIds?: string[]
   startedAt: string
   resolvedAt?: string | null
+  /** #1390 — the provider's own record for this incident is self-contradictory (it recovered BEFORE it
+   *  started) and the page carried no `component_impacts` window to recover the real one. On such a
+   *  record NEITHER timestamp reliably means what its name says — ElevenLabs' `Increased Error Rate in
+   *  US Region` publishes a `resolved_at` that its own update text shows is the START. `startedAt` is
+   *  therefore collapsed onto `resolvedAt`: not because that instant is the end, but because it is the
+   *  one the provider published closest to the event, which keeps the incident on the right DAY instead
+   *  of the day it was filed — a migration stamps every import with the import date, which would land
+   *  ancient outages inside the Score's 30-day window (`score.ts` filters on `startedAt`). `duration` is
+   *  null, because none is derivable.
+   *
+   *  Readers that need a real elapsed time must check this: `buildHistoryRecord` refuses such a record
+   *  outright, since `durationMin` would be a fabricated 0 in a corpus with no TTL. */
+  startUnknown?: boolean
   duration: string | null
   timeline: TimelineEntry[]
   // #983 — this incident was opened by the provider's AUTO-MONITOR, not written by a human.
@@ -141,6 +154,23 @@ export interface ServiceStatus {
   // (incident.io — so the client can bucket the real instant into the VIEWER's local day, fixing the
   // UTC-vs-local off-by-one; #693 follow-up). buildCalendarFromIncidents handles both key forms.
   dailyImpact?: Record<string, DailyImpactLevel>
+  /** #1390 — does `dailyImpact` already account for EVERY day in the window, so that supplementing
+   *  the calendar with individual incidents would only add noise?
+   *
+   *  True wherever the source publishes its OWN per-day record, false where `dailyImpact` is derived
+   *  from something else. The membership is not listed here — `grep -n dailyImpactComplete services.ts`
+   *  for the emit sites, and a test pins that every one of them states an answer. FALSE for incident.io,
+   *  whose `dailyImpact` is derived from `component_impacts`
+   *  — and a provider can open and resolve an incident there without ever writing an impact row
+   *  (perplexity's `Computer Tasks Degraded`, 2026-09-01, is one: `component_impacts: []` with the
+   *  component named only in `affected_components` + `status_summaries`).
+   *
+   *  The client used to infer this from `calendarDays === 30`, which worked only because every
+   *  30-day service happened to be Atlassian. #1390 gave perplexity a `statusComponentId`, that
+   *  derivation flipped it to 30, and its incident-supplemented days silently stopped being painted —
+   *  joining openai/chatgpt/codex/langsmith/langfuse/junie, which had the same shape already. A window
+   *  LENGTH is not a statement about provenance, so the provenance is carried here instead. */
+  dailyImpactComplete?: boolean
   calendarDays?: number
   /** #1017 — TODAY's weighted outage seconds (UTC calendar day, [startOfTodayUTC, now]). Populated
    *  by all 5 "official" uptime sources, via two different mechanisms: incident.io / Instatus /
@@ -336,27 +366,6 @@ export interface ServiceConfig {
   // worst-of'ing every component into the badge would be too noisy (e.g. a Billing blip).
   // When both are set, the breakdown prefers displayComponentIds.
   displayComponentIds?: string[]
-  // #1177 — Instatus ONLY (read inside fetchService's `instatusUrl` branch; silently inert on an
-  // Atlassian / incident.io / BetterStack service, so setting it there does nothing). This card
-  // represents EVERY component it displays, not just `statusComponent`: uptime is computed over the
-  // whole `displayComponentIds` set, worst-of — the same aggregation the Nuxt GROUP path already
-  // applies to its members.
-  //
-  // Set it TOGETHER WITH dropping `incidentKeywords`, because the two express ONE decision and split
-  // apart they re-create the bug this fixes (the full case is in
-  // docs/reference/status-determination.md, "When the card displays a component, that component is the
-  // service"). Wide incidents + narrow uptime leaves "1 incident listed, uptime 100%"; narrow incidents
-  // + wide uptime is the same contradiction reversed. `perplexity-scope.test.ts` sweeps SERVICES so the
-  // pair cannot drift apart in-repo.
-  //
-  // Dropping `incidentKeywords` also widens the BADGE, which is the most user-visible half: on this
-  // branch the Instatus badge is `hasOngoing ? 'degraded' : httpStatus` over the post-filter list, so
-  // an ongoing incident on ANY displayed component now degrades the card (and with it the Discord
-  // alert, the RSS entry and the /is-*-down answer).
-  //
-  // Off by default: a service whose card is deliberately an API-surface view (fal, mistral) keeps its
-  // keyword scoping and its single-component uptime, and must NOT be swept along by this flag.
-  uptimeOverDisplayComponents?: boolean
   // Per-component-id → group label, mirroring the OFFICIAL status page's component groups
   // (the v2 summary/components JSON does NOT expose group membership, so it must be curated
   // here). Applied in the explicit-id breakdown path (displayComponentIds, or the statusComponentIds

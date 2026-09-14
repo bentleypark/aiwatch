@@ -95,7 +95,13 @@ export function archiveIncidentToLive(archIncident, service) {
     // Carry the archived duration so a RESOLVED archive incident shows its real duration (e.g.
     // "7h 26m") instead of falling through to the "Ongoing" placeholder (`incident.duration ??`).
     // An unresolved archive entry (resolvedAt null) keeps duration undefined → renders "Ongoing".
-    duration: archIncident.resolvedAt ? formatRecoveryMin(archIncident.durationMin ?? 0) : undefined,
+    // #1390 — an archived row flagged `startUnknown` has `durationMin: 0` meaning UNKNOWN, not instant;
+    // `formatRecoveryMin(0)` would re-state it as "0m" on the way back into the live shape. Left
+    // undefined so the same readers that handle the live anchored incident handle this one.
+    duration: archIncident.startUnknown || !archIncident.resolvedAt
+      ? undefined
+      : formatRecoveryMin(archIncident.durationMin ?? 0),
+    ...(archIncident.startUnknown ? { startUnknown: true } : {}),
     // #1292 — forward the tag AND the day, or an archive-served incident silently loses every guard
     // the live one has: its anchor renders at minute precision again, on whatever date that anchor
     // happens to fall, and the modal falls back to "no timeline data" instead of explaining the

@@ -54,6 +54,30 @@ export function displayedMinutes(ms: number): number {
   return Math.max(1, Math.ceil(ms / 60_000))
 }
 
+/** #1390 — is this published incident record self-contradictory, i.e. does it claim to have recovered
+ *  BEFORE it started?
+ *
+ *  Not hypothetical, and not one provider's mistake. incident.io's Atlassian-compat `incidents.json`
+ *  sets `created_at` to when the incident was DECLARED, which for a retroactively-filed incident (or a
+ *  whole history imported by a status-page migration) is long after the outage it describes. Several
+ *  such records were live on the published `/api/status` when this shipped (#1390).
+ *
+ *  Why it cannot be ignored: `formatDuration` floors a negative interval to `1m` via
+ *  `displayedMinutes`, so a 2-hour outage publishes as a one-minute one — and `score.ts` computes MTTR
+ *  from exactly that figure, so the Recovery component reads a fabricated near-perfect recovery.
+ *
+ *  Parsed, never string-compared. These payloads mix fractional-second precision, and WITHIN ONE SECOND
+ *  lexical order is wrong in both directions (`…03.123Z` sorts below `…03Z` because `.` < `Z`) — a
+ *  false positive on an ordinary pair and a miss on a genuinely backwards one. An unparseable or absent
+ *  timestamp is NOT impossible — it is unknown — so this returns false and leaves the record alone. */
+export function isTimeOrderImpossible(startedAt: string | undefined, resolvedAt: string | null | undefined): boolean {
+  if (!startedAt || !resolvedAt) return false
+  const start = Date.parse(startedAt)
+  const end = Date.parse(resolvedAt)
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return false
+  return end < start
+}
+
 export function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
   const totalMin = displayedMinutes(diffMs)

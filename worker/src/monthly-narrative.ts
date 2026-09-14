@@ -88,6 +88,7 @@ export function selectIncidentCandidates(
 ): FlatIncident[] {
   const flat: FlatIncident[] = []
   let excludedDerived = 0
+  let excludedStartUnknown = 0
   for (const [id, svc] of Object.entries(archive.services)) {
     // Only skip where the downtime aggregates ALSO excluded them. On the truncated branch they did not,
     // so skipping here would recreate the contradiction from the other side: an inflated published total
@@ -111,6 +112,13 @@ export function selectIncidentCandidates(
       // Only the per-EVENT narrative excludes it, which is the same line every other narrative-grade
       // consumer draws (`incident:history`, `findSimilarIncidents`, the MTTR sample).
       if (inc.derived === 'status_history') { excludedDerived++; continue }
+      // #1390 — same line, one axis over. An anchored row (`startUnknown`) is `resolved` with
+      // `durationMin: 0`, so `formatDurationLabel` below calls it "ongoing" — the same mislabel
+      // `sumGroupDuration` was fixed for, here on a PUBLISHED report whose prompt orders the model to
+      // copy `durationLabel` VERBATIM. There is no honest label for a row whose duration is unknown, so
+      // it is excluded from the per-EVENT narrative rather than given one. Its downtime is untouched in
+      // the totals, exactly as the day-bucket exclusion above leaves its own.
+      if (inc.startUnknown) { excludedStartUnknown++; continue }
       flat.push({ ...inc, serviceId: id, serviceName: serviceNames[id] ?? id })
     }
   }
@@ -126,6 +134,9 @@ export function selectIncidentCandidates(
     // Named, like #1210-EXCLUDED: a candidate list that quietly shrinks is indistinguishable from a
     // quiet month, and these services are precisely the ones whose feed went silent.
     console.warn(`[monthly-narrative] #1292-EXCLUDED ${excludedDerived} status_history-derived day-bucket(s) from the Notable Incident candidates — their downtime remains in the published totals`)
+  if (excludedStartUnknown > 0) {
+    console.warn(`[monthly-narrative] #1390-EXCLUDED ${excludedStartUnknown} anchored incident(s) with no derivable duration from the Notable Incident candidates — their downtime remains in the published totals`)
+  }
   }
   return flat.slice(0, MAX_INCIDENT_CANDIDATES)
 }

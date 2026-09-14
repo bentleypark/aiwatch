@@ -2,7 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import type { StatuspageResponse } from './statuspage'
-import { fetchWithTimeout } from '../utils'
+import { fetchWithTimeout, formatDuration, isTimeOrderImpossible } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
@@ -605,11 +605,30 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
         // Skip impacts shorter than 10 minutes (matches official calendar threshold)
         if (end.getTime() - start.getTime() < 600_000) continue
 
-        // Map status to DailyImpactLevel
+        // #1390 — announced maintenance is NOT an outage, and every other reader of these same rows
+        // already knows it: `INCIDENT_IO_STATUS_WEIGHTS.under_maintenance` is 0 so uptime excludes it,
+        // `parseIncidentIoGlobalPage` drops maintenance entries outright, and /methodology publishes
+        // the exclusion as a rule. Only this mapping disagreed — its trailing branch is a CATCH-ALL
+        // whose comment says `degraded_performance`, so `under_maintenance` fell into it and painted a
+        // cell. Nothing explains that cell to a reader either: maintenance is not published as an
+        // incident, so the list beside the calendar is empty for that day. Reported on perplexity's
+        // 2026-09-10 status-page migration window (36min, KST 09-11) after #1390 moved it to
+        // incident.io; junie already carried two such days (2026-06-20, 2026-09-11).
+        if (isMaintenanceStatus(impact.status)) continue
+        // Driven off the SAME vocabulary `computeIncidentIoUptime` weights (`INCIDENT_IO_STATUS_WEIGHTS`),
+        // so the two readers of these rows cannot disagree about what a status means. The old form ended
+        // in a CATCH-ALL — `: 'minor' // degraded_performance` — which is how `under_maintenance` came to
+        // paint a cell at all; deleting that one member would have left the next vocabulary incident.io
+        // adds doing the same thing, silently, while uptime warned about it and excluded it.
+        const weight = impact.status ? INCIDENT_IO_STATUS_WEIGHTS[impact.status] : undefined
+        if (weight === undefined) {
+          console.warn(`[parseIncidentIoComponentImpacts] unknown component_impacts status "${impact.status}" — no calendar cell painted (uptime ignores it too)`)
+          continue
+        }
         const level: DailyImpactLevel =
           impact.status === 'full_outage' ? 'critical'
           : impact.status === 'partial_outage' ? 'major'
-          : 'minor' // degraded_performance
+          : 'minor' // degraded_performance — the only remaining weighted status
 
         // Emit one entry per UTC day the impact spans, keyed by an ISO TIMESTAMP within the impact's
         // coverage (NOT a bare UTC date) so the client buckets each to the correct LOCAL day — fixing
@@ -656,6 +675,7 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
 //
 // Returns incidentId → component ids (deduped). Empty when the page has no impacts array — callers
 // must treat that as "no information", never as "no components".
+
 export function parseIncidentIoIncidentComponentIds(html: string): Record<string, string[]> {
   const result: Record<string, string[]> = {}
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
@@ -688,6 +708,117 @@ export function parseIncidentIoIncidentComponentIds(html: string): Record<string
     break
   }
   return result
+}
+
+/** #1390 — repair an incident whose published record claims it recovered BEFORE it started.
+ *
+ *  `isTimeOrderImpossible` (utils.ts) documents where these come from and how many there are. The
+ *  repair material is on the SAME page we already fetched for uptime: `component_impacts` carries the
+ *  real window, keyed by `status_page_incident_id`. That is the record our impact CALENDAR already
+ *  renders, so a corrected incident agrees with the calendar cell beside it instead of contradicting
+ *  it — the state this function exists to end (perplexity's `Investigating API issue` sat on the list
+ *  as 2026-08-24 while the calendar marked 2026-08-13).
+ *
+ *  Deliberately narrow, in two ways that matter:
+ *
+ *  1. It fires ONLY on the impossible ordering. A provider that merely backdates its impact window
+ *     relative to declaration is not wrong, and several do it by hours — a blanket "impacts win" would
+ *     re-time real incidents and their Scores. That is a different decision from this one, and it is
+ *     not this issue's.
+ *  2. It accepts a window only when that window is INTERNALLY ordered (`start < end`), and never by
+ *     checking it against the record's own `resolved_at` — see the comment on the `windows` map below
+ *     for the record that made that distinction load-bearing.
+ *
+ *  Unrepairable (no impact row joined — the majority of perplexity's imports) → `startUnknown`,
+ *  `duration: null`, and `startedAt` anchored on `resolvedAt`. Two separate harms, neither optional:
+ *    - the duration must not stay the `1m` `formatDuration` floors a negative interval to, because
+ *      `score.ts` computes MTTR from exactly that figure;
+ *    - the start must not stay the DECLARATION time either. A migration stamps every imported record
+ *      with the import date, so outages from months or years earlier would land inside the 30-day
+ *      window `score.ts` filters on `startedAt` and be counted as this month's incidents.
+ *  Collapsing onto `resolvedAt` is NOT a claim that the remaining instant is the end — it is the one
+ *  timestamp the provider published closest to the event, which is enough to place the incident on the
+ *  right DAY. That the result reads as a zero-length event is why `startUnknown` is set rather than left
+ *  implicit: `buildHistoryRecord` refuses it, and no reader may derive an elapsed time from a start we
+ *  are openly saying we do not have. */
+export function correctIncidentIoImpossibleTimes(incidents: Incident[], html: string | undefined): Incident[] {
+  if (!incidents.some((i) => isTimeOrderImpossible(i.startedAt, i.resolvedAt))) return incidents
+  const impacts = html ? parseIncidentIoImpacts(html) : null
+  // Three states, and the operator needs to tell them apart: no HTML at all, HTML whose
+  // `component_impacts` marker was present but UNPARSEABLE (`null` — the window very likely exists and
+  // WE could not read it, which `computeIncidentIoUptime` already words that way), and a readable page
+  // that genuinely carries no row for this incident. None of them yields repair material, but blaming
+  // the provider for our own parse failure sends the operator to the wrong page.
+  const material = !html ? 'no-html' : impacts === null ? 'unparseable' : 'readable'
+  // The WHOLE window per incident, both endpoints. Taking only the start and keeping the record's own
+  // `resolved_at` was wrong in the way that matters: on an impossible record `resolved_at` is precisely
+  // the field we have declared untrustworthy, and it is not always the end. ElevenLabs'
+  // `Increased Error Rate in US Region` publishes `created_at 17:42:12` / `resolved_at 17:04:00` while
+  // its own update text and its impact rows both say the outage ran `17:04 → 17:13` — so its
+  // `resolved_at` is the START. Repairing half the pair from a trustworthy source and keeping the other
+  // half from an untrustworthy one produced a `start === end` comparison, which the strict check below
+  // then rejected, discarding a real 9-minute window that was sitting on the page.
+  const windows = new Map<string, { start: string; end: string }>()
+  for (const im of impacts ?? []) {
+    const id = im.status_page_incident_id
+    const start = im.start_at
+    const end = im.end_at
+    if (!id || !start || !end) continue
+    // An announced maintenance window is not outage evidence — the same decision
+    // `parseIncidentIoComponentImpacts` below and `INCIDENT_IO_STATUS_WEIGHTS` already make about these
+    // very rows. `parseIncidentIoImpacts` does not filter by status, so without this the repair could
+    // take a "real start" from a maintenance window and the two halves of one change would disagree.
+    if (isMaintenanceStatus(im.status)) continue
+    const prev = windows.get(id)
+    windows.set(id, prev === undefined
+      ? { start, end }
+      : {
+          start: Date.parse(start) < Date.parse(prev.start) ? start : prev.start,
+          end: Date.parse(end) > Date.parse(prev.end) ? end : prev.end,
+        })
+  }
+  return incidents.map((inc) => {
+    if (!isTimeOrderImpossible(inc.startedAt, inc.resolvedAt)) return inc
+    const w = windows.get(inc.id)
+    const startMs = w ? Date.parse(w.start) : NaN
+    const endMs = w ? Date.parse(w.end) : NaN
+    // The window has to be internally ordered — that is the only consistency this branch can check, and
+    // it is checked against the window's OWN endpoints rather than against the record's discredited
+    // `resolved_at`. A zero-length or inverted window buys nothing, so it falls through to the anchor.
+    if (w && Number.isFinite(startMs) && Number.isFinite(endMs) && startMs < endMs) {
+      // The REPAIR is the branch that silently moves a published start by up to months, on a join
+      // against a hand-rolled RSC extraction. It is the one that has to leave a trail: a wrong join
+      // produces a plausible window with nothing to grep for. The anchored branch below merely
+      // declines to act.
+      console.log(`[correctIncidentIoImpossibleTimes] ${inc.id}: repaired from component_impacts — ${inc.startedAt}→${inc.resolvedAt} becomes ${w.start}→${w.end}, duration ${inc.duration ?? 'null'} -> ${formatDuration(new Date(startMs), new Date(endMs))}`)
+      return { ...inc, startedAt: w.start, resolvedAt: w.end, duration: formatDuration(new Date(startMs), new Date(endMs)) }
+    }
+    warnAnchored(inc.id, material, inc.startedAt, inc.duration)
+    return { ...inc, startedAt: inc.resolvedAt as string, duration: null, startUnknown: true }
+  })
+}
+
+/** Warn-once per incident. `correctIncidentIoImpossibleTimes` runs on the WHOLE pre-filter incident list
+ *  on every `fetchService` pass — which is every `/api/status` request, not once per cron tick — and a
+ *  permanently-unrepairable record (perplexity holds 17) never becomes repairable, so an unthrottled
+ *  line here is thousands a day, forever, burying the warns an operator is actually looking for. Same
+ *  convention and same reason as `warnNextUptimeShape` in `parsers/instatus.ts`. */
+const warnedAnchored = new Set<string>()
+function warnAnchored(incId: string, material: 'no-html' | 'unparseable' | 'readable', startedAt: string | undefined, duration: string | null): void {
+  if (warnedAnchored.has(incId)) return
+  if (warnedAnchored.size >= 500) warnedAnchored.clear()
+  warnedAnchored.add(incId)
+  const why = material === 'unparseable'
+    ? 'component_impacts present but unparseable — the window may exist and we could not read it'
+    : material === 'no-html'
+      ? 'no page HTML this cycle, so no window could be consulted'
+      : 'the page carries no usable component_impacts window for it'
+  console.warn(`[correctIncidentIoImpossibleTimes] ${incId}: recovery predates start and ${why} — anchoring on resolvedAt with duration: null (was ${duration ?? 'null'}, startedAt ${startedAt})`)
+}
+
+/** Test-only: reset the warn-once set so a test can assert the warn fires. */
+export function __resetAnchoredWarnings(): void {
+  warnedAnchored.clear()
 }
 
 /** #1004 — restore the `componentNames` that incident.io's JSON API drops, from the page HTML (see

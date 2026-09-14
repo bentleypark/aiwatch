@@ -24,6 +24,19 @@
 // day-bucket?) from this one (freshness: is this incident evidence about THIS cycle's source?) — a
 // file can be classified differently on each axis, and most are, which is why this is a second set of
 // registries over the SAME file list rather than a shared one.
+//
+// #1390 — a THIRD axis, same file list, same mechanism. `startUnknown` (parsers/incident-io.ts
+// `correctIncidentIoImpossibleTimes`) marks an incident whose provider published a record recovering
+// BEFORE it started, and whose page carried no `component_impacts` window to recover the real start:
+// `startedAt` is anchored on the incident's own `resolvedAt` and `duration` is null. Round 1 of #1390's
+// review found SEVEN second consumers of that one new shape — the Score's Recovery default flipping
+// 15→0, a flap group labelled "Ongoing" while every member was resolved, `"0h 0m"` in the published
+// monthly archive, the `recovered:` marker re-fabricating the `1m` the repair had just removed, the
+// public `/api/v1` shape handing out a synthetic start unflagged, and an RSS item grading a real AI
+// estimate against a 0-minute "actual". Every one was the second consumer on a path an earlier fix had
+// touched. That is the #1292 story verbatim, which is why this axis is a registry and not a list of
+// patched files. The question here is neither precision nor freshness: it is **is an elapsed time, or a
+// real start instant, derivable from this incident at all?**
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -238,6 +251,109 @@ const RB_SAFE = {
   'src/pages/Uptime.jsx': 'uptime figures, not incident measurements',
 }
 
+
+// ── #1390 startUnknown axis — same file list, third question (see header) ───────────────────────────
+
+/** Applies the rule: reads `startUnknown` and refuses to derive an elapsed time, or discloses that the
+ *  start is an anchor. Each entry names what round 1 of #1390 found, where it found one. */
+const SU_APPLIERS = {
+  'worker/src/score.ts': 'carriesRecoveryTime excludes it from the Recovery SAMPLE, not just the durations — otherwise the default scores Recovery 0 instead of abstaining at 15 (round 1, reproduced at -19 Score)',
+  'worker/src/incident-history.ts': 'buildHistoryRecord returns null — a 0-minute row in the no-TTL corpus grades every prediction as over-predicted and grounds the next estimate',
+  'worker/src/monthly-archive.ts': 'kept out of countedCount (the published "avg recovery" divisor) and out of longest; the reconstructed duration is null, never minutesToDurationString(0) = "0h 0m"; the flag itself survives the freeze',
+  'worker/src/recovery-mark.ts': 'markIncidentResolved writes no duration — formatDuration over a zero-length interval floors to the same 1m the repair removed (round 1, reproduced on the KV marker)',
+  'worker/src/rss.ts': 'the resolved item publishes no predicted-vs-actual line — durationMinOf over the anchored pair is 0, which would grade a real AI estimate against a duration we declined to state, in a public feed',
+  'src/utils/incidentSort.js': 'sumGroupDuration counts it as unknownCount rather than letting it fall through to hasOngoing, and groupDurationText states the absence — a group of entirely resolved incidents read "Ongoing" before (round 1, executed)',
+  'src/pages/Incidents.jsx': 'renders incidents.startUnknown.note on the detail row and takes the group label from groupDurationText',
+  'src/pages/ServiceDetails.jsx': 'renders incidents.startUnknown.note beside the incident',
+  'src/pages/Overview.jsx': 'the flap-group label states the unknown rather than falling through to the ongoing label',
+  'worker/src/monthly-narrative.ts': 'selectIncidentCandidates skips it — formatDurationLabel would call a resolved row with durationMin 0 "ongoing", the same mislabel sumGroupDuration was fixed for, and the prompt orders the model to copy durationLabel VERBATIM into the published report',
+  'api/_is-down/html-template.ts': 'states the duration unknown rather than dropping the field, and discloses that no usable time range was available — it does NOT claim which end of the outage the shown instant marks, because nothing establishes that (see the startUnknown doc in worker/src/types.ts)',
+}
+
+/** Carries the flag across a boundary. Must not test it — must not DROP it. */
+const SU_FORWARDERS = {
+  'worker/src/index.ts': 'the /api/v1/status/:id field allowlist emits it — the #1292 precedent verbatim: without it the one PUBLIC surface hands a consumer a synthetic start with no way to apply the rule the rest of the codebase applies',
+  'worker/src/services.ts': 'calls the producer AND forwards: mergeRetainedIncidentHistory rebuilds an Incident from a stored MonthlyIncidentEntry via `carriedIncidentTags`, pinned by retained-tag-forwarding.test.ts against the stored type\'s own field list. It sat in SAFE as "the orchestrator, not a consumer" while that rebuild silently dropped the flag. Scope, stated: that pin covers THIS forwarder only — src/utils/archiveMerge.js rehydrates the same stored type in a bundle that cannot import the helper, and carries the tags inline',
+  'src/utils/archiveMerge.js': 'archive entry → live incident shape: forwards startUnknown and leaves duration undefined rather than re-stating the stored 0 as "0m". It carries its tags INLINE — the worker-side carriedIncidentTags cannot cross the bundle boundary — and it does not carry `autoMonitor`, a pre-existing drop this issue did not touch (its consequence is pinned by src/utils/__tests__/incidentGrouping.test.js)',
+}
+
+/** Cannot be reached by an anchored incident, or reads nothing it could get wrong. Each reason is a
+ *  property of the CODE, not a recollection — if one stops holding, its file moves to SU_APPLIERS. */
+const SU_SAFE = {
+  // Producers. Only `parsers/incident-io.ts` stamps the flag; no other parser can emit one.
+  'worker/src/parsers/incident-io.ts': 'PRODUCES it — correctIncidentIoImpossibleTimes is where the flag is stamped and where the repair is attempted first',
+  'worker/src/parsers/betterstack.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/onlineornot.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/statuspage.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/aws.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/aistudio.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/gcloud.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/flashduty.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/rootly.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/types.ts': 'declares the Incident shape, including the startUnknown flag itself',
+  'worker/src/utils.ts': 'hosts isTimeOrderImpossible (the predicate the producer keys on) and incidentDay, which buckets by day — the anchor is a real instant the provider published about this incident, so its day is a day the incident was down whichever end of the outage it marks',
+  'worker/src/xai-regions.ts': 'xAI-only region collapsing; xAI is an RSS service and never reaches the incident.io repair',
+
+  // Active-only. An anchored incident is `resolved` by construction — the flag is only ever set on a
+  // record that published a `resolved_at`.
+  'worker/src/daily-summary.ts': 'reads only the first non-resolved incident',
+  'worker/src/ext-claude.ts': 'projects ACTIVE incidents only',
+  'worker/src/statusline.ts': 'reads the first non-resolved incident',
+  'worker/src/fallback.ts': 'gates on non-resolved incidents',
+  'worker/src/incident-text.ts': 'skips resolved — a cause must be live',
+  'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved',
+  'worker/src/platform-monitor.ts': 'reads Atlassian\'s own meta-status response, not our Incident type',
+  'worker/src/report.ts': 'active incidents only',
+  'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — active only',
+  'src/utils/regionStatus.js': 'active incidents only',
+  'src/utils/constants.js': 'active incidents only',
+  'api/_is-down/region-status.ts': 'active incidents only',
+  'api/is-down.ts': 'active-only for the verdict; the AI card joins by incident id and an anchored one is never analyzed fresh',
+
+  // Already require a truthy `duration`, which an anchored incident does not have — so the wrong
+  // derivation is unreachable, not merely unlikely.
+  'src/utils/recovery.js': 'the dashboard Recovery card filters `i.duration && i.duration !== "0m"` before parsing, so an anchored incident contributes nothing and cannot move the median',
+  'api/is-down-group.ts': 'renders a duration only when the incident carries one',
+  'worker/src/alerts.ts': 'the Resolved embed prints a duration only when `inc.duration` is truthy; every other read is of `startedAt` as an ORDERING key (age, hold windows), where the anchor is a real instant',
+  'worker/src/ai-analysis.ts': 'the history grounding reads the corpus buildHistoryRecord already refuses to write, and the incident-list prompt line renders `i.duration ?? "unknown duration"`',
+
+  // Precision/day-bucketing only. The anchor is a REAL published instant (the recovery), not a
+  // synthesized one like `status_history`'s — so day-level placement is true, and no elapsed time is
+  // derived. If any of these starts computing a duration from the pair, it moves to SU_APPLIERS.
+  'src/utils/calendar.js': 'incidentLocalDay buckets the anchor to a local day; the anchor is a real instant the provider published about this incident, so the cell it paints is a day the service was down — which end it marks does not change that',
+  'src/utils/incidentGrouping.js': 'flap-grouping keys on title + day; it derives no duration of its own (the group total comes from sumGroupDuration, which is an SU_APPLIER)',
+  'api/_is-down/incident-grouping.ts': 'derives no duration; it buckets by title + day and pushes the SAME incident objects into `entries` (line 214), so the flag survives by reference. It DECLARES the field for the #1292 reason — an undeclared optional lets the weak-type check prove html-template.ts\'s guards can never fire — and that declaration is not a code read, which is why this is SAFE rather than a forwarder',
+  'worker/src/growth-series.ts': 'counts an incident on the outage-day axis; the anchor day is a day the service was down, so counting it is true — it derives no duration',
+
+  // Id/title-keyed, count-only, or downstream of an already-guarded gate.
+  'worker/src/suppression.ts': 'matches by id/title to hide an entry',
+  'worker/src/overrides.ts': 'operator-pinned durations keyed on an incident id an operator typed; it WRITES a durationMin and a derived resolvedAt and reads no incident field of its own. It does NOT clear the flag — see its KNOWN LIMIT: an override on an anchored row is discarded downstream, and clearing it shifts both endpoints by the pinned duration',
+  'worker/src/withdrawn.ts': 'tombstones keyed on the alerted:new marker; nothing reads a duration',
+  'worker/src/withdrawal-log.ts': 'rows render from a tombstone; no duration is derived',
+  'worker/src/alert-feed.ts': 'membership test by incident id against the alerted set',
+  'worker/src/upstream-feed.ts': 'non-carded upstream feeds; never sees a service incident list',
+  'worker/src/archive-patch.ts': 'corrects a FROZEN archive using the builder\'s own functions; the startUnknown rows it may carry are excluded by monthly-archive.ts\'s own aggregation, which this file reuses rather than reimplements',
+  'worker/src/probe-archival.ts': 'the incidentWindows param that would read a duration is passed by NO production caller (TODO #132)',
+  'worker/src/weekly-briefing.ts': 'reads the durable MonthlyIncidentEntry[] counts, not a derived elapsed time',
+  'worker/src/parse-failure-log.ts': 'counts SOURCE-READ failures by reason; reads no incident field',
+  'src/utils/predictionAccuracy.js': 'every entry point returns early when the analysis carries no `resolvedAt` (predictionAccuracy.js:181), and markIncidentResolved refuses to stamp one for this shape — the same upstream-predicate property the other two axes rest on, not a claim about a different gate',
+  'src/utils/recoveredGrouping.js': 'a row exists only because of the recovered: KV marker, and markIncidentResolved writes none for this shape. It does NOT read the marker\'s duration field — it subtracts the incident\'s own timestamp pair — so withholding the marker is what makes it safe, not clearing a field',
+  'src/components/AnalysisModal.jsx': 'the predicted-vs-actual line comes from predictionAccuracy.js, which returns early without a stamped analysis resolvedAt — and markIncidentResolved stamps none for this shape',
+  'src/components/IncidentTimeline.jsx': 'renders the timeline it is given; the note prop covers the empty case',
+  'src/components/RecentUserReports.jsx': 'user-submitted reports, not provider incidents',
+  'src/components/Sidebar.jsx': 'active incident count only',
+  'src/components/Topbar.jsx': 'active incident count only',
+  'src/components/SkeletonUI.jsx': 'loading placeholder — renders no real incident data',
+  'src/pages/Settings.jsx': 'subscription toggles keyed on service id',
+  'src/pages/Uptime.jsx': 'uptime figures, not incident measurements',
+  'src/locales/en.js': 'a flat key→string copy map; the match is a dotted i18n KEY, not a field read',
+  'src/locales/ko.js': 'a flat key→string copy map; the match is a dotted i18n KEY, not a field read',
+  'api/_is-down/seo-content.ts': 'static per-service SEO copy',
+  'api/_methodology/html-template.ts': 'static prose describing the Score',
+  'api/_is-down/upstream-note.ts': 'renders UpstreamLink records sourced from causal incidents, which skip resolved',
+}
+
 function consumers() {
   const found = []
   for (const root of ROOTS) {
@@ -355,6 +471,87 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
         .replace(/^\s*(\/\/|\*|\/\*).*$/gm, '')
       expect(code, `${file} is registered as applying the retainedBridge rule but never reads the field in code`)
         .toMatch(BRANCHES_ON_TAG)
+    }
+  })
+})
+
+describe('#1390 — every incident-field consumer is classified for startUnknown too', () => {
+  const all = consumers()
+
+  it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
+    expect(all.length).toBe(73)
+  })
+
+  it('leaves none unclassified for startUnknown', () => {
+    const known = new Set([...Object.keys(SU_APPLIERS), ...Object.keys(SU_FORWARDERS), ...Object.keys(SU_SAFE)])
+    const unclassified = all.filter((f) => !known.has(f))
+    expect(unclassified,
+      'a new consumer of incident measurements appeared. Classify it for startUnknown too: can it derive ' +
+      'an elapsed time or a real start from an incident whose startedAt is an anchor on its own ' +
+      'resolvedAt? Round 1 of #1390 found seven such consumers by hand — this gate exists so round 2 ' +
+      'does not have to.',
+    ).toEqual([])
+  })
+
+  it('lists no startUnknown registry entry that is no longer a consumer', () => {
+    const stale = [...Object.keys(SU_APPLIERS), ...Object.keys(SU_FORWARDERS), ...Object.keys(SU_SAFE)]
+      .filter((f) => !all.includes(f))
+    expect(stale, 'a registry entry no longer reads incident fields — remove it so the list stays honest').toEqual([])
+  })
+
+  it('gives every startUnknown entry a reason', () => {
+    for (const [file, why] of Object.entries({ ...SU_APPLIERS, ...SU_FORWARDERS, ...SU_SAFE })) {
+      expect(why.length, `${file} has no stated reason`).toBeGreaterThan(20)
+    }
+  })
+
+  it('no SU_SAFE file reads the flag — the converse, which the APPLIER check cannot see', () => {
+    // The enforcement above is one-directional: it proves a registered APPLIER really applies the rule,
+    // and says nothing about a file parked in SAFE that quietly starts reading `.startUnknown`. Round 4
+    // of #1390 landed exactly there — `overrides.ts` was changed to read and mutate the flag while its
+    // SAFE reason still said it read no incident field, and every test stayed green. A SAFE entry is a
+    // claim that the file CANNOT get this wrong; a file that branches on the flag is making a decision
+    // about it and belongs in APPLIERS with a reason that says what the decision is.
+    //
+    // The two locale maps are the documented exception and their own reasons say why: the match is a
+    // dotted i18n KEY (`incidents.startUnknown.note`), not a member access on an incident.
+    const KEY_ONLY = new Set(['src/locales/en.js', 'src/locales/ko.js'])
+    const readers = []
+    let scanned = 0
+    for (const file of Object.keys(SU_SAFE)) {
+      if (KEY_ONLY.has(file)) continue
+      const code = fs.readFileSync(path.join(ROOT, file), 'utf-8')
+        .replace(/^\s*(\/\/|\*|\/\*).*$/gm, '')
+      scanned++
+      if (/\.startUnknown\b/.test(code)) readers.push(file)
+    }
+    // Asserted INSIDE the same test as its verdict, because an empty `readers` is the passing answer
+    // and is also what a scan that read nothing produces. A separate meta-test cannot tell those apart:
+    // widening the skip list to everything left this green until this line existed.
+    expect(scanned, 'the converse scan read nothing — it is passing vacuously').toBeGreaterThan(40)
+    expect(readers, 'a file classified SAFE for startUnknown now branches on it — reclassify it as an ' +
+      'APPLIER and state what the decision is, or remove the read').toEqual([])
+  })
+
+  it('the converse scan matches the shape it was written for', () => {
+    expect(/\.startUnknown\b/.test('if (next.startUnknown) delete next.startUnknown')).toBe(true)
+  })
+
+  it('every SU_APPLIER and SU_FORWARDER reads the flag in CODE, not in a comment or the type', () => {
+    // Same shape as the two guards above and the same failure they prevent: a declaration
+    // (`startUnknown?: boolean`) has no member access, and a comment has no code. Strip line comments
+    // first, then require a real read — `.startUnknown` (bare or optional-chained).
+    //
+    // `unknownCount` is the second accepted form, and it is not a loosening: `sumGroupDuration` is the
+    // one place that turns the flag into a count, and a flap-group renderer consumes that count rather
+    // than the flag. Overview.jsx is exactly that case — it branches on the count and never sees an
+    // individual incident. Requiring `.startUnknown` there would force a read that has nothing to read.
+    const READS_FLAG = /\.startUnknown\b|\bunknownCount\b/
+    for (const file of [...Object.keys(SU_APPLIERS), ...Object.keys(SU_FORWARDERS)]) {
+      const code = fs.readFileSync(path.join(ROOT, file), 'utf-8')
+        .replace(/^\s*(\/\/|\*|\/\*).*$/gm, '')
+      expect(code, `${file} is registered as reading the startUnknown flag but never does so in code`)
+        .toMatch(READS_FLAG)
     }
   })
 })

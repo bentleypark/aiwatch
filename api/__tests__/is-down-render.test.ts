@@ -621,3 +621,66 @@ describe('is-down AI card summary/progress split (#1328)', () => {
     expect(render({ ...base, status: 'operational', incidents: [done] }, legacyDone)).toContain(DURABLE + '</p>')
   })
 })
+
+// #1390 — the worker publishes `duration: null` on a RESOLVED incident when the provider's own record
+// recovered before it started and its page carried no `component_impacts` window to recover the real
+// one. Both duration sites on this page previously read that as "not finished yet": the summary line
+// printed "(ongoing)" about a recovered incident, and the incident row dropped the field silently.
+describe('a resolved incident with no duration (#1390)', () => {
+  const seo = getSEOContent('junie')!
+  const base = {
+    id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent',
+    latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
+    incidents: [], aiwatchScore: null, scoreGrade: null, status: 'operational',
+  }
+  const started = new Date(Date.now() - 3 * 86_400_000).toISOString()
+  const noDuration = { id: 'i9', title: 'Anthropic Org Quota exceeded', status: 'resolved', impact: 'major', startedAt: started, duration: null }
+  const render = (svc: object) => renderPage('junie', svc as never, seo, [{ name: 'Alt', score: 90 } as never], undefined as never)
+
+  it('is never called ongoing', () => {
+    const html = render({ ...base, incidents: [noDuration] })
+    expect(html).toContain('duration unknown')
+    expect(html).not.toContain('(ongoing)')
+  })
+
+  it('an actually-ongoing incident still says ongoing', () => {
+    // The control: the fix must key on the incident's own status, not on the null duration.
+    const html = render({ ...base, incidents: [{ ...noDuration, id: 'i10', status: 'investigating' }] })
+    expect(html).toContain('(ongoing)')
+  })
+
+  it('a resolved incident WITH a duration is untouched', () => {
+    const html = render({ ...base, incidents: [{ ...noDuration, id: 'i11', duration: '2h 19m' }] })
+    expect(html).toContain('2h 19m')
+    expect(html).not.toContain('duration unknown')
+  })
+})
+
+// #1390 — /methodology publishes the rule in both locales: "we never fill a missing value with our own
+// estimate". #713 removed the last invented uptime and #1006 made every figure a COMPUTATION over the
+// provider's own published records. The is-down insight copy is written per service by hand and no lint
+// reaches it, so perplexity's kept saying "AIWatch estimates uptime from incident durations" — a claim
+// about our own method that our own methodology page contradicts, on a public SEO page.
+describe('no is-down insight claims AIWatch estimates uptime (#713/#1006)', () => {
+  it('the retired vocabulary appears in no service`s copy', () => {
+    const offenders: string[] = []
+    for (const slug of Object.keys(SLUG_TO_SERVICE)) {
+      const seo = getSEOContent(slug)
+      if (!seo) continue
+      const prose = [seo.insight, ...(seo.faq ?? []).map((f) => `${f.q} ${f.a}`)].join(' ')
+      // Scoped to OUR method. A service genuinely publishing no uptime may still be described as such
+      // (gemini's copy does, correctly) — what may never be written is that WE estimate the number.
+      if (/AIWatch\s+estimates?\s+(the\s+)?uptime/i.test(prose)) offenders.push(slug)
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('the sweep actually reads copy — it would catch the sentence it was written for', () => {
+    // Without this the assertion above passes on an empty slug list or a renamed field.
+    const withCopy = Object.keys(SLUG_TO_SERVICE).filter((s) => (getSEOContent(s)?.insight ?? '').length > 40)
+    expect(withCopy.length, 'no insight copy found to scan').toBeGreaterThan(20)
+    expect(/AIWatch\s+estimates?\s+(the\s+)?uptime/i.test(
+      "Perplexity's status page does not publish official uptime numbers, so AIWatch estimates uptime from incident durations.",
+    ), 'the pattern must match the real sentence this guards').toBe(true)
+  })
+})

@@ -81,7 +81,7 @@ Grouped by the dashboard's category taxonomy (45 total — sidebar filters / Ove
 | Together AI | Together | Better Stack RSS + uptime API |
 | Fireworks AI | Fireworks | incident.io (Atlassian compat) |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
-| Perplexity | Perplexity AI | Instatus (Next.js SSR) |
+| Perplexity | Perplexity AI | incident.io (Atlassian compat) |
 | xAI API | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Flashduty (browser-rendered feed) |
 | Kimi (Moonshot AI) | Moonshot AI | Atlassian Statuspage (Chinese titles → English) |

@@ -177,10 +177,11 @@ export function totalFor(day: ParseFailDay, svcId: string): number {
  * fetch. Near-exact, not exact, and the error runs BOTH ways.
  *
  * UNDER-counts: the read-modify-write can lose a bump, and `fetchAllServices` runs services in
- * concurrent batches, so two writers that land in the same batch race on this one key. As of #1123
- * they DO: with `BATCH_SIZE = 10`, perplexity (index 11) and openrouter (index 15) both sit in batch
- * 1 — mistral is in batch 0 and fal in batch 2. This was the "incidental, not guaranteed" case the
- * earlier version of this note warned about, and adding a second source made it real. It costs a lost
+ * concurrent batches, so two writers that land in the same batch race on this one key. As of #1123 two
+ * booking services CAN share a `BATCH_SIZE = 10` batch — which ones depends on their index in
+ * `SERVICES`, so it moves with every reorder and is deliberately not enumerated here. This was the
+ * "incidental, not guaranteed" case the earlier version of this note warned about, and adding a second
+ * source made it real. It costs a lost
  * bump on a counter that is explicitly an order of magnitude, so it is accepted, not fixed.
  *
  * OVER-counts: the slot dedup depends on READING the write made seconds earlier in the same slot, and
