@@ -137,6 +137,10 @@ export interface ServiceData {
     derived?: 'status_history'
     /** #1292 — the page-local day; see `worker/src/types.ts`. */
     derivedDay?: string
+    /** #1390 — `startedAt` is an ANCHOR on this incident's own `resolvedAt`; no elapsed time is
+     *  derivable. Declared for the same reason `derived` above is: an undeclared optional lets
+     *  TypeScript's weak-type check prove the guards that read it can never fire. */
+    startUnknown?: boolean
   }>
   aiwatchScore: number | null
   scoreGrade: string | null
@@ -1161,7 +1165,7 @@ ${/* #1268 — a stale source with NOTHING behind it asserts neither branch. "No
       while still serving a live badge AND live incidents — `readFlashdutyStatus` preserves them
       deliberately. Withholding on bare `stale` deleted the only surviving description of what was wrong
       from a page answering "Yes — down": `renderIncidents` is stale-gated too, and the #1104 note is
-      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt, isDailyRecordIncident(lastIncident), lastIncident.derivedDay))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}${isDailyRecordIncident(lastIncident) ? ' &mdash; start time not published by the provider' : ''}</p>` : '<p class="meta">No recent incidents</p>'}
+      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt, isDailyRecordIncident(lastIncident), lastIncident.derivedDay))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : lastIncident.status === 'resolved' ? ' (duration unknown)' : ' (ongoing)'}${isDailyRecordIncident(lastIncident) ? ' &mdash; start time not published by the provider' : lastIncident.startUnknown ? ' &mdash; no usable time range for this incident' : ''}</p>` : '<p class="meta">No recent incidents</p>'}
 ${/* #1104 — withholding the "Resolved" label stopped the false claim but left the page answering
       "Operational" directly above an Investigating row with nothing reconciling the two. The AI card
       cannot do that job: it renders '' whenever no analysis exists, which is the state right after a
@@ -1443,9 +1447,12 @@ function renderIncidentSingle(inc: GroupingIncident): string {
   const impactCls = inc.impact === 'major' || inc.impact === 'critical' ? 'impact-major' : inc.impact === 'minor' ? 'impact-minor' : ''
   const statusColor = inc.status === 'resolved' ? '#3fb950' : inc.status === 'monitoring' ? '#58a6ff' : '#e86235'
   const statusText = inc.status === 'resolved' ? 'Resolved' : inc.status === 'monitoring' ? 'Monitoring' : 'Investigating'
+  // #1390 — a resolved incident with no duration is not ongoing and is not blank: there is no elapsed
+  // time to show and no duration to state. Say which, rather than dropping the field silently. Keyed on
+  // the broad condition (resolved, no duration), which several parsers can produce.
   const durationOrElapsed = inc.duration
     ? ` &middot; ${esc(inc.duration)}`
-    : inc.status !== 'resolved' ? ` &middot; ${formatElapsed(inc.startedAt)}` : ''
+    : inc.status !== 'resolved' ? ` &middot; ${formatElapsed(inc.startedAt)}` : ' &middot; duration unknown'
   const impactMeta = impactCls ? ` &middot; <span class="${impactCls}">${esc(inc.impact ?? '')}</span>` : ''
   return `<div class="incident-item">
 <div class="incident-title">${esc(inc.title)}</div>

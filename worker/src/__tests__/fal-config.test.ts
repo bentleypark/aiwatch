@@ -1,7 +1,8 @@
 // #758 — pin the fal.ai service config. fal is a generative-media inference platform (image/video/
-// audio/3D, 600+ models) added as a Replicate/Hugging Face peer. Its status page is Instatus (Next.js),
-// so it reuses the Perplexity config shape: a wrong statusComponent / incidentKeywords would silently
-// break uptime parsing or badge scoping with no runtime signal — pin the load-bearing fields.
+// audio/3D, 600+ models) added as a Replicate/Hugging Face peer. Its status page is Instatus (Next.js)
+// — since #1390 moved perplexity to incident.io, the only one left: a wrong statusComponent /
+// incidentKeywords would silently break uptime parsing or badge scoping with no runtime signal, so pin
+// the load-bearing fields.
 // Mirrors image-services-config.test.ts (#756) / observability-services-config.test.ts (#601).
 
 import { describe, it, expect } from 'vitest'
@@ -30,13 +31,6 @@ describe('#758 fal.ai inference service config', () => {
     const s = SERVICES.find((x) => x.id === 'fal')!
     // Display-only — ALL top-level Instatus components (uniform rule); badge stays on statusComponent 'API'.
     expect(s.displayComponentIds).toEqual(['clzmj6mnv0283gwmwtdqtt9u3', 'clzmj6mni0276gwmw95xftvtd', 'clzu5ivf0385762icocgwepue4u'])
-  })
-
-  it('perplexity has the #761 per-component snapshot config (API + Website + Computer #911)', () => {
-    // Pinned because resolveSvcComponents is ≥2-gated: a single stale/typo'd id would silently drop
-    // the breakdown to [] with no other failing test. Computer (cmr18ih7201l20rqmap66bx4l) added #911.
-    const s = SERVICES.find((x) => x.id === 'perplexity')!
-    expect(s!.displayComponentIds).toEqual(['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l'])
   })
 
   it('fal is excluded from fallback (self-serve inference platform, like Replicate/Hugging Face)', () => {

@@ -453,7 +453,7 @@ describe('parseInstatusUptime — Next.js componentsUptime (#635 → #1006)', ()
 
 describe('parseInstatusIncidents — Next.js component capture (#623, keyword-scoped service)', () => {
   // #1177 — the config below is a KEYWORD-SCOPED Instatus service, which is what this describe is
-  // about. It was perplexity until #1177 widened perplexity's scope to every component its card
+  // about. It was perplexity until #1390 moved it off Instatus entirely; before that #1177 had widened its scope to every component its card
   // displays; `fal` is the surviving example, and `perplexity-scope.test.ts` now asserts the opposite
   // outcome for the real perplexity. The PAYLOAD stays perplexity-shaped — it is real captured data and
   // exercises the parser regardless of which service consumes it.
@@ -1024,7 +1024,7 @@ describe('#1089 — an unreadable incident list is NOT "no incidents"', () => {
     expect(parseInstatusIncidentsResult('<html>nothing</html>').ok).toBe(false)
   })
 
-  // perplexity / fal are Next-format. A guard covering only Mistral would read as protection while two
+  // fal is Next-format. A guard covering only the Nuxt shape would read as protection while the other
   // of the three Instatus services stayed exposed.
   it('Next.js format — a missing notices envelope is a structural failure, not "no incidents"', () => {
     expect(parseInstatusIncidentsResult('<script>self.__next_f.push([1,"other"])</script>'))
@@ -1041,7 +1041,7 @@ describe('#1089 — an unreadable incident list is NOT "no incidents"', () => {
 describe('#1089 review — Next.js inner-shape drift is a failure, not a quiet page', () => {
   // Review round 1 (Important 2): the first guard only asked "is the `notices` substring present?",
   // so every INNER shape change still returned ok:true with []. That is the same class of failure
-  // Mistral actually hit on the Nuxt side — so perplexity/fal would have stayed exposed while the
+  // Mistral actually hit on the Nuxt side — so the Next-format service would have stayed exposed while the
   // comment claimed all three Instatus services were covered.
   const withEnvelope = (inner: string) => `<script>self.__next_f.push([1,"{\\"notices\\":{${inner}},\\"metrics\\":{}}"])</script>`
 
@@ -1098,7 +1098,7 @@ describe('#1089 review round 2 — a filtered-out Next page is quiet, not broken
 
   it('an empty envelope is a genuine quiet page — regardless of key order', () => {
     // The old guard hard-coded `notices\\":{},`; if Instatus ever emitted `notices` LAST, every quiet
-    // day on perplexity/fal became a fabricated outage. Extraction does not care about key order.
+    // day on a Next-format page became a fabricated outage. Extraction does not care about key order.
     expect(parseInstatusIncidentsResult(page({ notices: {}, metrics: {} })).ok).toBe(true)
     expect(parseInstatusIncidentsResult(page({ metrics: {}, notices: {} })).ok).toBe(true)
   })

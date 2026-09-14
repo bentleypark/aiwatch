@@ -5264,6 +5264,11 @@ export default {
               // reconstructed anchor and a day-bucket duration with no way to apply the rule the rest
               // of the codebase applies to them.
               ...(i.derived ? { derived: i.derived, derivedDay: i.derivedDay } : {}),
+              // #1390 — same reasoning one axis over: `startedAt` here can be an anchor on the
+              // incident's own `resolvedAt`, published because the provider's record was
+              // self-contradictory. Without the flag a public consumer reads a synthetic instant as
+              // the outage's start and a null duration as "still running".
+              ...(i.startUnknown ? { startUnknown: true } : {}),
             })),
             aiwatchScore: scoreData.score,
             scoreGrade: scoreData.grade,

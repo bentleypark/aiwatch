@@ -80,7 +80,7 @@
 | Together AI | Together | Better Stack RSS + 가동률 API |
 | Fireworks AI | Fireworks | incident.io (Atlassian 호환) |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
-| Perplexity | Perplexity AI | Instatus (Next.js SSR) |
+| Perplexity | Perplexity AI | incident.io (Atlassian 호환) |
 | xAI API | xAI | RSS 피드 |
 | DeepSeek API | DeepSeek | Flashduty (브라우저 렌더 피드) |
 | Kimi (Moonshot AI) | Moonshot AI | Atlassian Statuspage (중국어 제목 → 영어) |

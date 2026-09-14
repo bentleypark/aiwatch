@@ -207,7 +207,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   perplexity: {
     displayName: 'Perplexity',
     description: 'Perplexity is an AI-powered answer engine combining LLMs with real-time web search. It offers consumer search at perplexity.ai and an API for developers to access its search-augmented generation capabilities.',
-    insight: 'Perplexity\'s status page does not publish official uptime numbers, so AIWatch estimates uptime from incident durations using Atlassian-style impact weighting. Outages often correlate with upstream LLM provider issues since Perplexity uses multiple model backends.',
+    insight: 'Perplexity moved its status page to incident.io in September 2026, which publishes per-component outage records. AIWatch computes its own 30-day uptime from those records rather than copying the figure the page shows, so the two can differ. Outages often correlate with upstream LLM provider issues since Perplexity uses multiple model backends.',
     whenDown: 'When Perplexity is down, both the consumer search interface (perplexity.ai) and the developer API will fail to return answers. Apps built on Perplexity API for search-augmented generation will lose their search capability.',
     faqs: [
       { q: 'Is Perplexity down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Perplexity every 5 minutes and shows real-time operational status.' },

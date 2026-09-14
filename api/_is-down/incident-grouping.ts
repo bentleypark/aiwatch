@@ -113,6 +113,10 @@ export interface GroupingIncident {
   derived?: 'status_history'
   /** #1292 — the page-local day; see `worker/src/types.ts`. */
   derivedDay?: string
+  /** #1390 — `startedAt` is an ANCHOR on this incident's own `resolvedAt`; no elapsed time is
+   *  derivable. Declared for the same reason `derived` above is: an undeclared optional lets
+   *  TypeScript's weak-type check prove the guards that read it can never fire. */
+  startUnknown?: boolean
 }
 
 export interface GroupRow {

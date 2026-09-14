@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   formatMttrHours,
   incidentDurationText,
+  groupDurationText,
   STATUS_PRIORITY,
   STATUS_ORDER,
   getResolvedTime,
@@ -702,5 +703,79 @@ describe('#1292 — incidentDurationText', () => {
   it('falls back when there is no duration yet — the qualifier must not appear', () => {
     expect(incidentDurationText({ derived: 'status_history' }, t, 'Ongoing')).toBe('Ongoing')
     expect(incidentDurationText({ duration: null }, t, 'Ongoing')).toBe('Ongoing')
+  })
+})
+
+describe('#1390 incidentDurationText — a resolved incident with no duration is not "Ongoing"', () => {
+  const t = (k) => k
+
+  it('states the absence instead of claiming the incident is still running', () => {
+    // The worker publishes `duration: null` on a resolved incident when the provider's own record
+    // recovered before it started and its page carried no impact window to recover the real one.
+    // Saying "Ongoing" about something that has recovered is the one answer that misleads.
+    expect(incidentDurationText({ status: 'resolved', duration: null }, t, 'incidents.duration.ongoing'))
+      .toBe('incidents.duration.unknown')
+  })
+
+  it('still says Ongoing for an incident that genuinely has not resolved', () => {
+    for (const status of ['investigating', 'identified', 'monitoring']) {
+      expect(incidentDurationText({ status, duration: null }, t, 'incidents.duration.ongoing'))
+        .toBe('incidents.duration.ongoing')
+    }
+  })
+
+  it('leaves a real duration alone, resolved or not', () => {
+    expect(incidentDurationText({ status: 'resolved', duration: '2h 19m' }, t, 'x')).toBe('2h 19m')
+    expect(incidentDurationText({ status: 'resolved', duration: '17h 18m', derived: 'status_history' }, t, 'x'))
+      .toBe('17h 18m incidents.derived.dayTotal')
+  })
+})
+
+describe('#1390 sumGroupDuration / groupDurationText — an anchored entry is resolved, not ongoing', () => {
+  const t = (k) => k
+  const anchored = (id) => ({ id, startedAt: '2026-09-01T00:06:56Z', resolvedAt: '2026-09-01T00:06:56Z', startUnknown: true })
+  const measured = (id) => ({ id, startedAt: '2026-09-05T04:50:00Z', resolvedAt: '2026-09-05T07:09:00Z' })
+
+  it('does not count an anchored entry as ongoing', () => {
+    // Its interval is zero-length, so it used to fail the `end > start` test and fall through to
+    // `hasOngoing` — labelling a group of entirely RESOLVED incidents "Ongoing", the exact claim
+    // incidentDurationText was changed to stop making for the same incident one screen away.
+    const s = sumGroupDuration({ entries: [anchored('a'), anchored('b')] })
+    expect(s.hasOngoing).toBe(false)
+    expect(s.unknownCount).toBe(2)
+    expect(groupDurationText(s, t)).toBe('incidents.duration.unknown')
+  })
+
+  it('a mixed group reports the measured total AND says something is unknown', () => {
+    const s = sumGroupDuration({ entries: [measured('m'), anchored('a')] })
+    expect(s.resolvedCount).toBe(1)
+    expect(s.unknownCount).toBe(1)
+    expect(groupDurationText(s, t)).toBe('2h 19m + incidents.duration.unknown')
+  })
+
+  it('a genuinely ongoing entry still says ongoing', () => {
+    // The control: the fix must not silence a real in-progress incident.
+    const s = sumGroupDuration({ entries: [{ id: 'o', startedAt: '2026-09-05T04:50:00Z' }] })
+    expect(s.hasOngoing).toBe(true)
+    expect(groupDurationText(s, t)).toBe('incidents.duration.ongoing')
+  })
+
+  it('an all-resolved measured group is unchanged', () => {
+    const s = sumGroupDuration({ entries: [measured('m1'), measured('m2')] })
+    expect(s.unknownCount).toBe(0)
+    expect(groupDurationText(s, t)).toBe('4h 38m')
+  })
+})
+
+describe('#1390 getContextualTime — an anchored instant keeps minute precision', () => {
+  const t = (k) => k
+  it('does NOT set dayOnly, because dayOnly without a `day` renders the UTC day', () => {
+    // The regression guard for a fix that was tried and reverted: `formatDate` forces UTC for any
+    // dayOnly render and only substitutes the noon anchor when a `day` accompanies it. An anchored
+    // incident has no `derivedDay`, so flagging it printed the UTC calendar day while the calendar on
+    // the same screen painted the local one. The note on the card carries the caveat instead.
+    const ctx = getContextualTime({ status: 'resolved', startedAt: '2025-12-14T21:28:00Z', resolvedAt: '2025-12-14T21:28:00Z', duration: null, startUnknown: true, timeline: [] }, t)
+    expect(ctx.dayOnly).toBe(false)
+    expect(ctx.day, 'and there is no day to anchor it with').toBeUndefined()
   })
 })

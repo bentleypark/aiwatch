@@ -120,14 +120,22 @@ export function formatMttrHours(hours) {
  * Defensive: skips entries with missing/invalid timestamps so a malformed
  * payload doesn't crash the row render.
  *
- * @param {{ entries?: { startedAt?: string, resolvedAt?: string }[] }} group
- * @returns {{ totalMs: number, hasOngoing: boolean, resolvedCount: number }}
+ * #1390 — an entry whose start is ANCHORED on its own `resolvedAt` (`startUnknown`) has a zero-length
+ * interval, so it used to fail the `end > start` test and fall through to `hasOngoing`. That made a
+ * group of entirely RESOLVED incidents render as "Ongoing" — the one answer `incidentDurationText`
+ * below was changed to stop giving for the same incident on the single-row path, one screen away. It
+ * is counted separately instead: resolved, but carrying no measurable elapsed time.
+ *
+ * @param {{ entries?: { startedAt?: string, resolvedAt?: string, startUnknown?: boolean }[] }} group
+ * @returns {{ totalMs: number, hasOngoing: boolean, resolvedCount: number, unknownCount: number }}
  */
 export function sumGroupDuration(group) {
   let totalMs = 0
   let hasOngoing = false
   let resolvedCount = 0
+  let unknownCount = 0
   for (const entry of group.entries ?? []) {
+    if (entry.startUnknown) { unknownCount += 1; continue }
     if (entry.resolvedAt && entry.startedAt) {
       const start = new Date(entry.startedAt).getTime()
       const end = new Date(entry.resolvedAt).getTime()
@@ -146,7 +154,32 @@ export function sumGroupDuration(group) {
     }
     hasOngoing = true
   }
-  return { totalMs, hasOngoing, resolvedCount }
+  return { totalMs, hasOngoing, resolvedCount, unknownCount }
+}
+
+/**
+ * #1390 — the label for a flap group's cumulative duration. Extracted because Incidents.jsx carried
+ * two byte-identical copies of this expression and Overview.jsx a third variant, and the
+ * `unknownCount` case had to be added to all of them: a group whose only entries carry no derivable
+ * elapsed time is not ongoing, and it is not "0m" either.
+ *
+ * @param {{ totalMs: number, hasOngoing: boolean, resolvedCount: number, unknownCount: number }} summed
+ * @param {(key: string) => string} t
+ * @returns {string}
+ */
+export function groupDurationText(summed, t) {
+  if (summed.resolvedCount === 0) {
+    if (summed.hasOngoing) return t('incidents.duration.ongoing')
+    // Nothing measurable and nothing running: every entry is resolved with an unrecoverable start.
+    // `formatDurationMs(0)` would state a duration we have just declined to state.
+    if (summed.unknownCount > 0) return t('incidents.duration.unknown')
+  }
+  const measured = formatDurationMs(summed.totalMs)
+  if (summed.hasOngoing) return `${measured} + ${t('incidents.duration.ongoing')}`
+  // A group mixing measured and unknown entries reports the measured total; saying so is what stops
+  // the figure reading as the group's whole impact.
+  if (summed.unknownCount > 0) return `${measured} + ${t('incidents.duration.unknown')}`
+  return measured
 }
 
 /**
@@ -200,6 +233,15 @@ const ACTIVE_TIMELINE_GUARDED = new Set(['ongoing', 'investigating', 'identified
  * @returns {{ label: string, date: string, dayOnly: boolean, day: string|undefined }}
  */
 export function getContextualTime(inc, t) {
+  // #1390 — `startUnknown` deliberately does NOT join this axis, and the attempt is worth recording so
+  // it is not retried. `dayOnly` renders through `formatDate`, which forces UTC and substitutes the
+  // noon anchor only when a `day` accompanies the flag. An anchored incident has no `derivedDay`, so
+  // `dayOnly` without `day` printed the UTC calendar day while `calendar.js` painted the LOCAL day of
+  // the same instant — the two disagreeing by one day on one screen, which is the disagreement #1400
+  // closed from the other side. The row keeps minute precision and states the provider's own published
+  // instant; `incidents.startUnknown.note` on the same card is what says how far to trust it. That is
+  // the same division of labour `status_history` uses — a precise-looking anchor plus a note — not a
+  // contradiction to be fixed by hedging the label.
   const dayOnly = inc.derived === 'status_history'
   // The day travels WITH the flag: for a resolved incident this returns `resolvedAt`, and a day bucket
   // over 12h resolves on the NEXT calendar day under the noon anchor — so a consumer formatting that
@@ -331,13 +373,18 @@ export function compareGroupedRows(a, b) {
  * print a bare "17h 18m" that reads as one continuous outage, while the is-down card for the same
  * incident already says "down 17h 18m that day".
  *
- * @param {{ duration?: string|null, derived?: string }} inc
+ * #1390 — a RESOLVED incident with no duration is not ongoing, and saying "Ongoing" about something
+ * that has recovered is the worst of the three things it could say. The condition is deliberately the
+ * broad one — resolved, no duration — because several parsers can produce it (a missing or unparseable
+ * end timestamp), not only the #1390 repair that prompted the fix. The cell states the absence instead.
+ *
+ * @param {{ duration?: string|null, derived?: string, status?: string }} inc
  * @param {(key: string) => string} t
  * @param {string} fallback  what to show when there is no duration yet (ongoing / monitoring)
  * @returns {string}
  */
 export function incidentDurationText(inc, t, fallback) {
-  if (!inc.duration) return fallback
+  if (!inc.duration) return inc.status === 'resolved' ? t('incidents.duration.unknown') : fallback
   return inc.derived === 'status_history'
     ? `${inc.duration} ${t('incidents.derived.dayTotal')}`
     : inc.duration
