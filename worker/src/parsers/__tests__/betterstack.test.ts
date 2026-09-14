@@ -684,6 +684,66 @@ describe('parseXaiRssIncidents', () => {
   it('returns empty for no items', () => {
     expect(parseXaiRssIncidents('<rss></rss>')).toEqual([])
   })
+
+  // #1349 — status.x.ai does NOT list an item's updates in a consistent direction: 30 of the 115
+  // items in the live feed (read 2026-09-14) are oldest-first, and some are in neither order. The
+  // parser used to `.reverse()` unconditionally, which put the RESOLUTION at `timeline[0]` for the
+  // oldest-first ones — and `startedAt` is read from that slot, so those incidents took their
+  // resolution instant as their start. `formatDuration` then floored the zero interval to `1m`,
+  // which `score.ts` reads as a near-perfect recovery (`utils.ts` `isTimeOrderImpossible` documents
+  // the same failure). The pre-#1349 test above happens to use an oldest-first item and asserted
+  // only `timeline.length > 0`, so it passed throughout.
+  const xaiItem = (updates: string[]) => `
+      <item>
+        <title>[API (us-east-1.api.x.ai)] Models unavailable</title>
+        <guid isPermaLink="false">INC7c0fd2b1</guid>
+        <description><![CDATA[
+          Status: RESOLVED
+          Resolved: Wed, 21 Jan 2026 13:02:00 GMT
+          ${updates.join('\n          ')}
+        ]]></description>
+      </item>`
+  const INVESTIGATING = '<div><strong>Wed, 21 Jan 2026 11:19:00 GMT</strong><h3>Investigating</h3><p>Models are unavailable on the API</p></div>'
+  const RESOLVED = '<div><strong>Wed, 21 Jan 2026 13:02:00 GMT</strong><h3>Incident resolved</h3><p>Resolved</p></div>'
+
+  it('reads startedAt from the EARLIEST update when the feed lists updates oldest-first', () => {
+    const [out] = parseXaiRssIncidents(xaiItem([INVESTIGATING, RESOLVED]))
+    expect(out.startedAt).toBe('2026-01-21T11:19:00.000Z')
+    expect(out.duration).toBe('1h 43m')
+    expect(out.timeline.map(t => t.at)).toEqual(['2026-01-21T11:19:00.000Z', '2026-01-21T13:02:00.000Z'])
+  })
+
+  it('reads the same startedAt when the feed lists the same updates newest-first', () => {
+    const [out] = parseXaiRssIncidents(xaiItem([RESOLVED, INVESTIGATING]))
+    expect(out.startedAt).toBe('2026-01-21T11:19:00.000Z')
+    expect(out.duration).toBe('1h 43m')
+    expect(out.timeline.map(t => t.at)).toEqual(['2026-01-21T11:19:00.000Z', '2026-01-21T13:02:00.000Z'])
+  })
+
+  // The class that makes this a SORT rather than a conditional reverse: an item in NEITHER order, so
+  // no reversal puts the earliest update first. Transcribed from `INC58e769ba`
+  // (`[Grok (iOS)] Grok Response is Disrupted`, 2025-08-14), which lists 16:55 → 15:10 → 16:17.
+  it('reads startedAt from the earliest update when the feed lists updates in NEITHER order', () => {
+    const at = (t: string, h: string) =>
+      `<div><strong>Thu, 14 Aug 2025 ${t} GMT</strong><h3>${h}</h3><p>${h}</p></div>`
+    const [out] = parseXaiRssIncidents(`
+      <item>
+        <title>[Grok (iOS)] Grok Response is Disrupted</title>
+        <guid isPermaLink="false">INC58e769ba</guid>
+        <description><![CDATA[
+          Status: RESOLVED
+          Resolved: Thu, 14 Aug 2025 16:55:00 GMT
+          ${at('16:55:00', 'Resolved')}
+          ${at('15:10:00', 'Investigating')}
+          ${at('16:17:00', 'Identified')}
+        ]]></description>
+      </item>`)
+    expect(out.startedAt).toBe('2025-08-14T15:10:00.000Z')
+    expect(out.duration).toBe('1h 45m')
+    expect(out.timeline.map(t => t.at)).toEqual([
+      '2025-08-14T15:10:00.000Z', '2025-08-14T16:17:00.000Z', '2025-08-14T16:55:00.000Z',
+    ])
+  })
 })
 
 describe('parseBetterStackStatus', () => {

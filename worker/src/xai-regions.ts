@@ -7,10 +7,12 @@
 //   • #703 — the AI analysis: refreshOrReanalyze otherwise analyzes each region separately, so the
 //     Analyze modal shows one xAI card with two region-duplicate analysis entries + burns a 2nd
 //     Gemma/Sonnet call.
-// Both key on the region-tag-STRIPPED title, so the SAME event across regions collapses while DISTINCT
-// events (e.g. image-gen vs grok-code-fast-1) stay separate. This module is the single source of that
-// regex + the helpers, so the two surfaces can't drift. xAI-only by design (other SERVICE_REGIONS feeds
-// aren't verified to split incidentIds per region).
+// This module is the single source of the region regex + the helpers, so the two surfaces can't
+// drift on what a region IS. The region-tag-stripped title alone is NOT an event identity, though —
+// xAI reuses API titles — so deciding whether two incidents are ONE event needs
+// `groupXaiRegionalIncidents` (#1349), which also bounds a group in time and refuses a region it
+// already holds. xAI-only by design (other SERVICE_REGIONS feeds aren't verified to split
+// incidentIds per region).
 //
 // #1337 adds the SECOND axis on the same page: xAI files one Grok app outage as a separate incident per
 // SURFACE, tagged `[Grok (<surface>)] `. Same failure, different prefix — see `mergeXaiGrokSurfaceIncidents`
@@ -34,11 +36,18 @@ export function xaiEventKey(title: string): string {
 }
 
 /**
- * Collapse xAI per-region incidents (same region-stripped title) to ONE — keeping the FIRST
- * occurrence per event. Non-region-tagged incidents (and every incident of a non-xAI service, since
- * only xAI titles carry the `[API (<region>.api.x.ai)]` prefix) pass through untouched, so this is a
- * safe no-op on any other service's incident list. Used by the AI-analysis path (#703) so a 2-region
- * xAI event is analyzed once. Generic over the incident shape — only `title` is read.
+ * Collapse xAI per-region incidents of the SAME EVENT to ONE — keeping the first occurrence per
+ * group. Non-region-tagged incidents (and every incident of a non-xAI service, since only xAI titles
+ * carry the `[API (<region>.api.x.ai)]` prefix) pass through untouched, so this is a safe no-op on
+ * any other service's incident list. Used by the AI-analysis path (#703) so a 2-region xAI event is
+ * analyzed once.
+ *
+ * **"Same event" is `groupXaiRegionalIncidents`'s rule, not the stripped title (#1349.)** It used to
+ * be the title alone, across the whole list, which was harmless only while the source merge
+ * guaranteed one incident per title. #1349 removed that guarantee on purpose — two same-title
+ * outages more than `REGION_WINDOW_MS` apart are now two incidents — and a title-only rule here
+ * would have dropped one of them, re-fusing on this surface what the merge had just split — costing
+ * the dropped incident its AI analysis for as long as both were open.
  *
  * "First kept" is intentionally aligned with `mergeXaiRegionalAlerts`'s `arr[0]` anchor (both walk
  * `svc.incidents` order), so the region whose analysis the initial path wrote is the one the refresh
@@ -50,31 +59,22 @@ export function xaiEventKey(title: string): string {
  * after deploy if a 2-region xAI incident is already active. It self-heals within ~1h (the dropped
  * region's key is never re-bumped).
  */
-export function collapseXaiRegionalIncidents<T extends { title: string }>(incidents: T[]): T[] {
-  // Pass 1 — collect the affected regions per event (in first-seen order, deduped).
-  const regionsByEvent = new Map<string, string[]>()
-  for (const inc of incidents) {
-    if (!XAI_REGION_RE.test(inc.title)) continue
-    const key = xaiEventKey(inc.title)
-    const region = xaiRegionOf(inc.title)
-    if (!region) continue
-    const arr = regionsByEvent.get(key)
-    if (arr) { if (!arr.includes(region)) arr.push(region) }
-    else regionsByEvent.set(key, [region])
-  }
-  // Pass 2 — keep the FIRST incident per event; for a MULTI-region event, return a copy whose title
-  // names all affected regions, so the downstream AI analysis reflects EVERY region (not just the
-  // first one analyzed — #703, the "only us-east-1 shown" gap). Single-region + non-tagged: unchanged.
-  const kept = new Set<string>()
+export function collapseXaiRegionalIncidents<T extends { title: string; startedAt: string }>(incidents: T[]): T[] {
+  const groupOfIndex = groupXaiRegionalIncidents(incidents)
+  // Keep the FIRST incident per group; for a MULTI-region group, return a copy whose title names all
+  // affected regions, so the downstream AI analysis reflects EVERY region (not just the first one
+  // analyzed — #703, the "only us-east-1 shown" gap). Single-region + non-tagged: unchanged.
+  const emitted = new Set<RegionGroup<T>>()
   const out: T[] = []
-  for (const inc of incidents) {
-    if (!XAI_REGION_RE.test(inc.title)) { out.push(inc); continue }
-    const key = xaiEventKey(inc.title)
-    if (kept.has(key)) continue // a duplicate region of an already-kept event → drop
-    kept.add(key)
-    const regions = regionsByEvent.get(key) ?? []
-    out.push(regions.length > 1 ? { ...inc, title: `${key} (regions: ${regions.join(', ')})` } : inc)
-  }
+  incidents.forEach((inc, idx) => {
+    const group = groupOfIndex.get(idx)
+    if (!group) { out.push(inc); return }
+    if (emitted.has(group)) return // a duplicate region of an already-kept event → drop
+    emitted.add(group)
+    out.push(group.regions.size > 1
+      ? { ...inc, title: `${group.key} (regions: ${[...group.regions].join(', ')})` }
+      : inc)
+  })
   return out
 }
 
@@ -96,65 +96,126 @@ function fnv1aHex(s: string): string {
 }
 
 /**
+ * The time bound on a region group (#1349). Before it, the region merge grouped on the stripped
+ * title across the whole feed, and xAI reuses API titles: `Models unavailable` covers a 2026-01-14
+ * outage and a separate 2026-01-21 one, which fused into a single fabricated 162-hour incident whose
+ * `duration` fed MTTR.
+ *
+ * 30 min is a bound, not a fitted constant, and it is the same number the surface axis uses. It sits
+ * above the widest spread between the regions of ONE event in the live feed (2026-09-14, 115 items):
+ * 4m 52s — `Imagine Video 1.5 …` on 2026-07-07, us-east-1 15:35:34 → us-west-2 15:40:26. Tighten it
+ * only against an event it would have split.
+ */
+const REGION_WINDOW_MS = 30 * 60 * 1000
+
+interface RegionGroup<T> {
+  key: string
+  /** the EARLIEST member's start — see the ordering note in `groupXaiRegionalIncidents`. */
+  anchorMs: number
+  regions: Set<string>
+  members: T[]
+}
+
+/**
+ * The region-grouping rule for `mergeXaiRegionalIncidents` and `collapseXaiRegionalIncidents`. One
+ * copy, because the drift has a direction: whichever copy kept the old title-only rule would
+ * silently re-fuse what the other one deliberately split. (`mergeXaiRegionalAlerts` cannot use this
+ * — an `AlertCandidate` carries no `startedAt` — so it bounds its buckets by region alone.)
+ *
+ * Three conditions, all required: the same region-stripped title, a start within
+ * `REGION_WINDOW_MS` of the group's anchor, and a region the group does not already hold (two
+ * incidents in ONE region cannot be one event).
+ *
+ * Grouping walks the incidents in START order, not input order, so the anchor is always the group's
+ * earliest member. Input order alone decided the partition before: three regions of one key at
+ * t=0/25/50 min group as `{0,25}+{50}` when listed ascending and as one group of three when the
+ * middle one comes first — different rows AND different ids for one input set.
+ */
+function groupXaiRegionalIncidents<T extends { title: string; startedAt: string }>(
+  incidents: T[],
+): Map<number, RegionGroup<T>> {
+  const groups: RegionGroup<T>[] = []
+  const groupOfIndex = new Map<number, RegionGroup<T>>()
+
+  const byStart = incidents
+    .map((inc, idx) => ({ inc, idx, startedMs: Date.parse(inc.startedAt) }))
+    .filter(({ inc, startedMs }) => {
+      if (!xaiRegionOf(inc.title)) return false
+      if (Number.isNaN(startedMs)) {
+        // `Incident.startedAt` is a required string, so this is a parser defect, not normal input.
+        // The resulting pass-through is byte-identical to a healthy no-match, so log it — mirrors the
+        // #983 warn on this same field in `alerts.ts` and the one in `upstream-link.ts`.
+        console.warn('[xai-regions] #1349 unparseable startedAt — leaving incident unmerged:', inc.startedAt)
+        return false
+      }
+      return true
+    })
+    .sort((a, b) => (a.startedMs - b.startedMs) || (a.idx - b.idx))
+
+  for (const { inc, idx, startedMs } of byStart) {
+    const region = xaiRegionOf(inc.title)!
+    const key = xaiEventKey(inc.title)
+    // `startedMs >= anchorMs` always, since the walk is ascending — no `Math.abs` needed.
+    const group = groups.find((g) =>
+      g.key === key && !g.regions.has(region) && startedMs - g.anchorMs <= REGION_WINDOW_MS)
+    if (group) {
+      group.regions.add(region)
+      group.members.push(inc)
+      groupOfIndex.set(idx, group)
+    } else {
+      const created: RegionGroup<T> = { key, anchorMs: startedMs, regions: new Set([region]), members: [inc] }
+      groups.push(created)
+      groupOfIndex.set(idx, created)
+    }
+  }
+  return groupOfIndex
+}
+
+/** The earliest `startedAt` in a group, compared as an INSTANT and re-emitted in one normalized
+ *  spelling. `utils.ts` (`isTimeOrderImpossible`) records why these payloads are never string-compared:
+ *  they mix fractional-second precision, and within one second lexical order is wrong in both
+ *  directions (`…03.123Z` sorts below `…03Z` because `.` < `Z`). That mattered for display before; it
+ *  decides IDENTITY now that the id hashes this value, and hashing the raw string would additionally
+ *  give two spellings of one instant two different ids.
+ *
+ *  Every caller drops an unparseable `startedAt` before grouping, so no member here can yield `NaN`.
+ *  This deliberately carries no guard for that: an unparseable value would throw on the `Date`
+ *  construction, which is the right outcome — a silent fallback would mint a WRONG identity. */
+function earliestStartedAt(members: Incident[]): string {
+  return new Date(Math.min(...members.map((m) => Date.parse(m.startedAt)))).toISOString()
+}
+
+/**
  * #940 — collapse xAI per-region incidents to ONE canonical incident **at the source**
  * (`services.ts`, right after `parseXaiRssIncidents`), so EVERY downstream surface — dashboard list,
  * Analyze modal, RSS/Slack `/feed`, Discord new+resolved alerts — sees a single incident. The old
  * per-surface merges (`mergeXaiRegionalAlerts` #686, `collapseXaiRegionalIncidents` #703) were
  * cycle-local: they only collapsed within one cron batch, so regions that surfaced/resolved in
- * different cycles leaked as duplicate messages/cards. This is the single, source-level fix; the two
- * older helpers become no-ops (kept as cheap defense).
+ * different cycles leaked as duplicate messages/cards. This is the single, source-level fix.
  *
  * Non-region-tagged incidents (and every incident of any non-xAI service, since only xAI titles carry
  * the `[API (<region>.api.x.ai)]` prefix) pass through untouched → safe no-op elsewhere.
  *
  * Per-field merge semantics are `mergeXaiEventGroup`'s, shared with the surface merge. This function
  * owns only the GROUPING and the IDENTITY:
- *  - **grouping**: the region-stripped title, a start within REGION_WINDOW_MS of the group anchor, and
- *    no repeated region in the group. The title alone is not an event identity: xAI reused "Models
- *    unavailable" seven days apart in January 2026, which fabricated a 162-hour outage (#1349).
+ *  - **grouping**: `groupXaiRegionalIncidents`'s rule, shared with `collapseXaiRegionalIncidents`.
+ *    Emission follows FEED order, so a merged incident keeps its first member's position.
  *  - **id**: a canonical `xai-evt:<fnv1a(eventKey|startedAt)>`, so recurrences cannot collide in the
- *    SPA's raw-id dedupe. It remains stable across a partial resolution and a late *later-starting*
- *    region. A late member with an earlier start re-keys once because this pure snapshot merge has no
- *    durable first-seen identity; that bounded alert/archive duplicate is preferable to fusing distinct
- *    outages.
+ *    SPA's raw-id dedupe. It is stable across a partial resolution and across a late *later-starting*
+ *    region joining. It re-keys once when the group's EARLIEST member changes — a late member with an
+ *    earlier start, or the anchor ageing out of the feed window — because a pure snapshot merge has no
+ *    durable first-seen identity; that would need KV. Bounded (one duplicate Discord alert, one extra
+ *    additive `incidents:monthly` row), and preferable to fusing distinct outages.
  *  - **title**: single region keeps its original `[API (<region>)] …`; multi-region →
  *    `[API] <eventKey> (regions: a, b, …)` — see the `[API]` marker note at the title itself.
  */
-const REGION_WINDOW_MS = 30 * 60 * 1000
-
-interface RegionGroup {
-  key: string
-  anchorMs: number
-  regions: Set<string>
-  members: Incident[]
-}
-
 export function mergeXaiRegionalIncidents(incidents: Incident[]): Incident[] {
-  const groups: RegionGroup[] = []
-  const groupOfIndex = new Map<number, RegionGroup>()
-  incidents.forEach((inc, idx) => {
-    const region = xaiRegionOf(inc.title)
-    if (!region) return
-    const startedMs = Date.parse(inc.startedAt)
-    if (Number.isNaN(startedMs)) {
-      console.warn('[xai-regions] #1349 unparseable startedAt — leaving incident unmerged:', inc.startedAt)
-      return
-    }
-    const key = xaiEventKey(inc.title)
-    const group = groups.find((g) =>
-      g.key === key && !g.regions.has(region) && Math.abs(startedMs - g.anchorMs) <= REGION_WINDOW_MS)
-    if (group) {
-      group.regions.add(region)
-      group.members.push(inc)
-      groupOfIndex.set(idx, group)
-    } else {
-      const created: RegionGroup = { key, anchorMs: startedMs, regions: new Set([region]), members: [inc] }
-      groups.push(created)
-      groupOfIndex.set(idx, created)
-    }
-  })
+  const groupOfIndex = groupXaiRegionalIncidents(incidents)
 
-  const emitted = new Set<RegionGroup>()
+  // `uniqueId` completes the same-region rule, exactly as on the surface axis: two groups that rule
+  // split apart can still share a `(key, startedAt)` and would then hash to one id, which the SPA's
+  // raw-id dedupe re-fuses into a single row. Suffixing by emission order keeps them distinct.
+  const emitted = new Set<RegionGroup<Incident>>()
   const usedIds = new Set<string>()
   const uniqueId = (id: string): string => {
     if (!usedIds.has(id)) { usedIds.add(id); return id }
@@ -170,17 +231,17 @@ export function mergeXaiRegionalIncidents(incidents: Incident[]): Incident[] {
     if (emitted.has(group)) return
     emitted.add(group)
     const members = collapseCrossMemberEchoes(group.members)
-    const startedAt = members.reduce((min, m) => (m.startedAt < min ? m.startedAt : min), members[0].startedAt)
-    const id = uniqueId(`xai-evt:${fnv1aHex(`${group.key}|${startedAt}`)}`)
-    out.push({ ...mergeXaiEventGroup(members, {
-      id,
+    // `anchorMs` IS the group's earliest start — the walk that built it is ascending — so the id
+    // names the same instant `mergeXaiEventGroup` will emit as `startedAt`, without re-deriving it.
+    out.push(mergeXaiEventGroup(members, {
+      id: uniqueId(`xai-evt:${fnv1aHex(`${group.key}|${new Date(group.anchorMs).toISOString()}`)}`),
       // A single-region event keeps its original `[API (<region>.api.x.ai)] …` title; a multi-region
       // event drops the per-region prefixes for `<eventKey> (regions: …)` — but MUST retain an `[API]`
       // marker so it still passes `filterIncidents`, which keeps an xAI incident only when its title
       // carries the `api` keyword (xAI incidents have no componentNames to match on). Without it a real
       // multi-region outage would be silently filtered out → the service would read operational (#940 review).
       title: members.length === 1 ? members[0].title : `[API] ${group.key} (regions: ${[...group.regions].join(', ')})`,
-    }), id })
+    }))
   })
   return out
 }
@@ -217,7 +278,7 @@ function mergeXaiEventGroup(members: Incident[], identity: { id: string; title: 
     null,
   )
 
-  const startedAt = members.reduce((min, m) => (m.startedAt < min ? m.startedAt : min), members[0].startedAt)
+  const startedAt = earliestStartedAt(members)
   const resolvedAt = allResolved
     ? members.reduce<string | null>((max, m) => {
         const r = m.resolvedAt ?? null
@@ -287,13 +348,13 @@ export function xaiGrokDisplayTitle(title: string): string {
 }
 
 /**
- * The time bound on a surface group, and the reason this merge is NOT a copy of the region merge.
+ * The time bound on a surface group. Both axes are bounded now — #1349 gave the region merge the
+ * same construction after xAI reused an API title for separate outages — so this is `REGION_WINDOW_MS`'s
+ * sibling, not a divergence from it. It is kept a separate constant because the two are derived
+ * against different evidence, and either could move without the other.
  *
- * `mergeXaiRegionalIncidents` groups on the stripped title alone, across the whole feed. That cannot
- * be copied here, because Grok's titles RECUR: `Grok is Temporarily Unavailable` covers many separate
- * outages months apart, and a title-only key would offer them all to one group.
- *
- * The window is what separates the recurrences: removing it fuses events weeks apart whose surface
+ * The window is what separates the recurrences — Grok's titles RECUR, `Grok is Temporarily
+ * Unavailable` covering many separate outages months apart. Removing it fuses events weeks apart whose surface
  * sets happen not to overlap, and the 2026-03-10 and 2026-02-12 outages of that title are one such
  * pair. Comparing group COUNTS hides this — the count is unchanged — so compare the emitted groups'
  * surfaces and start instants.
@@ -345,25 +406,23 @@ interface SurfaceGroup {
  *     feed, and the SPA's raw-id dedupe (`Incidents.jsx`) would render them as a single row;
  *   • the key plus a UTC DAY still collides, on 2026-01-27, which carries two of those events (03:33
  *     and 14:10).
- * `xai-grok:` namespaces the axis. It is a deliberate guard rather than today's load-bearing
- * separator: the region merge hashes the title with the provider's casing (`fnv1a('Models outage')` =
- * `1sc6h22`, the API side's live id for this very outage) while this one hashes `models outage|…`, so
- * the hashes already differ. The prefix is what keeps that true if either key's normalization changes.
- * A shared id would have joined the xAI API and Grok cards into one row by accident, whichever service
- * is processed first silently winning the title; joining those two cards is a separate, deliberate
+ * `xai-grok:` namespaces the axis. Since #1349 both axes hash `<key>|<startedAt>`, and the keys
+ * differ only in normalization — this one lowercases, the region merge keeps the provider's casing —
+ * so the prefix is what guarantees they cannot collide however either normalization changes. A shared
+ * id would have joined the xAI API and Grok cards into one row by accident, whichever service is
+ * processed first silently winning the title; joining those two cards is a separate, deliberate
  * change (#1338).
  *
  * **The id is NOT stable against a member arriving late with an earlier start.** `startedAt` is the
  * minimum over the members present in THIS snapshot, so a surface that shows up in a later cron cycle
  * carrying an earlier `startedAt` moves the minimum and re-keys the incident — one duplicate Discord
- * "new incident" alert and one extra row in the additive `incidents:monthly`. The region merge does
- * not have this exposure, because its id ignores time entirely; the trade is deliberate, since a
- * time-free key here would instead fuse unrelated recurrences of a title xAI reuses constantly. An
- * earlier draft claimed this could not happen, citing a replay of the feed in `startedAt` order — an
- * ordering that cannot exhibit the failure by construction, since arrival order is exactly what the
- * archived feed does not record. `mergeXaiGrokSurfaceIncidents` is a pure function of one snapshot and
- * cannot close this; a durable first-seen id would have to live in KV. Bounded, and still far fewer
- * alerts than the pre-#1337 behaviour of four separate incidents alerting four times.
+ * "new incident" alert and one extra row in the additive `incidents:monthly`. Since #1349 the region
+ * merge carries the identical exposure for the identical reason; neither is a pure function of one
+ * snapshot that can close it, and a durable first-seen id would have to live in KV. An earlier draft
+ * claimed this could not happen, citing a replay of the feed in `startedAt` order — an ordering that
+ * cannot exhibit the failure by construction, since arrival order is exactly what the archived feed
+ * does not record. Bounded, and still far fewer alerts than the pre-#1337 behaviour of four separate
+ * incidents alerting four times.
  *
  * Like #940, an incident already active at DEPLOY re-keys once from its RSS guid, and the monthly
  * accumulator is additive — it keeps the pre-merge rows until they are pruned.
@@ -434,11 +493,14 @@ export function mergeXaiGrokSurfaceIncidents(incidents: Incident[]): Incident[] 
 /**
  * Drop each member's copy of an announcement another member already made, keeping the earliest.
  *
- * Only sound where the members are CONTEMPORANEOUS, which is why it lives here and not in
- * `mergeXaiEventGroup`: a surface group is bounded to `SURFACE_WINDOW_MS`, so a sentence repeated
- * across its members is one announcement echoed. The region merge has no time bound and can hold
- * members from outages months apart, where the same boilerplate is two separate announcements — an
- * earlier cut of this ran inside the shared merge and deleted a whole later outage's rows there.
+ * Only sound where the members are CONTEMPORANEOUS, which is why it lives here and not inside
+ * `mergeXaiEventGroup`: the precondition belongs to the CALLER's grouping, not to the per-field
+ * merge. Both callers satisfy it by being time-bounded — the surface merge to `SURFACE_WINDOW_MS`,
+ * the region merge to `REGION_WINDOW_MS` since #1349 — so a sentence repeated across a group's
+ * members is one announcement echoed. It was unsound on the region axis while that axis had no time
+ * bound: a group could hold members from outages months apart, where the same boilerplate is two
+ * separate announcements, and an earlier cut of this ran inside the shared merge and deleted a whole
+ * later outage's rows. A future caller that groups without a time bound must not call this.
  *
  * A member repeating ITSELF is left alone: that is the provider saying it is still going, and the
  * per-member set is what tells the two apart.
@@ -468,7 +530,7 @@ function collapseCrossMemberEchoes(members: Incident[]): Incident[] {
 function mergeSurfaceGroup(group: SurfaceGroup): Incident {
   const { surfaces } = group
   const members = collapseCrossMemberEchoes(group.members)
-  const startedAt = members.reduce((min, m) => (m.startedAt < min ? m.startedAt : min), members[0].startedAt)
+  const startedAt = earliestStartedAt(members)
   return mergeXaiEventGroup(members, {
     id: `xai-grok:${fnv1aHex(`${group.key}|${startedAt}`)}`,
     // A single-surface event keeps its original `[Grok (<surface>)] …` title untouched. A merged one

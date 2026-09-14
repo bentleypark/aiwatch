@@ -212,7 +212,17 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
         : 'investigating' as const
       const text = textMatch?.map(p => decodeXmlEntities(p.replace(/<[^>]*>/g, ''))).join(' ').trim() || null
       return [{ stage, text, at }]
-    }).reverse() // oldest first
+    })
+      // #1349 — ORDER BY THE TIMESTAMPS, not by the feed's layout. The `.reverse()` this replaces
+      // assumed status.x.ai always lists updates newest-first; 30 of the 115 items in the live feed
+      // (2026-09-14) list them oldest-first instead, and reversing those puts the RESOLUTION at
+      // `timeline[0]`. `startedAt` is read from exactly that slot, so those incidents took the
+      // resolution instant as their start: `startedAt === resolvedAt`, and `formatDuration` floors
+      // the zero interval to `1m` — the failure `utils.ts` documents at `isTimeOrderImpossible`,
+      // where a real outage publishes as a one-minute one and `score.ts` reads a fabricated
+      // near-perfect recovery off it. Live example: `[API] Models unavailable` on 2026-01-21 ran
+      // 11:19:00 → 13:02:00 (1h 43m) in both regions and parsed as `1m`.
+      .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
 
     const startedAt = timeline.length > 0 ? timeline[0].at : new Date().toISOString()
     const resolvedAt = (resolvedDate && !isNaN(resolvedDate.getTime())) ? resolvedDate : null

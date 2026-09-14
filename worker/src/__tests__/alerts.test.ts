@@ -1144,6 +1144,57 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
     expect(result[0].fallbackText).toContain('Suggested fallback')
   })
 
+  // #1349 — this merge keys on the stripped title with no time bound, which was safe only while the
+  // #940 source merge guaranteed one xAI incident per title. #1349 removed that guarantee on purpose
+  // (two same-title outages more than REGION_WINDOW_MS apart are two incidents), so if both alert in
+  // one cron batch a title-only bucket would fold them into one embed reading `(us-east-1, us-east-1)`.
+  // An AlertCandidate carries no startedAt, so the region half of the rule is the half available here.
+  it('does NOT fold two alerts of the SAME region into one (#1349)', () => {
+    const result = mergeXaiRegionalAlerts([
+      xaiNew('old', 'us-east-1', 'Models unavailable'),
+      xaiNew('new', 'us-east-1', 'Models unavailable'),
+    ])
+    expect(result).toHaveLength(2)
+    expect(result.every(a => a.title === '🔴 xAI API — New Incident')).toBe(true) // neither got a (regions: …) suffix
+    // Set-wise: this function has never promised an emission order across buckets — a non-bucketed
+    // alert reaches `out` during the bucketing pass while every bucket flushes after it.
+    expect(result.map(a => a.key).sort()).toEqual(['alerted:new:new', 'alerted:new:old'])
+  })
+
+  it('still merges the other regions of an event when one region repeats (#1349)', () => {
+    const result = mergeXaiRegionalAlerts([
+      xaiNew('us1', 'us-east-1', 'Models unavailable'),
+      xaiNew('eu1', 'eu-west-1', 'Models unavailable'),
+      xaiNew('us2', 'us-east-1', 'Models unavailable'),
+    ])
+    expect(result).toHaveLength(2)
+    const merged = result.find(a => a.title.includes('('))!
+    expect(merged.title).toBe('🔴 xAI API — New Incident (us-east-1, eu-west-1)')
+    expect(merged._mergedKeys).toEqual(['alerted:new:us1', 'alerted:new:eu1'])
+    // the repeat stays its own alert, keeping its own key in the roster
+    expect(result.find(a => !a.title.includes('('))!.key).toBe('alerted:new:us2')
+  })
+
+  // The repeat opens the NEXT bucket for that title rather than leaving the merge — so a recurrence
+  // still merges across its own regions. Two regions × two same-title outages is 2 embeds, not 3.
+  it('merges each same-title outage across its OWN regions (#1349)', () => {
+    const result = mergeXaiRegionalAlerts([
+      xaiNew('a1', 'us-east-1', 'Models unavailable'),
+      xaiNew('a2', 'eu-west-1', 'Models unavailable'),
+      xaiNew('b1', 'us-east-1', 'Models unavailable'),
+      xaiNew('b2', 'eu-west-1', 'Models unavailable'),
+    ])
+    expect(result).toHaveLength(2)
+    expect(result.map(a => a.title)).toEqual([
+      '🔴 xAI API — New Incident (us-east-1, eu-west-1)',
+      '🔴 xAI API — New Incident (us-east-1, eu-west-1)',
+    ])
+    expect(result.map(a => a._mergedKeys)).toEqual([
+      ['alerted:new:a1', 'alerted:new:a2'],
+      ['alerted:new:b1', 'alerted:new:b2'],
+    ])
+  })
+
   it('does NOT merge two DISTINCT events (each in two regions → two merged alerts)', () => {
     const result = mergeXaiRegionalAlerts([
       xaiNew('a1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'),

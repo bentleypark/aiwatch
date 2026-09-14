@@ -5,7 +5,10 @@ import type { Incident } from '../types'
 
 const XAI_CONFIG = SERVICES.find(s => s.id === 'xai')!
 
-const inc = (id: string, title: string) => ({ id, title })
+// `collapseXaiRegionalIncidents` reads `startedAt` since #1349 (same grouping rule as the source
+// merge), so these fixtures carry one. A shared instant is the "same event across regions" case these
+// tests are about; the recurrence case has its own test below.
+const inc = (id: string, title: string, startedAt = '2026-07-08T00:00:00.000Z') => ({ id, title, startedAt })
 
 // Full-Incident builder for the #940 source-merge tests.
 const fullInc = (over: Partial<Incident> & { id: string; title: string }): Incident => ({
@@ -86,6 +89,36 @@ describe('xai-regions (#686/#703)', () => {
       expect(collapseXaiRegionalIncidents(list)).toEqual(list)
     })
 
+    // #1349 — this helper runs on the ALREADY-merged list (ai-analysis.ts `refreshOrReanalyze`). Once
+    // the source merge stopped guaranteeing one incident per stripped title, a title-only rule here
+    // dropped one of two concurrently-open same-title outages, costing it its AI analysis.
+    it('does NOT collapse two same-title outages that are separate events', () => {
+      const out = collapseXaiRegionalIncidents([
+        inc('old', '[API (us-east-1.api.x.ai)] Models unavailable', '2026-01-14T18:53:15.000Z'),
+        inc('new', '[API (us-east-1.api.x.ai)] Models unavailable', '2026-01-21T11:19:00.000Z'),
+      ])
+      expect(out.map((i) => i.id)).toEqual(['old', 'new'])
+      expect(out.map((i) => i.title)).toEqual([
+        '[API (us-east-1.api.x.ai)] Models unavailable',
+        '[API (us-east-1.api.x.ai)] Models unavailable',
+      ])
+    })
+
+    // …and by TIME when the regions differ, which the same-region rule cannot decide. This is the
+    // half of the #1349 rule that is new on THIS surface, and it is what stops the AI-analysis path
+    // from dropping a same-title recurrence in another region.
+    it('does NOT collapse two same-title outages in DIFFERENT regions far apart in time', () => {
+      const out = collapseXaiRegionalIncidents([
+        inc('jan14', '[API (us-east-1.api.x.ai)] Models unavailable', '2026-01-14T18:53:15.000Z'),
+        inc('jan21', '[API (eu-west-1.api.x.ai)] Models unavailable', '2026-01-21T11:19:00.000Z'),
+      ])
+      expect(out.map((i) => i.id)).toEqual(['jan14', 'jan21'])
+      expect(out.map((i) => i.title)).toEqual([
+        '[API (us-east-1.api.x.ai)] Models unavailable',
+        '[API (eu-west-1.api.x.ai)] Models unavailable',
+      ])
+    })
+
     it('a region-tagged + a non-tagged incident: tagged collapses by event, untagged kept', () => {
       const out = collapseXaiRegionalIncidents([
         inc('us1', '[API (us-east-1.api.x.ai)] Event A'),
@@ -113,13 +146,15 @@ describe('xai-regions (#686/#703)', () => {
     })
 
     it('canonical id is STABLE across single- vs multi-region member sets for the same event', () => {
-      const single = mergeXaiRegionalIncidents([fullInc({ id: 'us1', title: `[API (us-east-1.api.x.ai)] ${T}` })])
+      const us = fullInc({ id: 'us1', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-07-08T00:00:00.000Z' })
+      const single = mergeXaiRegionalIncidents([us])
+      // The joining region starts LATER, which is the case the stability guarantee actually rests on:
+      // the group's minimum does not move, so the id does not re-key. (It is NOT stable the other way
+      // — a member arriving with an EARLIER start moves the minimum; the docblock says so.)
       const multi = mergeXaiRegionalIncidents([
-        fullInc({ id: 'us1', title: `[API (us-east-1.api.x.ai)] ${T}` }),
-        fullInc({ id: 'eu1', title: `[API (eu-west-1.api.x.ai)] ${T}` }),
+        us,
+        fullInc({ id: 'eu1', title: `[API (eu-west-1.api.x.ai)] ${T}`, startedAt: '2026-07-08T00:04:00.000Z' }),
       ])
-      // Same key + group anchor → same id whether 1 or 2 regions are present (survives partial
-      // resolution / a later-starting region joining).
       expect(single[0].id).toBe(multi[0].id)
     })
 
@@ -183,17 +218,39 @@ describe('xai-regions (#686/#703)', () => {
       expect(out[0].timeline).toHaveLength(1)
     })
 
-    it('splits the real recurring Models unavailable pair, preserving plausible durations and ids', () => {
+    // The #1349 pair, transcribed from https://status.x.ai/feed.xml as read 2026-09-14 — the three
+    // items are INC10b35980 (2026-01-14, us-east-1 ONLY) and INC7c0fd2b1 / INC6bf67591 (2026-01-21,
+    // both regions, identical instants). Feed order, newest item first. Every timestamp here is the
+    // provider's; nothing is invented, because the numbers this asserts are the ones #1349 asks for.
+    it('splits the real recurring Models unavailable pair into its true per-outage durations', () => {
       const SAME = 'We are investigating an issue.'
+      const jan21 = (id: string, region: string) => fullInc({
+        id, title: `[API (${region}.api.x.ai)] Models unavailable`, status: 'resolved',
+        startedAt: '2026-01-21T11:19:00.000Z', resolvedAt: '2026-01-21T13:02:00.000Z',
+        timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-21T11:19:00.000Z' }],
+      })
       const out = mergeXaiRegionalIncidents([
-        fullInc({ id: 'jan14-us', title: '[API (us-east-1.api.x.ai)] Models unavailable', status: 'resolved', startedAt: '2026-01-14T18:53:15.000Z', resolvedAt: '2026-01-14T19:30:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-14T18:53:15.000Z' }] }),
-        fullInc({ id: 'jan14-eu', title: '[API (eu-west-1.api.x.ai)] Models unavailable', status: 'resolved', startedAt: '2026-01-14T18:55:00.000Z', resolvedAt: '2026-01-14T19:32:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-14T18:55:00.000Z' }] }),
-        fullInc({ id: 'jan21-us', title: '[API (us-east-1.api.x.ai)] Models unavailable', status: 'resolved', startedAt: '2026-01-21T11:19:00.000Z', resolvedAt: '2026-01-21T13:02:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-21T11:19:00.000Z' }] }),
-        fullInc({ id: 'jan21-eu', title: '[API (eu-west-1.api.x.ai)] Models unavailable', status: 'resolved', startedAt: '2026-01-21T11:21:00.000Z', resolvedAt: '2026-01-21T13:01:00.000Z', timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-21T11:21:00.000Z' }] }),
+        jan21('INC7c0fd2b1', 'us-east-1'),
+        jan21('INC6bf67591', 'eu-west-1'),
+        fullInc({
+          id: 'INC10b35980', title: '[API (us-east-1.api.x.ai)] Models unavailable', status: 'resolved',
+          startedAt: '2026-01-14T18:53:15.000Z', resolvedAt: '2026-01-14T21:19:48.000Z',
+          timeline: [{ stage: 'investigating', text: SAME, at: '2026-01-14T18:53:15.000Z' }],
+        }),
       ])
       expect(out).toHaveLength(2)
-      expect(out.map(i => i.duration)).toEqual(['39m', '1h 43m'])
-      expect(new Set(out.map(i => i.id)).size).toBe(2)
+      // Pre-#1349 these three fused into ONE `xai-evt:o9u2n1` reading 2026-01-14T18:53:15 →
+      // 2026-01-21T13:02:00, `162h 9m` — the figure #1349 quotes from production.
+      expect(out.map(i => i.duration)).toEqual(['1h 43m', '2h 27m'])
+      expect(out[0].title).toBe('[API] Models unavailable (regions: us-east-1, eu-west-1)')
+      expect(out[1].title).toBe('[API (us-east-1.api.x.ai)] Models unavailable')
+      // PIN THE HASH PAYLOAD, not just distinctness. `startedAt` is the half of
+      // `fnv1a(eventKey|startedAt)` that separates these two outages, and a distinctness assertion
+      // alone does NOT pin it: drop `startedAt` and both groups hash to `fnv1a('Models unavailable')`
+      // = `xai-evt:o9u2n1` — the fused id from #1349 — which `uniqueId` then makes distinct as
+      // `o9u2n1` / `o9u2n1-2`, so `new Set(ids).size === 2` still holds while the id has silently
+      // gone back to colliding across recurrences. These literals are what kills that mutant.
+      expect(out.map(i => i.id)).toEqual(['xai-evt:1ytiy7b', 'xai-evt:11amozi'])
     })
 
     it('refuses to fuse two same-region incidents even inside the time window', () => {
@@ -205,12 +262,81 @@ describe('xai-regions (#686/#703)', () => {
       expect(new Set(out.map(i => i.id)).size).toBe(2)
     })
 
+    // Splitting the groups is only half of keeping both incidents: same key + same startedAt hash to
+    // one id, and the SPA's raw-id dedupe would re-fuse the pair the same-region rule just split.
+    // Identical `startedAt` values are ordinary on this feed — the whole 2026-09-03 quartet shares
+    // 13:30:00.000Z. The surface axis has this test; the region axis shipped the code without one.
+    it('gives two same-region incidents sharing a startedAt DISTINCT ids', () => {
+      const out = mergeXaiRegionalIncidents([
+        fullInc({ id: 'first', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:00.000Z' }),
+        fullInc({ id: 'second', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:00.000Z' }),
+      ])
+      expect(out).toHaveLength(2)
+      expect(new Set(out.map(i => i.id)).size).toBe(2)
+      expect(out[1].id).toBe(`${out[0].id}-2`)
+    })
+
+    it('leaves an incident with an unparseable startedAt unmerged', () => {
+      const out = mergeXaiRegionalIncidents([
+        fullInc({ id: 'ok', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:00.000Z' }),
+        fullInc({ id: 'broken', title: `[API (eu-west-1.api.x.ai)] ${T}`, startedAt: 'not-a-date' }),
+      ])
+      expect(out.map(i => i.id)).toEqual(['xai-evt:' + out[0].id.split(':')[1], 'broken'])
+      expect(out[1].title).toBe(`[API (eu-west-1.api.x.ai)] ${T}`) // untouched, original id kept
+    })
+
+    // Nothing guarantees the feed's guids are unique — `parseXaiRssIncidents` passes `<guid>` through
+    // unchecked — so the grouping is keyed by POSITION. An id-keyed map loses a whole group when two
+    // incidents share one guid. The surface axis has this test; the region axis did not.
+    it('does not lose a group when two incidents share a guid', () => {
+      const out = mergeXaiRegionalIncidents([
+        fullInc({ id: 'dup', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:00.000Z' }),
+        fullInc({ id: 'dup', title: `[API (us-east-1.api.x.ai)] Some other event`, startedAt: '2026-09-03T13:30:00.000Z' }),
+      ])
+      expect(out).toHaveLength(2)
+    })
+
+    // Three regions of one key at t=0/25/50 min: first-match grouping in FEED order yields
+    // `{0,25}+{50}` when listed ascending but one group of three when the middle one leads. Walking
+    // in START order settles it. (Exactly-equal starts still fall back to input index — untested
+    // here because no order-independent tie-break exists for them.)
+    it('partitions three spread-out regions identically whatever order the feed lists them in', () => {
+      const event = [
+        fullInc({ id: 'us', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:00:00.000Z' }),
+        fullInc({ id: 'eu', title: `[API (eu-west-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:25:00.000Z' }),
+        fullInc({ id: 'uw', title: `[API (us-west-2.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:50:00.000Z' }),
+      ]
+      const ids = (list: Incident[]) => mergeXaiRegionalIncidents(list).map(i => i.id).sort()
+      const ascending = ids(event)
+      expect(ascending).toHaveLength(2) // {13:00, 13:25} + {13:50} — 50 min is outside the anchor's window
+      expect(ids([event[1], event[0], event[2]])).toEqual(ascending)
+      expect(ids([...event].reverse())).toEqual(ascending)
+    })
+
     it('keeps the canonical id stable when same-event regions arrive in another feed order', () => {
       const event = [
         fullInc({ id: 'us', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:00.000Z' }),
         fullInc({ id: 'eu', title: `[API (eu-west-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:34:00.000Z' }),
       ]
       expect(mergeXaiRegionalIncidents(event)[0].id).toBe(mergeXaiRegionalIncidents([...event].reverse())[0].id)
+    })
+
+    // #1349 — the id hashes `startedAt`, so the comparison that picks the group's earliest member
+    // decides IDENTITY. `utils.ts` (`isTimeOrderImpossible`) records that within one second lexical
+    // order is wrong in both directions: `…03.123Z` sorts BELOW `…03Z` because `.` < `Z`. A lexical
+    // minimum would name 13:30:03.123Z the start of a group whose true earliest is 13:30:03Z.
+    it('picks the group start by INSTANT, not by string order, within one second', () => {
+      const out = mergeXaiRegionalIncidents([
+        fullInc({ id: 'us', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:03.123Z' }),
+        fullInc({ id: 'eu', title: `[API (eu-west-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:03Z' }),
+      ])
+      expect(out).toHaveLength(1)
+      expect(out[0].startedAt).toBe('2026-09-03T13:30:03.000Z')
+      // …and the id names that same instant, in one normalized spelling.
+      expect(out[0].id).toBe(mergeXaiRegionalIncidents([
+        fullInc({ id: 'us', title: `[API (us-east-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:03.000Z' }),
+        fullInc({ id: 'eu', title: `[API (eu-west-1.api.x.ai)] ${T}`, startedAt: '2026-09-03T13:30:03.123Z' }),
+      ])[0].id)
     })
 
     it('keeps DISTINCT events separate (different canonical ids)', () => {
@@ -370,7 +496,12 @@ describe('xai Grok surface merge (#1337)', () => {
         fullInc({ id: 'b-web', title: '[Grok (Web)] Grok is Temporarily Unavailable', startedAt: '2026-01-27T14:10:00.000Z' }),
       ])
       expect(out).toHaveLength(2)
-      expect(new Set(out.map(i => i.id)).size).toBe(2)
+      // PIN THE HASH PAYLOAD, not just distinctness — the same reason the region axis pins literals.
+      // Drop `|startedAt` and both groups hash to `fnv1a('grok is temporarily unavailable')` =
+      // `xai-grok:z74zew`, which `uniqueId` then makes distinct as `z74zew` / `z74zew-2`, so
+      // `new Set(ids).size === 2` still holds while the id has silently gone back to colliding across
+      // every recurrence of a title xAI reuses constantly. These are the ids the live feed produces.
+      expect(out.map(i => i.id)).toEqual(['xai-grok:qmgt28', 'xai-grok:kj4mvc'])
     })
 
     it('leaves a genuinely per-platform outage split — the case #1165 declined to merge for', () => {
@@ -395,6 +526,20 @@ describe('xai Grok surface merge (#1337)', () => {
         fullInc({ id: 'mar', title: '[Grok (iOS)] Grok is Temporarily Unavailable', startedAt: '2026-03-10T20:06:42.000Z' }),
       ])
       expect(out).toHaveLength(2)
+    })
+
+    // Same pair in the order the FEED actually supplies — newest-first. This merge walks feed order,
+    // so `startedMs - anchorMs` is NEGATIVE for every later-listed member and `Math.abs` is the only
+    // thing enforcing the window; the ascending test above cannot pin it, because there the delta is
+    // already positive. Without the guard these two fuse, and on the live feed the fused
+    // `Grok is Temporarily Unavailable` recurrences publish durations in the hundreds of hours.
+    it('separates the same two events when the feed lists them newest-first', () => {
+      const out = mergeXaiGrokSurfaceIncidents([
+        fullInc({ id: 'mar', title: '[Grok (iOS)] Grok is Temporarily Unavailable', startedAt: '2026-03-10T20:06:42.000Z' }),
+        fullInc({ id: 'feb', title: '[Grok (Android)] Grok is Temporarily Unavailable', startedAt: '2026-02-12T19:39:59.000Z' }),
+      ])
+      expect(out).toHaveLength(2)
+      expect(out.map(i => i.startedAt)).toEqual(['2026-03-10T20:06:42.000Z', '2026-02-12T19:39:59.000Z'])
     })
 
     it('refuses to fuse two incidents on the SAME surface', () => {
