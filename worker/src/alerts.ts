@@ -922,8 +922,9 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
 // but near-identical titles differing only by a `[API (<region>.api.x.ai)] ` prefix (live: us-east-1 +
 // eu-west-1). buildIncidentAlerts groups by incidentId, so each region fires its own alert. Strip the
 // region prefix off the alert description (= the incident title) to derive a grouping key, so the SAME
-// event across regions merges while DISTINCT events stay separate. The regex lives in xai-regions.ts
-// (#703) so the alert merge + the AI-analysis dedup can't drift. xAI-only by design.
+// event across regions merges. Distinct events with the SAME title do not stay separate by that key
+// alone — #1349 — which is what the per-region rule inside `collapse` below is for. The regex lives
+// in xai-regions.ts (#703) so the two surfaces agree on what a region IS. xAI-only by design.
 
 /**
  * Merge concurrent xAI API per-region incident alerts (same event, different region) into one
@@ -940,16 +941,32 @@ export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate
   const rest = alerts.filter((a) => !isXai(a))
 
   const collapse = (group: AlertCandidate[], kind: 'new' | 'res'): AlertCandidate[] => {
-    const buckets = new Map<string, AlertCandidate[]>()
+    // #1349 — one alert per REGION per bucket, and an event may now own MORE THAN ONE bucket. This
+    // merge keys on the stripped title with no time bound, which was safe only while the #940 source
+    // merge guaranteed one xAI incident per title. #1349 removed that guarantee on purpose: two
+    // same-title outages more than `REGION_WINDOW_MS` apart are two incidents, and a title-only
+    // bucket folds them into a single embed reading `(us-east-1, us-east-1)`. A repeated region
+    // cannot be another region of the same event, so it opens the next bucket for that title — which
+    // is why `buckets` is a LIST, not a title-keyed map. A recurrence still merges across ITS OWN
+    // regions that way; dropping the repeat into the pass-through list instead would cost the
+    // recurrence the #686 merge entirely (2 regions × 2 outages → 3 embeds, not 2).
+    // A time bound is what the region merge groups with; an AlertCandidate carries no startedAt (see
+    // the #1330 note below on why none is attributed), so the region rule is the half available here.
+    const buckets: { event: string; regions: Set<string>; members: AlertCandidate[] }[] = []
     const out: AlertCandidate[] = []
     for (const a of group) {
       if (!XAI_REGION_RE.test(a.description)) { out.push(a); continue } // not region-tagged → never merge
       const event = a.description.replace(XAI_REGION_RE, '').trim()
-      const arr = buckets.get(event) ?? []
-      arr.push(a)
-      buckets.set(event, arr)
+      const region = XAI_REGION_RE.exec(a.description)?.[1] ?? ''
+      const bucket = buckets.find((b) => b.event === event && !b.regions.has(region))
+      if (bucket) {
+        bucket.regions.add(region)
+        bucket.members.push(a)
+      } else {
+        buckets.push({ event, regions: new Set([region]), members: [a] })
+      }
     }
-    for (const arr of buckets.values()) {
+    for (const { members: arr } of buckets) {
       if (arr.length <= 1) { out.push(...arr); continue }
       const regions = arr.map((a) => XAI_REGION_RE.exec(a.description)?.[1]).filter(Boolean)
       const merged: AlertCandidate = {
