@@ -86,6 +86,7 @@ Every clickable inbound link **we** emit is UTM-tagged so GA4 (and the `#842-B` 
 | `threads` / `copy-link` | `share` | `outage` | is-down share buttons (`buildShareUrl`) | `direct` if the visit carries no referrer host, else `refhost` (#1055) |
 | `rss` | `feed` | `outage` | RSS feed items (`appendUtm`, rss.ts) | `feed` |
 | `reddit` | `social` | `outage` | Reddit promote links (`appendUtm`, reddit.ts) | **`reddit`** (#1055 — was `direct`) |
+| `bsky` | `social` | `outage` | Bluesky reply-assist link in the operator incident alert (`appendUtm`, alerts.ts) | **`bsky`** (#1417) — also by referrer host `bsky.app`/`go.bsky.app` |
 | **`discord`** | **`notification`** | **`outage`** | **#936 — Discord alert "View on AIWatch" (operator dashboard + per-user is-down, `appendUtm`)** | `feed` |
 | **`extension`** | **`referral`** | — | **#936 — Chrome extension deep links + dashboard (`withExtUtm`, extension/config.js)** | `owned` |
 | **`statusline`** | **`referral`** | — | **#936 — statusline OSC-8 links (`appendUtm`, statusline.ts)** | `owned` |

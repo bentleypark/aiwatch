@@ -38,6 +38,9 @@ Scope is `REDDIT_ENGAGE_SUBS`, whose keys are pinned equal to `TWEET_SEARCH_TERM
 
 Length-guarded against the 4096-char embed cap. When the section is dropped for space the cron logs a scoped `#1182 reddit section dropped (embed cap)` warn — otherwise that outcome is byte-identical to "no targets" and unanswerable from the logs later.
 
+### Bluesky reply assist (#1417) — operator-only block on the incident embed
+Appended after the Reddit block by `appendBlueskySection`, from `buildBlueskyEngageTargets(alert, scored)`. It shares `resolveEngageSurfaces` with the Reddit builder, so scope (`TWEET_SEARCH_TERMS`), the `isNonOutageAlert` gate and the #1193 family collapse are the same. Each line is a `bsky.app/search` link plus a `?utm_source=bsky` is-down reply link rendered as inline code, for the same bucket-pollution reason as the Reddit link. No Bluesky request is made. Same one-try guard, same operator-only boundary (`reddit-engage-wiring.test.ts`), and a scoped `#1417 bluesky section dropped (embed cap)` warn when the section does not fit. Bluesky search requires a signed-in session.
+
 ### New status-page component detection (#992) — operator ops alert
 A cron-only operator alert (webhook only, never per-user), sibling to the #135 component-**miss** alert but the **inverse direction**: #135 fires when a *configured* id disappears (migration); this fires when an *unseen* id **appears** (a provider added a component AIWatch should decide whether to track). Data is free — `fetchAllServices` returns `pageComponents` (apiUrl → `{id,name}[]`, built by `buildPageComponents`) harvested from the live prefetch; the cron diffs each page against the durable `component-seen:{apiUrl}` KV snapshot (`diffPageComponents`).
 

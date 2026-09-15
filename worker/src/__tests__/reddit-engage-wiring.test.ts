@@ -78,6 +78,37 @@ describe('reddit engage wiring (#1182)', () => {
   })
 })
 
+describe('bluesky engage wiring (#1417)', () => {
+  function bskyBlock(): string {
+    const start = INDEX_SRC.indexOf('const withReddit = operatorDescription')
+    const end = INDEX_SRC.indexOf('const operatorSent = await sendDiscordAlert', start)
+    expect(start, 'bluesky assembly block not found — did the wiring move?').toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    return INDEX_SRC.slice(start, end)
+  }
+
+  it('imports both builders from ./alerts', () => {
+    expect(INDEX_SRC).toMatch(/import\s*\{[^}]*buildBlueskyEngageTargets[^}]*\}\s*from\s*'\.\/alerts'/s)
+    expect(INDEX_SRC).toMatch(/import\s*\{[^}]*appendBlueskySection[^}]*\}\s*from\s*'\.\/alerts'/s)
+  })
+
+  it('appends after the Reddit block, inside one try, before the send', () => {
+    const block = bskyBlock()
+    expect(INDEX_SRC.indexOf('const withReddit = operatorDescription')).toBeGreaterThan(
+      INDEX_SRC.indexOf('operatorDescription = appendRedditSection(withSearches, redditTargets, DIV)'),
+    )
+    const tryIdx = block.indexOf('try {')
+    const buildIdx = block.indexOf('buildBlueskyEngageTargets(alert, scored)')
+    const renderIdx = block.indexOf('operatorDescription = appendBlueskySection(withReddit, bskyTargets, DIV)')
+    expect(tryIdx).toBeGreaterThan(-1)
+    expect(buildIdx).toBeGreaterThan(tryIdx)
+    expect(renderIdx).toBeGreaterThan(tryIdx)
+    expect(block.indexOf('} catch')).toBeGreaterThan(renderIdx)
+    expect(block).toContain('#1417 bluesky section dropped (embed cap)')
+    expect(block).toContain('bskyTargets.length > 0 && operatorDescription === withReddit')
+  })
+})
+
 describe('#1330 - feedAgeText fails closed on the first-seen TTL, so the two must not drift', () => {
   // `feedAgeText` suppresses the disclosure at or above ALERTED_NEW_TTL_S because that is exactly
   // when `feed:firstseen:{id}` expires and gets re-stamped with `now`. That reasoning is only sound

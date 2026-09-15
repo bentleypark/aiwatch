@@ -1756,6 +1756,43 @@ export function mergeFamilySubs(memberSubs: readonly (readonly string[])[]): str
  * decisions.
  */
 export function buildRedditEngageTargets(alert: AlertCandidate, services: ScoredService[]): RedditEngageTarget[] {
+  return resolveEngageSurfaces(alert, services, (id) => !!REDDIT_ENGAGE_SUBS[id]).map((s) => ({
+    serviceId: s.serviceId,
+    serviceName: s.serviceName,
+    term: s.term,
+    subs: (s.memberIds.length >= 2 ? mergeFamilySubs(s.memberIds.map((m) => REDDIT_ENGAGE_SUBS[m])) : REDDIT_ENGAGE_SUBS[s.memberIds[0]]).map(
+      (sub) => ({ subreddit: sub, url: buildRedditSearchUrl(sub, s.term) }),
+    ),
+    allRedditUrl: buildRedditAllSearchUrl(s.term),
+    // #548 — utm_source=reddit is what attributes the click to the Reddit channel in the
+    // outage-audience classifier; `?e=reddit` namespaces the social-card unfurl (#539). Same
+    // construction formatRedditAlert uses, so both Reddit surfaces tag identically.
+    replyLink: appendUtm(appendStatusHint(`https://ai-watch.dev/is-${s.linkSlug}-down`, 'reddit'), 'reddit'),
+  }))
+}
+
+/** One line of an operator reply-assist block: a single surface, or a collapsed provider family. */
+export interface EngageSurface {
+  /** A service id, or `family:<slug>` for a collapsed provider family (#1193). */
+  serviceId: string
+  serviceName: string
+  term: string
+  /** The covered in-scope surfaces this line stands for — one, or 2+ for a family. */
+  memberIds: string[]
+  /** is-down slug the reply link points at: the surface's own page, or the family group page. */
+  linkSlug: string
+}
+
+/**
+ * The svcIds resolution, non-outage gate and #1193 family collapse shared by the Reddit (#1182) and
+ * Bluesky (#1417) reply-assist blocks. `inScope` is the channel's own membership test, applied on
+ * top of TWEET_SEARCH_TERMS.
+ */
+export function resolveEngageSurfaces(
+  alert: AlertCandidate,
+  services: ScoredService[],
+  inScope: (id: string) => boolean,
+): EngageSurface[] {
   const kind = kindFromKey(alert.key)
   if (!kind) return []
   // #1021 advisory / #1106 withdrawal — same gate as the tweet draft + X-search block.
@@ -1763,11 +1800,11 @@ export function buildRedditEngageTargets(alert: AlertCandidate, services: Scored
   const keys = alert._mergedKeys ?? [alert.key]
   const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
 
-  // In-scope, deduped, order preserved. A service needs BOTH a sub list and a search term.
+  // In-scope, deduped, order preserved. A service needs BOTH channel membership and a search term.
   const inScopeIds: string[] = []
   const seen = new Set<string>()
   for (const id of svcIds) {
-    if (!REDDIT_ENGAGE_SUBS[id] || !TWEET_SEARCH_TERMS[id] || seen.has(id)) continue
+    if (!inScope(id) || !TWEET_SEARCH_TERMS[id] || seen.has(id)) continue
     seen.add(id)
     inScopeIds.push(id)
   }
@@ -1780,7 +1817,7 @@ export function buildRedditEngageTargets(alert: AlertCandidate, services: Scored
     byFamily.set(family.slug, [...(byFamily.get(family.slug) ?? []), id])
   }
 
-  const out: RedditEngageTarget[] = []
+  const out: EngageSurface[] = []
   const emittedFamilies = new Set<string>()
   for (const id of inScopeIds) {
     const family = FAMILY_OF_SERVICE[id]
@@ -1803,39 +1840,24 @@ export function buildRedditEngageTargets(alert: AlertCandidate, services: Scored
         serviceId: `family:${family.slug}`,
         serviceName: family.name,
         term: familyTerm,
-        subs: mergeFamilySubs(memberIds.map((m) => REDDIT_ENGAGE_SUBS[m])).map((s) => ({
-          subreddit: s,
-          url: buildRedditSearchUrl(s, familyTerm),
-        })),
-        allRedditUrl: buildRedditAllSearchUrl(familyTerm),
+        memberIds,
         // The provider GROUP is-down page. Its route is a hand-added vercel.json rewrite, pinned by
         // family-group-route.test.ts.
-        replyLink: appendUtm(appendStatusHint(`https://ai-watch.dev/is-${family.slug}-down`, 'reddit'), 'reddit'),
+        linkSlug: family.slug,
       })
       continue
     }
-    const subs = REDDIT_ENGAGE_SUBS[id]
     const term = TWEET_SEARCH_TERMS[id]
     const slug = SERVICE_ID_TO_SLUG[id]
     if (!slug) {
       // Scoped diagnostic rather than a half-rendered block: the scope test pins that every keyed id
       // has a slug, so reaching this means the slug map changed under us and the operator would
       // otherwise get "go find the threads" links with nothing to paste.
-      console.warn('[alerts] #1182 no is-down slug — skipping reddit target:', id)
+      console.warn('[alerts] #1182 no is-down slug — skipping engage target:', id)
       continue
     }
     const svc = services.find((s) => s.id === id)
-    out.push({
-      serviceId: id,
-      serviceName: svc ? svc.name : id,
-      term,
-      subs: subs.map((s) => ({ subreddit: s, url: buildRedditSearchUrl(s, term) })),
-      allRedditUrl: buildRedditAllSearchUrl(term),
-      // #548 — utm_source=reddit is what attributes the click to the Reddit channel in the
-      // outage-audience classifier; `?e=reddit` namespaces the social-card unfurl (#539). Same
-      // construction formatRedditAlert uses, so both Reddit surfaces tag identically.
-      replyLink: appendUtm(appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, 'reddit'), 'reddit'),
-    })
+    out.push({ serviceId: id, serviceName: svc ? svc.name : id, term, memberIds: [id], linkSlug: slug })
   }
   return out
 }
@@ -1886,6 +1908,41 @@ export function appendRedditSection(description: string, targets: RedditEngageTa
   }
 
   return build(true) ?? build(false) ?? description
+}
+
+// #1417 — operator-only Bluesky reply assist, the Bluesky twin of the Reddit block above: a search
+// link the operator opens in a browser + a utm_source=bsky is-down link to paste. No Bluesky API call.
+// Scope is TWEET_SEARCH_TERMS' keys, shared through resolveEngageSurfaces.
+
+export function buildBlueskySearchUrl(term: string): string {
+  return `https://bsky.app/search?q=${encodeURIComponent(term)}`
+}
+
+export interface BlueskyEngageTarget {
+  serviceId: string
+  serviceName: string
+  searchUrl: string
+  replyLink: string
+}
+
+export function buildBlueskyEngageTargets(alert: AlertCandidate, services: ScoredService[]): BlueskyEngageTarget[] {
+  return resolveEngageSurfaces(alert, services, () => true).map((s) => ({
+    serviceId: s.serviceId,
+    serviceName: s.serviceName,
+    searchUrl: buildBlueskySearchUrl(s.term),
+    replyLink: appendUtm(appendStatusHint(`https://ai-watch.dev/is-${s.linkSlug}-down`, 'bsky'), 'bsky'),
+  }))
+}
+
+/** Length-guarded like appendRedditSection; the reply link is inline code for the same #1202 reason. */
+export function appendBlueskySection(description: string, targets: BlueskyEngageTarget[], div: string): string {
+  if (targets.length === 0) return description
+  const cap = DISCORD_EMBED_DESC_MAX - 16
+  const body = targets
+    .map((t) => `\n→ ${defuseAutolinkDomain(t.serviceName)}: [search Bluesky](${t.searchUrl})\n   🔗 \`${t.replyLink}\``)
+    .join('')
+  const full = `\n${div}\n🦋 **FIND BLUESKY POSTS TO REPLY TO**${body}`
+  return description.length + full.length <= cap ? description + full : description
 }
 
 export interface PushTarget {
