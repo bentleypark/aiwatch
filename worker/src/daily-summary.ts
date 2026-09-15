@@ -455,8 +455,17 @@ export function formatAudienceLine(audience: AudienceCounts | null | undefined):
     `\n👥 **is-down Audience** (24h)\n` +
     `   During outages: ${row(audience.activeTotal, audience.activeBySource)}\n` +
     `   All views: ${row(audience.total, audience.bySource)}` +
-    formatAudienceScreenRow(audience.byScreen)
+    formatAudienceScreenRow(audience.byScreen) +
+    formatAudienceAgentRow(audience)
   )
+}
+
+/** #1083 — flagged-bot views as a share of each number above. `''` until a tagged row exists. */
+export function formatAudienceAgentRow(audience: AudienceCounts): string {
+  const { byAgent, activeByAgent } = audience
+  if (!byAgent || byAgent.bot + byAgent.unflagged <= 0) return ''
+  const untagged = byAgent.unknown > 0 ? ` · ${byAgent.unknown} untagged` : ''
+  return `\n   Flagged bots: ${byAgent.bot} of ${audience.total} (during outages: ${activeByAgent.bot} of ${audience.activeTotal})${untagged}`
 }
 
 /** Max screens named before the rest collapse into a `+N more` tail, so the row cannot wrap into a
