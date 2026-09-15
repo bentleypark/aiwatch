@@ -314,7 +314,7 @@ export function buildDailySummary(data: DailySummaryData): string {
   } else if (health) {
     const age = formatDarkFor(Date.now() - health.at)
     const detail = health.reason === 'partial' ? 'some subreddits blocked (401/403) — detection is partly dark'
-      : health.reason === 'streak' ? 'no subreddit returned a usable response for 3+ runs — could be an egress/connectivity issue, a 200 bot wall (body present but not a valid Atom feed), or sustained Reddit rate-limiting (429) on the shared Cloudflare egress IP; check recent Worker logs for the per-run status codes AND bodies'
+      : health.reason === 'streak' ? 'no subreddit returned a usable response for ~3h of scans — could be an egress/connectivity issue, a 200 bot wall (body present but not a valid Atom feed), or sustained Reddit rate-limiting (429) on the shared Cloudflare egress IP; check recent Worker logs for the per-run status codes AND bodies'
       : 'the listing feed returned a block status (401/403) — detection is dark'
     lines.push(`⚠️ **Reddit source DOWN**: ${detail} (${age})`)
   } else if (redditCount > 0) {
