@@ -8,9 +8,10 @@ metadata:
 # Findings-only review
 
 Use this skill for every review round in the AIWatch `ship-issue` loop, including round 1. Review the
-current diff against `AGENTS.md`, the development workflow, and relevant `docs/reference/` material.
-This is a read-only review: do not edit, write, or create files; do not run commands that mutate the
-working tree or Git state.
+current diff against `AGENTS.md`, `CLAUDE.md` where applicable, the development workflow, and
+relevant `docs/reference/` material.
+This is a read-only review: do not edit, write, or create files in the reviewed worktree, and do not
+run commands that mutate its Git state.
 
 ## Findings contract
 
@@ -20,7 +21,8 @@ what should replace it.
 
 Rate each candidate from 0 to 100 and report only items at 80 or higher:
 
-- **Critical (91-100):** a real bug or an explicit violation of `AGENTS.md` or `docs/reference/`.
+- **Critical (91-100):** a real bug or an explicit violation of `AGENTS.md`, `CLAUDE.md` where
+  applicable, or `docs/reference/`.
 - **Important (80-90):** an issue that needs attention before merge.
 - Below 80: omit it.
 
@@ -33,8 +35,11 @@ For every reported finding, provide:
    this branch introduced it or it predates the merge base.
 
 Verify claims before reporting them. In particular, confirm that a deletion candidate is unused or false.
-Treat a failed or empty tool invocation as inconclusive unless its healthy outcome was established. If the
-tree changes during review, report that condition instead of mixing revisions.
+Treat a failed or empty tool invocation as inconclusive unless its healthy outcome was established. If a
+mutation test is needed, first copy the tree to an isolated temporary location, then mutate and run the
+test only there; never mutate the reviewed worktree. If the reviewed tree changes during review, report
+that condition instead of mixing revisions. If citing a docblock, memory page, issue, PR, or comment as
+support, read it and quote the sentence relied on.
 
 ## Input and report shape
 

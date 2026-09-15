@@ -7,8 +7,8 @@ tags: [workflow, review, tooling]
 
 # Code-review policy (#1245, #1412)
 
-`ship-issue` steps 5-6 are the procedure and are self-contained — the caller does not need this page to
-run the loop. This page records why the procedure has the shape it has.
+The `ship-issue` review-and-fix loop is self-contained — the caller does not need this page to run it.
+This page records why the procedure has the shape it has.
 
 ## The loop does not use `/pr-review-toolkit:review-pr` (#1412)
 
@@ -33,13 +33,13 @@ A report's replacement prose is unverified by anyone. Taking the finding and dis
 rule about what the caller does, and it failed nine rounds running on #1293. The agent removes the input
 instead: its system prompt forbids replacement prose, and where the answer is a deletion it says so as a
 finding. It keeps the ≥80 floor. It does not stop a caller from rewriting prose on its own initiative —
-that is what `ship-issue` step 6's no-prose rule is for.
+that is what the `ship-issue` review-and-fix loop's no-prose rule is for.
 
 **Availability caveat:** Claude agent definitions load at session start, like `.claude/settings.json`
 hooks. A newly added or edited Claude agent is not visible to the session that wrote it —
-`subagent_type` resolution fails with "agent type not found" until a restart. Codex reads its
-project skill from `.codex/skills/`; sync it with `npm run skills:install` before opening a new Codex
-turn that must invoke it.
+`subagent_type` resolution fails with "agent type not found" until a restart. Codex loads installed
+skills from `$CODEX_HOME/skills` (default `~/.codex/skills`); `.codex/skills/` is this repository's
+source, so run `npm run skills:install` before opening a new Codex turn that must invoke it.
 
 ## Verify a finding before acting on it
 
