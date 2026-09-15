@@ -12,7 +12,7 @@
 // counts and is read back once/day via AE SQL for the operator report. Mirrors the #518/#548
 // api-traffic.ts pattern on the SAME dataset, distinguished by a separate index ('isdown-view').
 //   index1  = 'isdown-view'                         → total is-down views via one index filter
-//   blob1   = source bucket ('x'|'search'|'feed'|'owned'|'direct'|'plugin'|'reddit'|'hn'|'refhost')
+//   blob1   = source bucket ('x'|'search'|'feed'|'owned'|'direct'|'plugin'|'reddit'|'bsky'|'hn'|'refhost')
 //             NOTE #1055 widened this vocabulary FORWARD-ONLY — rows written before the #1055 deploy
 //             fold reddit/hn/refhost/self-referral views into 'direct', so any window spanning that
 //             deploy mixes two vocabularies and its 'direct' is NOT comparable to a later one. No
@@ -66,8 +66,8 @@ import { V1_DATASET } from './api-traffic'
 //      SKIPS any row whose source isn't in the array, and `formatAudienceLine` iterates it — so the
 //      new bucket reads as a permanent zero in both the series and the operator line while every
 //      test stays green. `AUDIENCE_SOURCES covers every AudienceSource` in the tests pins 3 against 2.
-export type AudienceSource = 'x' | 'search' | 'feed' | 'owned' | 'direct' | 'plugin' | 'reddit' | 'hn' | 'refhost'
-export const AUDIENCE_SOURCES: AudienceSource[] = ['x', 'search', 'feed', 'owned', 'direct', 'plugin', 'reddit', 'hn', 'refhost']
+export type AudienceSource = 'x' | 'search' | 'feed' | 'owned' | 'direct' | 'plugin' | 'reddit' | 'bsky' | 'hn' | 'refhost'
+export const AUDIENCE_SOURCES: AudienceSource[] = ['x', 'search', 'feed', 'owned', 'direct', 'plugin', 'reddit', 'bsky', 'hn', 'refhost']
 
 /**
  * #1280 — which is-down SURFACE a view landed on. These two are the only values a PAGE may declare.
@@ -159,6 +159,10 @@ const SELF_HOSTS = /^(.*\.)?ai-watch\.dev$|^localhost$|^aiwatch[a-z0-9-]*\.verce
 // reliable signal is a utm-tagged link; `reddit.ts` already appends `utm_source=reddit` (#548) to the
 // promote links we emit.
 const REDDIT_HOSTS = /(^|\.)(reddit\.com|redd\.it)$/
+// #1417 — observed 2026-09-15 in Chrome: a post link opens via `go.bsky.app/redirect` and arrives with
+// `Referer: https://go.bsky.app/`; bsky.app itself sets `origin-when-cross-origin`. The mobile app is
+// not observed, so utm_source=bsky stays the reliable signal.
+const BSKY_HOSTS = /(^|\.)bsky\.app$/
 const HN_HOSTS = /(^|\.)(news\.ycombinator\.com|hn\.algolia\.com)$/
 
 /**
@@ -191,6 +195,7 @@ export function classifyReferrer(utmSource: string | undefined, refHost: string 
   if (utm === 'claude-code') return 'plugin' // #920 — Claude Code plugin is-down links
   if (SELF_HOSTS.test(host)) return 'owned' // #1055 — our own cross-links are not inbound traffic
   if (utm === 'reddit' || REDDIT_HOSTS.test(host)) return 'reddit' // #1055
+  if (utm === 'bsky' || BSKY_HOSTS.test(host)) return 'bsky' // #1417
   if (utm === 'hn' || utm === 'hackernews' || HN_HOSTS.test(host)) return 'hn' // #1055
   if (SEARCH_HOSTS.test(host)) return 'search'
   return host ? 'refhost' : 'direct' // #1055 — 'direct' now means literally no referrer
@@ -272,7 +277,7 @@ export interface AudienceCounts {
   activeByAgent: Record<AudienceAgentKey, number> // #1083 — active-outage views by bot flag
 }
 
-const zeroBySource = (): Record<AudienceSource, number> => ({ x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0, reddit: 0, hn: 0, refhost: 0 })
+const zeroBySource = (): Record<AudienceSource, number> => ({ x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0, reddit: 0, bsky: 0, hn: 0, refhost: 0 })
 const zeroByAgent = (): Record<AudienceAgentKey, number> =>
   Object.fromEntries(AUDIENCE_AGENT_KEYS.map((k) => [k, 0])) as Record<AudienceAgentKey, number>
 // Derived from AUDIENCE_SURFACE_KEYS rather than written out, so that array is load-bearing.

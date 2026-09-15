@@ -427,7 +427,7 @@ export function formatReferralLine(
 
 // #1055 — 'refhost' reads as "other referrer" in the operator line: the bucket means we saw a
 // referring host but don't name it, and 'other-ref' says that more plainly than the field name does.
-const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', owned: 'owned', direct: 'direct', plugin: 'plugin', reddit: 'Reddit', hn: 'HN', refhost: 'other-ref' }
+const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', owned: 'owned', direct: 'direct', plugin: 'plugin', reddit: 'Reddit', bsky: 'Bluesky', hn: 'HN', refhost: 'other-ref' }
 
 /** #842-B — outage-moment audience line (consent-free is-down views by source). The active-outage
  *  subset (the sponsor-evidence "outage-spike audience") first, then the whole day, then the screens.

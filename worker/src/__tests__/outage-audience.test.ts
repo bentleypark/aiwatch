@@ -55,6 +55,13 @@ describe('classifyReferrer (#842-B)', () => {
     expect(classifyReferrer('', 'redd.it')).toBe('reddit') // short-link domain
     expect(classifyReferrer('Reddit', '')).toBe('reddit') // case-insensitive, like the others
   })
+  it('names Bluesky by utm or host, including the go.bsky.app link redirect (#1417)', () => {
+    expect(classifyReferrer('bsky', '')).toBe('bsky')
+    expect(classifyReferrer('', 'go.bsky.app')).toBe('bsky')
+    expect(classifyReferrer('', 'bsky.app')).toBe('bsky')
+    expect(classifyReferrer('', 'bsky.app.evil.example')).toBe('refhost')
+    expect(classifyReferrer('', 'notbsky.app')).toBe('refhost')
+  })
   it('names Hacker News by utm or host (#1055)', () => {
     expect(classifyReferrer('hn', '')).toBe('hn')
     expect(classifyReferrer('hackernews', '')).toBe('hn')
@@ -225,8 +232,8 @@ describe('parseOutageAudienceResponse (#842-B)', () => {
     // Exhaustive shape (not objectContaining) on purpose: a new bucket must show up here, so adding
     // one to AudienceSource without zero-initializing it in zeroBySource() fails loudly. #1055 added
     // reddit/hn/refhost.
-    expect(r.bySource).toEqual({ x: 200, search: 40, feed: 15, owned: 10, direct: 0, plugin: 0, reddit: 0, hn: 0, refhost: 0 })
-    expect(r.activeBySource).toEqual({ x: 180, search: 0, feed: 15, owned: 10, direct: 0, plugin: 0, reddit: 0, hn: 0, refhost: 0 })
+    expect(r.bySource).toEqual({ x: 200, search: 40, feed: 15, owned: 10, direct: 0, plugin: 0, reddit: 0, bsky: 0, hn: 0, refhost: 0 })
+    expect(r.activeBySource).toEqual({ x: 180, search: 0, feed: 15, owned: 10, direct: 0, plugin: 0, reddit: 0, bsky: 0, hn: 0, refhost: 0 })
   })
   it('skips unknown source buckets and tolerates bad views', () => {
     const r = parseOutageAudienceResponse({ data: [
