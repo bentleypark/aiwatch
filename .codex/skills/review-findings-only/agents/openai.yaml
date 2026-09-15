@@ -1,0 +1,6 @@
+interface:
+  display_name: "Findings-Only Review"
+  short_description: "Report evidence-backed review findings only"
+  default_prompt: "Use $review-findings-only to review the current AIWatch diff without proposing fixes."
+policy:
+  allow_implicit_invocation: true

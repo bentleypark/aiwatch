@@ -61,19 +61,14 @@ the engineering gates below remain the same.
 10. Review the complete diff against `AGENTS.md`, this runbook, `CLAUDE.md` where applicable, and
     the relevant reference documents.
 11. Follow the [code-review policy](code-review-policy.md): report only Critical or Important
-    findings with a file/line locator, reproduction or explicit judgement call, and whether the
-    previous fix caused the finding. A finding without evidence must be adjudicated with a check or
-    dropped.
+    findings with a precise locator (`file:line` for a file, or a retrieval command for a non-file
+    target), reproduction or explicit judgement call, and round plus branch attribution. A finding
+    without evidence must be adjudicated with a check or dropped.
     If the previous fix causes the finding in two consecutive rounds, change the fix class: delete
     a non-load-bearing construct or weaken the conclusion instead of rewriting it again. Re-test
-    and re-review until no Critical or Important findings remain. A Codex review can use this prompt:
-
-    ```text
-    Review the current diff against AGENTS.md, CLAUDE.md, and the relevant docs/reference files.
-    Report only Critical or Important findings. For each finding include file:line, a reproduction
-    or “judgement call”, and whether the previous round's fix caused it. Do not write replacement
-    code or prose.
-    ```
+    and re-review until no Critical or Important findings remain. For Codex, invoke the project-local
+    `$review-findings-only` skill in every round with the round number, prior findings and fixes, and
+    the running Critical/Important total.
 
 12. Update all affected documentation in the same change: `AGENTS.md`, `CLAUDE.md` when its
     guidance is affected, `README.md`, `README.ko.md`, the relevant `docs/reference/*`,
@@ -148,7 +143,8 @@ documentation, or configuration changes.
 
 - Claude Code: use `.claude/skills/ship-issue/SKILL.md` for the detailed procedure and the
   `.claude/` hooks/plugins for Claude-specific reminders and review tooling.
-- Codex: use this runbook directly. Replace Claude-only review agents with the equivalent review
-  prompt above and run repository commands from the active worktree.
+- Codex: use this runbook directly, `$review-findings-only` for every review round, and repository
+  commands from the active worktree. The project skill is installed into Codex with
+  `npm run skills:install` when its source changes.
 - Other agents: follow this runbook and use their native review/task mechanism only where it does
   not weaken the shared gates.
