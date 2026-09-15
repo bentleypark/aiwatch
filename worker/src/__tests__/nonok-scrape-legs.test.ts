@@ -7,7 +7,7 @@ import type { KVLike, TrackingStateBlob } from '../utils'
 
 // #1234 — the WIRING half of the disclosure guard on the generic path's two fetch legs.
 //
-// #1089 (Instatus) and #1123 (OnlineOrNot) gave their arms a "we could not read this source" verdict;
+// #1089 (Instatus) and #1123 (openrouter) gave their arms a "we could not read this source" verdict;
 // #1212 gave the Azure-RSS and AWS-Health arms the same. The RSS / gcloud / BetterStack legs of the
 // GENERIC path never got it: a non-ok scrape skipped the `else if (scrapeRes?.ok)` arm entirely, so
 // `incidents` stayed `[]`, `hasOngoing` was false, `derivedStatus` fell through to the MAIN page's
@@ -343,7 +343,7 @@ describe('#1234 — the disclosure is scoped to the FALSE GREEN, and books regar
   // (b) converted a live corroborated outage into `unknown` at strike 1 and (c) erased a readable
   // provider `down` from strike 3.
   //
-  // The invention was the problem: every sibling arm (Instatus #1089, OnlineOrNot #1123, AWS/Azure
+  // The invention was the problem: every sibling arm (Instatus #1089, openrouter #1123, AWS/Azure
   // #1212, the 5xx/throw returns) publishes `shouldDegrade ? 'unknown' : 'operational'`, and a fifth
   // behaviour had to be right about interactions none of them face. So the wire disclosure is scoped
   // to the case #1234 actually measured — a verdict that would otherwise be a FALSE GREEN, which is

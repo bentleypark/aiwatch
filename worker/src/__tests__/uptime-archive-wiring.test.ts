@@ -42,8 +42,9 @@ const index = readFileSync(join(SRC, 'index.ts'), 'utf8')
 const services = readFileSync(join(SRC, 'services.ts'), 'utf8')
 
 // #1017 — a review agent independently mutated all 8 threading points across services.ts (the
-// ServiceStatus-assembly sites for Flashduty / the shared Statuspage+incident.io branch / OnlineOrNot
-// / Instatus×2) and confirmed the full 3724-test suite stayed green with `todayWeightedOutageSec`
+// ServiceStatus-assembly sites for Flashduty / the shared Statuspage+incident.io branch / the
+// then-OnlineOrNot openrouter branch (now Datadog, #1403) / Instatus×2) and confirmed the full
+// 3724-test suite stayed green with `todayWeightedOutageSec`
 // silently dropped from every one of them. This guards the 5 FINAL write sites (where the field
 // actually lands on the returned ServiceStatus, as opposed to the intermediate local-variable
 // assignments feeding them).
@@ -56,8 +57,8 @@ describe('#1017 — services.ts threading of todayWeightedOutageSec onto Service
     expect(services).toMatch(/\.\.\.\(todayWeightedOutageSec != null \? \{ todayWeightedOutageSec \} : \{\}\)/)
   })
 
-  it('OnlineOrNot', () => {
-    expect(services).toMatch(/base\.todayWeightedOutageSec = page\.todayWeightedOutageSec/)
+  it('Datadog Status Page', () => {
+    expect(services).toMatch(/todayWeightedOutageSec: parsed\.page\.todayWeightedOutageSec/)
   })
 
   it('Instatus — both return sites (the parse-failure carryover AND the success path)', () => {

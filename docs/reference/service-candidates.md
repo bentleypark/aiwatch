@@ -38,6 +38,22 @@ sub-tiers (4–10) to same-tier-only, giving a solo service its own sub-tier wou
 return `[]` — no service is in that state today (every *populated* specialized tier, 4–8, has ≥2
 members; 9 and 10 are unused), but it is the trap waiting for whoever adds tier 9. Adding a sibling is the prerequisite for a category-aware sub-tier. Tracking issue: #601; tier membership: [fallback-tiers.md](fallback-tiers.md).
 
+**The one genuinely EMPTY tier is not a gap, and seeding it would create one.** `openrouter` is the
+only monitored service with ZERO same-tier candidates — tier 3 also holds `bedrock` and
+`azureopenai`, and both sit in `EXCLUDE_FALLBACK`. (No member's exclusion reason is recorded in
+`fallback.ts` or [fallback-tiers.md](fallback-tiers.md); those files record only *un*-exclusions.)
+It still needs no sibling: tier 3 is BELOW the specialized range, so candidates come from the
+nearest tiers by distance instead — which at distance 1 means tier 2 AND tier 4, since `openrouter`
+carries no `SERVICE_CAPABILITY` tag and so passes `sharesCapability` against the Voice tier too.
+The picks that surface are Score-ordered across that pool. What makes them defensible is not the
+tier arithmetic but a fact about this service: several tier-2 members are OpenRouter's own upstream
+providers (Groq, Cerebras, Together, Fireworks and DeepSeek all appear in its public
+`/api/v1/providers` list, 106 providers, checked 2026-09-15), so "the gateway is down, go direct to
+the backend it was already calling" is sound advice for whoever was routing to one of them. Giving
+`openrouter` a dedicated sub-tier would move it into the 4-10 range and trip the `sameTierOnly` trap
+above, turning that into no recommendation at all. Router/gateway candidates (Portkey, Requesty,
+LiteLLM, Vercel AI Gateway) are therefore **additive at best** — do not file them as a #601-style gap.
+
 ## Pick order
 
 Three kinds of candidate, and they are not comparable:

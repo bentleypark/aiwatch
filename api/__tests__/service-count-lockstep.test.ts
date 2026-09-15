@@ -444,7 +444,7 @@ describe('#1384 /methodology per-source service counts are derived, not stated',
     ['s1.src.awshealth', 'AWS Health Dashboard'],
     ['s1.src.cloudflare', 'Cloudflare Status v3'],
     ['s1.src.gcloud', 'Google Cloud Status \u00b7 AI Studio Status'],
-    ['s1.src.onlineornot', 'OnlineOrNot'],
+    ['s1.src.datadog', 'Datadog Status Page'],
     ['s1.src.rootly', 'Rootly'],
   ]
 

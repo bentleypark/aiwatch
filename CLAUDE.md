@@ -309,7 +309,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   growth-series.ts   # Durable daily series of the consent-free growth counters (#986) — the dataset #547's lift measurement reads
   reddit.ts security-monitor.ts changelog.ts platform-monitor.ts  # External monitoring
   alert-feed.ts ext-claude.ts indexnow.ts badge.ts og.ts og-render.ts  # Feeds, projections, SEO, images
-  parsers/           # statuspage, incident-io, gcloud, aistudio, instatus, betterstack, aws, flashduty, rootly, cloudflare-status
+  parsers/           # one module per status-page platform — `ls` it, or directory-map.md for what each does
 extension/           # Claude-only Chrome extension (MV3, #837) — consumes ?src=ext-claude only
 plugin/aiwatch/      # Claude Code plugin (#920) — outage monitor + /aiwatch command
 .claude-plugin/      # marketplace.json — AIWatch's OWN plugin catalog (`aiwatch-dev`); makes plugin/aiwatch/ installable with no third-party review (#920)

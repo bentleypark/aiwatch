@@ -85,7 +85,7 @@ Grouped by the dashboard's category taxonomy (45 total — sidebar filters / Ove
 | xAI API | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Flashduty (browser-rendered feed) |
 | Kimi (Moonshot AI) | Moonshot AI | Atlassian Statuspage (Chinese titles → English) |
-| OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
+| OpenRouter | OpenRouter | Datadog Status Page (`config.json`) |
 | Amazon Bedrock | AWS | AWS Health Dashboard |
 | Azure OpenAI | Microsoft | Azure Status RSS |
 
@@ -184,7 +184,7 @@ Parsers (worker/src/parsers/)
   ├── aistudio.ts        → Google AI Studio + direct Gemini API (secondary source, merged with gcloud — #310)
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json uptime API + dailyImpact (status_history)
-  ├── onlineornot.ts     → OnlineOrNot React Router SSR (OpenRouter)
+  ├── datadog.ts         → Datadog Status Page `config.json` (OpenRouter — #1403)
   ├── flashduty.ts       → Flashduty feed (DeepSeek + DeepSeek App — browser-rendered via a scheduled Action, #618)
   └── aws.ts             → AWS Health events JSON API (Bedrock) + RSS (Azure OpenAI)
   ↓
@@ -433,7 +433,7 @@ worker/
       aistudio.ts      # Google AI Studio + direct Gemini API (gemini secondary, #310)
       instatus.ts      # Instatus
       betterstack.ts   # Better Stack
-      onlineornot.ts   # OnlineOrNot (OpenRouter)
+      datadog.ts       # Datadog Status Page (OpenRouter)
       flashduty.ts     # Flashduty (DeepSeek + DeepSeek App)
       aws.ts           # AWS Health events JSON API — Bedrock (+ RSS parser reused for Azure OpenAI)
       impact-weights.ts uptime-interval.ts   # Shared uptime primitives (#1006)

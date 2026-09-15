@@ -30,9 +30,9 @@ import {
 } from './parsers/aistudio'
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
-import { mergeOnlineOrNotIncidents, parseOnlineOrNotIncidentHistory, parseOnlineOrNotPage, type OnlineOrNotParseFailure } from './parsers/onlineornot'
 import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { parseCloudflareStatusSummary } from './parsers/cloudflare-status'
+import { parseDatadogStatusPage } from './parsers/datadog'
 import { mergeXaiRegionalIncidents, mergeXaiGrokSurfaceIncidents } from './xai-regions'
 import type { MonthlyArchive, MonthlyIncidentEntry, MonthlyIncidents } from './monthly-archive'
 
@@ -84,17 +84,17 @@ export const ENVIRONMENT_SCOPE_EXCLUDE = ['fedramp']
  */
 export type StatusSourceName =
   | 'Rootly' | 'Flashduty' | 'Cloudflare Status v3' | 'AWS Health Dashboard'
-  | 'Google Cloud Status \u00b7 AI Studio Status' | 'Instatus' | 'OnlineOrNot' | 'Better Stack'
+  | 'Google Cloud Status \u00b7 AI Studio Status' | 'Instatus' | 'Datadog Status Page' | 'Better Stack'
   | 'incident.io' | 'Atlassian Statuspage' | 'RSS incident feeds'
 
 export function statusSourceOf(config: ServiceConfig): StatusSourceName | null {
   if (config.rootlyFeed) return 'Rootly'
   if (config.flashdutyFeed) return 'Flashduty'
   if (config.cloudflareStatusComponentIds?.length) return 'Cloudflare Status v3'
+  if (config.datadogStatusUrl) return 'Datadog Status Page'
   if (config.awsHealthApi) return 'AWS Health Dashboard'
   if (config.gcloudProduct || config.aistudioStatus) return 'Google Cloud Status \u00b7 AI Studio Status'
   if (config.instatusUrl) return 'Instatus'
-  if (config.onlineOrNotUrl) return 'OnlineOrNot'
   if (config.betterStackUrl) return 'Better Stack'
   if (config.incidentIoBaseUrl) return 'incident.io'
   if (config.apiUrl) return 'Atlassian Statuspage'
@@ -284,7 +284,15 @@ export const SERVICES: ServiceConfig[] = [
   //     operational). Plain LLM at API_TIER 2 (fallback.ts); the fallback capability nuance is tracked
   //     on #1062 (unbuilt) — no per-service entry needed here.
   { id: 'kimi', name: 'Kimi (Moonshot AI)', provider: 'Moonshot AI', category: 'api', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: '8psr5dfdld0s', displayComponentIds: ['8psr5dfdld0s', 'rf64wcbxt3r2', 'x0zsqgy57b75', 'z2zfp65lvb2z', 'lk7q3z0fcylp', 'p1j9ttb7jwhp', '8rkd3yj051gl', 'wmn9wzv84k1v'], componentGroups: { 'x0zsqgy57b75': 'Models', 'z2zfp65lvb2z': 'Models', 'lk7q3z0fcylp': 'Models', 'p1j9ttb7jwhp': 'Models', '8rkd3yj051gl': 'Models', 'wmn9wzv84k1v': 'Models' }, autoMonitorTitles: [/^agentic\s*模型错误报警$/i], titleMap: { 'Agentic 模型错误报警': 'Agentic model error alert', 'agentic模型错误报警': 'Agentic model error alert', '搜索请求出现大量报错': 'Elevated search request error rate', '短信登录异常': 'SMS login failure', 'deep research workflow错误率异常': 'Deep Research workflow error rate anomaly' }, addedAt: '2026-07-18' },
-  { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
+  // #1403 — OpenRouter migrated its status page from OnlineOrNot to Datadog Status Page (the old
+  // React-Router SSR payload is gone; a plain fetch now returns a ~600-byte client-rendered shell).
+  // No `retainIncidentHistoryUntil` bridge here, unlike replicate (below): this page BACKFILLED its
+  // history past the 30-day window (checked against AIWatch's own August record — both incidents
+  // matched), so the migration erases nothing the Score window still reads. The OPPOSITE direction
+  // is what this migration needs handled — the same outage arrives under a new `datadog:` id while
+  // AIWatch's accumulator still holds it under the old one, and a resolved row is never phantom-pruned
+  // (monthly-archive.ts). That is a one-off post-deploy `POST /api/admin/suppress`, not code.
+  { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, datadogStatusUrl: 'https://status.openrouter.ai' },
   // Voice & Speech AI
   // displayComponentIds (#606): curated availability surfaces for the breakdown card —
   // TTS, STT, Conversations, RAG, Telephony, Other API endpoints, + ElevenCreative (excludes UI/Quality/Other).
@@ -1086,7 +1094,7 @@ export const MIN_COVERAGE_DAYS = 30
 /** #1006 — the uptime window AIWatch presents and scores on, computed by us from the provider's own
  *  records. #1110 — this constant governs the Atlassian + incident.io branch ONLY (the two reads at the
  *  `parseUptimeData` / `computeIncidentIoUptime` call sites): `parseBetterStackUptime`, the Instatus
- *  paths and `parseOnlineOrNotPage` carry their own `windowDays = 30` default and never import it,
+ *  paths carry their own `windowDays = 30` default and never import it,
  *  and `platform_avg` narrows its denominator per resource. So do NOT read this as "one window for
  *  every service" — that claim was retracted; see `/methodology` §3 and status-determination.md. */
 export const UPTIME_WINDOW_DAYS = 30
@@ -1989,7 +1997,7 @@ export function isStatuspageSummary(v: unknown): v is StatuspageResponse {
  *  the reachable set is `legFalseGreen` at the generic path's return, not a fact prose can hold.
  *
  *  Setting the ranking flag on the ONE branch that produced the reported bug would have left the class
- *  open — the 5xx return sits a few branches above it with an identical body, and the Instatus/OnlineOrNot
+ *  open — the 5xx return sits a few branches above it with an identical body, and the Instatus
  *  parse-failure return carries services that rank in the HIGH-confidence table. Tying the flag to the
  *  unreadable-source VERDICT here covers all of them, and covers the next one written. Same reasoning as
  *  the `fetchService` tagging choke point (#983): a per-return copy is a rule nothing enforces.
@@ -2009,7 +2017,7 @@ export function isStatuspageSummary(v: unknown): v is StatuspageResponse {
  *  re-cutting a shared primitive here; recorded on #1268.
  *  Keying on the first read outright would defeat the flap suppression the ramp exists for — status-determination.md's #1233 entry makes the point directly: a single transient 5xx
  *  across a 45-service parallel fetch is COMMON, and this flag is not scoping-only. It also flips the
- *  cached is-down SEO page and its OG image, blanks the uptime the Instatus/OnlineOrNot return goes out
+ *  cached is-down SEO page and its OG image, blanks the uptime the Instatus return goes out
  *  of its way to preserve from an independent successful fetch, and gets stamped durably into the
  *  month-end archive. One unlucky timeout at archive time would mark a service stale for the whole
  *  month. The `sourceDead` (4xx) returns are unaffected: they set the flag inline and publish
@@ -2082,10 +2090,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
   // #1089 — set when the Instatus incident parse failed STRUCTURALLY (payload shape moved), as
   // opposed to a page that genuinely lists no incidents. Only the former may not derive a status.
   let instatusParseFailure: InstatusParseFailure | null = null
-  // #1123 — the same distinction for OnlineOrNot. Its incident list is the only signal this path
-  // CONSUMES (the payload also publishes a per-component `componentStatus`, which nothing reads
-  // today), so an unreadable payload pins the card to `operational` with nothing to contradict it.
-  let onlineOrNotParseFailure: OnlineOrNotParseFailure | null = null
   // #1234 — the same distinction for the generic path's two independent legs: the scrape (ONE fetch,
   // whose URL is the RSS feed or gcloud's incidents.json) and BetterStack's index.json. Two legs,
   // three reasons. Unlike the two above, these do NOT early-return — see the accounting block near
@@ -2167,6 +2171,73 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       }
       resetFetchFailure(trackingStore, config.id)
       return { ...base, status: parsed.summary.status, latency, incidents: parsed.summary.incidents }
+    }
+
+    // #1403 — Datadog Status Page. The hosted page is a client-rendered shell, but its whole state
+    // (components + incidents + maintenances) hydrates from ONE unauthenticated static document, so
+    // this is a single plain fetch with no scraper and no second endpoint. Shaped like the Cloudflare
+    // arm above rather than threaded into the generic scrape path below: there is nothing to scrape.
+    if (config.datadogStatusUrl) {
+      const start = Date.now()
+      const configUrl = `${config.datadogStatusUrl.replace(/\/$/, '')}/config.json`
+      const configRes = await fetchWithRetry(configUrl, { svcId: config.id })
+      const latency = Date.now() - start
+      if (!configRes.ok) {
+        console.error(`[fetchService] ${config.id} Datadog config.json returned HTTP ${configRes.status}`)
+        configRes.body?.cancel()
+        // Same split the Cloudflare arm makes: this is a static machine document, so an unambiguous
+        // gone/auth 4xx is a retired source, while 403/429 can still be an egress restriction.
+        if (GONE_STATUSES.has(configRes.status)) {
+          return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency }
+        }
+        // Booked, not just logged. The retired parser carried a caller-set `fetch-unreadable` for
+        // exactly this, and it is the likeliest failure on THIS host — a 403 here is most often a
+        // bot-management challenge to our egress, not a dead page. Without it an operator reading
+        // `instatus-parse-fail:` (the counter kv-schema.md sends them to) sees zero while the source
+        // is walled, and `fetch-fail:daily` cannot substitute: 48h TTL, rising edge only.
+        await recordParseFailure(kv, Date.now(), config.id, 'dd-fetch-unreadable')
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+      }
+      // `.text()` then parse, not `.json()`: a 200 carrying HTML (a bot interstitial, or the app shell
+      // this endpoint sits behind) is not a transiently-unreadable document, and letting the
+      // SyntaxError escape would land in the outer catch with no reason booked (#1268).
+      let configText: string
+      try { configText = await configRes.text() } catch (err) {
+        console.warn(`[fetchService] ${config.id} Datadog config.json body read failed:`, err instanceof Error ? err.message : err)
+        await recordParseFailure(kv, Date.now(), config.id, 'dd-fetch-unreadable')
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+      }
+      const parsed = parseDatadogStatusPage(safeJsonParse(configText))
+      if (!parsed.ok) {
+        console.warn(`[fetchService] ${config.id} Datadog config.json unreadable (${parsed.reason}) content-type=${configRes.headers.get('content-type') ?? 'none'} body[0..120]=${JSON.stringify(configText.slice(0, 120))}`)
+        await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+      }
+      resetFetchFailure(trackingStore, config.id)
+      return {
+        ...base,
+        status: parsed.page.status,
+        latency,
+        incidents: parsed.page.incidents,
+        // #1006 — the PROVIDER's own published records, computed by us over a trailing 30 days with
+        // the /methodology weights. Not a copy of a figure on their page: they publish none.
+        uptime30d: parsed.page.uptime30d,
+        uptimeSource: 'official' as const,
+        // #1004 — a page whose records reach back less than 30 days says so, instead of passing a
+        // short window off as a full one.
+        ...(parsed.page.uptimeWindowDays != null ? { uptimeWindowDays: parsed.page.uptimeWindowDays } : {}),
+        todayWeightedOutageSec: parsed.page.todayWeightedOutageSec, // #1017
+        // #1006 — the % the provider shows its own visitors, reproduced (the number is nowhere in
+        // `config.json`; the page computes it in the browser from the same records). Both the window
+        // AND the severity rule differ from ours here, so without this the detail page would publish
+        // our figure with nothing to check it against — see `reproduceReportedUptime`.
+        ...(parsed.page.reported != null
+          ? { uptimeReported: parsed.page.reported.pct, uptimeReportedDays: parsed.page.reported.days }
+          : {}),
+      }
     }
 
     if (config.apiUrl) {
@@ -2881,7 +2952,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
 
       const start = Date.now()
       const scrapeUrl = config.instatusUrl || config.rssFeedUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
-      const [res, scrapeRes, betterStackRes, aistudioRes, onlineOrNotHistoryRes] = await Promise.all([
+      const [res, scrapeRes, betterStackRes, aistudioRes] = await Promise.all([
         fetchWithTimeout(config.statusUrl),
         scrapeUrl
           ? fetchWithTimeout(scrapeUrl).catch((err) => {
@@ -2910,43 +2981,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
               return null
             })
           : Promise.resolve(null),
-        config.onlineOrNotUrl
-          // Two pages reach well past HISTORY_WINDOW_DAYS for OpenRouter's incident cadence; the real
-          // age bound is the cutoff inside mergeOnlineOrNotIncidents, not the page count (#1134).
-          ? Promise.all([1, 2].map((page) => {
-              const url = new URL(`${config.onlineOrNotUrl!.replace(/\/$/, '')}/incidents`)
-              url.searchParams.set('page', String(page))
-              return fetchWithTimeout(url.toString()).catch((err) => {
-                console.warn(`[fetchService] ${config.id} OnlineOrNot history page ${page} failed:`, err instanceof Error ? err.message : err)
-                return null
-              })
-            }))
-          : Promise.resolve([]),
       ])
       const latency = Date.now() - start
-
-      // #1134 — consume the supplemental OnlineOrNot /incidents pages exactly ONCE here, regardless of
-      // how the home-page read turns out. The fetches fire unconditionally (part of the Promise.all
-      // above), so their Response bodies must be drained on every path — including the home-failure
-      // branches that early-return — or a Worker holds an undrained body against the subrequest
-      // concurrency limit. The parsed rows are only USED when the home page parses (the merge target,
-      // below); on a home-page failure they are still drained here, just discarded.
-      const historyIncidents: Incident[] = []
-      for (let i = 0; i < onlineOrNotHistoryRes.length; i++) {
-        const historyRes = onlineOrNotHistoryRes[i]
-        if (!historyRes) continue // network error already logged in the fetch .catch
-        if (!historyRes.ok) {
-          console.warn(`[fetchService] ${config.id} OnlineOrNot history page ${i + 1} returned ${historyRes.status}`)
-          historyRes.body?.cancel()
-          continue
-        }
-        const historyPage = parseOnlineOrNotIncidentHistory(await historyRes.text())
-        if (historyPage.ok) historyIncidents.push(...historyPage.incidents)
-        // A supplemental parse failure is display-only: it must NOT drive sourceUnknown/trackFetchFailure
-        // (that is the HOME read's job) — the home payload still publishes. Log it service-scoped so a
-        // silent /incidents shape drift (#1123-class) is diagnosable rather than a permanent no-op.
-        else console.warn(`[fetchService] ${config.id} OnlineOrNot history page ${i + 1} unreadable (${historyPage.reason}) — dropping this page's supplemental history`)
-      }
 
       let incidents: Incident[] = []
       let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
@@ -2957,54 +2993,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       let instatusReported: number | null = null // #1006 — the page's own published aggregate (disclosure)
       let instatusReportedDays: number | null = null
       let instatusComponents: ServiceComponent[] = [] // #761 — Instatus per-component snapshot (Next.js reads a published status; Nuxt derives one)
-      if (config.onlineOrNotUrl && res.ok) {
-        const html = await res.text()
-        // #1123 — ONE parse yields both the incident list and the uptime, and says explicitly when the
-        // payload was unreadable. Previously an unreadable payload and a genuinely clean page were the
-        // same answer (`[]` + `null`), so a dead read published "operational, no incidents, no uptime".
-        const page = parseOnlineOrNotPage(html)
-        if (page.ok) {
-          incidents = page.incidents
-          // #1006 — computed over the trailing 30 days from the page's own incident records (started/
-          // ended/impact), like every other source, instead of reading its aggregate over an unknown
-          // period. It's the PROVIDER's own status page (not a third-party monitor), so this is
-          // 'official', not platform.
-          base.uptime30d = page.uptime30d
-          base.uptimeSource = 'official'
-          base.todayWeightedOutageSec = page.todayWeightedOutageSec // #1017
-
-          // #1134 — the home payload intentionally retains only ~14 days of root-map incidents. Older
-          // non-component incidents live on the paginated /incidents route (consumed above). This is a
-          // display-history supplement only: those rows have no impact and stay excluded from
-          // uptime/Score/MTTR by the existing null-impact policy.
-          if (historyIncidents.length > 0) {
-            incidents = mergeOnlineOrNotIncidents(incidents, historyIncidents, Date.now())
-          }
-        } else {
-          onlineOrNotParseFailure = page.reason
-          console.warn(`[fetchService] ${config.id} OnlineOrNot page unreadable (${page.reason}) — NOT treating as "no incidents"`)
-        }
-      } else if (config.onlineOrNotUrl && !res.ok) {
-        console.warn(`[fetchService] ${config.id} OnlineOrNot status page returned ${res.status}`)
-        res.body?.cancel()
-        // #1123 review — this arm used to just warn and fall through, which published the WORST
-        // outcome available: `incidents` stays `[]`, and since `httpStatus` maps 403 to `operational`,
-        // a real outage behind a 403 showed a green badge with no `sourceUnknown` — and
-        // `parseErrors === 0` meant `resetFetchFailure` cleared the consecutive-failure gate every
-        // cycle, so escalation could never fire either.
-        //
-        // 403/429 are NOT treated as `dead-source` here (unlike the Statuspage summary.json arm's
-        // shared `classifyStatusPageFailure`, whose input is a JSON API where a 4xx is unambiguous):
-        // this is an HTML page fronted by Cloudflare, so a 403 is most likely a transient bot-management
-        // challenge to OUR egress, NOT a gone page — the same reason `httpStatus` (below) refuses to
-        // read a 403 as anything. Promoting it to `sourceDead` would flap openrouter in and out of the
-        // rankings at poll rate. So only an unambiguous gone/auth 4xx (404/401/410/…) is dead-source;
-        // 403/429 and every 5xx are an INDETERMINATE read → `sourceUnknown`, booked for diagnosis.
-        if (res.status !== 403 && res.status !== 429 && classifyStatusPageFailure(res.status) === 'dead-source') {
-          return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
-        }
-        onlineOrNotParseFailure = 'fetch-unreadable'
-      } else if (config.instatusUrl) {
+      if (config.instatusUrl) {
         // #1089 — this arm is entered for an Instatus service even when the scrape did NOT come back
         // ok, deliberately. Gating it on `scrapeRes?.ok` (the original shape) meant a failed scrape
         // skipped the whole block — including the MAIN-PAGE read below, which is a separate fetch and
@@ -3116,7 +3105,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         scrapeRes?.body?.cancel()
         // #1234 — reaching here with a scrape CONFIGURED means the incident source was unreadable.
         // The arm immediately above is `else if (scrapeRes?.ok)` and every arm before it is guarded on
-        // an `onlineOrNotUrl`/`instatusUrl` this config does not carry, so a service with
+        // an `instatusUrl` this config does not carry, so a service with
         // `rssFeedUrl`/`gcloudProduct` is here only because the scrape returned non-ok or its fetch
         // threw (`.catch` → null). Before this,
         // the branch booked nothing: `incidents` stayed `[]`, `hasOngoing` was false, and
@@ -3382,12 +3371,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // read this source" (`svc.sourceUnknown.*`, #1004) instead of showing a green badge, and a
       // single transient blip does not fabricate an outage either. This closes the case #761's note
       // at the top of this file described but only mitigated: the discarded `shouldDegrade`.
-      // #1123 — OnlineOrNot joins the same guard. The two can never BOTH be set: the arms above are
-      // an `if (onlineOrNotUrl && res.ok) / else if (onlineOrNotUrl && !res.ok) / else if (instatusUrl)`
-      // chain, so an OnlineOrNot service cannot enter the Instatus arm even if a config ever carried
-      // both URLs. (Deliberately NOT annotated `string`: keeping the union means a typo'd or invented
-      // reason fails the type-check instead of landing an unreadable bucket in the KV counter.)
-      const sourceParseFailure = instatusParseFailure ?? onlineOrNotParseFailure
+      // (Deliberately NOT annotated `string`: keeping the union means a typo'd or invented reason
+      // fails the type-check instead of landing an unreadable bucket in the KV counter.)
+      const sourceParseFailure = instatusParseFailure
       if (sourceParseFailure) {
         // #1089 follow-up — book EVERY failure, not just the 3-strike crossings `trackFetchFailure`
         // records. A single failed cycle already drops the service out of `/api/statusline/down` and
@@ -3639,7 +3625,7 @@ export function detectPlatformOutage(
  *  service already KNOWN to have been publishing `sourceDead`, the first key does bound when it stopped
  *  answering an unambiguous gone-4xx, because that path returns `operational` and never enters
  *  `degradedFromFetch` — but 403 and 429 are deliberately excluded from `dead-source` on the
- *  OnlineOrNot leg, so even that reading is a bound and not a proof. Corroborate with `fetch-fail:daily`.
+ *  Statuspage summary leg, so even that reading is a bound and not a proof. Corroborate with `fetch-fail:daily`.
  *
  *  Character.AI's failure mode changed somewhere between 2026-08-01 and 2026-08-18 and dating it needed
  *  Wayback captures of a third-party status host, because these keys had expired. 90d covers the same

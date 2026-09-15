@@ -84,7 +84,7 @@
 | xAI API | xAI | RSS 피드 |
 | DeepSeek API | DeepSeek | Flashduty (브라우저 렌더 피드) |
 | Kimi (Moonshot AI) | Moonshot AI | Atlassian Statuspage (중국어 제목 → 영어) |
-| OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
+| OpenRouter | OpenRouter | Datadog Status Page (`config.json`) |
 | Amazon Bedrock | AWS | AWS Health Dashboard |
 | Azure OpenAI | Microsoft | Azure Status RSS |
 
@@ -183,7 +183,7 @@ Cloudflare Worker
   ├── aistudio.ts        → Google AI Studio + Gemini API (gcloud와 병합되는 2차 소스 — #310)
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json 가동률 API + dailyImpact (status_history)
-  ├── onlineornot.ts     → OnlineOrNot React Router SSR (OpenRouter)
+  ├── datadog.ts         → Datadog Status Page `config.json` (OpenRouter — #1403)
   ├── flashduty.ts       → Flashduty 피드 (DeepSeek + DeepSeek App — 예약 Action이 브라우저 렌더링, #618)
   └── aws.ts             → AWS Health events JSON API (Bedrock) + RSS (Azure OpenAI)
   ↓
@@ -432,7 +432,7 @@ worker/
       aistudio.ts      # Google AI Studio + Gemini API (gemini 2차 소스, #310)
       instatus.ts      # Instatus
       betterstack.ts   # Better Stack
-      onlineornot.ts   # OnlineOrNot (OpenRouter)
+      datadog.ts       # Datadog Status Page (OpenRouter)
       flashduty.ts     # Flashduty (DeepSeek + DeepSeek App)
       aws.ts           # AWS Health events JSON API — Bedrock (+ Azure OpenAI는 RSS 파서 재사용)
       impact-weights.ts uptime-interval.ts   # 공유 uptime 프리미티브 (#1006)
