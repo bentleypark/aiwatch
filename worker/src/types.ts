@@ -302,12 +302,17 @@ export interface ServiceConfig {
    *  is the only field the path needs. Uptime is COMPUTED from those records (`parsers/datadog.ts`);
    *  the page publishes no uptime number of its own. */
   datadogStatusUrl?: string
-  /** #1403 — the component ids the BADGE and the UPTIME figure run on, the `uptimeScopeOf` invariant
-   *  ("Badge + uptime run on … ALONE") expressed for this path. Required alongside `datadogStatusUrl`:
-   *  a Datadog page lists API and non-API components side by side with no grouping the parser can
-   *  key on, so without an explicit scope a website outage answers "yes" on /is-X-down. Ids, not
-   *  names, because this page's ids are stable UUIDs while its names carry the route path. */
-  datadogComponentIds?: [string, ...string[]]
+  /** #1403 — the `ComponentGroup` the BADGE and the UPTIME figure run on, the `uptimeScopeOf`
+   *  invariant ("Badge + uptime run on … ALONE") expressed for this path. Required alongside
+   *  `datadogStatusUrl`: a Datadog page lists API and non-API components side by side, so without a
+   *  scope a website outage answers "yes" on /is-X-down.
+   *
+   *  A GROUP id, not a list of member ids, and that is the load-bearing part. A member list has to be
+   *  maintained by hand against a page that changes silently, and this path has none of the drift
+   *  machinery the Atlassian arm relies on (`buildPageComponents` keys on `apiUrl`, null here). So it
+   *  fails both ways and is loud in only one — a retired member blacks the service out, a NEW member
+   *  goes unbadged and uncounted with no signal. The provider maintains the group for us. */
+  datadogComponentGroupId?: string
   /**
    * A status-source migration can remove resolved incidents that AIWatch already collected inside
    * its live 30-day score window. Until this instant, retain those monthly-archive rows alongside

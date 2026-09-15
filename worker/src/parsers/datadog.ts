@@ -43,7 +43,7 @@ export type DatadogParseFailure =
   | 'dd-components-unreadable'       // the component tree is absent, or yielded no leaf component
   | 'dd-component-status-unreadable' // a component carries a status word this parser does not know
   | 'dd-incident-unreadable'         // an incident's shape or severity could not be read
-  | 'dd-component-missing'           // a configured component is no longer on the page
+  | 'dd-component-missing'           // the configured component group is gone from the page
   | 'dd-fetch-unreadable'            // set by the CALLER: the config.json fetch returned a non-OK
 
 export interface DatadogStatusPage {
@@ -149,8 +149,12 @@ function incidentStage(value: unknown): TimelineEntry['stage'] {
 
 /** Leaf components, flattened out of the group tree.
  *  `null` = the tree itself was unreadable; an unknown status word is reported separately. */
+/** A leaf plus the id of the `ComponentGroup` it sits under (`null` for a top-level leaf). The group
+ *  is what the SCOPE names — see {@link parseDatadogStatusPage}. */
+type Leaf = { id: string; name: string; status: ComponentStatus; groupId: string | null }
+
 type FlattenResult =
-  | { ok: true; leaves: Array<{ id: string; name: string; status: ComponentStatus }> }
+  | { ok: true; leaves: Leaf[] }
   | { ok: false; reason: Extract<DatadogParseFailure, 'dd-components-unreadable' | 'dd-component-status-unreadable'> }
 
 
@@ -167,15 +171,16 @@ type FlattenResult =
  */
 function flattenComponents(raw: unknown): FlattenResult {
   if (!Array.isArray(raw)) return { ok: false, reason: 'dd-components-unreadable' }
-  const leaves: Array<{ id: string; name: string; status: ComponentStatus }> = []
+  const leaves: Leaf[] = []
 
   type ComponentFailure = Extract<DatadogParseFailure, 'dd-components-unreadable' | 'dd-component-status-unreadable'>
-  const walk = (entries: unknown[]): ComponentFailure | null => {
+  const walk = (entries: unknown[], groupId: string | null): ComponentFailure | null => {
     for (const entry of entries) {
       if (!isRecord(entry)) return 'dd-components-unreadable'
       if (entry.type === 'ComponentGroup') {
         if (!Array.isArray(entry.components)) return 'dd-components-unreadable'
-        const failure = walk(entry.components)
+        if (typeof entry.id !== 'string') return 'dd-components-unreadable'
+        const failure = walk(entry.components, entry.id)
         if (failure) return failure
         continue
       }
@@ -183,12 +188,12 @@ function flattenComponents(raw: unknown): FlattenResult {
       if (typeof entry.id !== 'string' || typeof entry.name !== 'string') return 'dd-components-unreadable'
       const status = asComponentStatus(entry.status)
       if (!status) return 'dd-component-status-unreadable'
-      leaves.push({ id: entry.id, name: entry.name, status })
+      leaves.push({ id: entry.id, name: entry.name, status, groupId })
     }
     return null
   }
 
-  const failure = walk(raw)
+  const failure = walk(raw, null)
   if (failure) return { ok: false, reason: failure }
   if (leaves.length === 0) return { ok: false, reason: 'dd-components-unreadable' }
   return { ok: true, leaves }
@@ -388,7 +393,7 @@ const WINDOW_DAYS = 30
  */
 export function parseDatadogStatusPage(
   raw: unknown,
-  componentIds: readonly string[],
+  componentGroupId: string,
   nowMs: number = Date.now(),
 ): DatadogParseResult {
   if (!isRecord(raw)) return { ok: false, reason: 'dd-envelope-unreadable' }
@@ -408,14 +413,21 @@ export function parseDatadogStatusPage(
   // website outage answered "yes" on /is-openrouter-down with the API healthy, and 15h28m of website
   // degradation was the whole of openrouter's published uptime deficit.
   //
-  // A configured id missing from the page is REFUSED, not skipped. Silently narrowing the scope
-  // publishes a too-optimistic figure with no signal that it covers less than it claims — the
-  // direction this file must never fail in. `cloudflare-status.ts` makes the same call on the same
-  // shape (an explicit configured id list).
-  const configured = new Set(componentIds)
-  const scoped = flattened.leaves.filter((leaf) => configured.has(leaf.id))
-  if (scoped.length !== configured.size) {
-    console.warn(`[datadog] ${configured.size - scoped.length}/${configured.size} configured component(s) absent from the page — id rotation?`)
+  // The scope is the PROVIDER'S OWN GROUP, not a list of member ids. An enumeration has to be
+  // maintained by hand against a page that changes without telling us, and this path has none of the
+  // machinery the Atlassian arm uses to catch that (`buildPageComponents` keys on `apiUrl`, which is
+  // null here, so `diffPageComponents` and `trackComponentMiss` can never fire for this page). A
+  // member list therefore fails in BOTH directions and is only loud in one: a retired component
+  // blacks the service out, while a NEW API component is silently unbadged and uncounted. Naming the
+  // container the provider maintains removes the enumeration instead of adding a seventh guard to
+  // it — the same reason the retired OnlineOrNot parser trusted `scheduledMaintenance` grouping over
+  // a title regex.
+  //
+  // The group VANISHING is still refused: that is a page restructure, not component churn, and it is
+  // the one case where continuing would silently rescope the figure.
+  const scoped = flattened.leaves.filter((leaf) => leaf.groupId === componentGroupId)
+  if (scoped.length === 0) {
+    console.warn(`[datadog] component group ${componentGroupId} absent or empty — page restructured?`)
     return { ok: false, reason: 'dd-component-missing' }
   }
 
@@ -438,10 +450,16 @@ export function parseDatadogStatusPage(
   // simply does not move the API's badge or its uptime.
   const byComponent = new Map<string, OutageSegment[]>(scoped.map((leaf) => [leaf.id, []]))
   for (const seg of parsed.flatMap((p) => p.segments)) byComponent.get(seg.componentId)?.push(seg)
-  // Non-empty: the scope check above guarantees one bucket per configured id, and `ServiceConfig`
-  // types the field as a non-empty tuple.
+  // Non-empty: the scope check above returns early on an empty `scoped`, so there is always at least
+  // one bucket for the reducers below. (Before the group scope this was asserted against a type that
+  // did not carry the guarantee, and an empty list published `Math.min(...[])` — `Infinity` — as an
+  // `official` uptime.)
   const perComponent = [...byComponent.values()]
 
+  // Deliberately over EVERY incident, not just the scoped ones. Reach answers "how far back do this
+  // page's records go", which is a page property — the backfill was done as a page, not per
+  // component. A per-component reach would read a component that was simply QUIET as one with no
+  // record, and shorten the window on the strength of an absence.
   const reachDays = recordReachDays(parsed, raw.created, nowMs)
   // The denominator is what the records actually cover. Asserting a flat 30 days on a page whose
   // history reaches back five would publish a confident figure over a window that does not exist —

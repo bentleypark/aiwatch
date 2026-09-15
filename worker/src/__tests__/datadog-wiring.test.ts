@@ -7,10 +7,11 @@ import type { KVLike } from '../utils'
 
 // #1403 — the parser being right proves nothing about whether production calls it. These assert the
 // CALLED path: openrouter's config, the URL the branch derives, and what each failure mode publishes.
-const FIXTURE = readFileSync(
+const FIXTURE_RAW = readFileSync(
   join(__dirname, '../parsers/__tests__/fixtures/openrouter-datadog-2026-09-15.json'),
   'utf8',
 )
+const FIXTURE = JSON.parse(FIXTURE_RAW)
 
 const openrouter = SERVICES.find((service) => service.id === 'openrouter')!
 
@@ -44,6 +45,23 @@ describe('#1403 openrouter is wired to the Datadog path, not the retired one', (
     expect(statusSourceOf(openrouter)).toBe('Datadog Status Page')
   })
 
+  it('resolves the SHIPPED scope to the API components, excluding the website leaf', () => {
+    // Round 3 caught this: appending the `Web & Application Services` id to the config restored the
+    // exact behaviour this scope exists to remove, and 5503 tests stayed green — the parser suite
+    // exercises a hand-written copy of the scope, never the value that ships. This drives the REAL
+    // config through the REAL captured page.
+    const scoped = (FIXTURE.components as Array<{ id: string; type: string; components?: Array<{ name: string }> }>)
+      .find((c) => c.id === openrouter.datadogComponentGroupId)
+    expect(scoped?.type).toBe('ComponentGroup')
+    expect(scoped?.components?.map((c) => c.name)).toEqual([
+      'Chat (/api/v1/chat/completions)', 'Video (/api/v1/videos)', 'Image (/api/v1/image)',
+      'TTS (/api/v1/audio/speech)', 'STT (/api/v1/audio/transcriptions)', 'Embeddings (/api/v1/embeddings)',
+    ])
+    // The website leaf sits OUTSIDE that group — which is what keeps it out of the badge and uptime.
+    expect((FIXTURE.components as Array<{ id: string; name: string }>)
+      .some((c) => c.name === 'Web & Application Services' && c.id !== openrouter.datadogComponentGroupId)).toBe(true)
+  })
+
   it('is the ONLY service on this path — a second one would need the window caveat re-checked', () => {
     // openrouter's full window rests on one un-corroborated `Backfill` record (see the parser's
     // header). A second Datadog page would not inherit that, so it must not join silently.
@@ -53,7 +71,7 @@ describe('#1403 openrouter is wired to the Datadog path, not the retired one', (
 
 describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
   it('reads config.json and publishes incidents WITH an official computed uptime', async () => {
-    const urls = stubFetch(() => new Response(FIXTURE, { status: 200 }))
+    const urls = stubFetch(() => new Response(FIXTURE_RAW, { status: 200 }))
 
     const service = await fetchService(openrouter, undefined, undefined, {})
 
@@ -105,13 +123,14 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     // the two figures differ by the severity RULE, not only the window. An OPEN `degraded` incident
     // disagrees at every clock: it accrues for us at 0.3 forever and scores zero under the provider's
     // rule, so this pins the wiring without depending on when the suite runs.
-    // Every CONFIGURED component must be on the page, or the parser refuses — so this document
-    // carries all six, with the outage on the first.
-    const ids = openrouter.datadogComponentIds!
-    const affected = [{ id: ids[0], name: 'Chat', status: 'degraded', type: 'Component' }]
+    // The document must carry the CONFIGURED group, or the parser refuses.
+    const affected = [{ id: 'c0', name: 'Chat', status: 'degraded', type: 'Component' }]
     stubFetch(() => new Response(JSON.stringify({
       created: '2026-01-01T00:00:00Z',
-      components: ids.map((id, i) => ({ id, name: `C${i}`, position: i, status: i === 0 ? 'degraded' : 'operational', type: 'Component' })),
+      components: [{
+        id: openrouter.datadogComponentGroupId, name: 'API - Gateway', type: 'ComponentGroup',
+        components: [{ id: 'c0', name: 'Chat', position: 0, status: 'degraded', type: 'Component' }],
+      }],
       incidents: [{
         id: 'open', title: 'Degraded', currentStatus: 'identified',
         publishedDate: '2026-09-01T00:00:00Z', resolvedDate: null, resolved: false,

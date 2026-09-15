@@ -292,23 +292,18 @@ export const SERVICES: ServiceConfig[] = [
   // is what this migration needs handled — the same outage arrives under a new `datadog:` id while
   // AIWatch's accumulator still holds it under the old one, and a resolved row is never phantom-pruned
   // (monthly-archive.ts). That is a one-off post-deploy `POST /api/admin/suppress`, not code.
-  // Badge + uptime scope = the six `API - Gateway` leaves. The page's seventh leaf, `Web &
+  // Badge + uptime scope = the provider's own `API - Gateway` group. The page's other leaf, `Web &
   // Application Services` (2347916e-…), is openrouter.ai's site and dashboard, not an API endpoint:
   // unscoped it answered "yes" on /is-openrouter-down for a website outage while inference was
-  // fine, and its 15h28m degradation on 2026-08-28 — one the provider's own notice ends with
-  // "Inference is unaffected" — was the whole of the published uptime deficit. Same treatment
-  // cohere/groq/together/cerebras give `Website` via componentDenylist and mistral gives `le chat`
-  // + `console` via incidentExclude. It still appears in the incident list; it just does not move
-  // the API's badge or its percentage.
+  // fine, and its 15h28m degradation on 2026-08-28 — a notice the provider ends with "Inference is
+  // unaffected" — was the whole published uptime deficit (99.35 unscoped vs 99.88 scoped). Same
+  // treatment cohere/groq/together/cerebras give `Website` via componentDenylist and mistral gives
+  // `le chat` + `console` via incidentExclude. It stays in the incident list; it just does not move
+  // the API's badge or its percentage. Naming the GROUP rather than its six members means a seventh
+  // API component joins the scope on its own — there is no drift detector on this path to catch a
+  // stale list (see `datadogComponentGroupId`).
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, datadogStatusUrl: 'https://status.openrouter.ai',
-    datadogComponentIds: [
-      '9fb5ccff-e128-455a-be20-59572f8d363a', // Chat (/api/v1/chat/completions)
-      'bb2402ad-3e98-4c75-9eb5-ca68ca683c5a', // Video (/api/v1/videos)
-      'b108f556-36a0-43b5-aa55-a01b27855229', // Image (/api/v1/image)
-      '15c7d7e9-e2b7-43dd-aa56-77c4959fc603', // TTS (/api/v1/audio/speech)
-      '93008741-4362-4fb6-85c4-6cddb8412116', // STT (/api/v1/audio/transcriptions)
-      'c3a7fba9-9cbc-40a4-ae83-d990bc01d51d', // Embeddings (/api/v1/embeddings)
-    ] },
+    datadogComponentGroupId: '62d944d3-1acb-471b-81a0-099b3da0164f' }, // API - Gateway
   // Voice & Speech AI
   // displayComponentIds (#606): curated availability surfaces for the breakdown card —
   // TTS, STT, Conversations, RAG, Telephony, Other API endpoints, + ElevenCreative (excludes UI/Quality/Other).
@@ -2225,7 +2220,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
       }
-      const parsed = parseDatadogStatusPage(safeJsonParse(configText), config.datadogComponentIds ?? [])
+      const parsed = parseDatadogStatusPage(safeJsonParse(configText), config.datadogComponentGroupId ?? '')
       if (!parsed.ok) {
         console.warn(`[fetchService] ${config.id} Datadog config.json unreadable (${parsed.reason}) content-type=${configRes.headers.get('content-type') ?? 'none'} body[0..120]=${JSON.stringify(configText.slice(0, 120))}`)
         await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
