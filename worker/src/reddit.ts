@@ -28,8 +28,14 @@ export const REDDIT_TRANSIENT_STREAK_KEY = 'reddit:transient-streak'
 const SOURCE_DEAD_TTL_SEC = 93600
 // Consecutive all-transient (network throw / timeout) runs before escalating to source-dead. One
 // such run proves nothing; a sustained streak where every target is unreachable is a real block
-// that must not hide as a quiet day. Hourly cron → ~3h before the warning fires.
-const TRANSIENT_STREAK_LIMIT = 3
+// that must not hide as a quiet day. Counted in scans, sized to ~3h.
+export const REDDIT_SCAN_INTERVAL_MIN = 15
+export const TRANSIENT_STREAK_LIMIT = 180 / REDDIT_SCAN_INTERVAL_MIN
+
+// Assumes the every-5-minute cron: a scan runs on the tick inside the first five minutes of each interval.
+export function isRedditScanTick(scheduled: Date): boolean {
+  return scheduled.getUTCMinutes() % REDDIT_SCAN_INTERVAL_MIN < 5
+}
 
 export interface RedditPost {
   id: string
@@ -332,7 +338,7 @@ export function promoteJoinReading(
  *
  * **The gate never suppresses an alert — it downgrades the label.** An earlier cut withheld the
  * Discord message entirely on `downgrade-healthy` and re-decided the post on later runs. That cost
- * more than it saved: `promoteReason`'s `megathread` branch stops matching at 2h while the cron runs
+ * more than it saved: `promoteReason`'s `megathread` branch stops matching at 2h while the cron then ran
  * hourly, so a declarative "X is down for everyone" held once was gone — and our polling is
  * structurally later than a provider's own page, so the posts most likely to be held early are real
  * outage megathreads, the exact thing this channel exists to catch. Measured throughput was ~1 alert
@@ -518,10 +524,10 @@ export interface FetchResult {
 /**
  * Fetch the 25 newest posts from a subreddit (#820). No server-side search/query — the listing
  * feed doesn't support one, so keyword matching moves entirely to the caller (`detectRedditPosts`,
- * unchanged: `matchesKeywords` et al. read the title only). At the current HOURLY cron cadence
- * (`worker/src/index.ts` gates this to minute<5 of each hour) 25 posts is real headroom against a
- * subreddit's normal per-hour volume (~6/hour, measured live on r/ChatGPT 2026-08-12) — but not an unconditional
- * "more coverage than before" claim: a subreddit posting >25 items within the hour, which is
+ * unchanged: `matchesKeywords` et al. read the title only). At the scan cadence
+ * (`isRedditScanTick`) 25 posts is real headroom against a
+ * subreddit's normal volume (~6/hour, measured live on r/ChatGPT 2026-08-12) — but not an unconditional
+ * "more coverage than before" claim: a subreddit posting >25 items between scans, which is
  * plausible during exactly the kind of high-volume outage this feature exists to catch, could still
  * drop one. Fetches run in parallel (`Promise.allSettled` below) — serializing them was tested and
  * did not change the pass rate (see file header), so parallel is kept for lower total latency.
@@ -575,7 +581,7 @@ export function isRedditAtomFeed(text: string): boolean {
  * Marker so a persistent block is visible in the daily summary instead of silently zeroing out.
  */
 export async function markRedditSourceDead(kv: KVNamespace, reason: SourceDeadReason): Promise<void> {
-  // `at` is when darkness BEGAN, not when we last looked. The fold re-marks on every hourly run
+  // `at` is when darkness BEGAN, not when we last looked. The fold re-marks on every run
   // while unhealthy, and the daily summary reads this key seconds after the scan writes it (both
   // are minute<5 of the same cron invocation) — so re-stamping would pin the reported age at
   // "for 0m" forever, which reads as a fresh blip for a source that has been dark since June.
@@ -584,13 +590,13 @@ export async function markRedditSourceDead(kv: KVNamespace, reason: SourceDeadRe
   const at = existing && existing !== 'unknown' && existing.reason === reason ? existing.at : Date.now()
   // A persistent WRITE failure degrades to the pre-#820 behaviour: no marker, so the summary shows
   // a quiet day. There is no second channel here to report that on — it is a known limit, bounded
-  // by 24 hourly retries all having to fail.
+  // by a day of retries all having to fail.
   await kv.put(REDDIT_SOURCE_DEAD_KEY, JSON.stringify({ reason, at }), { expirationTtl: SOURCE_DEAD_TTL_SEC })
     .catch((err) => console.error('[reddit] source-dead marker write failed:', err instanceof Error ? err.message : err))
 }
 
-// KV bills a delete as a write, and the healthy path runs hourly — deleting unconditionally would
-// spend ~48 writes/day removing keys that are usually absent (`constraint_free_tier_budget`).
+// KV bills a delete as a write, and the healthy path runs every scan — deleting unconditionally would
+// spend two writes per scan removing keys that are usually absent (`constraint_free_tier_budget`).
 // A read first is effectively free by comparison.
 async function deleteIfPresent(kv: KVNamespace, key: string, label: string): Promise<void> {
   try {
@@ -669,7 +675,7 @@ export async function readRedditSourceDead(kv: KVNamespace): Promise<SourceHealt
     // instead.
     if (SOURCE_DEAD_REASONS.includes(parsed?.reason) && typeof parsed?.at === 'number') return parsed
   } catch { /* fall through to the shape warning */ }
-  // A marker written every hour and silently ignored forever is the same blind spot; say so.
+  // A marker written every scan and silently ignored forever is the same blind spot; say so.
   console.error(`[reddit] source-dead marker is malformed, treating health as unknown: ${raw.slice(0, 120)}`)
   return 'unknown'
 }

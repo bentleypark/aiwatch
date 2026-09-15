@@ -2124,7 +2124,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 import { generateBadgeSvg, badgeStatusColor } from './badge'
 import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, FEED_TARGET_IDS, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
-import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading } from './reddit'
+import { detectRedditPosts, isRedditScanTick, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
@@ -3175,14 +3175,14 @@ export default {
       const result = await cronAlertCheck(env, event.scheduledTime)
       if (!env.DISCORD_WEBHOOK_URL) return
 
-      // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
-      // KV budget (#820 round 2 — the old "max 5 writes/hour" cap is gone, see the outageAlerts loop
-      // below): worst case is REDDIT_TARGETS' 9 outage-mode subs × limit=25 posts = 225 dedup writes/
-      // hour, 5400/day — still trivial against the Workers Paid 1M/month inclusion. Real volume is far
-      // lower in practice (most posts don't match `matchesKeywords`, and #820's measured ~85% 429 rate
-      // on the fetch itself further caps how many subreddits even return posts to write keys for).
+      // Reddit community monitoring — every 15 minutes (#1418). KV budget (#820 round 2 — the old
+      // "max 5 writes/hour" cap is gone, see the outageAlerts loop below): worst case is
+      // REDDIT_TARGETS' 9 outage-mode subs × limit=25 posts = 225 dedup writes per scan — still
+      // trivial against the Workers Paid 1M/month inclusion. Real volume is far lower in practice (a
+      // post is written once, then deduped for 24h; most posts don't match `matchesKeywords`; #820's
+      // measured ~85% 429 rate caps how many subreddits return posts at all).
       const now = scheduledNow
-      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && isRedditScanTick(now)) {
         try {
           const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
           // Split: service outage alerts vs competitive vs security monitoring
@@ -3213,7 +3213,7 @@ export default {
           // is unconditional again (its pre-#1315 shape). An earlier cut withheld downgraded posts
           // and left their seen key unburned so a later run could re-decide them; that machinery is
           // gone, and with it the ordering trap it created. Why: `promoteReason`'s `megathread`
-          // branch stops matching at 2h while this block runs hourly, so a withheld declarative
+          // branch stops matching at 2h while this block then ran hourly, so a withheld declarative
           // outage post got at most one retry and then aged out permanently — and those are the
           // posts most likely to be withheld, because our polling lags a provider's own status page.
           const nowSec = Date.now() / 1000
@@ -3290,7 +3290,7 @@ export default {
               console.error('[reddit] promote-record write failed:', d.alert.post.id)
             }
           }
-          // Competitive alerts — mark seen + notify (max 2 per hour)
+          // Competitive alerts — mark seen + notify (max 2 per scan)
           for (const alert of competitiveAlerts.slice(0, 2)) {
             await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
             const formatted = formatCompetitiveAlert(alert)
@@ -3300,7 +3300,7 @@ export default {
               color: formatted.color,
             })
           }
-          // Security alerts from Reddit — notify first, then mark seen (max 5 per hour)
+          // Security alerts from Reddit — notify first, then mark seen (max 5 per scan)
           const secReddit = redditSecurityAlerts.slice(0, 5)
           if (secReddit.length > 0) {
             const secLines = secReddit.map(a => {
@@ -3321,7 +3321,9 @@ export default {
         } catch (err) {
           console.error('[cron] Reddit monitoring failed:', err instanceof Error ? err.message : err)
         }
+      }
 
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
         // HN + OSV security monitoring (independent of Reddit — separate try/catch)
         try {
           const securityAlerts = await detectSecurityAlerts(env.STATUS_CACHE)

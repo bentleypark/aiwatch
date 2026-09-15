@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { parseRedditAtomResponse, matchesKeywords, matchesSecurityKeywords, matchesCompetitiveKeywords, isPromotable, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert, REDDIT_TARGETS, isDeadStatus, isThrottledStatus, decideSourceHealth, transientStreakEscalates, readRedditSourceDead, isRedditAtomFeed, markRedditSourceDead, detectRedditPosts } from '../reddit'
+import { parseRedditAtomResponse, matchesKeywords, matchesSecurityKeywords, matchesCompetitiveKeywords, isPromotable, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert, REDDIT_TARGETS, isDeadStatus, isThrottledStatus, decideSourceHealth, transientStreakEscalates, readRedditSourceDead, isRedditAtomFeed, markRedditSourceDead, detectRedditPosts, TRANSIENT_STREAK_LIMIT, REDDIT_SCAN_INTERVAL_MIN, isRedditScanTick } from '../reddit'
 import type { RedditAlert } from '../reddit'
 
 // A minimal single-entry Atom feed matching the real shape of `www.reddit.com/r/{sub}/new/.rss`
@@ -260,7 +260,7 @@ describe('detectRedditPosts — /new/.rss endpoint (#820)', () => {
     expect(await kv.get('reddit:transient-streak')).toBe('1')
   })
 
-  it('#820 round 2/3 — a SUSTAINED all-429 run (3+ consecutive) escalates to "streak", still an alarm', async () => {
+  it('#820 round 2/3 — a SUSTAINED all-429 run (TRANSIENT_STREAK_LIMIT consecutive) escalates to "streak", still an alarm', async () => {
     // Round 2 first shipped this as a distinct 'throttled-streak' reason, but round 3 found that
     // broke `markRedditSourceDead`'s timestamp preservation whenever a streak's flavor flipped
     // between runs (see reddit.ts's decideSourceHealth docstring). It's plain 'streak' again — the
@@ -268,8 +268,8 @@ describe('detectRedditPosts — /new/.rss endpoint (#820)', () => {
     // cause, so the diagnosis stays accurate without a second reason value to maintain.
     const kv = fakeKv()
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 429 })))
-    await detectRedditPosts(kv)
-    await detectRedditPosts(kv)
+    for (let i = 0; i < TRANSIENT_STREAK_LIMIT - 1; i++) await detectRedditPosts(kv)
+    expect(await readRedditSourceDead(kv)).toBeNull()
     await detectRedditPosts(kv)
     const marker = await readRedditSourceDead(kv)
     expect(marker).not.toBeNull()
@@ -280,9 +280,7 @@ describe('detectRedditPosts — /new/.rss endpoint (#820)', () => {
   it('a sustained all-TRANSIENT (not throttled) run also escalates to "streak"', async () => {
     const kv = fakeKv()
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
-    await detectRedditPosts(kv)
-    await detectRedditPosts(kv)
-    await detectRedditPosts(kv)
+    for (let i = 0; i < TRANSIENT_STREAK_LIMIT; i++) await detectRedditPosts(kv)
     const marker = await readRedditSourceDead(kv)
     expect((marker as { reason: string }).reason).toBe('streak')
   })
@@ -294,14 +292,13 @@ describe('detectRedditPosts — /new/.rss endpoint (#820)', () => {
     // at" rule handles this correctly with no special-casing needed.
     const kv = fakeKv()
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
-    await detectRedditPosts(kv) // run 1: all transient
-    await detectRedditPosts(kv) // run 2: all transient
+    for (let i = 0; i < TRANSIENT_STREAK_LIMIT - 1; i++) await detectRedditPosts(kv) // all transient
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 429 })))
-    await detectRedditPosts(kv) // run 3: all throttled — flavor flips, streak still escalates here
+    await detectRedditPosts(kv) // all throttled — flavor flips, streak still escalates here
     const marker = (await readRedditSourceDead(kv)) as { reason: string; at: number }
     expect(marker.reason).toBe('streak')
     const firstAt = marker.at
-    await detectRedditPosts(kv) // run 4: still throttled — same reason, `at` must NOT move
+    await detectRedditPosts(kv) // still throttled — same reason, `at` must NOT move
     const marker2 = (await readRedditSourceDead(kv)) as { reason: string; at: number }
     expect(marker2.at).toBe(firstAt)
   })
@@ -814,9 +811,20 @@ describe('#820 source health', () => {
 
   it('escalates only once the transient streak reaches the limit', () => {
     expect(transientStreakEscalates(1)).toBe(false)
-    expect(transientStreakEscalates(2)).toBe(false)
-    expect(transientStreakEscalates(3)).toBe(true)
-    expect(transientStreakEscalates(9)).toBe(true)
+    expect(transientStreakEscalates(TRANSIENT_STREAK_LIMIT - 1)).toBe(false)
+    expect(transientStreakEscalates(TRANSIENT_STREAK_LIMIT)).toBe(true)
+    expect(transientStreakEscalates(TRANSIENT_STREAK_LIMIT + 5)).toBe(true)
+  })
+
+  it('#1418 the streak limit still means ~3h of consecutive failing scans', () => {
+    expect(TRANSIENT_STREAK_LIMIT * REDDIT_SCAN_INTERVAL_MIN).toBe(180)
+  })
+
+  it('#1418 a scan runs on the every-5-minute tick inside each 15-minute slot, four times an hour', () => {
+    const at = (minute: number) => new Date(Date.UTC(2026, 8, 15, 10, minute))
+    for (const m of [0, 4, 15, 19, 30, 45]) expect(isRedditScanTick(at(m))).toBe(true)
+    for (const m of [5, 10, 14, 20, 25, 35, 40, 50, 55, 59]) expect(isRedditScanTick(at(m))).toBe(false)
+    expect(Array.from({ length: 12 }, (_, i) => isRedditScanTick(at(i * 5))).filter(Boolean)).toHaveLength(4)
   })
 
   it('readRedditSourceDead reports healthy only for a genuinely absent marker', async () => {
