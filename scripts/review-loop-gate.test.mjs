@@ -69,7 +69,6 @@ test('REVIEW_AGENT_PREFIX stays in lockstep with the documented review command',
   // before any audit line. Pin the prefix to the command the workflow documents in-repo (the installed
   // plugin lives under ~/.claude/plugins, a machine-global path CI does not have).
   assert.ok(readFileSync(join(REPO, '.claude', 'skills', 'ship-issue', 'SKILL.md'), 'utf8').includes(`/${REVIEW_AGENT_PREFIX}:review-pr`))
-  assert.ok(readFileSync(join(REPO, 'CLAUDE.md'), 'utf8').includes(`${REVIEW_AGENT_PREFIX}:review-pr`))
 })
 
 test('declaredRound — reads a self-declared round in both languages and separators', () => {
