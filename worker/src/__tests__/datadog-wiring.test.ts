@@ -118,33 +118,17 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     expect(Object.keys(parseParseFailDay(store[key!]).counts.openrouter)).toEqual(['dd-envelope-unreadable'])
   })
 
-  it('carries the provider disclosure through to ServiceStatus', async () => {
-    // #1006 — /methodology promises the reader can check us against the provider, and on THIS source
-    // the two figures differ by the severity RULE, not only the window. An OPEN `degraded` incident
-    // disagrees at every clock: it accrues for us at 0.3 forever and scores zero under the provider's
-    // rule, so this pins the wiring without depending on when the suite runs.
-    // The document must carry the CONFIGURED group, or the parser refuses.
-    const affected = [{ id: 'c0', name: 'Chat', status: 'degraded', type: 'Component' }]
-    stubFetch(() => new Response(JSON.stringify({
-      created: '2026-01-01T00:00:00Z',
-      components: [{
-        id: openrouter.datadogComponentGroupId, name: 'API - Gateway', type: 'ComponentGroup',
-        components: [{ id: 'c0', name: 'Chat', position: 0, status: 'degraded', type: 'Component' }],
-      }],
-      incidents: [{
-        id: 'open', title: 'Degraded', currentStatus: 'identified',
-        publishedDate: '2026-09-01T00:00:00Z', resolvedDate: null, resolved: false,
-        componentsAffected: affected,
-        timeline: [{ id: 'a', status: 'identified', description: null, startedAt: '2026-09-01T00:00:00Z', createdAt: '2026-09-01T00:00:00Z', componentsAffected: affected }],
-      }],
-      maintenances: null,
-    }), { status: 200 }))
-
+  it('says its per-day impact record is INCOMPLETE, so the calendar keeps painting incidents', async () => {
+    // #1004/#1292 — this path publishes no per-day impact of its own. Once openrouter emits
+    // `uptimeWindowDays` it becomes `isArchiveRestoreEligible`, and the restore writes a `dailyImpact`
+    // map onto the snapshot; with `dailyImpactComplete` absent, `calendar.js`'s
+    // `dailyImpactComplete ?? days === 30` reads TRUE on the Overview 30-bar strip and skips the
+    // incident-painting phase entirely — openrouter's own incidents stop appearing there.
+    stubFetch(() => new Response(FIXTURE_RAW, { status: 200 }))
     const service = await fetchService(openrouter, undefined, undefined, {})
-    expect(service.uptimeReported).toBe(100)
-    expect(service.uptimeReportedDays).toBe(90)
-    expect(service.uptime30d).toBeLessThan(100)
-    expect(service.status).toBe('degraded')
+    expect(service.dailyImpactComplete).toBe(false)
+    // The trigger: this service now carries a short window, which is what makes the restore eligible.
+    expect(service.uptimeWindowDays).toBeTypeOf('number')
   })
 
   it('books a transient non-OK as unknown, and an unambiguous gone status as a dead source', async () => {

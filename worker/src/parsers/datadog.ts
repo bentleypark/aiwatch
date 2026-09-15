@@ -19,9 +19,6 @@
 //   - The page's window is the reach of its own records capped by a viewport-dependent 30/60/90
 //     (the cap is in the page's JS bundle, not in `config.json`); ours is that same reach capped at
 //     30. See {@link recordReachDays}.
-//
-// Because both differences move the number, the figure the provider shows its own visitors is
-// reproduced alongside ours — see {@link reproduceReportedUptime}.
 
 import type { Incident, TimelineEntry } from '../types'
 import { formatDuration } from '../utils'
@@ -56,10 +53,6 @@ export interface DatadogStatusPage {
   uptimeWindowDays: number | null
   /** #1017 — today's UTC-day weighted outage seconds, over the SAME intervals as `uptime30d`. */
   todayWeightedOutageSec: number
-  /** #1006 — the figure the PROVIDER shows its own visitors, reproduced, with the window it covers.
-   *  ONE field because the two must be present or absent together. `null` when it equals ours — the
-   *  field's contract is "absent when the two agree". See {@link reproduceReportedUptime}. */
-  reported: { pct: number; days: number } | null
 }
 
 export type DatadogParseResult =
@@ -78,30 +71,6 @@ const STATUS_WEIGHT: Record<ComponentStatus, number> = {
   operational: 0,
   degraded: MINOR_WEIGHT,
   partial_outage: MINOR_WEIGHT,
-  major_outage: MAJOR_WEIGHT,
-  maintenance: 0,
-}
-
-/**
- * Datadog's OWN severity rule, which is NOT ours and is used for exactly one thing: reproducing the
- * percentage the provider shows its own visitors (`uptimeReported`).
- *
- * It counts only `partial_outage` and `major_outage`, both at full weight, and ignores `degraded`
- * entirely (read off the page's bundle, where the downtime-status set defaults to
- * `["partial_outage","major_outage"]`). AIWatch weights degraded at 0.3 per /methodology, so on a
- * page whose incidents are all `degraded` the two figures differ by the whole gap — which is the
- * case on status.openrouter.ai today, and precisely why publishing ours without theirs beside it
- * would leave a reader unable to check us.
- *
- * This is the ONLY place in this repo where `uptimeReported` uses a non-AIWatch weighting.
- * `statuspage.ts` reproduces Atlassian's figure with OUR weights because Atlassian's own formula is
- * the same 1.0/0.3 (see `impact-weights.ts`); here it is not, so reusing ours would reproduce
- * nothing.
- */
-const PROVIDER_STATUS_WEIGHT: Record<ComponentStatus, number> = {
-  operational: 0,
-  degraded: 0,
-  partial_outage: MAJOR_WEIGHT,
   major_outage: MAJOR_WEIGHT,
   maintenance: 0,
 }
@@ -321,9 +290,7 @@ function parseIncident(raw: unknown, nowMs: number): ParsedIncident | null {
   for (let i = 0; i < reads.length; i++) {
     for (const { id, status } of reads[i].affected) {
       if (worstStatus === null || STATUS_WEIGHT[status] > STATUS_WEIGHT[worstStatus]) worstStatus = status
-      // Skipped only when BOTH weightings score it zero (operational / maintenance) — keying this on
-      // AIWatch's table alone would drop a segment the provider's reproduction still needs.
-      if (STATUS_WEIGHT[status] <= 0 && PROVIDER_STATUS_WEIGHT[status] <= 0) continue
+      if (STATUS_WEIGHT[status] <= 0) continue
       const next = reads.slice(i + 1).find((r) => r.affected.some((a) => a.id === id))
       // Open (`null`) only on a live incident — the shared accumulator clamps that to now, so
       // downtime accrues DURING an outage, which is exactly when uptime is consulted. On a resolved
@@ -485,8 +452,6 @@ export function parseDatadogStatusPage(
   const todayWeightedOutageSec = Math.max(...perComponent.map((segs) =>
     weightedDowntimeSeconds(toIntervals(segs, STATUS_WEIGHT), startOfTodayUTC(nowMs), nowMs)))
 
-  const reported = reproduceReportedUptime(perComponent, reachDays, nowMs)
-
   const incidents = parsed
     .map((p) => p.incident)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
@@ -500,9 +465,6 @@ export function parseDatadogStatusPage(
       uptime30d,
       uptimeWindowDays: windowDays !== null && windowDays < WINDOW_DAYS ? windowDays : null,
       todayWeightedOutageSec,
-      // The field's contract is "absent when the two agree" — a disclosure exists to show a reader a
-      // DIFFERENCE, and repeating our own number as the provider's adds nothing but noise.
-      reported: reported != null && uptime30d != null && reported.pct !== uptime30d ? reported : null,
     },
   }
 }
@@ -511,12 +473,6 @@ export function parseDatadogStatusPage(
 function pct(weightedSec: number, days: number): number {
   return Math.max(0, Math.floor((1 - weightedSec / (days * 86_400)) * 10000) / 100)
 }
-
-/** The widest window the rendered page offers. The page picks among 30/60/90 by VIEWPORT width, so
- *  there is no single number the provider commits to; 90 is what a desktop visitor sees. (Atlassian's
- *  page is viewport-dependent too, but `statuspage.ts` does not pick a constant — it reports however
- *  many day-buckets the payload embedded. This is a choice this file makes, not one it inherits.) */
-const PROVIDER_WINDOW_DAYS = 90
 
 /** Whole days the page's own records reach back: the earlier of `created` and the earliest update
  *  instant, which is how the page's own bundle bounds its uptime window. `null` when neither is
@@ -536,43 +492,4 @@ function recordReachDays(
   // A reach under one whole day cannot carry a daily-resolution percentage. `null` here means "no
   // window", which the caller must publish as NO uptime — never as the full 30.
   return days > 0 ? days : null
-}
-
-/**
- * #1006 — reproduce the percentage the provider shows its OWN visitors, so the detail page can put
- * it beside ours and a reader can check us. This is what `uptimeReported` is for.
- *
- * Reproduced, not read: the number is nowhere in `config.json`. The rendered page computes it in the
- * browser from these same records, so this re-runs the provider's own arithmetic —
- * {@link PROVIDER_STATUS_WEIGHT} (degraded ignored) over the provider's own window. `statuspage.ts`
- * does the same thing for Atlassian; the difference is that Atlassian's formula IS ours, so it can
- * reuse our weights, and this one cannot.
- *
- * The window is `min(90, the reach of the page's own records)` — the earlier of `created` and the
- * earliest timeline instant, which is exactly what the page's bundle does. On a BACKFILLED page the
- * records reach further back than `created`, and the page shows the full 90 days accordingly.
- *
- * Verified against the live page on 2026-09-15: status.openrouter.ai rendered "100.00% uptime" on
- * every component over "Jun 18, 2026 – Sep 15, 2026", and this reproduces 100.00 over 90 days —
- * while AIWatch's own 30-day figure was 99.23, the whole gap coming from the weighting rather than
- * the window (recomputing the provider's rule onto 30 days is still 100.00).
- *
- * Returns null when the reach cannot be established, rather than reporting a window we cannot bound.
- */
-function reproduceReportedUptime(
-  perComponent: OutageSegment[][],
-  reachDays: number | null,
-  nowMs: number,
-): { pct: number; days: number } | null {
-  if (reachDays === null) return null
-  const days = Math.min(PROVIDER_WINDOW_DAYS, reachDays)
-  const windowStart = nowMs - days * 86_400_000
-  // `Math.min` across components, exactly as `statuspage.ts` reduces its own per-component
-  // `uptimeReported`. The page renders one percentage PER COMPONENT and no page-level aggregate, so
-  // the worst component's figure is a number the reader can actually find on it.
-  return {
-    pct: Math.min(...perComponent.map((segs) =>
-      pct(weightedDowntimeSeconds(toIntervals(segs, PROVIDER_STATUS_WEIGHT), windowStart, nowMs), days))),
-    days,
-  }
 }

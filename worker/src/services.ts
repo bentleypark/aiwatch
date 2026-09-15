@@ -2244,13 +2244,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // short window off as a full one.
         ...(parsed.page.uptimeWindowDays != null ? { uptimeWindowDays: parsed.page.uptimeWindowDays } : {}),
         todayWeightedOutageSec: parsed.page.todayWeightedOutageSec, // #1017
-        // #1006 — the % the provider shows its own visitors, reproduced (the number is nowhere in
-        // `config.json`; the page computes it in the browser from the same records). Both the window
-        // AND the severity rule differ from ours here, so without this the detail page would publish
-        // our figure with nothing to check it against — see `reproduceReportedUptime`.
-        ...(parsed.page.reported != null
-          ? { uptimeReported: parsed.page.reported.pct, uptimeReportedDays: parsed.page.reported.days }
-          : {}),
+        // #1004/#1292 — this path publishes NO per-day impact record of its own, so any `dailyImpact`
+        // on the snapshot was derived elsewhere (the archive restore). Saying so is what keeps
+        // `calendar.js`'s Phase 2 painting openrouter's own incidents: without it the restore's map
+        // reads as complete on a 30-day strip and the service's live incidents stop appearing.
+        dailyImpactComplete: false,
       }
     }
 

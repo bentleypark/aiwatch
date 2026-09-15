@@ -79,34 +79,6 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     expect(parsed.page.uptime30d).toBe(99.79)
   })
 
-  it('#1006 — reproduces the % the provider shows its own visitors, for the reader to check us against', () => {
-    const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, NOW)
-    if (!parsed.ok) throw new Error('fixture must parse')
-
-    // Verified against the LIVE page on 2026-09-15: every component rendered "100.00% uptime" over
-    // "Jun 18, 2026 – Sep 15, 2026". If this figure ever stops being 100.00 on this fixture, either
-    // the provider's severity rule or its window bound changed, and the reproduction is stale.
-    expect(parsed.page.reported).toEqual({ pct: 100, days: 17 })
-
-    // And the gap to OUR figure is the WEIGHTING, not the window: the provider ignores `degraded`
-    // entirely and every in-window incident is degraded, so recomputing the provider's rule onto 30
-    // days is still 100.00. Publishing 99.79 with no provider number beside it would leave a reader
-    // unable to tell a real 0.21% of downtime from a difference of definition.
-    expect(parsed.page.uptime30d).toBe(99.79)
-  })
-
-  it('separates the two reasons the figures differ — the window and the severity rule', () => {
-    // A FULL outage weighs 1.0 under both rules, so the only thing left to separate them is the
-    // window: 1h over our 30 days vs the provider's 90.
-    const byWindow = parseDatadogStatusPage(doc({
-      created: '2026-01-01T00:00:00Z',
-      incidents: [incident('2026-09-10T01:00:00Z', '2026-09-10T02:00:00Z', 'major_outage')],
-    }), GROUP, NOW)
-    if (!byWindow.ok) throw new Error('must parse')
-    expect(byWindow.page.uptime30d).toBe(99.86)
-    expect(byWindow.page.reported).toEqual({ pct: 99.95, days: 90 })
-  })
-
   it('bounds BOTH windows by the reach of the page records, and discloses the short one', () => {
     // The page was created four days ago — a genuinely new page. Claiming 90
     // days for the provider would attribute a figure its page never shows; claiming 30 for ours would
@@ -121,7 +93,6 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     // 1h of `degraded` over 4 days: 1,080 weighted seconds of 345,600 for us, and zero for the
     // provider, whose rule ignores `degraded` — so the two disagree and the disclosure is emitted.
     expect(parsed.page.uptime30d).toBe(99.68)
-    expect(parsed.page.reported).toEqual({ pct: 100, days: 4 })
   })
 
   it('bounds the window by the SCOPED records — an out-of-scope one cannot widen it', () => {
@@ -150,17 +121,6 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     const parsed = parseDatadogStatusPage(nested, API_SCOPE, NOW)
     if (!parsed.ok) throw new Error('must parse')
     expect(parsed.page.status).toBe('down')
-  })
-
-  it('omits the reproduction when it agrees with our own figure', () => {
-    // The field is a DISCLOSURE of a difference; repeating our own number as the provider's is noise.
-    const clean = parseDatadogStatusPage(doc({
-      created: '2026-01-01T00:00:00Z',
-      incidents: [incident('2026-02-01T01:00:00Z', '2026-02-01T02:00:00Z', 'major_outage')],
-    }), GROUP, NOW)
-    if (!clean.ok) throw new Error('must parse')
-    expect(clean.page.uptime30d).toBe(100)
-    expect(clean.page.reported).toBeNull()
   })
 
   it('takes severity from the TIMELINE, not from the incident-level componentsAffected', () => {
@@ -404,8 +364,6 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     expect(parsed.page.todayWeightedOutageSec).toBe(0)
     expect(parsed.page.uptime30d).toBe(100)
     // …and the PROVIDER's table scores it zero too, so the reproduction agrees and is suppressed.
-    // Without a window established above, this assertion never reached that table at all.
-    expect(parsed.page.reported).toBeNull()
   })
 
   it('does not let a component-less update end a live outage', () => {
@@ -453,26 +411,6 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     expect(parsed.page.todayWeightedOutageSec).toBe(3600)
   })
 
-  it('applies the PROVIDER rule to the reproduction — partial_outage counts, degraded does not', () => {
-    // The two tables differ on exactly these two words, and that difference IS the reproduction.
-    // Asserting only that the figures are order-independent (the test below) passes even if the
-    // provider table is flattened to zeros, so the values are pinned here, derived from the window
-    // arithmetic rather than read off the implementation.
-    const twelveHoursOf = (status: string) => {
-      const parsed = parseDatadogStatusPage(doc({
-        created: '2026-01-01T00:00:00Z',
-        incidents: [incident('2026-09-10T00:00:00Z', '2026-09-10T12:00:00Z', status)],
-      }), GROUP, NOW)
-      if (!parsed.ok) throw new Error(`must parse: ${status}`)
-      return { ours: parsed.page.uptime30d, theirs: parsed.page.reported?.pct ?? parsed.page.uptime30d }
-    }
-    // 12h at 0.3 over 30d = 99.5 for us either way; the provider scores degraded 0 and partial 1.0.
-    expect(twelveHoursOf('degraded')).toEqual({ ours: 99.5, theirs: 100 })
-    expect(twelveHoursOf('partial_outage')).toEqual({ ours: 99.5, theirs: 99.44 })
-    // 12h at 1.0 over 30d = 98.33 for us; the provider agrees it is an outage, over its own 90d.
-    expect(twelveHoursOf('major_outage')).toEqual({ ours: 98.33, theirs: 99.44 })
-  })
-
   it('does not let the order of `componentsAffected` change any published figure', () => {
     // Two components named by ONE update, one word each. Collapsing them to a single "worst" under
     // AIWatch's table — which ties `degraded` and `partial_outage` at 0.3, while the provider's table
@@ -499,7 +437,6 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     const b = parseDatadogStatusPage(withOrder(['partial_outage', 'degraded']), GROUP, NOW)
     if (!a.ok || !b.ok) throw new Error('must parse')
     expect(a.page.uptime30d).toBe(b.page.uptime30d)
-    expect(a.page.reported).toEqual(b.page.reported)
   })
 
   it('keeps a non-API component out of the badge and the uptime, but not out of the incident list', () => {
@@ -596,8 +533,6 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     // Pooling the two would read 99.79; taking the best would read 99.95.
     expect(parsed.page.uptime30d).toBe(99.83)
     // Theirs: `heavy` alone counts, 4h at 1.0 over 90d = 14,400s of 7,776,000 → 99.81. `Math.max`
-    // would publish `light`'s untouched 100.
-    expect(parsed.page.reported).toEqual({ pct: 99.81, days: 90 })
     // Today: the WORST component's day, not the sum. 4h at 0.3 = 4,320. Summing reads 5,400.
     expect(parsed.page.todayWeightedOutageSec).toBe(4320)
   })
@@ -631,8 +566,6 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     // The provider's table must score that mid-incident `operational` window at ZERO too. Giving it
     // any weight charges the recovered hour and reads 99.81 — and `operational` is a row the fixture
     // can never reach, because every `operational` entry there is an incident's LAST update, whose
-    // segment is zero-length after the resolution clamp.
-    expect(parsed.page.reported).toEqual({ pct: 99.86, days: 90 })
   })
 
   it('publishes NO uptime when the records establish no window at all', () => {
@@ -647,7 +580,6 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     if (!hourOld.ok) throw new Error('must parse')
     expect(hourOld.page.uptime30d).toBeNull()
     expect(hourOld.page.uptimeWindowDays).toBeNull()
-    expect(hourOld.page.reported).toBeNull()
     // A full day of reach IS a window — short, and disclosed as such.
     const dayOld = parseDatadogStatusPage(doc({
       created: '2026-09-13T23:00:00Z',
