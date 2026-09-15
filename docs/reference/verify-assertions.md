@@ -223,6 +223,32 @@ endpoint. Lines carrying an `assert:` are excluded (they wait on a signal, not a
 limit is that an assertion gone permanently `skip`/`fail` pings weekly forever inside the one branch
 the bound cannot reach.
 
+### Undecidable reaches Discord once, not just a label (#1206)
+
+`verify-undecidable` used to be a label-and-log-line-only signal — accurate, but nobody reads
+`console.log` output, which is the exact failure this mechanism exists to end. The daily job now also
+posts a **third Discord embed**, *"New undecidable verify-after"*, alongside the routine-due and
+escalation ones (`buildReminderEmbeds`'s third parameter).
+
+**Restricted to issues newly discovered this run** (`findNewlyUndecidable`) — an issue already carrying
+the `verify-undecidable` label is excluded, so an issue that sits undecidable for weeks does not re-post
+every single day. That would just relocate the permanently-on-signal problem from a label nobody reads
+to a channel nobody can mute. This mirrors why "detection lands within a day of the merge that
+introduced it" (#1206's own body) is the design: the point is to catch it while the author still has
+context, not to nag forever about it once caught.
+
+The freshness test is **per-issue, not per-line** — the label is the only persistence this job has for
+"already announced", and a label lives on the issue, not on one of its lines. Accepted limitation: a
+SECOND undecidable line added later to an issue already flagged from a first one is not separately
+announced; it rides along silently until the label clears (every line on the issue becomes decidable or
+past-due) and the issue can be "new" again.
+
+**The label WRITE for a newly-discovered issue happens AFTER a successful Discord post, not before.**
+Labeling first would let a run that dies between the label call and the post strand the issue "already
+known" — permanently excluded from ever posting — with nothing having reached Discord. An issue already
+carrying the label is safe to re-label immediately (idempotent, no ordering hazard); only the *first*
+label on a given issue is deferred.
+
 **Closing an issue clears them all (#1037).** Each label describes an *open* verification obligation,
 so closing is that obligation's terminal state — the daily job sweeps closed issues and strips every one
 of them, unconditionally (no date logic: closed is closed). Grouped into one edit per issue, from one

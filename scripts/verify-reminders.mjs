@@ -244,6 +244,43 @@ export function hasUndecidableLabel(labels) {
 }
 
 /**
+ * Undecidable `verify-after` lines to post to Discord this run (#1206). The freshness test is
+ * PER-ISSUE, not per-line — an issue is skipped once it already carries `verify-undecidable`,
+ * because the label (an issue-level marker) is the only persistence this job has for "already
+ * announced". Accepted limitation this implies: a SECOND undecidable line added later to an issue
+ * already flagged from a first one is not separately announced — it rides along silently until the
+ * label clears (every line on the issue becomes decidable or past-due) and the issue can be
+ * "new" again. Once an issue passes that per-issue gate, every one of its undecidable lines is
+ * flattened to its own row — the same convention `findOverdueEscalations` uses, and for the same
+ * reason: collapsing a multi-line issue to one row would silently drop every line but the worst.
+ *
+ * The per-issue gate itself exists so an issue that sits undecidable for weeks does not re-post to
+ * Discord every single day — the point of this issue (its own body — "detection lands within a day
+ * of the merge that introduced it") is a same-day catch while the context is still warm, not a daily
+ * repeat of the label's own always-on signal. Without it, every still-undecidable issue would
+ * re-announce daily — exactly the permanently-on failure mode #1206 exists to kill, just moved from
+ * a label nobody reads to a channel nobody can mute.
+ *
+ * Takes the already-computed `undecidableScanned` shape (`{iss, items}[]`, `items` from
+ * `findUndecidableVerifyAfter`) rather than re-scanning bodies, mirroring why `splitEscalatedDue` is
+ * its own exported function: inlined in `main()`, a dropped filter survives `npm run test:scripts`'s
+ * green as easily as a wired one — this makes the filter independently testable. Pure — no I/O.
+ */
+export function findNewlyUndecidable(undecidableScanned) {
+  return (undecidableScanned || [])
+    .filter((x) => x.items.length > 0 && !hasUndecidableLabel(x.iss.labels))
+    .flatMap((x) => x.items.map((item) => ({
+      repo: x.iss.repo ?? null,
+      number: x.iss.number,
+      title: x.iss.title,
+      ref: displayRef(x.iss.repo, x.iss.number),
+      date: item.date,
+      note: item.note,
+      lineIndex: item.lineIndex,
+    })))
+}
+
+/**
  * Days past due after which an overdue verify-after stops being a routine ping and becomes a decision
  * to make (#1206). 30 days is four unanswered weekly pings: enough that "it will resolve itself next
  * week" has been falsified four times, and far enough above the 6-day worst case on the board when
@@ -432,16 +469,45 @@ function gh(args) {
 }
 
 /**
- * Render the two Discord sections (#1206). Routine items need a LOOK; escalated ones are past
- * OVERDUE_ESCALATION_DAYS and need a DECISION — close with a written reopen trigger, or make the
- * thing observable. Kept apart so a decision is not filed behind a list of routine checks and
- * skipped with them. Pure — exported for unit tests.
+ * True when this run's whole batch of computed work is empty — nothing to auto-verify, ping, unlabel,
+ * or announce as newly undecidable (#1206). Extracted and exported, not inlined in `main()`'s
+ * early-return: this exact class of gate is the one `splitEscalatedDue`'s docstring already warns
+ * about ("the feature can ship inert — with it inlined in main(), every wiring mutation survived the
+ * suite"), and round-1 review of the undecidable-Discord feature confirmed it by hand — dropping the
+ * `newlyUndecidable` clause from this condition left 81/81 tests green while making the whole feature
+ * a silent no-op on the one day it exists for (an undecidable-only day, nothing else due). Pure — no I/O.
  */
-export function buildReminderEmbeds(items, escalated = []) {
+export function hasNothingToDo({ autoVerified = [], due = [], toClearOverdue = [], newlyUndecidable = [] } = {}) {
+  return autoVerified.length === 0 && due.length === 0 && toClearOverdue.length === 0 && newlyUndecidable.length === 0
+}
+
+/**
+ * The Discord payload for this run, or `null` when there is nothing to post (#1206). `main()` calls
+ * this and branches on its result — it does not re-derive the "anything to post" decision itself —
+ * so the decision most likely to regress into a silent no-op (does a newly-undecidable-only run still
+ * reach Discord?) lives in one pure, tested place instead of an inline `if` a future edit can narrow
+ * back down without any test noticing. Same rationale as `hasNothingToDo` above. Pure — no I/O.
+ */
+export function planDiscordPost(routineDue, escalatedNow, newlyUndecidable) {
+  if (routineDue.length === 0 && escalatedNow.length === 0 && newlyUndecidable.length === 0) return null
+  return { routineDue, escalatedNow, newlyUndecidable }
+}
+
+/**
+ * Render the three Discord sections (#1206). Routine items need a LOOK; escalated ones are past
+ * OVERDUE_ESCALATION_DAYS and need a DECISION — close with a written reopen trigger, or make the
+ * thing observable; undecidable ones are future-dated but already unanswerable when their date
+ * arrives — the fix is cheapest NOW, while the author still has context. Kept apart so a decision or
+ * an authoring fix is not filed behind a list of routine checks and skipped with them. Pure —
+ * exported for unit tests.
+ */
+export function buildReminderEmbeds(items, escalated = [], undecidable = []) {
   const line = (it) => {
     const when = it.overdueDays > 0 ? `due ${it.date}, ${it.overdueDays}d overdue` : 'due today'
     return `• **${it.ref || `#${it.number}`}** ${it.title}\n  → ${it.note || 'verify production data'} _(${when})_`
   }
+  const undecidableLine = (it) =>
+    `• **${it.ref || `#${it.number}`}** ${it.title}\n  → ${it.note || 'verify production data'} _(due ${it.date} — no assert:/durable: marker)_`
   const embeds = []
   if (items.length) {
     embeds.push({
@@ -462,11 +528,22 @@ export function buildReminderEmbeds(items, escalated = []) {
       footer: { text: 'AIWatch · verify-after escalation (#1206)' },
     })
   }
+  if (undecidable.length) {
+    embeds.push({
+      title: '❓ New undecidable verify-after — add `assert:`/`durable:`, or drop the date',
+      description: `${undecidable.length} item(s) name a dated check with neither a machine \`assert:\` `
+        + 'nor a `durable:` artifact, so it cannot be decided when its date arrives. Add one now while the '
+        + 'context is still warm, or drop the date for a written reopen trigger instead.\n\n'
+        + undecidable.map(undecidableLine).join('\n'),
+      color: 0x5865f2,
+      footer: { text: 'AIWatch · verify-after undecidable guard (#1206)' },
+    })
+  }
   return embeds
 }
 
-async function postDiscord(webhook, items, escalated = []) {
-  const body = { embeds: buildReminderEmbeds(items, escalated) }
+async function postDiscord(webhook, items, escalated = [], undecidable = []) {
+  const body = { embeds: buildReminderEmbeds(items, escalated, undecidable) }
   const res = await fetch(webhook, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -566,30 +643,43 @@ async function main() {
   // Flag a dated check that names neither a machine assertion nor the durable artifact a human will
   // read on the date. Runs against every considered issue (not just verify-blocked ones): the line is
   // undecidable from the moment it is written, and catching it within a day of the merge is the whole
-  // point — the author still has the context to add instrumentation or drop the date. LABEL-ONLY, no
-  // Discord: this is a board signal, and the daily channel is for things due NOW. Self-healing, same
-  // as body-drift. Best-effort: a label failure must never abort the reminder run.
+  // point — the author still has the context to add instrumentation or drop the date. Self-healing,
+  // same as body-drift. Best-effort: a label failure must never abort the reminder run.
+  //
+  // The label WRITE is split from its computation here: re-labeling an issue that is ALREADY flagged
+  // is safe immediately (idempotent, and carries no Discord obligation). The FIRST label on a newly-
+  // discovered issue is deferred until AFTER a successful Discord post, further down in this
+  // function — see the ordering note there for why (labeling before announcing risks stranding an
+  // issue "already known" and permanently unannounced if the run dies in between).
   const undecidableScanned = considered.map((i) => ({ iss: i, items: findUndecidableVerifyAfter(i.body, today) }))
   const toFlagUndecidable = undecidableScanned.filter((x) => x.items.length > 0)
+  const alreadyFlaggedUndecidable = toFlagUndecidable.filter((x) => hasUndecidableLabel(x.iss.labels))
   const toClearUndecidable = undecidableScanned
     .filter((x) => x.items.length === 0 && hasUndecidableLabel(x.iss.labels))
     .map((x) => x.iss)
+  // Discord surfacing (#1206) — same-day catch of NEWLY undecidable issues only, not a daily repeat of
+  // the label. See findNewlyUndecidable's docstring for why "already labeled" is excluded and why the
+  // freshness gate is per-issue rather than per-line.
+  const newlyUndecidable = findNewlyUndecidable(undecidableScanned)
   if (toFlagUndecidable.length) console.log(`[verify-reminders] ${today}: ${toFlagUndecidable.length} undecidable verify-after → ${toFlagUndecidable.map((x) => `${displayRef(x.iss.repo, x.iss.number)}(${x.items.length})`).join(', ')}`)
   if (dryRun) {
-    if (toFlagUndecidable.length) console.log('[verify-reminders] --dry-run: would LABEL verify-undecidable:\n' + JSON.stringify(
-      toFlagUndecidable.map((x) => ({ ref: displayRef(x.iss.repo, x.iss.number), dates: x.items.map((i) => i.date) })), null, 2))
+    if (alreadyFlaggedUndecidable.length) console.log('[verify-reminders] --dry-run: would RE-LABEL (already verify-undecidable):\n' + JSON.stringify(
+      alreadyFlaggedUndecidable.map((x) => ({ ref: displayRef(x.iss.repo, x.iss.number), dates: x.items.map((i) => i.date) })), null, 2))
+    if (newlyUndecidable.length) console.log('[verify-reminders] --dry-run: would LABEL verify-undecidable (after a successful Discord post) on: '
+      + [...new Set(newlyUndecidable.map((u) => u.ref))].join(', '))
     if (toClearUndecidable.length) console.log('[verify-reminders] --dry-run: would CLEAR verify-undecidable on: ' + toClearUndecidable.map((i) => displayRef(i.repo, i.number)).join(', '))
   } else {
-    for (const { iss } of toFlagUndecidable) {
+    for (const { iss } of alreadyFlaggedUndecidable) {
       const a = ['issue', 'edit', String(iss.number), '--add-label', 'verify-undecidable']
       if (iss.repo) a.push('--repo', iss.repo)
-      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not add verify-undecidable on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not re-add verify-undecidable on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
     }
     for (const iss of toClearUndecidable) {
       const a = ['issue', 'edit', String(iss.number), '--remove-label', 'verify-undecidable']
       if (iss.repo) a.push('--repo', iss.repo)
       try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear verify-undecidable on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
     }
+    // The ADD for `newlyUndecidable` issues happens AFTER a successful Discord post, further down.
   }
 
   // ── Closed-issue label scars (#1037) ──────────────────────────────────────────
@@ -689,12 +779,13 @@ async function main() {
   // nothing to ping is exactly when a previous ping's label needs clearing.
   const toClearOverdue = findStaleOverdueLabels(considered, today, tickedKeys)
 
-  if (autoVerified.length === 0 && due.length === 0 && toClearOverdue.length === 0) {
+  if (hasNothingToDo({ autoVerified, due, toClearOverdue, newlyUndecidable })) {
     console.log(`[verify-reminders] ${today}: nothing to auto-verify, ping, or unlabel.`)
     return
   }
   if (autoVerified.length) console.log(`[verify-reminders] ${today}: ${autoVerified.length} auto-verifiable → ${autoVerified.map((a) => a.ref).join(', ')}`)
   if (due.length) console.log(`[verify-reminders] ${today}: ${due.length} due to ping → ${due.map((d) => d.ref).join(', ')}`)
+  if (newlyUndecidable.length) console.log(`[verify-reminders] ${today}: ${newlyUndecidable.length} newly undecidable → Discord → ${newlyUndecidable.map((d) => d.ref).join(', ')}`)
   if (toClearOverdue.length) console.log(`[verify-reminders] ${today}: ${toClearOverdue.length} stale verify-overdue → ${toClearOverdue.map((i) => displayRef(i.repo, i.number)).join(', ')}`)
 
   if (dryRun) {
@@ -704,6 +795,7 @@ async function main() {
     }
     if (routineDue.length) console.log('[verify-reminders] --dry-run: would PING:\n' + JSON.stringify(routineDue, null, 2))
     if (escalatedNow.length) console.log('[verify-reminders] --dry-run: would ESCALATE (needs a disposition):\n' + JSON.stringify(escalatedNow, null, 2))
+    if (newlyUndecidable.length) console.log('[verify-reminders] --dry-run: would POST undecidable to Discord:\n' + JSON.stringify(newlyUndecidable, null, 2))
     if (toClearOverdue.length) console.log('[verify-reminders] --dry-run: would CLEAR verify-overdue on: ' + toClearOverdue.map((i) => displayRef(i.repo, i.number)).join(', '))
     return
   }
@@ -749,7 +841,8 @@ async function main() {
     try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear verify-overdue on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
   }
 
-  if (due.length === 0) {
+  const discordPlan = planDiscordPost(routineDue, escalatedNow, newlyUndecidable)
+  if (!discordPlan) {
     console.log(`[verify-reminders] no reminders to ping (auto-verify / unlabel only).`)
     return
   }
@@ -759,7 +852,22 @@ async function main() {
     console.error('[verify-reminders] DISCORD_WEBHOOK_URL not set — cannot send. (Add it as a repo Actions secret.)')
     process.exit(1)
   }
-  await postDiscord(webhook, routineDue, escalatedNow)
+  await postDiscord(webhook, discordPlan.routineDue, discordPlan.escalatedNow, discordPlan.newlyUndecidable)
+  // #1206 — label a NEWLY-discovered undecidable issue only AFTER the post that succeeded. Labeling
+  // first (as originally shipped) would let a run that dies between the label call and the post leave
+  // the issue marked "already known" — which is exactly what excludes it from ever being announced —
+  // with nothing having reached Discord. Labeling here keeps the label meaning "announced", not just
+  // "detected". Deduped: `newlyUndecidable` is one row per LINE, and a multi-line issue must not get
+  // the same `--add-label` call twice.
+  const undecidableSeen = new Set()
+  for (const { number, repo } of newlyUndecidable) {
+    const key = `${repo || ''}#${number}`
+    if (undecidableSeen.has(key)) continue
+    undecidableSeen.add(key)
+    const args = ['issue', 'edit', String(number), '--add-label', 'verify-undecidable']
+    if (repo) args.push('--repo', repo)
+    try { gh(args) } catch (e) { console.warn(`[verify-reminders] could not add verify-undecidable on ${displayRef(repo, number)}: ${e.message.split('\n')[0]}`) }
+  }
   // Board visibility: label each fired issue so issue-triage sees what's past its verify date.
   // Best-effort — a label failure must not fail the run after a successful Discord send. Keyed by
   // repo+number so a sibling-repo issue is labeled in its own repo (and the label must exist there).
@@ -776,7 +884,10 @@ async function main() {
       console.warn(`[verify-reminders] could not label ${displayRef(repo, number)}: ${e.message.split('\n')[0]}`)
     }
   }
-  console.log('[verify-reminders] posted to Discord + labeled verify-overdue.')
+  // #1206 — this line is now reachable on an undecidable-only run (due.length === 0), where the
+  // verify-overdue labeling loop above did nothing: name only the label work actually performed.
+  const labelNote = due.length ? ' + labeled verify-overdue' : ''
+  console.log(`[verify-reminders] posted to Discord${labelNote}.`)
 }
 
 // Only run main when executed directly (so importing the helpers in the test has no side effects).

@@ -3,7 +3,7 @@
 // script, not src/worker code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates, planClosedScarRemovals, mergeClosedIssues, LIFECYCLE_LABELS, CLOSED_SCAR_LIMIT, findUndecidableVerifyAfter, hasUndecidableLabel, findOverdueEscalations, OVERDUE_ESCALATION_DAYS, buildReminderEmbeds, splitEscalatedDue, reminderLineKey } from './verify-reminders.mjs'
+import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates, planClosedScarRemovals, mergeClosedIssues, LIFECYCLE_LABELS, CLOSED_SCAR_LIMIT, findUndecidableVerifyAfter, hasUndecidableLabel, findNewlyUndecidable, findOverdueEscalations, OVERDUE_ESCALATION_DAYS, buildReminderEmbeds, splitEscalatedDue, reminderLineKey, hasNothingToDo, planDiscordPost } from './verify-reminders.mjs'
 import { pairVerifyAssertions, parseDurableLine } from './verify-assertions.mjs'
 
 test('parseVerifyAfter — extracts date + note from a checklist line', () => {
@@ -588,6 +588,112 @@ test('buildReminderEmbeds — routine and escalated are separate embeds, each om
   assert.match(both[1].description, new RegExp(String(OVERDUE_ESCALATION_DAYS)), 'and names the window')
   assert.ok(!both[0].description.includes('#2'), 'an escalated item is not ALSO in the routine list')
   assert.equal(buildReminderEmbeds([], []).length, 0)
+})
+
+// #1206 — the fix this issue's own body describes as the one remaining item: an undecidable
+// verify-after line must reach the operator's Discord channel, not just a label and a log line.
+test('buildReminderEmbeds — undecidable is a THIRD embed, independent of routine/escalated, omitted when empty', () => {
+  const undecidable = [{ ref: '#3', title: 'c', note: 'check the thing', date: '2026-10-01' }]
+  assert.equal(buildReminderEmbeds([], [], []).length, 0, 'all three empty → no embeds')
+  assert.equal(buildReminderEmbeds([], [], undecidable).length, 1, 'undecidable alone still posts')
+  const only = buildReminderEmbeds([], [], undecidable)[0]
+  assert.match(only.title, /undecidable/i)
+  assert.match(only.description, /assert:/)
+  assert.match(only.description, /durable:/)
+  assert.match(only.description, /#3/)
+
+  const routine = [{ ref: '#1', title: 'a', note: 'look', date: '2026-08-05', overdueDays: 0 }]
+  const esc = [{ ref: '#2', title: 'b', note: 'decide', date: '2026-06-01', overdueDays: 65 }]
+  const all = buildReminderEmbeds(routine, esc, undecidable)
+  assert.equal(all.length, 3, 'all three sections render together')
+  assert.ok(!all[0].description.includes('#3'), 'undecidable item is not ALSO in the routine embed')
+  assert.ok(!all[1].description.includes('#3'), 'undecidable item is not ALSO in the escalation embed')
+  assert.ok(!all[2].description.includes('#1') && !all[2].description.includes('#2'), 'the reverse: routine/escalated do not leak into undecidable')
+})
+
+test('buildReminderEmbeds — an undecidable item renders its due date, not an overdueDays clause (it is not yet due)', () => {
+  const undecidable = [{ ref: '#9', title: 'x', note: 'y', date: '2099-01-01' }]
+  const [embed] = buildReminderEmbeds([], [], undecidable)
+  assert.match(embed.description, /due 2099-01-01/)
+  assert.ok(!embed.description.includes('overdue'), 'undecidable lines are future-dated — "overdue" would be a false claim')
+})
+
+// findNewlyUndecidable — the filter that keeps the Discord post a same-day catch instead of a daily
+// repeat of the label (#1206's own stated purpose: "detection lands within a day of the merge").
+test('findNewlyUndecidable — flattens per LINE, across multiple issues', () => {
+  const scanned = [
+    { iss: { number: 1, repo: null, title: 'one', labels: [] }, items: [{ date: '2026-10-01', note: 'a', lineIndex: 3 }] },
+    { iss: { number: 2, repo: null, title: 'two', labels: [] }, items: [
+      { date: '2026-10-02', note: 'b', lineIndex: 1 }, { date: '2026-10-03', note: 'c', lineIndex: 5 },
+    ] },
+  ]
+  const out = findNewlyUndecidable(scanned)
+  assert.equal(out.length, 3, 'one issue with 2 lines contributes 2 rows, not 1')
+  assert.deepEqual(out.map((o) => o.ref), ['#1', '#2', '#2'])
+  assert.deepEqual(out.map((o) => o.date), ['2026-10-01', '2026-10-02', '2026-10-03'])
+})
+
+test('findNewlyUndecidable — excludes an issue ALREADY carrying verify-undecidable (not a daily repeat)', () => {
+  const scanned = [
+    { iss: { number: 1, repo: null, title: 'already known', labels: [{ name: 'verify-undecidable' }] }, items: [{ date: '2026-10-01', note: 'a', lineIndex: 0 }] },
+    { iss: { number: 2, repo: null, title: 'fresh', labels: [] }, items: [{ date: '2026-10-02', note: 'b', lineIndex: 0 }] },
+  ]
+  const out = findNewlyUndecidable(scanned)
+  assert.equal(out.length, 1)
+  assert.equal(out[0].number, 2)
+})
+
+test('findNewlyUndecidable — an issue with zero undecidable items contributes nothing, and empty input is safe', () => {
+  const scanned = [{ iss: { number: 1, repo: null, title: 't', labels: [] }, items: [] }]
+  assert.deepEqual(findNewlyUndecidable(scanned), [])
+  assert.deepEqual(findNewlyUndecidable([]), [])
+  assert.deepEqual(findNewlyUndecidable(undefined), [])
+})
+
+test('findNewlyUndecidable — qualifies a sibling-repo ref via displayRef, matching due/escalated', () => {
+  const scanned = [{ iss: { number: 41, repo: 'bentleypark/aiwatch-reports', title: 't', labels: [] }, items: [{ date: '2026-10-01', note: 'n', lineIndex: 0 }] }]
+  const [out] = findNewlyUndecidable(scanned)
+  assert.equal(out.ref, 'aiwatch-reports#41')
+})
+
+// Accepted limitation (round-1 review, #1206): the freshness gate is PER-ISSUE, since the label is the
+// only persistence available and a label lives on the issue, not on one of its lines. Pinning this as
+// a test (not just prose) so a future reader who "fixes" it to be per-line notices the trade-off
+// documented in findNewlyUndecidable's docstring rather than silently changing behavior.
+test('findNewlyUndecidable — a SECOND undecidable line added to an already-flagged issue is not announced (documented limitation)', () => {
+  const scanned = [{
+    iss: { number: 5, repo: null, title: 't', labels: [{ name: 'verify-undecidable' }] },
+    items: [
+      { date: '2026-10-01', note: 'the original line', lineIndex: 0 },
+      { date: '2026-11-01', note: 'a second, newer undecidable line added later', lineIndex: 9 },
+    ],
+  }]
+  assert.deepEqual(findNewlyUndecidable(scanned), [], 'the whole issue is skipped once it is already flagged, even for its newer line')
+})
+
+test('hasNothingToDo — true only when every field is empty; each field alone flips it', () => {
+  assert.equal(hasNothingToDo({}), true, 'no args at all — every field defaults to []')
+  assert.equal(hasNothingToDo({ autoVerified: [], due: [], toClearOverdue: [], newlyUndecidable: [] }), true)
+  assert.equal(hasNothingToDo({ autoVerified: [1] }), false)
+  assert.equal(hasNothingToDo({ due: [1] }), false)
+  assert.equal(hasNothingToDo({ toClearOverdue: [1] }), false)
+  // The field round-1 review's mutation test showed was NOT covered before this test existed — an
+  // undecidable-only day is exactly the scenario #1206's Discord fix exists for.
+  assert.equal(hasNothingToDo({ newlyUndecidable: [1] }), false)
+})
+
+// planDiscordPost — the single decision that determines whether an undecidable-only run reaches
+// Discord at all (#1206 round-1 review finding: the two inline `if` gates this replaces had NO test
+// that would fail if the `newlyUndecidable` clause were dropped from either of them).
+test('planDiscordPost — null when all three are empty; non-null (and carries newlyUndecidable) otherwise', () => {
+  assert.equal(planDiscordPost([], [], []), null)
+  assert.deepEqual(planDiscordPost([1], [], []), { routineDue: [1], escalatedNow: [], newlyUndecidable: [] })
+  assert.deepEqual(planDiscordPost([], [1], []), { routineDue: [], escalatedNow: [1], newlyUndecidable: [] })
+  // The crux case: NOTHING routinely due or escalated, but a newly undecidable item exists. Before the
+  // fix this went entirely unposted — this is the case that must return non-null.
+  const plan = planDiscordPost([], [], [{ ref: '#1', title: 't', note: 'n', date: '2026-10-01' }])
+  assert.notEqual(plan, null, 'an undecidable-only run must still produce a plan to post')
+  assert.equal(plan.newlyUndecidable.length, 1)
 })
 
 // Real-shape assertion: #827's actual `## Production-gated verification` block, verbatim as it stood
