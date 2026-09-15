@@ -147,8 +147,6 @@ function incidentStage(value: unknown): TimelineEntry['stage'] {
   return 'investigating'
 }
 
-/** Leaf components, flattened out of the group tree.
- *  `null` = the tree itself was unreadable; an unknown status word is reported separately. */
 /** A leaf plus the id of the `ComponentGroup` it sits under (`null` for a top-level leaf). The group
  *  is what the SCOPE names — see {@link parseDatadogStatusPage}. */
 type Leaf = { id: string; name: string; status: ComponentStatus; groupId: string | null }
@@ -180,7 +178,10 @@ function flattenComponents(raw: unknown): FlattenResult {
       if (entry.type === 'ComponentGroup') {
         if (!Array.isArray(entry.components)) return 'dd-components-unreadable'
         if (typeof entry.id !== 'string') return 'dd-components-unreadable'
-        const failure = walk(entry.components, entry.id)
+        // The OUTERMOST group wins, so a leaf nested in a sub-group still belongs to the scope its
+        // ancestor names. Rebinding to the innermost group dropped such a leaf silently — unbadged
+        // and uncounted — which is the same one-directional failure the member list had.
+        const failure = walk(entry.components, groupId ?? entry.id)
         if (failure) return failure
         continue
       }
@@ -253,9 +254,10 @@ type OutageSegment = { componentId: string; start: number; end: number | null; s
 type ParsedIncident = {
   incident: Incident
   segments: OutageSegment[]
-  /** Earliest timeline instant on this record, whatever its status — one of the two things that
-   *  bound the provider's own uptime window (see {@link reproduceReportedUptime}). */
-  earliestAt: number
+  /** Every (component, instant) this record's timeline named. The uptime window is bounded by the
+   *  earliest of these that is IN SCOPE, so the denominator rests on the same evidence as the
+   *  numerator (see {@link recordReachDays}). */
+  componentInstants: Array<{ id: string; at: number }>
 }
 
 const toIntervals = (segments: OutageSegment[], weights: Record<ComponentStatus, number>): OutageInterval[] =>
@@ -357,7 +359,7 @@ function parseIncident(raw: unknown, nowMs: number): ParsedIncident | null {
       timeline,
     },
     segments,
-    earliestAt: reads[0].at,
+    componentInstants: reads.flatMap((r) => r.affected.map((a) => ({ id: a.id, at: r.at }))),
   }
 }
 
@@ -423,8 +425,8 @@ export function parseDatadogStatusPage(
   // it — the same reason the retired OnlineOrNot parser trusted `scheduledMaintenance` grouping over
   // a title regex.
   //
-  // The group VANISHING is still refused: that is a page restructure, not component churn, and it is
-  // the one case where continuing would silently rescope the figure.
+  // The scope follows the provider's grouping in BOTH directions, including a leaf they move INTO the
+  // group, and this path has no drift detector to notice either. An empty group is refused.
   const scoped = flattened.leaves.filter((leaf) => leaf.groupId === componentGroupId)
   if (scoped.length === 0) {
     console.warn(`[datadog] component group ${componentGroupId} absent or empty — page restructured?`)
@@ -456,11 +458,14 @@ export function parseDatadogStatusPage(
   // `official` uptime.)
   const perComponent = [...byComponent.values()]
 
-  // Deliberately over EVERY incident, not just the scoped ones. Reach answers "how far back do this
-  // page's records go", which is a page property — the backfill was done as a page, not per
-  // component. A per-component reach would read a component that was simply QUIET as one with no
-  // record, and shorten the window on the strength of an absence.
-  const reachDays = recordReachDays(parsed, raw.created, nowMs)
+  // Bounded by the SCOPED records, so the denominator rests on the same evidence as the numerator.
+  // An earlier cut read every incident and justified it as "the backfill was done as a page, not per
+  // component" — an assertion the captured page contradicts: its only record older than 18 days is a
+  // `Backfill` entry naming the WEBSITE component alone, the one leaf the figure excludes. Reading it
+  // let the API's uptime claim a full 30 days, suppress the #1004 disclosure and publish 99.88 where
+  // the in-scope evidence supports 99.79 over 17 — LESS evidence producing a MORE confident, HIGHER
+  // number, the exact direction this file refuses everywhere else.
+  const reachDays = recordReachDays(parsed, new Set(scoped.map((leaf) => leaf.id)), raw.created, nowMs)
   // The denominator is what the records actually cover. Asserting a flat 30 days on a page whose
   // history reaches back five would publish a confident figure over a window that does not exist —
   // and `uptimeWindowDays` is the signal the rest of the system already reads for that (#1004).
@@ -517,9 +522,14 @@ const PROVIDER_WINDOW_DAYS = 90
  *  instant, which is how the page's own bundle bounds its uptime window. `null` when neither is
  *  readable. A BACKFILLED page reaches further back than `created` — status.openrouter.ai was
  *  created 2026-09-08 and reaches to 2026-05-31 — so `created` alone is not the bound. */
-function recordReachDays(parsed: ParsedIncident[], created: unknown, nowMs: number): number | null {
+function recordReachDays(
+  parsed: ParsedIncident[],
+  scopedIds: Set<string>,
+  created: unknown,
+  nowMs: number,
+): number | null {
   const createdMs = typeof created === 'string' ? Date.parse(created) : NaN
-  const reaches = parsed.map((p) => p.earliestAt)
+  const reaches = parsed.flatMap((p) => p.componentInstants.filter((c) => scopedIds.has(c.id)).map((c) => c.at))
   if (!Number.isNaN(createdMs)) reaches.push(createdMs)
   if (reaches.length === 0) return null
   const days = Math.floor((nowMs - Math.min(...reaches)) / 86_400_000)

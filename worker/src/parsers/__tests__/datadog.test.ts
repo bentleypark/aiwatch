@@ -76,7 +76,7 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     // a percentage per component and no page-level figure. `Web & Application Services` carries the
     // page's largest window, 15h28m, and is deliberately OUT of scope: it is openrouter.ai's site,
     // not an API endpoint. Unscoped it would publish 99.35 as the API's uptime.
-    expect(parsed.page.uptime30d).toBe(99.88)
+    expect(parsed.page.uptime30d).toBe(99.79)
   })
 
   it('#1006 — reproduces the % the provider shows its own visitors, for the reader to check us against', () => {
@@ -86,13 +86,13 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     // Verified against the LIVE page on 2026-09-15: every component rendered "100.00% uptime" over
     // "Jun 18, 2026 – Sep 15, 2026". If this figure ever stops being 100.00 on this fixture, either
     // the provider's severity rule or its window bound changed, and the reproduction is stale.
-    expect(parsed.page.reported).toEqual({ pct: 100, days: 90 })
+    expect(parsed.page.reported).toEqual({ pct: 100, days: 17 })
 
     // And the gap to OUR figure is the WEIGHTING, not the window: the provider ignores `degraded`
     // entirely and every in-window incident is degraded, so recomputing the provider's rule onto 30
-    // days is still 100.00. Publishing 99.88 with no provider number beside it would leave a reader
-    // unable to tell a real 0.12% of downtime from a difference of definition.
-    expect(parsed.page.uptime30d).toBe(99.88)
+    // days is still 100.00. Publishing 99.79 with no provider number beside it would leave a reader
+    // unable to tell a real 0.21% of downtime from a difference of definition.
+    expect(parsed.page.uptime30d).toBe(99.79)
   })
 
   it('separates the two reasons the figures differ — the window and the severity rule', () => {
@@ -124,10 +124,32 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     expect(parsed.page.reported).toEqual({ pct: 100, days: 4 })
   })
 
-  it('emits no window disclosure when the records cover the full 30 days', () => {
+  it('bounds the window by the SCOPED records — an out-of-scope one cannot widen it', () => {
+    // The captured page's only record older than 18 days is `Backfill`, and it names the WEBSITE
+    // component alone — the one leaf the figure excludes. Reading it let the API's uptime claim a
+    // full 30 days, suppress the #1004 disclosure and publish 99.88 where the in-scope evidence
+    // supports 99.79 over 17: less evidence producing a more confident, higher number.
     const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, NOW)
     if (!parsed.ok) throw new Error('fixture must parse')
-    expect(parsed.page.uptimeWindowDays).toBeNull()
+    expect(parsed.page.uptimeWindowDays).toBe(17)
+
+    // The record is real and still listed; it simply does not bound the API's window.
+    const backfill = parsed.page.incidents.find((i) => i.title === 'Backfill')
+    expect(backfill?.componentIds).toEqual([WEB])
+  })
+
+  it('puts a leaf nested inside the configured group IN scope', () => {
+    // The scope is "under this group", not "a direct child of it". Rebinding to the innermost group
+    // dropped a nested leaf silently — unbadged and uncounted — and both rules passed the suite, so
+    // the choice was made by nothing. A sub-group under `API - Gateway` is still the API.
+    const nested = JSON.parse(JSON.stringify(FIXTURE))
+    nested.components[0].components.push({
+      id: 'sub', name: 'Batch', type: 'ComponentGroup',
+      components: [{ id: 'batch-jobs', name: 'Batch jobs', position: 0, status: 'major_outage', type: 'Component' }],
+    })
+    const parsed = parseDatadogStatusPage(nested, API_SCOPE, NOW)
+    if (!parsed.ok) throw new Error('must parse')
+    expect(parsed.page.status).toBe('down')
   })
 
   it('omits the reproduction when it agrees with our own figure', () => {
@@ -195,7 +217,7 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     // incident keys" class the previous OpenRouter parser was bitten by twice has no path in.
     expect(withWindows.page.incidents).toHaveLength(4)
     expect(withWindows.page.incidents.some((i) => /Maintenance/i.test(i.title))).toBe(false)
-    expect(withWindows.page.uptime30d).toBe(99.88)
+    expect(withWindows.page.uptime30d).toBe(99.79)
   })
 })
 
@@ -490,7 +512,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     const parsed = parseDatadogStatusPage(webDown, API_SCOPE, NOW)
     if (!parsed.ok) throw new Error('must parse')
     expect(parsed.page.status).toBe('operational')
-    expect(parsed.page.uptime30d).toBe(99.88)
+    expect(parsed.page.uptime30d).toBe(99.79)
     // …and the provider's own record for it is still published.
     expect(parsed.page.incidents.some((i) => i.componentIds?.includes(WEB))).toBe(true)
   })
