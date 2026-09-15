@@ -60,7 +60,7 @@ function okIncidents(xml: string) {
 describe('parseAwsRssIncidentsResult — is this body a feed at all? (#1212)', () => {
   // The distinction the whole guard rests on. `[]` used to mean both "quiet feed" and "not a feed",
   // and the caller cleared the failure streak and published `operational` on either — a false
-  // recovery, the class already fixed for Instatus (#1089) and OnlineOrNot (#1123).
+  // recovery, the class already fixed for Instatus (#1089) and openrouter (#1123).
 
   it('a quiet feed is READABLE and empty — the false-positive direction', () => {
     // If this ever flips, azureopenai/bedrock would carry a permanent "we cannot read this source"

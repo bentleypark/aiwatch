@@ -82,7 +82,7 @@ const SAFE = {
   // Producers — they build incidents from an upstream payload; a derived one never flows back in.
   'worker/src/parsers/betterstack.ts': 'PRODUCES them; the tag is stamped here',
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload',
-  'worker/src/parsers/onlineornot.ts': 'producer — parses an upstream payload',
+  'worker/src/parsers/datadog.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/incident-io.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/statuspage.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/aws.ts': 'producer — parses an upstream payload',
@@ -175,7 +175,7 @@ const RB_SAFE = {
   // mergeRetainedIncidentHistory (services.ts); no parser ever produces it, and xAI has no migration bridge.
   'worker/src/parsers/betterstack.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
-  'worker/src/parsers/onlineornot.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
+  'worker/src/parsers/datadog.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
   'worker/src/parsers/incident-io.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
   'worker/src/parsers/statuspage.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
   'worker/src/parsers/aws.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
@@ -284,7 +284,7 @@ const SU_SAFE = {
   'worker/src/parsers/incident-io.ts': 'PRODUCES it — correctIncidentIoImpossibleTimes is where the flag is stamped and where the repair is attempted first',
   'worker/src/parsers/betterstack.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload, never stamps startUnknown',
-  'worker/src/parsers/onlineornot.ts': 'producer — parses an upstream payload, never stamps startUnknown',
+  'worker/src/parsers/datadog.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/statuspage.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/aws.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/aistudio.ts': 'producer — parses an upstream payload, never stamps startUnknown',

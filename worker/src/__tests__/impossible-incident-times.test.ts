@@ -23,7 +23,7 @@ import type { Incident } from '../types'
 //   perplexity   24 of 25, every one a migration import
 //
 // and ZERO on every other platform we read (Rootly / Atlassian / Cloudflare / Instatus / Better Stack /
-// Flashduty / OnlineOrNot / AWS / gcloud / RSS). Mistral's 44 `1m` durations are genuine 60-second
+// Flashduty / Datadog / AWS / gcloud / RSS). Mistral's 44 `1m` durations are genuine 60-second
 // auto-monitor flaps — start and resolve exactly one minute apart, which is why the predicate is the
 // ORDERING and never the duration string.
 

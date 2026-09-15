@@ -244,7 +244,7 @@ export function deriveAwsStatus(incidents: Incident[]): 'operational' | 'degrade
 
 /**
  * #1212 — the reason vocabularies for a body we could not read. Member names are unique ACROSS every
- * sibling union (Instatus, OnlineOrNot, and these two), so an operator aggregating one reason across
+ * sibling union (Instatus, Datadog, and these two), so an operator aggregating one reason across
  * services never sums two different parsers' failures — they take different fixes.
  */
 export type AwsHealthParseFailure =
@@ -275,7 +275,7 @@ const RSS_ENTRY_RE = /<item[\s>](?:(?!<item[\s>])[\s\S])*?<\/item>/g
  * #1212 — the entry point the caller must use, because `[]` alone cannot answer the only question
  * that matters here: a quiet feed and a body that is not a feed at all both yield no `<item>`, and
  * the second one silently reads as "no incidents" → `operational` + a cleared failure streak, which
- * is the false-recovery class already fixed for Instatus (#1089) and OnlineOrNot (#1123).
+ * is the false-recovery class already fixed for Instatus (#1089) and openrouter (#1123).
  *
  * The envelope is the discriminator. Azure's feed always ships `<rss>` wrapping a `<channel>`, on a
  * quiet day as much as a busy one (verified against the live feed 2026-08-06, which carried a

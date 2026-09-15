@@ -123,7 +123,7 @@ describe('#1268 — a 200 with a non-JSON body is an unread feed, not an indeter
     // Round 3 inverted this. It previously asserted the opposite, on the reasoning that "we did not read
     // the feed" is certain on cycle one. True, but the flag is not scoping-only: `incidentSourceStale`
     // also flips the CACHED is-down SEO page ("AIWatch can't currently read X's status source"), blanks
-    // the uptime the Instatus/OnlineOrNot return preserves from an independent successful fetch, and is
+    // the uptime the Instatus return preserves from an independent successful fetch, and is
     // stamped durably into the month-end archive. A single transient 5xx across a 45-service parallel
     // fetch is common (status-determination.md, #1233), so keying on the first read would defeat the
     // flap suppression the three-strike ramp exists for — one unlucky timeout at archive time would
@@ -240,7 +240,7 @@ describe('#1268 — a probe-backed green records that the probe is what backed i
 // source-liveness input at all (grep it for `incidentSourceStale` — no hits), so EVERY return that
 // publishes `incidents: []` because the read failed is scored as a clean 30-day window. Nine returns
 // set `sourceUnknown`; one set the flag. The 5xx return sits a few branches above the one that was fixed, and
-// the Instatus/OnlineOrNot parse-failure return carries services that rank in the HIGH-confidence table.
+// the Instatus parse-failure return carries services that rank in the HIGH-confidence table.
 //
 // So the flag is now tied to `sourceUnknown` at a choke point (`withUnreadFeedFlag`), and these tests
 // drive the failure MODES rather than the branches — a new branch inherits the invariant for free.

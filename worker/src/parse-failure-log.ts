@@ -1,6 +1,6 @@
 // #1089 — a durable, per-service tally of status-source read failures.
 //
-// #1123 — no longer Instatus-only: the OnlineOrNot path books here too. The KV key is still literally
+// #1123 — no longer Instatus-only: several other source paths book here too. The KV key is still literally
 // `instatus-parse-fail:` (renaming it would strand 30 days of in-flight counters for no diagnostic
 // gain), so the name is now HISTORICAL — read it as "source parse failures". `SourceParseFailure`
 // below is the full persisted vocabulary; `docs/reference/kv-schema.md` carries the operator-facing
@@ -39,9 +39,9 @@
 
 import { kvPut, type KVLike } from './utils'
 import type { InstatusParseFailure } from './parsers/instatus'
-import type { OnlineOrNotParseFailure } from './parsers/onlineornot'
 import type { AwsRssParseFailure, AwsHealthParseFailure } from './parsers/aws'
 import type { CloudflareStatusParseFailure } from './parsers/cloudflare-status'
+import type { DatadogParseFailure } from './parsers/datadog'
 
 /**
  * #1123 — the persisted reason vocabulary, joined in ONE place: the module that writes it. Typing
@@ -51,7 +51,7 @@ import type { CloudflareStatusParseFailure } from './parsers/cloudflare-status'
  * source's union on purpose, so an operator aggregating one reason over several services is never
  * summing two different parsers' failures — they take different fixes.
  */
-export type SourceParseFailure = InstatusParseFailure | OnlineOrNotParseFailure | AwsRssParseFailure | AwsHealthParseFailure | CloudflareStatusParseFailure | ScrapeLegParseFailure
+export type SourceParseFailure = InstatusParseFailure | AwsRssParseFailure | AwsHealthParseFailure | CloudflareStatusParseFailure | DatadogParseFailure | ScrapeLegParseFailure
 
 /**
  * #1234 — the generic path's two fetch legs: the scrape (one fetch, addressing either an RSS feed or
@@ -59,8 +59,8 @@ export type SourceParseFailure = InstatusParseFailure | OnlineOrNotParseFailure 
  * two configurations take different fixes.
  *
  * Homed HERE rather than in a parser module, which is where every union above lives. NOT on the
- * grounds that the caller sets them — `scrape-unreadable` and `fetch-unreadable` are caller-set too
- * and live in `parsers/instatus.ts` / `parsers/onlineornot.ts`, so that would prove nothing. The
+ * grounds that the caller sets them — `scrape-unreadable` and `dd-fetch-unreadable` are caller-set too
+ * and live in `parsers/instatus.ts` / `parsers/datadog.ts`, so that would prove nothing. The
  * reason is that these three span TWO parser modules: `parseRssIncidents` and the BetterStack readers
  * are both in `parsers/betterstack.ts`, the gcloud reader is in `parsers/gcloud.ts`. Filing them by
  * parser would split one concept across two files and leave neither able to state the rule, so the

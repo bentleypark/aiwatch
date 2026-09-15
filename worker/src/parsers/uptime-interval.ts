@@ -1,9 +1,9 @@
 // #1006 — the shared trailing-window downtime accumulator every INTERVAL-based uptime parser calls
-// (incident.io / Instatus / Flashduty / OnlineOrNot). The per-day-seconds sources (Atlassian
-// Statuspage, Better Stack) do NOT use this — they already sum non-overlapping daily buckets.
+// (incident.io / Instatus / Flashduty / Datadog). The per-day sources (Atlassian Statuspage, Better
+// Stack, Rootly) do NOT use this — they already sum non-overlapping daily buckets.
 //
 // Two correctness rules live here, in ONE place, so the parsers can't drift apart on them (they did:
-// a code review found incident.io + Instatus silently DROPPING open incidents while OnlineOrNot +
+// a code review found incident.io + Instatus silently DROPPING open incidents while the then-OnlineOrNot openrouter path +
 // Flashduty clamped them, and all four summing overlapping intervals):
 //
 //  1. An OPEN incident (no end / unparseable end) is clamped to `nowMs` — downtime accrues DURING a

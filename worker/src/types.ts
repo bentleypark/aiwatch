@@ -174,10 +174,12 @@ export interface ServiceStatus {
   calendarDays?: number
   /** #1017 — TODAY's weighted outage seconds (UTC calendar day, [startOfTodayUTC, now]). Populated
    *  by all 5 "official" uptime sources, via two different mechanisms: incident.io / Instatus /
-   *  Flashduty / OnlineOrNot compute it with a SECOND, cheap `weightedDowntimeSeconds` call over the
-   *  same `intervals[]` already built for their 30-day `uptime30d` figure (today's window instead of
-   *  30d); Atlassian Statuspage instead reads the provider's own last-published per-day bucket
-   *  directly (it doesn't build an `OutageInterval[]` at all — see statuspage.ts). Absent for Better
+   *  Flashduty / Datadog compute it with a SECOND, cheap `weightedDowntimeSeconds` call over the
+   *  same `intervals[]` already built for their `uptime30d` figure (today's window instead of 30d);
+   *  Atlassian Statuspage instead reads the provider's own last-published per-day bucket directly,
+   *  and Rootly sums its own per-day chart segments. `grep -n "uptimeSource: 'official'" services.ts`
+   *  for the current set rather than trusting a count here — this sentence has carried a stale one
+   *  through two migrations. Absent for Better
    *  Stack (`platform_avg` — a genuinely different weighting scheme, #1110, mixing it into this field
    *  would misrepresent the archive) and for any service with no uptime source at all.
    *
@@ -192,8 +194,9 @@ export interface ServiceStatus {
    *  #1006 —
    *    'official'      → AIWatch's OWN computation over the trailing 30 days, from the provider's
    *                      published per-day / impact records, with the weights on /methodology. Atlassian,
-   *                      incident.io, Instatus, OnlineOrNot and Flashduty — the five sources that carry
-   *                      the PROVIDER's own records. (Better Stack is computed by us too, but from a
+   *                      the sources that carry the PROVIDER's own records
+   *                      (`grep -n "uptimeSource: 'official'" services.ts`; do not restate a count —
+   *                      this line has carried a stale one through two migrations). (Better Stack is computed by us too, but from a
    *                      monitor rather than the provider, hence 'platform_avg' below.) Instatus's
    *                      Next.js path is itself an exception on the weights: a provider-published
    *                      `customImpactPercentage` wins over 1.0/0.3 (#1110).
@@ -294,6 +297,22 @@ export interface ServiceConfig {
   /** Public Cloudflare Status v3 summary endpoint and the exact component ids this service owns.
    * The v3 schema is not Statuspage-compatible, so it has a dedicated parser path. */
   cloudflareStatusComponentIds?: [string, ...string[]]
+  /** #1403 — a Datadog-hosted status page (origin only, no path). The page's whole state — components,
+   *  incidents, maintenances — is one unauthenticated static `config.json` under this origin, so this
+   *  is the only field the path needs. Uptime is COMPUTED from those records (`parsers/datadog.ts`);
+   *  the page publishes no uptime number of its own. */
+  datadogStatusUrl?: string
+  /** #1403 — the `ComponentGroup` the BADGE and the UPTIME figure run on, the `uptimeScopeOf`
+   *  invariant ("Badge + uptime run on … ALONE") expressed for this path. Required alongside
+   *  `datadogStatusUrl`: a Datadog page lists API and non-API components side by side, so without a
+   *  scope a website outage answers "yes" on /is-X-down.
+   *
+   *  A GROUP id, not a list of member ids, and that is the load-bearing part. A member list has to be
+   *  maintained by hand against a page that changes silently, and this path has none of the drift
+   *  machinery the Atlassian arm relies on (`buildPageComponents` keys on `apiUrl`, null here). So it
+   *  fails both ways and is loud in only one — a retired member blacks the service out, a NEW member
+   *  goes unbadged and uncounted with no signal. The provider maintains the group for us. */
+  datadogComponentGroupId?: string
   /**
    * A status-source migration can remove resolved incidents that AIWatch already collected inside
    * its live 30-day score window. Until this instant, retain those monthly-archive rows alongside
@@ -419,8 +438,6 @@ export interface ServiceConfig {
    *  and the detail page can put the provider's own number beside ours. Omit when the page has no group. */
   incidentIoGroupId?: string
   betterStackUrl?: string
-  onlineOrNotUrl?: string
-  onlineOrNotComponent?: string
   // #677 — AWS Health Dashboard public events JSON API (start+end+typeCode per incident). Replaced
   // the legacy per-region RSS for Bedrock: real start/end timestamps → correct duration, one event
   // per incident (no per-update-epoch guid split / 1m floor / double-count). Plain fetch, no scrape.
