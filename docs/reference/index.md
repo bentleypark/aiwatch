@@ -32,7 +32,7 @@ Read this index first, then load only the pages you need.
 - [Workflow-gate hooks (#415/#657)](workflow-hooks.md) — the workflow hooks, hard vs soft, the audit log + how to tune the step-3.5 hard gate; why the review loop is telemetry-only, and the instruction-budget ratchet.
 - [Agent-neutral development workflow](development-workflow.md) — the shared issue-to-release procedure for Codex, Claude Code, and other coding agents.
 - [Code-review policy (#1245)](code-review-policy.md) — which review agent to spawn, how to re-judge its severity labels, and what to take from a report.
-- [Reference Tooling](reference-tooling.md) — chub vs modern-web-guidance trigger map + the PreToolUse backstop.
+- [Reference Tooling](reference-tooling.md) — where to get ground truth (first-party skill / context7 / live upstream / modern-web-guidance), the trigger map + the PreToolUse backstop.
 - [Tier-A `verify-after` assertions (#873)](verify-assertions.md) — machine-checkable assert-clause grammar.
 - [Directory map](directory-map.md) — every module's purpose + the #-issue history behind it (CLAUDE.md keeps only the map).
 - [Product constraints](product-constraints.md) — AI analysis, fallback gating, deploy/cron rules, CSP, PWA, Edge SSR surfaces.
