@@ -296,7 +296,7 @@ export const SERVICES: ServiceConfig[] = [
   // Application Services` (2347916e-…), is openrouter.ai's site and dashboard, not an API endpoint:
   // unscoped it answered "yes" on /is-openrouter-down for a website outage while inference was
   // fine, and its 15h28m degradation on 2026-08-28 — a notice the provider ends with "Inference is
-  // unaffected" — was the whole published uptime deficit (99.35 unscoped vs 99.88 scoped). Same
+  // unaffected" — was the whole published uptime deficit before the scope. Same
   // treatment cohere/groq/together/cerebras give `Website` via componentDenylist and mistral gives
   // `le chat` + `console` via incidentExclude. It stays in the incident list; it just does not move
   // the API's badge or its percentage. Naming the GROUP rather than its six members means a seventh

@@ -75,11 +75,11 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     // over 2,592,000). Chat's 4m sits on another component and does not add to it — the page renders
     // a percentage per component and no page-level figure. `Web & Application Services` carries the
     // page's largest window, 15h28m, and is deliberately OUT of scope: it is openrouter.ai's site,
-    // not an API endpoint. Unscoped it would publish 99.35 as the API's uptime.
+    // not an API endpoint; unscoped, its window would be the API's published figure.
     expect(parsed.page.uptime30d).toBe(99.79)
   })
 
-  it('bounds BOTH windows by the reach of the page records, and discloses the short one', () => {
+  it('bounds the window by the reach of the page records, and discloses a short one', () => {
     // The page was created four days ago — a genuinely new page. Claiming 90
     // days for the provider would attribute a figure its page never shows; claiming 30 for ours would
     // publish a confident percentage over a window the records do not cover. The reach bounds both,
@@ -96,10 +96,9 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
   })
 
   it('bounds the window by the SCOPED records — an out-of-scope one cannot widen it', () => {
-    // The captured page's only record older than 18 days is `Backfill`, and it names the WEBSITE
-    // component alone — the one leaf the figure excludes. Reading it let the API's uptime claim a
-    // full 30 days, suppress the #1004 disclosure and publish 99.88 where the in-scope evidence
-    // supports 99.79 over 17: less evidence producing a more confident, higher number.
+    // The captured page's oldest record names the WEBSITE component alone — the one leaf the figure
+    // excludes. Reading it let the API's uptime claim a full 30 days and suppressed the #1004
+    // disclosure: less evidence producing a more confident, higher number.
     const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, NOW)
     if (!parsed.ok) throw new Error('fixture must parse')
     expect(parsed.page.uptimeWindowDays).toBe(17)
@@ -363,7 +362,6 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     expect(parsed.page.incidents[0].impact).toBeNull()
     expect(parsed.page.todayWeightedOutageSec).toBe(0)
     expect(parsed.page.uptime30d).toBe(100)
-    // …and the PROVIDER's table scores it zero too, so the reproduction agrees and is suppressed.
   })
 
   it('does not let a component-less update end a live outage', () => {
@@ -412,10 +410,10 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
   })
 
   it('does not let the order of `componentsAffected` change any published figure', () => {
-    // Two components named by ONE update, one word each. Collapsing them to a single "worst" under
-    // AIWatch's table — which ties `degraded` and `partial_outage` at 0.3, while the provider's table
-    // splits them 0 vs 1.0 — let the array's order decide, and `uptimeReported` moved between 100
-    // and 99.44 with nothing else changed. Per-component segments remove the collapse entirely.
+    // Two components named by ONE update, one word each. Collapsing them to a single "worst" lets
+    // the array's ORDER decide what the milder component is scored as. Per-component segments remove
+    // the collapse entirely. The sibling test above is what discriminates the collapse itself; this
+    // one pins that order cannot move a figure.
     const withOrder = (order: string[]) => doc({
       created: '2026-01-01T00:00:00Z',
       components: [{
@@ -495,11 +493,10 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     expect(parsed.page.status).toBe('down')
   })
 
-  it('reduces BOTH percentages to the worst component, and today\'s seconds to the worst DAY', () => {
+  it('reduces the percentage to the worst component, and today\'s seconds to the worst DAY', () => {
     // Two components down on the SAME UTC day, with different severities. The fixture cannot
     // discriminate these reducers — its three incidents are all `degraded` and all on different
-    // days — so `Math.max` for `Math.min` (on the provider figure) and `sum` for `Math.max` (on
-    // today's seconds) both survived the whole suite.
+    // days — so `sum` for `Math.max` on today's seconds survived the whole suite.
     const affected = (id: string, status: string) => [{ id, name: id, status, type: 'Component' }]
     const inc = (id: string, status: string, hours: number) => ({
       id, title: id, currentStatus: 'resolved',
@@ -530,7 +527,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     expect(parsed.page.incidents.find((i) => i.id === 'datadog:heavy')?.impact).toBe('minor')
     expect(parsed.page.incidents.find((i) => i.id === 'datadog:light')?.impact).toBe('minor')
     // Ours: the worst single component is `heavy`, 4h at 0.3 = 4,320s of 2,592,000 → 99.83.
-    // Pooling the two would read 99.79; taking the best would read 99.95.
+    // Pooling the two, or taking the best instead of the worst, each reads differently.
     expect(parsed.page.uptime30d).toBe(99.83)
     // Theirs: `heavy` alone counts, 4h at 1.0 over 90d = 14,400s of 7,776,000 → 99.81. `Math.max`
     // Today: the WORST component's day, not the sum. 4h at 0.3 = 4,320. Summing reads 5,400.
@@ -563,9 +560,52 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     // segment to the LAST naming update would charge all four hours.
     expect(parsed.page.todayWeightedOutageSec).toBe(10800)
     expect(parsed.page.uptime30d).toBe(99.58)
-    // The provider's table must score that mid-incident `operational` window at ZERO too. Giving it
-    // any weight charges the recovered hour and reads 99.81 — and `operational` is a row the fixture
-    // can never reach, because every `operational` entry there is an incident's LAST update, whose
+  })
+
+  it('scores each component named by ONE update at its OWN status, never at the update\'s worst', () => {
+    // A single update names two components with different words. Collapsing them to the update's
+    // worst scores the milder one as if it carried the severe one's status, and the published figure
+    // then depends on the array's order. Deleting the second weight table removed the only thing
+    // that separated `degraded` from `partial_outage`, so the existing order-independence test began
+    // passing on the implementation it was written to reject; this is the case that still tells them
+    // apart, because the milder component carries downtime of its own from a second incident.
+    const aff = (pairs: Array<[string, string]>) =>
+      pairs.map(([id, status]) => ({ id, name: id, status, type: 'Component' }))
+    const parsed = parseDatadogStatusPage(doc({
+      created: '2026-01-01T00:00:00Z',
+      components: [{
+        id: GROUP, name: 'API - Gateway', type: 'ComponentGroup',
+        components: [
+          { id: 'a', name: 'a', status: 'operational', type: 'Component' },
+          { id: 'b', name: 'b', status: 'operational', type: 'Component' },
+        ],
+      }],
+      incidents: [
+        {
+          id: 'both', title: 'Both', currentStatus: 'resolved',
+          publishedDate: '2026-09-15T00:00:00Z', resolvedDate: '2026-09-15T04:00:00Z', resolved: true,
+          componentsAffected: [],
+          timeline: [
+            { id: 'x', status: 'investigating', description: null, startedAt: '2026-09-15T00:00:00Z', createdAt: 'x', componentsAffected: aff([['a', 'major_outage'], ['b', 'degraded']]) },
+            { id: 'y', status: 'resolved', description: null, startedAt: '2026-09-15T04:00:00Z', createdAt: 'x', componentsAffected: aff([['a', 'operational'], ['b', 'operational']]) },
+          ],
+        },
+        {
+          id: 'bonly', title: 'B only', currentStatus: 'resolved',
+          publishedDate: '2026-09-15T05:00:00Z', resolvedDate: '2026-09-15T09:00:00Z', resolved: true,
+          componentsAffected: [],
+          timeline: [
+            { id: 'p', status: 'investigating', description: null, startedAt: '2026-09-15T05:00:00Z', createdAt: 'x', componentsAffected: aff([['b', 'degraded']]) },
+            { id: 'q', status: 'resolved', description: null, startedAt: '2026-09-15T09:00:00Z', createdAt: 'x', componentsAffected: aff([['b', 'operational']]) },
+          ],
+        },
+      ],
+    }), GROUP, Date.parse('2026-09-15T12:00:00.000Z'))
+    if (!parsed.ok) throw new Error('must parse')
+    // a: 4h at 1.0 = 14,400s. b: 4h + 4h at 0.3 = 8,640s. The worst component is `a`.
+    // Collapsing makes b's first window 1.0 too — 18,720s — and b becomes the worst, reading 99.27.
+    expect(parsed.page.uptime30d).toBe(99.44)
+    expect(parsed.page.todayWeightedOutageSec).toBe(14400)
   })
 
   it('publishes NO uptime when the records establish no window at all', () => {

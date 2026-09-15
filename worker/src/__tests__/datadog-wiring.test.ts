@@ -63,8 +63,8 @@ describe('#1403 openrouter is wired to the Datadog path, not the retired one', (
   })
 
   it('is the ONLY service on this path — a second one would need the window caveat re-checked', () => {
-    // openrouter's full window rests on one un-corroborated `Backfill` record (see the parser's
-    // header). A second Datadog page would not inherit that, so it must not join silently.
+    // Every caveat recorded for this path was established against ONE page. A second Datadog service
+    // must not join silently and inherit them unchecked.
     expect(SERVICES.filter((service) => service.datadogStatusUrl).map((s) => s.id)).toEqual(['openrouter'])
   })
 })
@@ -94,6 +94,28 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     expect(service.sourceDead).toBeUndefined()
   })
 
+  it('publishes the parser\'s VERDICT, not a hardcoded operational', async () => {
+    // Pre-existing gap, closed here because this path is new: the parser suite covers `worstVerdict`,
+    // but nothing pinned the wiring from that verdict to `ServiceStatus.status`. Replacing it with a
+    // literal `'operational'` passed all 5501 tests. A `major_outage` component with NO incidents is
+    // the discriminating case — an incident-backed degradation is re-derived downstream, so only the
+    // component-status path exposes the break.
+    const group = openrouter.datadogComponentGroupId
+    stubFetch(() => new Response(JSON.stringify({
+      created: '2026-01-01T00:00:00Z',
+      components: [{
+        id: group, name: 'API - Gateway', type: 'ComponentGroup',
+        components: [{ id: 'c0', name: 'Chat', position: 0, status: 'major_outage', type: 'Component' }],
+      }],
+      incidents: [],
+      maintenances: null,
+    }), { status: 200 }))
+
+    const service = await fetchService(openrouter, undefined, undefined, {})
+    expect(service.status).toBe('down')
+    expect(service.incidents).toEqual([])
+  })
+
   it('does not publish "operational, no incidents" when the document is unreadable', async () => {
     // A 200 carrying the app shell — the exact state that made this issue: the page answers fine and
     // says nothing we can read. It must never clear the incident list AND look healthy.
@@ -118,6 +140,38 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     expect(Object.keys(parseParseFailDay(store[key!]).counts.openrouter)).toEqual(['dd-envelope-unreadable'])
   })
 
+  it('threads a SHORT window through to ServiceStatus as the #1004 disclosure', async () => {
+    // Deleting a clock-dependent assertion in an earlier round left this emission covered by nothing:
+    // removing the `uptimeWindowDays` spread from `services.ts` passed the whole suite, which would
+    // ship a short-window figure as if it covered 30 and silently drop openrouter out of
+    // `isArchiveRestoreEligible`. Built RELATIVE to `Date.now()`, so it cannot rot the way the
+    // deleted assertion did — the page is always five days old when this runs.
+    const group = openrouter.datadogComponentGroupId
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString()
+    const affected = [{ id: 'c0', name: 'Chat', status: 'degraded', type: 'Component' }]
+    stubFetch(() => new Response(JSON.stringify({
+      created: daysAgo(5),
+      components: [{
+        id: group, name: 'API - Gateway', type: 'ComponentGroup',
+        components: [{ id: 'c0', name: 'Chat', position: 0, status: 'operational', type: 'Component' }],
+      }],
+      incidents: [{
+        id: 'i', title: 'Degraded', currentStatus: 'resolved',
+        publishedDate: daysAgo(4), resolvedDate: daysAgo(3), resolved: true,
+        componentsAffected: [],
+        timeline: [
+          { id: 'a', status: 'investigating', description: null, startedAt: daysAgo(4), createdAt: 'x', componentsAffected: affected },
+          { id: 'b', status: 'resolved', description: null, startedAt: daysAgo(3), createdAt: 'x', componentsAffected: [{ id: 'c0', name: 'Chat', status: 'operational', type: 'Component' }] },
+        ],
+      }],
+      maintenances: null,
+    }), { status: 200 }))
+
+    const service = await fetchService(openrouter, undefined, undefined, {})
+    expect(service.uptimeWindowDays).toBe(5)
+    expect(service.uptimeSource).toBe('official')
+  })
+
   it('says its per-day impact record is INCOMPLETE, so the calendar keeps painting incidents', async () => {
     // #1004/#1292 — this path publishes no per-day impact of its own. Once openrouter emits
     // `uptimeWindowDays` it becomes `isArchiveRestoreEligible`, and the restore writes a `dailyImpact`
@@ -127,8 +181,6 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     stubFetch(() => new Response(FIXTURE_RAW, { status: 200 }))
     const service = await fetchService(openrouter, undefined, undefined, {})
     expect(service.dailyImpactComplete).toBe(false)
-    // The trigger: this service now carries a short window, which is what makes the restore eligible.
-    expect(service.uptimeWindowDays).toBeTypeOf('number')
   })
 
   it('books a transient non-OK as unknown, and an unambiguous gone status as a dead source', async () => {

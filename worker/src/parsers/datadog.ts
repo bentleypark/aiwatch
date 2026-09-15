@@ -179,12 +179,10 @@ function worstVerdict(statuses: ComponentStatus[]): 'operational' | 'degraded' |
 /**
  * What one update's `componentsAffected` says, PER COMPONENT.
  *
- * It does not collapse to a single status. An earlier cut picked the "worst" by AIWatch's weight
- * table, which ties `degraded` and `partial_outage` at 0.3 — while the provider's own rule
- * ({@link PROVIDER_STATUS_WEIGHT}) separates them 0 vs 1.0. A tie under one table was therefore the
- * whole gap under the other, and the array's ORDER decided which word survived: reversing
- * `componentsAffected` moved the published `uptimeReported` between 100 and 99.44 with nothing else
- * changed. Keeping the per-component statuses means no cross-component collapse happens at all.
+ * It does not collapse to a single status. Collapsing makes the published figure depend on the
+ * ORDER of `componentsAffected`, because a component whose status loses the comparison is scored as
+ * if it carried the winner's. Keeping the per-component statuses means no cross-component collapse
+ * happens at all, and the worst-of runs where it belongs — across each component's OWN window.
  *
  * `'unknown'` is distinct from `'absent'` because a vocabulary change must refuse the read; skipping
  * it would let a readable sibling update paper over it.
@@ -215,9 +213,9 @@ function entryInstant(entry: Record<string, unknown>): string | null {
   return typeof entry.startedAt === 'string' ? entry.startedAt : null
 }
 
-/** One component's outage window, carrying the STATUS rather than a weight — so AIWatch's figure
- *  and the provider's reproduction are two mappings of ONE extraction. Per COMPONENT because the
- *  page publishes a percentage per component and no page-level aggregate at all. */
+/** One component's outage window. Per COMPONENT because the page publishes a percentage per
+ *  component and no page-level aggregate at all, so the figure is a worst-of across components
+ *  rather than a pool. */
 type OutageSegment = { componentId: string; start: number; end: number | null; status: ComponentStatus }
 
 type ParsedIncident = {
@@ -353,12 +351,7 @@ const WINDOW_DAYS = 30
  * nothing in this file indexes it.
  *
  * The uptime window is bounded by {@link recordReachDays}, and a short one is disclosed as
- * `uptimeWindowDays` (#1004) rather than published as a confident 30-day figure. On the one page
- * this serves today the reach is ~107 days, and it rests on a SINGLE record — a 2026-05-31 incident
- * titled `Backfill`, filed on 2026-09-11 with placeholder update text. Remove it and the reach is
- * 17 days. The cross-check against AIWatch's own collected records covers the two 2026-08-28
- * incidents only, so everything past 18 days is the provider's word; if they prune it the window
- * narrows and says so, which is why that disclosure exists rather than a pinned constant.
+ * `uptimeWindowDays` (#1004) rather than published as a confident 30-day figure.
  */
 export function parseDatadogStatusPage(
   raw: unknown,
@@ -426,12 +419,10 @@ export function parseDatadogStatusPage(
   const perComponent = [...byComponent.values()]
 
   // Bounded by the SCOPED records, so the denominator rests on the same evidence as the numerator.
-  // An earlier cut read every incident and justified it as "the backfill was done as a page, not per
-  // component" — an assertion the captured page contradicts: its only record older than 18 days is a
-  // `Backfill` entry naming the WEBSITE component alone, the one leaf the figure excludes. Reading it
-  // let the API's uptime claim a full 30 days, suppress the #1004 disclosure and publish 99.88 where
-  // the in-scope evidence supports 99.79 over 17 — LESS evidence producing a MORE confident, HIGHER
-  // number, the exact direction this file refuses everywhere else.
+  // Reading every incident let an out-of-scope component's older record widen the API's window,
+  // which both raised the figure and suppressed the #1004 disclosure — less evidence producing a
+  // more confident number, the direction this file refuses everywhere else. The figures are in
+  // `datadog.test.ts`, where they are checked.
   const reachDays = recordReachDays(parsed, new Set(scoped.map((leaf) => leaf.id)), raw.created, nowMs)
   // The denominator is what the records actually cover. Asserting a flat 30 days on a page whose
   // history reaches back five would publish a confident figure over a window that does not exist —
@@ -474,10 +465,10 @@ function pct(weightedSec: number, days: number): number {
   return Math.max(0, Math.floor((1 - weightedSec / (days * 86_400)) * 10000) / 100)
 }
 
-/** Whole days the page's own records reach back: the earlier of `created` and the earliest update
- *  instant, which is how the page's own bundle bounds its uptime window. `null` when neither is
- *  readable. A BACKFILLED page reaches further back than `created` — status.openrouter.ai was
- *  created 2026-09-08 and reaches to 2026-05-31 — so `created` alone is not the bound. */
+/** Whole days the records reach back: the earlier of `created` and the earliest IN-SCOPE update
+ *  instant. `null` when neither is readable. Two reasons neither half alone is the bound — a
+ *  BACKFILLED page's records can predate `created`, and a record outside the configured scope says
+ *  nothing about the scoped figure's window. */
 function recordReachDays(
   parsed: ParsedIncident[],
   scopedIds: Set<string>,
