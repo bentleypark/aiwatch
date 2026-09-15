@@ -127,7 +127,7 @@ describe('uptimeScopeOf / uptimeScopeForPage — one definition, two readers', (
       const expected = new Set(SERVICES.filter((s) => s.apiUrl === apiUrl).flatMap(uptimeScopeOf))
       expect(new Set(uptimeScopeForPage(apiUrl))).toEqual(expected)
     }
-    // …and the discriminating negative: Cursor's DISPLAY roster is six, its badge scope four. Asking
+    // …and the discriminating negative: Cursor's DISPLAY roster is seven, its badge scope five. Asking
     // for the display ids would fetch timelines nothing reads.
     expect(uptimeScopeForPage('https://status.cursor.com/api/v2/summary.json')).not.toContain('xwjpvdf81qh9')
     // Three services genuinely share the Anthropic document — the union property, not a count.

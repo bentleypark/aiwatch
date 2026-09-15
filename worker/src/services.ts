@@ -563,14 +563,14 @@ export const SERVICES: ServiceConfig[] = [
   //   Codex product (API/CLI/VS Code/Web) was operational. Removed from BOTH arrays and moved to
   //   chatgpt where it belongs.
   { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', statusComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', statusComponentIds: ['01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK'], displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV'] },
-  // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379). Auxiliary
+  // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379) + Review Agents (#1420). Auxiliary
   // surfaces are intentionally excluded from that worst-of set. Origin + Grok Bot (new components,
   // 2026-08-17) join that excluded category — Grok Bot is a bot integration, not a core product
   // surface, and Origin has no confirmed core-surface role — but resolveSvcComponents falls back to
   // statusComponentIds ONLY when displayComponentIds is absent, so displayComponentIds here MUST be a
   // superset of statusComponentIds (mirrors codex/openai/langsmith) or the breakdown card silently
-  // loses the four core rows the moment this field exists at all.
-  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'], displayComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', 'xwjpvdf81qh9', 'sm5wkcnqkvr9'] },
+  // loses the core rows the moment this field exists at all.
+  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl'], displayComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl', 'xwjpvdf81qh9', 'sm5wkcnqkvr9'] },
   // copilot badge reflects worst-of: Copilot + Copilot AI Model Providers (direct upstream) (#379).
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
   // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
@@ -1005,7 +1005,7 @@ export const TRACKED_COMPONENT_IDS: ReadonlySet<string> = new Set(
  * up to 11 extra timelines per page that nothing reads. Services with no `statusComponentId` contribute
  * nothing: the uptime branch is gated on that field, so a code fetched for them could not be used.
  *
- * Union'd across the page because claude/claudeai/claudecode (and cursor's four badge components) share
+ * Union'd across the page because claude/claudeai/claudecode (and cursor's badge components) share
  * one document; one request per page is the same dedup `uniqueApiUrls` already does for summary.json.
  * Order follows SERVICES so the request URL is stable cycle to cycle.
  */
