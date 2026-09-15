@@ -265,11 +265,11 @@ describe('readOverridesFreshResult (#1274)', () => {
 
   it('names which kind of malformed, because they need different repairs', async () => {
     expect(await readOverridesFreshResult(kvOf('{ not json')))
-      .toEqual({ state: 'malformed', reason: 'not-json', dropped: 0 })
+      .toEqual({ state: 'malformed', reason: 'not-json', dropped: 0, list: [] })
     expect(await readOverridesFreshResult(kvOf('{"id":"a","durationMin":18}')))
-      .toEqual({ state: 'malformed', reason: 'not-an-array', dropped: 0 })
+      .toEqual({ state: 'malformed', reason: 'not-an-array', dropped: 0, list: [] })
     expect(await readOverridesFreshResult(kvOf('[{"id":"a","durationMin":"18"}]')))
-      .toEqual({ state: 'malformed', reason: 'unusable-rows', dropped: 1 })
+      .toEqual({ state: 'malformed', reason: 'unusable-rows', dropped: 1, list: [] })
   })
 
   it('passes a well-formed list through unchanged', async () => {

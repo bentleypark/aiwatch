@@ -7,6 +7,8 @@ import {
   sameSuppressionTarget,
   mutateSuppressions,
   readSuppressionsFresh,
+  readSuppressionsFreshResult,
+  normalizeSuppressionsCounted,
   type SuppressionEntry,
 } from '../suppression'
 import type { Incident, ServiceStatus } from '../types'
@@ -185,5 +187,51 @@ describe('readSuppressionsFresh', () => {
     expect(await readSuppressionsFresh(kvWith(null))).toEqual([])
     expect(await readSuppressionsFresh(kvWith(() => { throw new Error('kv down') }))).toEqual([])
     expect(await readSuppressionsFresh(kvWith('not json'))).toEqual([])
+  })
+})
+
+describe('normalizeSuppressionsCounted (#1318)', () => {
+  it('counts every rejected row, and only rejected rows', () => {
+    const out = normalizeSuppressionsCounted([
+      { scope: 'incident', incId: 'a' },
+      { incId: 'lost-scope' },
+      { scope: 'service-pattern', svcId: 'openai' },
+      null,
+      { scope: 'service-pattern', svcId: 'openai', match: 'fedramp' },
+    ])
+    expect(out.list).toHaveLength(2)
+    expect(out.dropped).toBe(3)
+  })
+
+  it('reports 0 for a clean list and for a non-array', () => {
+    expect(normalizeSuppressionsCounted([{ scope: 'incident', incId: 'a' }]).dropped).toBe(0)
+    expect(normalizeSuppressionsCounted({ scope: 'incident', incId: 'a' })).toEqual({ list: [], dropped: 0 })
+  })
+})
+
+describe('readSuppressionsFreshResult (#1318)', () => {
+  const kvOf = (val: string | null, throwOn = false): KVNamespace =>
+    ({ get: async () => { if (throwOn) throw new Error('kv down'); return val } }) as unknown as KVNamespace
+
+  it('tells a fault apart from an absent key', async () => {
+    expect(await readSuppressionsFreshResult(kvOf(null, true))).toEqual({ state: 'unreadable' })
+    expect(await readSuppressionsFreshResult(kvOf(null))).toEqual({ state: 'ok', list: [] })
+  })
+
+  it('refuses a row that parses but lost its scope, instead of reading it as nothing suppressed', async () => {
+    expect(await readSuppressionsFreshResult(kvOf('[{"incId":"x"}]')))
+      .toEqual({ state: 'malformed', reason: 'unusable-rows', dropped: 1, list: [] })
+  })
+
+  it('names the other two kinds of malformed', async () => {
+    expect(await readSuppressionsFreshResult(kvOf('{ not json')))
+      .toEqual({ state: 'malformed', reason: 'not-json', dropped: 0, list: [] })
+    expect(await readSuppressionsFreshResult(kvOf('{"scope":"incident","incId":"x"}')))
+      .toEqual({ state: 'malformed', reason: 'not-an-array', dropped: 0, list: [] })
+  })
+
+  it('passes a well-formed list through', async () => {
+    expect(await readSuppressionsFreshResult(kvOf('[{"scope":"incident","incId":"x"}]')))
+      .toEqual({ state: 'ok', list: [{ scope: 'incident', incId: 'x' }] })
   })
 })

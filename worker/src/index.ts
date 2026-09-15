@@ -4,8 +4,8 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
-import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
-import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, type DurationOverride } from './overrides'
+import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
+import { OVERRIDES_KEY, normalizeOverridesCounted, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
 import { createReadCensus, formatCensus } from './kv-read-census'
@@ -2652,7 +2652,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
     // Retrying a malformed value never succeeds, and this read gates every month — saying
     // "retryable" would leave the endpoint bricked with the operator waiting (#1260 r3).
     return suppressionRead.state === 'malformed'
-      ? json(500, { ok: false, error: 'the suppression list is malformed', retryable: false, hint: 'repair the incident:suppressions KV value by hand' })
+      ? json(500, { ok: false, error: 'the suppression list is malformed', reason: suppressionRead.reason, droppedRows: suppressionRead.dropped, retryable: false, hint: 'repair the incident:suppressions KV value by hand' })
       : json(503, { ok: false, error: 'could not read the suppression list', retryable: true })
   }
   const suppressions = suppressionRead.list
@@ -2666,15 +2666,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
     console.error(`[admin/rebuild-archive] duration-override list ${overrideRead.state} — refusing ${month}`)
     // Same split, same reason as the suppression read above: an unusable value never becomes usable
     // on a retry, so calling it retryable would leave the operator re-running a call that cannot
-    // succeed. `reason` and `droppedRows` are echoed because the response is the only place that
-    // sees them: `GET /api/admin/duration-override` reads through `normalizeOverrides` and so
-    // renders the surviving rows only, and the rejected ones are invisible there.
-    //
-    // Deliberately NO repair instruction. The obvious one — re-add through
-    // `POST /api/admin/duration-override` — rewrites the whole KV value from that same normalized
-    // read, so it PERMANENTLY DROPS every rejected row, including overrides meant for other
-    // incidents, on a key with no backup (the #1256 whole-value-rewrite shape). Naming a remedy
-    // that destroys data is worse than naming none.
+    // succeed.
     return overrideRead.state === 'malformed'
       ? json(500, {
           ok: false,
@@ -2682,7 +2674,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
           reason: overrideRead.reason,
           droppedRows: overrideRead.dropped,
           retryable: false,
-          hint: 'read incident:duration-overrides directly (wrangler kv key get --remote) and repair it there; do NOT re-add through the admin endpoint, which rewrites the whole value and would drop the rejected rows',
+          hint: 'read incident:duration-overrides directly (wrangler kv key get --remote) and repair it there',
         })
       : json(503, { ok: false, error: 'could not read the duration-override list', retryable: true })
   }
@@ -2805,6 +2797,29 @@ interface AdminSuppressRequest {
   reason?: unknown
 }
 
+function operatorListStateFields<T>(read: OperatorListRead<T>): Record<string, unknown> {
+  return read.state === 'ok'
+    ? { listState: 'ok' }
+    : { listState: 'malformed', reason: read.reason, droppedRows: read.dropped }
+}
+
+// #1318 — both admin writes replace the whole TTL-less value, so a write built from a read that
+// dropped rows would delete them.
+function operatorListRewriteRefusal<T>(
+  json: (status: number, body: unknown) => Response,
+  read: Extract<OperatorListRead<T>, { state: 'malformed' }>,
+  key: string,
+): Response {
+  return json(409, {
+    ok: false,
+    error: `${key} holds a value this endpoint cannot read, so it refuses to rewrite it`,
+    reason: read.reason,
+    droppedRows: read.dropped,
+    retryable: false,
+    hint: `read ${key} directly (wrangler kv key get --remote) and repair it there`,
+  })
+}
+
 async function handleAdminSuppress(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
@@ -2814,16 +2829,17 @@ async function handleAdminSuppress(request: Request, env: Env, cors: Record<stri
   if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) return json(401, { ok: false, error: 'unauthorized' })
   if (!env.STATUS_CACHE) return json(503, { ok: false, error: 'Service unavailable' })
 
-  let current: SuppressionEntry[]
+  let read: OperatorListRead<SuppressionEntry>
   try {
-    const raw = await env.STATUS_CACHE.get(SUPPRESSIONS_KEY)
-    current = raw ? normalizeSuppressions(JSON.parse(raw)) : []
+    read = classifyOperatorList(await env.STATUS_CACHE.get(SUPPRESSIONS_KEY), normalizeSuppressionsCounted)
   } catch (err) {
     console.error('[admin/suppress] KV read failed:', err instanceof Error ? err.message : err)
     return json(502, { ok: false, error: 'failed to read suppression list' })
   }
 
-  if (request.method === 'GET') return json(200, { ok: true, suppressions: current })
+  if (request.method === 'GET') return json(200, { ok: true, suppressions: read.list, ...operatorListStateFields(read) })
+  if (read.state !== 'ok') return operatorListRewriteRefusal(json, read, SUPPRESSIONS_KEY)
+  const current = read.list
 
   let body: AdminSuppressRequest
   try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
@@ -2873,16 +2889,17 @@ async function handleAdminOverride(request: Request, env: Env, cors: Record<stri
   if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) return json(401, { ok: false, error: 'unauthorized' })
   if (!env.STATUS_CACHE) return json(503, { ok: false, error: 'Service unavailable' })
 
-  let current: DurationOverride[]
+  let read: OperatorListRead<DurationOverride>
   try {
-    const raw = await env.STATUS_CACHE.get(OVERRIDES_KEY)
-    current = raw ? normalizeOverrides(JSON.parse(raw)) : []
+    read = classifyOperatorList(await env.STATUS_CACHE.get(OVERRIDES_KEY), normalizeOverridesCounted)
   } catch (err) {
     console.error('[admin/duration-override] KV read failed:', err instanceof Error ? err.message : err)
     return json(502, { ok: false, error: 'failed to read override list' })
   }
 
-  if (request.method === 'GET') return json(200, { ok: true, overrides: current })
+  if (request.method === 'GET') return json(200, { ok: true, overrides: read.list, ...operatorListStateFields(read) })
+  if (read.state !== 'ok') return operatorListRewriteRefusal(json, read, OVERRIDES_KEY)
+  const current = read.list
 
   let body: AdminOverrideRequest
   try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }

@@ -84,10 +84,17 @@ export function applySuppressions(services: ServiceStatus[], list: SuppressionEn
 
 /** Pure: validate/normalize a parsed KV value into well-formed entries (drops malformed rows). */
 export function normalizeSuppressions(parsed: unknown): SuppressionEntry[] {
-  if (!Array.isArray(parsed)) return []
+  return normalizeSuppressionsCounted(parsed).list
+}
+
+/** #1318 — `normalizeSuppressions` plus the number of rows it rejected (the #1274
+ *  `normalizeOverridesCounted` shape). A non-array reports 0: it counts ROWS. */
+export function normalizeSuppressionsCounted(parsed: unknown): { list: SuppressionEntry[]; dropped: number } {
+  if (!Array.isArray(parsed)) return { list: [], dropped: 0 }
   const out: SuppressionEntry[] = []
+  let dropped = 0
   for (const raw of parsed) {
-    if (!raw || typeof raw !== 'object') continue
+    if (!raw || typeof raw !== 'object') { dropped++; continue }
     const e = raw as Record<string, unknown>
     if (e.scope === 'incident' && typeof e.incId === 'string' && e.incId) {
       out.push({
@@ -106,9 +113,35 @@ export function normalizeSuppressions(parsed: unknown): SuppressionEntry[] {
         match: e.match,
         ...pickMeta(e),
       })
+    } else {
+      dropped++
     }
   }
-  return out
+  return { list: out, dropped }
+}
+
+/** #1318 — how a stored operator list (suppressions, duration overrides) reads: usable, or unusable
+ *  for one of three reasons that no retry clears. `list` is the surviving rows in both states. An
+ *  absent key (`null`) is a genuinely empty list. */
+export type OperatorListRead<T> =
+  | { state: 'ok'; list: T[] }
+  | { state: 'malformed'; reason: 'not-json' | 'not-an-array' | 'unusable-rows'; dropped: number; list: T[] }
+
+export function classifyOperatorList<T>(
+  raw: string | null,
+  normalizeCounted: (parsed: unknown) => { list: T[]; dropped: number },
+): OperatorListRead<T> {
+  if (raw === null) return { state: 'ok', list: [] }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { state: 'malformed', reason: 'not-json', dropped: 0, list: [] }
+  }
+  if (!Array.isArray(parsed)) return { state: 'malformed', reason: 'not-an-array', dropped: 0, list: [] }
+  const { list, dropped } = normalizeCounted(parsed)
+  if (dropped > 0) return { state: 'malformed', reason: 'unusable-rows', dropped, list }
+  return { state: 'ok', list }
 }
 
 function pickMeta(e: Record<string, unknown>): { reason?: string; createdAt?: string; by?: string } {
@@ -206,7 +239,7 @@ export async function readSuppressionsFresh(kv?: KVNamespace): Promise<Suppressi
  *  fault clears on its own, a malformed value never does, so answering "retryable" to the second
  *  leaves the caller retrying forever against something only hand-repair fixes. */
 export async function readSuppressionsFreshResult(kv?: KVNamespace): Promise<
-  { state: 'ok'; list: SuppressionEntry[] } | { state: 'unreadable' } | { state: 'malformed' }
+  OperatorListRead<SuppressionEntry> | { state: 'unreadable' }
 > {
   if (!kv) return { state: 'unreadable' }
   let raw: string | null
@@ -215,12 +248,7 @@ export async function readSuppressionsFreshResult(kv?: KVNamespace): Promise<
   } catch {
     return { state: 'unreadable' }
   }
-  if (raw === null) return { state: 'ok', list: [] }
-  try {
-    return { state: 'ok', list: normalizeSuppressions(JSON.parse(raw)) }
-  } catch {
-    return { state: 'malformed' }
-  }
+  return classifyOperatorList(raw, normalizeSuppressionsCounted)
 }
 
 export async function readSuppressionsFreshOrNull(kv?: KVNamespace): Promise<SuppressionEntry[] | null> {

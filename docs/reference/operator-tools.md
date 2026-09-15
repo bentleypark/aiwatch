@@ -103,7 +103,7 @@ archive, and answers:
 | | when |
 |---|---|
 | **`503` `retryable:true`** | a read taken BEFORE the build could not be completed. Retry; `force` does not override it. |
-| **`500` `retryable:false`** | an operator list is present but unusable. Retrying never clears it — repair the KV value by hand. The two lists are NOT checked to the same depth: the duration-override read also refuses a value that parses to a non-array, or that holds rows it cannot use (a quoted `"18"` for `durationMin`), because those normalize to an empty list and would read as "no overrides configured" (#1274). The suppression read still classifies only an unparseable value, so the same hand-edit there is silently dropped. |
+| **`500` `retryable:false`** | an operator list is present but unusable. Retrying never clears it — repair the KV value by hand. Both lists are checked to the same depth (#1274, #1318): a value that does not parse, parses to a non-array, or holds rows the normalizer rejects (a quoted `"18"` for `durationMin`, a suppression row with no `scope`) is refused, with `reason` and `droppedRows` in the body. |
 | **`409`** | the rebuild measurably holds less than what is stored — `regressed` names what, alongside `prior` and `rebuilt`. Incidents the suppression list accounts for are NOT a loss, so the suppress-then-rebuild flow above passes without a `force`. |
 | **`409`** | the stored archive is unparseable, so the comparison could not be made at all. |
 | **`400`** | the month is not a real calendar month, or has not ENDED yet — the current month included (#1274). |
@@ -140,8 +140,11 @@ no cause on purpose: this endpoint cannot tell an aged-out key from a KV blip, a
 **Request body** (POST, JSON): `action` (`'add' | 'remove'`), `scope` (`'incident' | 'service-pattern'`),
 plus `incId` (incident scope) or `svcId` + `match` (service-pattern scope), optional `reason`. **Response**:
 `{ ok, changed, suppressions }` on 200; `add` is idempotent (`changed:false` on a duplicate target).
-Failure modes: 401 `unauthorized`, 400 (missing/invalid scope or fields), 502 (KV read/write failed),
-503 (`STATUS_CACHE` unavailable). Auth reuses `X-Admin-Key` / `ADMIN_API_KEY`. The isolate caches the list
+Failure modes: 401 `unauthorized`, 400 (missing/invalid scope or fields), 409 `retryable:false` (the stored
+value is unusable — `reason` + `droppedRows`; read it with `wrangler kv key get --remote` and repair it there, #1318),
+502 (KV read/write failed), 503 (`STATUS_CACHE` unavailable). GET always carries `listState`
+(`ok`/`malformed`); on `malformed` it also carries `reason` + `droppedRows`, since `suppressions` lists only
+the rows it could read. Auth reuses `X-Admin-Key` / `ADMIN_API_KEY`. The isolate caches the list
 for 60s (a write invalidates its own isolate immediately; others converge within ≤60s).
 
 # Operator Tools — `GET/POST /api/admin/duration-override` (#1019)
@@ -185,8 +188,8 @@ reads the same durations — so the report's Score/ranking is corrected too, not
   robust at ≥3 resolved incidents). General MTTR robustness is #1019 Part B.
 
 **Request body** (POST, JSON): `action` (`'add' | 'remove'`), `id`, `durationMin` (add only, finite ≥ 0),
-optional `reason`. **Response**: `{ ok, changed, overrides }` on 200. Failure modes mirror suppress
-(401/400/502/503). No isolate cache (the apply sites read fresh).
+optional `reason`. **Response**: `{ ok, changed, overrides }` on 200. Failure modes and the GET
+`listState` fields mirror suppress (401/400/409/502/503). No isolate cache (the apply sites read fresh).
 
 # Operator Tools — `GET /api/admin/withdrawals` (#1106 Part 5)
 
