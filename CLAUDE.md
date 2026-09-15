@@ -29,52 +29,23 @@ Don't store what the repo already records (code structure, past fixes, git histo
 ### OKF frontmatter convention
 Each page carries YAML frontmatter: `name`, `description`, `type` (+ optional `title`/`tags`). **Caveat: the harness normalizes memory frontmatter on write** (relocates `type`/`title`/`tags` under `metadata:`) — don't fight it; the fields survive under `metadata`. **Gotcha: quote any `description`/`title` containing a bare `#`** (e.g. `#N`) — unquoted YAML treats `#` as a comment and truncates the value (hit in #891 Phase 1). True OKF top-level conformance (for the Google graph visualizer) lives in the in-repo bundle **`docs/reference/*`** — an OKF bundle with `type`/`title`/`description`/`tags` frontmatter + `index.md` catalog + `log.md` (#891 Phase 4) — not the harness memory dir.
 
-## API Docs via Context Hub (chub)
+## API Docs (context7)
 
-This project uses [Context Hub](https://github.com/andrewyng/context-hub) (`chub` CLI) to fetch
-current, version-accurate API docs **before writing code against an external API/SDK/library** —
-instead of relying on training-cutoff knowledge (anti-hallucination). The global `get-api-docs`
-skill auto-triggers this flow.
+Fetch current docs **before writing code against an external API/SDK/library** instead of trusting
+training-cutoff knowledge. Lookup order:
+1. **A first-party skill, when one covers it** — `cloudflare` / `workers-best-practices` / `wrangler`
+   for Worker runtime code, `claude-api` for Anthropic, `modern-web-guidance` for HTML/CSS/client-JS.
+2. **context7** (MCP, wired in `.mcp.json`) — resolve the library id, then query ONE topic per call.
+   Optional: export `CONTEXT7_API_KEY` for the higher free-account quota.
+3. WebFetch of the official doc page.
 
-### Flow
-```bash
-chub update                          # refresh registry (occasionally)
-chub search "<keywords>" --json      # find the right doc id
-chub get <id> --lang js              # fetch (always pass --lang)
-chub annotate <id> "<gotcha>"        # save discovered gaps — persists across sessions
-```
+**Status-page parsers are not an API-docs problem.** No docs tool covers a provider's status page;
+the ground truth for `worker/src/parsers/*` is the live upstream response — fetch it.
 
-### AIWatch stack coverage (verified present, mostly maintainer-curated)
-`react/react` (React 19) · `vite/vite` · `tailwindcss/tailwindcss` (**v4**, CSS-first) ·
-`vitest/vitest` · `playwright/playwright` · `typescript/typescript` · `vercel/*` (Edge Functions) ·
-`esbuild/esbuild` (transitive via Vite — no direct config to tune)
-
-**Anthropic** is a special case: AIWatch calls the **Messages REST API via the Cloudflare AI Gateway
-with raw `fetch()`** (no `@anthropic-ai/sdk` dependency — see `worker/src/anthropic.ts`), so reach
-for the Anthropic Messages **REST API** doc shape, not an SDK-client doc.
-
-### Cloudflare doc selection (footgun)
-For `worker/src/*` runtime code (`env.AI` Gemma binding, KV `STATUS_CACHE` binding, `scheduled`
-cron handler, `wrangler.toml`) use **`cloudflare/workers-runtime`** (community). Do **NOT** use
-`cloudflare/workers` — that's the REST *management* API (Zones/DNS/script upload), the wrong layer.
-(An annotation already flags this on `cloudflare/workers`.)
-
-### Treat docs as orientation, not ground truth for our edge cases
-chub gives correct API *shape* but not project-specific battle scars. Example verified in the trial:
-the Workers AI doc shows only `res.response`, but `ai-analysis.ts` must also handle the
-OpenAI-compatible `res.choices[0].message.content` / `.reasoning` shape (model-dependent) plus
-`chat_template_kwargs:{enable_thinking:false}` for Gemma. Save such findings with `chub annotate`.
-
-**chub vs LLM Wiki memory**: chub = external API ground-truth (public, shared); the file-based LLM Wiki (`memory/`) = this project's
-decisions/debugging/feedback (private, project-scoped). Complementary, different layers.
-
-### modern-web-guidance + when-to-use-which
-The **`modern-web-guidance`** Claude Code plugin (Google Chrome marketplace) adds Baseline-current
-web-platform skills (a11y / Core Web Vitals / modern HTML/CSS/JS); run its skill **first** on any
-HTML/CSS/client-JS work. Install: `/plugin marketplace add GoogleChrome/modern-web-guidance` +
-`/plugin install modern-web-guidance@googlechrome`. The full trigger map (which of chub vs
-modern-web-guidance to run by file path) and the `tooling-trigger.sh` PreToolUse backstop are in
-**[docs/reference/reference-tooling.md](docs/reference/reference-tooling.md)**.
+Docs give the API *shape*, not our battle scars — those live in
+**[docs/reference/reference-tooling.md](docs/reference/reference-tooling.md)** (Workers AI response
+shape, Anthropic via AI Gateway), alongside the `tooling-trigger.sh` file-path trigger map. Context
+Hub (`chub`) was the prior tool, dropped in #1410: stale registry, whole-file retrieval, weak ranking.
 
 ## Commands
 
@@ -214,7 +185,7 @@ the decision moment instead:
 | `workflow-gates-reminder.sh` | UserPromptSubmit | Re-injects the non-negotiable gates **every turn** (incl. gate 0 = invoke `ship-issue` first). Soft. |
 | `git-mutation-gate.sh` | PreToolUse/Bash | Warns before `git commit`/`push`/`gh pr create`/`merge` — step-3.5, `--no-verify`, docs-drift, methodology-drift (#937), truncated ids (#1053). Soft. |
 | `stop-nag-gate.sh` | Stop | Blocks a closing "shall I proceed / 진행할까요?" and re-prompts. |
-| `tooling-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | Reminds to run chub / modern-web-guidance by file path. Soft. |
+| `tooling-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | Reminds, by file path, to fetch the live upstream (parsers) / current docs (SDK, bindings) / modern-web-guidance (UI). Soft. |
 | `korean-copy-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | On a Korean-copy file (ko.js / methodology·intro templates / LegalContent·AnalysisModal), reminds to run `lint:korean` + re-read the whole card (#1094/#1097). Soft. |
 | `public-issue-figures-trigger.sh` | PreToolUse/Bash | This repo is PUBLIC: absolute adoption numbers (subscriber/browser/install counts, and any value that divides into one) belong in the private `aiwatch-wiki` bundle — a public issue carries the verdict, field name or ratio only (#1354). Fires on the command name, never on the text. Soft. |
 | **`step35-verify-gate.mjs`** | PreToolUse/Bash + Edit\|Write\|MultiEdit | **HARD** — DENIES a UI/Edge `git commit` with no transcript-confirmed user verification, denies `--no-verify`, denies unauthorized self-edits to `.claude/hooks/**` + `.claude/settings*.json`. Fail-closed. The COMMIT deny's override is a user turn saying `검증 생략하고 커밋`; a self-edit deny needs stated intent toward the gate instead (`훅 작업`), which that path checks separately. |
