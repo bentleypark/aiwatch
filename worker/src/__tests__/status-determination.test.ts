@@ -916,7 +916,7 @@ describe('pickBreakdownComponents (#606 Cat B)', () => {
 })
 
 describe('SERVICES multi-component config sanity (#379)', () => {
-  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI', () => {
+  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI + Review Agents', () => {
     const cursor = SERVICES.find((s) => s.id === 'cursor')!
     expect(cursor.statusComponentId).toBe('rflc60xp5jp2') // IDE — primary for uptime parsing
     expect(cursor.statusComponentIds).toEqual([
@@ -924,10 +924,11 @@ describe('SERVICES multi-component config sanity (#379)', () => {
       'mwv1g9sc7kdh', // Cloud Agents
       'k0trcq273dr6', // Automations
       'vsny1qv7v86c', // CLI
+      '2x2chyqwmkzl', // Review Agents (#1420)
     ])
   })
 
-  it('cursor displayComponentIds is a SUPERSET of statusComponentIds — resolveSvcComponents falls back to statusComponentIds only when displayComponentIds is absent entirely, so a display-only addition that omits the badge set would silently drop the four core rows from the breakdown card', () => {
+  it('cursor displayComponentIds is a SUPERSET of statusComponentIds — resolveSvcComponents falls back to statusComponentIds only when displayComponentIds is absent entirely, so a display-only addition that omits the badge set would silently drop the core rows from the breakdown card', () => {
     const cursor = SERVICES.find((s) => s.id === 'cursor')!
     expect(cursor.displayComponentIds, 'cursor').toBeDefined()
     for (const id of cursor.statusComponentIds!) {
