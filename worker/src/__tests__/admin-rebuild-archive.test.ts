@@ -538,6 +538,21 @@ describe('POST /api/admin/rebuild-archive', () => {
     expect((await res.json() as { retryable: boolean }).retryable).toBe(false)
   })
 
+  it('refuses a suppression row that parses but is unusable, so the build never runs without it (#1318)', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      'incident:suppressions': '[{"incId":"inc-1","reason":"lost its scope"}]',
+    })
+
+    const res = await workerModule.fetch(req({ month, force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(500)
+    const body = await res.json() as { retryable: boolean; reason: string; droppedRows: number }
+    expect(body).toMatchObject({ retryable: false, reason: 'unusable-rows', droppedRows: 1 })
+    expect((kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0)
+  })
+
   it('refuses when the suppression list cannot be read, so the build never runs unfiltered', async () => {
     // The build used to re-read this list fail-open: a blip applied NO suppressions while the
     // handler's own read succeeded, so nothing shrank, nothing objected, and `ok: true` came back

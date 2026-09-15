@@ -31,6 +31,7 @@
 // tracked separately (#1019 Part B).
 
 import type { MonthlyIncidents, MonthlyIncidentServiceData } from './monthly-archive'
+import { classifyOperatorList, type OperatorListRead } from './suppression'
 
 /** KV key holding the operator duration-override list (single JSON array, no TTL — permanent). */
 export const OVERRIDES_KEY = 'incident:duration-overrides'
@@ -215,9 +216,7 @@ export async function readOverridesFresh(kv?: KVNamespace): Promise<DurationOver
  *                       JSON that normalizes to nothing.
  *  `unreadable` stays separate from all three because it IS worth retrying. */
 export async function readOverridesFreshResult(kv?: KVNamespace): Promise<
-  | { state: 'ok'; list: DurationOverride[] }
-  | { state: 'unreadable' }
-  | { state: 'malformed'; reason: 'not-json' | 'not-an-array' | 'unusable-rows'; dropped: number }
+  OperatorListRead<DurationOverride> | { state: 'unreadable' }
 > {
   if (!kv) return { state: 'unreadable' }
   let raw: string | null
@@ -226,18 +225,5 @@ export async function readOverridesFreshResult(kv?: KVNamespace): Promise<
   } catch {
     return { state: 'unreadable' }
   }
-  if (raw === null) return { state: 'ok', list: [] }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return { state: 'malformed', reason: 'not-json', dropped: 0 }
-  }
-  // A non-array normalizes to `[]` with `dropped: 0`, which would otherwise be indistinguishable
-  // from a legitimately empty list. The stored shape IS an array (`mutateOverrides` only ever writes
-  // one), so anything else is a hand-edit that lost the whole list.
-  if (!Array.isArray(parsed)) return { state: 'malformed', reason: 'not-an-array', dropped: 0 }
-  const { list, dropped } = normalizeOverridesCounted(parsed)
-  if (dropped > 0) return { state: 'malformed', reason: 'unusable-rows', dropped }
-  return { state: 'ok', list }
+  return classifyOperatorList(raw, normalizeOverridesCounted)
 }
