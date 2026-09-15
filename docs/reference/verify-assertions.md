@@ -289,8 +289,11 @@ node scripts/verify-assertions.mjs --issue N [--repo owner/repo] [--apply]
 ```
 
 Default is dry-run: fetch the issue, pair `verify-after`↔`assert`, evaluate live, print PASS/FAIL/SKIP.
-`--apply` (trusted-author-gated) ticks the passing box(es) + comments + drops `verify-blocked` when
-all resolved. Use it to validate a freshly-authored `assert:` line before the daily job runs.
+`--apply` (trusted-author-gated) ticks the passing box(es) + comments, and drops `verify-blocked`
+under the same rule as the daily job above — only once NO unchecked `verify-after` of any kind
+remains. It decides that by calling `planIssueAutoVerify`, not by re-deriving it: until #1408 this
+path held a second copy that counted only the ASSERTED lines, so a `durable:`-only line did not
+hold the label. Use it to validate a freshly-authored `assert:` line before the daily job runs.
 
 ## Security notes (do not regress)
 

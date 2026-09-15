@@ -540,42 +540,52 @@ async function main() {
   }
 
   console.log(`#${number} ${issue.title}\n${apply ? '(apply)' : '(dry-run)'} — ${items.length} assertion(s):`)
-  let newBody = issue.body
   const statuses = []
+  const evaluated = []
   for (const it of items) {
     const r = await runAssertion(it.assertion)
     statuses.push(r.status)
+    evaluated.push({ lineIndex: it.lineIndex, status: r.status })
     const mark = r.status === 'pass' ? '✅ PASS' : r.status === 'fail' ? '❌ FAIL' : '⚠️  SKIP'
     console.log(`  ${mark}  ${it.assertion.selector} ${it.assertion.op} ${it.assertion.expected ?? ''}`)
     console.log(`         → actual=${truncate(JSON.stringify(r.actual))} ${r.error ? `(${r.error})` : `[${r.url}]`}`)
-    if (r.status === 'pass') newBody = tickBox(newBody, it.lineIndex)
   }
-  const anyPass = statuses.includes('pass')
-  const allResolved = statuses.every((s) => s === 'pass') // #873 review #3: keep the label while any item is unresolved
+  // #1408 — the tick AND the label decision come from `planIssueAutoVerify`, the same function the
+  // daily job calls (`verify-reminders.mjs`). This path used to re-implement both, and the second copy
+  // decided label removal from `statuses.every(pass)` — built from the ASSERTED lines alone. A
+  // `verify-after` carrying only a `durable:` marker (the #1206 human-ping shape) is not in that set,
+  // so the label was dropped while a dated check was still pending; hit on #1349. `dropLabel` asks
+  // `countOpenVerifyAfter(newBody) === 0` instead, which sees every open line whether asserted or not.
+  // Keep this path calling the shared planner: the tests are on the planner, so a second copy here is
+  // untested by construction.
+  const { newBody, passCount, dropLabel } = planIssueAutoVerify(issue.body, evaluated)
+  const anyPass = passCount > 0
 
   if (!apply) { console.log('\n--dry-run: no mutations. Re-run with --apply to tick + comment + drop label.'); return }
-  if (!anyPass) { console.log('\nNo passing assertions — nothing applied (reminder stays live).'); return }
+  // `anyPass` is REAL ticks, not passing assertions: a pass on a prose (non-`- [ ]`) verify-after
+  // line ticks nothing. Report that cause rather than claiming no assertion passed (#1408).
+  if (!anyPass) { console.log('\nNothing to tick — no passing assertion sits on an open box (reminder stays live).'); return }
 
-  // Tick the passing box(es) always; only DROP verify-blocked when EVERY item is resolved (a mixed
-  // pass/fail/skip issue is still blocked on the unresolved item — dropping the label would hide it).
+  // Tick the passing box(es) always; DROP verify-blocked only when NO unchecked `verify-after` of any
+  // kind remains — an unresolved assertion OR a human-decidable line still blocks it (#1408).
   const editArgs = ['issue', 'edit', number, '--body', newBody]
   if (repo) editArgs.push('--repo', repo)
   gh(editArgs)
   // Label removal is a SEPARATE best-effort call (#873 review #3): a `--remove-label` on a label that
   // isn't present fails the whole `edit`, which would drop the body tick too. Keep them independent.
-  if (allResolved) {
+  if (dropLabel) {
     const labelArgs = ['issue', 'edit', number, '--remove-label', 'verify-blocked']
     if (repo) labelArgs.push('--repo', repo)
     try { gh(labelArgs) } catch { /* label absent / already removed — the tick already landed */ }
   }
-  const note = allResolved
+  const note = dropLabel
     ? 'Ticked the box(es) + dropped `verify-blocked`.'
     : 'Ticked the passing box(es); kept `verify-blocked` — other item(s) not yet verified.'
   const commentArgs = ['issue', 'comment', number, '--body',
     `✅ Auto-verified ${todayUTC()} — production signal now satisfies ${statuses.filter((s) => s === 'pass').length}/${statuses.length} verify-after assertion(s). ${note} (#873 Tier-A)`]
   if (repo) commentArgs.push('--repo', repo)
   gh(commentArgs)
-  console.log(`\napplied: ticked ${statuses.filter((s) => s === 'pass').length} box(es) + commented${allResolved ? ' + removed verify-blocked' : ' (label kept — unresolved items remain)'}.`)
+  console.log(`\napplied: ticked ${passCount} box(es) + commented${dropLabel ? ' + removed verify-blocked' : ' (label kept — unresolved items remain)'}.`)
 }
 
 function todayUTC() {

@@ -597,3 +597,30 @@ test('pairVerifyAssertions — the sub-block ends at the ITEM boundary, not at t
   assert.equal(bad.assertion, null, 'a broken clause is still not an assertion')
   assert.equal(bad.durable, 'x', 'but it no longer strands the durable: below it')
 })
+
+test('planIssueAutoVerify — an un-asserted verify-after HOLDS verify-blocked (#1408)', () => {
+  // The shape that broke on #1349: two Tier-A `assert:` lines, both passing, plus a human-decidable
+  // line carrying only a `durable:` marker. The CLI decided label removal from `statuses.every(pass)`
+  // — built from the ASSERTED lines alone — so the durable-only line was invisible and the label was
+  // dropped while a dated check was still pending. `countOpenVerifyAfter` sees it; that is the rule.
+  const body = [
+    '- [ ] **verify-after 2026-09-22** — machine check A',
+    '      assert: GET /api/status/cached | services[id=xai].status == "operational"',
+    '- [ ] **verify-after 2026-09-22** — machine check B',
+    '      assert: GET /api/status/cached | services[id=grok].status == "operational"',
+    '- [ ] **verify-after 2026-10-05** — a human check, no assert possible',
+    '      durable: archive:monthly:2026-09 (no TTL)',
+  ].join('\n')
+  const plan = planIssueAutoVerify(body, [{ lineIndex: 0, status: 'pass' }, { lineIndex: 2, status: 'pass' }])
+  assert.equal(plan.passCount, 2, 'both asserted boxes tick')
+  assert.equal(countOpenVerifyAfter(plan.newBody), 1, 'the durable-only line is still open')
+  assert.equal(plan.dropLabel, false, 'verify-blocked must survive while ANY verify-after is unchecked')
+  assert.equal(plan.close, false)
+  // `dropLabel` is gated on `ticked.length > 0` as well: with nothing left to tick it stays false
+  // even once every verify-after line is closed. Pinned here because this is the only test that
+  // catches removal of that gate.
+  const done = planIssueAutoVerify(plan.newBody.replace('- [ ] **verify-after 2026-10-05**', '- [x] **verify-after 2026-10-05**'), [{ lineIndex: 0, status: 'pass' }])
+  assert.equal(countOpenVerifyAfter(done.newBody), 0, 'no verify-after line is left open')
+  assert.equal(done.passCount, 0, 'an already-ticked box is not re-ticked')
+  assert.equal(done.dropLabel, false, 'so the planner cannot drop the label on a re-run — hand removal')
+})
