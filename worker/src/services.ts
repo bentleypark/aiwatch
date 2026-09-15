@@ -292,7 +292,23 @@ export const SERVICES: ServiceConfig[] = [
   // is what this migration needs handled — the same outage arrives under a new `datadog:` id while
   // AIWatch's accumulator still holds it under the old one, and a resolved row is never phantom-pruned
   // (monthly-archive.ts). That is a one-off post-deploy `POST /api/admin/suppress`, not code.
-  { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, datadogStatusUrl: 'https://status.openrouter.ai' },
+  // Badge + uptime scope = the six `API - Gateway` leaves. The page's seventh leaf, `Web &
+  // Application Services` (2347916e-…), is openrouter.ai's site and dashboard, not an API endpoint:
+  // unscoped it answered "yes" on /is-openrouter-down for a website outage while inference was
+  // fine, and its 15h28m degradation on 2026-08-28 — one the provider's own notice ends with
+  // "Inference is unaffected" — was the whole of the published uptime deficit. Same treatment
+  // cohere/groq/together/cerebras give `Website` via componentDenylist and mistral gives `le chat`
+  // + `console` via incidentExclude. It still appears in the incident list; it just does not move
+  // the API's badge or its percentage.
+  { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, datadogStatusUrl: 'https://status.openrouter.ai',
+    datadogComponentIds: [
+      '9fb5ccff-e128-455a-be20-59572f8d363a', // Chat (/api/v1/chat/completions)
+      'bb2402ad-3e98-4c75-9eb5-ca68ca683c5a', // Video (/api/v1/videos)
+      'b108f556-36a0-43b5-aa55-a01b27855229', // Image (/api/v1/image)
+      '15c7d7e9-e2b7-43dd-aa56-77c4959fc603', // TTS (/api/v1/audio/speech)
+      '93008741-4362-4fb6-85c4-6cddb8412116', // STT (/api/v1/audio/transcriptions)
+      'c3a7fba9-9cbc-40a4-ae83-d990bc01d51d', // Embeddings (/api/v1/embeddings)
+    ] },
   // Voice & Speech AI
   // displayComponentIds (#606): curated availability surfaces for the breakdown card —
   // TTS, STT, Conversations, RAG, Telephony, Other API endpoints, + ElevenCreative (excludes UI/Quality/Other).
@@ -2209,7 +2225,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
       }
-      const parsed = parseDatadogStatusPage(safeJsonParse(configText))
+      const parsed = parseDatadogStatusPage(safeJsonParse(configText), config.datadogComponentIds ?? [])
       if (!parsed.ok) {
         console.warn(`[fetchService] ${config.id} Datadog config.json unreadable (${parsed.reason}) content-type=${configRes.headers.get('content-type') ?? 'none'} body[0..120]=${JSON.stringify(configText.slice(0, 120))}`)
         await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
@@ -2224,8 +2240,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         incidents: parsed.page.incidents,
         // #1006 — the PROVIDER's own published records, computed by us over a trailing 30 days with
         // the /methodology weights. Not a copy of a figure on their page: they publish none.
-        uptime30d: parsed.page.uptime30d,
-        uptimeSource: 'official' as const,
+        // #713 — a page whose records establish no window publishes NO uptime, and therefore no
+        // `uptimeSource` either: the label would claim a provenance for a figure that is absent.
+        ...(parsed.page.uptime30d != null
+          ? { uptime30d: parsed.page.uptime30d, uptimeSource: 'official' as const }
+          : {}),
         // #1004 — a page whose records reach back less than 30 days says so, instead of passing a
         // short window off as a full one.
         ...(parsed.page.uptimeWindowDays != null ? { uptimeWindowDays: parsed.page.uptimeWindowDays } : {}),

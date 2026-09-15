@@ -16,6 +16,16 @@ const NOW = Date.parse('2026-09-15T00:00:00.000Z')
 
 const CHAT = '9fb5ccff-e128-455a-be20-59572f8d363a'
 const VIDEO = 'bb2402ad-3e98-4c75-9eb5-ca68ca683c5a'
+/** openrouter's configured badge+uptime scope: the six `API - Gateway` leaves. The page's seventh
+ *  leaf, `Web & Application Services`, is deliberately outside it. */
+const API_SCOPE = [
+  CHAT, VIDEO,
+  'b108f556-36a0-43b5-aa55-a01b27855229', // Image
+  '15c7d7e9-e2b7-43dd-aa56-77c4959fc603', // TTS
+  '93008741-4362-4fb6-85c4-6cddb8412116', // STT
+  'c3a7fba9-9cbc-40a4-ae83-d990bc01d51d', // Embeddings
+]
+const WEB = '2347916e-1f82-448c-b07d-8cfbbad57322'
 
 /** A minimal document in the platform's real shape — one group with one leaf, plus one incident. */
 function doc(overrides: Record<string, unknown> = {}) {
@@ -54,7 +64,7 @@ function incident(start: string, end: string | null, status = 'degraded', id = '
 
 describe('#1403 Datadog Status Page parser — the real captured document', () => {
   it('reads the component tree, the incidents, and computes uptime from their timelines', () => {
-    const parsed = parseDatadogStatusPage(FIXTURE, NOW)
+    const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, NOW)
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
 
@@ -65,14 +75,16 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     // Newest first.
     expect(parsed.page.incidents[0].title).toBe('Degraded video generation API')
 
-    // The WORST component, not a pool: `Web & Application Services` carries 15h28m of `degraded`
-    // (16,704 weighted seconds over 2,592,000). Chat's 4m and Video's 2h45m sit on other components
-    // and do not add to it — the page renders a percentage per component and no page-level figure.
-    expect(parsed.page.uptime30d).toBe(99.35)
+    // The WORST component IN SCOPE, not a pool: Video's 2h45m of `degraded` (2,970 weighted seconds
+    // over 2,592,000). Chat's 4m sits on another component and does not add to it — the page renders
+    // a percentage per component and no page-level figure. `Web & Application Services` carries the
+    // page's largest window, 15h28m, and is deliberately OUT of scope: it is openrouter.ai's site,
+    // not an API endpoint. Unscoped it would publish 99.35 as the API's uptime.
+    expect(parsed.page.uptime30d).toBe(99.88)
   })
 
   it('#1006 — reproduces the % the provider shows its own visitors, for the reader to check us against', () => {
-    const parsed = parseDatadogStatusPage(FIXTURE, NOW)
+    const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, NOW)
     if (!parsed.ok) throw new Error('fixture must parse')
 
     // Verified against the LIVE page on 2026-09-15: every component rendered "100.00% uptime" over
@@ -82,9 +94,9 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
 
     // And the gap to OUR figure is the WEIGHTING, not the window: the provider ignores `degraded`
     // entirely and every in-window incident is degraded, so recomputing the provider's rule onto 30
-    // days is still 100.00. Publishing 99.35 with no provider number beside it would leave a reader
-    // unable to tell a real 0.65% of downtime from a difference of definition.
-    expect(parsed.page.uptime30d).toBe(99.35)
+    // days is still 100.00. Publishing 99.88 with no provider number beside it would leave a reader
+    // unable to tell a real 0.12% of downtime from a difference of definition.
+    expect(parsed.page.uptime30d).toBe(99.88)
   })
 
   it('separates the two reasons the figures differ — the window and the severity rule', () => {
@@ -93,7 +105,7 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     const byWindow = parseDatadogStatusPage(doc({
       created: '2026-01-01T00:00:00Z',
       incidents: [incident('2026-09-10T01:00:00Z', '2026-09-10T02:00:00Z', 'major_outage')],
-    }), NOW)
+    }), [CHAT], NOW)
     if (!byWindow.ok) throw new Error('must parse')
     expect(byWindow.page.uptime30d).toBe(99.86)
     expect(byWindow.page.reported).toEqual({ pct: 99.95, days: 90 })
@@ -107,7 +119,7 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     const parsed = parseDatadogStatusPage(doc({
       created: '2026-09-11T00:00:00Z',
       incidents: [incident('2026-09-12T01:00:00Z', '2026-09-12T02:00:00Z', 'degraded')],
-    }), NOW)
+    }), [CHAT], NOW)
     if (!parsed.ok) throw new Error('must parse')
     expect(parsed.page.uptimeWindowDays).toBe(4)
     // 1h of `degraded` over 4 days: 1,080 weighted seconds of 345,600 for us, and zero for the
@@ -117,7 +129,7 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
   })
 
   it('emits no window disclosure when the records cover the full 30 days', () => {
-    const parsed = parseDatadogStatusPage(FIXTURE, NOW)
+    const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, NOW)
     if (!parsed.ok) throw new Error('fixture must parse')
     expect(parsed.page.uptimeWindowDays).toBeNull()
   })
@@ -127,14 +139,14 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
     const clean = parseDatadogStatusPage(doc({
       created: '2026-01-01T00:00:00Z',
       incidents: [incident('2026-02-01T01:00:00Z', '2026-02-01T02:00:00Z', 'major_outage')],
-    }), NOW)
+    }), [CHAT], NOW)
     if (!clean.ok) throw new Error('must parse')
     expect(clean.page.uptime30d).toBe(100)
     expect(clean.page.reported).toBeNull()
   })
 
   it('takes severity from the TIMELINE, not from the incident-level componentsAffected', () => {
-    const parsed = parseDatadogStatusPage(FIXTURE, NOW)
+    const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, NOW)
     if (!parsed.ok) throw new Error('fixture must parse')
     const video = parsed.page.incidents.find((i) => i.id.endsWith('2a3d415a-1eed-417f-b269-6e308a7f7990'))!
 
@@ -149,7 +161,7 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
   })
 
   it('maps the resolved record onto the display shape', () => {
-    const parsed = parseDatadogStatusPage(FIXTURE, NOW)
+    const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, NOW)
     if (!parsed.ok) throw new Error('fixture must parse')
     const video = parsed.page.incidents[0]
     expect(video).toMatchObject({
@@ -165,7 +177,7 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
   })
 
   it('#1017 — todayWeightedOutageSec covers the UTC day only, over the same intervals', () => {
-    const parsed = parseDatadogStatusPage(FIXTURE, Date.parse('2026-09-04T22:00:00.000Z'))
+    const parsed = parseDatadogStatusPage(FIXTURE, API_SCOPE, Date.parse('2026-09-04T22:00:00.000Z'))
     if (!parsed.ok) throw new Error('fixture must parse')
     // The 2h45m video incident, that same UTC day, at weight 0.3.
     expect(parsed.page.todayWeightedOutageSec).toBe(2970)
@@ -181,13 +193,13 @@ describe('#1403 Datadog Status Page parser — the real captured document', () =
         componentsAffected: [{ id: CHAT, name: 'Chat', status: 'maintenance', type: 'Component' }],
         timeline: [{ id: 'mt', status: 'completed', description: 'Done', startedAt: '2026-09-10T01:00:00Z', createdAt: '2026-09-10T01:00:00Z', componentsAffected: [{ id: CHAT, name: 'Chat', status: 'maintenance', type: 'Component' }] }],
       }],
-    }, NOW)
+    }, API_SCOPE, NOW)
     if (!withWindows.ok) throw new Error('must parse')
     // `maintenances` is a SEPARATE top-level array here, so the #894/#896 "maintenance reuses the
     // incident keys" class the previous OpenRouter parser was bitten by twice has no path in.
     expect(withWindows.page.incidents).toHaveLength(4)
     expect(withWindows.page.incidents.some((i) => /Maintenance/i.test(i.title))).toBe(false)
-    expect(withWindows.page.uptime30d).toBe(99.35)
+    expect(withWindows.page.uptime30d).toBe(99.88)
   })
 })
 
@@ -203,7 +215,7 @@ describe('#1403 Datadog parser — an unreadable document must never read as a c
         timeline: (i.timeline as Array<Record<string, unknown>>).map(({ componentsAffected, ...rest }) => rest),
       })),
     }
-    expect(parseDatadogStatusPage(stripped, NOW)).toEqual({ ok: false, reason: 'dd-incident-unreadable' })
+    expect(parseDatadogStatusPage(stripped, API_SCOPE, NOW)).toEqual({ ok: false, reason: 'dd-incident-unreadable' })
   })
 
   it('keeps an incident whose timeline says every component stayed operational', () => {
@@ -211,7 +223,7 @@ describe('#1403 Datadog parser — an unreadable document must never read as a c
     // weight: a notice that degraded nothing is a real, legitimate zero and must still be listed.
     const parsed = parseDatadogStatusPage(doc({
       incidents: [incident('2026-09-10T01:00:00Z', '2026-09-10T02:00:00Z', 'operational')],
-    }), NOW)
+    }), [CHAT], NOW)
     if (!parsed.ok) throw new Error('must parse')
     expect(parsed.page.incidents).toHaveLength(1)
     expect(parsed.page.incidents[0].impact).toBeNull()
@@ -230,7 +242,7 @@ describe('#1403 Datadog parser — an unreadable document must never read as a c
         timeline: (i.timeline as Array<Record<string, unknown>>).map(({ startedAt, ...rest }) => rest),
       })),
     }
-    expect(parseDatadogStatusPage(stripped, NOW)).toEqual({ ok: false, reason: 'dd-incident-unreadable' })
+    expect(parseDatadogStatusPage(stripped, API_SCOPE, NOW)).toEqual({ ok: false, reason: 'dd-incident-unreadable' })
   })
 
   it('refuses a record whose `resolved` is not a boolean', () => {
@@ -240,39 +252,39 @@ describe('#1403 Datadog parser — an unreadable document must never read as a c
       ...FIXTURE,
       incidents: FIXTURE.incidents.map(({ resolved, ...rest }: Record<string, unknown>) => rest),
     }
-    expect(parseDatadogStatusPage(renamed, NOW)).toEqual({ ok: false, reason: 'dd-incident-unreadable' })
+    expect(parseDatadogStatusPage(renamed, API_SCOPE, NOW)).toEqual({ ok: false, reason: 'dd-incident-unreadable' })
   })
 
   it('refuses a component status word it does not know', () => {
     const parsed = parseDatadogStatusPage(doc({
       components: [{ id: CHAT, name: 'Chat', position: 0, status: 'brown_out', type: 'Component' }],
-    }), NOW)
+    }), [CHAT], NOW)
     expect(parsed).toEqual({ ok: false, reason: 'dd-component-status-unreadable' })
   })
 
   it('refuses an unknown status word inside an incident timeline', () => {
     const parsed = parseDatadogStatusPage(doc({
       incidents: [incident('2026-09-10T01:00:00Z', '2026-09-10T02:00:00Z', 'brown_out')],
-    }), NOW)
+    }), [CHAT], NOW)
     expect(parsed).toEqual({ ok: false, reason: 'dd-incident-unreadable' })
   })
 
   it('refuses a component tree that yields no leaf component', () => {
     // What a wholesale redesign looks like. Reading it as "nothing is wrong" would publish
     // `operational` plus a spotless uptime off a document we did not parse.
-    expect(parseDatadogStatusPage(doc({ components: [] }), NOW))
+    expect(parseDatadogStatusPage(doc({ components: [] }), [CHAT], NOW))
       .toEqual({ ok: false, reason: 'dd-components-unreadable' })
     expect(parseDatadogStatusPage(doc({
       components: [{ id: 'g', name: 'G', type: 'ComponentGroup', components: [] }],
-    }), NOW)).toEqual({ ok: false, reason: 'dd-components-unreadable' })
+    }), [CHAT], NOW)).toEqual({ ok: false, reason: 'dd-components-unreadable' })
   })
 
   it('refuses a document whose `incidents` is not an array', () => {
     for (const incidents of [undefined, null, {}, 'none']) {
-      expect(parseDatadogStatusPage(doc({ incidents }), NOW))
+      expect(parseDatadogStatusPage(doc({ incidents }), [CHAT], NOW))
         .toEqual({ ok: false, reason: 'dd-envelope-unreadable' })
     }
-    expect(parseDatadogStatusPage('<!DOCTYPE html>', NOW))
+    expect(parseDatadogStatusPage('<!DOCTYPE html>', API_SCOPE, NOW))
       .toEqual({ ok: false, reason: 'dd-envelope-unreadable' })
   })
 
@@ -280,7 +292,7 @@ describe('#1403 Datadog parser — an unreadable document must never read as a c
     // Neither reading is safe: "open" accrues downtime to now, "instant" accrues none.
     const broken = incident('2026-09-10T01:00:00Z', '2026-09-10T02:00:00Z')
     broken.resolvedDate = 'pending'
-    expect(parseDatadogStatusPage(doc({ incidents: [broken] }), NOW))
+    expect(parseDatadogStatusPage(doc({ incidents: [broken] }), [CHAT], NOW))
       .toEqual({ ok: false, reason: 'dd-incident-unreadable' })
   })
 })
@@ -295,7 +307,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
       ],
     }]
     const statusOf = (s: string) => {
-      const parsed = parseDatadogStatusPage(doc({ components: tree(s) }), NOW)
+      const parsed = parseDatadogStatusPage(doc({ components: tree(s) }), [CHAT, VIDEO], NOW)
       if (!parsed.ok) throw new Error(`must parse: ${s}`)
       return parsed.page.status
     }
@@ -312,7 +324,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     const now = Date.parse('2026-09-15T02:00:00.000Z')
     const parsed = parseDatadogStatusPage(doc({
       incidents: [incident('2026-09-15T00:00:00Z', null, 'major_outage')],
-    }), now)
+    }), [CHAT], now)
     if (!parsed.ok) throw new Error('must parse')
     expect(parsed.page.incidents[0].status).toBe('investigating')
     expect(parsed.page.incidents[0].resolvedAt).toBeNull()
@@ -332,7 +344,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
           { id: 'b', status: 'identified', description: null, startedAt: '2026-09-15T02:00:00Z', createdAt: '2026-09-15T02:00:00Z', componentsAffected: [{ id: CHAT, name: 'Chat', status: 'major_outage', type: 'Component' }] },
         ],
       }],
-    }), Date.parse('2026-09-15T03:00:00.000Z'))
+    }), [CHAT], Date.parse('2026-09-15T03:00:00.000Z'))
     if (!parsed.ok) throw new Error('must parse')
     // 2h degraded (0.3) + 1h full outage (1.0) = 2160 + 3600. Charging the whole 3h at the worst
     // weight would read 10800; summing the two overlapping readings would read more still.
@@ -355,7 +367,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
           { id: 'b', status: 'monitoring', description: null, startedAt: '2026-09-15T02:00:00Z', createdAt: '2026-09-15T02:00:00Z', componentsAffected: [{ id: CHAT, name: 'Chat', status: 'degraded', type: 'Component' }] },
         ],
       }],
-    }), Date.parse('2026-09-15T03:00:00.000Z'))
+    }), [CHAT], Date.parse('2026-09-15T03:00:00.000Z'))
     if (!parsed.ok) throw new Error('must parse')
     // 2h at 1.0 + 1h at 0.3 = 8280. Flattening the segments would read 10800.
     expect(parsed.page.todayWeightedOutageSec).toBe(8280)
@@ -365,13 +377,17 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
     // Announced maintenance is not downtime (`impact-weights.ts`), so counting it would penalise a
     // provider for announcing its windows. The entry is still a published record and stays listed.
     const parsed = parseDatadogStatusPage(doc({
+      created: '2026-01-01T00:00:00Z',
       incidents: [incident('2026-09-15T00:00:00Z', '2026-09-15T02:00:00Z', 'maintenance')],
-    }), Date.parse('2026-09-15T03:00:00.000Z'))
+    }), [CHAT], Date.parse('2026-09-15T03:00:00.000Z'))
     if (!parsed.ok) throw new Error('must parse')
     expect(parsed.page.incidents).toHaveLength(1)
     expect(parsed.page.incidents[0].impact).toBeNull()
     expect(parsed.page.todayWeightedOutageSec).toBe(0)
     expect(parsed.page.uptime30d).toBe(100)
+    // …and the PROVIDER's table scores it zero too, so the reproduction agrees and is suppressed.
+    // Without a window established above, this assertion never reached that table at all.
+    expect(parsed.page.reported).toBeNull()
   })
 
   it('does not let a component-less update end a live outage', () => {
@@ -390,10 +406,10 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
         ],
       }],
     })
-    const bare = parseDatadogStatusPage(live([]), now)
+    const bare = parseDatadogStatusPage(live([]), [CHAT], now)
     const noted = parseDatadogStatusPage(live([
       { id: 'b', status: 'identified', description: 'still working on it', startedAt: '2026-09-15T01:00:00Z', createdAt: '2026-09-15T01:00:00Z', componentsAffected: [] },
-    ]), now)
+    ]), [CHAT], now)
     if (!bare.ok || !noted.ok) throw new Error('must parse')
     expect(bare.page.todayWeightedOutageSec).toBe(7200)
     expect(noted.page.todayWeightedOutageSec).toBe(7200)
@@ -413,7 +429,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
           { id: 'b', status: 'resolved', description: 'postmortem', startedAt: '2026-09-15T09:00:00Z', createdAt: '2026-09-15T09:00:00Z', componentsAffected: [{ id: CHAT, name: 'Chat', status: 'operational', type: 'Component' }] },
         ],
       }],
-    }), Date.parse('2026-09-15T12:00:00.000Z'))
+    }), [CHAT], Date.parse('2026-09-15T12:00:00.000Z'))
     if (!parsed.ok) throw new Error('must parse')
     expect(parsed.page.incidents[0].duration).toBe('1h 0m')
     expect(parsed.page.todayWeightedOutageSec).toBe(3600)
@@ -428,7 +444,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
       const parsed = parseDatadogStatusPage(doc({
         created: '2026-01-01T00:00:00Z',
         incidents: [incident('2026-09-10T00:00:00Z', '2026-09-10T12:00:00Z', status)],
-      }), NOW)
+      }), [CHAT], NOW)
       if (!parsed.ok) throw new Error(`must parse: ${status}`)
       return { ours: parsed.page.uptime30d, theirs: parsed.page.reported?.pct ?? parsed.page.uptime30d }
     }
@@ -458,31 +474,168 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
         }],
       }],
     })
-    const a = parseDatadogStatusPage(withOrder(['degraded', 'partial_outage']), NOW)
-    const b = parseDatadogStatusPage(withOrder(['partial_outage', 'degraded']), NOW)
+    const a = parseDatadogStatusPage(withOrder(['degraded', 'partial_outage']), ['c0', 'c1'], NOW)
+    const b = parseDatadogStatusPage(withOrder(['partial_outage', 'degraded']), ['c0', 'c1'], NOW)
     if (!a.ok || !b.ok) throw new Error('must parse')
     expect(a.page.uptime30d).toBe(b.page.uptime30d)
     expect(a.page.reported).toEqual(b.page.reported)
   })
 
-  it('keeps downtime for a component the tree no longer lists', () => {
-    // A retired component keeps its incident history. Bucketing segments by leaf id and dropping the
-    // rest would delete real published downtime — the one direction this parser must never fail in.
+  it('keeps a non-API component out of the badge and the uptime, but not out of the incident list', () => {
+    // `Web & Application Services` is openrouter.ai's site and dashboard. Unscoped it answered "yes"
+    // on /is-openrouter-down while inference was fine, and its 15h28m degradation on 2026-08-28 —
+    // a notice the provider ends with "Inference is unaffected" — was the whole published deficit.
+    // The #1006 invariant is that badge and uptime run on the SAME configured scope.
+    const webDown = JSON.parse(JSON.stringify(FIXTURE))
+    webDown.components[1].status = 'major_outage'
+    const parsed = parseDatadogStatusPage(webDown, API_SCOPE, NOW)
+    if (!parsed.ok) throw new Error('must parse')
+    expect(parsed.page.status).toBe('operational')
+    expect(parsed.page.uptime30d).toBe(99.88)
+    // …and the provider's own record for it is still published.
+    expect(parsed.page.incidents.some((i) => i.componentIds?.includes(WEB))).toBe(true)
+  })
+
+  it('refuses when a configured component is no longer on the page', () => {
+    // Silently narrowing the scope publishes a too-optimistic figure with no signal that it covers
+    // less than it claims. `cloudflare-status.ts` makes the same call on the same shape.
+    const missing = JSON.parse(JSON.stringify(FIXTURE))
+    missing.components[0].components = missing.components[0].components.slice(0, 5)
+    expect(parseDatadogStatusPage(missing, API_SCOPE, NOW))
+      .toEqual({ ok: false, reason: 'dd-component-missing' })
+  })
+
+  it('takes the WORST verdict when a down and a degraded component coexist', () => {
+    // Varying one component against an all-operational tree never exercises the precedence, so
+    // swapping the `down`/`degraded` checks survived the suite: a page with one `major_outage` leaf
+    // beside a `degraded` one published `degraded`, which answers "no" on /is-openrouter-down, fires
+    // no status-edge alert and pulls no fallbacks. This page has seven leaves — that is its shape.
+    const parsed = parseDatadogStatusPage(doc({
+      components: [{
+        id: 'g', name: 'API - Gateway', type: 'ComponentGroup',
+        components: [
+          { id: 'a', name: 'A', status: 'degraded', type: 'Component' },
+          { id: 'b', name: 'B', status: 'major_outage', type: 'Component' },
+        ],
+      }],
+    }), ['a', 'b'], NOW)
+    if (!parsed.ok) throw new Error('must parse')
+    expect(parsed.page.status).toBe('down')
+  })
+
+  it('reduces BOTH percentages to the worst component, and today\'s seconds to the worst DAY', () => {
+    // Two components down on the SAME UTC day, with different severities. The fixture cannot
+    // discriminate these reducers — its three incidents are all `degraded` and all on different
+    // days — so `Math.max` for `Math.min` (on the provider figure) and `sum` for `Math.max` (on
+    // today's seconds) both survived the whole suite.
+    const affected = (id: string, status: string) => [{ id, name: id, status, type: 'Component' }]
+    const inc = (id: string, status: string, hours: number) => ({
+      id, title: id, currentStatus: 'resolved',
+      publishedDate: '2026-09-15T00:00:00Z', resolvedDate: `2026-09-15T0${hours}:00:00Z`, resolved: true,
+      componentsAffected: affected(id, 'operational'),
+      timeline: [
+        { id: `${id}-a`, status: 'investigating', description: null, startedAt: '2026-09-15T00:00:00Z', createdAt: 'x', componentsAffected: affected(id, status) },
+        { id: `${id}-b`, status: 'resolved', description: null, startedAt: `2026-09-15T0${hours}:00:00Z`, createdAt: 'x', componentsAffected: affected(id, 'operational') },
+      ],
+    })
+    const parsed = parseDatadogStatusPage(doc({
+      created: '2026-01-01T00:00:00Z',
+      components: [
+        { id: 'light', name: 'light', status: 'operational', type: 'Component' },
+        { id: 'heavy', name: 'heavy', status: 'operational', type: 'Component' },
+      ],
+      // `light`: 1h degraded → 0.3 for us, 0 for the provider.
+      // `heavy`: 4h partial_outage → 0.3 for us, 1.0 for the provider.
+      incidents: [inc('light', 'degraded', 1), inc('heavy', 'partial_outage', 4)],
+    }), ['light', 'heavy'], Date.parse('2026-09-15T08:00:00.000Z'))
+    if (!parsed.ok) throw new Error('must parse')
+    // `partial_outage` must label the incident `minor`, not `major` — the cell drives the Score's
+    // Incidents component and the calendar colour, and it is the one `STATUS_IMPACT` row the fixture
+    // (all `degraded`) cannot reach.
+    expect(parsed.page.incidents.find((i) => i.id === 'datadog:heavy')?.impact).toBe('minor')
+    expect(parsed.page.incidents.find((i) => i.id === 'datadog:light')?.impact).toBe('minor')
+    // Ours: the worst single component is `heavy`, 4h at 0.3 = 4,320s of 2,592,000 → 99.83.
+    // Pooling the two would read 99.79; taking the best would read 99.95.
+    expect(parsed.page.uptime30d).toBe(99.83)
+    // Theirs: `heavy` alone counts, 4h at 1.0 over 90d = 14,400s of 7,776,000 → 99.81. `Math.max`
+    // would publish `light`'s untouched 100.
+    expect(parsed.page.reported).toEqual({ pct: 99.81, days: 90 })
+    // Today: the WORST component's day, not the sum. 4h at 0.3 = 4,320. Summing reads 5,400.
+    expect(parsed.page.todayWeightedOutageSec).toBe(4320)
+  })
+
+  it('reads a mid-timeline recovery and re-degradation as two windows, not one', () => {
+    // Every multi-update incident in the suite names its components exactly twice, so "the next
+    // update naming this component" and "the last one" coincide — taking the last survived. A
+    // partial recovery followed by re-degradation is the discriminating shape, and it is also what
+    // a real update stream looks like.
+    const at = (h: string, status: string) => ({
+      id: `u${h}`, status: 'identified', description: null,
+      startedAt: `2026-09-15T${h}:00:00Z`, createdAt: 'x',
+      componentsAffected: [{ id: CHAT, name: 'Chat', status, type: 'Component' }],
+    })
     const parsed = parseDatadogStatusPage(doc({
       created: '2026-01-01T00:00:00Z',
       incidents: [{
-        id: 'gone', title: 'Retired component', currentStatus: 'resolved',
-        publishedDate: '2026-09-10T00:00:00Z', resolvedDate: '2026-09-10T10:00:00Z', resolved: true,
-        componentsAffected: [],
-        timeline: [{
-          id: 'a', status: 'investigating', description: null,
-          startedAt: '2026-09-10T00:00:00Z', createdAt: '2026-09-10T00:00:00Z',
-          componentsAffected: [{ id: 'retired-id', name: 'Gone', status: 'major_outage', type: 'Component' }],
-        }],
+        id: 'flap', title: 'Flapping', currentStatus: 'resolved',
+        publishedDate: '2026-09-15T00:00:00Z', resolvedDate: '2026-09-15T04:00:00Z', resolved: true,
+        componentsAffected: [{ id: CHAT, name: 'Chat', status: 'operational', type: 'Component' }],
+        timeline: [
+          at('00', 'major_outage'), at('01', 'operational'), at('02', 'major_outage'), at('04', 'operational'),
+        ],
       }],
-    }), NOW)
+    }), [CHAT], Date.parse('2026-09-15T06:00:00.000Z'))
     if (!parsed.ok) throw new Error('must parse')
-    expect(parsed.page.uptime30d).toBeLessThan(100)
+    // 00-01 and 02-04 are outages; 01-02 is a real recovery. 3h at 1.0 = 10,800s. Running the first
+    // segment to the LAST naming update would charge all four hours.
+    expect(parsed.page.todayWeightedOutageSec).toBe(10800)
+    expect(parsed.page.uptime30d).toBe(99.58)
+    // The provider's table must score that mid-incident `operational` window at ZERO too. Giving it
+    // any weight charges the recovered hour and reads 99.81 — and `operational` is a row the fixture
+    // can never reach, because every `operational` entry there is an incident's LAST update, whose
+    // segment is zero-length after the resolution clamp.
+    expect(parsed.page.reported).toEqual({ pct: 99.86, days: 90 })
+  })
+
+  it('publishes NO uptime when the records establish no window at all', () => {
+    // #713 — AIWatch invents no uptime value. Mapping an unestablished reach onto the full 30 days
+    // made LESS evidence produce a MORE confident, HIGHER figure with the #1004 disclosure
+    // suppressed: a page two hours old read 99.86 over 30 days while a one-day-old page correctly
+    // read 95.83 over 1.
+    const hourOld = parseDatadogStatusPage(doc({
+      created: '2026-09-14T22:00:00Z',
+      incidents: [incident('2026-09-14T23:00:00Z', '2026-09-15T00:00:00Z', 'major_outage')],
+    }), [CHAT], NOW)
+    if (!hourOld.ok) throw new Error('must parse')
+    expect(hourOld.page.uptime30d).toBeNull()
+    expect(hourOld.page.uptimeWindowDays).toBeNull()
+    expect(hourOld.page.reported).toBeNull()
+    // A full day of reach IS a window — short, and disclosed as such.
+    const dayOld = parseDatadogStatusPage(doc({
+      created: '2026-09-13T23:00:00Z',
+      incidents: [incident('2026-09-14T23:00:00Z', '2026-09-15T00:00:00Z', 'major_outage')],
+    }), [CHAT], NOW)
+    if (!dayOld.ok) throw new Error('must parse')
+    expect(dayOld.page.uptime30d).toBe(95.83)
+    expect(dayOld.page.uptimeWindowDays).toBe(1)
+  })
+
+  it('refuses a timeline whose component entries are all unreadable, not just an absent array', () => {
+    // The existing refusal test deletes `componentsAffected` entirely — the `undefined` path, which
+    // `Array.isArray` rejects either way. These two are the shapes that reach the `readable === 0`
+    // guard, and dropping that guard published `uptime30d: 100` with `uptimeSource: 'official'` on a
+    // full incident list: the #1123 shape the module header claims to have closed.
+    const withTimeline = (componentsAffected: unknown) => ({
+      ...FIXTURE,
+      incidents: FIXTURE.incidents.map((i: Record<string, unknown>) => ({
+        ...i,
+        timeline: (i.timeline as Array<Record<string, unknown>>).map((t) => ({ ...t, componentsAffected })),
+      })),
+    })
+    expect(parseDatadogStatusPage(withTimeline([]), API_SCOPE, NOW)).toEqual({ ok: false, reason: 'dd-incident-unreadable' })
+    // Same shape reached by a renamed inner field: every entry drops through, leaving nothing read.
+    expect(parseDatadogStatusPage(withTimeline([{ componentId: CHAT, status: 'degraded' }]), API_SCOPE, NOW))
+      .toEqual({ ok: false, reason: 'dd-incident-unreadable' })
   })
 
   it('computes uptime over the FULL incident list, then caps the DISPLAY list at 25', () => {
@@ -492,7 +645,7 @@ describe('#1403 Datadog parser — status and uptime arithmetic', () => {
       const day = String(i + 1).padStart(2, '0')
       return incident(`2026-08-${day}T00:00:00Z`, `2026-08-${day}T01:00:00Z`, 'major_outage', `inc-${day}`)
     })
-    const parsed = parseDatadogStatusPage(doc({ incidents: many }), NOW)
+    const parsed = parseDatadogStatusPage(doc({ incidents: many }), [CHAT], NOW)
     if (!parsed.ok) throw new Error('must parse')
     expect(parsed.page.incidents).toHaveLength(25)
     expect(parsed.page.incidents[0].id).toBe('datadog:inc-30')

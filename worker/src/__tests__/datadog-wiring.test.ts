@@ -45,9 +45,8 @@ describe('#1403 openrouter is wired to the Datadog path, not the retired one', (
   })
 
   it('is the ONLY service on this path — a second one would need the window caveat re-checked', () => {
-    // The 30-day denominator is safe here because status.openrouter.ai backfilled its history past
-    // the window (checked against AIWatch's own August record). A second Datadog page would not
-    // inherit that fact, so it must not join silently.
+    // openrouter's full window rests on one un-corroborated `Backfill` record (see the parser's
+    // header). A second Datadog page would not inherit that, so it must not join silently.
     expect(SERVICES.filter((service) => service.datadogStatusUrl).map((s) => s.id)).toEqual(['openrouter'])
   })
 })
@@ -106,11 +105,13 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     // the two figures differ by the severity RULE, not only the window. An OPEN `degraded` incident
     // disagrees at every clock: it accrues for us at 0.3 forever and scores zero under the provider's
     // rule, so this pins the wiring without depending on when the suite runs.
-    const CHAT = '9fb5ccff-e128-455a-be20-59572f8d363a'
-    const affected = [{ id: CHAT, name: 'Chat', status: 'degraded', type: 'Component' }]
+    // Every CONFIGURED component must be on the page, or the parser refuses — so this document
+    // carries all six, with the outage on the first.
+    const ids = openrouter.datadogComponentIds!
+    const affected = [{ id: ids[0], name: 'Chat', status: 'degraded', type: 'Component' }]
     stubFetch(() => new Response(JSON.stringify({
       created: '2026-01-01T00:00:00Z',
-      components: [{ id: CHAT, name: 'Chat', position: 0, status: 'degraded', type: 'Component' }],
+      components: ids.map((id, i) => ({ id, name: `C${i}`, position: i, status: i === 0 ? 'degraded' : 'operational', type: 'Component' })),
       incidents: [{
         id: 'open', title: 'Degraded', currentStatus: 'identified',
         publishedDate: '2026-09-01T00:00:00Z', resolvedDate: null, resolved: false,

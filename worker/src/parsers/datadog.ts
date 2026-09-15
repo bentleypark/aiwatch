@@ -43,12 +43,15 @@ export type DatadogParseFailure =
   | 'dd-components-unreadable'       // the component tree is absent, or yielded no leaf component
   | 'dd-component-status-unreadable' // a component carries a status word this parser does not know
   | 'dd-incident-unreadable'         // an incident's shape or severity could not be read
+  | 'dd-component-missing'           // a configured component is no longer on the page
   | 'dd-fetch-unreadable'            // set by the CALLER: the config.json fetch returned a non-OK
 
 export interface DatadogStatusPage {
   status: 'operational' | 'degraded' | 'down'
   incidents: Incident[]
-  uptime30d: number
+  /** `null` when the page's records do not establish a window at all — #713's rule: AIWatch invents
+   *  no uptime value. The caller must leave `uptime30d` unset rather than publish a figure. */
+  uptime30d: number | null
   /** Days `uptime30d` covers, when the page's records reach back less than 30 (#1004). */
   uptimeWindowDays: number | null
   /** #1017 — today's UTC-day weighted outage seconds, over the SAME intervals as `uptime30d`. */
@@ -377,11 +380,17 @@ const WINDOW_DAYS = 30
  *
  * The uptime window is bounded by {@link recordReachDays}, and a short one is disclosed as
  * `uptimeWindowDays` (#1004) rather than published as a confident 30-day figure. On the one page
- * this serves today the reach is ~107 days: status.openrouter.ai was created 2026-09-08 but
- * BACKFILLED, and the backfill was checked against AIWatch's own independently-collected August
- * record for openrouter (both incidents matched by title and date).
+ * this serves today the reach is ~107 days, and it rests on a SINGLE record — a 2026-05-31 incident
+ * titled `Backfill`, filed on 2026-09-11 with placeholder update text. Remove it and the reach is
+ * 17 days. The cross-check against AIWatch's own collected records covers the two 2026-08-28
+ * incidents only, so everything past 18 days is the provider's word; if they prune it the window
+ * narrows and says so, which is why that disclosure exists rather than a pinned constant.
  */
-export function parseDatadogStatusPage(raw: unknown, nowMs: number = Date.now()): DatadogParseResult {
+export function parseDatadogStatusPage(
+  raw: unknown,
+  componentIds: readonly string[],
+  nowMs: number = Date.now(),
+): DatadogParseResult {
   if (!isRecord(raw)) return { ok: false, reason: 'dd-envelope-unreadable' }
   // `incidents` must be an ARRAY, not merely present: an error envelope or a redesigned document
   // would otherwise read as a page with nothing wrong.
@@ -391,6 +400,23 @@ export function parseDatadogStatusPage(raw: unknown, nowMs: number = Date.now())
   if (!flattened.ok) {
     console.warn(`[datadog] component tree unreadable (${flattened.reason}) — shape changed?`)
     return { ok: false, reason: flattened.reason }
+  }
+
+  // #1006 invariant — the badge and the uptime figure run on the SAME configured scope, the rule
+  // `uptimeScopeOf` states for every Atlassian/incident.io service ("Badge + uptime run on Central
+  // Console ALONE"). Without it this page's non-API `Web & Application Services` leaf drove both: a
+  // website outage answered "yes" on /is-openrouter-down with the API healthy, and 15h28m of website
+  // degradation was the whole of openrouter's published uptime deficit.
+  //
+  // A configured id missing from the page is REFUSED, not skipped. Silently narrowing the scope
+  // publishes a too-optimistic figure with no signal that it covers less than it claims — the
+  // direction this file must never fail in. `cloudflare-status.ts` makes the same call on the same
+  // shape (an explicit configured id list).
+  const configured = new Set(componentIds)
+  const scoped = flattened.leaves.filter((leaf) => configured.has(leaf.id))
+  if (scoped.length !== configured.size) {
+    console.warn(`[datadog] ${configured.size - scoped.length}/${configured.size} configured component(s) absent from the page — id rotation?`)
+    return { ok: false, reason: 'dd-component-missing' }
   }
 
   const parsed: ParsedIncident[] = []
@@ -407,31 +433,29 @@ export function parseDatadogStatusPage(raw: unknown, nowMs: number = Date.now())
     parsed.push(incident)
   }
 
-  const segments = parsed.flatMap((p) => p.segments)
-  const byComponent = new Map<string, OutageSegment[]>()
-  for (const leaf of flattened.leaves) byComponent.set(leaf.id, [])
-  for (const seg of segments) {
-    // An incident may name a component the tree no longer lists (a retired component keeps its
-    // history). Give it its own bucket rather than dropping it: dropping would delete real published
-    // downtime, which is the one direction this file must never fail in.
-    const bucket = byComponent.get(seg.componentId)
-    if (bucket) bucket.push(seg)
-    else byComponent.set(seg.componentId, [seg])
-  }
-  // Non-empty: `flattenComponents` refuses a tree with zero leaves, so the reducers below always
-  // have at least one element.
+  // One bucket per CONFIGURED component. Downtime on a component outside the scope (the website) is
+  // not dropped from the incident LIST below — the provider published it and it stays visible — it
+  // simply does not move the API's badge or its uptime.
+  const byComponent = new Map<string, OutageSegment[]>(scoped.map((leaf) => [leaf.id, []]))
+  for (const seg of parsed.flatMap((p) => p.segments)) byComponent.get(seg.componentId)?.push(seg)
+  // Non-empty: the scope check above guarantees one bucket per configured id, and `ServiceConfig`
+  // types the field as a non-empty tuple.
   const perComponent = [...byComponent.values()]
 
   const reachDays = recordReachDays(parsed, raw.created, nowMs)
   // The denominator is what the records actually cover. Asserting a flat 30 days on a page whose
   // history reaches back five would publish a confident figure over a window that does not exist —
   // and `uptimeWindowDays` is the signal the rest of the system already reads for that (#1004).
-  const windowDays = reachDays === null ? WINDOW_DAYS : Math.min(WINDOW_DAYS, reachDays)
-  const windowStart = nowMs - windowDays * 86_400_000
+  // An unestablished reach is NOT the full 30 days: mapping it there made LESS evidence produce a
+  // MORE confident, HIGHER figure with the #1004 disclosure suppressed (a 2-hour-old page read 99.86
+  // over 30 days while a 1-day-old page correctly read 95.83 over 1). No window, no uptime — #713's
+  // rule, and what `statuspage.ts` does when it holds no day-buckets.
+  const windowDays = reachDays === null ? null : Math.min(WINDOW_DAYS, reachDays)
+  const windowStart = windowDays === null ? nowMs : nowMs - windowDays * 86_400_000
   // Worst single component, never a pool across components — the rule `statuspage.ts` already
   // applies to a multi-component scope ("the impact CALENDAR is the union … while the PERCENT is the
   // worst single component"). Pooling here published a figure that appears on no component's row.
-  const uptime30d = Math.min(...perComponent.map((segs) =>
+  const uptime30d = windowDays === null ? null : Math.min(...perComponent.map((segs) =>
     pct(weightedDowntimeSeconds(toIntervals(segs, STATUS_WEIGHT), windowStart, nowMs), windowDays)))
   // Worst-of independently, like statuspage.ts's `Math.max(...todaySecs)`: the most-affected
   // component TODAY need not be the 30-day-worst one.
@@ -448,14 +472,14 @@ export function parseDatadogStatusPage(raw: unknown, nowMs: number = Date.now())
   return {
     ok: true,
     page: {
-      status: worstVerdict(flattened.leaves.map((leaf) => leaf.status)),
+      status: worstVerdict(scoped.map((leaf) => leaf.status)),
       incidents,
       uptime30d,
-      uptimeWindowDays: windowDays < WINDOW_DAYS ? windowDays : null,
+      uptimeWindowDays: windowDays !== null && windowDays < WINDOW_DAYS ? windowDays : null,
       todayWeightedOutageSec,
       // The field's contract is "absent when the two agree" — a disclosure exists to show a reader a
       // DIFFERENCE, and repeating our own number as the provider's adds nothing but noise.
-      reported: reported != null && reported.pct !== uptime30d ? reported : null,
+      reported: reported != null && uptime30d != null && reported.pct !== uptime30d ? reported : null,
     },
   }
 }
@@ -481,6 +505,8 @@ function recordReachDays(parsed: ParsedIncident[], created: unknown, nowMs: numb
   if (!Number.isNaN(createdMs)) reaches.push(createdMs)
   if (reaches.length === 0) return null
   const days = Math.floor((nowMs - Math.min(...reaches)) / 86_400_000)
+  // A reach under one whole day cannot carry a daily-resolution percentage. `null` here means "no
+  // window", which the caller must publish as NO uptime — never as the full 30.
   return days > 0 ? days : null
 }
 
