@@ -17,9 +17,12 @@ Edge/Vercel surface for landing pages, and a real generated artifact for UI-less
 and automated browser checks do not replace the user's explicit in-browser confirmation. Run the
 scope-appropriate lint, build, unit, E2E, worker typecheck, and dry-run deployment checks.
 
-Review the complete diff against `AGENTS.md`, the development workflow, and relevant references.
-Report only Critical or Important findings with a file/line locator plus reproduction or judgement
-call; re-test after fixes until no such findings remain. Do not adopt unverified replacement prose.
+Review the complete diff against `AGENTS.md`, the development workflow, and relevant references. In
+every review round, round 1 included, invoke `$review-findings-only`. Supply the round number,
+prior-round findings and fixes, and the running Critical/Important total. It reports only
+evidence-backed Critical or Important findings with a locator, reproduction or `judgement call`, and
+round plus branch attribution; it does not provide replacement prose. Re-test after fixes and re-review
+until no such findings remain.
 Before commit, status must contain only intended files. Commit, push, PR, merge, deploy, and issue
 close operations require explicit user approval. Keep production-gated checklist items open with a
 dated `verify-after` plus `assert:` or `durable:` evidence when applicable.

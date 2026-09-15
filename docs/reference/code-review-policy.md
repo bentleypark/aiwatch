@@ -1,7 +1,7 @@
 ---
 type: reference
-title: "Code-review policy (#1245, #1412) — which reviewer the loop spawns, and what to do with its report"
-description: "The review loop spawns review-findings-only every round, and how to act on a report."
+title: "Code-review policy (#1245, #1412) — which reviewer the loop uses, and what to do with its report"
+description: "The review loop invokes findings-only review every round, and how to act on a report."
 tags: [workflow, review, tooling]
 ---
 
@@ -12,8 +12,10 @@ run the loop. This page records why the procedure has the shape it has.
 
 ## The loop does not use `/pr-review-toolkit:review-pr` (#1412)
 
-Every round, round 1 included, spawns the project's `.claude/agents/review-findings-only.md`. The plugin left the loop because
-most of what this page used to say existed only to correct it:
+Every round, round 1 included, uses the project's findings-only reviewer: Claude Code spawns
+`.claude/agents/review-findings-only.md`; Codex invokes `$review-findings-only` from
+`.codex/skills/review-findings-only/`. The plugin left the loop because most of what this page used to
+say existed only to correct it:
 
 - its command fans out across several agents by file type, so round 1 returned a large batch that was
   fixed all at once, and round 2 then reviewed mostly new text;
@@ -33,9 +35,11 @@ instead: its system prompt forbids replacement prose, and where the answer is a 
 finding. It keeps the ≥80 floor. It does not stop a caller from rewriting prose on its own initiative —
 that is what `ship-issue` step 6's no-prose rule is for.
 
-**Deployment caveat:** agent definitions load at SESSION START, like `.claude/settings.json` hooks. A
-newly added or edited agent is not visible to the session that wrote it — `subagent_type` resolution
-fails with "agent type not found" until a restart. Verify it resolves before relying on it.
+**Availability caveat:** Claude agent definitions load at session start, like `.claude/settings.json`
+hooks. A newly added or edited Claude agent is not visible to the session that wrote it —
+`subagent_type` resolution fails with "agent type not found" until a restart. Codex reads its
+project skill from `.codex/skills/`; sync it with `npm run skills:install` before opening a new Codex
+turn that must invoke it.
 
 ## Verify a finding before acting on it
 
