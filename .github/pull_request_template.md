@@ -14,7 +14,7 @@
 - [ ] `npm test` passes (Playwright E2E)
 - [ ] `npm run test:src` passes (frontend vitest — incl. CSP hash pin, #877 CI-gated)
 - [ ] `npm run test:worker` passes (Worker vitest)
-- [ ] Code review completed (`/pr-review-toolkit:review-pr` or the agent-neutral review procedure)
+- [ ] Code review completed (`review-findings-only` or the agent-neutral review procedure)
 - [ ] Critical and Important review issues fixed
 - [ ] Docs updated for this change — README(.ko), `docs/reference/*`, CLAUDE.md, CONTRIBUTING.md, `index.html`, and `aiwatch-reports/` as applicable — or N/A
 - [ ] No hardcoded hex colors (use CSS design tokens)

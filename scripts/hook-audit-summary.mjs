@@ -208,8 +208,8 @@ for (const e of revloop) {
   } else revloopNoBranch++
 }
 // Spawns per session is the depth proxy that needs NO cooperation from the prompt. It matters because the
-// declared round is entirely self-reported, and `/pr-review-toolkit:review-pr` — the entry point CLAUDE.md
-// step 5 names — never tells the caller to state one: a loop driven straight through it records
+// declared round is entirely self-reported, and `/pr-review-toolkit:review-pr` never tells the caller to
+// state one: a loop driven straight through it records
 // `round-none` throughout, so the histogram is blind in exactly the runaway case, where "stopped tracking
 // rounds" and "ran long" co-occur. A session's spawn count still rises with every round.
 const revloopMaxPerSession = Math.max(0, ...Object.values(revloopBySession))

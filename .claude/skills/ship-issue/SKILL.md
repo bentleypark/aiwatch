@@ -32,7 +32,7 @@ is the *procedure* — follow it top to bottom.
      mock/fixture before commit (`git checkout` it) and confirm `git status` shows only intended files.
    - UI-less backend change (cron/WAE/RSS XML): there's no browser surface — verify by producing the
      real artifact (e.g. run the actual builder fn, fetch the real endpoint) and show it; say so plainly.
-2. **PR review before every commit** — run `/pr-review-toolkit:review-pr`; fix all Critical/Important;
+2. **PR review before every commit** — spawn `review-findings-only` (step 5); fix all Critical/Important;
    **auto-loop** (fix → re-test → re-review) until a round is 0 Critical/Important. Don't wait for a
    prompt to start the next round.
 3. **Commit / push / PR / merge only after the user asks or confirms.** A green/MERGEABLE PR is NOT a
@@ -68,47 +68,41 @@ is the *procedure* — follow it top to bottom.
    - Worker (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker`.
    - New worker logic → extract to an exported fn + unit-test it. New `src/utils/` → Vitest test.
    - **Every bug fix ships a test that would have caught the bug.**
-5. **PR review** — gate #2: `/pr-review-toolkit:review-pr`. **How to invoke it and how to read what it
-   returns** — which agent by domain, why only `code-reviewer` carries a severity floor, and why the
-   suggested rewrites in a report are not to be adopted — is
-   [docs/reference/code-review-policy.md](../../../docs/reference/code-review-policy.md) (#1245).
-   - **From round 2 onward, spawn `review-findings-only` directly** — `subagent_type: "review-findings-only"`,
-     in place of the plugin's `code-reviewer`. `/pr-review-toolkit:review-pr` selects among its own plugin
-     agents, so this one is reached only by naming it. It keeps the ≥80 floor, withholds the replacement
-     prose that reseeded findings on #1293, and requires the round attribution step 6's causal trigger
-     runs on (#1298).
-   - **Carry the round number, the RUNNING Critical total, and the prior round's findings into the next
-     review prompt (#1097/#1124).** The review agents are spawned fresh each round and cannot see how many
-     rounds have run or what the last one found — *you* are the only place that history lives, so state it:
-     "this is round N; round N-1 flagged {findings}, which I fixed by {changes}; {C} Criticals so far across
-     all rounds; for each finding, say whether the text it lands on was added by my last round's fix." The
-     `{changes}` slot and that last clause are what step 6's trigger runs on — every round of the loop sits
-     in one cumulative uncommitted diff, so unless you say what the last fix changed the reviewer cannot
-     attribute anything, and on #1110 the causality was volunteered only from round 5 on. The cumulative
-     total is what makes *not converging* visible while each individual round still looks healthy.
+5. **PR review** — gate #2. Everything the caller needs is in this step; do not rely on having read
+   another page (#1412).
+   - **Every round, round 1 included, spawns `review-findings-only`** —
+     `subagent_type: "review-findings-only"`. Do **not** run `/pr-review-toolkit:review-pr` or its
+     agents in this loop: its fan-out yields a large round-1 batch fixed all
+     at once, and its agents hand back rewrites that become the next round's findings (#1298, #1412).
+   - **The prompt carries the history — the agent is spawned fresh and has none:** "this is round N;
+     round N-1 flagged {findings}, which I fixed by {changes}; {C} Criticals so far; for each finding,
+     say whether it lands on my last round's fix, and whether this branch introduced it or it predates
+     the branch." The running total is what makes *not converging* visible.
+   - Background, not a prerequisite: [code-review-policy.md](../../../docs/reference/code-review-policy.md).
 6. **Fix review findings — auto-loop** to 0 Critical/Important (Suggestions-only = converged).
+   - A defect that predates the branch and is not what the issue is about becomes a new issue, not a
+     fix in this diff. A finding filed as an issue — here or below — stops counting toward 0
+     Critical/Important; list it with its issue number in the next round's prompt.
    - **Ask one question of fact about each finding before acting on it: did it arrive with a reproduction,
-     a failing check, or a mutation that goes red? (#1245)** Per finding, not per round: a round mixes
-     both kinds, and one adjudicable finding must not carry its siblings into the next round on its
-     reproduction.
-     - **Yes → work it, and never cap the rounds.** Several rounds is normal and legitimate: on #1052
-       four rounds each found a guard that reported green while guarding nothing, all via real mutations;
-       on #1110 round 3 found an unescaped apostrophe that broke `/methodology`'s inline i18n script.
+     a failing check, or a mutation that goes red? (#1245)** Per finding, not per round.
+     - **Yes → work it.** A behavioural reproduction becomes a failing test before the fix.
      - **No → do not carry it into another round.** Build the thing that would adjudicate it first, or —
-       when nothing could — drop the claim instead of rewording it. #1237 hit this and named the remedy
-       itself: two fixes attempted during review "produced worse defects" in a script with "no automated
-       test", so it deferred that piece — "Follow-up, harness first". #1241 built the harness first, and
-       its rounds then reproduced seven defects before fixing each.
+       when nothing could — drop the claim instead of rewording it.
+   - **A fix adds no prose, from round 1 (#1412).** No new docblock, doc paragraph, `KNOWN LIMIT` note
+     or explanatory comment to justify a fix — the test name and the commit message carry the why. A
+     mechanical correction (escaping, a typo, a renamed identifier) is not an addition; deleting is always
+     allowed.
    - **STOP when the previous round's fix INTRODUCED this round's finding, twice in a row (#1124).** This
-     trigger is causal, not a label — it needs no self-classification. It replaces the old "same finding *category* 3 rounds
-     running" trigger, which was self-assigned and therefore evadable: on #1110 rounds were labelled by
-     surface topic ("apostrophe", "hollow guard", "roster omission"), so "new category → keep going"
-     read as healthy for 8 rounds and 17 Criticals.
-   - **When it fires, change the CLASS of fix — do not take another pass at the sentence.** Ask:
-     **(a)** is this claim load-bearing for the point being made? If not, **delete it** — an unneeded
-     enumeration / classification / causal claim is verification debt, not content. **(b)** Am I holding a
-     conclusion fixed and swapping in weaker support each round? Then weaken the *conclusion* to what the
-     evidence carries, not the wording — *milder-each-round is the tell*.
+     trigger is causal, not a label — it needs no self-classification, and it holds for reproduced
+     findings too.
+   - **When it fires, change the CLASS of fix — do not take another pass at the same text.**
+     - **Prose:** **(a)** is this claim load-bearing for the point being made? If not, **delete it**.
+       **(b)** Am I holding a conclusion fixed and swapping in weaker support each round? Then weaken the
+       *conclusion* — *milder-each-round is the tell*.
+     - **Code:** revert the previous round's fix, then ask whether the finding it answered is required by
+       this issue's completion condition. Not required → file it as a follow-up issue and keep the revert.
+       Required → reproduce it as a failing test first and re-fix that one finding alone, with no other
+       change in the round.
    - **Delete the CONSTRUCT, not the sentence.** Copy that restates code branch logic — service
      enumerations, render conditions, per-source parser matrices — is unbounded verification debt: no test
      pins it and it drifts with every parser change (memory `feedback_no_prose_mirror_of_code_branches`).
@@ -116,9 +110,6 @@ is the *procedure* — follow it top to bottom.
      cosmetically three times on #1110 by dropping individual clauses while the enumeration that kept
      generating them stayed; deleting a never-needed parser list ended the last-4-of-12 sub-loop on #1091
      instantly.
-   - **Prose: from round 4 of the loop onward, a fix to the FLAGGED TEXT may only REMOVE text (#1124)** — a purely mechanical
-     correction (escaping, a typo, a renamed identifier) is not an addition. A qualifier added to be "more
-     precise" is itself a new unverified claim. Applies to docs, comments and issue bodies as much as to UI copy.
 7. **Docs update** — update whatever the change affects: CLAUDE.md (architecture/service count/layout —
    keep it **lean, ~40k-char guideline** — check `python3 -c "print(len(open('CLAUDE.md').read()))"`,
    move detail to `docs/reference/` if near), the relevant **`docs/reference/`** file (see the

@@ -62,8 +62,8 @@ the engineering gates below remain the same.
     the relevant reference documents.
 11. Follow the [code-review policy](code-review-policy.md): report only Critical or Important
     findings with a file/line locator, reproduction or explicit judgement call, and whether the
-    previous fix caused the finding. A finding with a reproduction or failing check must be fixed
-    without capping rounds; a finding without evidence must be adjudicated with a check or dropped.
+    previous fix caused the finding. A finding without evidence must be adjudicated with a check or
+    dropped.
     If the previous fix causes the finding in two consecutive rounds, change the fix class: delete
     a non-load-bearing construct or weaken the conclusion instead of rewriting it again. Re-test
     and re-review until no Critical or Important findings remain. A Codex review can use this prompt:
@@ -148,7 +148,7 @@ documentation, or configuration changes.
 
 - Claude Code: use `.claude/skills/ship-issue/SKILL.md` for the detailed procedure and the
   `.claude/` hooks/plugins for Claude-specific reminders and review tooling.
-- Codex: use this runbook directly. Replace Claude-only slash commands with the equivalent review
+- Codex: use this runbook directly. Replace Claude-only review agents with the equivalent review
   prompt above and run repository commands from the active worktree.
 - Other agents: follow this runbook and use their native review/task mechanism only where it does
   not weaken the shared gates.

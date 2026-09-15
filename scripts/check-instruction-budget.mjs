@@ -90,8 +90,10 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  47_695 → 45_954 (#1410): −1,741. The "API Docs via Context Hub (chub)" section became a lookup
  *  order (first-party skill → context7 → official page) plus the rule that status-page parsers are
  *  grounded in the live upstream. The chub flow and its doc-id list went with the tool; the project
- *  gotchas that section carried moved to reference-tooling.md, which loads on demand. */
-export const BUDGET_CHARS = 45_954
+ *  gotchas that section carried moved to reference-tooling.md, which loads on demand.
+ *  45_954 → 45_720 (#1412): −234. workflow-gates.txt −192 (gate 2 rewritten to name
+ *  `review-findings-only`); CLAUDE.md −42 (step 6's "never cap the rounds" clause deleted). */
+export const BUDGET_CHARS = 45_720
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the
