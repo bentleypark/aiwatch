@@ -2134,7 +2134,7 @@ import { searchBadgeEmbeds, diffBadgeRepoDiscovery, parseBadgeReposSeen, type Ba
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
 import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOutageWindows, nominalWindowEnd, previousPeriod, periodsCoveringWindow, type GrowthDailyRow } from './growth-series'
-import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
+import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
@@ -4501,7 +4501,11 @@ export default {
         try {
           const parsed = parsePageviewBody(await request.json(), new Set(SERVICES.map(s => s.id)))
           if (!parsed) return new Response(null, { status: 400, headers: cors })
-          recordOutageView(env.ANALYTICS, parsed.source, parsed.active, parsed.svc, parsed.surface)
+          const agent = classifyAgent(
+            (request.cf as { verifiedBotCategory?: unknown } | undefined)?.verifiedBotCategory,
+            request.headers.get('User-Agent'),
+          )
+          recordOutageView(env.ANALYTICS, parsed.source, parsed.active, parsed.svc, parsed.surface, agent)
           return new Response(null, { status: 204, headers: cors })
         } catch (err) {
           if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })

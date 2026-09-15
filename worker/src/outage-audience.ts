@@ -27,7 +27,9 @@
 //                                                     AudienceSurfaceKey — a hand-written AE SQL
 //                                                     filter of `IN ('service','group')` silently
 //                                                     drops every deploy-window row.
-//   double1 = 1                                     → view counter
+//   blob5   = agent ('bot'|'unflagged')             → #1083, see AudienceAgent. A row written before
+//                                                     blob5 existed reads back as `unknown`.
+//   double1 = 1                                    → view counter
 //
 // #1280 — why blob3 alone could not be read. Two surfaces write it. A per-service page sends its own
 // id, but a provider-family GROUP page (`/is-claude-down`, #1164) has a slug that is not a service id,
@@ -95,6 +97,35 @@ export const AUDIENCE_UNKNOWN_SCREEN = '__unknown__'
 /** Every key that can appear in a stored map. */
 export type AudienceSurfaceKey = AudienceSurface | typeof AUDIENCE_SURFACE_UNKNOWN
 export const AUDIENCE_SURFACE_KEYS: AudienceSurfaceKey[] = [...AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN]
+
+/**
+ * #1083 — whether a view came from a client that identified itself as a bot.
+ *
+ * `'unflagged'` is deliberately not `'human'`: both signals only catch clients that announce
+ * themselves, so a headless scraper with an ordinary Chrome UA from an unverified IP is `unflagged`.
+ *
+ * `AUDIENCE_AGENT_UNKNOWN` is read-side only: a row written before blob5 existed. It must not fold
+ * into `unflagged`, or every pre-deploy view would be booked as not-a-bot.
+ */
+export type AudienceAgent = 'bot' | 'unflagged'
+export const AUDIENCE_AGENTS: AudienceAgent[] = ['bot', 'unflagged']
+export const AUDIENCE_AGENT_UNKNOWN = 'unknown'
+export type AudienceAgentKey = AudienceAgent | typeof AUDIENCE_AGENT_UNKNOWN
+export const AUDIENCE_AGENT_KEYS: AudienceAgentKey[] = [...AUDIENCE_AGENTS, AUDIENCE_AGENT_UNKNOWN]
+
+const BOT_UA = /bot|crawler|spider|headless/i
+
+/**
+ * #1083 — classify a beacon request. `verifiedBotCategory` is Cloudflare's IP/ASN-ownership
+ * verification (`request.cf.verifiedBotCategory`, `""` for an unverified client — confirmed present
+ * on our plan at runtime 2026-07-22, though absent from workers-types); it cannot be spoofed by a UA.
+ * The UA regex is the complement for self-declaring clients Cloudflare has not verified. Pure.
+ */
+export function classifyAgent(verifiedBotCategory: unknown, userAgent: string | null | undefined): AudienceAgent {
+  if (typeof verifiedBotCategory === 'string' && verifiedBotCategory !== '') return 'bot'
+  if (userAgent && BOT_UA.test(userAgent)) return 'bot'
+  return 'unflagged'
+}
 
 const ISDOWN_INDEX = 'isdown-view'
 
@@ -213,11 +244,12 @@ export function recordOutageView(
   active: boolean,
   svcId: string,
   surface: AudienceSurfaceKey,
+  agent: AudienceAgent,
 ): void {
   if (!analytics) return
   try {
     analytics.writeDataPoint({
-      blobs: [source, active ? 'active' : 'clear', svcId, surface],
+      blobs: [source, active ? 'active' : 'clear', svcId, surface, agent],
       doubles: [1],
       indexes: [ISDOWN_INDEX],
     })
@@ -236,9 +268,13 @@ export interface AudienceCounts {
   bySource: Record<AudienceSource, number> // all views by source
   activeBySource: Record<AudienceSource, number> // active-outage views by source
   byScreen: AudienceByScreen // #1280 — surface → service id → views (all views, not the active subset)
+  byAgent: Record<AudienceAgentKey, number> // #1083 — all views by bot flag
+  activeByAgent: Record<AudienceAgentKey, number> // #1083 — active-outage views by bot flag
 }
 
 const zeroBySource = (): Record<AudienceSource, number> => ({ x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0, reddit: 0, hn: 0, refhost: 0 })
+const zeroByAgent = (): Record<AudienceAgentKey, number> =>
+  Object.fromEntries(AUDIENCE_AGENT_KEYS.map((k) => [k, 0])) as Record<AudienceAgentKey, number>
 // Derived from AUDIENCE_SURFACE_KEYS rather than written out, so that array is load-bearing.
 const emptyByScreen = (): AudienceByScreen =>
   Object.fromEntries(AUDIENCE_SURFACE_KEYS.map((k) => [k, {}])) as AudienceByScreen
@@ -252,10 +288,10 @@ export function buildOutageAudienceSql(dataset = V1_DATASET): string {
   // `phase` (NOT `window`, a SQL reserved keyword the AE parser may reject → 400 → the section
   // silently omits forever); mirrors api-traffic.ts aliasing to non-reserved tokens.
   return (
-    `SELECT blob1 AS source, blob2 AS phase, blob3 AS svc, blob4 AS surface, SUM(_sample_interval) AS views ` +
+    `SELECT blob1 AS source, blob2 AS phase, blob3 AS svc, blob4 AS surface, blob5 AS agent, SUM(_sample_interval) AS views ` +
     `FROM ${dataset} ` +
     `WHERE index1 = '${ISDOWN_INDEX}' AND timestamp > NOW() - INTERVAL '1' DAY ` +
-    `GROUP BY blob1, blob2, blob3, blob4 ` +
+    `GROUP BY blob1, blob2, blob3, blob4, blob5 ` +
     `FORMAT JSON`
   )
 }
@@ -285,18 +321,25 @@ export function parseOutageAudienceResponse(json: unknown): AudienceCounts | nul
   const bySource = zeroBySource()
   const activeBySource = zeroBySource()
   const byScreen = emptyByScreen()
+  const byAgent = zeroByAgent()
+  const activeByAgent = zeroByAgent()
   let total = 0
   let activeTotal = 0
   for (const row of data) {
-    const r = row as { source?: unknown; phase?: unknown; svc?: unknown; surface?: unknown; views?: unknown }
+    const r = row as { source?: unknown; phase?: unknown; svc?: unknown; surface?: unknown; agent?: unknown; views?: unknown }
     const source = r.source as AudienceSource
     if (!AUDIENCE_SOURCES.includes(source)) continue
     const parsed = Number(r.views)
     const n = Number.isFinite(parsed) ? parsed : 0
+    const agent: AudienceAgentKey = AUDIENCE_AGENTS.includes(r.agent as AudienceAgent)
+      ? (r.agent as AudienceAgent)
+      : AUDIENCE_AGENT_UNKNOWN
     bySource[source] += n
+    byAgent[agent] += n
     total += n
     if (r.phase === 'active') {
       activeBySource[source] += n
+      activeByAgent[agent] += n
       activeTotal += n
     }
     // A row with no usable id is booked as unattributed, never skipped: skipping would subtract it
@@ -308,7 +351,7 @@ export function parseOutageAudienceResponse(json: unknown): AudienceCounts | nul
     const surface = svc === AUDIENCE_UNKNOWN_SCREEN ? AUDIENCE_SURFACE_UNKNOWN : declared
     byScreen[surface][svc] = (byScreen[surface][svc] ?? 0) + n
   }
-  return { total, activeTotal, bySource, activeBySource, byScreen }
+  return { total, activeTotal, bySource, activeBySource, byScreen, byAgent, activeByAgent }
 }
 
 /** Query the last-24h is-down audience via the AE SQL API. Best-effort: null on missing creds /

@@ -1119,7 +1119,29 @@ describe('formatAudienceLine (#842-B)', () => {
     bySource: src(),
     activeBySource: src(),
     byScreen: { service: {}, group: {}, unknown: {} },
+    byAgent: { bot: 0, unflagged: 0, unknown: 0 },
+    activeByAgent: { bot: 0, unflagged: 0, unknown: 0 },
     ...o,
+  })
+
+  // #1083 — layout pinned whole: each bot count must sit beside the number it is a share of.
+  it('renders flagged bots against each total, and the pre-deploy residual as untagged', () => {
+    const line = formatAudienceLine(counts({
+      total: 180, activeTotal: 10,
+      bySource: src({ direct: 170, x: 10 }),
+      activeBySource: src({ x: 10 }),
+      byAgent: { bot: 120, unflagged: 50, unknown: 10 },
+      activeByAgent: { bot: 0, unflagged: 6, unknown: 4 },
+    }))
+    expect(line).toBe('\n👥 **is-down Audience** (24h)\n   During outages: 10 — X 10\n   All views: 180 — X 10 · direct 170\n   Flagged bots: 120 of 180 (during outages: 0 of 10) · 10 untagged')
+  })
+
+  it('omits the bot row when no view in the window carries a tag (pre-deploy)', () => {
+    const line = formatAudienceLine(counts({
+      total: 5, bySource: src({ direct: 5 }),
+      byAgent: { bot: 0, unflagged: 0, unknown: 5 },
+    }))
+    expect(line).not.toContain('Flagged bots')
   })
 
   it('leads with the active-outage subset by source, then the whole day by source', () => {

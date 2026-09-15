@@ -32,7 +32,7 @@ function post(body: unknown): Request {
   })
 }
 
-/** The single recorded data point's blobs: [source, 'active'|'clear', svcId, surface]. */
+/** The single recorded data point's blobs: [source, 'active'|'clear', svcId, surface, agent]. */
 function recordedBlobs(writeDataPoint: ReturnType<typeof vi.fn>): string[] {
   expect(writeDataPoint).toHaveBeenCalledTimes(1)
   return writeDataPoint.mock.calls[0][0].blobs
@@ -51,13 +51,13 @@ describe('POST /api/pageview → recorded source bucket (#1055 wiring)', () => {
     // argument at the CALL SITE. `activeTotal` is the sponsor-evidence number, so a dropped `active`
     // would silently collapse it to zero. #1280 added `surface` as a fourth argument with exactly the
     // same exposure — it is the one dimension that separates a group-page view from a per-service one.
-    expect(recordedBlobs(writeDataPoint)).toEqual(['reddit', 'active', 'claude', 'service'])
+    expect(recordedBlobs(writeDataPoint)).toEqual(['reddit', 'active', 'claude', 'service', 'unflagged'])
   })
 
   it('records a self-referral (our own is-down cross-links) as owned, not refhost (#1055)', async () => {
     const { env, writeDataPoint } = makeEnv()
     await workerModule.fetch(post({ svc: 'openai', ref: 'ai-watch.dev', utm: '', active: false, surface: 'service' }), env, ctx)
-    expect(recordedBlobs(writeDataPoint)).toEqual(['owned', 'clear', 'openai', 'service'])
+    expect(recordedBlobs(writeDataPoint)).toEqual(['owned', 'clear', 'openai', 'service', 'unflagged'])
   })
 
   // #1280 — the surface dimension, asserted at the CALL SITE. A unit test of parsePageviewBody or
@@ -69,7 +69,7 @@ describe('POST /api/pageview → recorded source bucket (#1055 wiring)', () => {
     // A family page posts the WORST-OF member's id by design (api/is-down-group.ts), so this row is
     // indistinguishable from a view of claudecode's own page without blob4.
     await workerModule.fetch(post({ svc: 'claudecode', ref: '', utm: 'x', active: true, surface: 'group' }), env, ctx)
-    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'active', 'claudecode', 'group'])
+    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'active', 'claudecode', 'group', 'unflagged'])
   })
 
   it('records a body with NO surface as unknown, never as service (the deploy window)', async () => {
@@ -79,7 +79,7 @@ describe('POST /api/pageview → recorded source bucket (#1055 wiring)', () => {
     // not be attributed, because folding it into `service` under-reports the group surface in exactly
     // the direction of the bug #1280 exists to fix.
     await workerModule.fetch(post({ svc: 'claude', ref: '', utm: 'x', active: false }), env, ctx)
-    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'clear', 'claude', 'unknown'])
+    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'clear', 'claude', 'unknown', 'unflagged'])
   })
 
   it('records a junk surface as unknown rather than trusting or rejecting it', async () => {
@@ -87,7 +87,7 @@ describe('POST /api/pageview → recorded source bucket (#1055 wiring)', () => {
     // /api/pageview is public, so the surface is caller-controlled. It collapses to a fixed sentinel,
     // which is what keeps blob4's cardinality bounded.
     await workerModule.fetch(post({ svc: 'claude', ref: '', utm: 'x', active: false, surface: 'haxx' }), env, ctx)
-    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'clear', 'claude', 'unknown'])
+    expect(recordedBlobs(writeDataPoint)).toEqual(['x', 'clear', 'claude', 'unknown', 'unflagged'])
   })
 
   it('records an unnamed referring host as refhost', async () => {
@@ -109,7 +109,26 @@ describe('POST /api/pageview → recorded source bucket (#1055 wiring)', () => {
     // `claude-api` is a real is-down SLUG.
     const res = await workerModule.fetch(post({ svc: 'claude-api', ref: 'www.reddit.com', active: true, surface: 'service' }), env, ctx)
     expect(res.status).toBe(204)
-    expect(recordedBlobs(writeDataPoint)).toEqual(['reddit', 'active', '__unknown__', 'service'])
+    expect(recordedBlobs(writeDataPoint)).toEqual(['reddit', 'active', '__unknown__', 'service', 'unflagged'])
+  })
+
+  // #1083 — both bot signals asserted at the CALL SITE: `classifyAgent` is pure-tested, but only this
+  // test sees the handler reading `request.cf` and the User-Agent header and passing the verdict on.
+  it('tags a Cloudflare-verified bot as bot, reading request.cf', async () => {
+    const { env, writeDataPoint } = makeEnv()
+    const req = post({ svc: 'claude', ref: '', utm: '', active: false, surface: 'service' })
+    Object.defineProperty(req, 'cf', { value: { verifiedBotCategory: 'Search Engine Crawler' } })
+    await workerModule.fetch(req, env, ctx)
+    expect(recordedBlobs(writeDataPoint)).toEqual(['direct', 'clear', 'claude', 'service', 'bot'])
+  })
+
+  it('tags a self-declared bot User-Agent as bot', async () => {
+    const { env, writeDataPoint } = makeEnv()
+    const req = post({ svc: 'pinecone', ref: '', utm: '', active: false, surface: 'service' })
+    req.headers.set('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/128.0.0.0 Safari/537.36')
+    Object.defineProperty(req, 'cf', { value: { verifiedBotCategory: '' } })
+    await workerModule.fetch(req, env, ctx)
+    expect(recordedBlobs(writeDataPoint)).toEqual(['direct', 'clear', 'pinecone', 'service', 'bot'])
   })
 
   it('still rejects a body with no service id at all, without recording', async () => {

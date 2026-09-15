@@ -79,6 +79,11 @@ export interface GrowthDailyRow {
   // A service id here does not name a screen on its own — read the (surface, id) PAIR. Why:
   // outage-audience.ts.
   audienceByScreen?: Record<string, Record<string, number>> | null
+  // #1083 — the same window's views by bot flag (`bot`/`unflagged`/`unknown`), for all views and the
+  // active subset. Same three states as `audienceByScreen`. `unflagged` is not "human" — see
+  // AudienceAgent in outage-audience.ts.
+  audienceByAgent?: Record<string, number> | null
+  audienceActiveByAgent?: Record<string, number> | null
   // #1273 — feed-poll volume for the window: feed (canonical service ids plus the
   // `__all__`/`__unknown__` sentinels) → client class → count. This is the durable
   // half of the RSS/Slack retention proxy: #548 already computed a 24h number but only printed it into
@@ -380,6 +385,8 @@ export function buildGrowthDailyRow(i: GrowthDailyInputs): GrowthDailyRow {
     audienceActiveTotal: i.audience?.activeTotal ?? null,
     audienceBySource: i.audience?.bySource ?? null,
     audienceByScreen: i.audience?.byScreen ?? null,
+    audienceByAgent: i.audience?.byAgent ?? null,
+    audienceActiveByAgent: i.audience?.activeByAgent ?? null,
     feedPolls: i.feedPolls.polls,
     feedPollsRead: i.feedPolls.verdict,
     extPolls: i.extPolls.polls,
@@ -426,7 +433,7 @@ export function appendGrowthDaily(existing: unknown, row: GrowthDailyRow): Growt
  *
  * #1280 — the audience fields do NOT belong to that TTL rationale: `queryOutageAudience` reads the
  * Analytics Engine SQL API, so its `null` is a failed request, not an expiry. Overwriting a real
- * measurement with it destroys the value permanently — this key has no TTL and no backfill. The four
+ * measurement with it destroys the value permanently — this key has no TTL and no backfill. The audience
  * fields travel as ONE group because they come from one `AudienceCounts`. Pure.
  */
 function preserveMeasured(prior: GrowthDailyRow | undefined, row: GrowthDailyRow): GrowthDailyRow {
@@ -475,6 +482,8 @@ function preserveMeasured(prior: GrowthDailyRow | undefined, row: GrowthDailyRow
       audienceActiveTotal: prior.audienceActiveTotal,
       audienceBySource: prior.audienceBySource,
       audienceByScreen: prior.audienceByScreen, // ABSENT on a pre-#1280 prior; must not become null
+      audienceByAgent: prior.audienceByAgent,
+      audienceActiveByAgent: prior.audienceActiveByAgent,
     }
   }
   return out

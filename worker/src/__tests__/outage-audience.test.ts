@@ -6,6 +6,7 @@ import {
   buildOutageAudienceSql,
   queryOutageAudience,
   recordOutageView,
+  classifyAgent,
   AUDIENCE_SOURCES,
   AUDIENCE_SURFACES,
   AUDIENCE_SURFACE_UNKNOWN,
@@ -348,30 +349,30 @@ describe('queryOutageAudience (#842-B)', () => {
 describe('recordOutageView (#842-B)', () => {
   it('writes one data point with the source/phase/svc/surface blob order the SQL reads', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claude', 'service')
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claude', 'service', 'unflagged')
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['x', 'active', 'claude', 'service'],
+      blobs: ['x', 'active', 'claude', 'service', 'unflagged'],
       doubles: [1],
       indexes: ['isdown-view'],
     })
   })
   it('maps active=false → clear and no-ops when the binding is absent', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'search', false, 'openai', 'service')
-    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['search', 'clear', 'openai', 'service'] }))
-    expect(() => recordOutageView(undefined, 'x', true, 'claude', 'service')).not.toThrow()
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'search', false, 'openai', 'service', 'unflagged')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['search', 'clear', 'openai', 'service', 'unflagged'] }))
+    expect(() => recordOutageView(undefined, 'x', true, 'claude', 'service', 'unflagged')).not.toThrow()
   })
   // #1280 — the group surface is the whole point of blob4: without it this row is indistinguishable
   // from a view of claude's OWN page, because the group page reports a member id by design.
   it('writes the group surface without altering the service id it reports', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claudecode', 'group')
-    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['x', 'active', 'claudecode', 'group'] }))
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claudecode', 'group', 'unflagged')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['x', 'active', 'claudecode', 'group', 'unflagged'] }))
   })
   it('writes the unknown sentinel through unchanged, so a pre-blob4 body is not booked as service', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'direct', false, 'claude', 'unknown')
-    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['direct', 'clear', 'claude', 'unknown'] }))
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'direct', false, 'claude', 'unknown', 'unflagged')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['direct', 'clear', 'claude', 'unknown', 'unflagged'] }))
   })
 })
 
@@ -391,11 +392,56 @@ describe('buildOutageAudienceSql (#842-B)', () => {
     const sql = buildOutageAudienceSql('ds')
     expect(sql).toContain('blob3 AS svc')
     expect(sql).toContain('blob4 AS surface')
-    expect(sql).toContain('GROUP BY blob1, blob2, blob3, blob4')
+    expect(sql).toContain('GROUP BY blob1, blob2, blob3, blob4, blob5 ')
     // A selected-but-ungrouped column is the failure mode that matters: AE either rejects the query
     // (→ the whole 👥 section silently disappears, the trap the `phase` alias comment guards) or
     // returns an arbitrary representative row.
     expect(sql).not.toContain('GROUP BY blob1, blob2 ')
     expect(sql.endsWith('FORMAT JSON')).toBe(true)
+  })
+
+  it('selects AND groups by the agent dimension (#1083)', () => {
+    const sql = buildOutageAudienceSql('ds')
+    expect(sql).toContain('blob5 AS agent')
+    expect(sql).toMatch(/GROUP BY blob1, blob2, blob3, blob4, blob5 FORMAT JSON$/)
+  })
+})
+
+describe('classifyAgent (#1083)', () => {
+  const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+
+  it('flags a Cloudflare-verified bot even when its UA looks like a browser', () => {
+    expect(classifyAgent('Search Engine Crawler', CHROME)).toBe('bot')
+  })
+  it('does not read an empty verifiedBotCategory as a verdict — an ordinary browser is unflagged', () => {
+    expect(classifyAgent('', CHROME)).toBe('unflagged')
+    expect(classifyAgent(undefined, CHROME)).toBe('unflagged')
+  })
+  it('flags self-declaring UAs Cloudflare has not verified', () => {
+    expect(classifyAgent('', 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)')).toBe('bot')
+    expect(classifyAgent('', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/128.0.0.0 Safari/537.36')).toBe('bot')
+    expect(classifyAgent('', 'Screaming Frog SEO Spider/20.0')).toBe('bot')
+    expect(classifyAgent('', 'SomeCrawler/1.0')).toBe('bot')
+  })
+  it('treats a missing UA and a non-string category as unflagged, never throwing', () => {
+    expect(classifyAgent(null, null)).toBe('unflagged')
+    expect(classifyAgent(42, '')).toBe('unflagged')
+  })
+})
+
+describe('parseOutageAudienceResponse — agent dimension (#1083)', () => {
+  it('splits all views and the active subset by agent, and books a pre-blob5 row as unknown', () => {
+    const r = parseOutageAudienceResponse({ data: [
+      { source: 'direct', phase: 'clear', svc: 'pinecone', surface: 'service', agent: 'bot', views: 30 },
+      { source: 'direct', phase: 'clear', svc: 'claude', surface: 'service', agent: 'unflagged', views: 12 },
+      { source: 'x', phase: 'active', svc: 'claude', surface: 'service', agent: 'unflagged', views: 8 },
+      { source: 'x', phase: 'active', svc: 'claude', surface: 'service', agent: 'bot', views: 1 },
+      { source: 'x', phase: 'active', svc: 'claude', surface: 'service', views: 5 },          // pre-blob5
+      { source: 'x', phase: 'clear', svc: 'claude', surface: 'service', agent: 'Bot', views: 2 }, // wrong case
+    ] })!
+    expect(r.byAgent).toEqual({ bot: 31, unflagged: 20, unknown: 7 })
+    expect(r.activeByAgent).toEqual({ bot: 1, unflagged: 8, unknown: 5 })
+    expect(Object.values(r.byAgent).reduce((a, b) => a + b, 0)).toBe(r.total)
+    expect(Object.values(r.activeByAgent).reduce((a, b) => a + b, 0)).toBe(r.activeTotal)
   })
 })

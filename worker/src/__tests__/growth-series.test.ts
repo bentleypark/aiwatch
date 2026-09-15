@@ -44,7 +44,7 @@ describe('buildGrowthDailyRow', () => {
     subscriberNewToday: 1,
     // #1280 — a real AudienceCounts always carries `byScreen`; the `as never` below means tsc cannot
     // enforce that here, so the fixture has to stay faithful by hand.
-    audience: { total: 40, activeTotal: 31, bySource: { x: 20, search: 11 }, activeBySource: { x: 20 }, byScreen: { service: { claude: 25 }, group: { claude: 15 }, unknown: {} } },
+    audience: { total: 40, activeTotal: 31, bySource: { x: 20, search: 11 }, activeBySource: { x: 20 }, byScreen: { service: { claude: 25 }, group: { claude: 15 }, unknown: {} }, byAgent: { bot: 9, unflagged: 31, unknown: 0 }, activeByAgent: { bot: 1, unflagged: 30, unknown: 0 } },
     feedPolls: { verdict: 'failed', polls: null },
     // #1293 — same shape as `feedPolls`: the pair, never the value alone.
     extPolls: { verdict: 'failed', polls: null },
@@ -66,6 +66,8 @@ describe('buildGrowthDailyRow', () => {
       // #1280 — stored as read: the group page's views stay under `group` rather than being folded
       // into the member id they share, which is the whole reason the field exists.
       audienceByScreen: { service: { claude: 25 }, group: { claude: 15 }, unknown: {} },
+      audienceByAgent: { bot: 9, unflagged: 31, unknown: 0 },
+      audienceActiveByAgent: { bot: 1, unflagged: 30, unknown: 0 },
       feedPolls: null,
       feedPollsRead: 'failed',
       extPolls: null,
@@ -202,6 +204,8 @@ describe('buildGrowthDailyRow', () => {
     // null means "the read failed". A day whose WAE query died would become permanently readable as
     // a pre-deploy day.
     expect(r.audienceByScreen).toBeNull()
+    expect(r.audienceByAgent).toBeNull()
+    expect(r.audienceActiveByAgent).toBeNull()
   })
 
   it('a real zero stays 0 — nobody clicked is a fact, not a gap', () => {
@@ -763,11 +767,14 @@ describe('recordGrowthDaily — feedPolls at the KV boundary (#1273)', () => {
       audienceBySource: { x: 200, direct: 180 },
       audienceByScreen: { service: { claude: 300 }, group: { claude: 78 }, unknown: { openai: 2 } },
     }
-    const out = appendGrowthDaily([measured], row('2026-08-22', {
+    const out = appendGrowthDaily([{ ...measured, audienceByAgent: { bot: 40, unflagged: 340, unknown: 0 }, audienceActiveByAgent: { bot: 0, unflagged: 78, unknown: 0 } }], row('2026-08-22', {
       audienceTotal: null, audienceActiveTotal: null, audienceBySource: null, audienceByScreen: null,
+      audienceByAgent: null, audienceActiveByAgent: null,
     }))
+    expect(out[0].audienceByAgent).toEqual({ bot: 40, unflagged: 340, unknown: 0 })
+    expect(out[0].audienceActiveByAgent).toEqual({ bot: 0, unflagged: 78, unknown: 0 })
     expect(out[0].audienceByScreen).toEqual({ service: { claude: 300 }, group: { claude: 78 }, unknown: { openai: 2 } })
-    // The four travel as ONE group — carrying a subset would leave one run's totals beside another
+    // The audience fields travel as ONE group — carrying a subset would leave one run's totals beside another
     // run's breakdown, the same defect `feedPollsRead` travelling with its map exists to prevent.
     expect(out[0].audienceTotal).toBe(380)
     expect(out[0].audienceActiveTotal).toBe(78)
