@@ -96,7 +96,7 @@
 | Codex | OpenAI |
 | Cursor | Anysphere |
 | GitHub Copilot | Microsoft |
-| Windsurf | Codeium |
+| Windsurf | Cognition |
 | Junie | JetBrains |
 
 ### 음성 (3개)

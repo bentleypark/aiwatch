@@ -109,12 +109,12 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   windsurf: {
     displayName: 'Windsurf',
-    description: 'Windsurf is an AI-powered code editor by Codeium, offering intelligent code completions, multi-file editing, and an agentic coding experience. It supports multiple LLM backends and is designed as a Cursor alternative.',
-    insight: 'Windsurf relies on Codeium\'s own infrastructure plus upstream model providers. AIWatch tracks Windsurf independently — when Windsurf reports an issue, it may be Codeium-specific or caused by an upstream model outage. Windsurf has maintained strong uptime since launch.',
+    description: 'Windsurf is an AI-powered code editor by Cognition, offering intelligent code completions, multi-file editing, and an agentic coding experience. It supports multiple LLM backends and is designed as a Cursor alternative.',
+    insight: 'Windsurf relies on its own infrastructure plus upstream model providers. AIWatch tracks Windsurf independently — when Windsurf reports an issue, it may be Windsurf-specific or caused by an upstream model outage.',
     whenDown: 'When Windsurf is down, developers lose AI code completions, multi-file editing, and agentic coding features. The editor may still function for basic editing, but all AI-powered features will be unavailable.',
     faqs: [
       { q: 'Is Windsurf down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Windsurf every 5 minutes and shows real-time operational status.' },
-      { q: 'Why is Windsurf AI not working?', a: 'Windsurf AI features may be down due to Codeium server issues or upstream model provider outages. Check this page for current status details.' },
+      { q: 'Why is Windsurf AI not working?', a: 'Windsurf AI features may be down due to Windsurf\'s own server issues or upstream model provider outages. Check this page for current status details.' },
       { q: 'What are alternatives to Windsurf?', a: 'When Windsurf is down, Cursor, GitHub Copilot, or Claude Code are alternative AI coding tools. AIWatch shows which are currently operational.' },
       { q: 'Is Windsurf better than Cursor?', a: 'Both are AI-native code editors with different strengths. Check AIWatch reliability rankings at ai-watch.dev/#ranking to compare uptime and incident history.' },
     ],
