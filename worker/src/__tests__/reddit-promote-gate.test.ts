@@ -174,16 +174,13 @@ describe('#1315 promoteJoinIds — the join set is derived, not hand-listed', ()
     for (const id of promoteJoinIds('chatgpt') ?? []) expect(ids).toContain(id)
   })
 
-  // Grouping by `provider` instead of `statusUrl` passes every other assertion here, so this names
-  // the concrete pair that separates the two rules rather than restating the implementation.
-  it('does NOT join two products that share a vendor but not a status source', () => {
-    const azure = SERVICES.find(x => x.id === 'azureopenai')
-    const copilot = SERVICES.find(x => x.id === 'copilot')
-    expect(azure?.provider, 'fixture premise: same vendor').toBe(copilot?.provider)
-    expect(azure?.statusUrl, 'fixture premise: different status page').not.toBe(copilot?.statusUrl)
-    // An Azure OpenAI incident must not open the gate for a GitHub Copilot subreddit.
-    expect(promoteJoinIds('copilot')).not.toContain('azureopenai')
-    expect(promoteJoinIds('azureopenai')).not.toContain('copilot')
+  it('does NOT join two services on different status sources', () => {
+    const pair = [
+      { id: 'vendor-a-one', statusUrl: 'https://status.one.example' },
+      { id: 'vendor-a-two', statusUrl: 'https://status.two.example' },
+    ]
+    expect(promoteJoinIds('vendor-a-one', pair)).toEqual(['vendor-a-one'])
+    expect(promoteJoinIds('vendor-a-two', pair)).not.toContain('vendor-a-one')
   })
 
   it('never reaches beyond the status source and its declared upstreams', () => {

@@ -70,7 +70,7 @@ test.describe('Offline / API failure (dev mode)', () => {
             { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, uptime30d: 99.99, incidents: [] },
             { id: 'xai', category: 'api', name: 'xAI API', provider: 'xAI', status: 'operational', latency: 100, uptime30d: null, incidents: [] },
             { id: 'huggingface', category: 'api', name: 'Hugging Face', provider: 'Hugging Face', status: 'operational', latency: 100, uptime30d: null, incidents: [] },
-            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational', latency: null, uptime30d: 99.4, incidents: [] },
+            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'GitHub', status: 'operational', latency: null, uptime30d: 99.4, incidents: [] },
             { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', provider: 'ElevenLabs', status: 'operational', latency: 156, uptime30d: 99.8, incidents: [] },
           ],
           lastUpdated: new Date().toISOString(),
@@ -95,7 +95,7 @@ test.describe('Offline / API failure (dev mode)', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           services: [
-            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational', latency: null, uptime30d: 99.4, incidents: [
+            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'GitHub', status: 'operational', latency: null, uptime30d: 99.4, incidents: [
               { id: 'cp-test', title: 'Billing issues', status: 'investigating', impact: 'minor', startedAt: new Date().toISOString(), duration: null },
             ] },
             { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 145, uptime30d: 99.97, incidents: [] },
@@ -124,7 +124,7 @@ test.describe('Offline / API failure (dev mode)', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           services: [
-            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational', latency: null, uptime30d: 99.4, incidents: [
+            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'GitHub', status: 'operational', latency: null, uptime30d: 99.4, incidents: [
               { id: 'cp-mon', title: 'Code Completion Degraded', status: 'monitoring', impact: 'minor', startedAt: new Date().toISOString(), duration: null },
             ] },
             { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 145, uptime30d: 99.97, incidents: [] },

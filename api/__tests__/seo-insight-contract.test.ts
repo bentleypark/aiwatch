@@ -32,6 +32,14 @@ describe('is-down insight contract', () => {
     expect(without).toEqual([...OMITTED].sort())
   })
 
+  it('every slug meets the FAQ floor the e2e asserts over its 13-page sample', () => {
+    const belowFloor = Object.keys(SLUG_TO_SERVICE)
+      .map((slug) => ({ slug, count: getSEOContent(slug)?.faqs?.length ?? 0 }))
+      .filter(({ count }) => count < 4)
+      .map(({ slug, count }) => `${slug}:${count}`)
+    expect(belowFloor).toEqual([])
+  })
+
   it('an insight that exists reaches the page, and an omitted one renders no box', () => {
     const svc = {
       id: 'kimi', name: 'Kimi', provider: 'Moonshot AI', category: 'api',

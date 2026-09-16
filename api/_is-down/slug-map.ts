@@ -14,7 +14,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'claude-api':      { id: 'claude',     name: 'Claude API',       provider: 'Anthropic',   category: 'api', group: 'llm' },
   'chatgpt':         { id: 'chatgpt',    name: 'ChatGPT',          provider: 'OpenAI',      category: 'app', group: 'apps' },
   'gemini':          { id: 'gemini',     name: 'Gemini API',       provider: 'Google',      category: 'api', group: 'llm' },
-  'github-copilot':  { id: 'copilot',    name: 'GitHub Copilot',   provider: 'Microsoft',   category: 'agent', group: 'agents' },
+  'github-copilot':  { id: 'copilot',    name: 'GitHub Copilot',   provider: 'GitHub',        category: 'agent', group: 'agents' },
   'cursor':          { id: 'cursor',     name: 'Cursor',           provider: 'Anysphere',   category: 'agent', group: 'agents' },
   'claude-code':     { id: 'claudecode', name: 'Claude Code',      provider: 'Anthropic',   category: 'agent', group: 'agents' },
   'openai-api':      { id: 'openai',     name: 'OpenAI API',       provider: 'OpenAI',      category: 'api', group: 'llm' },
@@ -81,9 +81,6 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
   // distinct from the deprecated 2023 Codex code-generation API.
   'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent', group: 'agents' },
-  // Junie (#336) — JetBrains coding agent. Status page is shared with sibling
-  // JetBrains AI products (Grazie, AI Platform, AI Platform China); the worker
-  // scopes the badge to the Junie component only via statusComponentId.
   'junie':           { id: 'junie',       name: 'Junie',           provider: 'JetBrains',   category: 'agent', group: 'agents' },
 }
 

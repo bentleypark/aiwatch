@@ -626,7 +626,7 @@ export const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational',
+    id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'GitHub', status: 'operational',
     latency: null, uptime30d: 99.40,
     history30d: hist([9, 24]),
     history3m: [{ month: '2026-01', uptime: 99.60 }, { month: '2026-02', uptime: 99.50 }, { month: '2026-03', uptime: 99.40 }],

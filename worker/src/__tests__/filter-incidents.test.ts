@@ -1035,7 +1035,7 @@ describe('filterIncidents — GitHub Copilot scoping (#397)', () => {
   const copilotConfig: ServiceConfig = {
     id: 'copilot',
     name: 'GitHub Copilot',
-    provider: 'Microsoft',
+    provider: 'GitHub',
     category: 'agent',
     statusUrl: 'https://githubstatus.com',
     apiUrl: 'https://www.githubstatus.com/api/v2/summary.json',

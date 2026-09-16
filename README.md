@@ -96,7 +96,7 @@ Grouped by the dashboard's category taxonomy (45 total — sidebar filters / Ove
 | Claude Code | Anthropic |
 | Codex | OpenAI |
 | Cursor | Anysphere |
-| GitHub Copilot | Microsoft |
+| GitHub Copilot | GitHub |
 | Windsurf | Cognition |
 | Junie | JetBrains |
 
