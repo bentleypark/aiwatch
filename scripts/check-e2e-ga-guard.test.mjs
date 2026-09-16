@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { findGaGuardViolations, stripComments, stripNonCode, readSpecs, TESTS_DIR } from './check-e2e-ga-guard.mjs'
-import { GA_HIT_RE } from '../tests/ga-hosts.js'
+import { GA_HIT_RE, AUDIENCE_BEACON_RE } from '../tests/ga-hosts.js'
 
 const spec = (source) => [{ file: 'x.spec.js', source }]
 
@@ -22,6 +22,21 @@ test('GA_HIT_RE matches every GA4 collect endpoint the CSP allows', () => {
 
 test('GA_HIT_RE does NOT match gtag.js — consent.spec needs the loader to reach the browser', () => {
   assert.ok(!GA_HIT_RE.test('https://www.googletagmanager.com/gtag/js?id=G-D4ZWVHQ7JK'))
+})
+
+test('AUDIENCE_BEACON_RE matches the production beacon endpoint (#1436)', () => {
+  assert.ok(AUDIENCE_BEACON_RE.test('https://aiwatch-worker.p2c2kbf.workers.dev/api/pageview'))
+})
+
+test('AUDIENCE_BEACON_RE does NOT match other worker or Edge API routes the pages need', () => {
+  for (const url of [
+    'https://aiwatch-worker.p2c2kbf.workers.dev/api/status',
+    'https://aiwatch-worker.p2c2kbf.workers.dev/api/pageviews',
+    'https://aiwatch-worker.p2c2kbf.workers.dev/api/referral',
+    'http://localhost:3333/api/is-down-group?family=claude',
+  ]) {
+    assert.ok(!AUDIENCE_BEACON_RE.test(url), `must not block ${url}`)
+  }
 })
 
 // --- import escape ----------------------------------------------------------------------------

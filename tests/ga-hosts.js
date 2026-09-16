@@ -12,3 +12,8 @@
 // measurement, and tests/consent.spec.js needs it to load — the `_ga` cookie that spec asserts is
 // written client-side by gtag.js, not by a collect response.
 export const GA_HIT_RE = /(google-analytics\.com|analytics\.google\.com)\//
+
+// #1436 — the is-down audience beacon (`api/_shared/audience-beacon.ts`) posts to the PRODUCTION
+// worker from any host, including the Vercel Preview the Edge E2E job runs against, whose origin the
+// worker allows. Unblocked, every PR run booked its page loads as real audience in `growth:daily`.
+export const AUDIENCE_BEACON_RE = /\/api\/pageview(?:$|[?#])/
