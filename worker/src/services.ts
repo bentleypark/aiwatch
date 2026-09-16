@@ -1007,9 +1007,10 @@ export function uptimeScopeForPage(apiUrl: string): string[] {
 }
 
 /**
- * #1006/#379 — the component scope a service's uptime is computed over: its badge worst-of when it has
- * one, else its single primary component. Empty when the service has no `statusComponentId`, which is
- * the gate the uptime branch itself applies.
+ * #1006/#379 — the component scope the ATLASSIAN uptime path computes over: a service's badge worst-of
+ * when it has one, else its single primary component. Empty when the service has no
+ * `statusComponentId`, which is the gate that branch itself applies. The other source arms each decide
+ * their own scope and do not call this.
  *
  * ONE definition, two readers (#1389): the `parseUptimeData`/`computeUptimeData` call site, and
  * `uptimeScopeForPage`, which turns it into the `/uptime_showcase` request. Written inline in both
@@ -2662,9 +2663,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           uptimeRepDays = uptimeResult.uptimeReportedDays ?? undefined
         }
       } else if (uptimeHtml && config.incidentIoComponentId) {
-        // #1006 — uptime is computed over the SAME component scope the badge and the impact calendar use
-        // (`statusComponentIds`, worst-of per #379), not over the single `incidentIoComponentId`.
-        // LangSmith exposed the gap: its badge spans API + Run Ingestion + Application, but uptime read
+        // #1006 — LangSmith exposed the gap: its badge spans API + Run Ingestion + Application, but uptime read
         // only the API component — so a partial outage on Run Ingestion showed up in the incident list
         // while uptime sat at a spotless 100%. The old 90-day published figure happened to be low enough
         // that nobody noticed; computing an honest 30 days made the mismatch visible.
