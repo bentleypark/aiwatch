@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures.js'
+import { test, expect, AUDIENCE_BEACON_RE } from './fixtures.js'
 // #568/#643: upper bound on the is-down "ranked #X of N" denominator. constants.js is a pure data
 // module (no browser deps) → importable in node/Playwright, so this auto-tracks service additions.
 //
@@ -33,6 +33,16 @@ const PAGES = [
   { slug: 'character-ai', title: 'Is Character.AI Down?', displayName: 'Character.AI' }, // dashed slug, app category
   { slug: 'codex', title: 'Is Codex Down?', displayName: 'Codex' }, // coding agent, no umbrella component (#294)
 ]
+
+// #1436 — the page's own beacon must fire and be killed by the fixture. Waiting on the real request
+// (not a hand-built fetch) is what catches a beacon URL change that slips past AUDIENCE_BEACON_RE:
+// an unmatched request completes, no `requestfailed` arrives, and the test times out red.
+test('the audience beacon fires on load and the e2e fixture aborts it', async ({ page }) => {
+  const failed = page.waitForEvent('requestfailed', (req) => AUDIENCE_BEACON_RE.test(req.url()))
+  await page.goto('/is-chatgpt-down', { waitUntil: 'domcontentloaded' })
+  const req = await failed
+  expect(req.failure()?.errorText).toBe('net::ERR_BLOCKED_BY_CLIENT.Inspector')
+})
 
 test.describe('Is X Down? SSR pages', () => {
   for (const page of PAGES) {

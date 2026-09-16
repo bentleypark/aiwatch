@@ -19,14 +19,17 @@
 // inside it.
 
 import { test as base, expect } from '@playwright/test'
-import { GA_HIT_RE } from './ga-hosts.js'
+import { GA_HIT_RE, AUDIENCE_BEACON_RE } from './ga-hosts.js'
 
-export { GA_HIT_RE }
+export { GA_HIT_RE, AUDIENCE_BEACON_RE }
 
-// Block GA4 hits on a Page or a BrowserContext. Specs that build their own context or page off the
-// `browser` fixture (bypassing the `context` override below) must call this on it.
+// Block GA4 hits and the is-down audience beacon (#1436) on a Page or a BrowserContext. Specs that
+// build their own context or page off the `browser` fixture (bypassing the `context` override below)
+// must call this on it. The beacon abort uses its own error code: a local run's cross-origin beacon
+// already fails CORS with `net::ERR_FAILED`, so only a distinct code proves the block did it.
 export async function blockGaHits(pageOrContext) {
   await pageOrContext.route(GA_HIT_RE, (route) => route.abort())
+  await pageOrContext.route(AUDIENCE_BEACON_RE, (route) => route.abort('blockedbyclient'))
 }
 
 export const test = base.extend({
