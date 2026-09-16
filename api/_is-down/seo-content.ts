@@ -49,9 +49,9 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   'github-copilot': {
     displayName: 'GitHub Copilot',
-    description: 'GitHub Copilot is an AI-powered coding assistant by Microsoft that integrates with VS Code, JetBrains, and other IDEs. It provides real-time code suggestions, chat assistance, and automated pull request reviews.',
-    insight: 'GitHub Copilot incidents often overlap with broader GitHub infrastructure issues (Git operations, Actions, Codespaces). AIWatch tracks Copilot-specific incidents separately, but when GitHub itself is degraded, Copilot is almost always affected. Copilot Coding Agent is a newer feature with its own distinct failure patterns.',
-    whenDown: 'When GitHub Copilot is down, developers lose AI code completions and chat assistance in their IDE. Copilot Coding Agent sessions and automated reviews will also be unavailable.',
+    description: 'GitHub Copilot is GitHub\'s AI coding assistant. It provides real-time code suggestions, chat assistance, and automated pull request reviews.',
+    insight: 'GitHub Copilot incidents often overlap with broader GitHub infrastructure issues. AIWatch tracks Copilot-specific incidents separately.',
+    whenDown: 'When GitHub Copilot is down, developers lose AI code completions and chat assistance. Copilot cloud agent sessions and automated reviews will also be unavailable.',
     faqs: [
       { q: 'Is GitHub Copilot down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors GitHub Copilot every 5 minutes using GitHub Status data.' },
       { q: 'Why is Copilot not suggesting code?', a: 'Copilot may be experiencing service issues. Check this page for current status. Also verify your subscription is active and your IDE extension is up to date.' },
@@ -61,26 +61,26 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   cursor: {
     displayName: 'Cursor',
-    description: 'Cursor is an AI-native code editor built on VS Code that integrates multiple LLM providers for intelligent code editing, chat, and codebase understanding.',
-    insight: 'Cursor depends on upstream model providers (Claude, OpenAI), so outages can originate from either Cursor infrastructure or its AI backends. AIWatch monitors Cursor independently — when Cursor reports an issue, check the AIWatch dashboard to see if Claude or OpenAI is also down.',
-    whenDown: 'When Cursor is down, developers cannot use AI features including code completions, chat, and intelligent editing. The editor itself may still function for basic editing, but AI-powered features will be unavailable.',
+    description: 'Cursor is a coding agent built on the VS Code codebase, integrating multiple LLM providers for code editing, chat, and codebase understanding.',
+    insight: 'Cursor depends on upstream model providers as well as its own models, so outages can originate from either Cursor infrastructure or its AI backends. AIWatch monitors Cursor independently — when Cursor reports an issue, check the AIWatch dashboard to see whether a provider it uses is also down.',
+    whenDown: 'When Cursor is down, developers cannot use AI features including code completions, chat, and intelligent editing.',
     faqs: [
       { q: 'Is Cursor down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cursor every 5 minutes and shows real-time operational status.' },
-      { q: 'Why is Cursor AI not working?', a: 'Cursor AI features may be down due to server issues or upstream model provider outages (e.g., Claude or OpenAI). Check this page for current status details.' },
+      { q: 'Why is Cursor AI not working?', a: 'Cursor AI features may be down due to server issues or an upstream model provider outage. Check this page for current status details.' },
       { q: 'What are alternatives to Cursor?', a: 'When Cursor is down, GitHub Copilot, Windsurf, or Claude Code are alternative AI coding tools. AIWatch shows which are currently operational.' },
-      { q: 'Is Cursor down because of Claude or OpenAI?', a: 'Cursor relies on external model providers. Check the AIWatch dashboard at ai-watch.dev to see if Claude API or OpenAI is also experiencing issues.' },
+      { q: 'Is Cursor down because of an upstream model provider?', a: 'Cursor relies on external model providers as well as its own models. Check the AIWatch dashboard at ai-watch.dev to see whether a provider it uses is also experiencing issues.' },
     ],
   },
   'claude-code': {
     displayName: 'Claude Code',
-    description: 'Claude Code is Anthropic\'s official CLI tool for AI-powered coding. It runs in the terminal, understands entire codebases, and can edit files, run commands, and manage git workflows autonomously using Claude models.',
-    insight: 'Claude Code shares Anthropic\'s status page with Claude API and claude.ai. An incident on Claude API will also affect Claude Code since it relies on the same backend models. When evaluating Claude Code reliability, check both the Claude Code status and the Claude API status on AIWatch.',
-    whenDown: 'When Claude Code is down, developers cannot use AI-assisted coding in their terminal. Code generation, file editing, command execution, and codebase Q&A features will be unavailable. Consider using an alternative coding agent until the service recovers.',
+    description: 'Claude Code is Anthropic\'s coding agent. It understands entire codebases and can edit files, run commands, and manage git workflows autonomously using Claude models.',
+    insight: 'Claude Code shares Anthropic\'s status page with Claude API and claude.ai. When evaluating Claude Code reliability, check both the Claude Code status and the Claude API status on AIWatch.',
+    whenDown: 'When Claude Code is down, developers cannot use AI-assisted coding. Code generation, file editing, command execution, and codebase Q&A features will be unavailable. Consider using an alternative coding agent until the service recovers.',
     faqs: [
       { q: 'Is Claude Code down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Claude Code every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
-      { q: 'Why is Claude Code not working?', a: 'Claude Code relies on Anthropic\'s Claude API backend. If Claude API is experiencing issues (model errors, rate limiting), Claude Code will also be affected. Check this page for current status.' },
+      { q: 'Why is Claude Code not working?', a: 'Claude Code\'s default backend is Anthropic\'s Claude API, so a Claude API incident (model errors, rate limiting) can reach Claude Code too. Check this page for current status.' },
       { q: 'What can I use instead of Claude Code?', a: 'When Claude Code is down, GitHub Copilot, Cursor, or Windsurf are alternative AI coding tools. AIWatch shows which are currently operational.' },
-      { q: 'Is Claude Code down because of Claude API?', a: 'Yes, Claude Code depends on Claude API models. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
+      { q: 'Is Claude Code down because of Claude API?', a: 'Not always — enterprise deployments can route inference through a cloud provider instead. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
     ],
   },
   'claude-ai': {
@@ -121,14 +121,14 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   junie: {
     displayName: 'Junie',
-    description: 'Junie is JetBrains\' AI coding agent, integrated across IntelliJ IDEA, PyCharm, WebStorm, GoLand, and other JetBrains IDEs. It autonomously plans and edits code through chat, leveraging the JetBrains AI platform that wraps Anthropic, OpenAI, and Google models.',
-    insight: 'Junie shares the JetBrains Cloud Platform status page with sibling products (Grazie, Mellum, JetBrains Context) and the upstream model providers. AIWatch scopes Junie\'s badge to JetBrains\' AI gateway — the component that carries the LLM-API, auth, and quota incidents Junie depends on — so an unrelated Grazie or single-model incident doesn\'t flip Junie to degraded. When that gateway degrades, the upstream provider (Anthropic, OpenAI, Gemini) is often affected too; AIWatch tracks each of those on its own page.',
-    whenDown: 'When Junie is down, JetBrains IDE users lose autonomous code edits, chat-driven planning, and multi-step refactors. The IDE itself keeps working for normal editing — only the AI agent surface is affected.',
+    description: 'Junie is JetBrains\' AI coding agent. It autonomously plans and edits code through chat, using the JetBrains AI service or a model provider you connect yourself.',
+    insight: 'Junie shares the JetBrains Cloud Platform status page with JetBrains\' other AI products and the upstream model providers.',
+    whenDown: 'When Junie is down, users lose autonomous code edits, chat-driven planning, and multi-step refactors.',
     faqs: [
       { q: 'Is Junie down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Junie every 5 minutes via the JetBrains Cloud Platform status feed and shows real-time operational status.' },
-      { q: 'Why are Junie\'s AI features not working?', a: 'Junie may be down due to JetBrains-specific issues or an upstream model provider outage (Anthropic, OpenAI, Google). The status page often labels which upstream is involved; AIWatch surfaces that detail when available.' },
+      { q: 'Why are Junie\'s AI features not working?', a: 'Junie may be down due to JetBrains-specific issues or an upstream model provider outage.' },
       { q: 'What are alternatives to Junie?', a: 'When Junie is down, Cursor, Claude Code, GitHub Copilot, Codex, or Windsurf are alternative AI coding agents. AIWatch shows which are currently operational and recommends the highest-scored alternative.' },
-      { q: 'Does Junie work in every JetBrains IDE?', a: 'Junie is available across the JetBrains IDE family (IntelliJ, PyCharm, WebStorm, GoLand, RubyMine, etc.). Status disruptions on the JetBrains AI platform affect all of them simultaneously.' },
+      { q: 'Does Junie work in every JetBrains IDE?', a: 'No — JetBrains ships the Junie plugin for a subset of its IDEs, each with its own minimum version. Check JetBrains\' documentation for the one you use.' },
     ],
   },
   // Phase B — LLM APIs (#263)
@@ -509,19 +509,17 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     ],
   },
   // Coding agents (#294) — "OpenAI Codex" on this page means the current coding
-  // agent product (CLI, Codex Web, VS Code extension), not the deprecated 2023
-  // Codex code-generation API.
+  // agent product, not the code-generation API OpenAI retired in 2023.
   codex: {
     displayName: 'Codex',
-    description: 'Codex is a coding agent from OpenAI that runs across web, CLI, and a VS Code extension, using frontier OpenAI models to plan and execute multi-step code changes. This is the current Codex coding-agent product, not the deprecated 2023 Codex code-generation API.',
-    insight: 'Codex shares its backend infrastructure with ChatGPT and the OpenAI API. When OpenAI has a broad platform incident, Codex is almost always affected — AIWatch tracks Codex independently so the impact scope is visible per surface (Codex Web, Codex API, CLI, VS Code extension). Codex-specific incidents that do not also affect ChatGPT are less common but do occur.',
-    whenDown: 'When Codex is down, developers lose the coding agent across the CLI, web, and VS Code extension — multi-step planning, file edits, and task execution all fail. The underlying OpenAI models may still be reachable via the API for other uses.',
+    description: 'Codex is OpenAI\'s coding agent, using frontier OpenAI models to plan and execute multi-step code changes.',
+    insight: 'AIWatch tracks Codex independently of ChatGPT and the OpenAI API, so an incident\'s impact scope is visible per surface.',
+    whenDown: 'When Codex is down, developers lose the coding agent — multi-step planning, file edits, and task execution all fail. The underlying OpenAI models may still be reachable via the API for other uses.',
     faqs: [
-      { q: 'Is Codex down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Codex every 5 minutes across its four published surfaces (Codex Web, Codex API, CLI, VS Code extension) and shows real-time operational status.' },
-      { q: 'Is this the old Codex API from 2023?', a: 'No. This page tracks the current OpenAI Codex coding agent released as part of OpenAI\'s agent products. The 2023 Codex code-generation API was deprecated and is not what AIWatch monitors here.' },
+      { q: 'Is Codex down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Codex every 5 minutes across its published surfaces and shows real-time operational status.' },
+      { q: 'Is this the old Codex code-generation API?', a: 'No. This page tracks the current OpenAI Codex coding agent. The older code-generation API was retired in 2023 and is not what AIWatch monitors here.' },
       { q: 'Why is Codex not working?', a: 'Codex outages usually stem from one of: a broader OpenAI platform incident (also affects ChatGPT and the API), a Codex-specific backend issue, or an upstream model outage. Check the Recent Incidents section for current context.' },
       { q: 'What are alternatives to Codex?', a: 'When Codex is down, Claude Code, GitHub Copilot, Cursor, or Windsurf are alternative coding agents. AIWatch shows which are currently operational.' },
-      { q: 'Which Codex surface does the uptime percentage track?', a: 'The uptime shown on this page reflects the Codex API component specifically, which backs the CLI and VS Code extension. Codex Web frontend outages may not be counted in that percentage — check the Recent Incidents section for surface-specific events across all four Codex surfaces (Codex Web, Codex API, CLI, VS Code extension).' },
     ],
   },
   twelvelabs: {

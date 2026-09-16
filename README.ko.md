@@ -95,7 +95,7 @@
 | Claude Code | Anthropic |
 | Codex | OpenAI |
 | Cursor | Anysphere |
-| GitHub Copilot | Microsoft |
+| GitHub Copilot | GitHub |
 | Windsurf | Cognition |
 | Junie | JetBrains |
 

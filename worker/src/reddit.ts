@@ -14,6 +14,7 @@
 import { defuseAutolinkDomain } from './alerts'
 import { appendStatusHint, appendUtm } from './utils'
 import { isAffectedStatus, isUnreadableStatus, type ServiceStatusValue } from './status-verdict'
+import type { ServiceConfig } from './types'
 import { SERVICES } from './services'
 import { UPSTREAM_DEPS } from './upstream-link'
 
@@ -273,10 +274,8 @@ export function promoteReason(title: string, ageSec: number = Infinity): Promote
  *      whichever Anthropic surface they were using, and AIWatch resolves `claude` / `claudeai` /
  *      `claudecode` independently off one `status.claude.com` — so joining r/ClaudeAI to one of them
  *      downgraded every post during a single-surface outage we were carrying under another id.
- *      Grouped by `statusUrl`, NOT by `provider`: `provider` is the corporate vendor, and Microsoft
- *      spans `azureopenai` (azure.status.microsoft) and `copilot` (githubstatus.com) — one vendor,
- *      two unrelated status sources. That pair is the only place the two groupings differ today, and
- *      neither is a `REDDIT_TARGETS` anchor, so this is the rule being right rather than a fix.
+ *      Grouped by `statusUrl`, NOT by `provider`: `provider` is the corporate vendor, which can
+ *      cover products on unrelated status sources.
  *   2. **A declared upstream** (`UPSTREAM_DEPS`). On 2026-07-17 Anthropic opened its incident at
  *      06:47:54Z and Cursor opened its own at 07:17:15Z — the two times `upstream-link.ts` records.
  *      A dependent that files 29 minutes late reads healthy for those 29 minutes.
@@ -289,14 +288,17 @@ export function promoteReason(title: string, ageSec: number = Infinity): Promote
  * The one call site (`detectRedditPosts`) is the remaining hand-written expression, so it is covered
  * behaviourally there — deriving correctly and never being called is the same bug as not deriving.
  */
-export function promoteJoinIds(statusId: string | undefined): readonly string[] | undefined {
+export function promoteJoinIds(
+  statusId: string | undefined,
+  services: readonly Pick<ServiceConfig, 'id' | 'statusUrl'>[] = SERVICES,
+): readonly string[] | undefined {
   if (!statusId) return undefined
-  const anchor = SERVICES.find(s => s.id === statusId)
+  const anchor = services.find(s => s.id === statusId)
   if (!anchor) return [statusId]
-  const ids = new Set(SERVICES.filter(s => s.statusUrl === anchor.statusUrl).map(s => s.id))
+  const ids = new Set(services.filter(s => s.statusUrl === anchor.statusUrl).map(s => s.id))
   for (const id of [...ids]) {
     for (const up of UPSTREAM_DEPS.find(d => d.id === id)?.upstreamIds ?? []) {
-      if (SERVICES.some(s => s.id === up)) ids.add(up)
+      if (services.some(s => s.id === up)) ids.add(up)
     }
   }
   return [...ids]
