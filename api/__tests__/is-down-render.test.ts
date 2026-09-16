@@ -667,7 +667,7 @@ describe('no is-down insight claims AIWatch estimates uptime (#713/#1006)', () =
     for (const slug of Object.keys(SLUG_TO_SERVICE)) {
       const seo = getSEOContent(slug)
       if (!seo) continue
-      const prose = [seo.insight, ...(seo.faq ?? []).map((f) => `${f.q} ${f.a}`)].join(' ')
+      const prose = [seo.insight, ...seo.faqs.map((f) => `${f.q} ${f.a}`)].join(' ')
       // Scoped to OUR method. A service genuinely publishing no uptime may still be described as such
       // (gemini's copy does, correctly) — what may never be written is that WE estimate the number.
       if (/AIWatch\s+estimates?\s+(the\s+)?uptime/i.test(prose)) offenders.push(slug)

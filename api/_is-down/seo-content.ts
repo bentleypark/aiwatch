@@ -3,7 +3,7 @@
 export interface ServiceSEO {
   displayName: string
   description: string
-  insight: string
+  insight?: string
   whenDown: string
   faqs: Array<{ q: string; a: string }>
 }
@@ -26,7 +26,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   chatgpt: {
     displayName: 'ChatGPT',
     description: 'ChatGPT is a conversational AI assistant by OpenAI, available on web, iOS, Android, and desktop. Used by millions for writing, research, coding, and creative tasks, it is powered by OpenAI\'s latest language models.',
-    insight: 'ChatGPT and OpenAI API share infrastructure but are tracked separately by AIWatch. A ChatGPT outage does not always mean the API is down — and vice versa. OpenAI has historically maintained one of the highest uptime records among AI providers, with most incidents resolved within 30 minutes.',
+    insight: 'ChatGPT and OpenAI API share infrastructure but are tracked separately by AIWatch. A ChatGPT outage does not always mean the API is down — and vice versa.',
     whenDown: 'When ChatGPT is down, users cannot access the web interface for conversations, file uploads, or image generation. Mobile apps and API integrations through the OpenAI platform may also be affected.',
     faqs: [
       { q: 'Is ChatGPT down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors ChatGPT every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
@@ -38,7 +38,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   gemini: {
     displayName: 'Gemini',
     description: 'Gemini is Google\'s multimodal AI model API, capable of processing text, images, audio, and video. It powers Google AI Studio and is available through the Vertex AI platform for enterprise applications.',
-    insight: 'Google does not publish official uptime percentages for Gemini on their public status pages, making independent monitoring especially valuable. AIWatch tracks Gemini through Google AI Studio status (aistudio.google.com/status) and Google Cloud incident feeds in parallel so both the direct API and Vertex surfaces are covered. Gemini outages tend to be infrequent but can be longer in duration compared to other LLM providers.',
+    insight: 'Google does not publish official uptime percentages for Gemini on their public status pages, making independent monitoring especially valuable. AIWatch tracks Gemini through Google AI Studio status (aistudio.google.com/status) and Google Cloud incident feeds in parallel so both the direct API and Vertex surfaces are covered.',
     whenDown: 'When Gemini API is down, applications using Google\'s AI models will fail to process requests. This affects both direct API users and services built on Google AI Studio or Vertex AI.',
     faqs: [
       { q: 'Is Gemini API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Gemini API every 5 minutes using Google AI Studio status data and Google Cloud incident feeds.' },
@@ -62,7 +62,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   cursor: {
     displayName: 'Cursor',
     description: 'Cursor is an AI-native code editor built on VS Code that integrates multiple LLM providers for intelligent code editing, chat, and codebase understanding.',
-    insight: 'Cursor depends on upstream model providers (Claude, OpenAI), so outages can originate from either Cursor infrastructure or its AI backends. AIWatch monitors Cursor independently — when Cursor reports an issue, check the AIWatch dashboard to see if Claude or OpenAI is also down. Cursor has maintained strong uptime with most incidents attributed to upstream provider issues.',
+    insight: 'Cursor depends on upstream model providers (Claude, OpenAI), so outages can originate from either Cursor infrastructure or its AI backends. AIWatch monitors Cursor independently — when Cursor reports an issue, check the AIWatch dashboard to see if Claude or OpenAI is also down.',
     whenDown: 'When Cursor is down, developers cannot use AI features including code completions, chat, and intelligent editing. The editor itself may still function for basic editing, but AI-powered features will be unavailable.',
     faqs: [
       { q: 'Is Cursor down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cursor every 5 minutes and shows real-time operational status.' },
@@ -98,7 +98,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   'openai-api': {
     displayName: 'OpenAI',
     description: 'OpenAI API provides access to OpenAI\'s language, image, and audio models used by millions of developers. It serves both the ChatGPT consumer product and enterprise API integrations.',
-    insight: 'OpenAI API and ChatGPT share infrastructure but are monitored separately by AIWatch. An API outage may not affect ChatGPT and vice versa. OpenAI maintains one of the highest uptime records among AI providers, with most incidents resolved within 30 minutes.',
+    insight: 'OpenAI API and ChatGPT share infrastructure but are monitored separately by AIWatch. An API outage may not affect ChatGPT and vice versa.',
     whenDown: 'When OpenAI API is down, applications using language, embedding, or image generation models will fail. This affects thousands of third-party apps, chatbots, and developer tools that rely on OpenAI as their backend.',
     faqs: [
       { q: 'Is OpenAI API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors OpenAI API every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
@@ -147,19 +147,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   cohere: {
     displayName: 'Cohere',
     description: 'Cohere API provides enterprise-grade language models specializing in retrieval-augmented generation (RAG), reranking, and multilingual embeddings. Cohere is widely used in enterprise search and knowledge applications.',
-    insight: 'Cohere reports incidents per component (Generate, Embed, Rerank, Classify), so AIWatch shows aggregated overall status. Cohere has strong uptime historically — most incidents are short, model-specific issues rather than full API outages.',
     whenDown: 'When Cohere API is down, applications relying on Generate, Embed, or Rerank endpoints will fail. Enterprise search and RAG applications built on Cohere will not return results.',
     faqs: [
       { q: 'Is Cohere API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cohere every 5 minutes and shows real-time operational status.' },
       { q: 'How do I check Cohere status?', a: 'You can check Cohere status on this page, on the official Cohere status page at status.cohere.com, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What can I use instead of Cohere?', a: 'When Cohere is down, Voyage AI is a strong alternative for embeddings and reranking. For Generate, OpenAI, Mistral, or Groq are options. AIWatch shows current availability.' },
       { q: 'Are Cohere embeddings affected during incidents?', a: 'Cohere reports embed and generate incidents separately. Check this page for the current overall status, and the official status page for component-level breakdowns.' },
+      { q: 'What can I use instead of Cohere?', a: 'When Cohere is down, Voyage AI is a strong alternative for embeddings and reranking. For Generate, OpenAI, Mistral, or Groq are options. AIWatch shows current availability.' },
     ],
   },
   groq: {
     displayName: 'Groq Cloud',
     description: 'Groq Cloud provides ultra-low-latency inference for popular open-source LLMs (Llama, Mixtral, Gemma) using custom LPU hardware. Groq is known for sub-100ms response times that traditional GPU-based providers cannot match.',
-    insight: 'Groq\'s edge is response speed, not just availability. AIWatch tracks both uptime and probe-based response times — Groq\'s latency advantage usually holds even during partial degradations. Most incidents are short capacity-related slowdowns rather than full outages.',
+    insight: 'Groq\'s edge is response speed, not just availability. AIWatch tracks both uptime and probe-based response times.',
     whenDown: 'When Groq Cloud is down, applications relying on its low-latency inference (real-time voice, streaming chat, agentic loops) lose their speed advantage and must fall back to slower providers, often breaking UX assumptions.',
     faqs: [
       { q: 'Is Groq Cloud down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Groq every 5 minutes and shows real-time operational status, uptime, and response time data.' },
@@ -183,7 +182,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   fireworks: {
     displayName: 'Fireworks AI',
     description: 'Fireworks AI offers fast, scalable inference for popular open-source LLMs and image models, plus fine-tuning and dedicated deployments. It is positioned as a high-performance alternative to Together AI.',
-    insight: 'Fireworks reports incidents per model (16 tracked, e.g. Kimi, DeepSeek, GLM), so AIWatch aggregates across them for overall status and computes a rolling uptime figure from the incident record. Most incidents are short, single-model degradations rather than full API outages.',
     whenDown: 'When Fireworks AI is down, developers lose hosted inference for open-source models. Production apps relying on Fireworks for serverless or dedicated endpoints will see request failures.',
     faqs: [
       { q: 'Is Fireworks AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Fireworks every 5 minutes and shows real-time operational status.' },
@@ -207,7 +205,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   perplexity: {
     displayName: 'Perplexity',
     description: 'Perplexity is an AI-powered answer engine combining LLMs with real-time web search. It offers consumer search at perplexity.ai and an API for developers to access its search-augmented generation capabilities.',
-    insight: 'Perplexity moved its status page to incident.io in September 2026, which publishes per-component outage records. AIWatch computes its own 30-day uptime from those records rather than copying the figure the page shows, so the two can differ. Outages often correlate with upstream LLM provider issues since Perplexity uses multiple model backends.',
+    insight: 'Perplexity moved its status page to incident.io in September 2026, which publishes per-component outage records. AIWatch computes its own 30-day uptime from those records rather than copying the figure the page shows, so the two can differ.',
     whenDown: 'When Perplexity is down, both the consumer search interface (perplexity.ai) and the developer API will fail to return answers. Apps built on Perplexity API for search-augmented generation will lose their search capability.',
     faqs: [
       { q: 'Is Perplexity down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Perplexity every 5 minutes and shows real-time operational status.' },
@@ -285,7 +283,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   elevenlabs: {
     displayName: 'ElevenLabs',
     description: 'ElevenLabs provides leading text-to-speech and voice cloning APIs used in audiobooks, podcasts, conversational AI, and accessibility apps. Its multilingual voice synthesis is known for natural prosody and emotion.',
-    insight: 'ElevenLabs reports incidents per feature (TTS, Voice Cloning, Conversational AI Agents). AIWatch tracks the overall service availability. Recent updates to AIWatch use Atlassian-style impact weighting so minor incidents (e.g., dashboard glitches) don\'t over-penalize ElevenLabs\' uptime score.',
     whenDown: 'When ElevenLabs is down, applications relying on text-to-speech generation, voice cloning, or conversational voice agents will fail. Audiobook pipelines, podcast generators, and voice-first apps lose their primary capability.',
     faqs: [
       { q: 'Is ElevenLabs down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors ElevenLabs every 5 minutes and shows real-time operational status.' },
@@ -297,7 +294,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   assemblyai: {
     displayName: 'AssemblyAI',
     description: 'AssemblyAI provides production-grade speech-to-text APIs with features like speaker diarization, sentiment analysis, and topic detection. It is widely used for meeting transcription, podcast indexing, and call center analytics.',
-    insight: 'AssemblyAI publishes per-component status (Async Transcription, Real-time Transcription, LeMUR). AIWatch tracks the API endpoint as a whole. Async transcription incidents are more common than real-time outages but generally resolve quickly.',
     whenDown: 'When AssemblyAI is down, applications submitting transcription jobs (async or real-time) will fail. Meeting recorders, captioning services, and call analytics pipelines will queue or drop work.',
     faqs: [
       { q: 'Is AssemblyAI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors AssemblyAI every 5 minutes and shows real-time operational status.' },
@@ -309,7 +305,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   deepgram: {
     displayName: 'Deepgram',
     description: 'Deepgram provides fast, accurate speech-to-text APIs optimized for streaming use cases like real-time captions, voice agents, and live transcription. Its Nova model family is widely used in conversational AI.',
-    insight: 'Deepgram typically maintains very high uptime, but live streaming endpoints can be more sensitive to regional issues than batch endpoints. AIWatch tracks Deepgram\'s overall API availability via probe-based health checks alongside official status.',
+    insight: 'AIWatch tracks Deepgram\'s overall API availability via probe-based health checks alongside official status.',
     whenDown: 'When Deepgram is down, applications using real-time transcription for voice agents, live captions, or contact center streaming will lose their core functionality. Batch transcription jobs may queue but live UX breaks immediately.',
     faqs: [
       { q: 'Is Deepgram down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Deepgram every 5 minutes and shows real-time operational status.' },
@@ -322,10 +318,10 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   huggingface: {
     displayName: 'Hugging Face',
     description: 'Hugging Face hosts the largest open-source AI model hub plus Inference API endpoints, datasets, and Spaces (deployed apps). It is the de facto registry for open ML and a major inference provider.',
-    insight: 'Hugging Face has multiple distinct services (Hub, Inference API, Spaces, Datasets) that can fail independently. AIWatch monitors the Inference API path most relevant to API consumers — Hub-only or Spaces-only outages may not trigger an inference incident.',
-    whenDown: 'When Hugging Face Inference API is down, apps loading models programmatically or using hosted inference endpoints will fail. Even when Inference is healthy, Hub or Spaces outages can affect model downloads and deployed apps.',
+    insight: 'Hugging Face has multiple distinct services that can fail independently.',
+    whenDown: 'When Hugging Face is down, apps loading models programmatically or using hosted inference endpoints will fail.',
     faqs: [
-      { q: 'Is Hugging Face down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Hugging Face Inference every 5 minutes and shows real-time operational status.' },
+      { q: 'Is Hugging Face down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Hugging Face every 5 minutes and shows real-time operational status.' },
       { q: 'Why can\'t I download models from Hugging Face?', a: 'Model downloads use the Hub API which can fail independently of Inference. Check this page and the official status page for component-level detail.' },
       { q: 'What are alternatives to Hugging Face?', a: 'For inference, Replicate, Together AI, and Modal are alternatives. For model storage, models can be cached locally. AIWatch shows current availability across providers.' },
       { q: 'How do I check Hugging Face status?', a: 'You can check Hugging Face status on this page, on the official Hugging Face status page at status.huggingface.co, or on the AIWatch dashboard at ai-watch.dev.' },
@@ -382,7 +378,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   stability: {
     displayName: 'Stability AI',
     description: 'Stability AI develops the Stable Diffusion family of image models and provides API access for image generation, editing, and upscaling. It is widely used in creative tools, design apps, and content generation pipelines.',
-    insight: 'Stability publishes model-tier incidents separately (SD3, SDXL, Stable Image Ultra). AIWatch shows platform-level status. With AIWatch\'s Atlassian-aligned uptime weighting, short minor incidents have proportionally smaller impact on the displayed reliability score.',
     whenDown: 'When Stability AI is down, apps generating images, doing image-to-image transformation, or upscaling will fail. Creative pipelines and design tools that integrate Stable Image API lose their generation capability.',
     faqs: [
       { q: 'Is Stability AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Stability AI every 5 minutes and shows real-time operational status.' },
@@ -406,7 +401,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   voyageai: {
     displayName: 'Voyage AI',
     description: 'Voyage AI provides best-in-class embedding and reranking APIs optimized for retrieval-augmented generation (RAG). It is widely used to improve search quality in enterprise RAG pipelines.',
-    insight: 'Voyage AI is a smaller, focused API with high reliability historically. Its limited surface area (embeddings + reranking only) means fewer failure modes than general-purpose LLM APIs. AIWatch tracks endpoint availability via probe checks.',
     whenDown: 'When Voyage AI is down, RAG pipelines using its embeddings for search or reranking for relevance will degrade — searches may continue using stale embeddings but reranking quality will drop without the API.',
     faqs: [
       { q: 'Is Voyage AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Voyage AI every 5 minutes and shows real-time operational status.' },
@@ -493,7 +487,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   'character-ai': {
     displayName: 'Character.AI',
     description: 'Character.AI is a consumer AI chatbot platform where users create and interact with custom AI characters. It is one of the most-used AI consumer apps with millions of daily active users.',
-    insight: 'Character.AI experiences capacity-driven slowdowns more frequently than enterprise APIs due to its consumer scale. Outages often correlate with viral moments or schedule patterns (school hours). AIWatch tracks platform availability without distinguishing per-character issues.',
     whenDown: 'When Character.AI is down, users cannot start conversations, continue existing chats, or create new characters. The mobile and web interfaces both depend on the same backend, so an outage affects all access methods.',
     faqs: [
       { q: 'Is Character.AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Character.AI every 5 minutes and shows real-time operational status.' },
@@ -506,11 +499,10 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   // mobile app), distinct from the 'deepseek' (DeepSeek API) page for developers.
   'deepseek-app': {
     displayName: 'DeepSeek App',
-    description: 'DeepSeek App is DeepSeek\'s consumer AI assistant — the chat experience at chat.deepseek.com and the "DeepSeek - AI Assistant" mobile apps on iOS and Android. It is distinct from the DeepSeek API used by developers; AIWatch tracks the consumer Web Chat surface here and the API separately.',
-    insight: 'DeepSeek\'s consumer chat saw rapid, viral growth and experiences capacity-driven slowdowns more often than its developer API. AIWatch reads DeepSeek\'s official Flashduty status feed (via a browser-rendered fetch, since the page blocks plain server requests) and scopes this page to the Web Chat component — so a chat outage shows here even when the API stays healthy, and vice versa.',
+    description: 'DeepSeek App is DeepSeek\'s consumer AI assistant — the chat experience at chat.deepseek.com and the "DeepSeek - AI Assistant" mobile apps on iOS and Android. It is distinct from the DeepSeek API used by developers; AIWatch tracks the consumer chat surface here and the API separately.',
     whenDown: 'When the DeepSeek App is down, users cannot start or continue conversations on the web chat or mobile apps. The web and mobile clients share the same backend, so an outage typically affects all consumer access at once; the DeepSeek API may still be operational for developers.',
     faqs: [
-      { q: 'Is the DeepSeek App down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors DeepSeek\'s Web Chat service and shows real-time operational status from DeepSeek\'s official status feed.' },
+      { q: 'Is the DeepSeek App down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the DeepSeek App every 5 minutes and shows real-time operational status from DeepSeek\'s official status feed.' },
       { q: 'Is this the same as the DeepSeek API?', a: 'No. This page tracks the consumer chat app (chat.deepseek.com and the mobile apps). The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
       { q: 'Why is the DeepSeek App not loading?', a: 'The DeepSeek App may be experiencing high traffic, a backend incident, or maintenance. Check this page for current status and recent incident history.' },
       { q: 'What are alternatives to the DeepSeek App?', a: 'When the DeepSeek App is down, ChatGPT, claude.ai, or Gemini are alternative AI chat apps. AIWatch shows which AI chat services are currently operational.' },
@@ -535,7 +527,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   twelvelabs: {
     displayName: 'Twelve Labs',
     description: 'Twelve Labs is a video understanding AI platform that provides search, embed, and analyze capabilities over video using the Marengo and Pegasus foundation models. It enables developers to build applications that can search within videos, generate embeddings, and analyze video content.',
-    insight: 'Twelve Labs is a video understanding API focused on search, embed, and analyze workflows — not video generation. It uses a custom Atlassian Statuspage (status.twelvelabs.io) with a well-structured component layout: the API group covers 10 individual model surfaces (Search, Embed, Analyze by Marengo 3.0 and Pegasus 1.5/1.2, Index, Video list), while Platform/Playground/Dashboard are non-API surfaces.',
+    insight: 'Twelve Labs is a video understanding API focused on search, embed, and analyze workflows — not video generation. It uses a custom Atlassian Statuspage (status.twelvelabs.io).',
     whenDown: 'When Twelve Labs API is down, applications relying on video search, embedding, or analysis capabilities will be unable to process video content. Video indexing tasks and search queries will fail or timeout.',
     faqs: [
       { q: 'Is Twelve Labs API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Twelve Labs every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },

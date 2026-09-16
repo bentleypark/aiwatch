@@ -1636,7 +1636,7 @@ function renderDescription(seo: ServiceSEO, service: ServiceData | null): string
 ${summary ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;background:#161b22;border-left:3px solid #3fb950;border-radius:0 4px 4px 0"><strong>AIWatch Data:</strong> ${esc(summary)}</p>` : ''}
 <p style="font-size:14px;margin-bottom:12px">${esc(seo.description)}</p>
 ${seo.insight ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;background:#161b22;border-left:3px solid #58a6ff;border-radius:0 4px 4px 0"><strong>AIWatch Insight:</strong> ${esc(seo.insight)}</p>` : ''}
-<p style="font-size:14px;color:#8b949e">${esc(seo.whenDown)}</p>
+<p style="font-size:14px">${esc(seo.whenDown)}</p>
 <p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status and recent incident details; uptime history is shown only when the official source publishes sufficient comparable records &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
 </div>`
 }

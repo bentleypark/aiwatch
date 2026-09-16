@@ -63,10 +63,9 @@ test.describe('Is X Down? SSR pages', () => {
         expect(hasFaqSchema).toBe(true)
       })
 
-      test(`has About section with insight`, async ({ page: p }) => {
+      test(`has About section`, async ({ page: p }) => {
         await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
         await expect(p.locator('h2', { hasText: `About ${page.displayName}` })).toBeVisible()
-        await expect(p.locator('body')).toContainText('AIWatch Insight:')
       })
 
       test(`has AIWatch Data summary`, async ({ page: p }) => {
@@ -98,12 +97,14 @@ test.describe('Is X Down? SSR pages', () => {
         await expect(ga).toHaveAttribute('src', /G-D4ZWVHQ7JK/)
       })
 
-      test(`renders non-empty SEO content (insight + FAQ answers)`, async ({ page: p }) => {
-        // Guards seo-content.ts against typos, accidental empty strings, merge-conflict wipes.
-        // Catches any service missing displayName/description/insight/whenDown/FAQ answers.
+      test(`renders non-empty SEO content (FAQ answers)`, async ({ page: p }) => {
+        // Guards the rendered FAQ answers; the insight contract is asserted over the data in
+        // api/__tests__/seo-insight-contract.test.ts.
         await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
         const body = (await p.locator('body').textContent()) || ''
-        expect(body, `[${page.slug}] Insight label or body missing`).toMatch(/AIWatch Insight:\s*\S[^\n]{19,}/)
+        if (body.includes('AIWatch Insight:')) {
+          expect(body, `[${page.slug}] Insight label present but body missing or too short`).toMatch(/AIWatch Insight:\s*\S[^\n]{19,}/)
+        }
 
         const scripts = await p.locator('script[type="application/ld+json"]').allTextContents()
         const jsonLdRaw = scripts.find(t => t.includes('FAQPage'))
