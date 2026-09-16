@@ -369,9 +369,8 @@ export function parseDatadogStatusPage(
     return { ok: false, reason: flattened.reason }
   }
 
-  // #1006 invariant — the badge and the uptime figure run on the SAME configured scope, the rule
-  // `uptimeScopeOf` states for every Atlassian/incident.io service ("Badge + uptime run on Central
-  // Console ALONE"). Without it this page's non-API `Web & Application Services` leaf drove both: a
+  // #1006 invariant — the badge and the uptime figure run on the SAME configured scope. Without it
+  // this page's non-API `Web & Application Services` leaf drove both: a
   // website outage answered "yes" on /is-openrouter-down with the API healthy, and 15h28m of website
   // degradation was the whole of openrouter's published uptime deficit.
   //

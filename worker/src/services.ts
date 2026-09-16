@@ -208,8 +208,7 @@ export const SERVICES: ServiceConfig[] = [
   // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
   // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
   // like cohere/groq): the breakdown lists every live component and the badge worst-ofs them (the #992
-  // resolveSvcStatus dynamic branch), so a new/retired model needs no config edit. statusComponentId
-  // (Developer Console) stays the primary for uptime parsing / calendar / component-miss alerting;
+  // resolveSvcStatus dynamic branch), so a new/retired model needs no config edit.
   // Developer Console is a componentSurfaces row (models fold into the collapsible "Models" group).
   // componentDenylist mirrors the cohere/groq convention — a future non-availability component
   // (Website/Docs) must not enter the dynamic worst-of badge or the breakdown.
@@ -268,7 +267,7 @@ export const SERVICES: ServiceConfig[] = [
   // #989 — Kimi (Moonshot AI). Atlassian Statuspage, data-rich (verified 2026-07-18: x-statuspage-version
   // header + window.uptimeData for the badge component). `.cn` is a CNAME to Statuspage (AtlassianEdge)
   // so a Worker fetch reaches it — no China-network risk, no mirror needed.
-  //   • statusComponentId 'Open API' drives the badge + uptime; the model components are display-only
+  //   • the model components are display-only
   //     (displayComponentIds, #606) — NOT the badge, so a model-component change can't flip the card
   //     (which would drag status-edge alerts + cache refresh). componentGroups folds the six `* Model`
   //     components under one collapsible "Models" header (replicate pattern); Open API + API Service
@@ -313,9 +312,6 @@ export const SERVICES: ServiceConfig[] = [
   // while the breakdown stayed all-operational — a visible contradiction. The row label reads
   // 'ElevenCreative' (broader suite), the accepted trade-off since no finer-grained component exists.
   // Display-only: badge stays on the overall page indicator (no statusComponentIds).
-  // #1006 — uptime scoped to the badge/detail components (Text-to-Speech + STT + Conversations + RAG +
-  // Telephony + …), not just Text-to-Speech: they are distinct product surfaces, and an STT outage was
-  // showing in the incident list while uptime, read from TTS alone, sat at 100%.
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], displayComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'] },
   // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
   // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
@@ -379,7 +375,7 @@ export const SERVICES: ServiceConfig[] = [
   // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge
   // worst-of (#379): the developer-facing API surface + the "Image Generation Services" group (rolls
   // up every FLUX model tier), so a single model-tier blip doesn't flip the badge unless API or the
-  // whole image group degrades. statusComponentId (API) is the primary for uptime parsing / calendar.
+  // whole image group degrades.
   // Per-component breakdown (#606): displayAllComponents per-model page — API + Finetuning stay
   // individual surfaces; the FLUX model tiers fold into the collapsed "Models" group; the "Image
   // Generation Services" group-header component is denylisted (its children are already shown).
@@ -414,12 +410,11 @@ export const SERVICES: ServiceConfig[] = [
   // (Billing, Sandboxes, Bulk Exports, PromptHub, Fleet, Deployments Data/Control Plane) are excluded
   // so non-availability blips don't flip the badge. Single-tenant (dedicated) page → no
   // incidentKeywords needed. is-down slug is 'langchain' (see slug-map.ts / rss.ts).
-  // Official 30-day uptime is COMPUTED from the API component's `component_impacts` (#1006), and its
-  // published `component_uptimes` figure is surfaced as `uptimeReported` — NOT the statuspage uptime-
-  // showcase (incident.io pages don't emit it). The API surface is the developer-facing one and tracks
+  // The API component's published `component_uptimes` figure is surfaced as `uptimeReported` — NOT the
+  // statuspage uptime-showcase (incident.io pages don't emit it). The API surface is the developer-facing one and tracks
   // the real incident activity; Run Ingestion reads ~100% despite the incidents, so it would understate.
   // That API component is also statusComponentIds[1], so it doubles as one of the three worst-of badge
-  // inputs AND (via incidentIoComponentId) the source of official uptime + calendar impact + text enrichment.
+  // inputs.
   // #1066 — `displayComponentIds` shows ALL 10 page components in the breakdown (decoupled from the
   // 3-component badge, #606): the badge stays on the availability core (API/Run Ingestion/Application)
   // so a Billing/Bulk-Exports blip can't flip it, while the dashboard mirrors the official page's full
@@ -430,8 +425,7 @@ export const SERVICES: ServiceConfig[] = [
   // the summary.json shape from the page-root RSC. Component ids ALL rotated (01JT46QKH7… → 01KX6FV0RR…);
   // the badge worst-of is still Run Ingestion + API + Application, incidentIoComponentId is still the API
   // component (whose published `component_uptimes` figure — a rolling window, not consumed by the Score —
-  // becomes uptimeReported), and statusComponentId (Run Ingestion) stays the
-  // calendar/miss anchor. New components' data_available_since is 2026-07-10, so uptime reports a <30-day
+  // becomes uptimeReported). New components' data_available_since is 2026-07-10, so uptime reports a <30-day
   // window until the migration clock catches up (#1006 uptimeWindowDays).
   { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://global.status.smith.langchain.com/gcp-us', apiUrl: 'https://global.status.smith.langchain.com/gcp-us/api/v2/summary.json', incidentIoGlobalPage: true, statusComponentId: '01KX6FV0RR5XXJ0SM3NXZRKMBY', statusComponentIds: ['01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RRKA56PXCRWEHJTMXM'], displayComponentIds: ['01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9'], incidentIoBaseUrl: 'https://global.status.smith.langchain.com/gcp-us/incidents', incidentIoComponentId: '01KX6FV0RRSSTKC5V2GPAMCEQR', addedAt: '2026-06-11' }, // #802
   // #601 — LLM observability siblings for LangSmith (un-blocks the observability fallback sub-tier).
@@ -546,14 +540,8 @@ export const SERVICES: ServiceConfig[] = [
   // status.openai.com (Codex Web / Codex API / CLI / VS Code extension) with a
   // Codex group aggregate over all four.
   //
-  // Uptime source: Codex group aggregate (#367 — '01KMKF9EBTCD8BN9PG8DJZXRSQ').
-  // Matches what OpenAI publishes on status.openai.com. The original #301 scoping
-  // to the Codex API component alone produced 100% while OpenAI's published Codex
-  // group sat at 99.98%; the dashboard now mirrors what users see upstream.
-  // incidentIoComponentId stays set to Codex API as a fallback — if the group
-  // ID becomes invalid, the parser falls through to the per-component lookup
-  // rather than returning null. Surface-specific outages (e.g., Codex Web only)
-  // still surface via incidentKeywords in Recent Incidents.
+  // Surface-specific outages (e.g., Codex Web only) still surface via
+  // incidentKeywords in Recent Incidents.
   // displayComponentIds (#606 Cat B): the official "Codex" group (4) on status.openai.com —
   // Codex API + CLI + VS Code extension + Codex Web. Display-only; disjoint from openai/chatgpt.
   // #1008: "Codex in ChatGPT Desktop" (01KMKFAMWKQ81YWSE1Z18R6VHR) is NOT a Codex-group component —
@@ -814,7 +802,7 @@ export function resolveSvcStatus(
   //   (all page components minus componentDenylist names), mirroring the resolveSvcComponents dynamic
   //   breakdown so a new/churned model degrades the badge with NO config edit. Positioned AFTER the
   //   statusComponentIds branch (BFL has BOTH and keeps its curated worst-of) and BEFORE the single-
-  //   component branch (so a dynamic service's uptime-primary statusComponentId — e.g. Cerebras'
+  //   component branch (so a dynamic service's primary statusComponentId — e.g. Cerebras'
   //   Developer Console — does not pin the badge to that one component). cohere/groq/together/fireworks
   //   have no statusComponent* so they returned at branch 1 (overall indicator) already; they never reach here.
   if (config.displayAllComponents && summaryData.components) {
@@ -2571,9 +2559,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
 
       // Compute daily impact for calendar from uptimeData HTML (Statuspage services only).
       // Daily impact for calendar: Statuspage uptimeData OR incident.io component_impacts
-      // #1006 — the same scope the badge + calendar use (worst-of, #379), not the single primary
-      // component: a multi-component service showed outages in its incident list while uptime, read
-      // from one component, sat at 100%.
+      // #1006 — the same scope the calendar uses: a multi-component service showed outages in its
+      // incident list while uptime, read from one component, sat at 100%.
       //
       // #1389 — two transports, ONE computation. `uptimeTimelines` is present only when the prefetch
       // found this page had moved its payload to `/uptime_showcase` and read it; on every other page the
