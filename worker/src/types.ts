@@ -302,8 +302,7 @@ export interface ServiceConfig {
    *  is the only field the path needs. Uptime is COMPUTED from those records (`parsers/datadog.ts`);
    *  the page publishes no uptime number of its own. */
   datadogStatusUrl?: string
-  /** #1403 — the `ComponentGroup` the BADGE and the UPTIME figure run on, the `uptimeScopeOf`
-   *  invariant ("Badge + uptime run on … ALONE") expressed for this path. Required alongside
+  /** #1403 — the `ComponentGroup` the BADGE and the UPTIME figure run on. Required alongside
    *  `datadogStatusUrl`: a Datadog page lists API and non-API components side by side, so without a
    *  scope a website outage answers "yes" on /is-X-down.
    *
@@ -365,8 +364,7 @@ export interface ServiceConfig {
   // Optional: multiple components to track for the badge (worst-status wins).
   // When set, the dashboard status is `down` if any component is `major_outage`,
   // `degraded` if any is `partial_outage`/`degraded_performance`, else `operational`.
-  // `statusComponentId` remains the *primary* component used for uptime parsing,
-  // calendar days, and component-miss alerting; this list adds extra surfaces
+  // This list adds extra surfaces
   // whose health should also flip the badge (e.g. Cursor IDE primary +
   // Cloud Agents/Automations as user-impacting agentic surfaces).
   // An empty array `[]` is treated as if the field were absent — the resolver
@@ -425,8 +423,7 @@ export interface ServiceConfig {
   componentsUrl?: string
   // A list is a worst-of (min) across the components — for a page whose only components are
   // per-region endpoints and which publishes no group aggregate (turbopuffer, #857). Unlike
-  // `statusComponentId`/`statusComponentIds` (two fields because they carry two DIFFERENT roles —
-  // calendar/miss anchor vs badge group), this field has a single role (which components to read
+  // `statusComponentId`/`statusComponentIds`, this field has a single role (which components to read
   // uptime from), so the list form generalizes it rather than needing a sibling field.
   // The tuple forbids `[]`, which would be silently truthy: it passes the `needsHtml` gate, runs the
   // parser over zero ids, and yields null — reinstating the exact silent uptime drop #857 fixed.

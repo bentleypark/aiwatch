@@ -16,7 +16,7 @@ describe('#756 Black Forest Labs (FLUX) image sibling config', () => {
     expect(s!.category).toBe('api')
     expect(s!.apiUrl).toBe('https://status.bfl.ml/api/v2/summary.json')
     expect(s!.statusUrl).toBe('https://status.bfl.ml')
-    // Primary (uptime parsing / calendar) = the developer-facing API component.
+    // The developer-facing API component.
     expect(s!.statusComponentId).toBe('ws9rrzk6n2j7')
     // Badge worst-of (#379): API + the "Image Generation Services" group roll-up.
     expect(s!.statusComponentIds).toEqual(['ws9rrzk6n2j7', 'm991l9z7y6jj'])

@@ -73,8 +73,8 @@ describe('turbopuffer — the real region roster resolves to a worst-of uptime (
 
 describe('chart_only pages now get an uptime (#1006)', () => {
   // Chart-only pages hide the percentage but publish the impact records. The first configured component
-  // is the uptime primary (ElevenLabs also worst-of the rest of its roster, #1006 — tested
-  // separately); one degraded window on it must still yield a computed figure, never "Not provided".
+  // is the uptime primary; one degraded window on it must still yield a computed figure, never
+  // "Not provided".
   // Replicate left this path in #1384: Cloudflare Status v3 does not expose compatible uptime data.
   it.each(['stability', 'elevenlabs'])('%s resolves a figure from impacts alone', (id) => {
     const svc = SERVICES.find((s) => s.id === id)!

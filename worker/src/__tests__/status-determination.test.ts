@@ -308,7 +308,7 @@ describe('svcStatus determination', () => {
   })
 
   describe('with displayAllComponents dynamic worst-of (#992) — Cerebras shape', () => {
-    // Cerebras: displayAllComponents + statusComponentId (uptime primary), NO statusComponentIds.
+    // Cerebras: displayAllComponents + statusComponentId, NO statusComponentIds.
     const config: StatusConfig = { displayAllComponents: true, statusComponentId: 'dev' }
 
     it('worst-ofs EVERY shown component, so a brand-new/untracked model degrades the badge', () => {
@@ -346,7 +346,7 @@ describe('svcStatus determination', () => {
     })
 
     it('does NOT pin the badge to the single statusComponentId component (the branch-3 hazard)', () => {
-      // Developer Console (the uptime primary) is operational, but a model is down. If the single-
+      // Developer Console (the primary) is operational, but a model is down. If the single-
       // component branch ran, the badge would read operational — the exact regression #992 avoids.
       const summary: SummaryData = {
         status: { indicator: 'none' },
@@ -715,8 +715,8 @@ describe('displayComponentIds config sanity (#606)', () => {
       expect(new Set(svc.statusComponentIds).size, id).toBe(count)
       // Same id set as the breakdown (badge scope == displayed group).
       expect(new Set(svc.statusComponentIds), id).toEqual(new Set(svc.displayComponentIds))
-      // primary statusComponentId = incidentIoComponentId (uptime/calendar/component-miss anchor),
-      // listed first in statusComponentIds (#379 convention).
+      // primary statusComponentId = incidentIoComponentId, listed first in statusComponentIds
+      // (#379 convention).
       expect(svc.statusComponentId, id).toBe(SHARED_PAGE_PRIMARY[id])
       expect(svc.statusComponentIds![0], id).toBe(SHARED_PAGE_PRIMARY[id])
     }
@@ -918,7 +918,7 @@ describe('pickBreakdownComponents (#606 Cat B)', () => {
 describe('SERVICES multi-component config sanity (#379)', () => {
   it('cursor tracks IDE primary + Cloud Agents + Automations + CLI + Review Agents', () => {
     const cursor = SERVICES.find((s) => s.id === 'cursor')!
-    expect(cursor.statusComponentId).toBe('rflc60xp5jp2') // IDE — primary for uptime parsing
+    expect(cursor.statusComponentId).toBe('rflc60xp5jp2') // IDE
     expect(cursor.statusComponentIds).toEqual([
       'rflc60xp5jp2', // IDE
       'mwv1g9sc7kdh', // Cloud Agents
@@ -963,17 +963,16 @@ describe('SERVICES multi-component config sanity (#379)', () => {
     // Was a 5-id statusComponentIds allowlist (#391/#379); the lineup churned (2 ids went dead + a new
     // Gemma4-31B-Multimodal appeared untracked), so it's now displayAllComponents like cohere/groq: the
     // breakdown lists every live component and the #992 dynamic worst-of drives the badge, so a model
-    // added/retired needs no config edit. statusComponentId stays the uptime/calendar/miss primary.
+    // added/retired needs no config edit.
     const cb = SERVICES.find((s) => s.id === 'cerebras')!
-    expect(cb.statusComponentId).toBe('83h1cchw4vs4') // Developer Console — primary for uptime parsing
+    expect(cb.statusComponentId).toBe('83h1cchw4vs4') // Developer Console
     expect(cb.displayAllComponents).toBe(true)
     expect(cb.componentSurfaces).toContain('Developer Console')
     expect(cb.statusComponentIds).toBeUndefined() // allowlist dropped
   })
 
   it('primary statusComponentId always appears as the first entry of statusComponentIds', () => {
-    // Convention: primary first so a reader can scan the array and immediately see
-    // which component drives uptime%/calendar/miss tracking. Derive the list from
+    // Convention: primary first. Derive the list from
     // SERVICES so every present and future multi-component service is covered without
     // a hand-maintained literal — accidental reordering during config edits is caught.
     const multiComponent = SERVICES.filter((s) => s.statusComponentIds && s.statusComponentId)
@@ -1064,13 +1063,7 @@ describe('ChatGPT without statusComponentId (#292)', () => {
     expect(chatgptConfig.incidentKeywords).toContain('conversation')
   })
 
-  it('config has incidentIoComponentId + incidentIoGroupId for uptime sourcing (#367)', () => {
-    // Separate code path from the cross-contamination guard above: the dashboard
-    // uptime is COMPUTED from that component's impact records (#1006 — the page's published ChatGPT
-    // group aggregate is gone with `incidentIoGroupId`: it is not a 30-day figure, and OpenAI's page
-    // excludes degraded/partial states from it entirely, so it was not comparable with any other
-    // service's number). The guard above checks statusComponent / statusComponentId only, so having
-    // incidentIoComponentId here does NOT defeat #292.
+  it('config pins incidentIoComponentId to the Conversations component', () => {
     expect(chatgptConfig.incidentIoComponentId).toBe('01JMXBNJXGV1T5GT2M9XA83XNG')  // Conversations
   })
 
@@ -1152,7 +1145,7 @@ describe('OpenAI Codex without statusComponentId (#294)', () => {
 
   const codexConfig = SERVICES.find((s) => s.id === 'codex') as ServiceConfig
 
-  it('config: agent category, Codex API component ID for uptime, keyword coverage for all 4 surfaces', () => {
+  it('config: agent category, badge scoped to its own surfaces, keyword coverage for all 4 surfaces', () => {
     expect(codexConfig).toBeDefined()
     expect(codexConfig.category).toBe('agent')
     expect(codexConfig.provider).toBe('OpenAI')
@@ -1164,11 +1157,6 @@ describe('OpenAI Codex without statusComponentId (#294)', () => {
     expect(codexConfig.statusComponentIds).toBeDefined()
     expect(codexConfig.statusComponent).toBeUndefined()
     expect(codexConfig.incidentExclude).toEqual(['fedramp']) // #990 environment-scope veto only
-    // incidentIoComponentId = Codex API (#301) — kept as fallback if the group
-    // lookup ever fails. incidentIoGroupId = Codex group (#367) — primary uptime
-    // source. #1006 — uptime is now COMPUTED from this component's impact records rather than read off
-    // the page's Codex-group aggregate (#367), which tracked a different window and downtime definition
-    // than every other service's number.
     expect(codexConfig.incidentIoComponentId).toBe('01KMP3KP5MGE23B80K1EK4S8PV')
     expect(codexConfig.incidentKeywords).toContain('codex')
     expect(codexConfig.incidentKeywords).toContain('cli')
