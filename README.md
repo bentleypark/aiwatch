@@ -97,7 +97,7 @@ Grouped by the dashboard's category taxonomy (45 total — sidebar filters / Ove
 | Codex | OpenAI |
 | Cursor | Anysphere |
 | GitHub Copilot | Microsoft |
-| Windsurf | Codeium |
+| Windsurf | Cognition |
 | Junie | JetBrains |
 
 ### Voice (3)

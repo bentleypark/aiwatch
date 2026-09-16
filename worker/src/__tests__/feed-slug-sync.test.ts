@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { feedSlug, IS_DOWN_SLUG_OVERRIDE, NO_IS_DOWN_PAGE } from '../rss'
 import { SERVICES } from '../services'
-import { SERVICE_ID_TO_SLUG } from '../../../api/_is-down/slug-map'
+import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE } from '../../../api/_is-down/slug-map'
 
 describe('feed slug ↔ api/is-down slug-map sync', () => {
   it('feedSlug() matches SERVICE_ID_TO_SLUG for every is-down service', () => {
@@ -36,6 +36,13 @@ describe('feed slug ↔ api/is-down slug-map sync', () => {
       .filter((id) => !(id in SERVICE_ID_TO_SLUG))
       .sort()
     expect([...NO_IS_DOWN_PAGE].sort()).toEqual(absent)
+  })
+
+  it('every slug-map provider matches the worker service provider', () => {
+    const workerProvider = new Map(SERVICES.map((s) => [s.id, s.provider]))
+    for (const entry of Object.values(SLUG_TO_SERVICE)) {
+      expect(entry.provider, `slug-map '${entry.id}'`).toBe(workerProvider.get(entry.id))
+    }
   })
 
   it('every slug-map service ID is a real worker service', () => {

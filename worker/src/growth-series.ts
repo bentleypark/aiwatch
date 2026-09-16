@@ -62,8 +62,8 @@ export interface GrowthDailyRow {
   // So when reading
   // this field across a deploy boundary, treat a missing key as "not classified then", never as 0:
   // `direct` before the #1055 deploy absorbed reddit/hn/refhost/self-referrals and is NOT comparable
-  // to `direct` after it. Key COUNT discriminates the version, but only on rows where the WAE read
-  // SUCCEEDED — a failed/unconfigured read stores `null` here, not a 9-key map (see the `?? null` at
+  // to `direct` after it. The key SET discriminates the version, but only on rows where the WAE read
+  // SUCCEEDED — a failed/unconfigured read stores `null` here, not a map (see the `?? null` at
   // the write site). The deploy date is to be recorded in docs/reference/kv-schema.md's
   // `growth:daily` row.
   audienceBySource: Record<string, number> | null

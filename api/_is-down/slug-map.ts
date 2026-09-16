@@ -18,7 +18,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'cursor':          { id: 'cursor',     name: 'Cursor',           provider: 'Anysphere',   category: 'agent', group: 'agents' },
   'claude-code':     { id: 'claudecode', name: 'Claude Code',      provider: 'Anthropic',   category: 'agent', group: 'agents' },
   'openai-api':      { id: 'openai',     name: 'OpenAI API',       provider: 'OpenAI',      category: 'api', group: 'llm' },
-  'windsurf':        { id: 'windsurf',   name: 'Windsurf',         provider: 'Codeium',     category: 'agent', group: 'agents' },
+  'windsurf':        { id: 'windsurf',   name: 'Windsurf',         provider: 'Cognition',   category: 'agent', group: 'agents' },
   'claude-ai':       { id: 'claudeai',   name: 'claude.ai',        provider: 'Anthropic',   category: 'app', group: 'apps' },
   // Phase B — LLM APIs (#263)
   'mistral':         { id: 'mistral',    name: 'Mistral API',      provider: 'Mistral AI',  category: 'api', group: 'llm' },
@@ -69,7 +69,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // Luma / Dream Machine (#602) — generative-video AI; slug == worker id ('luma'), no override needed.
   'luma':            { id: 'luma',       name: 'Luma (Dream Machine)', provider: 'Luma',     category: 'api', group: 'video' },
   // AI apps (#263)
-  'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app', group: 'apps' },
+  'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character AI', category: 'app', group: 'apps' },
   // DeepSeek App (#619) — DeepSeek's consumer chat app (chat.deepseek.com), distinct from the
   // 'deepseek' (DeepSeek API) page. Slug 'deepseek-app' ≠ worker id 'deepseekapp'; the id≠slug
   // mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE + src/utils/constants.js
