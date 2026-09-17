@@ -22,9 +22,11 @@ every review round, round 1 included, invoke `$review-findings-only`. Supply the
 prior-round findings and fixes, and the running Critical/Important total. It reports only
 evidence-backed Critical or Important findings with a locator, reproduction or `judgement call`, and
 round plus branch attribution; it does not provide replacement prose. Re-test after fixes and re-review
-until no such findings remain. A review fix adds no explanatory docblock, documentation paragraph, or
-comment; use the test name and commit message for rationale. Mechanical corrections and deletions are
-allowed.
+until no such findings remain. In every round, also ask what is excessive: name any non-load-bearing
+construct in the diff that can be deleted while the relevant tests remain green, with the evidence for
+that conclusion. `$review-findings-only` remains read-only and reports a qualifying deletion candidate
+as a finding. A review fix adds no explanatory docblock, documentation paragraph, or comment; use the
+test name and commit message for rationale. Mechanical corrections and deletions are allowed.
 Before commit, status must contain only intended files. Commit, push, PR, merge, deploy, and issue
 close operations require explicit user approval. Keep production-gated checklist items open with a
 dated `verify-after` plus `assert:` or `durable:` evidence when applicable.
