@@ -237,7 +237,7 @@ export const SERVICES: ServiceConfig[] = [
   // A SECOND consequence, disclosed rather than left to be found: `calendarDays` is derived as
   // `statusComponentId ? 30 : 14`, so giving perplexity a primary moved its Status Calendar from 14 days
   // to 30. Kept, not reverted — all three components' `data_available_since` clear 30 days, the page
-  // itself draws 90, and 30 matches the uptime and Score windows as well as the six other incident.io
+  // itself draws 90, and 30 matches the uptime and Score windows as well as the other incident.io
   // services that carry a `statusComponentId`. But the derivation is a config flag standing in for "how
   // much per-day record exists", which is a defect in its own right (#1406, with the measurement:
   // `fireworks` publishes 57 days and draws 14). When that rule is redone, re-decide this with it.
@@ -304,15 +304,14 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, datadogStatusUrl: 'https://status.openrouter.ai',
     datadogComponentGroupId: '62d944d3-1acb-471b-81a0-099b3da0164f' }, // API - Gateway
   // Voice & Speech AI
-  // displayComponentIds (#606): curated availability surfaces for the breakdown card —
-  // TTS, STT, Conversations, RAG, Telephony, Other API endpoints, + ElevenCreative (excludes UI/Quality/Other).
+  // The curated availability surfaces, as ONE list: the #606 breakdown card, the #379 worst-of badge
+  // and the uptime scope all read it, so adding a member younger than 30 days shortens the window.
   // #685 — ElevenCreative (01JJM5RKYAEWNM3XYRHXM8FJQ3) is the ONLY component reflecting Dubbing health
   // (a Voice-domain product within the ElevenCreative suite; no standalone Dubbing component exists). It
-  // was previously omitted, so a Dubbing/ElevenCreative degradation flipped the badge (overall indicator)
-  // while the breakdown stayed all-operational — a visible contradiction. The row label reads
+  // was previously omitted, so a Dubbing/ElevenCreative degradation flipped the badge while the
+  // breakdown stayed all-operational — a visible contradiction. The row label reads
   // 'ElevenCreative' (broader suite), the accepted trade-off since no finer-grained component exists.
-  // Display-only: badge stays on the overall page indicator (no statusComponentIds).
-  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], displayComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'] },
+  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], statusComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', statusComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'] },
   // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
   // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
   // — the card shows the per-surface children). Display-only — badge stays on statusComponentId.
@@ -1161,9 +1160,8 @@ export function tagAutoMonitorIncidents(incidents: Incident[], config: ServiceCo
 
 /** #1032 — can the id-keyed exclude-bypass ever fire for this service? It needs all three: an
  *  `incidentExclude` to veto an incident in the first place, a `statusComponentIds` badge group to
- *  intersect against, and an incident.io page to read `component_impacts` from. Exactly
- *  openai/chatgpt/codex today — the set the blast-radius replay measured (pinned by
- *  `openai-login-attribution.test.ts`, so a config edit that widens or empties it fails loudly).
+ *  intersect against, and an incident.io page to read `component_impacts` from. The membership is
+ *  pinned by `openai-login-attribution.test.ts`, so a config edit that widens or empties it fails loudly.
  *
  *  ONE predicate for EVERY end — the fetch gate (does this service need the page HTML?) and both
  *  readers (`filterIncidents`' #1032 exclude-bypass and `filterByComponentStatus`' #1104 active-keep).
@@ -1182,7 +1180,7 @@ export function canIdBypass(config: ServiceConfig): boolean {
  *  groups on a shared page (the two "Login" on status.openai.com). `componentIds` is tagged at the
  *  source by `attachIncidentIoComponentIds` from the page HTML's `component_impacts`; absent ⇒ false ⇒
  *  the caller's pre-existing behaviour (fail-closed on a missing/shape-changed page). Gated on
- *  `canIdBypass`, so `config.statusComponentIds` is non-empty here — openai/chatgpt/codex only. ONE
+ *  `canIdBypass`, so `config.statusComponentIds` is non-empty here. ONE
  *  primitive for every reader on the id axis (`feedback_shared_primitive_over_parallel_copies`): the
  *  #1032 exclude-bypass, the #1038 keyword-augment, and the #1104 active-keep all ask this one question. */
 export function incidentTagsOwnBadge(inc: Incident, config: ServiceConfig): boolean {
@@ -1517,8 +1515,8 @@ export function filterByComponentStatus(
           warnedMissingJoin.add(missingJoinKey(config.id, i.id))
           console.warn(`[filterByComponentStatus] #1104 ${config.id}: dropping active incident ${i.id} — it joined NO component_impacts row from the HTML we had this cycle, so the evidence is MISSING, not negative, and the id keep could not judge it`)
         }
-        // LIMITATION, by decision. Both the keep and the warn are gated on `canIdBypass`, i.e. exactly
-        // openai/chatgpt/codex — because per-component impact WINDOWS are the evidence the keep needs,
+        // LIMITATION, by decision. Both the keep and the warn are gated on `canIdBypass` — because
+        // per-component impact WINDOWS are the evidence the keep needs,
         // and only incident.io publishes them. But the failure #1104 filed (an incident we already
         // alerted on vanishing from the card while the alert's link reads Operational) is not
         // openai-specific: for the other services reaching this gate, this `return false` is still
@@ -1547,8 +1545,8 @@ export function filterByComponentStatus(
       // Fail closed.
       //
       // Inert today (no live change): incident.io returns `components: []` (#1004), so openai carries no
-      // `componentNames` and the untagged drop above already fired — this line is unreachable for the
-      // three canIdBypass services right now. It is defence for the latent route:
+      // `componentNames` and the untagged drop above already fired — this line is unreachable for every
+      // canIdBypass service right now. It is defence for the latent route:
       // `attachIncidentIoComponentNames`/`resolveComponentNames` (#1047) defer to the API, so a restored
       // `components`/`affected_components` field would give a ChatGPT-only Login incident
       // `componentNames: ['Login']`, and without this guard `inBadgeGroup` would name-match openai's badge
@@ -2409,16 +2407,15 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // re-fetched it above) — so fetch it here rather than silently dropping every incident.
       // (uptimeHtml is declared + possibly populated above for the #1066 global-page rebuild.)
       const tagsNeedHtml = !!(config.incidentComponents && config.incidentIoComponentId)
-      // #1032 — the id-axis twin (`canIdBypass`: exclude + badge group + incident.io page). Exactly
-      // openai/chatgpt/codex today — the same set the blast-radius replay measured, so the gate states
-      // the reachable set rather than widening it. Deliberately NOT "every incident.io service":
+      // #1032 — the id-axis twin (`canIdBypass`: exclude + badge group + incident.io page). The gate
+      // states the reachable set rather than widening it. Deliberately NOT "every incident.io service":
       // `attachIncidentIoComponentIds` is cheap but its output would then ride the KV/API payload for
       // the OTHER 9 incident.io services, which can never use it.
       //
-      // Side effect worth knowing: this admits openai/chatgpt/codex to the 3s re-fetch below, which was
+      // Side effect worth knowing: this admits the canIdBypass services to the 3s re-fetch below, which was
       // `incidentComponents`-only before. On a cycle where the PREFETCH's own HTML fetch failed, that
       // re-fetched HTML now also reaches `parseUptimeData` / `parseIncidentIoComponentImpacts` /
-      // `computeIncidentIoUptime` for these three — so uptime/calendar values appear where the cycle
+      // `computeIncidentIoUptime` for them — so uptime/calendar values appear where the cycle
       // previously yielded `null`. A strict improvement (fewer null cycles), but a real behaviour change
       // outside the #1032 blast radius, and it costs one serial 3s fetch on that failure path only.
       const idsNeedHtml = canIdBypass(config)
@@ -2429,7 +2426,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           const htmlRes = await fetchWithTimeout(config.statusUrl, 3000)
           if (htmlRes.ok) uptimeHtml = await htmlRes.text()
           else {
-            // #1032 — a non-OK response logged NOTHING before, and three more services now depend on
+            // #1032 — a non-OK response logged NOTHING before, and the canIdBypass services depend on
             // this HTML for incident-attribution correctness. "MISSING" downstream doesn't say WHY, and
             // 403 (bot-wall — status.deepseek.com already does this) vs 503 are opposite diagnoses.
             console.warn(`[fetchService] ${config.id} status-page HTML returned HTTP ${htmlRes.status}`)
@@ -2751,9 +2748,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           await trackPartialResolve(kv, config.id, missing, Date.now(), viaSummary)
         }
       }
-      // #606 — drift signal for the display-only breakdown list. These services have no
-      // statusComponentId/Ids, so without this a renamed/removed curated component would silently
-      // shrink the breakdown (or drop it under the ≥2 gate) with no operator signal. Checks
+      // #606 — drift signal for the display-only breakdown list. Without this a renamed/removed
+      // curated component would silently shrink the breakdown (or drop it under the ≥2 gate) with
+      // no operator signal. Checks
       // breakdownComponents (the resolved source), so componentsUrl-backed ids aren't false-flagged.
       if (config.displayComponentIds && breakdownComponents) {
         const missing = config.displayComponentIds.filter(

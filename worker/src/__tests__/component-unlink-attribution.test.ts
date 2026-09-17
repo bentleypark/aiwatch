@@ -471,8 +471,8 @@ describe('#1104 filterByComponentStatus — an open incident tagged onto our bad
     expect(warn.mock.calls.filter((c) => String(c[0]).includes('#1104'))).toHaveLength(0)
   })
 
-  it('the warn throttle is keyed per SERVICE — the three bypass services share one status page', () => {
-    // openai/chatgpt/codex are exactly the canIdBypass set AND they share status.openai.com, so one
+  it('the warn throttle is keyed per SERVICE — bypass services can share one status page', () => {
+    // openai/chatgpt/codex are canIdBypass services that share status.openai.com, so one
     // incident id passes through all three in a single fetchAllServices pass. Drop `${config.id}` from
     // the key (in BOTH the has and the add — a half-mutation goes red on its own) and two of the three
     // services' diagnostics vanish: the silent-drop class this warn exists to prevent.
