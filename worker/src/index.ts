@@ -2025,10 +2025,11 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     }
   }
 
-  // Partial component resolve detection (#1179) — the miss alert above watches the PRIMARY
-  // statusComponentId only, so a service resolving its badge from some but not all of its configured
-  // ids reaches nobody. Time-based (6h), so a summary.json that rotates which components it serves
-  // (#1125) cannot page on a single cycle.
+  // Partial component resolve detection (#1179, extended #957) — the miss alert above watches the
+  // PRIMARY statusComponentId only, so a service resolving incompletely — its badge from some but
+  // not all `statusComponentIds`, or its uptime from some but not all `incidentIoComponentId`s —
+  // reaches nobody. Time-based (6h), so a source that rotates which ids it serves cannot page on a
+  // single cycle.
   const partialNow = Date.now()
   const partials = await detectPartialResolves(PARTIAL_COMPONENT_SERVICES, env.STATUS_CACHE, partialNow)
   for (const svc of partials) {
@@ -2039,7 +2040,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       // #135 block above predates it.
       const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
         title: `⚠️ Partial Component Resolve: ${svc.name}`,
-        description: formatPartialResolveAlert(svc.name, svc.missing, svc.since, partialNow, svc.viaSummary),
+        description: formatPartialResolveAlert(svc.name, svc.missing, svc.since, partialNow, svc.viaSummary, svc.scope),
         color: 0xFFA500,
       })
       if (sent) {

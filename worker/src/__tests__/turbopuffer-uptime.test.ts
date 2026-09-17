@@ -52,15 +52,17 @@ describe('turbopuffer — the real region roster resolves to a worst-of uptime (
   it('computes a worst-of across the CONFIGURED ids, though the page publishes no percentage', () => {
     // One region takes a 24h full outage; every other region is clean.
     const html = page([impactEntry(ids[3], 5, 4, 'full_outage')], established())
-    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0 })
+    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0, missing: [] })
   })
 
   it('WARNS when a configured id no longer resolves — a rotated ULID must not silently shrink the worst-of', () => {
     // The page still returns 200 and the parser still yields a number, so no fetch-failure or
-    // component-miss alert fires. This warn is the only signal that the roster went stale.
+    // component-miss alert fires — this warn is this function's own only signal.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const html = page([], [uptimeEntry(ids[0], '2023-12-07T00:00:00Z')])
-    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 100, days: 30, todayWeightedOutageSec: 0 })
+    // #957 — `missing` names every unresolved id (this is what services.ts now hands to
+    // `trackPartialResolve` so the drift reaches Discord, not just this console.warn).
+    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 100, days: 30, todayWeightedOutageSec: 0, missing: ids.slice(1) })
     expect(warn).toHaveBeenCalledOnce()
     expect(warn.mock.calls[0][0]).toContain(`${ids.length - 1}/${ids.length} configured components absent`)
   })
@@ -87,6 +89,6 @@ describe('chart_only pages now get an uptime (#1006)', () => {
       (Array.isArray(scope) ? scope : [scope]).map((c) => uptimeEntry(c, '2024-01-01T00:00:00Z')),
     )
     // 6h × 0.3 = 1.8h of 30 days → 99.75%
-    expect(computeIncidentIoUptime(html, scope, NOW)).toEqual({ pct: 99.75, days: 30, todayWeightedOutageSec: 0 })
+    expect(computeIncidentIoUptime(html, scope, NOW)).toEqual({ pct: 99.75, days: 30, todayWeightedOutageSec: 0, missing: [] })
   })
 })

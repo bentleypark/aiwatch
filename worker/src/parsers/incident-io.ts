@@ -42,6 +42,14 @@ export interface IncidentIoUptime {
    *  `pct` above, just windowed to [startOfTodayUTC, nowMs] instead of the trailing 30 days. The
    *  durable per-day archive input — see ServiceStatus.todayWeightedOutageSec. */
   todayWeightedOutageSec: number
+  /** #957 — configured ids that did NOT resolve this cycle (no `data_available_since`, or no
+   *  impact-window result), for a multi-id `componentId`. Empty when every id resolved, or when
+   *  `componentId` was a single string (a lone id resolving to nothing returns `null` instead — see
+   *  the function's own docblock on why that case stays silent). Lets a caller with `ids.length > 1`
+   *  report a live PARTIAL resolve the same way `services.ts` already does for `statusComponentIds`
+   *  (#1179) — the risk `computeIncidentIoUptime`'s own docblock already named: a shrinking worst-of
+   *  can report a healthy number while a vanished region is actually down, with nothing to say so. */
+  missing: string[]
 }
 
 /** Every `component_impacts` entry on the page, parsed once. Returns [] when the page has no impacts
@@ -157,14 +165,16 @@ export function parseIncidentIoDataAvailableSince(html: string, componentId: str
 
 /** Uptime for ONE component over the trailing window, from its impact records.
  *  null when the page doesn't track the component (no `data_available_since`) — absence of impacts is
- *  NOT evidence of absence of downtime, so we withhold rather than invent a 100%. */
+ *  NOT evidence of absence of downtime, so we withhold rather than invent a 100%.
+ *  `missing` is a `computeIncidentIoUptime`-level (multi-id) concept, not a per-component one — this
+ *  internal helper's result excludes it rather than always populating an empty array. */
 function componentUptime(
   impacts: IncidentIoImpact[],
   componentId: string,
   since: string,
   nowMs: number,
   windowDays: number,
-): IncidentIoUptime | null {
+): Omit<IncidentIoUptime, 'missing'> | null {
   const sinceMs = Date.parse(since)
   if (Number.isNaN(sinceMs)) return null
   const covered = Math.min(windowDays, (nowMs - sinceMs) / 86_400_000)
@@ -223,12 +233,13 @@ export function computeIncidentIoUptime(
   let shortestDays = Infinity
   let worstTodaySec = 0
   let resolved = 0
+  const missing: string[] = []
 
   for (const id of ids) {
     const since = parseIncidentIoDataAvailableSince(html, id)
-    if (!since) continue // the page doesn't track this component — withhold, don't assume 100%
+    if (!since) { missing.push(id); continue } // the page doesn't track this component — withhold, don't assume 100%
     const result = componentUptime(impacts, id, since, nowMs, windowDays)
-    if (!result) continue
+    if (!result) { missing.push(id); continue }
     resolved++
     worstPct = Math.min(worstPct, result.pct)
     shortestDays = Math.min(shortestDays, result.days)
@@ -242,6 +253,8 @@ export function computeIncidentIoUptime(
   // component" is the ordinary, expected reason there). For N>1 ids configured together, expecting
   // SOME subset to keep resolving, a simultaneous total loss reads as an upstream reorg/rotation the
   // partial-loss warn below would otherwise never surface (it only fires when 0 < resolved < ids.length).
+  // Total loss is not reported via `missing` (the function returns null, no object to carry it on) —
+  // deliberately: it already drives `uptime30d` to null, which #1389's checkUptimeLiveness alerts on.
   if (resolved === 0) {
     if (ids.length > 1) {
       console.warn(
@@ -256,7 +269,7 @@ export function computeIncidentIoUptime(
       `component_uptimes (upstream id rotation?) — uptime is a worst-of over the ${resolved} that resolved`,
     )
   }
-  return { pct: worstPct, days: shortestDays, todayWeightedOutageSec: worstTodaySec }
+  return { pct: worstPct, days: shortestDays, todayWeightedOutageSec: worstTodaySec, missing }
 }
 
 
