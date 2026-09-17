@@ -379,8 +379,8 @@ export interface ServiceConfig {
   // field drives ONLY the breakdown (read by resolveSvcComponents, never resolveSvcStatus),
   // so a service whose badge stays on the overall page indicator (no statusComponentIds)
   // can still surface a curated component card without changing its status determination.
-  // Use for single-owner statuspages with rich components (elevenlabs, replicate) where
-  // worst-of'ing every component into the badge would be too noisy (e.g. a Billing blip).
+  // Use for single-owner statuspages with rich components where worst-of'ing every
+  // component into the badge would be too noisy (e.g. a Billing blip).
   // When both are set, the breakdown prefers displayComponentIds.
   displayComponentIds?: string[]
   // Per-component-id → group label, mirroring the OFFICIAL status page's component groups

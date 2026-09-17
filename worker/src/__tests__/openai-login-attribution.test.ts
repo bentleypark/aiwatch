@@ -141,10 +141,11 @@ describe('filterIncidents — id-keyed exclude-bypass (#1032)', () => {
     expect(filterIncidents([fedrampApi], cfg('openai')).map((i) => i.id)).toEqual(['FED2'])
   })
 
-  it('a service with an exclude but no badge group (elevenlabs) is unreachable by the bypass', () => {
-    expect(cfg('elevenlabs').statusComponentIds).toBeUndefined()
+  it('a service with an exclude but no badge group is unreachable by the bypass', () => {
+    // Synthetic because the property is about the missing field, not about any one service.
+    const noBadgeGroup = { ...cfg('elevenlabs'), statusComponentIds: undefined }
     const webpage = apiIncident('EL1', 'Webpage outage', [API_LOGIN])
-    expect(filterIncidents([webpage], cfg('elevenlabs'))).toHaveLength(0)
+    expect(filterIncidents([webpage], noBadgeGroup)).toHaveLength(0)
   })
 })
 
@@ -166,9 +167,9 @@ describe('incidentTagsOwnBadge — the shared id-axis primitive (#1032/#1038)', 
   })
 
   it('false for a service outside canIdBypass even if the id would intersect', () => {
-    // elevenlabs has an exclude but no badge group → not canIdBypass → the primitive can never fire.
-    expect(canIdBypass(cfg('elevenlabs'))).toBe(false)
-    expect(incidentTagsOwnBadge(apiIncident('X', 't', [OPENAI_API_MAIN]), cfg('elevenlabs'))).toBe(false)
+    const noBadgeGroup = { ...cfg('elevenlabs'), statusComponentIds: undefined }
+    expect(canIdBypass(noBadgeGroup)).toBe(false)
+    expect(incidentTagsOwnBadge(apiIncident('X', 't', [OPENAI_API_MAIN]), noBadgeGroup)).toBe(false)
   })
 
   it('false when the incident carries no componentIds (fail-closed, no invention)', () => {
@@ -207,7 +208,7 @@ describe('filterIncidents — id-positive keyword-augment (#1038 Part A)', () =>
   })
 
   it('chatgpt + codex: the same augment keeps a model-named incident tagged onto THEIR badge group', () => {
-    // The fix is gated on canIdBypass, so it applies uniformly to all three — a model-named incident
+    // The fix is gated on canIdBypass, so it applies uniformly to every member — a model-named incident
     // with no service-specific keyword still surfaces once the provider tags it onto that service.
     const chatBadge = cfg('chatgpt').statusComponentIds![0]
     const codexBadge = cfg('codex').statusComponentIds![0]
@@ -295,20 +296,20 @@ describe('attachIncidentIoComponentIds (#1032)', () => {
 // restore the exact bug (degraded card, empty incident list) with CI fully green — the fail-closed
 // design makes the failure a silence, not an error.
 describe('#1032 wiring — the mutations that would silently delete the fix', () => {
-  it('canIdBypass selects EXACTLY openai/chatgpt/codex from the real SERVICES (config lockstep)', () => {
+  it('canIdBypass membership is pinned against the real SERVICES (config lockstep)', () => {
     // Pins the reachable-set claim the code comment + status-determination.md both make: a config edit
     // that drops openai's statusComponentIds, or refactors incidentExclude, silently empties the fix —
     // this fails loudly instead. #1104's active-keep is gated on the SAME predicate, so relaxing this
     // test disables that fix too, not just #1032's bypass. Scope note: this asserts the PREDICATE, not the call sites that consume
     // it, so it cannot catch a gate that stops calling it (see the re-fetch test in the fetchService
     // describe for that).
-    expect(SERVICES.filter(canIdBypass).map((s) => s.id)).toEqual(['openai', 'chatgpt', 'codex'])
+    expect(SERVICES.filter(canIdBypass).map((s) => s.id)).toEqual(['openai', 'elevenlabs', 'chatgpt', 'codex'])
   })
 
   it('canIdBypass excludes services that lack any one of the three preconditions', () => {
-    // exclude but no badge group → unreachable (elevenlabs); badge group but no exclude → unreachable.
+    // exclude but no badge group → unreachable; badge group but no exclude → unreachable.
     expect(SERVICES.filter((s) => s.incidentExclude?.length && !canIdBypass(s)).map((s) => s.id))
-      .toEqual(['claude', 'mistral', 'xai', 'elevenlabs'])
+      .toEqual(['claude', 'mistral', 'xai'])
   })
 
   it('the #1004 names path and the #1032 ids path never both fire for one service', () => {

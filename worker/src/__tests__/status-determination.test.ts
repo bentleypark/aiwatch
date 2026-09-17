@@ -616,18 +616,16 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
 
 describe('displayComponentIds config sanity (#606)', () => {
   // Exact curated counts — guards against a careless edit truncating the list
-  // (the doc comments enumerate the excluded components, so the count is intentional).
   const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 7 }
 
-  it('elevenlabs carries the exact curated displayComponentIds count and NO statusComponentIds (badge unchanged)', () => {
+  it('elevenlabs computes uptime over the same components its card shows (#1434)', () => {
     for (const [id, count] of Object.entries(EXPECTED_COUNT)) {
       const svc = SERVICES.find((s) => s.id === id)!
-      expect(svc.displayComponentIds, id).toBeDefined()
-      expect(svc.displayComponentIds!.length, id).toBe(count)
-      // No duplicate ids in the curated list.
-      expect(new Set(svc.displayComponentIds).size, id).toBe(count)
-      // Display-only: must not feed the worst-of badge (#606 decoupling), so no statusComponentIds.
-      expect(svc.statusComponentIds, id).toBeUndefined()
+      // ONE list, so the card and the uptime scope cannot diverge: `resolveSvcComponents` falls through
+      // to `statusComponentIds` and the incident.io uptime arm reads the same field.
+      expect(svc.displayComponentIds, id).toBeUndefined()
+      expect(svc.statusComponentIds!.length, id).toBe(count)
+      expect(new Set(svc.statusComponentIds).size, id).toBe(count)
     }
   })
 
@@ -654,12 +652,12 @@ describe('displayComponentIds config sanity (#606)', () => {
   it('#685 — surfaces a degraded ElevenCreative in the elevenlabs breakdown (no more all-green-while-badge-degraded)', () => {
     const elevenlabs = SERVICES.find((s) => s.id === 'elevenlabs')!
     const CREATIVE = '01JJM5RKYAEWNM3XYRHXM8FJQ3'
-    expect(elevenlabs.displayComponentIds, 'ElevenCreative must be curated in (the #685 fix)').toContain(CREATIVE)
+    expect(elevenlabs.statusComponentIds, 'ElevenCreative must be curated in (the #685 fix)').toContain(CREATIVE)
     // Summary where every curated component is operational EXCEPT ElevenCreative (degraded) — the exact
     // shape that previously rendered all-green while the badge (overall indicator) read degraded.
     const summary = {
       status: { indicator: 'minor' },
-      components: elevenlabs.displayComponentIds!.map((id) => ({
+      components: elevenlabs.statusComponentIds!.map((id) => ({
         id,
         name: id === CREATIVE ? 'ElevenCreative' : `Surface ${id.slice(-4)}`,
         status: id === CREATIVE ? 'degraded_performance' : 'operational',
