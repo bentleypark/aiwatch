@@ -352,4 +352,13 @@ describe('#1233 isReadSuspect — the cross-validation + platform-quorum input',
     expect(isReadSuspect({ status: 'degraded', incidents: inc })).toBe(false)
     expect(isReadSuspect({ status: 'operational', incidents: [] })).toBe(false)
   })
+
+  it('#1329 — excludes a dead-source unknown, even though it now shares the same status value', () => {
+    // A dead status PAGE has its own dedicated probe-only promotion path at the end of
+    // `fetchAllServices`. Admitting it here would double-process it: quorum could force it
+    // `operational` with no probe evidence, a failing probe could force it `degraded` while the
+    // display layer still shows the neutral badge, and a persistently dead-source sibling would
+    // inflate its platform's quorum ratio forever.
+    expect(isReadSuspect({ status: 'unknown', incidents: [], sourceDead: true })).toBe(false)
+  })
 })

@@ -3570,9 +3570,16 @@ function getServicePlatform(config: ServiceConfig): StatusPlatform {
  *  failure produces `degraded` any more, so it would have stopped counting the population it exists to
  *  detect — under-counting, not counting zero, since a page reporting degraded while naming no incident
  *  still lands in the set — with nothing failing to say so. `platform-outage.test.ts` now pins both
- *  arms. */
-export function isReadSuspect(s: Pick<ServiceStatus, 'status' | 'incidents'>): boolean {
-  return (s.status === 'unknown' || s.status === 'degraded') && s.incidents.length === 0
+ *  arms.
+ *
+ *  #1329 — `sourceDead` is excluded even though it now also publishes `unknown`: a dead status PAGE has
+ *  its own dedicated promotion path (the `sourceDead` loop at the end of `fetchAllServices`, probe-only,
+ *  never quorum), and admitting it here double-processes it — quorum could force it `operational` with
+ *  no probe evidence at all, and a failing probe could force it `degraded` while the display layer still
+ *  shows the neutral badge (`sourceDead` alone drives that). It would also inflate a platform's quorum
+ *  ratio with a sibling whose SOURCE died, not whose SERVICE is failing. */
+export function isReadSuspect(s: Pick<ServiceStatus, 'status' | 'incidents' | 'sourceDead'>): boolean {
+  return !s.sourceDead && (s.status === 'unknown' || s.status === 'degraded') && s.incidents.length === 0
 }
 
 /** Detect platform-level outage: 70%+ simultaneous fetch failures on a platform.
@@ -3621,9 +3628,9 @@ export function detectPlatformOutage(
  *  date a change in how a source fails — `isReadSuspect` also admits a page reporting `degraded` with
  *  no incident named, and an ordinary multi-cycle 5xx or timeout episode produces the same key. For a
  *  service already KNOWN to have been publishing `sourceDead`, the first key does bound when it stopped
- *  answering an unambiguous gone-4xx, because that path returns `operational` and never enters
- *  `degradedFromFetch` — but 403 and 429 are deliberately excluded from `dead-source` on the
- *  Statuspage summary leg, so even that reading is a bound and not a proof. Corroborate with `fetch-fail:daily`.
+ *  answering an unambiguous gone-4xx, because `isReadSuspect` excludes `sourceDead` outright (#1329) and
+ *  that path never enters `degradedFromFetch` — but 403 and 429 are deliberately excluded from
+ *  `dead-source` on the Statuspage summary leg, so even that reading is a bound and not a proof. Corroborate with `fetch-fail:daily`.
  *
  *  Character.AI's failure mode changed somewhere between 2026-08-01 and 2026-08-18 and dating it needed
  *  Wayback captures of a third-party status host, because these keys had expired. 90d covers the same
