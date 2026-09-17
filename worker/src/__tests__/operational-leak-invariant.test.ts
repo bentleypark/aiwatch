@@ -176,8 +176,8 @@ describe('#1232 Part 2 — a fast 5xx probe is not an all-clear', () => {
     expect(claude?.status).toBe('operational')
   }, TEST_TIMEOUT_MS)
 
-  // The predicate's second wired consumer (#689): a service whose status PAGE is gone is published
-  // `operational`, and `probeConfirmed` is the only thing that says anything corroborates it.
+  // The predicate's second wired consumer (#689/#1329): a service whose status page is gone starts
+  // as `unknown`; a healthy direct probe may promote it to `operational` with `probeConfirmed`.
   it('withholds probeConfirmed on a dead source when the probe answers 5xx', async () => {
     stubFetchDeadClaudePage()
     const claude = await claudeAfterFetch(mockKV(), probeFixture([
@@ -186,6 +186,7 @@ describe('#1232 Part 2 — a fast 5xx probe is not an all-clear', () => {
     ]))
 
     expect(claude?.sourceDead).toBe(true)
+    expect(claude?.status).toBe('unknown')
     expect(claude?.probeConfirmed).toBeFalsy()
   }, TEST_TIMEOUT_MS)
 
@@ -197,6 +198,7 @@ describe('#1232 Part 2 — a fast 5xx probe is not an all-clear', () => {
     ]))
 
     expect(claude?.sourceDead).toBe(true)
+    expect(claude?.status).toBe('operational')
     expect(claude?.probeConfirmed).toBe(true)
   }, TEST_TIMEOUT_MS)
 })

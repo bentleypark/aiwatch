@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { detectPlatformOutage } from '../services'
 import type { ServiceStatus, ServiceConfig } from '../types'
 
-function makeSvc(id: string, status: 'operational' | 'degraded' | 'unknown', incidents: number = 0): ServiceStatus {
+function makeSvc(id: string, status: 'operational' | 'degraded' | 'unknown', incidents: number = 0, sourceDead: boolean = false): ServiceStatus {
   return {
     id, name: id, provider: '', category: 'api', status, latency: null, uptime30d: null,
     lastChecked: '', incidents: Array.from({ length: incidents }, (_, i) => ({
       id: `inc-${i}`, title: '', status: 'investigating' as const, impact: null,
       startedAt: '', duration: null, timeline: [],
     })),
+    ...(sourceDead ? { sourceDead: true } : {}),
   }
 }
 
@@ -129,5 +130,23 @@ describe('detectPlatformOutage', () => {
 
     const affected = detectPlatformOutage(services, configs)
     expect(affected.size).toBe(0)
+  })
+
+  it('#1329 — a dead-source sibling does not count toward the quorum, even though it publishes `unknown`', () => {
+    // Before #1329, a dead status page always published `operational` and never reached here. Once it
+    // started publishing `unknown` to fix the sourceDead verdict, it would otherwise inflate every
+    // OTHER service's platform-quorum ratio forever, purely because its SOURCE (not its SERVICE) died.
+    // 4/5 dead-source would be 80% — over threshold if counted as read-suspect; excluded, it's 0/5.
+    const services = [
+      makeSvc('dead0', 'unknown', 0, true),
+      makeSvc('dead1', 'unknown', 0, true),
+      makeSvc('dead2', 'unknown', 0, true),
+      makeSvc('dead3', 'unknown', 0, true),
+      makeSvc('ok0', 'operational'),
+    ]
+    const configs = services.map(s => makeConfig(s.id, { apiUrl: `https://status.${s.id}.com/api/v2/summary.json` }))
+
+    const affected = detectPlatformOutage(services, configs)
+    expect(affected.size).toBe(0) // would be 5 (80% >= 70%) if dead-source services counted as read-suspect
   })
 })

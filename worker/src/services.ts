@@ -2019,8 +2019,8 @@ export function isStatuspageSummary(v: unknown): v is StatuspageResponse {
  *  of its way to preserve from an independent successful fetch, and gets stamped durably into the
  *  month-end archive. One unlucky timeout at archive time would mark a service stale for the whole
  *  month. The `sourceDead` (4xx) returns are unaffected: they set the flag inline and publish
- *  `operational`, so they satisfy none of the three conjuncts above. How a surface is meant to render
- *  that value is #689's rule, and #1329 tracks the surfaces that do not apply it.
+ *  `unknown`, so they satisfy none of the three conjuncts above. A healthy direct probe may later
+ *  promote that verdict to `operational` with `probeConfirmed` as its provenance.
  *
  *  Idempotent, and returns the SAME object when it changes nothing, so it cannot disturb
  *  `fetchService`'s identity-preserving return. */
@@ -2154,7 +2154,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // The v3 API is a machine endpoint, but 403/429 can still be an egress restriction rather
         // than a retired source. Only unambiguous gone/auth statuses become a dead-source verdict.
         if (GONE_STATUSES.has(summaryRes.status)) {
-          return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency }
+          return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency }
         }
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
@@ -2186,7 +2186,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // Same split the Cloudflare arm makes: this is a static machine document, so an unambiguous
         // gone/auth 4xx is a retired source, while 403/429 can still be an egress restriction.
         if (GONE_STATUSES.has(configRes.status)) {
-          return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency }
+          return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency }
         }
         // Booked, not just logged. The retired parser carried a caller-set `fetch-unreadable` for
         // exactly this, and it is the likeliest failure on THIS host — a 403 here is most often a
@@ -2268,7 +2268,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // every cycle, so it auto-recovers to real status the moment the page returns 200. A 5xx /
           // network error stays in the transient trackFetchFailure → degraded path below.
           if (classifyStatusPageFailure(summaryRes.status) === 'dead-source') {
-            return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true }
+            return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true }
           }
           // #714 — a 5xx is an INDETERMINATE source verdict, not a recovery. Flag `sourceUnknown` so
           // the source-inactive alert HOLDS a prior dead state this cycle instead of misreading the
@@ -2844,7 +2844,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // and the #500 persistent-block alert stays armed. Neither of these two services is probed,
           // so `probeConfirmed` can never correct a wrong `sourceDead` here the way it can elsewhere.
           if (res && GONE_STATUSES.has(res.status)) {
-            return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
+            return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
           }
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           // A failed read is not a verdict about the provider.
@@ -2924,7 +2924,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // rather than a permanent amber badge nobody is told about. Everything else falls through to the
           // transient path — see the AWS Health leg above.
           if (rssRes && GONE_STATUSES.has(rssRes.status)) {
-            return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
+            return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
           }
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           // An HTTP error still measured a response time (kept, as on the AWS Health leg above); a
@@ -3612,9 +3612,16 @@ function getServicePlatform(config: ServiceConfig): StatusPlatform {
  *  failure produces `degraded` any more, so it would have stopped counting the population it exists to
  *  detect — under-counting, not counting zero, since a page reporting degraded while naming no incident
  *  still lands in the set — with nothing failing to say so. `platform-outage.test.ts` now pins both
- *  arms. */
-export function isReadSuspect(s: Pick<ServiceStatus, 'status' | 'incidents'>): boolean {
-  return (s.status === 'unknown' || s.status === 'degraded') && s.incidents.length === 0
+ *  arms.
+ *
+ *  #1329 — `sourceDead` is excluded even though it now also publishes `unknown`: a dead status PAGE has
+ *  its own dedicated promotion path (the `sourceDead` loop at the end of `fetchAllServices`, probe-only,
+ *  never quorum), and admitting it here double-processes it — quorum could force it `operational` with
+ *  no probe evidence at all, and a failing probe could force it `degraded` while the display layer still
+ *  shows the neutral badge (`sourceDead` alone drives that). It would also inflate a platform's quorum
+ *  ratio with a sibling whose SOURCE died, not whose SERVICE is failing. */
+export function isReadSuspect(s: Pick<ServiceStatus, 'status' | 'incidents' | 'sourceDead'>): boolean {
+  return !s.sourceDead && (s.status === 'unknown' || s.status === 'degraded') && s.incidents.length === 0
 }
 
 /** Detect platform-level outage: 70%+ simultaneous fetch failures on a platform.
@@ -3663,9 +3670,9 @@ export function detectPlatformOutage(
  *  date a change in how a source fails — `isReadSuspect` also admits a page reporting `degraded` with
  *  no incident named, and an ordinary multi-cycle 5xx or timeout episode produces the same key. For a
  *  service already KNOWN to have been publishing `sourceDead`, the first key does bound when it stopped
- *  answering an unambiguous gone-4xx, because that path returns `operational` and never enters
- *  `degradedFromFetch` — but 403 and 429 are deliberately excluded from `dead-source` on the
- *  Statuspage summary leg, so even that reading is a bound and not a proof. Corroborate with `fetch-fail:daily`.
+ *  answering an unambiguous gone-4xx, because `isReadSuspect` excludes `sourceDead` outright (#1329) and
+ *  that path never enters `degradedFromFetch` — but 403 and 429 are deliberately excluded from
+ *  `dead-source` on the Statuspage summary leg, so even that reading is a bound and not a proof. Corroborate with `fetch-fail:daily`.
  *
  *  Character.AI's failure mode changed somewhere between 2026-08-01 and 2026-08-18 and dating it needed
  *  Wayback captures of a third-party status host, because these keys had expired. 90d covers the same
@@ -4215,17 +4222,17 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     }
   }
 
-  // #689 — for status-source-dead services (4xx → `sourceDead`, already `operational`), mark whether
-  // a healthy direct probe INDEPENDENTLY confirms reachability. The 2nd case: a PROBED service whose
-  // status PAGE died but whose API still responds → `probeConfirmed` → the UI keeps the operational
-  // badge (probe-backed). A dead-source service with no probe target at all gets no mark → stays
-  // `sourceDead` only → the UI shows a neutral "Unknown". Runs outside the degraded block above since
-  // sourceDead services are operational, not in `degradedFromFetch`.
+  // #689 — for status-source-dead services (4xx → `sourceDead`, initially `unknown`), a healthy direct
+  // probe independently confirms reachability and is the only path that promotes the verdict to
+  // `operational`. A dead-source service with no healthy probe stays neutral.
   if (probeSnapshots && probeSnapshots.length > 0) {
     const probedNow = probeSnapshots[probeSnapshots.length - 1]?.data ?? {}
     for (const svc of raw) {
       if (!svc.sourceDead) continue
-      if (isProbeHealthy(probeSnapshots, svc.id)) svc.probeConfirmed = true
+      if (isProbeHealthy(probeSnapshots, svc.id)) {
+        svc.status = 'operational'
+        svc.probeConfirmed = true
+      }
       // #1232 — the second consumer of the stricter predicate: a dead-source service whose own probe
       // answers 5xx no longer gets the probe-backed operational badge, it falls to neutral Unknown.
       // Logged only for services we actually probed this cycle, so an un-probed dead source does not

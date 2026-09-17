@@ -270,6 +270,22 @@ describe('the whole is-down page agrees when the source is unreadable (#1004)', 
     expect(html).not.toContain('status=degraded')
   })
 
+  it('does not publish a clean-record data summary for an unreadable source', () => {
+    const html = render({ ...base, status: 'unknown', sourceDead: true })
+
+    expect(html).toContain('Status Unknown')
+    expect(html).not.toContain('clean record with zero incidents')
+  })
+
+  it('does not publish a clean-record data summary when only a direct probe is operational', () => {
+    const html = render({
+      ...base, status: 'operational', sourceDead: true, probeConfirmed: true, incidentSourceStale: true,
+    })
+
+    expect(html).toContain('is operational')
+    expect(html).not.toContain('clean record with zero incidents')
+  })
+
   // #1233 — the "🔄 Alternatives" block gated on `serviceStatus !== 'operational'`, a two-valued test
   // that `'unknown'` passes. The page then recommended switching away from a service whose own headline
   // says the status could not be confirmed. Reachable because the AI card renders from `ai:analysis:*`

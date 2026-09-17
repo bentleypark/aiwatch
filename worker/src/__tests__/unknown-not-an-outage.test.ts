@@ -65,6 +65,11 @@ describe('#1233 transitional — a payload cached before the change', () => {
     expect(st({ status: 'degraded', sourceUnknown: true })).toBe('unknown')
   })
 
+  it('normalises legacy operational sourceDead entries unless a probe confirmed them', () => {
+    expect(st({ status: 'operational', sourceDead: true })).toBe('unknown')
+    expect(st({ status: 'operational', sourceDead: true, probeConfirmed: true })).toBe('operational')
+  })
+
   it('leaves a CORROBORATED fetch-failure degraded alone — the probe is independent evidence', () => {
     expect(st({ status: 'degraded', sourceUnknown: true, probeContradicted: true })).toBe('degraded')
   })
@@ -346,5 +351,14 @@ describe('#1233 isReadSuspect — the cross-validation + platform-quorum input',
     const inc = [{ id: 'i1', title: 't', status: 'investigating' as const, impact: null, startedAt: '', duration: null, timeline: [] }]
     expect(isReadSuspect({ status: 'degraded', incidents: inc })).toBe(false)
     expect(isReadSuspect({ status: 'operational', incidents: [] })).toBe(false)
+  })
+
+  it('#1329 — excludes a dead-source unknown, even though it now shares the same status value', () => {
+    // A dead status PAGE has its own dedicated probe-only promotion path at the end of
+    // `fetchAllServices`. Admitting it here would double-process it: quorum could force it
+    // `operational` with no probe evidence, a failing probe could force it `degraded` while the
+    // display layer still shows the neutral badge, and a persistently dead-source sibling would
+    // inflate its platform's quorum ratio forever.
+    expect(isReadSuspect({ status: 'unknown', incidents: [], sourceDead: true })).toBe(false)
   })
 })

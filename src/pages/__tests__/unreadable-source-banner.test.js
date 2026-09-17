@@ -70,6 +70,17 @@ describe('#1268 — the unreadable-source banner on ServiceDetails', () => {
     expect(html).not.toContain('svc.sourceUnknown.bodyProbe')
   })
 
+  it('a dead source with a healthy probe keeps the measurement disclosure and blanks frozen data', () => {
+    const html = render(service({
+      status: 'operational', sourceDead: true, probeConfirmed: true, incidentSourceStale: true, uptime30d: 99.9,
+    }))
+
+    expect(html).toContain('svc.sourceDead.title')
+    expect(html).toContain('svc.sourceDead.bodyProbe')
+    expect(html).not.toContain('99.9')
+    expect(html).toContain('uptime.unavailable')
+  })
+
   it('a FIRST-STRIKE unreadable read shows no banner at all', () => {
     // The flap-suppression case. Under the 3-strike threshold the worker publishes `operational` with
     // `sourceUnknown` and no `probeConfirmed` — a single failed poll of a source that may just be

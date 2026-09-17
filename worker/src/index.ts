@@ -1270,8 +1270,9 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   }
 
   // #689/#714 — distinct operator alert when a service's status SOURCE goes inactive (4xx → sourceDead),
-  // so it reads accurately ("status source inactive": service is operational+stale, excluded from
-  // rankings) instead of a misleading "degraded" alert. Deduped per service; on a GENUINE recovery
+  // so it reads accurately ("status source inactive": service is unknown+stale unless its direct probe
+  // confirms it operational, excluded from rankings) instead of a misleading "degraded" alert. Deduped
+  // per service; on a GENUINE recovery
   // (source returns 200 again → liveness 'alive') the marker is cleared and a recovery note is sent.
   // #714 — the decision is driven by 3-state liveness (dead/alive/unknown), NOT a boolean: an
   // indeterminate cycle (throw / 5xx / 429 → 'unknown') HOLDS the prior dead state instead of firing a

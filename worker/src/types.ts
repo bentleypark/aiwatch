@@ -107,7 +107,7 @@ export interface ServiceStatus {
   name: string
   provider: string
   category: 'api' | 'app' | 'agent'
-  /** #1233 — `unknown` means AIWatch could not READ this service's status source; it is NOT a verdict
+  /** #1233/#1329 — `unknown` means AIWatch could not READ this service's status source; it is NOT a verdict
    *  about the service. It is the value the fetch-failure paths publish once `trackFetchFailure` crosses
    *  its threshold (they used to publish `degraded` + `sourceUnknown`, leaving every consumer to apply
    *  the correction itself — and the ones that didn't know the flag existed published a false outage).
@@ -249,7 +249,7 @@ export interface ServiceStatus {
    *  frozen mirror. Absent when false. */
   incidentSourceStale?: boolean
   /** #689 — the status-page API returned a 4xx (the page is deactivated/gone). The service is shown
-   *  operational+stale (not a false degraded);
+   *  unknown+stale unless a healthy direct probe independently confirms it operational;
    *  this flag lets the cron send a distinct "status source inactive" operator alert (not a misleading
    *  "degraded" alert) so the source death is judged accurately. Runtime-only; absent when the source
    *  responds. */
@@ -480,7 +480,7 @@ export interface ServiceConfig {
   incidentSourceStale?: boolean
   // #800 — the status page is a KNOWN, acknowledged, long-running DEACTIVATION (e.g. Character.AI's
   // Statuspage went "Page Inactive"/401 ~2026-06-18 with no replacement, #689). The runtime sourceDead
-  // path still shows the service operational+stale + excluded from rankings; this flag only SUPPRESSES
+  // path shows the service unknown+stale + excluded from rankings unless a direct probe confirms it;
   // the recurring operator alerts the operator has already acknowledged: the #500 persistent-failure
   // (daily) sweep skips it, and the #689 source-dead RISING-edge "Inactive" (weekly) is suppressed
   // (marker still written so a RECOVERY is still detected + notified). REMOVE when the page reactivates.

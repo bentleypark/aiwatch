@@ -385,9 +385,9 @@ describe('#1212 — the same split on the AWS Health leg', () => {
 })
 
 describe('#1212 — a 4xx is the source being GONE, not an indeterminate read', () => {
-  // `sourceUnknown`'s contract (types.ts) excludes a confirmed 4xx, and the consequence is not
-  // cosmetic: `sourceLivenessOf` maps `unknown` to a HOLD, so a retired endpoint would publish a
-  // permanent `degraded` that nobody is ever alerted about.
+  // `sourceUnknown`'s contract (types.ts) excludes a confirmed 4xx. `sourceDead` publishes the
+  // neutral `unknown` verdict instead: neither endpoint has a direct probe that could corroborate
+  // an operational claim.
 
   it.each([
     ['azureopenai', () => azure, 404],
@@ -401,7 +401,7 @@ describe('#1212 — a 4xx is the source being GONE, not an indeterminate read', 
 
     expect(svc.sourceDead, 'a 4xx is a confirmed dead source').toBe(true)
     expect(svc.sourceUnknown, 'and therefore NOT the indeterminate flag').toBeFalsy()
-    expect(svc.status, 'a dead status page is not an outage of the service').toBe('operational')
+    expect(svc.status, 'a dead status page is not a verdict about the service').toBe('unknown')
     expect(svc.incidentSourceStale, 'and it drops out of the rankings').toBe(true)
   })
 

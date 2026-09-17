@@ -207,10 +207,8 @@ function statusEmoji(status: string): string {
 //
 // #1233 — the fetch-failure case is now carried by the STATUS, so the first clause below is the whole
 // rule for a current payload. Two further clauses survive:
-//   - `sourceDead` (#689) is still flag-only — a 4xx page publishes `operational` as its raw value, and
-//     `isStatusUnknown` below is where this page applies #689's rendering rule to it. Not every surface
-//     does; #1329 tracks those. Moving `sourceDead` into the status the way #1233 moved the
-//     fetch-failure case is that issue's change to make, not a silent rider on this one.
+//   - `sourceDead` (#689) now publishes `unknown` unless a healthy direct probe promotes it to
+//     `operational`; the flag survives as source provenance.
 //   - the `sourceUnknown` + `degraded` pair is a transitional read of a payload cached before #1233,
 //     not the rule (mirrors `normalizeCachedService` in `worker/src/status-verdict.ts`). Its window is
 //     NOT a cache TTL: `/api/status/cached` decodes on read, so once the worker is deployed this page can
@@ -1586,6 +1584,7 @@ export function renderIncidents(service: ServiceData | null): string {
 
 function buildDataSummary(service: ServiceData | null, displayName: string): string {
   if (!service) return ''
+  if (service.incidentSourceStale || isStatusUnknown(service)) return ''
   const incidents = Array.isArray(service.incidents) ? service.incidents : []
   const cutoff = Date.now() - 30 * 86_400_000
   const recent = incidents.filter((i) => new Date(i.startedAt).getTime() >= cutoff)
