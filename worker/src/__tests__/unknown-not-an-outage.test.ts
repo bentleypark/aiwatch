@@ -65,6 +65,11 @@ describe('#1233 transitional — a payload cached before the change', () => {
     expect(st({ status: 'degraded', sourceUnknown: true })).toBe('unknown')
   })
 
+  it('normalises legacy operational sourceDead entries unless a probe confirmed them', () => {
+    expect(st({ status: 'operational', sourceDead: true })).toBe('unknown')
+    expect(st({ status: 'operational', sourceDead: true, probeConfirmed: true })).toBe('operational')
+  })
+
   it('leaves a CORROBORATED fetch-failure degraded alone — the probe is independent evidence', () => {
     expect(st({ status: 'degraded', sourceUnknown: true, probeContradicted: true })).toBe('degraded')
   })

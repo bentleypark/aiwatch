@@ -102,9 +102,10 @@ export function asServiceStatus(value: string): ServiceStatusValue {
  *  to remember to re-attach, which is the same "every consumer must apply the correction" shape this
  *  refactor exists to delete.
  *
- *  A cached `/api/status` body written by the previous worker encodes an unreadable source as
- *  `degraded` + `sourceUnknown`, the very pair this refactor replaced. Without a decode, a legacy
- *  payload renders as a real outage for the life of those cache entries.
+ *  A cached `/api/status` body written before #1233 encodes an unreadable source as `degraded` +
+ *  `sourceUnknown`; one written before #1329 encodes a dead source as `operational` + `sourceDead`
+ *  without a confirming probe. Without a decode, either legacy payload can make a claim that current
+ *  workers no longer publish for the life of those cache entries.
  *
  *  Apply it wherever a stored payload re-enters the worker and its `status` is then read.
  *
@@ -118,14 +119,15 @@ export function asServiceStatus(value: string): ServiceStatusValue {
  *  why it stays permanently rather than being a dated cleanup nobody removes. The `probeContradicted` guard is the same one the
  *  old display rule applied: a fetch-failure `degraded` that our own probe independently corroborates is
  *  a REAL outage and must stay `degraded`. */
-export function normalizeCachedService<T extends Pick<ServiceStatus, 'status' | 'sourceUnknown' | 'probeContradicted'>>(svc: T): T {
+export function normalizeCachedService<T extends Pick<ServiceStatus, 'status' | 'sourceDead' | 'sourceUnknown' | 'probeConfirmed' | 'probeContradicted'>>(svc: T): T {
   if (svc.status === 'degraded' && svc.sourceUnknown && !svc.probeContradicted) return { ...svc, status: 'unknown' }
+  if (svc.status === 'operational' && svc.sourceDead && !svc.probeConfirmed) return { ...svc, status: 'unknown' }
   return svc
 }
 
 /** List form — the shape both call sites actually need. Returns the SAME array reference when nothing
  *  was legacy, so the common (post-rollout) path allocates nothing. */
-export function normalizeCachedServices<T extends Pick<ServiceStatus, 'status' | 'sourceUnknown' | 'probeContradicted'>>(list: T[]): T[] {
+export function normalizeCachedServices<T extends Pick<ServiceStatus, 'status' | 'sourceDead' | 'sourceUnknown' | 'probeConfirmed' | 'probeContradicted'>>(list: T[]): T[] {
   let changed = false
   const out = list.map((svc) => {
     const next = normalizeCachedService(svc)

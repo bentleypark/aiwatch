@@ -520,8 +520,9 @@ export function shouldSuppressSourceDeadAlert(
 }
 
 /** #689 — Operator embed for a status source going inactive (4xx) or recovering. DISTINCT from a
- *  "degraded" alert so the source death is judged accurately: the service is shown operational+stale
- *  and excluded from rankings — it is NOT a service degradation. Yellow (operator action), not red. */
+ *  "degraded" alert so the source death is judged accurately: the service is unknown+stale unless a
+ *  direct probe confirms it operational, and is excluded from rankings — it is NOT a service
+ *  degradation. Yellow (operator action), not red. */
 export function buildSourceDeadEmbed(name: string, statusUrl: string, recovered: boolean): { title: string; description: string; color: number } {
   if (recovered) {
     return {
@@ -532,7 +533,7 @@ export function buildSourceDeadEmbed(name: string, statusUrl: string, recovered:
   }
   return {
     title: `⚠️ ${name} — Status Source Inactive`,
-    description: `The status page returned a 4xx — likely deactivated/inactive (${statusUrl}). This is NOT a service degradation: AIWatch shows ${name} as operational + stale and excludes it from rankings until the source returns. Verify the status page / config.`,
+    description: `The status page returned a 4xx — likely deactivated/inactive (${statusUrl}). This is NOT a service degradation: AIWatch marks ${name} Unknown unless its own direct probe confirms it is responding, and excludes source data from rankings until the source returns. Verify the status page / config.`,
     color: 0xFEE75C, // yellow — operator action needed, not an outage
   }
 }

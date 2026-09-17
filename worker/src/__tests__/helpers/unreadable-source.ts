@@ -65,7 +65,7 @@ export function decayedTracking(ids: string[]) {
 }
 
 /** fetch where the Anthropic status page answers a DEAD-SOURCE 4xx (#689 — a deactivated page), so the
- *  service is published `operational` + `sourceDead` and only the probe can corroborate reachability. */
+ *  service is published `unknown` + `sourceDead`; a healthy probe can promote it to `operational`. */
 export function stubFetchDeadClaudePage() {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url

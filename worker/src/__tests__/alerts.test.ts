@@ -147,6 +147,8 @@ describe('buildSourceDeadEmbed (#689)', () => {
     const e = buildSourceDeadEmbed('Character.AI', 'https://status.character.ai', false)
     expect(e.title).toContain('Status Source Inactive')
     expect(e.description).toContain('NOT a service degradation')
+    expect(e.description).toContain('Unknown unless its own direct probe confirms')
+    expect(e.description).not.toContain('operational + stale')
     expect(e.description).toContain('https://status.character.ai')
     expect(e.color).toBe(0xFEE75C) // yellow (operator action), not red 0xED4245
   })
