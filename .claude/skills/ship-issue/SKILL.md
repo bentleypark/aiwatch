@@ -80,6 +80,12 @@ is the *procedure* — follow it top to bottom.
      the branch." The running total is what makes *not converging* visible.
    - Background, not a prerequisite: [code-review-policy.md](../../../docs/reference/code-review-policy.md).
 6. **Fix review findings — auto-loop** to 0 Critical/Important (Suggestions-only = converged).
+   - **Every round's prompt asks what is EXCESSIVE, not only what is missing.** Add to the round prompt:
+     "name anything in this diff that could be deleted with the tests still green, and say what would
+     stop failing if it went." Ask `review-findings-only`, which is read-only — do NOT reach for
+     `pr-review-toolkit:code-simplifier`, which step 5 bans, which carries no `tools:` restriction and so
+     edits the tree (memory `debugging_review_agent_clobbers_concurrent_edits`, six recurrences), and
+     whose rewrites `code-review-policy.md` says are not to be adopted.
    - A defect that predates the branch and is not what the issue is about becomes a new issue, not a
      fix in this diff. A finding filed as an issue — here or below — stops counting toward 0
      Critical/Important; list it with its issue number in the next round's prompt.
