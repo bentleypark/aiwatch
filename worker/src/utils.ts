@@ -676,11 +676,12 @@ export async function detectComponentMismatches(
   return results
 }
 
-// ── Partial `statusComponentIds` resolve (#1179) ────────────────────────────────────────────────
+// ── Partial component resolve (#1179, extended #957) ────────────────────────────────────────────
 //
-// `resolveSvcStatus` drops the configured ids it cannot find and badges off the survivors, so its
-// return value cannot say that it judged only some of them — and the #135 alert cannot see it,
-// because that path watches the primary `statusComponentId` only. Rationale, and why this is not an
+// Two independent checks feed this one mechanism (see `PartialResolveEntry`'s `scope` field): the
+// original `statusComponentIds`/`breakdownComponents` badge check (#1179), and the
+// `incidentIoComponentId`/`computeIncidentIoUptime` uptime check (#957). Neither is visible to the
+// #135 alert, which watches the primary `statusComponentId` only. Rationale, and why this is not an
 // extension of #135: docs/reference/discord-alert-paths.md.
 //
 // The record is REFRESHED while the drift is live and EXPIRES on its own; nothing deletes it. A
@@ -725,8 +726,19 @@ export const HISTORY_RETENTION_DAYS = 90
  * `viaSummary` — whether the resolve was EVER observed falling back to `summary.json` on a service
  * that configures a `componentsUrl`, i.e. a recorded #1175 revert rather than a guess from config.
  * Monotone within a record's life for the same reason `missing` is.
+ *
+ * `scope` (#957) — which SYMPTOM this drift produces, so `formatPartialResolveAlert` can describe the
+ * right one: `'badge'` for the `statusComponentIds`/`breakdownComponents` check (#1179's original
+ * case, drives `resolveSvcStatus`'s worst-of badge), `'uptime'` for the `incidentIoComponentId`/
+ * `computeIncidentIoUptime` check (#957, affects everything that function returns — not only the
+ * displayed uptime figure — never the badge). The two call sites
+ * in `services.ts` are gated to be mutually exclusive per service (see the `#957` comment there), so a
+ * given service's `scope` is effectively fixed by its config, not re-derived per cycle — held stable
+ * on refresh mainly so a config change mid-record does not retroactively relabel an in-flight drift.
+ * Absent on a record written before this field existed → `parsePartialResolve` defaults it to
+ * `'badge'`, the only scope that existed then.
  */
-export type PartialResolveEntry = { since: string; updatedAt: string; missing: string[]; viaSummary: boolean }
+export type PartialResolveEntry = { since: string; updatedAt: string; missing: string[]; viaSummary: boolean; scope: 'badge' | 'uptime' }
 
 const partialResolveKey = (svcId: string) => `component-partial:${svcId}`
 
@@ -762,7 +774,9 @@ export function parsePartialResolve(raw: string | null, svcId?: string): Partial
   if (missing.length !== parsed.missing.length) {
     console.warn(`[partial-resolve] ${svcId ?? 'unknown'}'s record carried ${parsed.missing.length - missing.length} non-string id(s); they were dropped rather than rendered into an alert`)
   }
-  return { since: parsed.since, updatedAt, missing, viaSummary: parsed.viaSummary === true }
+  // #957 — absent on a record written before `scope` existed, and 'badge' was the only scope then.
+  const scope = parsed.scope === 'uptime' ? 'uptime' : 'badge'
+  return { since: parsed.since, updatedAt, missing, viaSummary: parsed.viaSummary === true, scope }
 }
 
 /** Pure: is every id in `next` already in `prev`? When true the stored union needs no growth. */
@@ -792,9 +806,10 @@ export function nextPartialResolveEntry(
   missing: string[],
   viaSummary: boolean,
   nowMs: number,
+  scope: 'badge' | 'uptime' = 'badge',
 ): PartialResolveEntry | null {
   const nowIso = new Date(nowMs).toISOString()
-  if (!prev) return { since: nowIso, updatedAt: nowIso, missing: [...missing].sort(), viaSummary }
+  if (!prev) return { since: nowIso, updatedAt: nowIso, missing: [...missing].sort(), viaSummary, scope }
   const grewMissing = !coversIdSet(prev.missing, missing)
   const grewViaSummary = viaSummary && !prev.viaSummary
   const dueForRefresh = elapsedAtLeast(prev.updatedAt, nowMs, PARTIAL_RESOLVE_REFRESH_MS)
@@ -804,11 +819,15 @@ export function nextPartialResolveEntry(
     updatedAt: nowIso,
     missing: unionIds(prev.missing, missing),
     viaSummary: prev.viaSummary || viaSummary,
+    // #957 — held from `prev`, not re-derived, so a config change mid-record cannot retroactively
+    // relabel an in-flight drift (see PartialResolveEntry's docblock).
+    scope: prev.scope,
   }
 }
 
 /**
- * Record that this cycle resolved a service's badge from an incomplete component list.
+ * Record that this cycle resolved a service incompletely — its badge or its uptime, per `scope`
+ * (`PartialResolveEntry`'s docblock).
  *
  * Call ONLY on a genuine partial resolve. There is deliberately no "clear" call: a clean cycle does
  * nothing at all (no read, no write, so the steady state is free), and the record retires by TTL
@@ -825,6 +844,7 @@ export async function trackPartialResolve(
   missing: string[],
   nowMs: number,
   viaSummary = false,
+  scope: 'badge' | 'uptime' = 'badge',
 ): Promise<void> {
   if (!kv || missing.length === 0) return
   const key = partialResolveKey(svcId)
@@ -835,7 +855,7 @@ export async function trackPartialResolve(
     return null
   })
   if (readFailed) return
-  const entry = nextPartialResolveEntry(parsePartialResolve(raw, svcId), missing, viaSummary, nowMs)
+  const entry = nextPartialResolveEntry(parsePartialResolve(raw, svcId), missing, viaSummary, nowMs, scope)
   if (!entry) return
   const wrote = await kvPut(kv, key, JSON.stringify(entry), { expirationTtl: PARTIAL_RESOLVE_TTL_S })
   if (!wrote) {
@@ -857,8 +877,8 @@ export async function detectPartialResolves(
   kv: KVLike,
   nowMs: number,
   thresholdMs = PARTIAL_RESOLVE_THRESHOLD_MS,
-): Promise<{ id: string; name: string; since: string; missing: string[]; viaSummary: boolean; alertKey: string }[]> {
-  const results: { id: string; name: string; since: string; missing: string[]; viaSummary: boolean; alertKey: string }[] = []
+): Promise<{ id: string; name: string; since: string; missing: string[]; viaSummary: boolean; scope: 'badge' | 'uptime'; alertKey: string }[]> {
+  const results: { id: string; name: string; since: string; missing: string[]; viaSummary: boolean; scope: 'badge' | 'uptime'; alertKey: string }[] = []
   for (const svc of services) {
     // The `.catch` is load-bearing twice over: it stops one faulting key from rejecting the whole
     // cron pass (this runs at the top level of `cronAlertCheck`, ahead of the #992 detector), and it
@@ -880,23 +900,33 @@ export async function detectPartialResolves(
       return null
     })
     if (alreadyAlerted) continue
-    results.push({ ...svc, since: entry.since, missing: entry.missing, viaSummary: entry.viaSummary, alertKey })
+    results.push({ ...svc, since: entry.since, missing: entry.missing, viaSummary: entry.viaSummary, scope: entry.scope, alertKey })
   }
   return results
 }
 
 /**
- * Operator Discord body for a persistent partial resolve (#1179).
+ * Operator Discord body for a persistent partial resolve (#1179, extended #957).
  *
  * Every claim is scoped to the window, because the record is a union over it: `missing` lists every
  * id seen unresolved since `since`, so some may be resolving again right now — the body says so
  * rather than asserting a present-tense blind spot for all of them, which would invite the operator
  * to delete a healthy id from the config.
  *
+ * `scope` picks which SYMPTOM the body names: `'badge'` when the drift was found via
+ * `breakdownComponents` (drives `resolveSvcStatus`'s worst-of), `'uptime'` when found via
+ * `computeIncidentIoUptime`'s own resolution (affects everything that function returns, never the
+ * badge). Getting this wrong is not
+ * cosmetic — #957's own review round 1 caught exactly that: turbopuffer/fireworks have no badge id list
+ * at all, so a body claiming "resolving its badge from an incomplete component list" / naming
+ * `statusComponentIds` would send the operator to grep a field that does not exist in their config.
+ *
  * The `viaSummary` line is likewise a window claim, gated on the OBSERVATION recorded at resolve
  * time rather than on the presence of a `componentsUrl` in config: a provider deleting one id from a
  * perfectly readable `components.json` produces the same missing set, and sending the operator to
- * debug a working fetch would be the wrong root cause.
+ * debug a working fetch would be the wrong root cause. It is a `'badge'`-only concern (the #1175
+ * revert it names is about `resolveSvcStatus`'s own summary.json fallback) — irrelevant, and never
+ * rendered, for a `'uptime'`-scoped record.
  */
 export function formatPartialResolveAlert(
   serviceName: string,
@@ -904,12 +934,17 @@ export function formatPartialResolveAlert(
   sinceIso: string,
   nowMs: number,
   viaSummary: boolean,
+  scope: 'badge' | 'uptime' = 'badge',
 ): string {
   const elapsedH = Math.floor((nowMs - new Date(sinceIso).getTime()) / 3_600_000)
+  const idList = missing.map((id) => `\`${id}\``).join(', ')
+  if (scope === 'uptime') {
+    return `⚠️ **${serviceName}** has been computing UPTIME from an INCOMPLETE component list since **${elapsedH}h+** ago.\n\n\`incidentIoComponentId\` seen unresolved in that window (some may resolve again intermittently): ${idList}\n\nWhile an id is unresolved, uptime is a worst-of over the ones that still are — a degraded or down component among the missing ones is invisible to the reported percentage, which can then look healthier than reality.\n\n**Action**: check the provider's component list and reconcile \`worker/src/services.ts\`.`
+  }
   const cause = viaSummary
     ? `\n\nAt least once in that window it resolved off \`summary.json\` despite configuring a \`componentsUrl\` — check whether that read is failing, which would mean the #1175 fix has reverted.`
     : ''
-  return `⚠️ **${serviceName}** has been resolving its badge from an INCOMPLETE component list since **${elapsedH}h+** ago.\n\n\`statusComponentIds\` seen unresolved in that window (some may resolve again intermittently): ${missing.map((id) => `\`${id}\``).join(', ')}\n\nWhile an id is unresolved the badge is a worst-of over the others, so an outage on it reads as operational.${cause}\n\n**Action**: check the provider's component list and reconcile \`worker/src/services.ts\`.`
+  return `⚠️ **${serviceName}** has been resolving its badge from an INCOMPLETE component list since **${elapsedH}h+** ago.\n\n\`statusComponentIds\` seen unresolved in that window (some may resolve again intermittently): ${idList}\n\nWhile an id is unresolved the badge is a worst-of over the others, so an outage on it reads as operational.${cause}\n\n**Action**: check the provider's component list and reconcile \`worker/src/services.ts\`.`
 }
 
 /**

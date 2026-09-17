@@ -2682,6 +2682,27 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // rule ("why does LangSmith show two numbers and OpenAI one?"). A near-identical pair is not
           // noise either: it CORROBORATES our figure against the provider's. Identical → nothing to say.
           if (reported != null && reported !== uptimeValue) uptimeRep = reported
+          // #957 — the SAME operator path #1179 already gives a partial `statusComponentIds` resolve,
+          // now ALSO fed from this second, independent resolution check. `io.missing` names ids that
+          // `computeIncidentIoUptime` could not find in `component_uptimes`/`data_available_since`,
+          // reported with `scope: 'uptime'` (see PartialResolveEntry in utils.ts).
+          //
+          // Gated on `!config.statusComponentIds`: when that field IS set, `uptimeScope` above resolved
+          // to IT, not `incidentIoComponentId` — so `io.missing` would hold `statusComponentIds` ids,
+          // but the `'uptime'` alert body hardcodes `incidentIoComponentId` as the field name. The gate
+          // is what makes `uptimeScope === config.incidentIoComponentId` true by construction for every
+          // service this block ever reports on, which is what makes that name correct. Any service
+          // configuring both `statusComponentIds` and `incidentIoComponentId` gets no uptime-side
+          // coverage from this check as a result — an accepted, deferred gap, not a bug (not
+          // enumerated here — that set is config, not something this comment should re-list and let
+          // drift): see the `#957` paragraph in discord-alert-paths.md for why (a prior revision
+          // reported for them too and named the wrong field). `io.missing` is only ever non-empty here for a
+          // multi-id list that partially resolved — a single id either fully resolves or `io` itself is
+          // null (see computeIncidentIoUptime).
+          if (io.missing.length > 0 && !config.statusComponentIds) {
+            console.warn(`[fetchService] ${config.id} incidentIoComponentId ids missing from component_uptimes: ${io.missing.join(', ')}`)
+            await trackPartialResolve(kv, config.id, io.missing, Date.now(), false, 'uptime')
+          }
         }
         // #713 — NO invented uptime. A component the page does not track at all (no
         // `data_available_since`) yields null here rather than a fabricated 100%: absence of impact
@@ -2745,7 +2766,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // OBSERVED, not inferred from config: the badge resolved off the summary window, which is the
           // real #1175 revert signal rather than a guess the alert would otherwise have to make.
           const viaSummary = Boolean(config.componentsUrl) && breakdownComponents === summaryData.components
-          await trackPartialResolve(kv, config.id, missing, Date.now(), viaSummary)
+          // #957 — explicit `scope: 'badge'`: this check reads `breakdownComponents`, which drives
+          // `resolveSvcStatus`'s worst-of badge, never `uptime30d`. See the #957 block above for the
+          // sibling `'uptime'`-scoped check, gated so it never reports for a service reaching HERE.
+          await trackPartialResolve(kv, config.id, missing, Date.now(), viaSummary, 'badge')
         }
       }
       // #606 — drift signal for the display-only breakdown list. Without this a renamed/removed
@@ -3529,14 +3553,35 @@ export const CACHE_KEY = 'services:latest'
 export const COMPONENT_ID_SERVICES: { id: string; name: string; statusComponentId: string }[] =
   SERVICES.filter((s) => s.statusComponentId).map((s) => ({ id: s.id, name: s.name, statusComponentId: s.statusComponentId! }))
 
-/** #1179 — services whose badge is a worst-of over `statusComponentIds`, i.e. the ones that CAN
- *  resolve partially. Derived from SERVICES so adding a service to the multi-component branch
- *  enrolls it in the alert with no second list to keep in sync. Carries no `componentsUrl` flag:
- *  whether a resolve actually fell back to `summary.json` is an observation `fetchService` records
- *  on the entry, not something config can answer. */
-export const PARTIAL_COMPONENT_SERVICES: { id: string; name: string }[] =
-  SERVICES.filter((s) => s.statusComponentIds && s.statusComponentIds.length > 0)
-    .map((s) => ({ id: s.id, name: s.name }))
+/** Pure — is `s` in the `statusComponentIds` badge-worst-of group (#1179's original scope)? Extracted
+ *  so the roster's membership rule is testable against a synthetic config, not only against whatever
+ *  `SERVICES` happens to hold today — a `SERVICES`-only assertion cannot fail if no live service
+ *  currently exercises the boundary it's meant to guard (#957 review round 1). */
+export function isBadgePartialGroup(s: Pick<ServiceConfig, 'statusComponentIds'>): boolean {
+  return Boolean(s.statusComponentIds && s.statusComponentIds.length > 0)
+}
+
+/** Pure — is `s` in the LIST `incidentIoComponentId` group added by #957 (turbopuffer/fireworks: no
+ *  `statusComponentIds` at all, so every `statusComponentId`-keyed signal structurally exempts them)?
+ *  `!s.statusComponentIds` MIRRORS the correctness gate in `fetchService`'s `#957` block verbatim (see
+ *  its comment) — presence, not `isBadgePartialGroup`'s non-empty check, because the gate itself is
+ *  `!config.statusComponentIds` and an empty array is truthy: a service configuring `statusComponentIds: []`
+ *  fails the gate (never reaches that block's `trackPartialResolve` call — `uptimeScope` still resolves
+ *  to `statusComponentIds`, i.e. `[]`, not `incidentIoComponentId`) and must fail this predicate the same
+ *  way, or the roster lists a service `detectPartialResolves` will never find a `scope: 'uptime'` write for. */
+export function isUptimePartialGroup(s: Pick<ServiceConfig, 'statusComponentIds' | 'incidentIoComponentId'>): boolean {
+  return !s.statusComponentIds && Array.isArray(s.incidentIoComponentId) && s.incidentIoComponentId.length > 1
+}
+
+/** #1179 (+ #957) — services whose uptime OR badge is a worst-of over more than one id, i.e. the ones
+ *  that CAN resolve partially and so need `detectPartialResolves`' cron sweep. Derived from SERVICES so
+ *  adding a service to either group enrolls it with no second list to keep in sync. Carries no
+ *  `componentsUrl` flag: whether a resolve actually fell back to `summary.json` is an observation
+ *  `fetchService` records on the entry, not something config can answer. */
+export const PARTIAL_COMPONENT_SERVICES: { id: string; name: string }[] = [
+  ...SERVICES.filter(isBadgePartialGroup),
+  ...SERVICES.filter(isUptimePartialGroup),
+].map((s) => ({ id: s.id, name: s.name }))
 
 // ── Platform grouping for quorum-based outage detection ──
 // When 70%+ of services on the same status page platform fail simultaneously,

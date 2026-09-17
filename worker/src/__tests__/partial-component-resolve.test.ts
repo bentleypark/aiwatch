@@ -35,7 +35,7 @@ import {
   type PartialResolveEntry,
   type KVLike,
 } from '../utils'
-import { PARTIAL_COMPONENT_SERVICES, SERVICES, fetchService } from '../services'
+import { PARTIAL_COMPONENT_SERVICES, SERVICES, fetchService, isBadgePartialGroup, isUptimePartialGroup } from '../services'
 
 const INDEX_SRC = readFileSync(join(__dirname, '..', 'index.ts'), 'utf8')
 const SERVICES_SRC = readFileSync(join(__dirname, '..', 'services.ts'), 'utf8')
@@ -71,7 +71,7 @@ const ago = (ms: number) => new Date(NOW - ms).toISOString()
 const rec = (e: { since: string; missing: string[]; updatedAt?: string; viaSummary?: boolean }) =>
   JSON.stringify({ updatedAt: e.since, viaSummary: false, ...e })
 const entry = (e: Partial<PartialResolveEntry> = {}): PartialResolveEntry =>
-  ({ since: ago(HOUR), updatedAt: ago(HOUR), missing: ['a'], viaSummary: false, ...e })
+  ({ since: ago(HOUR), updatedAt: ago(HOUR), missing: ['a'], viaSummary: false, scope: 'badge', ...e })
 
 let warn: ReturnType<typeof vi.spyOn>
 let error: ReturnType<typeof vi.spyOn>
@@ -141,12 +141,20 @@ describe('elapsedAtLeast — the shared duration primitive', () => {
 describe('parsePartialResolve', () => {
   it('reads a well-formed record', () => {
     expect(parsePartialResolve(rec({ since: ago(2 * HOUR), updatedAt: ago(MIN), missing: ['a', 'b'] })))
-      .toEqual({ since: ago(2 * HOUR), updatedAt: ago(MIN), missing: ['a', 'b'], viaSummary: false })
+      .toEqual({ since: ago(2 * HOUR), updatedAt: ago(MIN), missing: ['a', 'b'], viaSummary: false, scope: 'badge' })
     expect(parsePartialResolve(rec({ since: ago(HOUR), missing: ['a'], viaSummary: true }))?.viaSummary).toBe(true)
     // Absent fields (a record written before they existed) must degrade, not reject: viaSummary
-    // false, updatedAt falling back to since.
+    // false, updatedAt falling back to since, and — #957 — scope defaulting to 'badge', the only
+    // scope that existed before this field was added.
     const legacy = parsePartialResolve(JSON.stringify({ since: ago(HOUR), missing: ['a'] }))
-    expect(legacy).toEqual({ since: ago(HOUR), updatedAt: ago(HOUR), missing: ['a'], viaSummary: false })
+    expect(legacy).toEqual({ since: ago(HOUR), updatedAt: ago(HOUR), missing: ['a'], viaSummary: false, scope: 'badge' })
+  })
+
+  // #957 — a record explicitly written with scope: 'uptime' round-trips, and an invalid/garbage value
+  // degrades to 'badge' rather than being trusted or rejecting the whole record over one bad field.
+  it('reads an explicit uptime scope, and degrades a garbage scope value to badge', () => {
+    expect(parsePartialResolve(JSON.stringify({ since: ago(HOUR), missing: ['a'], scope: 'uptime' }))?.scope).toBe('uptime')
+    expect(parsePartialResolve(JSON.stringify({ since: ago(HOUR), missing: ['a'], scope: 'nonsense' }))?.scope).toBe('badge')
   })
 
   it('returns null for absent, malformed, wrong-shape and EMPTY records', () => {
@@ -204,7 +212,7 @@ describe('coversIdSet / unionIds', () => {
 describe('nextPartialResolveEntry — the write-bound rule', () => {
   it('a first sighting starts both clocks', () => {
     expect(nextPartialResolveEntry(null, ['b', 'a'], false, NOW))
-      .toEqual({ since: ago(0), updatedAt: ago(0), missing: ['a', 'b'], viaSummary: false })
+      .toEqual({ since: ago(0), updatedAt: ago(0), missing: ['a', 'b'], viaSummary: false, scope: 'badge' })
   })
 
   it('says NOTHING TO WRITE when the union covers it and the refresh is not due', () => {
@@ -213,7 +221,7 @@ describe('nextPartialResolveEntry — the write-bound rule', () => {
 
   it('grows the union — and keeps `since`, so a rotating window cannot restart the clock', () => {
     const next = nextPartialResolveEntry(entry({ since: ago(5 * HOUR), updatedAt: ago(MIN), missing: ['a'] }), ['b'], false, NOW)
-    expect(next).toEqual({ since: ago(5 * HOUR), updatedAt: ago(0), missing: ['a', 'b'], viaSummary: false })
+    expect(next).toEqual({ since: ago(5 * HOUR), updatedAt: ago(0), missing: ['a', 'b'], viaSummary: false, scope: 'badge' })
   })
 
   it('refreshes on the throttle so the record cannot expire under a live drift', () => {
@@ -228,6 +236,16 @@ describe('nextPartialResolveEntry — the write-bound rule', () => {
     expect(nextPartialResolveEntry(entry({ updatedAt: ago(MIN), viaSummary: false }), ['a'], true, NOW)?.viaSummary).toBe(true)
     expect(nextPartialResolveEntry(entry({ updatedAt: ago(MIN), viaSummary: true }), ['a'], false, NOW)).toBeNull()
     expect(nextPartialResolveEntry(entry({ updatedAt: ago(2 * PARTIAL_RESOLVE_REFRESH_MS), viaSummary: true }), ['a'], false, NOW)?.viaSummary).toBe(true)
+  })
+
+  // #957 — `scope` is set ONLY on first sighting and held stable across every refresh, unlike
+  // `viaSummary`/`missing` which grow. The two call sites in services.ts are gated to be mutually
+  // exclusive per service, so in practice every call for one service passes the same scope — this
+  // pins the mechanical property directly (pure-function level), independent of that gate holding.
+  it('scope is set on first sighting and IGNORES whatever a later call passes', () => {
+    expect(nextPartialResolveEntry(null, ['a'], false, NOW, 'uptime')?.scope).toBe('uptime')
+    expect(nextPartialResolveEntry(entry({ updatedAt: ago(MIN), scope: 'uptime' }), ['a', 'b'], false, NOW, 'badge')?.scope).toBe('uptime')
+    expect(nextPartialResolveEntry(entry({ updatedAt: ago(MIN), scope: 'badge' }), ['a', 'b'], false, NOW, 'uptime')?.scope).toBe('badge')
   })
 
   it('an alternating drift writes on the throttle, NOT once per cycle', () => {
@@ -253,8 +271,15 @@ describe('trackPartialResolve', () => {
     const kv = mockKV()
     await trackPartialResolve(kv, 'chatgpt', ['voice', 'tasks'], NOW)
     expect(JSON.parse(kv.store['component-partial:chatgpt']))
-      .toEqual({ since: ago(0), updatedAt: ago(0), missing: ['tasks', 'voice'], viaSummary: false })
+      .toEqual({ since: ago(0), updatedAt: ago(0), missing: ['tasks', 'voice'], viaSummary: false, scope: 'badge' })
     expect(kv.put).toHaveBeenCalledWith(expect.any(String), expect.any(String), { expirationTtl: PARTIAL_RESOLVE_TTL_S })
+  })
+
+  // #957 — the sixth (optional) parameter threads through to the stored record.
+  it('records an explicit uptime scope', async () => {
+    const kv = mockKV()
+    await trackPartialResolve(kv, 'turbopuffer', ['id-x'], NOW, false, 'uptime')
+    expect(JSON.parse(kv.store['component-partial:turbopuffer']).scope).toBe('uptime')
   })
 
   it('does nothing at all when there is nothing to report — the steady state is free', async () => {
@@ -312,7 +337,15 @@ describe('detectPartialResolves', () => {
     const kv = mockKV({ 'component-partial:chatgpt': live(7 * HOUR, true) })
     const out = await detectPartialResolves(services, kv, NOW)
     expect(out).toHaveLength(1)
-    expect(out[0]).toMatchObject({ id: 'chatgpt', name: 'ChatGPT', missing: ['voice'], viaSummary: true, alertKey: 'alerted:component-partial:chatgpt' })
+    expect(out[0]).toMatchObject({ id: 'chatgpt', name: 'ChatGPT', missing: ['voice'], viaSummary: true, scope: 'badge', alertKey: 'alerted:component-partial:chatgpt' })
+  })
+
+  // #957 — the stored `scope` (whichever it was written with) reaches the caller, not a hardcoded
+  // default. `rec()` above has no `scope` field, so this covers the OTHER value round-tripping.
+  it('surfaces an uptime-scoped record correctly', async () => {
+    const kv = mockKV({ 'component-partial:chatgpt': JSON.stringify({ since: ago(7 * HOUR), updatedAt: ago(MIN), missing: ['01ABC'], viaSummary: false, scope: 'uptime' }) })
+    const out = await detectPartialResolves(services, kv, NOW)
+    expect(out[0]).toMatchObject({ scope: 'uptime', missing: ['01ABC'] })
   })
 
   it('stays silent below the threshold — a rotation that lasts minutes cannot page', async () => {
@@ -438,12 +471,91 @@ describe('formatPartialResolveAlert', () => {
     expect(formatPartialResolveAlert('ChatGPT', ['voice'], ago(7 * HOUR), NOW, true)).toContain('#1175')
     expect(formatPartialResolveAlert('ChatGPT', ['voice'], ago(7 * HOUR), NOW, false)).not.toContain('#1175')
   })
+
+  // #957 round-1 review Critical #1 — the earlier revision hardcoded "badge"/`statusComponentIds`
+  // language for EVERY caller, which is false for turbopuffer/fireworks (no badge id list at all: the
+  // alert would send an operator to grep a field that does not exist in their config). `scope` is what
+  // fixes it, so it is pinned directly against the exact wording round 1 found wrong.
+  describe('scope selects which symptom the body names (#957)', () => {
+    it('badge scope (default) — the pre-existing wording, unchanged', () => {
+      const body = formatPartialResolveAlert('ChatGPT', ['voice'], ago(7 * HOUR), NOW, false, 'badge')
+      expect(body).toContain('statusComponentIds')
+      expect(body).toContain('resolving its badge')
+      expect(body).toContain('an outage on it reads as operational')
+      expect(body).not.toContain('incidentIoComponentId')
+      expect(body).not.toContain('UPTIME')
+    })
+
+    it('uptime scope — names incidentIoComponentId and the uptime symptom, never the badge', () => {
+      const body = formatPartialResolveAlert('turbopuffer', ['01ABC'], ago(7 * HOUR), NOW, false, 'uptime')
+      expect(body).toContain('incidentIoComponentId')
+      expect(body).toContain('UPTIME')
+      expect(body).toContain('01ABC')
+      expect(body).toContain('7h+')
+      // The exact defect round 1 found: this wording must NOT appear for an uptime-scoped record.
+      expect(body).not.toContain('statusComponentIds')
+      expect(body).not.toContain('badge')
+      expect(body).not.toContain('reads as operational')
+    })
+
+    it('uptime scope never renders the #1175/viaSummary clause — it is a badge-only concept', () => {
+      // viaSummary=true would inject the #1175 clause on the badge path; on the uptime path it must be
+      // silently ignored rather than rendering a claim about resolveSvcStatus's summary.json fallback,
+      // which has nothing to do with computeIncidentIoUptime's resolution.
+      const body = formatPartialResolveAlert('turbopuffer', ['01ABC'], ago(7 * HOUR), NOW, true, 'uptime')
+      expect(body).not.toContain('#1175')
+      expect(body).not.toContain('summary.json')
+    })
+
+    it('scope defaults to badge when omitted — every pre-#957 call site keeps its old body', () => {
+      expect(formatPartialResolveAlert('ChatGPT', ['voice'], ago(7 * HOUR), NOW, false))
+        .toBe(formatPartialResolveAlert('ChatGPT', ['voice'], ago(7 * HOUR), NOW, false, 'badge'))
+    })
+  })
+})
+
+// #957 round-1 review Important #2 — a SERVICES-only assertion cannot fail on the group boundary it's
+// meant to guard, because no live service today exercises it (no service has both `statusComponentIds`
+// AND a qualifying `incidentIoComponentId` list). These test the pure predicates directly, against
+// synthetic configs, so the boundary is checked regardless of what SERVICES currently holds.
+describe('isBadgePartialGroup / isUptimePartialGroup — the roster predicates, against synthetic configs', () => {
+  it('isBadgePartialGroup requires a non-empty statusComponentIds', () => {
+    expect(isBadgePartialGroup({ statusComponentIds: ['a', 'b'] })).toBe(true)
+    expect(isBadgePartialGroup({ statusComponentIds: [] })).toBe(false)
+    expect(isBadgePartialGroup({})).toBe(false)
+  })
+
+  it('isUptimePartialGroup requires a LIST incidentIoComponentId of length > 1', () => {
+    expect(isUptimePartialGroup({ incidentIoComponentId: ['x', 'y'] })).toBe(true)
+    expect(isUptimePartialGroup({ incidentIoComponentId: 'x' })).toBe(false) // single id, not a list
+    expect(isUptimePartialGroup({ incidentIoComponentId: ['x'] })).toBe(false) // list of 1
+    expect(isUptimePartialGroup({})).toBe(false)
+  })
+
+  // The exact boundary #957 round 1 found untested: a service qualifying for BOTH must land in the
+  // badge group only — a mutation dropping isUptimePartialGroup's exclusion clause turns this red.
+  it('a service with BOTH fields set belongs to the badge group only', () => {
+    const dual = { statusComponentIds: ['a', 'b'], incidentIoComponentId: ['x', 'y'] as [string, ...string[]] }
+    expect(isBadgePartialGroup(dual)).toBe(true)
+    expect(isUptimePartialGroup(dual)).toBe(false)
+  })
+
+  // #957 round 6: isUptimePartialGroup's exclusion must mirror fetchService's actual gate
+  // (`!config.statusComponentIds`, presence) rather than isBadgePartialGroup's non-empty check — an
+  // empty array is truthy, so the gate excludes `statusComponentIds: []` too, and the roster must agree
+  // or it lists a service `detectPartialResolves` will never find a `scope: 'uptime'` write for.
+  it('a service with an EMPTY statusComponentIds is excluded from the uptime group too', () => {
+    const emptyList = { statusComponentIds: [] as string[], incidentIoComponentId: ['x', 'y'] as [string, ...string[]] }
+    expect(isBadgePartialGroup(emptyList)).toBe(false)
+    expect(isUptimePartialGroup(emptyList)).toBe(false)
+  })
 })
 
 describe('PARTIAL_COMPONENT_SERVICES roster', () => {
-  it('is exactly the services whose badge is a worst-of over statusComponentIds', () => {
-    const expected = SERVICES.filter((s) => s.statusComponentIds && s.statusComponentIds.length > 0).map((s) => s.id)
-    expect(PARTIAL_COMPONENT_SERVICES.map((s) => s.id).sort()).toEqual([...expected].sort())
+  it('is exactly the union of the statusComponentIds badge group and the #957 incidentIoComponentId-list group', () => {
+    const badgeGroup = SERVICES.filter(isBadgePartialGroup).map((s) => s.id)
+    const uptimeGroup = SERVICES.filter(isUptimePartialGroup).map((s) => s.id)
+    expect(PARTIAL_COMPONENT_SERVICES.map((s) => s.id).sort()).toEqual([...badgeGroup, ...uptimeGroup].sort())
     expect(PARTIAL_COMPONENT_SERVICES.length).toBeGreaterThan(0)
   })
 
@@ -459,6 +571,25 @@ describe('PARTIAL_COMPONENT_SERVICES roster', () => {
     expect(ids).toContain('chatgpt')  // componentsUrl group
     expect(ids).toContain('cursor')   // summary.json group — the half a componentsUrl-scoped fix would miss
     expect(ids).toContain('copilot')
+  })
+
+  // #957 — turbopuffer/fireworks configure a LIST `incidentIoComponentId` with no `statusComponentId`/
+  // `statusComponentIds` at all, so every existing signal (#135/#379/#606) was structurally exempt from
+  // them. This is the roster that closes that gap.
+  it('includes the incidentIoComponentId-list services with no statusComponentIds (#957)', () => {
+    const ids = PARTIAL_COMPONENT_SERVICES.map((s) => s.id)
+    expect(ids).toContain('turbopuffer')
+    expect(ids).toContain('fireworks')
+  })
+
+  // The two groups must never double-count the same service: `fetchService`'s #957 block is gated on
+  // `!config.statusComponentIds` (see its comment — an earlier revision reported unconditionally and
+  // review found it named the wrong field for a dual-configured service), so a service configuring
+  // BOTH is entirely the badge group's concern — enrolling it via the second branch too would list a
+  // roster entry `detectPartialResolves` can never find a matching write for.
+  it('never double-enrolls a service through both branches', () => {
+    const ids = PARTIAL_COMPONENT_SERVICES.map((s) => s.id)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })
 
@@ -665,8 +796,9 @@ describe('wiring — the cron sends the alert (#1179)', () => {
 
   it('passes the service name and the RECORDED observation to the formatter', () => {
     // Pins the argument list, not just the callee: hardcoding the last argument would silently kill
-    // the #1175-revert callout, and passing svc.id would title the alert with a slug.
-    expect(cronBody()).toMatch(/formatPartialResolveAlert\(svc\.name, svc\.missing, svc\.since, partialNow, svc\.viaSummary\)/)
+    // the #1175-revert callout, and passing svc.id would title the alert with a slug. #957 — svc.scope
+    // is now threaded through too, or the body would fall back to 'badge' for every record.
+    expect(cronBody()).toMatch(/formatPartialResolveAlert\(svc\.name, svc\.missing, svc\.since, partialNow, svc\.viaSummary, svc\.scope\)/)
   })
 
   it('writes the 24h dedup key ONLY on a successful send', () => {
@@ -681,7 +813,15 @@ describe('wiring — the cron sends the alert (#1179)', () => {
   })
 
   it('services.ts reports from the secondary-id miss check, with the observed fallback flag', () => {
-    expect(SERVICES_SRC).toMatch(/await trackPartialResolve\(kv, config\.id, missing, Date\.now\(\), viaSummary\)/)
+    expect(SERVICES_SRC).toMatch(/await trackPartialResolve\(kv, config\.id, missing, Date\.now\(\), viaSummary, 'badge'\)/)
     expect(SERVICES_SRC).toMatch(/const viaSummary = Boolean\(config\.componentsUrl\) && breakdownComponents === summaryData\.components/)
+  })
+
+  // #957 — the sibling uptime-side check reports as scope: 'uptime', gated on `!config.statusComponentIds`
+  // (review round 2 found unconditional reporting named the WRONG field — `incidentIoComponentId` — for
+  // a service where `uptimeScope` actually resolved `statusComponentIds`; see the comment in services.ts).
+  it('services.ts reports from the uptime-side check as scope: uptime, gated on !config.statusComponentIds', () => {
+    expect(SERVICES_SRC).toMatch(/await trackPartialResolve\(kv, config\.id, io\.missing, Date\.now\(\), false, 'uptime'\)/)
+    expect(SERVICES_SRC).toMatch(/if \(io\.missing\.length > 0 && !config\.statusComponentIds\) \{/)
   })
 })
