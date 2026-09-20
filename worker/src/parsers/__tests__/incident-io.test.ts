@@ -98,7 +98,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
     expect(out).toEqual({ pct: 83.33, days: 6, todayWeightedOutageSec: 0, missing: [] })
   })
 
-  it('a LIST of ids is a worst-of, over the shortest covered window (turbopuffer regions, #857)', () => {
+  it('a LIST of ids reports the window of its worst percentage (turbopuffer regions, #857)', () => {
     const out = computeIncidentIoUptime(
       html(
         [{ id: 'r2', start: at(5), end: at(4), status: 'full_outage' }],
