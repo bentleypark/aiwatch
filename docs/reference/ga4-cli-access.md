@@ -176,6 +176,14 @@ of days (`07-15`: 4, `07-18`: 26, `07-26`: 1, `07-31`: 59, `08-04`: 51) rather t
 been silently truncated — the shape held). #998 records 249 / 149 for a read on 2026-08-17. Quote the query date
 **and** an explicit `--end` beside any figure taken from here.
 
+**Reading rule after the filter went Active (decided 2026-09-20, #998).** The filter has been Active since
+2026-08-19 and still lets non-production hosts through: `--dimensions hostName --metrics sessions --start
+2026-08-20 --end 2026-09-19 --limit 200`, run 2026-09-20, gave `ai-watch.dev` 211, `localhost` 40 and
+`127.0.0.1` 33 (73 of 284; read without `date`, because sessions are not additive across it). The leak is
+handled on the read, not on collection: read the `hostName` rows and set aside the ones that are dev machines
+or preview deployments, judging each host by what serves it rather than from a fixed list — preview hostnames
+change on every deploy. The decision, and what it leaves undone, is recorded in #998.
+
 ## Security
 
 The service account key is a real credential — same handling as any other secret in this repo:
