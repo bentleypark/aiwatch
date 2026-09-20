@@ -740,7 +740,8 @@ export const HISTORY_RETENTION_DAYS = 90
  */
 export type PartialResolveEntry = { since: string; updatedAt: string; missing: string[]; viaSummary: boolean; scope: 'badge' | 'uptime' }
 
-const partialResolveKey = (svcId: string) => `component-partial:${svcId}`
+const partialResolveKey = (svcId: string, scope: 'badge' | 'uptime' = 'badge') =>
+  scope === 'uptime' ? `component-partial:${svcId}:uptime` : `component-partial:${svcId}`
 
 /**
  * Pure: parse a stored record. Returns null on absent/corrupt/wrong-shape/empty-`missing`, and on a
@@ -847,7 +848,7 @@ export async function trackPartialResolve(
   scope: 'badge' | 'uptime' = 'badge',
 ): Promise<void> {
   if (!kv || missing.length === 0) return
-  const key = partialResolveKey(svcId)
+  const key = partialResolveKey(svcId, scope)
   let readFailed = false
   const raw = await kv.get(key).catch((err) => {
     readFailed = true
@@ -873,18 +874,19 @@ export async function trackPartialResolve(
  * also reported, since a read that keeps faulting re-pages every cron tick.
  */
 export async function detectPartialResolves(
-  services: { id: string; name: string }[],
+  services: { id: string; name: string; scope: 'badge' | 'uptime'; field: 'statusComponentIds' | 'incidentIoComponentId' }[],
   kv: KVLike,
   nowMs: number,
   thresholdMs = PARTIAL_RESOLVE_THRESHOLD_MS,
-): Promise<{ id: string; name: string; since: string; missing: string[]; viaSummary: boolean; scope: 'badge' | 'uptime'; alertKey: string }[]> {
-  const results: { id: string; name: string; since: string; missing: string[]; viaSummary: boolean; scope: 'badge' | 'uptime'; alertKey: string }[] = []
+): Promise<{ id: string; name: string; since: string; missing: string[]; viaSummary: boolean; scope: 'badge' | 'uptime'; field: 'statusComponentIds' | 'incidentIoComponentId'; alertKey: string }[]> {
+  const results: { id: string; name: string; since: string; missing: string[]; viaSummary: boolean; scope: 'badge' | 'uptime'; field: 'statusComponentIds' | 'incidentIoComponentId'; alertKey: string }[] = []
   for (const svc of services) {
+    const { scope, field } = svc
     // The `.catch` is load-bearing twice over: it stops one faulting key from rejecting the whole
     // cron pass (this runs at the top level of `cronAlertCheck`, ahead of the #992 detector), and it
     // reports the fault, which a bare `?? null` would not. Returning null then skips the service via
     // the `!entry` guard below — no separate flag, which would be a branch no mutation can reach.
-    const raw = await kv.get(partialResolveKey(svc.id)).catch((err) => {
+    const raw = await kv.get(partialResolveKey(svc.id, scope)).catch((err) => {
       console.error(`[partial-resolve] KV read failed for ${svc.id} — cannot tell a drift record from none, so it is UNCHECKED this cycle:`, err instanceof Error ? err.message : err)
       return null
     })
@@ -894,13 +896,13 @@ export async function detectPartialResolves(
     // Still live? A record whose last observation is old means the drift stopped (or polling did);
     // TTL will retire it shortly, and until then it must not page.
     if (elapsedAtLeast(entry.updatedAt, nowMs, PARTIAL_RESOLVE_STALE_MS)) continue
-    const alertKey = `alerted:component-partial:${svc.id}`
+    const alertKey = scope === 'uptime' ? `alerted:component-partial:${svc.id}:uptime` : `alerted:component-partial:${svc.id}`
     const alreadyAlerted = await kv.get(alertKey).catch((err) => {
       console.warn(`[partial-resolve] dedup read failed for ${svc.id} — paging again rather than dropping it; a repeating fault here re-pages every cron tick:`, err instanceof Error ? err.message : err)
       return null
     })
     if (alreadyAlerted) continue
-    results.push({ ...svc, since: entry.since, missing: entry.missing, viaSummary: entry.viaSummary, scope: entry.scope, alertKey })
+    results.push({ id: svc.id, name: svc.name, since: entry.since, missing: entry.missing, viaSummary: entry.viaSummary, scope: entry.scope, field, alertKey })
   }
   return results
 }
@@ -935,11 +937,12 @@ export function formatPartialResolveAlert(
   nowMs: number,
   viaSummary: boolean,
   scope: 'badge' | 'uptime' = 'badge',
+  field: 'statusComponentIds' | 'incidentIoComponentId' = scope === 'uptime' ? 'incidentIoComponentId' : 'statusComponentIds',
 ): string {
   const elapsedH = Math.floor((nowMs - new Date(sinceIso).getTime()) / 3_600_000)
   const idList = missing.map((id) => `\`${id}\``).join(', ')
   if (scope === 'uptime') {
-    return `⚠️ **${serviceName}** has been computing UPTIME from an INCOMPLETE component list since **${elapsedH}h+** ago.\n\n\`incidentIoComponentId\` seen unresolved in that window (some may resolve again intermittently): ${idList}\n\nWhile an id is unresolved, uptime is a worst-of over the ones that still are — a degraded or down component among the missing ones is invisible to the reported percentage, which can then look healthier than reality.\n\n**Action**: check the provider's component list and reconcile \`worker/src/services.ts\`.`
+    return `⚠️ **${serviceName}** has been computing UPTIME from an INCOMPLETE component list since **${elapsedH}h+** ago.\n\n\`${field}\` seen unresolved in that window (some may resolve again intermittently): ${idList}\n\nWhile an id is unresolved, uptime is a worst-of over the ones that still are — a degraded or down component among the missing ones is invisible to the reported percentage, which can then look healthier than reality.\n\n**Action**: check the provider's component list and reconcile \`worker/src/services.ts\`.`
   }
   const cause = viaSummary
     ? `\n\nAt least once in that window it resolved off \`summary.json\` despite configuring a \`componentsUrl\` — check whether that read is failing, which would mean the #1175 fix has reverted.`

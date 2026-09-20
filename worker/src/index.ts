@@ -2041,7 +2041,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       // #135 block above predates it.
       const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
         title: `⚠️ Partial Component Resolve: ${svc.name}`,
-        description: formatPartialResolveAlert(svc.name, svc.missing, svc.since, partialNow, svc.viaSummary, svc.scope),
+        description: formatPartialResolveAlert(svc.name, svc.missing, svc.since, partialNow, svc.viaSummary, svc.scope, svc.field),
         color: 0xFFA500,
       })
       if (sent) {

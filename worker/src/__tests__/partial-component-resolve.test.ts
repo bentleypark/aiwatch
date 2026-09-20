@@ -279,7 +279,7 @@ describe('trackPartialResolve', () => {
   it('records an explicit uptime scope', async () => {
     const kv = mockKV()
     await trackPartialResolve(kv, 'turbopuffer', ['id-x'], NOW, false, 'uptime')
-    expect(JSON.parse(kv.store['component-partial:turbopuffer']).scope).toBe('uptime')
+    expect(JSON.parse(kv.store['component-partial:turbopuffer:uptime']).scope).toBe('uptime')
   })
 
   it('does nothing at all when there is nothing to report — the steady state is free', async () => {
@@ -329,7 +329,7 @@ describe('trackPartialResolve', () => {
 })
 
 describe('detectPartialResolves', () => {
-  const services = [{ id: 'chatgpt', name: 'ChatGPT' }]
+  const services = [{ id: 'chatgpt', name: 'ChatGPT', scope: 'badge' as const, field: 'statusComponentIds' as const }]
   const live = (sinceMsAgo: number, viaSummary = false) =>
     rec({ since: ago(sinceMsAgo), updatedAt: ago(MIN), missing: ['voice'], viaSummary })
 
@@ -343,8 +343,8 @@ describe('detectPartialResolves', () => {
   // #957 — the stored `scope` (whichever it was written with) reaches the caller, not a hardcoded
   // default. `rec()` above has no `scope` field, so this covers the OTHER value round-tripping.
   it('surfaces an uptime-scoped record correctly', async () => {
-    const kv = mockKV({ 'component-partial:chatgpt': JSON.stringify({ since: ago(7 * HOUR), updatedAt: ago(MIN), missing: ['01ABC'], viaSummary: false, scope: 'uptime' }) })
-    const out = await detectPartialResolves(services, kv, NOW)
+    const kv = mockKV({ 'component-partial:chatgpt:uptime': JSON.stringify({ since: ago(7 * HOUR), updatedAt: ago(MIN), missing: ['01ABC'], viaSummary: false, scope: 'uptime' }) })
+    const out = await detectPartialResolves([{ id: 'chatgpt', name: 'ChatGPT', scope: 'uptime', field: 'incidentIoComponentId' }], kv, NOW)
     expect(out[0]).toMatchObject({ scope: 'uptime', missing: ['01ABC'] })
   })
 
@@ -394,12 +394,12 @@ describe('detectPartialResolves', () => {
     // LAST — the two duration gates matter most, since "record exists but is younger than 6h" is the
     // ordinary state of a service that just started drifting.
     const roster = [
-      { id: 'alerted-already', name: 'A' },
-      { id: 'read-faults', name: 'B' },
-      { id: 'no-record', name: 'C' },
-      { id: 'too-young', name: 'D' },
-      { id: 'gone-stale', name: 'E' },
-      { id: 'chatgpt', name: 'ChatGPT' },
+      { id: 'alerted-already', name: 'A', scope: 'badge' as const, field: 'statusComponentIds' as const },
+      { id: 'read-faults', name: 'B', scope: 'badge' as const, field: 'statusComponentIds' as const },
+      { id: 'no-record', name: 'C', scope: 'badge' as const, field: 'statusComponentIds' as const },
+      { id: 'too-young', name: 'D', scope: 'badge' as const, field: 'statusComponentIds' as const },
+      { id: 'gone-stale', name: 'E', scope: 'badge' as const, field: 'statusComponentIds' as const },
+      { id: 'chatgpt', name: 'ChatGPT', scope: 'badge' as const, field: 'statusComponentIds' as const },
     ]
     const kv = faultyKV(/component-partial:read-faults/, {
       'component-partial:alerted-already': live(7 * HOUR),
@@ -440,7 +440,7 @@ describe('an INTERMITTENT drift still pages — the property the mechanism turns
       if (i % 2 === 0) continue           // clean poll: components.json readable, nothing reported
       await trackPartialResolve(kv, 'chatgpt', ['voice'], at, true)
     }
-    const out = await detectPartialResolves([{ id: 'chatgpt', name: 'ChatGPT' }], kv, NOW)
+    const out = await detectPartialResolves([{ id: 'chatgpt', name: 'ChatGPT', scope: 'badge', field: 'statusComponentIds' }], kv, NOW)
     expect(out.map((s) => s.id)).toEqual(['chatgpt'])
     // …and it did not cost a write per poll to get there.
     expect(kv.put.mock.calls.length).toBeLessThanOrEqual(Math.ceil(7 * HOUR / PARTIAL_RESOLVE_REFRESH_MS) + 1)
@@ -498,6 +498,12 @@ describe('formatPartialResolveAlert', () => {
       expect(body).not.toContain('reads as operational')
     })
 
+    it('uptime scope names statusComponentIds when that is the actual scope', () => {
+      const body = formatPartialResolveAlert('Dual Config', ['id-b'], ago(7 * HOUR), NOW, false, 'uptime', 'statusComponentIds')
+      expect(body).toContain('statusComponentIds')
+      expect(body).not.toContain('incidentIoComponentId')
+    })
+
     it('uptime scope never renders the #1175/viaSummary clause — it is a badge-only concept', () => {
       // viaSummary=true would inject the #1175 clause on the badge path; on the uptime path it must be
       // silently ignored rather than rendering a claim about resolveSvcStatus's summary.json fallback,
@@ -532,12 +538,10 @@ describe('isBadgePartialGroup / isUptimePartialGroup — the roster predicates, 
     expect(isUptimePartialGroup({})).toBe(false)
   })
 
-  // The exact boundary #957 round 1 found untested: a service qualifying for BOTH must land in the
-  // badge group only — a mutation dropping isUptimePartialGroup's exclusion clause turns this red.
-  it('a service with BOTH fields set belongs to the badge group only', () => {
+  it('a service with BOTH fields set belongs to both independent scopes', () => {
     const dual = { statusComponentIds: ['a', 'b'], incidentIoComponentId: ['x', 'y'] as [string, ...string[]] }
     expect(isBadgePartialGroup(dual)).toBe(true)
-    expect(isUptimePartialGroup(dual)).toBe(false)
+    expect(isUptimePartialGroup(dual)).toBe(true)
   })
 
   // #957 round 6: isUptimePartialGroup's exclusion must mirror fetchService's actual gate
@@ -582,14 +586,9 @@ describe('PARTIAL_COMPONENT_SERVICES roster', () => {
     expect(ids).toContain('fireworks')
   })
 
-  // The two groups must never double-count the same service: `fetchService`'s #957 block is gated on
-  // `!config.statusComponentIds` (see its comment — an earlier revision reported unconditionally and
-  // review found it named the wrong field for a dual-configured service), so a service configuring
-  // BOTH is entirely the badge group's concern — enrolling it via the second branch too would list a
-  // roster entry `detectPartialResolves` can never find a matching write for.
-  it('never double-enrolls a service through both branches', () => {
-    const ids = PARTIAL_COMPONENT_SERVICES.map((s) => s.id)
-    expect(new Set(ids).size).toBe(ids.length)
+  it('assigns separate scope records to a dual-configured service', () => {
+    const records = PARTIAL_COMPONENT_SERVICES.map((s) => `${s.id}:${s.scope}`)
+    expect(new Set(records).size).toBe(records.length)
   })
 })
 
@@ -798,7 +797,7 @@ describe('wiring — the cron sends the alert (#1179)', () => {
     // Pins the argument list, not just the callee: hardcoding the last argument would silently kill
     // the #1175-revert callout, and passing svc.id would title the alert with a slug. #957 — svc.scope
     // is now threaded through too, or the body would fall back to 'badge' for every record.
-    expect(cronBody()).toMatch(/formatPartialResolveAlert\(svc\.name, svc\.missing, svc\.since, partialNow, svc\.viaSummary, svc\.scope\)/)
+    expect(cronBody()).toMatch(/formatPartialResolveAlert\(svc\.name, svc\.missing, svc\.since, partialNow, svc\.viaSummary, svc\.scope, svc\.field\)/)
   })
 
   it('writes the 24h dedup key ONLY on a successful send', () => {
@@ -820,8 +819,8 @@ describe('wiring — the cron sends the alert (#1179)', () => {
   // #957 — the sibling uptime-side check reports as scope: 'uptime', gated on `!config.statusComponentIds`
   // (review round 2 found unconditional reporting named the WRONG field — `incidentIoComponentId` — for
   // a service where `uptimeScope` actually resolved `statusComponentIds`; see the comment in services.ts).
-  it('services.ts reports from the uptime-side check as scope: uptime, gated on !config.statusComponentIds', () => {
+  it('services.ts reports every uptime-side partial resolve as scope: uptime', () => {
     expect(SERVICES_SRC).toMatch(/await trackPartialResolve\(kv, config\.id, io\.missing, Date\.now\(\), false, 'uptime'\)/)
-    expect(SERVICES_SRC).toMatch(/if \(io\.missing\.length > 0 && !config\.statusComponentIds\) \{/)
+    expect(SERVICES_SRC).toMatch(/if \(io\.missing\.length > 0\) \{/)
   })
 })
