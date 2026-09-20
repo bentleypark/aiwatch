@@ -310,6 +310,8 @@ happened — `computeIncidentIoUptime` picks the worst `pct` and shortest `days`
 scope's members, a pre-existing property of every multi-component incident.io service, tracked
 separately (#1448).
 
+**#1447 side effects, disclosed:** reconciling fireworks' `incidentIoComponentId` (seven ids the page no longer serves dropped, six live components whose records already cover the 30-day window added) moved its published `uptime30d` **99.96 → 99.84** (measured against the live page, 2026-09-20). That step is definitional: the worst member is now Kimi K3 US, on its own impact records, and the dropped ids were already contributing nothing. The provider-published figure beside it moves 99.82 → 99.67, `dailyImpact` (the Overview sparkline and Status Calendar scope) now covers the same wider set, and `archive:monthly:*` crosses a definition boundary at the next deploy, with older months computed on the earlier roster. Every listed id clears 30 days by `data_available_since`, so no `uptimeWindowDays` disclosure is owed.
+
 **#1434 side effects, disclosed:** giving elevenlabs a scope moved its badge off the overall page
 indicator onto a worst-of over that scope, added it to the `canIdBypass` set, moved its Status Calendar
 14 → 30 on the same `statusComponentId ? 30 : 14` derivation as #1390 above, and stepped its published
