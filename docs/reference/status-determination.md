@@ -286,10 +286,29 @@ duration string.
 
 **#1390 side effect, disclosed:** giving perplexity a `statusComponentId` also moved its Status Calendar
 from 14 days to 30, because `calendarDays` derives as `statusComponentId ? 30 : 14`. Kept — the data
-supports it (all three components clear 30 days of records, the page itself draws 90) and it matches the
-uptime/Score windows and the other incident.io services with a primary. But that derivation is a
-config flag standing in for "how much per-day record exists", which is its own defect (#1406 —
+supports it (App, Website and Computer's records clear 30 days, the page itself draws 90) and it
+matches the uptime/Score windows and the other incident.io services with a primary. But that derivation
+is a config flag standing in for "how much per-day record exists", which is its own defect (#1406 —
 `fireworks` publishes 57 days and draws 14); re-decide this window when that rule is redone.
+
+**2026-09-18 side effect, disclosed:** the page began serving a standalone `API` component (absent
+since the #1390 migration; #992's new-component alert caught it live), added to perplexity's
+`statusComponentIds`/`displayComponentIds` — 3 components → 4, `incidentIoComponentId`/`statusComponentId`
+left as App (unaffected, see the config comment). This does not touch `calendarDays`, which reads only
+`statusComponentId`, unchanged here. Worst-of uptime, badge and `dailyImpact` now scope over
+the wider set, so `archive:monthly:*` crosses a definition boundary at the next deploy the same way #1434
+did, with older months computed on the 3-component scope. Unlike #1434, `uptime30d` does not step on this
+one: the added component's own impact history is clean (verified against the live page's
+`component_impacts` — zero entries tagged to it), so today's worst-of is unchanged (99.81% before and
+after). `canIdBypass` is unaffected (perplexity sets no `incidentExclude`); `calendarDays` was already 30.
+The one live dependency: the added component's `data_available_since` predates its own page debut by
+months (provider-backdated, not something this repo controls), which is what keeps `uptimeWindowDays`
+absent today — see the config comment's citation of the fireworks/junie precedent and the
+`perplexity-scope.test.ts` case pinning that a shorter value is surfaced rather than silently dropped.
+That test does not cover whether the accompanying `pct` would still describe the same window if it
+happened — `computeIncidentIoUptime` picks the worst `pct` and shortest `days` independently across a
+scope's members, a pre-existing property of every multi-component incident.io service, tracked
+separately (#1448).
 
 **#1434 side effects, disclosed:** giving elevenlabs a scope moved its badge off the overall page
 indicator onto a worst-of over that scope, added it to the `canIdBypass` set, moved its Status Calendar
