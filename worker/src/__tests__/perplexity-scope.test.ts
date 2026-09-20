@@ -9,10 +9,11 @@ import type { Incident } from '../types'
 // the list HONESTLY (`sourceUnknown` + `incidentSourceStale`, uptime withheld), so there was no wrong
 // screen to notice — the same shape as #1381 (Mistral → Rootly).
 //
-// The old roster was API + Website + Computer; the new one is Website + App + Computer. There is no `API`
-// component any more, so #635's `statusComponent: 'API'` primary lost its referent. That cost nothing,
-// because #1177 had already widened this card to every component it displays (see the second block) —
-// the page-wide scope here carries that decision across a platform change, it does not make a new one.
+// The pre-#1390 roster was API + Website + Computer; the #1390 migration's roster was Website + App +
+// Computer, with no `API` component, so #635's `statusComponent: 'API'` primary lost its referent. That
+// cost nothing, because #1177 had already widened this card to every component it displays (see the
+// second block) — the page-wide scope here carries that decision across a platform change, it does not
+// make a new one. (2026-09-18: the page began serving a standalone `API` component — see `API_ID` below.)
 //
 // The two kinds of test below catch different things, and the split is the #1004 one:
 //   - CONFIG assertions are a REVERT guard. They pin our own constants, so the NEXT upstream migration
@@ -26,7 +27,13 @@ import type { Incident } from '../types'
 const APP_ID = '01KZSFD424NN3EYBS78TMVWNEK'       // primary — the page tagged `Investigating API issue` (2026-08-13) onto it
 const WEBSITE_ID = '01KZSFD424KQ6VQYV4R0KCA30P'
 const COMPUTER_ID = '01M0TRMC3ED1PG4GRRXXMVNNZ6'
-const SCOPE = [APP_ID, WEBSITE_ID, COMPUTER_ID]
+/** #992 new-component alert, 2026-09-18: the page now carries a standalone `API` component — the page
+ *  had none between the #1390 migration and this addition (see the class comment above). Added to the
+ *  worst-of scope, not made primary: `incidentIoComponentId`/`statusComponentId` stay App, since that is
+ *  still the component the page's own incidents have historically tagged (`Investigating API issue`,
+ *  2026-08-13). */
+const API_ID = '01M2R6E5FPASTEW3A3V8TSYHJ0'
+const SCOPE = [APP_ID, WEBSITE_ID, COMPUTER_ID, API_ID]
 /** The Instatus cuids the dead config addressed. Absent from the incident.io page entirely. */
 const DEAD_INSTATUS_IDS = ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l']
 
@@ -45,10 +52,10 @@ describe('#1390 perplexity config — the incident.io migration (revert guard)',
     }
   })
 
-  it('carries no `statusComponent`: the API component it named has no successor', () => {
-    // #635 kept 'API' as the primary/uptime-fallback component. The new roster is Website + App +
-    // Computer and nothing on the page is an API surface, so a name-based primary would match nothing
-    // and silently disable the Instatus uptime fallback it was there for.
+  it('carries no `statusComponent`: id-based scoping, not name-based, even now that API exists again', () => {
+    // #635 kept 'API' as the primary/uptime-fallback component under the old Instatus config; that field
+    // is a different mechanism (name-matching, no successor here) and stays unset. The 2026-09-18 API
+    // component (added to statusComponentIds/displayComponentIds below) is scoped by id, not by this field.
     expect(perplexity.statusComponent).toBeUndefined()
   })
 
@@ -134,7 +141,7 @@ describe('#1177 filterIncidents — no component is scoped out', () => {
     expect(filterIncidents([website], perplexity).map((i) => i.id)).toEqual(['w1'])
   })
 
-  it('keeps an App-only incident — the component that carries the API surface now', () => {
+  it('keeps an App-only incident — the component the page tagged its 2026-08-13 API-titled incident onto', () => {
     const app = inc({ id: 'a1', title: 'Investigating API issue', componentNames: ['App'] })
     expect(filterIncidents([app], perplexity).map((i) => i.id)).toEqual(['a1'])
   })
@@ -147,17 +154,21 @@ describe('#1177 filterIncidents — no component is scoped out', () => {
 const DAY = 86_400_000
 const esc = (o: unknown) => JSON.stringify(o).replace(/"/g, '\\"')
 
-/** `data_available_since` values captured from the live page. All older than the 30-day window, so the
- *  computed figure covers a whole 30 days and `uptimeWindowDays` stays absent. */
+/** `data_available_since` values captured verbatim from the live page — what the fixture reproduces,
+ *  not a claim about how much genuine history each component carries (the provider's own value for
+ *  `API_ID` predates that component's 2026-09-18 debut on the page by months; this file does not take a
+ *  position on what that means). All four are more than 30 days before "now" by clock alone, which is
+ *  what makes `computeIncidentIoUptime` return `days: 30` and `uptimeWindowDays` absent below. */
 const SINCE: Record<string, string> = {
   [WEBSITE_ID]: '2024-07-30T16:55:00Z',
   [APP_ID]: '2025-01-23T00:58:00Z',
   [COMPUTER_ID]: '2026-06-30T21:39:00Z',
+  [API_ID]: '2026-05-16T22:00:00Z', // captured from the live page 2026-09-18
 }
 /** The `component_uptimes[].uptime` figures the page publishes — NOT 30-day numbers (#1006), read only
  *  for the provider-attributed disclosure. App's differs from anything we compute below, which is what
  *  makes the `uptimeReported` assertion non-vacuous. */
-const PUBLISHED: Record<string, string> = { [WEBSITE_ID]: '100.00', [APP_ID]: '99.95', [COMPUTER_ID]: '99.61' }
+const PUBLISHED: Record<string, string> = { [WEBSITE_ID]: '100.00', [APP_ID]: '99.95', [COMPUTER_ID]: '99.61', [API_ID]: '100.00' }
 
 /** The page-root RSC chunk, in the byte shape `parseIncidentIoImpacts` reads: an escaped JSON payload
  *  inside `self.__next_f.push([1,"…"])`, `component_impacts` before `component_uptimes`.
@@ -165,7 +176,10 @@ const PUBLISHED: Record<string, string> = { [WEBSITE_ID]: '100.00', [APP_ID]: '9
  *  Outage clocks are RELATIVE to `Date.now()` — `computeIncidentIoUptime` takes the wall clock, so a
  *  fixture pinned to a fixed date would drift out of the trailing 30-day window weeks after merge and
  *  fail as a red CI on an unrelated PR. */
-function ioPageHtml(outage: { componentId: string; hours: number; status: string; ongoing?: boolean } | null): string {
+function ioPageHtml(
+  outage: { componentId: string; hours: number; status: string; ongoing?: boolean } | null,
+  sinceOverride: Partial<Record<string, string>> = {},
+): string {
   const start = Date.now() - 5 * DAY
   const impacts = outage
     ? [{
@@ -178,7 +192,7 @@ function ioPageHtml(outage: { componentId: string; hours: number; status: string
     : []
   const uptimes = SCOPE.map((id) => ({
     component_id: id,
-    data_available_since: SINCE[id],
+    data_available_since: sinceOverride[id] ?? SINCE[id],
     status_page_component_group_id: '$undefined',
     uptime: PUBLISHED[id],
   }))
@@ -189,7 +203,7 @@ function ioPageHtml(outage: { componentId: string; hours: number; status: string
 /** The Atlassian-compat summary incident.io serves. `components: []` on every incident is real (#1004):
  *  the compat API drops the tags, which is why `componentNames` is absent throughout this block. */
 function summary(opts: { degradedId?: string; incidents?: Array<Record<string, unknown>> } = {}) {
-  const name = (id: string) => (id === APP_ID ? 'App' : id === WEBSITE_ID ? 'Website' : 'Computer')
+  const name = (id: string) => (id === APP_ID ? 'App' : id === WEBSITE_ID ? 'Website' : id === COMPUTER_ID ? 'Computer' : 'API')
   return {
     page: { id: '01KZSFD3VPNK8C7QRFH0GAZ4H2', name: 'Perplexity', updated_at: new Date().toISOString() },
     status: opts.degradedId
@@ -260,30 +274,53 @@ describe('#1390 wiring — the incident.io payload reaches incidents, uptime and
     // silently fell back to one clean component would still publish an `official` 100.
     expect(svc.uptime30d).toBe(96.66)
     expect(svc.uptimeSource).toBe('official')
-    expect(svc.uptimeWindowDays, 'every component has >30d of records').toBeUndefined()
+    expect(svc.uptimeWindowDays, 'every SINCE value clears 30 days by clock, per the fixture above').toBeUndefined()
   })
 
   it.each([
     ['App', APP_ID],
     ['Website', WEBSITE_ID],
     ['Computer', COMPUTER_ID],
+    ['API', API_ID],
   ])('an outage on %s alone moves uptime — every member of the scope is load-bearing', async (_name, id) => {
     // Without this, a scope quietly narrowed to the primary (or to whichever component the other cases
-    // happen to hit) still passes them all.
+    // happen to hit) still passes them all. Worst-of is a MIN across components (computeIncidentIoUptime),
+    // so a single outage's own pct is unaffected by how many OTHER components are in scope — this value
+    // does not need to move when a 4th component joins.
     const svc = await fetchPerplexity(summary(), ioPageHtml({ componentId: id, hours: 12, status: 'full_outage' }))
     expect(svc.uptime30d).toBe(98.33)
   })
 
   it('withholds uptime rather than inventing 100% when the page tracks none of our ids (#713)', async () => {
-    const rotated = ioPageHtml(null).replaceAll(APP_ID, 'ROTATED1').replaceAll(WEBSITE_ID, 'ROTATED2').replaceAll(COMPUTER_ID, 'ROTATED3')
+    const rotated = ioPageHtml(null)
+      .replaceAll(APP_ID, 'ROTATED1').replaceAll(WEBSITE_ID, 'ROTATED2').replaceAll(COMPUTER_ID, 'ROTATED3').replaceAll(API_ID, 'ROTATED4')
     const svc = await fetchPerplexity(summary(), rotated)
     expect(svc.uptime30d).toBeNull()
+  })
+
+  it('surfaces uptimeWindowDays rather than dropping it silently if a scope member turns out young', async () => {
+    // #1449: `API_ID`'s live `data_available_since` (2026-05-16) predates the component's
+    // own 2026-09-18 page debut by months — the provider backdates it, and Computer's real impact
+    // records (from 2026-06-30, before Computer's own 2026-08-24 debut) corroborate that this page does
+    // genuinely backfill `data_available_since` rather than resetting it at component creation. But that
+    // is a provider-controlled field this file cannot pin — if it were ever corrected to something
+    // recent, `statusComponentIds` membership would pin perplexity's WHOLE disclosed window down to it
+    // (the exact hazard `services.ts`'s fireworks/junie config comments warn about: "check its age
+    // first, not just whether it's missing"). This test pins only that `uptimeWindowDays` gets populated
+    // in that case rather than silently staying absent — NOT that the accompanying `pct` would still
+    // describe the same window (`computeIncidentIoUptime` computes the worst `pct` and shortest `days`
+    // independently across the scope; they can already come from different components today, a
+    // pre-existing gap tracked separately, #1448 — this all-impact-free fixture cannot exercise it).
+    const fiveDaysAgo = new Date(Date.now() - 5 * DAY).toISOString()
+    const svc = await fetchPerplexity(summary(), ioPageHtml(null, { [API_ID]: fiveDaysAgo }))
+    expect(svc.uptimeWindowDays).toBe(5)
   })
 
   it('discloses the provider-published % for the primary component only', async () => {
     const svc = await fetchPerplexity(summary(), ioPageHtml({ componentId: COMPUTER_ID, hours: 24, status: 'full_outage' }))
     // App publishes 99.95; our worst-of computes 96.66. Shown side by side because they differ — and it
-    // is App's own number, not a min we synthesized across three components.
+    // is App's own number, not a min we synthesized across the whole scope (not enumerated by count
+    // here — that number is `SCOPE.length` and would drift the moment a component joins or leaves).
     expect(svc.uptimeReported).toBe(99.95)
   })
 
@@ -306,9 +343,9 @@ describe('#1390 wiring — the incident.io payload reaches incidents, uptime and
     expect(svc.calendarDays).toBe(30)
   })
 
-  it('renders all three components in the breakdown, in card order', async () => {
+  it('renders all four components in the breakdown, in card order', async () => {
     const svc = await fetchPerplexity(summary(), ioPageHtml(null))
-    expect(svc.components?.map((c) => c.name)).toEqual(['App', 'Website', 'Computer'])
+    expect(svc.components?.map((c) => c.name)).toEqual(['App', 'Website', 'Computer', 'API'])
   })
 
   it('an ongoing incident on a non-primary component degrades the badge', async () => {

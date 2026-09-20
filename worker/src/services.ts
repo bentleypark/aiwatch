@@ -219,14 +219,24 @@ export const SERVICES: ServiceConfig[] = [
   // so the integration was dead: parse failure → `trackFetchFailure` → #500's "unreachable 1h+" alert,
   // which misdescribes it (the page answered 200 in 0.7s; the FETCH succeeded and the PARSE failed).
   //
-  // The old roster was API + Website + Computer; the new one is Website + App + Computer, flat, no
-  // groups, no descriptions. There is no `API` component any more and nothing succeeds it, so #635's
+  // The old (pre-#1390) roster was API + Website + Computer; the #1390 migration's roster was
+  // Website + App + Computer, flat, no groups, no descriptions — no `API` component, so #635's
   // `statusComponent: 'API'` primary had nothing left to point at. That costs nothing here, because
   // #1177 had ALREADY widened this card to every component it displays — incidents unscoped (this is a
   // SINGLE-OWNER page, so every notice on it is a Perplexity incident) and uptime worst-of over the
   // displayed set. The page-wide scope below carries that same decision across rather than making a new
   // one: statusComponentIds == displayComponentIds == the whole roster, so badge, uptime (#1006) and
   // impact calendar share one scope.
+  //
+  // **2026-09-18 (#1449): the page began serving a standalone `API` component** (id
+  // `01M2R6E5FPASTEW3A3V8TSYHJ0`, added below to `statusComponentIds`/`displayComponentIds`) — detected
+  // live via the #992 new-component alert. `statusComponent` (name-based) stays unset regardless; this
+  // scope is id-based. Putting a component this young into `statusComponentIds` is exactly the hazard
+  // the fireworks and junie config comments in this file warn about (check age, not just presence) —
+  // the live page's own `data_available_since` for it predates its debut by months, which is what keeps
+  // the window at 30 days today. That field is provider-controlled; the dependency and its known gap
+  // are recorded in `docs/reference/status-determination.md` and `perplexity-scope.test.ts` (#1448), not
+  // restated here.
   //
   // `incidentIoComponentId` stays SINGLE while that scope is a list. It is what
   // `parseIncidentIoReportedUptime` reads for the provider-ATTRIBUTED disclosure, and over a list that
@@ -236,18 +246,20 @@ export const SERVICES: ServiceConfig[] = [
   //
   // A SECOND consequence, disclosed rather than left to be found: `calendarDays` is derived as
   // `statusComponentId ? 30 : 14`, so giving perplexity a primary moved its Status Calendar from 14 days
-  // to 30. Kept, not reverted — all three components' `data_available_since` clear 30 days, the page
-  // itself draws 90, and 30 matches the uptime and Score windows as well as the other incident.io
+  // to 30. Kept, not reverted — App, Website and Computer's `data_available_since` clear 30 days, the
+  // page itself draws 90, and 30 matches the uptime and Score windows as well as the other incident.io
   // services that carry a `statusComponentId`. But the derivation is a config flag standing in for "how
   // much per-day record exists", which is a defect in its own right (#1406, with the measurement:
   // `fireworks` publishes 57 days and draws 14). When that rule is redone, re-decide this with it.
+  // The 2026-09-18 `API` addition below does not touch this derivation — it widens `statusComponentIds`
+  // (the worst-of/uptime scope), not `statusComponentId` (the sole input `calendarDays` reads).
   // One behaviour this migration DOES change, worth knowing rather than discovering: the Instatus
   // branch never reached `filterByComponentStatus`, and the Atlassian/incident.io branch does. So an
   // ACTIVE incident whose components have all returned to operational is now dropped (perplexity sets
   // no `incidentExclude`, so `canIdBypass` is false and the #1104 id-keep route is off). That is the
   // same regime every other incident.io service here already runs under — not a perplexity-specific
   // concession.
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: 'https://status.perplexity.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.perplexity.com/incidents', incidentIoComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6'], displayComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6'] },
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: 'https://status.perplexity.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.perplexity.com/incidents', incidentIoComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6', '01M2R6E5FPASTEW3A3V8TSYHJ0'], displayComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6', '01M2R6E5FPASTEW3A3V8TSYHJ0'] },
   // #1165 — renamed 'xAI (Grok)' → 'xAI API': now that Grok's consumer app is its own service
   // ('grok', in the Apps section below), "(Grok)" on this card would misname the API surface.
   { id: 'xai', name: 'xAI API', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
