@@ -392,7 +392,7 @@ export function introduces(between) {
 
 /** Citations chained by a separator alone — "`a`/`b`/`c`" — are one citation for the purpose of what
  *  governs them. */
-const CHAINED = /^[`*\s]*[/,][`*\s]*$/
+const CHAINED = /^[`*\s]*\/[`*\s]*$/
 
 /** A negation that governs a citation is ADJACENT to it — "sets no `statusComponentIds` (a, b)". */
 const NEGATED_CITATION = /\b(?:no|not|never)\b[\s`*]*$/i
@@ -405,9 +405,9 @@ const NEGATED_CITATION = /\b(?:no|not|never)\b[\s`*]*$/i
  * scope — reading one requires parsing the sentence around it, and every attempt to do that produced a
  * false positive on a true sentence.
  *
- * A run is governed by the last field citation BEFORE it: this corpus writes the list after the name it
- * enumerates (`displayComponentIds` (#606: …)), and binding to the NEAREST citation instead charges
- * `statusComponentIds` (#604: cerebras/…) to the `displayComponentIds` that follows it.
+ * A run is governed by the last field citation BEFORE it. Binding to the NEAREST citation instead
+ * charges `statusComponentIds` (#604: cerebras/…) to the `displayComponentIds` that follows it. A list
+ * written BEFORE the name it enumerates is therefore not read at all.
  *
  * `allow` keys are `file:field:id`. A list can sit beside a field name without enumerating it, so when
  * one lands inside the reach the remedy has to be something other than rewriting a true sentence —

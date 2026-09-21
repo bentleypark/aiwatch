@@ -434,6 +434,13 @@ test('#1444 NEGATIVE CONTROL: a sentence break alone ends the binding, with no n
   assert.equal(audit(across.replace('row below).', 'row below,')).length, 3, 'without the break it IS the claim')
 })
 
+test('#1444 NEGATIVE CONTROL: a comma does not chain citations — a negation about the first must not deny the second', () => {
+  const line = 'the badge is not `componentGroupsInline`, `displayAllComponents` covers cohere/elevenlabs'
+  assert.deepEqual(audit(line), ['displayAllComponents<-elevenlabs'])
+  assert.deepEqual(audit(line.replace('`componentGroupsInline`, ', '`componentGroupsInline`/')), [],
+    'a `/` chain IS one citation, so the same negation denies it')
+})
+
 test('#1444: a list written with backticks or bold is the same list', () => {
   // `` `a`/`b` `` is the corpus's usual spelling; dropping the decoration tolerance loses it silently.
   for (const run of ['cohere/groq/elevenlabs', '`cohere`/`groq`/`elevenlabs`', '**cohere**, **groq**, **elevenlabs**']) {

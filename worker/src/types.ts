@@ -137,10 +137,9 @@ export interface ServiceStatus {
    *  crowd reports: an operational page + a probe spike + enough crowd reports surfaces the gated
    *  "Recent user reports" early-warning. Absent when no spike / no probe data. */
   probeSpike?: boolean
-  /** #604 — per-component snapshot for multi-component services (cerebras / cursor /
-   *  copilot / windsurf / langsmith / runway). The curated `statusComponentIds` subset,
-   *  worst-of'd into `status` above but retained here for the ServiceDetails / is-down
-   *  breakdown. Present only when ≥2 components matched; absent otherwise. */
+  /** #604 — per-component snapshot for multi-component services, worst-of'd into `status`
+   *  above but retained here for the ServiceDetails / is-down breakdown. Present only when
+   *  ≥2 components matched; absent otherwise. */
   components?: ServiceComponent[]
   /** When true, the breakdown UI renders its sections (each componentGroups group as a collapsible
    *  block; each consecutive run of ungrouped components as a surface grid) in COMPONENT-ARRAY order —

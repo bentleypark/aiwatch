@@ -73,8 +73,9 @@ sentence is true and its list is not that field's enumeration, the remedy is an 
 `doc-membership-allow.txt` with a reason, never a rewrite of correct prose.
 
 **Every other false claim in prose is invisible to it** — a behavioural claim ("the warn is gated on an
-empty id list"), and an enumeration that OMITS a member, which cannot be told from `e.g.` and is
-deliberately unchecked. Those carry no automated check; they are review's job.
+empty id list"), an enumeration that OMITS a member, which cannot be told from `e.g.` and is
+deliberately unchecked, and a list written BEFORE the field name it belongs to, which the reach does not
+read. Those carry no automated check; they are review's job.
 
 ## Related
 
