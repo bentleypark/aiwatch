@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, parseSnapshotWindow, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, parseSnapshotWindow, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
 import type { Incident } from '../types'
 
 describe('appendStatusHint (#539)', () => {
@@ -411,7 +411,7 @@ describe('shouldAlertPersistentFailure (#500)', () => {
     expect(shouldAlertPersistentFailure(undefined, now)).toBe(false)
   })
 
-  it('false when unreachable < 1h', () => {
+  it('false when unreadable < 1h', () => {
     const since = new Date(now - 59 * 60_000).toISOString() // 59 min ago
     expect(shouldAlertPersistentFailure(since, now)).toBe(false)
   })
@@ -421,7 +421,7 @@ describe('shouldAlertPersistentFailure (#500)', () => {
     expect(shouldAlertPersistentFailure(since, now)).toBe(true)
   })
 
-  it('true when unreachable well over 1h', () => {
+  it('true when unreadable well over 1h', () => {
     const since = new Date(now - 5 * 3_600_000).toISOString()
     expect(shouldAlertPersistentFailure(since, now)).toBe(true)
   })
@@ -437,15 +437,48 @@ describe('shouldAlertPersistentFailure (#500)', () => {
 })
 
 describe('formatPersistentFailureAlert (#500)', () => {
-  it('reports the elapsed whole hours and names the service', () => {
-    const now = Date.parse('2026-06-02T12:00:00.000Z')
-    const since = new Date(now - 3 * 3_600_000 - 20 * 60_000).toISOString() // 3h 20m ago
-    const out = formatPersistentFailureAlert('DeepSeek API', since, now)
-    expect(out).toContain('DeepSeek API')
-    expect(out).toContain('3h+') // floor of 3h20m
-    expect(out).toContain('structural block')
+  const now = Date.parse('2026-06-02T12:00:00.000Z')
+  const since = new Date(now - 3 * 3_600_000 - 20 * 60_000).toISOString() // 3h 20m ago
+
+  // Whole-string equality on every shape the sweep can produce. A `toContain` leaves room for a
+  // clause to be appended beside it, which is how the sentence this issue removed kept coming back:
+  // the alert asserted a structural block for a source that answered 2xx, then denied one for a
+  // source that never replied. Any added clause fails the row it lands in.
+  const HEAD = (name: string) => `⚠️ **${name}** status source has been unreadable for **3h+**.` // 3h+ = floor of 3h20m
+
+  const read = (failure: StatusSourceReadFailure) => ({ failure })
+
+  it.each([
+    ['no response at all', read({ source: 'aws-health', phase: 'transport', errorKind: 'timeout' }), 'Observed: AWS Health transport timeout.'],
+    ['a body-read network loss after res.ok', read({ source: 'aws-health', phase: 'transport', httpStatus: 200, errorKind: 'network' }), 'Observed: AWS Health transport network.'],
+    ['an http phase', read({ source: 'aws-health', phase: 'http', httpStatus: 429 }), 'Observed: AWS Health HTTP 429.'],
+    ['a decode phase', read({ source: 'aws-health', phase: 'decode', httpStatus: 200 }), 'Observed: AWS Health response decode failed.'],
+    ['a shape phase', read({ source: 'aws-health', phase: 'shape', httpStatus: 200 }), 'Observed: AWS Health response shape failed.'],
+    // `sanitizeTrackingState` admits both fields as absent, so the `?? 'unknown'` fallbacks are
+    // reachable shapes for a hand-edited or older stored value.
+    ['a transport failure with no errorKind', read({ source: 'aws-health', phase: 'transport' }), 'Observed: AWS Health transport unknown.'],
+    ['an http failure with no status', read({ source: 'aws-health', phase: 'http' }), 'Observed: AWS Health HTTP unknown.'],
+    ['one booked reason', { reasons: ['scrape-unreadable'] }, 'Booked today: `scrape-unreadable`.'],
+    ['several booked reasons', { reasons: ['no-nuxt-payload', 'scrape-unreadable'] }, 'Booked today: `no-nuxt-payload`, `scrape-unreadable`.'],
+    // Both signals present is the case an earlier precedence rule dropped: it elected the booking
+    // and discarded the read failure entirely.
+    ['both signals', { reasons: ['aws-health-unparseable'], failure: { source: 'aws-health', phase: 'http', httpStatus: 503 } as StatusSourceReadFailure },
+      'Booked today: `aws-health-unparseable`. Observed: AWS Health HTTP 503.'],
+    ['neither signal', {}, 'Check both the configured status-page URL and whether the provider changed status-page vendors.'],
+  ])('renders %s as exactly the head plus what the record holds', (_label, cause, tail) => {
+    expect(formatPersistentFailureAlert('DeepSeek API', since, now, cause)).toBe(`${HEAD('DeepSeek API')} ${tail}`)
+  })
+
+  // Every row above sits at one elapsed value, so a clause gated on a LONG streak would ship unseen.
+  // That is not an exotic branch: the alert is deduped 24h and re-fires at ~25h and ~49h on an
+  // ongoing failure, so a long streak is what the operator sees on most real sends.
+  it.each([1, 7, 30, 200])('adds nothing at %ih elapsed', (h) => {
+    const elapsed = new Date(now - h * 3_600_000 - 20 * 60_000).toISOString()
+    expect(formatPersistentFailureAlert('DeepSeek API', elapsed, now, {}))
+      .toBe(`⚠️ **DeepSeek API** status source has been unreadable for **${h}h+**. Check both the configured status-page URL and whether the provider changed status-page vendors.`)
   })
 })
+
 
 describe('trackComponentMiss (#1224 — blob-based, synchronous)', () => {
   it('returns false on first miss (count=1, threshold=3)', () => {

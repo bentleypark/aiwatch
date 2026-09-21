@@ -309,7 +309,7 @@ describe('classifyDegradation (#464/#511)', () => {
   })
 })
 
-describe('buildDailySummary — Status Page Fetch Failures section (#500)', () => {
+describe('buildDailySummary — Unreadable Status Sources section (#500)', () => {
   const BASE = {
     services: [
       makeSvc({ id: 'deepseek', name: 'DeepSeek API' }),
@@ -323,7 +323,7 @@ describe('buildDailySummary — Status Page Fetch Failures section (#500)', () =
 
   it('omits section when no fetch failures today', () => {
     const result = buildDailySummary({ ...BASE })
-    expect(result).not.toContain('Status Page Fetch Failures')
+    expect(result).not.toContain('Unreadable Status Sources')
   })
 
   it('shows section with threshold-hit count when failures present', () => {
@@ -331,7 +331,7 @@ describe('buildDailySummary — Status Page Fetch Failures section (#500)', () =
       ...BASE,
       fetchFailureCounts: { deepseek: 5 },
     })
-    expect(result).toContain('Status Page Fetch Failures Today')
+    expect(result).toContain('Unreadable Status Sources Today')
     expect(result).toContain('DeepSeek API: 5× threshold hit')
     expect(result).toContain('5 real')
   })
@@ -360,7 +360,7 @@ describe('buildDailySummary — Status Page Fetch Failures section (#500)', () =
       fetchFailureCounts: { claude: 1, deepseek: 8 },
     })
     // Extract only the fetch failures section to avoid matching 'Claude API' in earlier sections
-    const sectionStart = result.indexOf('Status Page Fetch Failures Today')
+    const sectionStart = result.indexOf('Unreadable Status Sources Today')
     expect(sectionStart).toBeGreaterThan(-1)
     const section = result.slice(sectionStart)
     expect(section.indexOf('DeepSeek API')).toBeLessThan(section.indexOf('Claude API'))
@@ -373,7 +373,7 @@ describe('buildDailySummary — Status Page Fetch Failures section (#500)', () =
       crossValidSuppressed: { deepseek: 5 },
     })
     expect(result).not.toMatch(/-\d+ real/)
-    expect(result).toContain('Status Page Fetch Failures Today')
+    expect(result).toContain('Unreadable Status Sources Today')
   })
 
   it('omits section when crossValidSuppressed has entries but fetchFailureCounts is empty', () => {
@@ -381,7 +381,7 @@ describe('buildDailySummary — Status Page Fetch Failures section (#500)', () =
       ...BASE,
       crossValidSuppressed: { deepseek: 3 },
     })
-    expect(result).not.toContain('Status Page Fetch Failures')
+    expect(result).not.toContain('Unreadable Status Sources')
   })
 })
 
