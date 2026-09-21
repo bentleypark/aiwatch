@@ -176,21 +176,16 @@ export const SERVICES: ServiceConfig[] = [
   // page's overall indicator) — same as cohere/groq/together, which are in the identical bucket. The
   // badge is therefore NOT a dynamic worst-of; only `displayAllComponents`' BREAKDOWN is dynamic (every
   // page component minus componentDenylist, via `resolveSvcComponents`) — chosen because a hand-
-  // maintained breakdown id list would go stale the way cerebras' did pre-#992 (Fireworks' 16 are all
-  // per-model and the roster churns — new ones have appeared roughly every 1-4 weeks per the ULID
-  // creation-date spread below, as observed through 2026-08-02).
+  // maintained breakdown id list would go stale the way cerebras' did pre-#992 (Fireworks' components are all
+  // per-model and the roster churns).
   // `incidentIoComponentId` IS also a hand-maintained list here (mirrors turbopuffer's no-canonical-
   // component shape), but ONLY for the uptime worst-of via `computeIncidentIoUptime` — deliberately
-  // NOT the full 16-model roster above, to avoid a churn trap distinct from the breakdown one: incident.io
-  // stamps each component's `data_available_since` at CREATION, and `computeIncidentIoUptime` takes the
-  // shortest covered window across every listed id — so a brand-new model in the list pins the whole
-  // service's uptime window down to that model's age. Excludes 4 of the 16 as of #1198 (ULID creation
-  // timestamps decoded 2026-08-02): the "Kimi K3"/"Kimi K3 Fast"/"Kimi K3 US" trio (3 days old — would
-  // have collapsed a 30-day figure to 3) and "GLM 5.2 Fast" `01KXRHGRD149W1YP3WS59SWC2P` (15 days old —
-  // still short of the 30-day window). If you're reconciling 16-vs-12 and tempted to add one back:
-  // check its age first, not just whether it's "missing" — re-adding GLM 5.2 Fast today would still
-  // shrink the window to ~15d. Scoped instead to the 12 ids ≥40 days old as of #1198 — same fix junie
-  // already applies for
+  // NOT the full roster above, to avoid a churn trap distinct from the breakdown one:
+  // `computeIncidentIoUptime` takes the shortest `data_available_since` window across every listed id,
+  // so a brand-new model in the list pins the whole service's uptime window down to that model's age.
+  // If you're reconciling the list and tempted to add one: check its `data_available_since` first, not
+  // just whether it's "missing" — only ids old enough not to shorten that window belong. Same
+  // fix junie already applies for
   // the identical reason (see its config comment: "putting it in the badge scope pins uptimeWindowDays
   // to 6... an incoherent '99.8% over 6d'"). Accepted tradeoffs: a model this list omits contributes no
   // uptime signal until someone manually ages it in (real, not fabricated — matches the "no invented
@@ -203,7 +198,7 @@ export const SERVICES: ServiceConfig[] = [
   // Discord New+Resolved pair apiece. holdShortIncidents (the mistral/langfuse mechanism, #792/#929)
   // holds on impact alone — real incident.io `impact` (not BetterStack's hardcoded null) still lets
   // `major`/`critical` through immediately, only non-major short blips get the ~9min hold.
-  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KTM9PHXTZPW4Z1VXF78MQ3WS', '01KTM9PHXTRAV1Q7H06Y4WWSBZ', '01KTM9G064204E1Q8XBQEYESSH', '01KTM9G064Y9AE48A0ZY1WTTB2', '01KTM9G06402NMVSVM7WGEQEK2', '01KTNFZQEJ62PJ2C68P6G2576M', '01KVEMVZJRNJ2RJVFKSRFKRM4E', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMYTCCMV80Z2SSGE7YMRKX', '01KVEMYTCC3B1ZSXC0EJHPY01P', '01KVEMZE3M15ZV46ZEB7X88H61'], displayAllComponents: true, holdShortIncidents: true },
+  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KTM9G06402NMVSVM7WGEQEK2', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMYTCCMV80Z2SSGE7YMRKX', '01KVEMZE3M15ZV46ZEB7X88H61', '01KXRHGRD149W1YP3WS59SWC2P', '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8', '01KZ7E1S4Z6PKCDYYNW358ATCX', '01M03TGQ7XTQ8HAKZ8MDQ44HH5'], componentsUrl: 'https://status.fireworks.ai/api/v2/components.json', displayAllComponents: true, holdShortIncidents: true },
   // Cerebras Inference (#391, #992) — Atlassian Statuspage, single-tenant, per-model. Its model lineup
   // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
   // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
