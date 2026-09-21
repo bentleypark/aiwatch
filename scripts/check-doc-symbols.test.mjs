@@ -406,9 +406,18 @@ test('#1444 NEGATIVE CONTROL: a negation before a CHAIN of citations governs all
   assert.equal(audit(line.replace('with no ', 'with ')).length, 2, 'without the negation it IS the claim')
 })
 
-test('#1444 NEGATIVE CONTROL: the lead stops at a sentence end, like the introducer does', () => {
-  const line = '`componentGroupsInline` is not set anywhere. `displayAllComponents` covers cohere/elevenlabs'
-  assert.deepEqual(audit(line), ['displayAllComponents<-elevenlabs'], 'a negation in the PREVIOUS sentence must not reach forward')
+test('#1444 NEGATIVE CONTROL: only a negation ADJACENT to the citation denies it', () => {
+  // A window scanned backwards for any negation reads the clause before as the claim's. Both lines are
+  // real corpus shapes whose negation governs something else.
+  for (const line of [
+    '`componentGroupsInline` is not set anywhere. `displayAllComponents` covers cohere/elevenlabs',
+    'impact — NOT all non-null impact) on a `displayAllComponents` service (cohere/elevenlabs)',
+    '(`isShortIncidentHoldable`, no title shape required) on a `displayAllComponents` service (cohere/elevenlabs)',
+  ]) assert.deepEqual(audit(line), ['displayAllComponents<-elevenlabs'], line)
+  // directory-map.md writes `the old no-statusComponentId overall-indicator path`: a hyphenated
+  // compound naming the field is not a denial of it.
+  assert.deepEqual(audit('replacing the old no-displayAllComponents path for cohere/elevenlabs'),
+    ['displayAllComponents<-elevenlabs'])
 })
 
 test('#1444 NEGATIVE CONTROL: a negation AFTER the list governs it too', () => {
@@ -444,8 +453,8 @@ test('#1444 NEGATIVE CONTROL: an introducer longer than the reach is a different
 // ── mutation coverage: each guard, removed, must resurface a measured artifact ──
 
 test('#1444: `/** … */` blocks are part of the scanned corpus, not only `//` lines', () => {
-  // 25 of them in types.ts and 52 in services.ts. The real-tree assertion asserts EMPTINESS, so losing
-  // this branch removes corpus without reddening anything there.
+  // The real-tree assertion asserts EMPTINESS, so losing this branch removes corpus without reddening
+  // anything there.
   const ts = ['/**', ' * `displayAllComponents` covers: cohere/groq/elevenlabs.', ' */', 'const x = 1'].join('\n')
   assert.deepEqual(audit(tsCommentText(ts), 'types.ts'), ['displayAllComponents<-elevenlabs'])
   assert.ok(tsCommentText(readFileSync(join(ROOT, 'worker/src/types.ts'), 'utf8')).includes('per-component breakdown'),
@@ -544,7 +553,7 @@ test('#1444: the shipped allowlist is empty and every entry would need a reason'
 
 test('#1444 WIRING: the CLI passes `declared` and `allow`, neither of which moves a count', () => {
   // `docs` and `services` are pinned by the ratchet, because cutting them moves the bound count. These
-  // two do not, so cutting either left all 50 tests green: the escape hatch stopped working, and a
+  // two do not, so cutting either left the whole suite green: the escape hatch stopped working, and a
   // zero-setter field stopped being checked, in silence. Only behaviour at a real root catches it.
   const root = mkdtempSync(join(tmpdir(), 'audit-tree-'))
   const write = (rel, body) => {

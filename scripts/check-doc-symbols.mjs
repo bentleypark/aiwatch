@@ -307,7 +307,7 @@ export function isSentenceEnd(text, i) {
 
 /**
  * Text that denies membership rather than asserting it — "`displayAllComponents` is not set on …".
- * Judged on the introducer and the LEAD, never on the surrounding sentences: reading those silences six
+ * Judged on the introducer alone, never on the surrounding sentences: reading those silences six
  * of the eight enumerations this check can see, every one of them over a `not` about something else.
  * `no` excludes `no-`, for `no-store`/`no-op`/`no-cache`.
  */
@@ -394,13 +394,8 @@ export function introduces(between) {
  *  governs them. */
 const CHAINED = /^[`*\s]*[/,][`*\s]*$/
 
-/** The text before a citation, bounded exactly like `introduces`: short, and inside one sentence. */
-export function lead(line, start) {
-  const w = line.slice(Math.max(0, start - RUN_MAX_GAP), start)
-  let cut = 0
-  for (let i = 0; i < w.length; i++) if (isSentenceEnd(w, i)) cut = i + 1
-  return w.slice(cut)
-}
+/** A negation that governs a citation is ADJACENT to it — "sets no `statusComponentIds` (a, b)". */
+const NEGATED_CITATION = /\b(?:no|not|never)\b[\s`*]*$/i
 
 /**
  * The claim shape this checks: an id RUN — two or more service ids joined only by `/` or `,` — which is
@@ -441,7 +436,7 @@ export function membershipBindings({ docs, services, declared = [] }) {
         while (h > 0 && CHAINED.test(line.slice(before[h - 1].end, before[h].start))) h--
         const introducer = line.slice(gov.end, run.index)
         if (!introduces(introducer) || isAbsenceContext(introducer)) continue
-        if (isAbsenceContext(lead(line, before[h].start))) continue
+        if (NEGATED_CITATION.test(line.slice(0, before[h].start))) continue
         bound.push({
           file,
           field: gov.name,
