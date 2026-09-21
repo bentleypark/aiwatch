@@ -327,8 +327,8 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(formatVitalsSection(vitals))
   }
 
-  // Section: Status page fetch failures (#500) — surfaces structural URL blocks early.
-  // fetch-fail:daily = times the degraded threshold was hit today (transient: 1-2, structural: 5+).
+  // Section: Unreadable status sources (#500) — surfaces a source we repeatedly could not read.
+  // fetch-fail:daily = times the degraded threshold was hit today.
   // cross-valid:suppressed = subset where probe confirmed the API was healthy (false positives caught).
   if (fetchFailureCounts && Object.keys(fetchFailureCounts).length > 0) {
     const nameMap = new Map(services.map(s => [s.id, s.name]))
@@ -345,7 +345,7 @@ export function buildDailySummary(data: DailySummaryData): string {
         return `   ${nameMap.get(id) ?? id}: ${total}× threshold hit (${detail})`
       })
       .join('\n')
-    lines.push(`\n⚠️ **Status Page Fetch Failures Today** (#500)\n${items}`)
+    lines.push(`\n⚠️ **Unreadable Status Sources Today** (#500)\n${items}`)
   }
 
   // Section: RTT degradation detection (#464) — the honest differentiator that replaced the

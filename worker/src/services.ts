@@ -208,8 +208,7 @@ export const SERVICES: ServiceConfig[] = [
   // #623/#1177 → #1390 — status.perplexity.com moved from Instatus to incident.io. The page carries
   // its own migration notice: announced 2026-09-07, cut over by DNS on 2026-09-10 21:00 UTC — the very
   // cycle our `officialUptime` snapshot went null. The Instatus parser cannot read an incident.io page,
-  // so the integration was dead: parse failure → `trackFetchFailure` → #500's "unreachable 1h+" alert,
-  // which misdescribes it (the page answered 200 in 0.7s; the FETCH succeeded and the PARSE failed).
+  // so the integration was dead: the page answered 200 in 0.7s — the FETCH succeeded and the PARSE failed.
   //
   // The old (pre-#1390) roster was API + Website + Computer; the #1390 migration's roster was
   // Website + App + Computer, flat, no groups, no descriptions — no `API` component, so #635's
@@ -1646,7 +1645,7 @@ export function includeUntaggedIncidents(
  *  4xx to dead-source, which is right for a JSON API where a 4xx is unambiguous; on these two it
  *  would also swallow 403/429 (a WAF challenge or rate limit aimed at our egress) and 408/451 — none
  *  of which say the URL died, and all of which would skip `trackFetchFailure` and disarm the #500
- *  persistent-block alert. An explicit set says what the comment says. */
+ *  persistent-failure alert. An explicit set says what the comment says. */
 const GONE_STATUSES = new Set([401, 404, 410])
 
 /** #1212 — how many of OUR incidents a leg publishes, applied after the keyword filter. Same figure
@@ -2840,7 +2839,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           //
           // Everything else — 403/429 above all, this being an undocumented endpoint fetched with a
           // spoofed UA from Worker egress — falls through to the transient path so the streak advances
-          // and the #500 persistent-block alert stays armed. Neither of these two services is probed,
+          // and the #500 persistent-failure alert stays armed. Neither of these two services is probed,
           // so `probeConfirmed` can never correct a wrong `sourceDead` here the way it can elsewhere.
           if (res && GONE_STATUSES.has(res.status)) {
             return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
@@ -2850,7 +2849,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
         // Decode the utf-16 (BOM-detected) JSON. A 200 with an unparseable body means the endpoint's
-        // shape/encoding drifted \u2014 treat that like a fetch failure (degrade + trip the persistent-block
+        // shape/encoding drifted \u2014 treat that like a fetch failure (degrade + trip the persistent-failure
         // alert) instead of resetting the failure counter and silently showing "operational, no
         // incidents", which would hide a real outage on this undocumented endpoint (#677 review).
         // #1212 — a sentinel rather than `null`, because a body of literal `null` decodes fine and

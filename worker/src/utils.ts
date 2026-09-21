@@ -354,9 +354,8 @@ function pruneIfEmpty(store: TrackingStateBlob, svcId: string): void {
  *  (30 min): the old keys stopped being refreshed once their tracker stopped writing (past
  *  threshold, `next <= threshold` goes false), so each expired ~30 min after its crossing write, and
  *  the NEXT failure restarted the climb at 1 — which is what makes `fetch-fail:daily` count distinct
- *  EPISODES ("structural: 10+ crossings/day, one per ~45-min cycle",
- *  `docs/reference/status-determination.md`) instead of one permanent crossing. Losing this silently
- *  would make a day-2+ structural block invisible to the daily summary (`daily-summary.ts` only lists
+ *  EPISODES (one crossing per ~45-min cycle) instead of one permanent crossing. Losing this silently
+ *  would make a day-2+ failure episode invisible to the daily summary (`daily-summary.ts` only lists
  *  a service `if (failCount > 0)`, and a sticky sub-threshold-of-1 sitting at the cap is
  *  indistinguishable from a single blip). */
 export const TRACKING_COUNT_DECAY_MS = 1_800_000 // 30 min
@@ -441,7 +440,7 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
     // Fires only on the rising edge (count going from threshold-1 → threshold) — the TRACKING_COUNT_DECAY_MS
     // comment above is what keeps that true now that the counter lives in a TTL-less blob. Expected scale:
     //   transient: 1–3 crossings/day  (occasional blips that recover quickly)
-    //   structural: 10+ crossings/day (URL blocked — one crossing per ~45-min cycle all day)
+    //   persistent: 10+ crossings/day (one crossing per ~45-min cycle all day)
     // Deliberately NOT part of the consolidated blob above — rare enough that a direct KV
     // read/write here was never the read-volume problem.
     if (kv) {
@@ -451,7 +450,7 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
       await kvPut(kv, dailyKey, String(dailyCount + 1), { expirationTtl: 172800 }) // 48h
     }
 
-    // #500: record the FIRST-failure timestamp for the persistent (1h+) structural-block alert.
+    // #500: record the FIRST-failure timestamp for the persistent (1h+) unreadable-source alert.
     // Set only if absent so it survives re-climb cycles — immune to call frequency by construction,
     // since it's a wall-clock timestamp, not a cycle count. resetFetchFailure clears it on recovery.
     // Unlike the pre-#1224 key, `failSince` itself has no expiry — `checkPersistentFetchFailures`
@@ -493,16 +492,16 @@ export function resetFetchFailure(store: TrackingStateBlob, svcId: string): void
  *  covers one full decay window plus the reclimb back to threshold. */
 export const TRACKING_ALERT_STALE_MS = 2 * TRACKING_COUNT_DECAY_MS // 60 min
 
-/** Is `entry`'s `failSince` still corroborated by a recently-refreshed `failCountAt`? A `failSince`
- *  with no supporting recent write is not evidence of an ONGOING block — it's a frozen leftover from
- *  a path (dead source, feed failure) that stopped calling `trackFetchFailure` entirely. */
+/** Is `entry`'s `failSince` still corroborated by a recently-refreshed `failCountAt`? Without one it
+ *  is a frozen leftover from a path (dead source, feed failure) that stopped calling
+ *  `trackFetchFailure` entirely. */
 export function isFailSinceLive(entry: ServiceTrackingState | undefined, nowMs: number): boolean {
   if (!entry?.failSince) return false
   return !isTimestampStale(entry.failCountAt, nowMs, TRACKING_ALERT_STALE_MS)
 }
 
-/** Threshold for the #500 persistent structural-block alert: a status page unreachable this long
- *  is a structural block (URL/IP), not a transient blip. */
+/** Threshold for the #500 persistent unreadable-source alert: a source unreadable this long is past
+ *  a transient blip. #1391 — it does not establish a structural block; the streak carries no cause. */
 export const PERSISTENT_FAILURE_THRESHOLD_MS = 3_600_000 // 1h
 
 /**
@@ -528,7 +527,7 @@ export function elapsedAtLeast(
   return nowMs - sinceMs >= thresholdMs
 }
 
-/** Pure decision: has the status page been continuously unreachable for >= threshold? Frequency-
+/** Pure decision: has the source been continuously unreadable for >= threshold? Frequency-
  *  independent — keys off the first-failure wall-clock timestamp, not a count of polling cycles. */
 export function shouldAlertPersistentFailure(
   sinceIso: string | null | undefined,
@@ -538,11 +537,28 @@ export function shouldAlertPersistentFailure(
   return elapsedAtLeast(sinceIso, nowMs, thresholdMs)
 }
 
-/** Operator Discord alert body for a persistent (structural) status-page block (#500). */
-export function formatPersistentFailureAlert(serviceName: string, sinceIso: string, nowMs: number, sourceReadFailure?: StatusSourceReadFailure): string {
+/** #1391 — what produced the `failSince` streak the #500 alert is about to report. `reasons` is every
+ *  reason booked for the service that UTC day, because the record carries no per-reason recency. */
+export type PersistentFailureCause = {
+  /** Reasons booked for the service today, when the last booking is recent enough to be current. */
+  reasons?: string[]
+  /** The read failure retained in `tracking:state`. */
+  failure?: StatusSourceReadFailure
+}
+
+/** #1391 — what the alert adds after its fixed first sentence. Both signals are reported when both
+ *  exist: electing one discards a current observation, and neither is a claim about the cause. */
+function persistentFailureClause(cause: PersistentFailureCause): string {
+  const parts: string[] = []
+  if (cause.reasons?.length) parts.push(`Booked today: ${cause.reasons.map((r) => `\`${r}\``).join(', ')}.`)
+  if (cause.failure) parts.push(`Observed: ${formatSourceReadFailure(cause.failure)}.`)
+  return parts.length > 0 ? parts.join(' ') : 'Check both the configured status-page URL and whether the provider changed status-page vendors.'
+}
+
+/** Operator Discord alert body for a persistently unreadable status source (#500/#1391). */
+export function formatPersistentFailureAlert(serviceName: string, sinceIso: string, nowMs: number, cause: PersistentFailureCause): string {
   const elapsedH = Math.floor((nowMs - new Date(sinceIso).getTime()) / 3_600_000)
-  const detail = sourceReadFailure ? ` Observed source-read failure: ${formatSourceReadFailure(sourceReadFailure)}.` : ''
-  return `⚠️ **${serviceName}** status page has been unreachable for **${elapsedH}h+** — likely a structural block (URL moved / IP blocked), not a transient blip. Probe-based status may still be accurate; verify the configured status-page URL.${detail}`
+  return `⚠️ **${serviceName}** status source has been unreadable for **${elapsedH}h+**. ${persistentFailureClause(cause)}`
 }
 
 function formatSourceReadFailure(failure: StatusSourceReadFailure): string {

@@ -2,9 +2,9 @@
 //
 // The gap this closes, in the words of the incident that forced it: on 2026-09-10 Atlassian moved the
 // uptime payload off the status document, 14 services went to `uptime30d: null` in one cycle, and
-// NOTHING said so. Every existing backstop keys on the source being unreachable —
-// `checkPersistentFetchFailures` (#500) on 1h+ of failed fetches, `decideSourceDeadAction` (#689) on a
-// 4xx, `trackComponentMiss` (#135) on a component id that no longer resolves — and here the page
+// NOTHING said so. `checkPersistentFetchFailures` (#500) fires on 1h+ of failed reads,
+// `decideSourceDeadAction` (#689) on a 4xx, `trackComponentMiss` (#135) on a component id that no
+// longer resolves — none of them on this, because here the page
 // answered 200 with a perfectly good component list. Only the NUMBER was gone. The visible effect was
 // confined to things nobody is paged about: the Score switching to the no-uptime path, and the service
 // leaving the high-confidence ranking table (#1186).
@@ -19,7 +19,7 @@
 // other could be starved by blip frequency. A wall-clock "since" has neither property.
 //
 // KNOWN, ACCEPTED OVERLAP: this asks nothing about what the other operator alerts are doing, so a
-// service whose page is unreachable (#500), 4xx (#689) or whose component id rotated (#135) produces
+// service whose source is unreadable (#500), 4xx (#689) or whose component id rotated (#135) produces
 // their message AND, 6h in, this one. Bounded — 7d dedup, and the 30d retention prune caps a permanent
 // loss at roughly five sends before silence — and the two messages say different things (theirs names
 // the source state, this one says how long the DATA has been gone).
@@ -48,7 +48,7 @@ type DiscordSend = (
 ) => Promise<boolean>
 
 /** Re-alert cadence for a service whose uptime stays gone. 7 days, not the 24h the fetch-failure alert
- *  uses: an unreachable status page is often transient and worth a daily nudge, whereas a source that
+ *  uses: an unreadable source may recover on its own and is worth a daily nudge, whereas a source that
  *  stopped publishing uptime is a CONFIG job — the fix is a code change (a new parser, a new component
  *  id, a new vendor), so re-asking daily while that PR is being written is pure noise. */
 const UPTIME_MISSING_DEDUP_TTL_S = 604_800 // 7d
@@ -94,7 +94,7 @@ export async function checkUptimeLiveness(
       const ok = await send(discordUrl, {
         title: `📉 ${svc.name} — uptime has stopped publishing`,
         description: formatUptimeMissingAlert(svc.name, entry.uptimeMissingSince!, entry.uptimeSeenAt, svc.statusUrl, nowMs),
-        color: 0x9b59b6, // purple — a DATA-quality alarm, not a service outage (red) or a source block (amber)
+        color: 0x9b59b6, // purple — a DATA-quality alarm, not a service outage (red) or an unreadable source (amber)
       })
       // Only on a successful send, so a failed Discord POST retries next cron instead of being
       // swallowed by its own dedup marker. A failed WRITE is logged rather than discarded: it turns the

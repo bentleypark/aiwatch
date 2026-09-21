@@ -20,7 +20,7 @@
 //      `/api/statusline/down` and make the plugin monitor emit a false "✅ recovered". So the metric
 //      that matters is invisible to it by construction, not by retention.
 //
-// Both are correct for what `trackFetchFailure` is for (deciding when a source is structurally dead),
+// Both are correct for what `trackFetchFailure` is for (deciding when a source has stopped being readable),
 // and that primitive is shared by every monitored service — bending its TTL or its rising-edge semantics to
 // suit one measurement would change the #500 persistent-failure alert and the daily summary too. So
 // this is a separate, narrow counter rather than a modification of a shared one.
