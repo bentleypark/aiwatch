@@ -390,9 +390,25 @@ test('#1444 NEGATIVE CONTROL: a single id in prose is not an enumeration', () =>
 })
 
 test('#1444 NEGATIVE CONTROL: a negation BEFORE the citation governs the list after it', () => {
-  const line = 'Fireworks sets no `statusComponentIds`, so `resolveSvcStatus` returns at its FIRST branch'
-    + ' (the page overall indicator) — same as cohere/groq/together, which are in the identical bucket.'
+  // kv-schema.md's real shape. The earlier fixture for this put the list past the reach, so the reach
+  // declined it and the test stayed green with no absence guard at all.
+  const line = 'for a service with **no** `statusComponentIds` at all (turbopuffer, fireworks today).'
   assert.deepEqual(audit(line), [])
+  assert.equal(audit(line.replace('**no** ', '')).length, 2, 'without the negation it IS the claim')
+})
+
+test('#1444 NEGATIVE CONTROL: a negation before a CHAIN of citations governs all of them', () => {
+  // discord-alert-paths.md's real shape: the negation precedes the FIRST citation, and the list binds
+  // to the LAST, so a lead window measured from the governing citation alone cannot see it.
+  const line = 'A service with no `statusComponentId`/`statusComponentIds`/`displayComponentIds`'
+    + ' (turbopuffer, fireworks) has `uptimeScope` fall back to `config.incidentIoComponentId`.'
+  assert.deepEqual(audit(line), [])
+  assert.equal(audit(line.replace('with no ', 'with ')).length, 2, 'without the negation it IS the claim')
+})
+
+test('#1444 NEGATIVE CONTROL: the lead stops at a sentence end, like the introducer does', () => {
+  const line = '`componentGroupsInline` is not set anywhere. `displayAllComponents` covers cohere/elevenlabs'
+  assert.deepEqual(audit(line), ['displayAllComponents<-elevenlabs'], 'a negation in the PREVIOUS sentence must not reach forward')
 })
 
 test('#1444 NEGATIVE CONTROL: a negation AFTER the list governs it too', () => {
@@ -451,9 +467,9 @@ test('#1444 MUTATION: isSentenceEnd must read the NEXT character, not a regex th
 })
 
 test('#1444: a negation in the INTRODUCER denies the claim; one anywhere else does not', () => {
-  // The scope is the whole point. Judging the surrounding sentences instead silences five of the seven
+  // The scope is the whole point. Judging the surrounding sentences instead silences six of the eight
   // enumerations this check can see, each over a negation about something else — measured by injecting
-  // a non-member into every one of the seven: 2 of 7 caught that way, 7 of 7 this way.
+  // a non-member into every one of the eight: 2 of 8 caught that way, 8 of 8 this way.
   for (const intro of ['is not set on', 'never covers', 'lists no service but']) {
     assert.deepEqual(audit(`\`displayAllComponents\` ${intro} cohere/elevenlabs`), [], intro)
   }
@@ -512,7 +528,7 @@ test('#1444 RATCHET: the number of enumerations this gate actually checks', () =
   // Only one site carries an anchor of its own, so this count is what makes such a drop visible.
   // If it moved, find out WHICH site and why before touching the number.
   const bound = membershipBindings({ docs: membershipDocs(ROOT), services: SERVICES, declared: DECLARED })
-  assert.equal(bound.length, 7, `coverage moved:\n${bound.map((b) => `  ${b.file}: ${b.field} <- ${b.run}`).join('\n')}`)
+  assert.equal(bound.length, 8, `coverage moved:\n${bound.map((b) => `  ${b.file}: ${b.field} <- ${b.run}`).join('\n')}`)
   // and the number the CLI shows an operator has to BE that number, not a proxy that never moves
   const out = execFileSync('node', [join(ROOT, 'scripts/check-doc-symbols.mjs')], { cwd: ROOT, encoding: 'utf8' })
   assert.match(out, new RegExp(`doc-membership lint: ${bound.length} enumeration`))

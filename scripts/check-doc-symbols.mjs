@@ -306,11 +306,10 @@ export function isSentenceEnd(text, i) {
 }
 
 /**
- * An INTRODUCER that denies membership rather than asserting it — "`displayAllComponents` is not set on
- * …". Judged on the introducer alone, never on the surrounding sentences: reading those silenced five
- * of the seven enumerations this check can see, every one of them over a `not` about something else.
- * No introducer in either corpus carries a negation, so the corpus does not force these stems and the
- * fixtures in the test are the whole evidence. `no` excludes `no-`, for `no-store`/`no-op`/`no-cache`.
+ * Text that denies membership rather than asserting it — "`displayAllComponents` is not set on …".
+ * Judged on the introducer and the LEAD, never on the surrounding sentences: reading those silences six
+ * of the eight enumerations this check can see, every one of them over a `not` about something else.
+ * `no` excludes `no-`, for `no-store`/`no-op`/`no-cache`.
  */
 export function isAbsenceContext(introducer) {
   return /\b(?:no|not|never)\b(?!-)/i.test(introducer)
@@ -391,6 +390,18 @@ export function introduces(between) {
   return between.length <= RUN_MAX_GAP && ![...between].some((_, i) => isSentenceEnd(between, i))
 }
 
+/** Citations chained by a separator alone — "`a`/`b`/`c`" — are one citation for the purpose of what
+ *  governs them. */
+const CHAINED = /^[`*\s]*[/,][`*\s]*$/
+
+/** The text before a citation, bounded exactly like `introduces`: short, and inside one sentence. */
+export function lead(line, start) {
+  const w = line.slice(Math.max(0, start - RUN_MAX_GAP), start)
+  let cut = 0
+  for (let i = 0; i < w.length; i++) if (isSentenceEnd(w, i)) cut = i + 1
+  return w.slice(cut)
+}
+
 /**
  * The claim shape this checks: an id RUN — two or more service ids joined only by `/` or `,` — which is
  * how every wrong membership #1434 found was written (`elevenlabs/replicate/cursor`,
@@ -420,14 +431,17 @@ export function membershipBindings({ docs, services, declared = [] }) {
   const bound = []
   for (const { file, content } of docs) {
     for (const line of content.split('\n')) {
-      const fields = [...line.matchAll(fieldRe)].map((m) => ({ name: m[1], end: m.index + m[1].length }))
+      const fields = [...line.matchAll(fieldRe)].map((m) => ({ name: m[1], start: m.index, end: m.index + m[1].length }))
       if (!fields.length) continue
       for (const run of line.matchAll(runRe)) {
         const before = fields.filter((f) => f.end <= run.index)
-        const gov = before[before.length - 1]
+        let h = before.length - 1
+        const gov = before[h]
         if (!gov) continue
+        while (h > 0 && CHAINED.test(line.slice(before[h - 1].end, before[h].start))) h--
         const introducer = line.slice(gov.end, run.index)
         if (!introduces(introducer) || isAbsenceContext(introducer)) continue
+        if (isAbsenceContext(lead(line, before[h].start))) continue
         bound.push({
           file,
           field: gov.name,
