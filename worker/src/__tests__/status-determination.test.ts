@@ -550,6 +550,29 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
     expect(resolveSvcComponents(dyn, summary).every((c) => c.group === 'Models')).toBe(true)
   })
 
+  it('displayAllComponents preserves an explicit provider group ahead of the Models fallback', () => {
+    const dyn: StatusConfig = {
+      displayAllComponents: true,
+      componentGroups: { all: 'Endpoints', embeddings: 'Endpoints' },
+      componentSurfaces: ['Infrastructure'],
+    }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [
+        { id: 'all', name: 'All Endpoints', status: 'operational' },
+        { id: 'embeddings', name: 'embeddings', status: 'operational' },
+        { id: 'model', name: 'command-a', status: 'operational' },
+        { id: 'infra', name: 'Infrastructure', status: 'operational' },
+      ],
+    }
+    expect(resolveSvcComponents(dyn, summary).map((c) => [c.name, c.group])).toEqual([
+      ['All Endpoints', 'Endpoints'],
+      ['embeddings', 'Endpoints'],
+      ['command-a', 'Models'],
+      ['Infrastructure', undefined],
+    ])
+  })
+
   it('displayAllComponents takes precedence over displayComponentIds / statusComponentIds', () => {
     const dyn: StatusConfig = { displayAllComponents: true, componentDenylist: [], statusComponentIds: ['a'], displayComponentIds: ['b'] }
     const summary: SummaryData = {
@@ -629,12 +652,13 @@ describe('displayComponentIds config sanity (#606)', () => {
     }
   })
 
-  it('every componentGroups key is a member of that service\'s displayComponentIds (no typo\'d/orphan ULID)', () => {
+  it('every static componentGroups key is a member of that service\'s displayComponentIds (no typo\'d/orphan ULID)', () => {
     // A componentGroups key not present in displayComponentIds is dead config: it would silently fail
     // to tag any rendered component (the component stays an ungrouped surface row), so a mistyped ULID
     // would never group + never error. This pins the map to the curated id list.
     for (const svc of SERVICES) {
       if (!svc.componentGroups) continue
+      if (svc.displayAllComponents) continue
       const ids = new Set(svc.displayComponentIds ?? svc.statusComponentIds ?? [])
       for (const key of Object.keys(svc.componentGroups)) {
         expect(ids.has(key), `${svc.id}: componentGroups key ${key} not in displayComponentIds`).toBe(true)
@@ -674,13 +698,20 @@ describe('displayComponentIds config sanity (#606)', () => {
   it('cohere + groq use dynamic displayAllComponents with the Docs/Website denylist, surface lists, and NO badge ids', () => {
     const EXPECTED_SURFACES: Record<string, string[]> = {
       groq: ['API'],
-      cohere: ['Coral', 'Infrastructure', 'Playground', 'embeddings'],
+      cohere: ['Coral', 'Infrastructure', 'Playground'],
     }
     for (const id of ['cohere', 'groq']) {
       const svc = SERVICES.find((s) => s.id === id)!
       expect(svc.displayAllComponents, id).toBe(true)
       expect(svc.componentDenylist, id).toEqual(['Docs', 'Website'])
       expect(svc.componentSurfaces, id).toEqual(EXPECTED_SURFACES[id])
+      if (id === 'cohere') {
+        expect(svc.componentGroups).toEqual({
+          '01M1ETCNNYXYNTJY9J6RMJYKWB': 'Endpoints',
+          '01HQ6CA39NZ5X3PRFPN71Q89TE': 'Endpoints',
+        })
+        expect(svc.componentGroupsInline).toBe(true)
+      }
       // Dynamic mode is display-only and must not configure id-list breakdowns or feed the badge.
       expect(svc.displayComponentIds, id).toBeUndefined()
       expect(svc.statusComponentIds, id).toBeUndefined()
