@@ -210,8 +210,9 @@ function componentUptime(
  *
  *  A LIST of ids is a WORST-OF (the badge convention for a multi-component service, #379/#857 —
  *  turbopuffer's per-region components have no group aggregate, so the honest headline is the worst
- *  region, not an arbitrary one). The reported `days` is the SHORTEST covered window among the ids that
- *  resolved — the conservative bound.
+ *  region, not an arbitrary one). The reported `days` comes from the component that produced the
+ *  worst percentage, so the disclosed window always describes that percentage. Equal percentages use
+ *  the shorter window as the conservative tie-breaker.
  *
  *  null when NO configured id is tracked by the page. Warns when only some resolve: an incident.io ULID
  *  rotation silently stops matching on a 200-OK page, and a shrinking worst-of could then report a
@@ -230,7 +231,7 @@ export function computeIncidentIoUptime(
     return null
   }
   let worstPct = Infinity
-  let shortestDays = Infinity
+  let worstDays = Infinity
   let worstTodaySec = 0
   let resolved = 0
   const missing: string[] = []
@@ -241,9 +242,11 @@ export function computeIncidentIoUptime(
     const result = componentUptime(impacts, id, since, nowMs, windowDays)
     if (!result) { missing.push(id); continue }
     resolved++
-    worstPct = Math.min(worstPct, result.pct)
-    shortestDays = Math.min(shortestDays, result.days)
-    // #1017 — worst-of like pct/days above: the most-affected component's TODAY figure, not a sum
+    if (result.pct < worstPct || (result.pct === worstPct && result.days < worstDays)) {
+      worstPct = result.pct
+      worstDays = result.days
+    }
+    // #1017 — worst-of: the most-affected component's TODAY figure, not a sum
     // (a sum across components would double-count a shared outage worst-of'd elsewhere in this file).
     worstTodaySec = Math.max(worstTodaySec, result.todayWeightedOutageSec)
   }
@@ -269,7 +272,7 @@ export function computeIncidentIoUptime(
       `component_uptimes (upstream id rotation?) — uptime is a worst-of over the ${resolved} that resolved`,
     )
   }
-  return { pct: worstPct, days: shortestDays, todayWeightedOutageSec: worstTodaySec, missing }
+  return { pct: worstPct, days: worstDays, todayWeightedOutageSec: worstTodaySec, missing }
 }
 
 

@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure } from './parse-failure-log'
-import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type TrackingStateBlob } from './utils'
+import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
@@ -181,13 +181,10 @@ export const SERVICES: ServiceConfig[] = [
   // `incidentIoComponentId` IS also a hand-maintained list here (mirrors turbopuffer's no-canonical-
   // component shape), but ONLY for the uptime worst-of via `computeIncidentIoUptime` — deliberately
   // NOT the full roster above, to avoid a churn trap distinct from the breakdown one:
-  // `computeIncidentIoUptime` takes the shortest `data_available_since` window across every listed id,
-  // so a brand-new model in the list pins the whole service's uptime window down to that model's age.
+  // a brand-new model in the list can shorten the whole service's uptime window to that model's age.
   // If you're reconciling the list and tempted to add one: check its `data_available_since` first, not
-  // just whether it's "missing" — only ids old enough not to shorten that window belong. Same
-  // fix junie already applies for
-  // the identical reason (see its config comment: "putting it in the badge scope pins uptimeWindowDays
-  // to 6... an incoherent '99.8% over 6d'"). Accepted tradeoffs: a model this list omits contributes no
+  // just whether it's "missing" — only ids old enough not to shorten that window belong.
+  // Accepted tradeoffs: a model this list omits contributes no
   // uptime signal until someone manually ages it in (real, not fabricated — matches the "no invented
   // value" rule, #713); a REMOVED id from this shorter list still warns via
   // `computeIncidentIoUptime`'s `resolved < ids.length` log.
@@ -226,12 +223,7 @@ export const SERVICES: ServiceConfig[] = [
   // **2026-09-18 (#1449): the page began serving a standalone `API` component** (id
   // `01M2R6E5FPASTEW3A3V8TSYHJ0`, added below to `statusComponentIds`/`displayComponentIds`) — detected
   // live via the #992 new-component alert. `statusComponent` (name-based) stays unset regardless; this
-  // scope is id-based. Putting a component this young into `statusComponentIds` is exactly the hazard
-  // the fireworks and junie config comments in this file warn about (check age, not just presence) —
-  // the live page's own `data_available_since` for it predates its debut by months, which is what keeps
-  // the window at 30 days today. That field is provider-controlled; the dependency and its known gap
-  // are recorded in `docs/reference/status-determination.md` and `perplexity-scope.test.ts` (#1448), not
-  // restated here.
+  // scope is id-based.
   //
   // `incidentIoComponentId` stays SINGLE while that scope is a list. It is what
   // `parseIncidentIoReportedUptime` reads for the provider-ATTRIBUTED disclosure, and over a list that
@@ -277,8 +269,8 @@ export const SERVICES: ServiceConfig[] = [
   //   • the model components are display-only
   //     (displayComponentIds, #606) — NOT the badge, so a model-component change can't flip the card
   //     (which would drag status-edge alerts + cache refresh). componentGroups folds the six `* Model`
-  //     components under one collapsible "Models" header (replicate pattern); Open API + API Service
-  //     stay as ungrouped surface rows.
+  //     components under one collapsible "Models" header; Open API + API Service stay as ungrouped
+  //     surface rows.
   //   • The auto-monitor opens frequent `critical` incidents titled `Agentic 模型错误报警` that attach to
   //     no component (verified 2026-07-18) and carry paperwork-inflated durations (recorded hours vs
   //     minutes of real impact — the #1019 pattern). autoMonitorTitles tags them → grouped in the UI +
@@ -312,7 +304,7 @@ export const SERVICES: ServiceConfig[] = [
     datadogComponentGroupId: '62d944d3-1acb-471b-81a0-099b3da0164f' }, // API - Gateway
   // Voice & Speech AI
   // The curated availability surfaces, as ONE list: the #606 breakdown card, the #379 worst-of badge
-  // and the uptime scope all read it, so adding a member younger than 30 days shortens the window.
+  // and the uptime scope all read it.
   // #685 — ElevenCreative (01JJM5RKYAEWNM3XYRHXM8FJQ3) is the ONLY component reflecting Dubbing health
   // (a Voice-domain product within the ElevenCreative suite; no standalone Dubbing component exists). It
   // was previously omitted, so a Dubbing/ElevenCreative degradation flipped the badge while the
@@ -362,7 +354,7 @@ export const SERVICES: ServiceConfig[] = [
   // 84/good/high). The page published uptime the whole time (display_uptime_mode 'chart_and_percentage'
   // as of 2026-07). Should it ever flip to 'chart_only' the values become "$undefined" and this degrades
   // to "No official uptime" — the honest state, not a misreading.
-  // Uptime = worst-of across the 15 per-region API components. There is no group aggregate to read
+  // Uptime = worst-of across the per-region API components. There is no group aggregate to read
   // (every component is ungrouped), so a single region would be an arbitrary pick that reports 100%
   // while another region is down; worst-of matches the statusComponentIds badge convention (#379).
   // `Dashboard` (01K0Q5QSJV9KAZMEMMQ0NCHD9E) is deliberately EXCLUDED because it is not an API surface —
@@ -370,12 +362,12 @@ export const SERVICES: ServiceConfig[] = [
   // differs: excluding Run Ingestion stopped an over-good ~100% from hiding incidents, while excluding
   // Dashboard stops a non-API component from dragging the worst-of down. A new region must be added here;
   // `computeIncidentIoUptime` warns when a configured id no longer resolves (ULID rotation), and
-  // turbopuffer-uptime.test.ts pins the roster against the Dashboard id.
+  // turbopuffer-config.test.ts pins the roster by value.
   // The badge still rides the overall page indicator (status-determination step 4) — a region belongs on a
   // Region card, not the badge/breakdown — so no statusComponentId / displayComponentIds. Score keeps its
   // probe (api.turbopuffer.com → {"status":"🐡"}) and the #802 coverage gate still holds it out of the
   // ranking until 30d of coverage accrue, independent of this uptime fix.
-  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD'], addedAt: '2026-07-01' }, // #802 / #857
+  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD', '01M1EB2MF3HY0FGY4G4XKG6NWD', '01M1ENXV57AJASWNHCRYDGS5N8', '01M1ENXV5779G7VTW967EJHE5H', '01M1ENXV572CR9QK3M3RB2236R'], addedAt: '2026-07-01' }, // #802 / #857
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // Black Forest Labs / FLUX (#756) — image-generation sibling for Stability AI (un-blocks the image
   // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge
@@ -485,15 +477,8 @@ export const SERVICES: ServiceConfig[] = [
   //   reads. It also widened the breakdown, which the #1062 capability routing reads
   //   (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
   // #1010 — `Compliance API`, `Sites` and `ChatGPT Work` are ChatGPT-group members in the badge scope.
-  //   The last two were held out on first pass: badge scope is also uptime scope (see #1006 above), and
-  //   `computeIncidentIoUptime` takes the SHORTEST covered window across that scope
-  //   (`covered = Math.min(windowDays, now - data_available_since)`), so adopting a component created
-  //   less than 30 days ago drops this WHOLE service's uptime window below 30 and lights the #1004
-  //   short-history disclosure. Both were created `2026-07-09T19:25:56Z`; re-read from the page RSC on
-  //   2026-08-20 that is 42 days, so `covered` clamps to the full 30 and the window is unmoved.
-  //   **Re-check that field against today before adopting any further group member.** Same trade junie
-  //   declines — see its config comment below; it keeps its young component in the breakdown, which the
-  //   `statusComponentIds` ≡ `displayComponentIds` invariant forbids here.
+  //   The last two were held out until their `data_available_since` cleared 30 days. **Re-check that
+  //   field against today before adopting any further group member.**
   //   Two consequences every adoption carries, neither specific to these two: it WIDENS the #1032
   //   id-bypass, so a `fedramp` advisory tagged on the new id now survives `incidentExclude`
   //   (`openai-login-attribution.test.ts` carries the ChatGPT Work case) — the #990 firewall is the
@@ -583,11 +568,10 @@ export const SERVICES: ServiceConfig[] = [
   // Badge + uptime run on Central Console ALONE; JetBrains AI rides along only in the breakdown +
   // incident scope. Why not a worst-of-both badge (statusComponentIds): uptime is computed over the
   // SAME scope as the badge (`statusComponentIds ?? incidentIoComponentId`, the #1006 invariant that
-  // keeps uptime/calendar/badge aligned), and computeIncidentIoUptime reports the SHORTEST covered
-  // window across that scope. JetBrains AI's records start 2026-07-09 (~6d), so putting it in the badge
-  // scope pins uptimeWindowDays to 6 while the % reflects Console's 30 days — an incoherent "99.8% over
-  // 6d". Console's records reach 2026-05-29 → the honest 30d window. JetBrains AI is 100%/empty anyway,
-  // so the badge loses nothing by resolving on Console.
+  // keeps uptime/calendar/badge aligned). JetBrains AI's records start 2026-07-09 (~6d), so the two
+  // remain deliberately separated: Console carries the service's established uptime while JetBrains AI
+  // is a disclosed surface and incident scope. Console's records reach 2026-05-29 → the honest 30d
+  // window. JetBrains AI is 100%/empty anyway, so the badge loses nothing by resolving on Console.
   //   • displayComponentIds lists BOTH (≥2 → a real 2-row breakdown that discloses the JetBrains AI
   //     roll-up the KB names, alongside the Console gateway).
   //   • incidentComponents scopes to BOTH names, so if JetBrains ever starts tagging incidents on the
@@ -1678,6 +1662,21 @@ const GONE_STATUSES = new Set([401, 404, 410])
  *  the RSS parser used to enforce internally; the difference is that it now counts only entries this
  *  service actually owns, so a busy shared feed cannot truncate ours out of the list. */
 const PUBLISHED_INCIDENT_CAP = 20
+
+type StatusSourceFailureLog = StatusSourceReadFailure & {
+  event: 'status_source_read_failure'
+  serviceId: string
+  latencyMs: number
+}
+
+function logStatusSourceReadFailure(failure: StatusSourceFailureLog) {
+  console.warn(failure)
+}
+
+function statusSourceTransportErrorKind(error: unknown): StatusSourceReadFailure['errorKind'] {
+  if (error instanceof Error && error.name === 'AbortError') return 'timeout'
+  return error instanceof Error ? 'network' : 'unknown'
+}
 
 // Retry once on failure to reduce false-positive 'down' from transient network issues
 // Retry uses shorter timeout to keep total wall-clock time under ~12s per service
@@ -2822,15 +2821,24 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // #677 — AWS Health public events JSON API (one fetch, all regions, real start+end timestamps)
       if (config.awsHealthApi) {
         const start = Date.now()
+        let transportError: unknown
         const res = await fetchWithTimeout(config.awsHealthApi.url, 8000, {
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIWatch/1.0; +https://ai-watch.dev)' },
         }).catch((err) => {
-          console.warn(`[fetchService] ${config.id} AWS Health API failed:`, err instanceof Error ? err.message : err)
+          transportError = err
           return null
         })
         const latency = Date.now() - start
         if (!res || !res.ok) {
-          if (res) { console.warn(`[fetchService] ${config.id} AWS Health API HTTP ${res.status}`); res.body?.cancel() }
+          const sourceReadFailure: StatusSourceReadFailure = res
+            ? { source: 'aws-health', phase: 'http', httpStatus: res.status }
+            : { source: 'aws-health', phase: 'transport', errorKind: statusSourceTransportErrorKind(transportError) }
+          if (res) {
+            logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+            res.body?.cancel()
+          } else {
+            logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+          }
           // #1212 — an unambiguous gone/auth 4xx is the source being GONE, which matters most on THIS
           // leg: the endpoint is undocumented, so its retirement is a live possibility, and without
           // this it would publish a permanent `degraded` with liveness `unknown` — which the
@@ -2843,7 +2851,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           if (res && GONE_STATUSES.has(res.status)) {
             return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
           }
-          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
           // A failed read is not a verdict about the provider.
           return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
@@ -2855,12 +2863,19 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // would otherwise be indistinguishable from a decode that threw. The 30d reason counter exists
         // to outlive the logs, so it must not conflate the two: they take different fixes.
         const DECODE_FAILED = Symbol('decode-failed')
+        let body: ArrayBuffer
+        try {
+          body = await res.arrayBuffer()
+        } catch (err) {
+          const sourceReadFailure: StatusSourceReadFailure = { source: 'aws-health', phase: 'transport', httpStatus: res.status, errorKind: statusSourceTransportErrorKind(err) }
+          logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+        }
         let json: unknown = DECODE_FAILED
         try {
-          json = decodeAwsHealthJson(await res.arrayBuffer(), res.headers.get('content-type'))
-        } catch (err) {
-          console.warn(`[fetchService] ${config.id} AWS Health API decode/parse failed (ct=${res.headers.get('content-type')}):`, err instanceof Error ? err.message : err)
-        }
+          json = decodeAwsHealthJson(body, res.headers.get('content-type'))
+        } catch {}
         // #1212 — the same verdict-not-a-list treatment the RSS leg gets. `parseAwsHealthEvents`
         // returns `[]` for anything it cannot read, which used to clear the streak and publish
         // `operational` — the false recovery this issue closes.
@@ -2868,9 +2883,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           ? { ok: false, reason: 'aws-health-unparseable' } as const
           : parseAwsHealthEventsResult(json, config.awsHealthApi.service)
         if (!health.ok) {
-          console.warn(`[fetchService] ${config.id} AWS Health API unreadable (${health.reason}, ct=${res.headers.get('content-type')})`)
+          const sourceReadFailure: StatusSourceReadFailure = { source: 'aws-health', phase: json === DECODE_FAILED ? 'decode' : 'shape', httpStatus: res.status }
+          logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
           await recordParseFailure(kv, Date.now(), config.id, health.reason)
-          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
           // `sourceUnknown` is what says "our read failed" on the badge and to the withdrawal hold,
           // rather than only in the counter.
           return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }

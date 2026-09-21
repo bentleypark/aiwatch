@@ -124,12 +124,18 @@ jobs:
     # paths-ignores — the same gap #961 fixed for the OKF lint. The complementary case (a CODE rename
     # that orphans a doc ref) is caught by the real-repo assertion in check-doc-symbols.test.mjs,
     # which runs under test:scripts on code PRs. Zero-dependency (node: builtins) → no `npm ci`.
+    #
+    # #1444 — the test file runs HERE too, which #1100 alone did not need. For an invented symbol the
+    # CLI exits 1, so the CLI is the whole gate; for a membership claim the erosion shape is a doc edit
+    # that pushes a list out of the reach, and the CLI reports that as a smaller count and exits 0. The
+    # coverage ratchet is the only thing that fails on it, and it lives in the test file.
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: node scripts/check-doc-symbols.mjs
+      - run: node --test scripts/check-doc-symbols.test.mjs
 
   instruction-budget:
     name: Instruction Budget

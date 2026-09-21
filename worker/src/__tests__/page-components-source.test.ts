@@ -499,12 +499,7 @@ describe('an official ChatGPT-group component absent from the config (#1010)', (
   })
 })
 
-// #1010 — the rule that governs WHEN a group member may be adopted, made executable. Badge scope IS
-// uptime scope: `uptimeScope` (`services.ts`) reads `statusComponentIds`, and `computeIncidentIoUptime`
-// worst-ofs the percentage and takes the SHORTEST covered window across it — so adopting a component
-// created less than 30 days ago shortens the WHOLE service's window. This is the test to re-read
-// before adopting the next one. Each `it` carries its own control on the SAME html, so neither can
-// pass just because the fixture is clean.
+// #1010 — Badge scope IS uptime scope: `uptimeScope` (`services.ts`) reads `statusComponentIds`.
 describe('uptime is computed over the badge scope, not the primary alone (#1010/#1006)', () => {
   const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
   const PRIMARY = CHATGPT.incidentIoComponentId as string // "Conversations"
@@ -553,9 +548,7 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
     expect(svc.uptime30d).toBe(96.66)
   })
 
-  it('a badge component with a short record shortens the disclosed window — the cost of adopting too early', async () => {
-    // The shape a premature adoption creates: one young member, every other one old. `Sites` /
-    // `ChatGPT Work` were held out until their record cleared 30 days precisely to avoid it.
+  it('a short record wins an equal-percentage tie for the disclosed window', async () => {
     const html = rsc([], CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, id === COMPLIANCE ? 20 : 400)))
     expect(computeIncidentIoUptime(html, PRIMARY, now)!.days).toBe(30) // control: the primary alone is whole
     const svc = await fetchService(CHATGPT, withUptimeHtml(html), undefined, {})

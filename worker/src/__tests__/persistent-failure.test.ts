@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { checkPersistentFetchFailures } from '../persistent-failure'
-import { TRACKING_ALERT_STALE_MS, TRACKING_COUNT_DECAY_MS } from '../utils'
+import { TRACKING_ALERT_STALE_MS, TRACKING_COUNT_DECAY_MS, type StatusSourceReadFailure } from '../utils'
 
 type DiscordSend = (
   webhookUrl: string,
@@ -30,7 +30,7 @@ function mockKV(store: Record<string, string> = {}) {
 // without ALSO writing failCount/failCountAt in the same call, and sanitizeTrackingState requires the
 // (failCount, failCountAt) pair to survive together (a lone failCountAt with no failCount is itself
 // treated as corruption, same as the reverse).
-const trackingKV = (blob: Record<string, { failSince?: string; failCountAt?: string; failCount?: number }>, extra: Record<string, string> = {}) => {
+const trackingKV = (blob: Record<string, { failSince?: string; failCountAt?: string; failCount?: number; sourceReadFailure?: StatusSourceReadFailure }>, extra: Record<string, string> = {}) => {
   // Stamped against the sweep's own frozen NOW, not the real wall clock — using Date.now() here would
   // make every default-stamped entry look "fresh" only because it sits in NOW's future (2026-06-02),
   // which passes the staleness gate for the wrong reason and stops these fixtures from actually
@@ -53,6 +53,20 @@ describe('checkPersistentFetchFailures (#500)', () => {
     expect(embed.title).toContain('DeepSeek API')
     expect(embed.description).toContain('2h+')
     expect(kv.store['alerted:fetch-persistent:deepseek']).toBe('1') // dedup written
+  })
+
+  it.each([
+    [{ source: 'aws-health', phase: 'transport', errorKind: 'timeout' }, 'AWS Health transport timeout'],
+    [{ source: 'aws-health', phase: 'http', httpStatus: 429 }, 'AWS Health HTTP 429'],
+    [{ source: 'aws-health', phase: 'decode', httpStatus: 200 }, 'AWS Health response decode failed'],
+    [{ source: 'aws-health', phase: 'shape', httpStatus: 200 }, 'AWS Health response shape failed'],
+  ] as const)('includes the retained source-read cause for %o', async (sourceReadFailure, expected) => {
+    const kv = trackingKV({ deepseek: { failSince: twoHoursAgo, sourceReadFailure } })
+    const send = vi.fn<DiscordSend>(async () => true)
+
+    await checkPersistentFetchFailures(kv, DISCORD, svcs, NOW, send)
+
+    expect(send.mock.calls[0][1].description).toContain(`Observed source-read failure: ${expected}.`)
   })
 
   it('does NOT alert when the failure is younger than 1h', async () => {

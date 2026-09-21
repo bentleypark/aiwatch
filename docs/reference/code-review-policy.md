@@ -55,12 +55,27 @@ agent's write clobbered concurrent edits (#1032), and a live mutation battery ru
 close to being reported as a Critical in the diff (#1224). Run mutation batteries on a copy, and when
 several agents are in flight, collect all reports before applying anything.
 
-## No lint checks whether a claim is true
+## Two claim shapes are linted; every other one is review's job
 
-`scripts/check-doc-symbols.mjs` (#1100) reads `CLAUDE.md` and `docs/reference/*.md` for citations, and
-it checks one thing: that a backticked identifier exists somewhere in source. **A false claim in prose
-is not an identifier**, so no lint sees it — in a doc or in a comment. Claims of this kind carry no
-automated check at all; they are review's job.
+`scripts/check-doc-symbols.mjs` runs two. #1100 reads `CLAUDE.md` and `docs/reference/*.md` and asks
+whether a backticked identifier exists somewhere in source. #1444 reads those **plus the comments of
+`worker/src/services.ts` and `worker/src/types.ts`**, and asks whether every service in a LIST written
+after a config field name actually sets that field. The list is the shape it can see: two or more ids
+joined by `/` or `,` is a lexical object, and a single id in a sentence is not — reading that needs the
+sentence parsed, and every attempt to do so reported a true sentence as a false claim.
+
+Its **reach** is short on purpose — the list has to start a few dozen characters after the field name,
+in one sentence — and it rejects most of the id-lists in these docs, because most of them sit beside a
+field they do not enumerate. Widening it turns those into false positives on true sentences, which is
+why it is narrow and why the run prints how many enumerations it actually checked. So **a clean run is
+not a proof**, and a red one is not always a wrong claim: when the
+sentence is true and its list is not that field's enumeration, the remedy is an entry in
+`doc-membership-allow.txt` with a reason, never a rewrite of correct prose.
+
+**Every other false claim in prose is invisible to it** — a behavioural claim ("the warn is gated on an
+empty id list"), an enumeration that OMITS a member, which cannot be told from `e.g.` and is
+deliberately unchecked, and a list written BEFORE the field name it belongs to, which the reach does not
+read. Those carry no automated check; they are review's job.
 
 ## Related
 

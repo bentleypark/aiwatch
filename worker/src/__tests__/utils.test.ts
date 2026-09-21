@@ -168,6 +168,14 @@ describe('trackFetchFailure (#1224 — blob-based)', () => {
     expect(await trackFetchFailure(store, undefined, 'azure')).toBe(true)
   })
 
+  it('keeps the source-read cause frozen once the count stops advancing past the threshold', async () => {
+    const at = new Date().toISOString()
+    const http429 = { source: 'aws-health', phase: 'http', httpStatus: 429 } as const
+    const store: TrackingStateBlob = { bedrock: { failCount: 3, failCountAt: at, sourceReadFailure: http429 } }
+    await trackFetchFailure(store, undefined, 'bedrock', 3, Date.parse(at) + 60_000, { source: 'aws-health', phase: 'transport', errorKind: 'timeout' })
+    expect(store.bedrock).toEqual({ failCount: 3, failCountAt: at, sourceReadFailure: http429 })
+  })
+
   it('writes the daily accumulator via KV when threshold is reached (still a real key — #1224 kept this one out of the blob)', async () => {
     const dailyStore: Record<string, string> = {}
     const kv = mockKV(dailyStore)
@@ -506,7 +514,7 @@ describe('readTrackingState / writeTrackingStateIfChanged (#1224 — the consoli
   })
 
   it('parses a stored blob', async () => {
-    const stored: TrackingStateBlob = { azure: { failCount: 2, failCountAt: '2026-08-01T00:00:00.000Z' } }
+    const stored: TrackingStateBlob = { azure: { failCount: 2, failCountAt: '2026-08-01T00:00:00.000Z', sourceReadFailure: { source: 'aws-health', phase: 'http', httpStatus: 429 } } }
     const kv = mockKV({ 'tracking:state': JSON.stringify(stored) })
     expect(await readTrackingState(kv)).toEqual(stored)
   })
@@ -562,6 +570,11 @@ describe('readTrackingState / writeTrackingStateIfChanged (#1224 — the consoli
 
     it('drops a non-string failSince', async () => {
       const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, failSince: 12345 } }) })
+      expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
+    })
+
+    it('drops an invalid source-read failure without discarding the fetch state', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, sourceReadFailure: { source: 'aws-health', phase: 'http', httpStatus: '429' } } }) })
       expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
     })
 
