@@ -221,8 +221,16 @@ export interface ServiceTrackingState {
   uptimeSeenAt?: string
   // When the nulls started — a full ISO timestamp, because the alert threshold is measured in hours.
   uptimeMissingSince?: string
+  sourceReadFailure?: StatusSourceReadFailure
 }
 export type TrackingStateBlob = Record<string, ServiceTrackingState>
+
+export type StatusSourceReadFailure = {
+  source: 'aws-health'
+  phase: 'transport' | 'http' | 'decode' | 'shape'
+  httpStatus?: number
+  errorKind?: 'timeout' | 'network' | 'unknown'
+}
 
 const TRACKING_STATE_KEY = 'tracking:state'
 
@@ -261,6 +269,14 @@ function sanitizeTrackingState(parsed: Record<string, unknown>): TrackingStateBl
     // last-reading date rather than be rejected.)
     if (typeof v.uptimeSeenAt === 'string') entry.uptimeSeenAt = v.uptimeSeenAt
     if (typeof v.uptimeMissingSince === 'string') entry.uptimeMissingSince = v.uptimeMissingSince
+    if (v.sourceReadFailure && typeof v.sourceReadFailure === 'object' && !Array.isArray(v.sourceReadFailure)) {
+      const failure = v.sourceReadFailure as Record<string, unknown>
+      if (failure.source === 'aws-health' && ['transport', 'http', 'decode', 'shape'].includes(String(failure.phase)) &&
+        (failure.httpStatus === undefined || (typeof failure.httpStatus === 'number' && Number.isInteger(failure.httpStatus))) &&
+        (failure.errorKind === undefined || ['timeout', 'network', 'unknown'].includes(String(failure.errorKind)))) {
+        entry.sourceReadFailure = failure as StatusSourceReadFailure
+      }
+    }
     if (Object.keys(entry).length > 0) clean[svcId] = entry
   }
   return clean
@@ -373,7 +389,7 @@ function isTimestampStale(at: string | undefined, nowMs: number, maxAgeMs: numbe
  * `failSince` is still live (`isFailSinceLive`).
  * Returns false while still climbing toward the first crossing (treat as operational / no data).
  */
-export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | undefined, svcId: string, threshold = 3, nowMs = Date.now()): Promise<boolean> {
+export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | undefined, svcId: string, threshold = 3, nowMs = Date.now(), sourceReadFailure?: StatusSourceReadFailure): Promise<boolean> {
   const entry = entryFor(store, svcId)
   // #1232 — the published verdict follows `failSince`, not the decaying count below. The count cannot
   // answer "is this source still unread?": its `failCountAt` stops being refreshed once the count
@@ -413,6 +429,7 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
   if (next <= threshold) {
     entry.failCount = next
     entry.failCountAt = new Date(nowMs).toISOString()
+    if (sourceReadFailure) entry.sourceReadFailure = sourceReadFailure
   }
   const shouldDegrade = next >= threshold || stillUnrecovered
   if (next === threshold) {
@@ -456,6 +473,7 @@ export function resetFetchFailure(store: TrackingStateBlob, svcId: string): void
   delete entry.failCount
   delete entry.failCountAt
   delete entry.failSince
+  delete entry.sourceReadFailure
   pruneIfEmpty(store, svcId)
 }
 
@@ -517,9 +535,16 @@ export function shouldAlertPersistentFailure(
 }
 
 /** Operator Discord alert body for a persistent (structural) status-page block (#500). */
-export function formatPersistentFailureAlert(serviceName: string, sinceIso: string, nowMs: number): string {
+export function formatPersistentFailureAlert(serviceName: string, sinceIso: string, nowMs: number, sourceReadFailure?: StatusSourceReadFailure): string {
   const elapsedH = Math.floor((nowMs - new Date(sinceIso).getTime()) / 3_600_000)
-  return `⚠️ **${serviceName}** status page has been unreachable for **${elapsedH}h+** — likely a structural block (URL moved / IP blocked), not a transient blip. Probe-based status may still be accurate; verify the configured status-page URL.`
+  const detail = sourceReadFailure ? ` Observed source-read failure: ${formatSourceReadFailure(sourceReadFailure)}.` : ''
+  return `⚠️ **${serviceName}** status page has been unreachable for **${elapsedH}h+** — likely a structural block (URL moved / IP blocked), not a transient blip. Probe-based status may still be accurate; verify the configured status-page URL.${detail}`
+}
+
+function formatSourceReadFailure(failure: StatusSourceReadFailure): string {
+  if (failure.phase === 'transport') return `AWS Health transport ${failure.errorKind ?? 'unknown'}`
+  if (failure.phase === 'http') return `AWS Health HTTP ${failure.httpStatus ?? 'unknown'}`
+  return `AWS Health response ${failure.phase} failed`
 }
 
 /**

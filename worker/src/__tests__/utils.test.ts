@@ -506,7 +506,7 @@ describe('readTrackingState / writeTrackingStateIfChanged (#1224 — the consoli
   })
 
   it('parses a stored blob', async () => {
-    const stored: TrackingStateBlob = { azure: { failCount: 2, failCountAt: '2026-08-01T00:00:00.000Z' } }
+    const stored: TrackingStateBlob = { azure: { failCount: 2, failCountAt: '2026-08-01T00:00:00.000Z', sourceReadFailure: { source: 'aws-health', phase: 'http', httpStatus: 429 } } }
     const kv = mockKV({ 'tracking:state': JSON.stringify(stored) })
     expect(await readTrackingState(kv)).toEqual(stored)
   })
@@ -562,6 +562,11 @@ describe('readTrackingState / writeTrackingStateIfChanged (#1224 — the consoli
 
     it('drops a non-string failSince', async () => {
       const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, failSince: 12345 } }) })
+      expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
+    })
+
+    it('drops an invalid source-read failure without discarding the fetch state', async () => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, sourceReadFailure: { source: 'aws-health', phase: 'http', httpStatus: '429' } } }) })
       expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
     })
 
