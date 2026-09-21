@@ -796,9 +796,7 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
   // single statusComponentId badge (so the badge is unchanged; statusComponentIds plural absent).
-  // junie: 2 — #1004 follow-on. Single statusComponentId badge (Central Console, the AI gateway) + a
-  // curated 2-row breakdown [Central Console, JetBrains AI]; no worst-of statusComponentIds.
-  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, junie: 2, voyageai: 2, pinecone: 6, twelvelabs: 11 }
+  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, voyageai: 2, pinecone: 6, twelvelabs: 11 }
 
   it('single-owner services carry the curated displayComponentIds count, keep their badge statusComponentId, and have no worst-of statusComponentIds', () => {
     for (const [id, count] of Object.entries(SINGLE_OWNER_COUNT)) {
@@ -843,8 +841,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(svc.componentDenylist).toBeUndefined()
     // incidentIoComponentId IS set — but only for the uptime worst-of (mirrors turbopuffer's
     // no-canonical-component shape), NOT every page component: deliberately scoped to ids old enough
-    // that a brand-new model can't pin the uptime window down to its own age (see the config comment —
-    // the same failure junie's config avoids).
+    // that a brand-new model can't pin the uptime window down to its own age (see the config comment).
     // Pinned by value so a roster change fails here and has to be made on purpose (drop, replace, add).
     expect(svc.incidentIoComponentId).toEqual([
       '01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KTM9G06402NMVSVM7WGEQEK2', '01KVEMYTCCD5S0RQWPBQZ431PE',

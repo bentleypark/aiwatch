@@ -192,7 +192,7 @@ describe('filterIncidents — incidentComponents exact-name scoping (#683)', () 
 
   it('keeps a genuine Junie-affecting incident (componentNames includes JetBrains AI)', () => {
     // #1004 follow-on — JetBrains removed the standalone "Junie" component; Junie now scopes to the
-    // "JetBrains AI" roll-up + "JetBrains Central Console" gateway (SUPPORT-A-2595 + our incident archive).
+    // "JetBrains AI" and "JetBrains Central Console" components.
     const inc = mockIncident({
       id: 'junie-auth',
       title: 'Auth & licensing service issues',
@@ -201,15 +201,13 @@ describe('filterIncidents — incidentComponents exact-name scoping (#683)', () 
     expect(filterIncidents([inc], junie()).map((i) => i.id)).toEqual(['junie-auth'])
   })
 
-  it('keeps a Central Console gateway incident (where the real LLM-API outages tag)', () => {
-    // The case that motivated option C: "AI Platform LLM APIs outage" tags Central Console, not the
-    // empty "JetBrains AI" component — a JetBrains-AI-only scope would have dropped it.
+  it('keeps a Central Console-tagged incident', () => {
     const inc = mockIncident({
-      id: 'llm-api-outage',
-      title: 'AI Platform LLM APIs outage',
+      id: 'console-incident',
+      title: 'Central Console incident',
       componentNames: ['JetBrains Central Console'],
     })
-    expect(filterIncidents([inc], junie()).map((i) => i.id)).toEqual(['llm-api-outage'])
+    expect(filterIncidents([inc], junie()).map((i) => i.id)).toEqual(['console-incident'])
   })
 
   it('drops an untagged incident (no componentNames) — nothing to match', () => {
