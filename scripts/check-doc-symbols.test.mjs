@@ -507,18 +507,19 @@ test('#1444: fenced blocks ARE scanned for membership, unlike for the symbol lin
 test('#1444: a field NO service sets is still checkable — its member set is empty, not absent', () => {
   // Derived from the interface, not from observed keys. Otherwise deleting a field's last setter makes
   // every claim about it MORE wrong and the gate GREENER, and 17 fields have exactly one setter today.
-  const declared = declaredConfigFields(readFileSync(join(ROOT, 'worker/src/types.ts'), 'utf8'))
-  assert.ok(declared.includes('componentGroupsInline'))
-  const members = fieldMembership(SERVICES, declared)
-  assert.deepEqual([...members.get('componentGroupsInline')], [], 'zero setters is a member set, not a gap')
-  assert.deepEqual(audit('`componentGroupsInline` is set on cohere/groq'),
-    ['componentGroupsInline<-cohere', 'componentGroupsInline<-groq'])
+  const zeroDeclared = declaredConfigFields('export interface ServiceConfig {\n  zeroSetField?: boolean\n}')
+  const members = fieldMembership(SERVICES, zeroDeclared)
+  assert.deepEqual([...members.get('zeroSetField')], [], 'zero setters is a member set, not a gap')
+  assert.deepEqual(auditMembership({
+    docs: [{ file: 'k.md', content: '`zeroSetField` is set on cohere/groq' }], services: SERVICES, declared: zeroDeclared,
+  }).map((finding) => `${finding.field}<-${finding.id}`),
+  ['zeroSetField<-cohere', 'zeroSetField<-groq'])
   // and the inversion itself: wiping a field from every service must never REMOVE a finding
-  const claim = [{ file: 'k.md', content: '`componentGroups` folds models for kimi/cohere' }]
-  const before = auditMembership({ docs: claim, services: SERVICES, declared })
-  const wiped = SERVICES.map((s) => ({ ...s, keys: new Set([...s.keys].filter((k) => k !== 'componentGroups')) }))
-  assert.ok(auditMembership({ docs: claim, services: wiped, declared }).length >= before.length,
-    'deleting the last setter made the gate greener')
+  const claim = [{ file: 'k.md', content: '`zeroSetField` is set on cohere/groq' }]
+  const withSetter = SERVICES.map((s) => (s.id === 'cohere' ? { ...s, keys: new Set([...s.keys, 'zeroSetField']) } : s))
+  const ids = (services) => auditMembership({ docs: claim, services, declared: zeroDeclared }).map((f) => f.id)
+  assert.deepEqual(ids(withSetter), ['groq'])
+  assert.deepEqual(ids(SERVICES), ['cohere', 'groq'], 'deleting the last setter made the gate greener')
 })
 
 // ── real-tree assertion: this is what fails CI on a new wrong membership ──

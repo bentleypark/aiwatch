@@ -142,11 +142,9 @@ export interface ServiceStatus {
    *  ≥2 components matched; absent otherwise. */
   components?: ServiceComponent[]
   /** When true, the breakdown UI renders its sections (each componentGroups group as a collapsible
-   *  block; each consecutive run of ungrouped components as a surface grid) in COMPONENT-ARRAY order —
-   *  groups interleaved among surfaces exactly where the curated `displayComponentIds` array places
-   *  their first member — instead of the default "surfaces grid first, then all groups". Lets a curated
-   *  array fully control layout (replicate: API · Inference and Training · Website groups, then the
-   *  Registry/Official Models surface rows, then the Support group). Propagated from config via `base`. */
+   *  block; each consecutive run of ungrouped components as a surface grid) in resolved COMPONENT-ARRAY
+   *  order — each group placed where its first member appears — instead of the default "surfaces grid
+   *  first, then all groups". Propagated from config via `base`. */
   componentGroupsInline?: boolean
   // Per-day impact for the status calendar. Keys are either a bare UTC date `YYYY-MM-DD`
   // (statuspage/betterstack — already the source's daily bucket) OR a full ISO timestamp
@@ -383,15 +381,14 @@ export interface ServiceConfig {
   displayComponentIds?: string[]
   // Per-component-id → group label, mirroring the OFFICIAL status page's component groups
   // (the v2 summary/components JSON does NOT expose group membership, so it must be curated
-  // here). Applied in the explicit-id breakdown path (displayComponentIds, or the statusComponentIds
-  // fallback): a matched component whose id is
+  // here). Applied in both breakdown paths: a matched component whose id is
   // present is tagged `group: <label>` so the UI collapses same-label components under one
   // header (worst-of status shown on the collapsed header), exactly like the dynamic
   // `MODEL_GROUP` path. Ids absent from this map render as individual top-level surface rows.
   componentGroups?: Record<string, string>
-  // When true, the breakdown renders its sections (group blocks + surface-run grids) in component-ARRAY
-  // order (groups interleaved among surfaces where the displayComponentIds array places them), for
-  // services whose curated array defines the official-page layout. Default (absent) =
+  // When true, the breakdown renders its sections (group blocks + surface-run grids) in resolved
+  // component-array order (groups interleaved among surface rows), for services whose official-page
+  // layout requires that order. Default (absent) =
   // surfaces-grid-first-then-groups, where surface rows lead and 'Models' trails.
   componentGroupsInline?: boolean
   // #606 Category A (cohere/groq) — DYNAMIC breakdown for per-model statuspages with
@@ -408,7 +405,8 @@ export interface ServiceConfig {
   // Names (case-insensitive) treated as individual "surface" rows in the breakdown; every
   // OTHER displayAllComponents component is folded into a collapsible "Models" group (#606,
   // matching the official status page's Endpoints/Models split). e.g. groq: ['API'];
-  // cohere: ['Coral','Infrastructure','Playground','embeddings']. Empty/absent → all grouped.
+  // cohere: ['Coral','Infrastructure','Playground'] (its endpoint members use componentGroups).
+  // Empty/absent → all grouped.
   componentSurfaces?: string[]
   // #606 Cat B — source the breakdown's component LIST from this URL (an Atlassian/incident.io
   // `components.json`) instead of the `apiUrl` summary.json. Needed when a shared status page

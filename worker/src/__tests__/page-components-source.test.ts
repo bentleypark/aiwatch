@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildPageComponents, fetchPageComponents, pickBreakdownComponents, fetchService, SERVICES, TRACKED_COMPONENT_IDS } from '../services'
+import { buildPageComponents, fetchPageComponents, pickBreakdownComponents, fetchService, resolveSvcComponents, SERVICES, TRACKED_COMPONENT_IDS } from '../services'
 import { diffPageComponents, partitionFirstSeen } from '../utils'
 import { computeIncidentIoUptime } from '../parsers/incident-io'
 import { UPSTREAM_FEEDS } from '../upstream-feed'
@@ -684,6 +684,24 @@ describe('prefetch + alert wiring (#1125)', () => {
 
   it('fireworks reads its breakdown from components.json — summary.json omits rotating components (#1455)', () => {
     expect(SERVICES.find((s) => s.id === 'fireworks')?.componentsUrl).toBe('https://status.fireworks.ai/api/v2/components.json')
+  })
+
+  it('cohere reads its dynamic breakdown from components.json — summary.json omits configured surfaces (#1458)', () => {
+    expect(SERVICES.find((s) => s.id === 'cohere')?.componentsUrl).toBe('https://status.cohere.com/api/v2/components.json')
+  })
+
+  it('cohere keeps the official Endpoints group with its endpoint surfaces (#1458)', () => {
+    const cohere = SERVICES.find((s) => s.id === 'cohere')!
+    const components = resolveSvcComponents(cohere, {
+      components: [
+        comp('infrastructure', 'Infrastructure'),
+        comp('playground', 'Playground'),
+        comp('01M1ETCNNYXYNTJY9J6RMJYKWB', 'All Endpoints'),
+        comp('website', 'Website'),
+      ],
+    })
+    expect(components.map((component) => component.name)).toEqual(['Infrastructure', 'Playground', 'All Endpoints'])
+    expect(components.map((component) => component.group)).toEqual([undefined, undefined, 'Endpoints'])
   })
 
   it('every service resolving components on such a page configures it too (#1175)', () => {

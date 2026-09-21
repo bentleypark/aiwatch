@@ -165,9 +165,9 @@ export const SERVICES: ServiceConfig[] = [
   // "Console Degraded" reached the API card. Pinned by a wiring test against the real title.
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, rootlyFeed: true, incidentExclude: ['console', 'le chat', 'documentation', 'website'], holdShortIncidents: true, displayComponentIds: ['304d5895-4dde-47be-b2e1-b7ebeb28dd4d', '719fdf28-3a3d-48f9-bfe3-7766e55091b4', 'ba3a6e31-16e8-48c1-9a0e-dc09d9f65b68', 'a4b27297-cd30-47b8-8ac0-1d1081fe905a', '4b32fcf7-6173-4456-85ba-048d384ae4a6', '74350cee-8e18-44bb-be49-9a5ae3f8f218', '951414e5-fcd1-4c1d-9f2f-acaf726bd245', '3e804d64-e876-488f-ba91-69913a2d54f9', '7ea6517b-2d19-42f8-b90f-39607552a60b', 'd16850a6-af05-4366-abc2-65d89959305d', '3abd6dd4-8de0-44ad-a65c-e11280a66ca9', '2b40e771-7a56-40b3-8e96-792740c301f4', '974aefe0-ee25-48a2-ac3d-4f12cc788c2d'] },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
-  // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
-  // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
-  { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['Coral', 'Infrastructure', 'Playground', 'embeddings'] },
+  // (dynamic, so new/retired models need no config edit). The flat API omits the official Endpoints
+  // group, so its two stable members are mapped explicitly; ungrouped components fold into Models.
+  { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE', componentsUrl: 'https://status.cohere.com/api/v2/components.json', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['Coral', 'Infrastructure', 'Playground'], componentGroups: { '01M1ETCNNYXYNTJY9J6RMJYKWB': 'Endpoints', '01HQ6CA39NZ5X3PRFPN71Q89TE': 'Endpoints' }, componentGroupsInline: true },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'] },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true, componentDenylist: ['Website'] },
   // #1198 — migrated off BetterStack (dead: /index.json and /feed both 404) onto the incident.io
@@ -826,19 +826,20 @@ export function resolveSvcComponents(
 ): ServiceComponent[] {
   if (!summaryData.components) return []
 
-  // 1. Dynamic mode — all components minus the (small, stable) denylist by name. Each
-  // non-surface component is tagged `group: 'Models'` so the UI collapses them under one
-  // header (#606); `componentSurfaces` names stay ungrouped as individual rows.
+  // 1. Dynamic mode — all components minus the (small, stable) denylist by name. Curated
+  // componentGroups preserve a provider-published group the flat API omits; each remaining
+  // non-surface component is tagged `group: 'Models'` so the UI collapses them under one header.
   if (config.displayAllComponents) {
     const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
     const surfaces = new Set((config.componentSurfaces ?? []).map((n) => n.toLowerCase()))
+    const groups = config.componentGroups
     const matched = summaryData.components
       .filter((c) => !deny.has(c.name.toLowerCase()))
       .map((c) => ({
         id: c.id,
         name: c.name,
         status: normalizeStatus(c.status),
-        ...(surfaces.has(c.name.toLowerCase()) ? {} : { group: MODEL_GROUP }),
+        ...(groups?.[c.id] ? { group: groups[c.id] } : surfaces.has(c.name.toLowerCase()) ? {} : { group: MODEL_GROUP }),
       }))
     return matched.length >= 2 ? matched : []
   }
