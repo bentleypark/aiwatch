@@ -92,8 +92,14 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  grounded in the live upstream. The chub flow and its doc-id list went with the tool; the project
  *  gotchas that section carried moved to reference-tooling.md, which loads on demand.
  *  45_954 → 45_720 (#1412): −234. workflow-gates.txt −192 (gate 2 rewritten to name
- *  `review-findings-only`); CLAUDE.md −42 (step 6's "never cap the rounds" clause deleted). */
-export const BUDGET_CHARS = 45_720
+ *  `review-findings-only`); CLAUDE.md −42 (step 6's "never cap the rounds" clause deleted).
+ *  45_720 → 45_976 (#1444): the `lint:docs` line costs +278; the constant moves 256 because 22
+ *  characters of prior slack were absorbed first. The doc-symbol gate now also fails a membership
+ *  claim, and a gate nobody knows fires is a gate that gets worked around. The line carries the SHAPE
+ *  it checks, its REACH, and where the escape hatch is: most id-lists in these docs sit beside a field
+ *  they do not enumerate, so a reader who does not know the reach reads a clean run as a proof and a
+ *  red one as a demand to rewrite true prose. The rest is in code-review-policy.md, on demand. */
+export const BUDGET_CHARS = 45_976
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

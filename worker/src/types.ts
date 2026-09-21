@@ -137,10 +137,9 @@ export interface ServiceStatus {
    *  crowd reports: an operational page + a probe spike + enough crowd reports surfaces the gated
    *  "Recent user reports" early-warning. Absent when no spike / no probe data. */
   probeSpike?: boolean
-  /** #604 — per-component snapshot for multi-component services (cerebras / cursor /
-   *  copilot / windsurf / langsmith / runway). The curated `statusComponentIds` subset,
-   *  worst-of'd into `status` above but retained here for the ServiceDetails / is-down
-   *  breakdown. Present only when ≥2 components matched; absent otherwise. */
+  /** #604 — per-component snapshot for multi-component services, worst-of'd into `status`
+   *  above but retained here for the ServiceDetails / is-down breakdown. Present only when
+   *  ≥2 components matched; absent otherwise. */
   components?: ServiceComponent[]
   /** When true, the breakdown UI renders its sections (each componentGroups group as a collapsible
    *  block; each consecutive run of ungrouped components as a surface grid) in COMPONENT-ARRAY order —
@@ -390,12 +389,11 @@ export interface ServiceConfig {
   // present is tagged `group: <label>` so the UI collapses same-label components under one
   // header (worst-of status shown on the collapsed header), exactly like the dynamic
   // `MODEL_GROUP` path. Ids absent from this map render as individual top-level surface rows.
-  // e.g. replicate: the 5 "Inference and Training" GPU/CPU hardware ids → 'Inference and Training'.
   componentGroups?: Record<string, string>
   // When true, the breakdown renders its sections (group blocks + surface-run grids) in component-ARRAY
   // order (groups interleaved among surfaces where the displayComponentIds array places them), for
-  // services whose curated array defines the official-page layout (replicate). Default (absent) =
-  // surfaces-grid-first-then-groups, matching cohere/groq/bfl where surface rows lead + 'Models' trails.
+  // services whose curated array defines the official-page layout. Default (absent) =
+  // surfaces-grid-first-then-groups, where surface rows lead and 'Models' trails.
   componentGroupsInline?: boolean
   // #606 Category A (cohere/groq) — DYNAMIC breakdown for per-model statuspages with
   // many, frequently-changing components. Instead of a hardcoded id list (which goes
