@@ -49,7 +49,7 @@ export async function checkPersistentFetchFailures(
       const name = nameById.get(svcId) ?? svcId
       const ok = await send(discordUrl, {
         title: `⚠️ ${name} — status page unreachable 1h+`,
-        description: formatPersistentFailureAlert(name, since, nowMs),
+        description: formatPersistentFailureAlert(name, since, nowMs, entry.sourceReadFailure),
         color: 0xe67e22, // warning amber — distinct from down (red) / degraded
       })
       // Write the dedup marker only on a successful send, so a failed Discord POST retries next cron.

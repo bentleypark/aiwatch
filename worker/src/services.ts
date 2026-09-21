@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure } from './parse-failure-log'
-import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type TrackingStateBlob } from './utils'
+import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
@@ -1679,6 +1679,21 @@ const GONE_STATUSES = new Set([401, 404, 410])
  *  service actually owns, so a busy shared feed cannot truncate ours out of the list. */
 const PUBLISHED_INCIDENT_CAP = 20
 
+type StatusSourceFailureLog = StatusSourceReadFailure & {
+  event: 'status_source_read_failure'
+  serviceId: string
+  latencyMs: number
+}
+
+function logStatusSourceReadFailure(failure: StatusSourceFailureLog) {
+  console.warn(failure)
+}
+
+function statusSourceTransportErrorKind(error: unknown): StatusSourceReadFailure['errorKind'] {
+  if (error instanceof Error && error.name === 'AbortError') return 'timeout'
+  return error instanceof Error ? 'network' : 'unknown'
+}
+
 // Retry once on failure to reduce false-positive 'down' from transient network issues
 // Retry uses shorter timeout to keep total wall-clock time under ~12s per service
 //
@@ -2832,15 +2847,24 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // #677 — AWS Health public events JSON API (one fetch, all regions, real start+end timestamps)
       if (config.awsHealthApi) {
         const start = Date.now()
+        let transportError: unknown
         const res = await fetchWithTimeout(config.awsHealthApi.url, 8000, {
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIWatch/1.0; +https://ai-watch.dev)' },
         }).catch((err) => {
-          console.warn(`[fetchService] ${config.id} AWS Health API failed:`, err instanceof Error ? err.message : err)
+          transportError = err
           return null
         })
         const latency = Date.now() - start
         if (!res || !res.ok) {
-          if (res) { console.warn(`[fetchService] ${config.id} AWS Health API HTTP ${res.status}`); res.body?.cancel() }
+          const sourceReadFailure: StatusSourceReadFailure = res
+            ? { source: 'aws-health', phase: 'http', httpStatus: res.status }
+            : { source: 'aws-health', phase: 'transport', errorKind: statusSourceTransportErrorKind(transportError) }
+          if (res) {
+            logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+            res.body?.cancel()
+          } else {
+            logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+          }
           // #1212 — an unambiguous gone/auth 4xx is the source being GONE, which matters most on THIS
           // leg: the endpoint is undocumented, so its retirement is a live possibility, and without
           // this it would publish a permanent `degraded` with liveness `unknown` — which the
@@ -2853,7 +2877,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           if (res && GONE_STATUSES.has(res.status)) {
             return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
           }
-          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
           // A failed read is not a verdict about the provider.
           return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
         }
@@ -2865,12 +2889,19 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // would otherwise be indistinguishable from a decode that threw. The 30d reason counter exists
         // to outlive the logs, so it must not conflate the two: they take different fixes.
         const DECODE_FAILED = Symbol('decode-failed')
+        let body: ArrayBuffer
+        try {
+          body = await res.arrayBuffer()
+        } catch (err) {
+          const sourceReadFailure: StatusSourceReadFailure = { source: 'aws-health', phase: 'transport', httpStatus: res.status, errorKind: statusSourceTransportErrorKind(err) }
+          logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+        }
         let json: unknown = DECODE_FAILED
         try {
-          json = decodeAwsHealthJson(await res.arrayBuffer(), res.headers.get('content-type'))
-        } catch (err) {
-          console.warn(`[fetchService] ${config.id} AWS Health API decode/parse failed (ct=${res.headers.get('content-type')}):`, err instanceof Error ? err.message : err)
-        }
+          json = decodeAwsHealthJson(body, res.headers.get('content-type'))
+        } catch {}
         // #1212 — the same verdict-not-a-list treatment the RSS leg gets. `parseAwsHealthEvents`
         // returns `[]` for anything it cannot read, which used to clear the streak and publish
         // `operational` — the false recovery this issue closes.
@@ -2878,9 +2909,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           ? { ok: false, reason: 'aws-health-unparseable' } as const
           : parseAwsHealthEventsResult(json, config.awsHealthApi.service)
         if (!health.ok) {
-          console.warn(`[fetchService] ${config.id} AWS Health API unreadable (${health.reason}, ct=${res.headers.get('content-type')})`)
+          const sourceReadFailure: StatusSourceReadFailure = { source: 'aws-health', phase: json === DECODE_FAILED ? 'decode' : 'shape', httpStatus: res.status }
+          logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
           await recordParseFailure(kv, Date.now(), config.id, health.reason)
-          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
           // `sourceUnknown` is what says "our read failed" on the badge and to the withdrawal hold,
           // rather than only in the counter.
           return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }

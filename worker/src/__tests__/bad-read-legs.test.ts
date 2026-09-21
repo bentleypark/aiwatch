@@ -154,11 +154,68 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
     const store: Record<string, string> = {}
     const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET') }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
     const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.status).toBe('unknown')
+    expect(trackingStore.bedrock?.sourceReadFailure).toEqual({ source: 'aws-health', phase: 'transport', errorKind: 'network' })
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'status_source_read_failure', serviceId: 'bedrock', source: 'aws-health', phase: 'transport', errorKind: 'network', latencyMs: expect.any(Number),
+    }))
+  })
+
+  it('classifies an AbortError fetch as a timeout', async () => {
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('deadline exceeded', 'AbortError') }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    await fetchService(bedrock, undefined, mockKV(store), trackingStore)
+
+    expect(trackingStore.bedrock?.sourceReadFailure).toEqual({ source: 'aws-health', phase: 'transport', errorKind: 'timeout' })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'status_source_read_failure', serviceId: 'bedrock', source: 'aws-health', phase: 'transport', errorKind: 'timeout', latencyMs: expect.any(Number),
+    }))
+  })
+
+  it('records a non-OK response without treating it as a transport failure', async () => {
+    const store: Record<string, string> = {}
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 429 })))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    await fetchService(bedrock, undefined, mockKV(store), {})
+
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'status_source_read_failure', serviceId: 'bedrock', source: 'aws-health', phase: 'http', httpStatus: 429, latencyMs: expect.any(Number),
+    }))
+  })
+
+  it('classifies a connection lost mid-body as transport, not decode', async () => {
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('[{"a"'))
+        c.error(new TypeError('Network connection lost'))
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
+
+    expect(svc.sourceUnknown).toBe(true)
+    expect(svc.status).toBe('unknown')
+    expect(trackingStore.bedrock?.sourceReadFailure).toEqual({ source: 'aws-health', phase: 'transport', httpStatus: 200, errorKind: 'network' })
+    expect(keysStartingWith(store, 'instatus-parse-fail:')).toHaveLength(0)
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'status_source_read_failure', serviceId: 'bedrock', source: 'aws-health', phase: 'transport', httpStatus: 200, errorKind: 'network', latencyMs: expect.any(Number),
+    }))
   })
 
   it('flags sourceUnknown on a 200 with an unparseable body', async () => {
@@ -167,12 +224,18 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
     const store: Record<string, string> = {}
     const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('not json at all', { status: 200 })))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
     const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.status).toBe('unknown')
     expect(trackingStore.bedrock?.failCount).toBe(3)
+    expect(trackingStore.bedrock?.sourceReadFailure).toEqual({ source: 'aws-health', phase: 'decode', httpStatus: 200 })
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'status_source_read_failure', serviceId: 'bedrock', source: 'aws-health', phase: 'decode', httpStatus: 200, latencyMs: expect.any(Number),
+    }))
   })
 
   it('separates a body that would not PARSE from one that parsed into the wrong thing', async () => {
@@ -199,14 +262,16 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
 
   it('a readable events payload is not flagged', async () => {
     const store: Record<string, string> = {}
-    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
+    const trackingStore: TrackingStateBlob = { bedrock: { failCount: 2, failCountAt: new Date().toISOString(), sourceReadFailure: { source: 'aws-health', phase: 'http', httpStatus: 429 } } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
     const svc = await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     expect(svc.sourceUnknown).toBeUndefined()
     expect(svc.status).toBe('operational')
     expect(trackingStore.bedrock).toBeUndefined()
+    expect(warn).not.toHaveBeenCalled()
   })
 })
 
@@ -264,13 +329,20 @@ describe('#1212 — a 200 that PARSES but is the wrong shape (bedrock)', () => {
 
   it('books the shape drift under its own reason, distinct from the parse failure', async () => {
     const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = {}
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
-    await fetchService(bedrock, undefined, mockKV(store), {})
+    await fetchService(bedrock, undefined, mockKV(store), trackingStore)
 
     const booked = keysStartingWith(store, 'instatus-parse-fail:')
     expect(booked).toHaveLength(1)
     expect(JSON.parse(store[booked[0]]).counts.bedrock).toEqual({ 'aws-health-not-an-array': 1 })
+    expect(trackingStore.bedrock?.sourceReadFailure).toEqual({ source: 'aws-health', phase: 'shape', httpStatus: 200 })
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'status_source_read_failure', serviceId: 'bedrock', source: 'aws-health', phase: 'shape', httpStatus: 200, latencyMs: expect.any(Number),
+    }))
   })
 })
 
