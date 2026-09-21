@@ -156,6 +156,23 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'fal', source: 'instatus-scrape', phase: 'transport', errorKind: 'network', latencyMs: expect.any(Number) }))
   })
 
+  it('clears a prior scrape HTTP cause when the later unreadable payload has no bounded fetch cause', async () => {
+    const responses = [
+      new Response(healthyNuxtHtml(), { status: 200 }),
+      new Response('unavailable', { status: 503 }),
+      new Response('<html><body>redesigned</body></html>', { status: 200 }),
+      new Response('<html><body>redesigned</body></html>', { status: 200 }),
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => responses.shift()!))
+    const trackingStore = {}
+
+    await fetchService(instatusSvc, undefined, undefined, trackingStore)
+    expect(trackingStore).toEqual({ fal: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'instatus-scrape', phase: 'http', httpStatus: 503 } } })
+
+    await fetchService(instatusSvc, undefined, undefined, trackingStore)
+    expect(trackingStore).toEqual({ fal: { failCount: 2, failCountAt: expect.any(String) } })
+  })
+
   it('carries the measured latency through the guard', async () => {
     // Review round 1 (Important 3): the early return dropped `latency` — all three Instatus services
     // are category:'api', so this was real data loss on every parse failure.

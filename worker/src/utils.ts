@@ -430,6 +430,7 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
     entry.failCount = next
     entry.failCountAt = new Date(nowMs).toISOString()
     if (sourceReadFailure) entry.sourceReadFailure = sourceReadFailure
+    else delete entry.sourceReadFailure
   }
   const shouldDegrade = next >= threshold || stillUnrecovered
   if (next === threshold) {

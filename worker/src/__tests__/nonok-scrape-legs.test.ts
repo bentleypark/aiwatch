@@ -188,6 +188,7 @@ describe('#1234 — the RSS leg (xai)', () => {
     expect(svc.sourceUnknown).toBe(true)
     expect(reasonsFor(store, 'xai')).toEqual({ 'rss-unreadable': 1 })
     expect(trackingStore.xai?.failCount).toBe(1)
+    expect(trackingStore.xai?.sourceReadFailure).toEqual({ source: 'rss', phase: 'transport', errorKind: 'network' })
   })
 
   it('a readable feed is NOT flagged — the false-positive direction', async () => {
@@ -245,6 +246,19 @@ describe('#1234 — the gcloud leg (gemini)', () => {
     expect(svc.incidentSourceStale, 'and it leaves the rankings, like any unreadable source').toBe(true)
   })
 
+  it('a thrown incidents.json fetch records a transport cause', async () => {
+    const store: Record<string, string> = {}
+    const trackingStore: TrackingStateBlob = {}
+    vi.stubGlobal('fetch', routedFetch([
+      [isGcloud, () => { throw new Error('ECONNRESET') }],
+      [isAistudio, () => new Response(EMPTY_AISTUDIO, { status: 200 })],
+    ]))
+
+    await fetchService(gemini, undefined, mockKV(store), trackingStore)
+
+    expect(trackingStore.gemini?.sourceReadFailure).toEqual({ source: 'gcloud', phase: 'transport', errorKind: 'network' })
+  })
+
   it('a readable incidents.json is NOT flagged', async () => {
     const store: Record<string, string> = {}
     const trackingStore: TrackingStateBlob = { gemini: { failCount: 2, failCountAt: new Date().toISOString() } }
@@ -279,6 +293,7 @@ describe('#1234 — the BetterStack index.json leg (together)', () => {
     expect(svc.sourceUnknown).toBe(true)
     expect(reasonsFor(store, 'together')).toEqual({ 'betterstack-unreadable': 1 })
     expect(trackingStore.together?.failCount).toBe(1)
+    expect(trackingStore.together?.sourceReadFailure).toEqual({ source: 'betterstack', phase: 'http', httpStatus: 502 })
   })
 
   it('the third consecutive bad read crosses into unknown', async () => {
@@ -465,6 +480,7 @@ describe('#1234 — when BOTH legs fail in one cycle', () => {
 
     expect(reasonsFor(store, 'together')).toEqual({ 'rss-unreadable': 1 })
     expect(trackingStore.together?.failCount, 'one cycle, one strike').toBe(1)
+    expect(trackingStore.together?.sourceReadFailure).toEqual({ source: 'rss', phase: 'http', httpStatus: 503 })
     expect(svc.sourceUnknown).toBe(true)
   })
 })
