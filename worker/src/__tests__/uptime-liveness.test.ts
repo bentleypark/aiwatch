@@ -1,8 +1,8 @@
 // #1389/#957 — "this service stopped publishing official uptime" operator alert.
 //
 // The failure it exists for: on 2026-09-10, 14 services went to `uptime30d: null` in a single cycle and
-// nothing said so. Every existing backstop is keyed on the SOURCE being unreachable, and the source was
-// answering 200 with a perfectly good component list — only the number was gone.
+// nothing said so: #500 fires on failed reads, #689 on a 4xx, #135 on an unresolvable component id,
+// and the source was answering 200 with a perfectly good component list — only the number was gone.
 //
 // The hard part is not detecting a null; it is not crying wolf about the services that have never
 // published uptime at all. The tracker's answer is that a reading must have been SEEN before its
@@ -279,7 +279,7 @@ describe('checkUptimeLiveness — the sweep', () => {
   //
   // Pinned as BEHAVIOUR, not left to prose: if someone reintroduces a marker check, these go red.
   it.each([
-    ['alerted:fetch-persistent', '#500 — status page unreachable 1h+'],
+    ['alerted:fetch-persistent', '#500 — status source unreadable 1h+'],
     ['alerted:source-dead', '#689 — status source returned 4xx'],
     ['alerted:component-missing', '#135 — configured component id no longer resolves'],
   ])('still alerts while %s is set (%s) — the overlap is deliberate', async (prefix) => {

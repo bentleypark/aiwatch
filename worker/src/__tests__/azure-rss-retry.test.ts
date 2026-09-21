@@ -173,9 +173,9 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
     expect(svc.latency, 'an HTTP error still measured a real round trip — that one is kept').toBeTypeOf('number')
   })
 
-  it('clears the #500 persistent-block marker too, once a retry recovers the source', async () => {
+  it('clears the #500 persistent-failure marker too, once a retry recovers the source', async () => {
     // The episode that matters: the streak already crossed, so `failSince` is armed and the 1h
-    // structural-block alert is counting. A rescue that cleared only the streak would leave that clock
+    // persistent-failure alert is counting. A rescue that cleared only the streak would leave that clock
     // running and eventually page the operator about a source that recovered.
     const store: Record<string, string> = {}
     const trackingStore: TrackingStateBlob = {
@@ -190,7 +190,7 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
 
     await fetchService(azure, undefined, mockKV(store), trackingStore)
 
-    expect(trackingStore.azureopenai, 'the persistent-block clock must be disarmed too').toBeUndefined()
+    expect(trackingStore.azureopenai, 'the persistent-failure clock must be disarmed too').toBeUndefined()
   })
 })
 

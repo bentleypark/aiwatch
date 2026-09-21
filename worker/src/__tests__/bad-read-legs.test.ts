@@ -486,8 +486,8 @@ describe('#1212 — a 4xx is the source being GONE, not an indeterminate read', 
     // Both endpoints are fetched from Worker egress — one behind Azure Front Door, one undocumented
     // with a spoofed UA — so a 403/429 is far likelier to be a WAF challenge or a rate limit than a
     // retirement. Reading it as dead would publish a green badge at poll rate with no streak, and
-    // would skip `trackFetchFailure`, disarming the #500 persistent-block alert that describes a
-    // block correctly. Neither service is probed, so nothing could correct a wrong `sourceDead`.
+    // would skip `trackFetchFailure`, disarming the #500 persistent-failure alert, which is the one
+    // signal that stays right here. Neither service is probed, so nothing could correct a wrong `sourceDead`.
     const trackingStore: TrackingStateBlob = { azureopenai: { failCount: 2, failCountAt: new Date().toISOString() }, bedrock: { failCount: 2, failCountAt: new Date().toISOString() } }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('blocked', { status: code })))
 
