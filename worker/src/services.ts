@@ -2179,6 +2179,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       if (!configRes.ok) {
         console.error(`[fetchService] ${config.id} Datadog config.json returned HTTP ${configRes.status}`)
         configRes.body?.cancel()
+        const sourceReadFailure: StatusSourceReadFailure = { source: 'datadog-config', phase: 'http', httpStatus: configRes.status }
+        logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
         // Same split the Cloudflare arm makes: this is a static machine document, so an unambiguous
         // gone/auth 4xx is a retired source, while 403/429 can still be an egress restriction.
         if (GONE_STATUSES.has(configRes.status)) {
@@ -2190,7 +2192,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // `instatus-parse-fail:` (the counter kv-schema.md sends them to) sees zero while the source
         // is walled, and `fetch-fail:daily` cannot substitute: 48h TTL, rising edge only.
         await recordParseFailure(kv, Date.now(), config.id, 'dd-fetch-unreadable')
-        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
       }
       // `.text()` then parse, not `.json()`: a 200 carrying HTML (a bot interstitial, or the app shell
@@ -2200,7 +2202,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       try { configText = await configRes.text() } catch (err) {
         console.warn(`[fetchService] ${config.id} Datadog config.json body read failed:`, err instanceof Error ? err.message : err)
         await recordParseFailure(kv, Date.now(), config.id, 'dd-fetch-unreadable')
-        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        const sourceReadFailure: StatusSourceReadFailure = { source: 'datadog-config', phase: 'transport', httpStatus: configRes.status, errorKind: statusSourceTransportErrorKind(err) }
+        logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
       }
       const parsed = parseDatadogStatusPage(safeJsonParse(configText), config.datadogComponentGroupId ?? '')
@@ -2973,10 +2977,13 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
 
       const start = Date.now()
       const scrapeUrl = config.instatusUrl || config.rssFeedUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
+      let scrapeTransportError: unknown
+      let betterStackTransportError: unknown
       const [res, scrapeRes, betterStackRes, aistudioRes] = await Promise.all([
         fetchWithTimeout(config.statusUrl),
         scrapeUrl
           ? fetchWithTimeout(scrapeUrl).catch((err) => {
+              scrapeTransportError = err
               console.warn(`[fetchService] ${config.id} scrape failed:`, err instanceof Error ? err.message : err)
               parseErrors++
               return null
@@ -2984,6 +2991,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           : Promise.resolve(null),
         config.betterStackUrl
           ? fetchWithTimeout(`${config.betterStackUrl}/index.json`, 5000).catch((err) => {
+              betterStackTransportError = err
               console.warn(`[fetchService] ${config.id} BetterStack uptime fetch failed:`, err instanceof Error ? err.message : err)
               parseErrors++
               return null
@@ -3401,7 +3409,13 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // makes the plugin monitor emit a false "✅ recovered", so the rising-edge counter is blind to
         // the metric the remaining decision needs. 30d retention, so a weekly check sees the window.
         await recordParseFailure(kv, Date.now(), config.id, sourceParseFailure)
-        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        const sourceReadFailure: StatusSourceReadFailure | undefined = sourceParseFailure === 'scrape-unreadable'
+          ? scrapeRes
+            ? { source: 'instatus-scrape', phase: 'http', httpStatus: scrapeRes.status }
+            : { source: 'instatus-scrape', phase: 'transport', errorKind: statusSourceTransportErrorKind(scrapeTransportError) }
+          : undefined
+        if (sourceReadFailure) logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+        const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
         return {
           ...base,
           status: shouldDegrade ? 'unknown' : 'operational',
@@ -3431,6 +3445,15 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // failed legs are ONE unreadable cycle, and counting them twice would make a two-leg service
       // climb the ramp at a different rate than a one-leg service for the same outage.
       const legFailure = scrapeLegFailure ?? betterStackLegFailure
+      const sourceReadFailure: StatusSourceReadFailure | undefined = legFailure === scrapeLegFailure && scrapeLegFailure
+        ? scrapeRes
+          ? { source: config.rssFeedUrl ? 'rss' : 'gcloud', phase: 'http', httpStatus: scrapeRes.status }
+          : { source: config.rssFeedUrl ? 'rss' : 'gcloud', phase: 'transport', errorKind: statusSourceTransportErrorKind(scrapeTransportError) }
+        : legFailure === betterStackLegFailure && betterStackLegFailure
+          ? betterStackRes
+            ? { source: 'betterstack', phase: 'http', httpStatus: betterStackRes.status }
+            : { source: 'betterstack', phase: 'transport', errorKind: statusSourceTransportErrorKind(betterStackTransportError) }
+          : undefined
       let legShouldDegrade = false
       // #1234 — an unreadable leg only reaches the WIRE where the verdict it leaves behind is a false
       // green. See the return below for why the other verdicts are untouched.
@@ -3444,7 +3467,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // reasoning as the `sourceParseFailure` guard above: one failed cycle already publishes a
         // service with no incidents, so a rising-edge counter cannot answer how often this fires.
         await recordParseFailure(kv, Date.now(), config.id, legFailure)
-        legShouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
+        if (sourceReadFailure) logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+        legShouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
       } else if (parseErrors > 0) {
         console.warn(`[fetchService] ${config.id} completed with ${parseErrors} parse error(s)`)
         await trackFetchFailure(trackingStore, kv, config.id)

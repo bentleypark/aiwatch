@@ -136,16 +136,41 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
 
   it('a 404 scrape does not read as "no incidents"', async () => {
     const calls = stubScrapeFailure(() => new Response('nope', { status: 404 }))
-    const svc = await fetchService(instatusSvc, undefined, undefined, {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const trackingStore = {}
+    const svc = await fetchService(instatusSvc, undefined, undefined, trackingStore)
     expectTwoSameUrl(calls)
     expect(svc.sourceUnknown, 'a 404 scrape must flag the source, not publish operational').toBe(true)
+    expect(trackingStore).toEqual({ fal: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'instatus-scrape', phase: 'http', httpStatus: 404 } } })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'fal', source: 'instatus-scrape', phase: 'http', httpStatus: 404, latencyMs: expect.any(Number) }))
   })
 
   it('a throwing scrape does not read as "no incidents"', async () => {
     const calls = stubScrapeFailure(() => { throw new Error('ECONNRESET') })
-    const svc = await fetchService(instatusSvc, undefined, undefined, {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const trackingStore = {}
+    const svc = await fetchService(instatusSvc, undefined, undefined, trackingStore)
     expectTwoSameUrl(calls)
     expect(svc.sourceUnknown).toBe(true)
+    expect(trackingStore).toEqual({ fal: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'instatus-scrape', phase: 'transport', errorKind: 'network' } } })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'fal', source: 'instatus-scrape', phase: 'transport', errorKind: 'network', latencyMs: expect.any(Number) }))
+  })
+
+  it('clears a prior scrape HTTP cause when the later unreadable payload has no bounded fetch cause', async () => {
+    const responses = [
+      new Response(healthyNuxtHtml(), { status: 200 }),
+      new Response('unavailable', { status: 503 }),
+      new Response('<html><body>redesigned</body></html>', { status: 200 }),
+      new Response('<html><body>redesigned</body></html>', { status: 200 }),
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => responses.shift()!))
+    const trackingStore = {}
+
+    await fetchService(instatusSvc, undefined, undefined, trackingStore)
+    expect(trackingStore).toEqual({ fal: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'instatus-scrape', phase: 'http', httpStatus: 503 } } })
+
+    await fetchService(instatusSvc, undefined, undefined, trackingStore)
+    expect(trackingStore).toEqual({ fal: { failCount: 2, failCountAt: expect.any(String) } })
   })
 
   it('carries the measured latency through the guard', async () => {

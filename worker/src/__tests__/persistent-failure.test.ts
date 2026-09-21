@@ -61,6 +61,11 @@ describe('checkPersistentFetchFailures (#500)', () => {
     [{ source: 'aws-health', phase: 'http', httpStatus: 429 }, 'AWS Health HTTP 429'],
     [{ source: 'aws-health', phase: 'decode', httpStatus: 200 }, 'AWS Health response decode failed'],
     [{ source: 'aws-health', phase: 'shape', httpStatus: 200 }, 'AWS Health response shape failed'],
+    [{ source: 'datadog-config', phase: 'http', httpStatus: 403 }, 'Datadog config.json HTTP 403'],
+    [{ source: 'instatus-scrape', phase: 'http', httpStatus: 503 }, 'Instatus scrape HTTP 503'],
+    [{ source: 'rss', phase: 'http', httpStatus: 503 }, 'RSS feed HTTP 503'],
+    [{ source: 'gcloud', phase: 'http', httpStatus: 504 }, 'Google Cloud incidents.json HTTP 504'],
+    [{ source: 'betterstack', phase: 'http', httpStatus: 502 }, 'Better Stack index.json HTTP 502'],
   ] as const)('includes the retained source-read cause for %o', async (sourceReadFailure, expected) => {
     const kv = trackingKV({ deepseek: { failSince: twoHoursAgo, sourceReadFailure } })
     const send = vi.fn<DiscordSend>(async () => true)

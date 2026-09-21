@@ -176,6 +176,15 @@ describe('trackFetchFailure (#1224 — blob-based)', () => {
     expect(store.bedrock).toEqual({ failCount: 3, failCountAt: at, sourceReadFailure: http429 })
   })
 
+  it('clears a retained cause when the next counted failure has none', async () => {
+    const at = Date.parse('2026-09-21T00:00:00.000Z')
+    const store: TrackingStateBlob = {
+      fal: { failCount: 1, failCountAt: new Date(at).toISOString(), sourceReadFailure: { source: 'instatus-scrape', phase: 'http', httpStatus: 503 } },
+    }
+    await trackFetchFailure(store, undefined, 'fal', 3, at + 60_000)
+    expect(store.fal).toEqual({ failCount: 2, failCountAt: new Date(at + 60_000).toISOString() })
+  })
+
   it('writes the daily accumulator via KV when threshold is reached (still a real key — #1224 kept this one out of the blob)', async () => {
     const dailyStore: Record<string, string> = {}
     const kv = mockKV(dailyStore)
@@ -606,8 +615,13 @@ describe('readTrackingState / writeTrackingStateIfChanged (#1224 — the consoli
       expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
     })
 
-    it('drops an invalid source-read failure without discarding the fetch state', async () => {
-      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, sourceReadFailure: { source: 'aws-health', phase: 'http', httpStatus: '429' } } }) })
+    it.each([
+      { source: 'not-a-source', phase: 'http', httpStatus: 429 },
+      { source: 'aws-health', phase: 'not-a-phase', httpStatus: 429 },
+      { source: 'aws-health', phase: 'transport', errorKind: 'not-an-error-kind' },
+      { source: 'aws-health', phase: 'http', httpStatus: '429' },
+    ])('drops an invalid source-read failure without discarding the fetch state (%o)', async (sourceReadFailure) => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, sourceReadFailure } }) })
       expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
     })
 

@@ -23,7 +23,7 @@ function mockKV(store: Record<string, string>): KVLike {
   } as unknown as KVLike
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 /** Capture the URLs the branch asks for, so "it fetched something" cannot pass for "it fetched the
  *  right document". */
@@ -186,7 +186,9 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
   it('books a transient non-OK as unknown, and an unambiguous gone status as a dead source', async () => {
     stubFetch(() => new Response('', { status: 503 }))
     const store: Record<string, string> = {}
-    const transient = await fetchService(openrouter, undefined, mockKV(store) as never, {})
+    const trackingStore = {}
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const transient = await fetchService(openrouter, undefined, mockKV(store) as never, trackingStore)
     expect(transient.sourceUnknown).toBe(true)
     expect(transient.sourceDead).toBeUndefined()
     // An HTTP failure books a reason too. The retired parser carried a caller-set one for exactly
@@ -195,10 +197,33 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     const key = Object.keys(store).find((k) => k.startsWith('instatus-parse-fail:'))
     expect(key, `expected a parse-failure counter key, got: ${Object.keys(store).join(', ')}`).toBeDefined()
     expect(Object.keys(parseParseFailDay(store[key!]).counts.openrouter)).toEqual(['dd-fetch-unreadable'])
+    expect(trackingStore).toEqual({ openrouter: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'datadog-config', phase: 'http', httpStatus: 503 } } })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'openrouter', source: 'datadog-config', phase: 'http', httpStatus: 503, latencyMs: expect.any(Number) }))
 
     stubFetch(() => new Response('', { status: 404 }))
     const gone = await fetchService(openrouter, undefined, undefined, {})
     expect(gone.sourceDead).toBe(true)
     expect(gone.incidentSourceStale).toBe(true)
+  })
+
+  it.each([401, 404, 410])('logs a gone config response before returning sourceDead (%i)', async (httpStatus) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    stubFetch(() => new Response('', { status: httpStatus }))
+
+    const service = await fetchService(openrouter, undefined, undefined, {})
+
+    expect(service.sourceDead).toBe(true)
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'openrouter', source: 'datadog-config', phase: 'http', httpStatus, latencyMs: expect.any(Number) }))
+  })
+
+  it('records a config body read as transport, not HTTP', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const trackingStore = {}
+    stubFetch(() => new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('connection lost')) } }), { status: 200 }))
+
+    await fetchService(openrouter, undefined, undefined, trackingStore)
+
+    expect(trackingStore).toEqual({ openrouter: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'datadog-config', phase: 'transport', httpStatus: 200, errorKind: 'network' } } })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'openrouter', source: 'datadog-config', phase: 'transport', httpStatus: 200, errorKind: 'network', latencyMs: expect.any(Number) }))
   })
 })

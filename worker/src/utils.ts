@@ -225,8 +225,11 @@ export interface ServiceTrackingState {
 }
 export type TrackingStateBlob = Record<string, ServiceTrackingState>
 
+export const STATUS_SOURCE_READ_FAILURE_SOURCES = ['aws-health', 'datadog-config', 'instatus-scrape', 'rss', 'gcloud', 'betterstack'] as const
+type StatusSourceReadFailureSource = typeof STATUS_SOURCE_READ_FAILURE_SOURCES[number]
+
 export type StatusSourceReadFailure = {
-  source: 'aws-health'
+  source: StatusSourceReadFailureSource
   phase: 'transport' | 'http' | 'decode' | 'shape'
   httpStatus?: number
   errorKind?: 'timeout' | 'network' | 'unknown'
@@ -271,7 +274,7 @@ function sanitizeTrackingState(parsed: Record<string, unknown>): TrackingStateBl
     if (typeof v.uptimeMissingSince === 'string') entry.uptimeMissingSince = v.uptimeMissingSince
     if (v.sourceReadFailure && typeof v.sourceReadFailure === 'object' && !Array.isArray(v.sourceReadFailure)) {
       const failure = v.sourceReadFailure as Record<string, unknown>
-      if (failure.source === 'aws-health' && ['transport', 'http', 'decode', 'shape'].includes(String(failure.phase)) &&
+      if (STATUS_SOURCE_READ_FAILURE_SOURCES.includes(failure.source as StatusSourceReadFailureSource) && ['transport', 'http', 'decode', 'shape'].includes(String(failure.phase)) &&
         (failure.httpStatus === undefined || (typeof failure.httpStatus === 'number' && Number.isInteger(failure.httpStatus))) &&
         (failure.errorKind === undefined || ['timeout', 'network', 'unknown'].includes(String(failure.errorKind)))) {
         entry.sourceReadFailure = failure as StatusSourceReadFailure
@@ -429,6 +432,7 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
     entry.failCount = next
     entry.failCountAt = new Date(nowMs).toISOString()
     if (sourceReadFailure) entry.sourceReadFailure = sourceReadFailure
+    else delete entry.sourceReadFailure
   }
   const shouldDegrade = next >= threshold || stillUnrecovered
   if (next === threshold) {
@@ -558,9 +562,17 @@ export function formatPersistentFailureAlert(serviceName: string, sinceIso: stri
 }
 
 function formatSourceReadFailure(failure: StatusSourceReadFailure): string {
-  if (failure.phase === 'transport') return `AWS Health transport ${failure.errorKind ?? 'unknown'}`
-  if (failure.phase === 'http') return `AWS Health HTTP ${failure.httpStatus ?? 'unknown'}`
-  return `AWS Health response ${failure.phase} failed`
+  const source = {
+    'aws-health': 'AWS Health',
+    'datadog-config': 'Datadog config.json',
+    'instatus-scrape': 'Instatus scrape',
+    rss: 'RSS feed',
+    gcloud: 'Google Cloud incidents.json',
+    betterstack: 'Better Stack index.json',
+  }[failure.source]
+  if (failure.phase === 'transport') return `${source} transport ${failure.errorKind ?? 'unknown'}`
+  if (failure.phase === 'http') return `${source} HTTP ${failure.httpStatus ?? 'unknown'}`
+  return `${source} response ${failure.phase} failed`
 }
 
 /**
