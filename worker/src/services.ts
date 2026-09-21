@@ -277,8 +277,8 @@ export const SERVICES: ServiceConfig[] = [
   //   • the model components are display-only
   //     (displayComponentIds, #606) — NOT the badge, so a model-component change can't flip the card
   //     (which would drag status-edge alerts + cache refresh). componentGroups folds the six `* Model`
-  //     components under one collapsible "Models" header (replicate pattern); Open API + API Service
-  //     stay as ungrouped surface rows.
+  //     components under one collapsible "Models" header; Open API + API Service stay as ungrouped
+  //     surface rows.
   //   • The auto-monitor opens frequent `critical` incidents titled `Agentic 模型错误报警` that attach to
   //     no component (verified 2026-07-18) and carry paperwork-inflated durations (recorded hours vs
   //     minutes of real impact — the #1019 pattern). autoMonitorTitles tags them → grouped in the UI +

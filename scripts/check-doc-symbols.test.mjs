@@ -1,12 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   stripFencedBlocks, isCodeShaped, isMemoryPageName, isRemovalContext, REMOVAL_WINDOW_CHARS,
   extractInlineTokens, parseAllowlist, auditDocSymbols,
   docFiles, collectSourceBlob,
+  parseServiceConfigs, fieldMembership, isSentenceEnd, isAbsenceContext,
+  tsCommentText, auditMembership, membershipDocs, readServiceConfigs, readDeclaredFields, declaredConfigFields,
+  MEMBERSHIP_ALLOW_FILE, membershipBindings, splitTsSource, auditTree,
 } from './check-doc-symbols.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -213,4 +218,371 @@ test('#1312 REAL DOCS: a fabricated symbol planted in the longest table row is c
     findings.some((f) => f.token === 'readPluginPollsFabricated1312'),
     'a fabricated symbol in the longest row went unflagged — the #1312 blind spot is back',
   )
+})
+
+// ── #1444: membership claims ─────────────────────────────────────────────────
+// The symbol check asks whether a name EXISTS; these ask whether a stated MEMBERSHIP is true. The
+// one-off audit written during #1434 failed its own positive control — its window truncated at the `.`
+// in `e.g.`, the construct these enumerations are written with — and reported CLEAN with a known-bad
+// claim injected. So every assertion below is a control, positive or negative.
+
+const SERVICES = readServiceConfigs(ROOT)
+const DECLARED = readDeclaredFields(ROOT)
+const audit = (content, file = 'x.md') => auditMembership({ docs: [{ file, content }], services: SERVICES, declared: DECLARED })
+  .map((f) => `${f.field}<-${f.id}`)
+
+test('#1444: the parsed roster equals service-groups.ts — a degraded brace-match reddens here', () => {
+  // GROUP_MEMBERS is an independent list of every service id, itself CI-pinned to the frontend by
+  // service-groups-sync.test.ts. Comparing against it needs no hand-typed count.
+  const groups = readFileSync(join(ROOT, 'worker/src/service-groups.ts'), 'utf8')
+  const block = groups.slice(groups.indexOf('GROUP_MEMBERS'), groups.indexOf('const ID_TO_GROUP'))
+  const roster = new Set([...block.matchAll(/'([a-z0-9]+)'/g)].map((m) => m[1]))
+  assert.deepEqual(new Set(SERVICES.map((s) => s.id)), roster)
+})
+
+test('#1444: the two halves of splitTsSource stay line-aligned, literals included', () => {
+  // The trailing-comment rule below reads `codeLines[i]` for comment line `i`, so the halves have to
+  // number the same. A multi-line template literal used to add lines to `code` and none to `comments`,
+  // after which every block boundary landed on the wrong line. Both scanned files hold today, but by
+  // accident — neither contains such a literal.
+  const lines = (s) => s.split('\n').length
+  for (const f of ['worker/src/services.ts', 'worker/src/types.ts']) {
+    const src = readFileSync(join(ROOT, f), 'utf8')
+    const { code, comments } = splitTsSource(src)
+    assert.equal(lines(code), lines(src), f)
+    assert.equal(lines(comments), lines(src), f)
+  }
+  const withLiteral = 'const a = `l1\nl2\nl3`\n// note\nconst b = 1\n'
+  const split = splitTsSource(withLiteral)
+  assert.equal(lines(split.comments), lines(withLiteral), 'a multi-line literal desynchronised the halves')
+  assert.equal(lines(split.code), lines(withLiteral))
+})
+
+test('#1444: a config line with a TRAILING comment ends the block, it does not fuse across it', () => {
+  // 29 config lines in services.ts carry one. Joining across a config entry fuses a service's docblock,
+  // its entry, and the NEXT service's docblock into one logical line, where a field name in one
+  // service's comment governs an id run in another's — a claim present in no comment.
+  const ts = [
+    '  // The dynamic breakdown uses displayAllComponents.',
+    "  { id: 'cohere', displayAllComponents: true },  // pairs with elevenlabs/replicate below",
+    '  // unrelated prose',
+  ].join('\n')
+  assert.equal(tsCommentText(ts).split('\n').length, 3, 'blocks were fused across the config line')
+  assert.deepEqual(audit(tsCommentText(ts), 'services.ts'), [])
+})
+
+test('#1444: a config example written in a COMMENT is not config', () => {
+  // services.ts is both the claim corpus and the truth those claims are checked against, so a
+  // `{ id: … }` example in a comment would silence a false claim about that service — fail-open, in the
+  // one direction a guard must never fail. One scanner splits the file; the halves cannot disagree.
+  const src = readFileSync(join(ROOT, 'worker/src/services.ts'), 'utf8')
+  const example = "\n// Shape reference, not live config:\n"
+    + "//   { id: 'kimi', name: 'K', statusUrl: 'x', componentDenylist: ['Website'] }\n"
+  // Through readServiceConfigs, not parseServiceConfigs — the defect is the WIRING, and calling the
+  // pure fn leaves reverting that wiring green.
+  const root = mkdtempSync(join(tmpdir(), 'doc-membership-'))
+  mkdirSync(join(root, 'worker/src'), { recursive: true })
+  writeFileSync(join(root, 'worker/src/services.ts'), src + example)
+  const withExample = readServiceConfigs(root)
+  assert.equal(withExample.length, SERVICES.length, 'a commented-out entry was counted as a service')
+  assert.ok(!withExample.find((s) => s.id === 'kimi').keys.has('componentDenylist'),
+    'a field set only in a comment example entered the membership truth')
+  rmSync(root, { recursive: true, force: true })
+  // and the same scanner still hands that text to the CLAIM side
+  assert.ok(tsCommentText(example).includes('Shape reference'))
+})
+
+test('#1444: the brace matcher is quote-aware — a brace inside a string value does not shift depth', () => {
+  // Asserted by parseServiceConfigs\' docblock and exercised by nothing in the real config, so without
+  // this the property is a claim. A `}` in a component name ends the entry early and drops every key
+  // after it; a `{` swallows the next entry whole.
+  // A LONE `}` — a balanced `} {` cancels out in the key scanner and discriminates nothing there.
+  const src = "const S = [\n"
+    + "  { id: 'aa', name: 'A }', statusUrl: 'x', displayAllComponents: true },\n"
+    + "  { id: 'bb', name: 'B {', statusUrl: 'y', componentGroups: {} },\n]"
+  const parsed = parseServiceConfigs(src)
+  assert.deepEqual(parsed.map((s) => s.id), ['aa', 'bb'], 'a braced string ended an entry early')
+  assert.ok(parsed[0].keys.has('displayAllComponents'), 'keys after the `}` string were dropped')
+  assert.ok(parsed[1].keys.has('componentGroups'), 'keys after the `{` string were dropped')
+})
+
+test('#1444: membership is read off the config, not off a hand-kept list', () => {
+  const members = fieldMembership(SERVICES)
+  // The round-15 finding on #1434: four different spellings of this set across docs and comments, the
+  // narrowest of them `cohere/groq`.
+  assert.deepEqual([...members.get('displayAllComponents')].sort(), ['bfl', 'cerebras', 'cohere', 'fireworks', 'groq'])
+  assert.ok(!members.has('id') && !members.has('name'), 'non-camelCase keys are prose, not citations')
+  for (const s of SERVICES) assert.ok(s.keys.has('statusUrl'), `${s.id} parsed without statusUrl`)
+})
+
+// ── positive controls: real #1434 claims, verbatim from 1c48d0cd^ ──
+// Re-derive one with `git show 1c48d0cd^:<file>` before editing it; a paraphrase certifies a capability
+// the check may not have on the real construct — which is what round 1 of this PR shipped.
+
+test('#1444 POSITIVE CONTROL: api-endpoints.md charged cerebras to statusComponentIds', () => {
+  // cerebras runs `displayAllComponents`; it has never set `statusComponentIds`.
+  const line = 'from `statusComponentIds` (#604: cerebras/runway/langsmith/copilot/windsurf), `displayComponentIds` (#606: elevenlabs/replicate/cursor)'
+  assert.ok(audit(line).includes('statusComponentIds<-cerebras'))
+})
+
+test('#1444 POSITIVE CONTROL: the list binds to the field BEFORE it, not the nearest one', () => {
+  // Same line: `cerebras/runway/…` sits 9 chars after `statusComponentIds` and 4 before
+  // `displayComponentIds`. Binding to the nearest charges runway/copilot/windsurf — all real
+  // statusComponentIds members — to displayComponentIds, three false positives from one list.
+  const line = 'from `statusComponentIds` (#604: cerebras/runway/langsmith/copilot/windsurf), `displayComponentIds` (#606: kimi/cursor)'
+  assert.deepEqual(audit(line), ['statusComponentIds<-cerebras'])
+})
+
+test('#1444 POSITIVE CONTROL: adding-a-service.md, the `e.g.` form inside a parenthetical', () => {
+  // #1384 took replicate off `displayComponentIds`. The #1434 one-off audit truncated at the `.` of
+  // `e.g.` and reported CLEAN on exactly this line.
+  const line = '   - **Curated allowlist** → `displayComponentIds: [ids]` (a few stable surfaces; e.g. elevenlabs, replicate, assemblyai).'
+  // elevenlabs joined replicate off this path in #1445, so today's config flags both.
+  assert.deepEqual(audit(line), ['displayComponentIds<-elevenlabs', 'displayComponentIds<-replicate'])
+})
+
+test('#1444 NEGATIVE CONTROL: status-determination.md, a list a full sentence after its field', () => {
+  // The claim is real and pre-#1445 it was wrong, but the list is a sentence away from the name it
+  // enumerates. Binding across that gap charged most runs in this corpus to a field they do not
+  // enumerate, each a TRUE sentence. Out of scope, by measurement.
+  const line = '2. **`displayComponentIds` (#606)** — explicit curated allowlist of surface ids (display-only).'
+    + ' Single-owner pages: elevenlabs, replicate, assemblyai, deepgram, characterai, junie, voyageai, pinecone.'
+  assert.deepEqual(audit(line), [])
+})
+
+test('#1444 POSITIVE CONTROL: a claim wrapped across comment lines is still one claim', () => {
+  // A line-scoped scan sees the name on one line and the list on the next, and reports nothing.
+  const ts = [
+    '  // The dynamic breakdown. `displayAllComponents`',
+    '  // covers: cohere/groq/elevenlabs.',
+    "  { id: 'zz', displayAllComponents: true },",
+  ].join('\n')
+  assert.deepEqual(audit(tsCommentText(ts), 'services.ts'), ['displayAllComponents<-elevenlabs'])
+})
+
+test('#1444 NEGATIVE CONTROL: a list the field merely passes near is not its enumeration', () => {
+  // Round 5's finding, as the reproduction that produced it: drop `displayComponentIds` from codex and
+  // this real services.ts comment becomes a false claim under a proximity-only binding, while the
+  // sentence itself stays true. Asserted against a config where codex DOES set the field and one where
+  // it does not, so the test cannot pass by accident of today's roster.
+  const line = '// displayComponentIds (#606 Cat B): the official "ChatGPT" group. Display-only; disjoint from openai/codex.'
+  assert.deepEqual(audit(line, 'services.ts'), [])
+  const without = SERVICES.map((s) => (s.id === 'codex'
+    ? { ...s, keys: new Set([...s.keys].filter((k) => k !== 'displayComponentIds')) } : s))
+  assert.deepEqual(auditMembership({ docs: [{ file: 'services.ts', content: line }], services: without, declared: DECLARED }), [])
+})
+
+test('#1444: a sentence end between the name and the list ends the claim', () => {
+  const same = '`displayAllComponents` covers: cohere/groq/elevenlabs'
+  const across = '`displayAllComponents` is the dynamic path. Its users are cohere/groq/elevenlabs'
+  assert.deepEqual(audit(same), ['displayAllComponents<-elevenlabs'])
+  assert.deepEqual(audit(across), [])
+})
+
+// ── negative controls: every false positive measured while building this ──
+
+test('#1444 NEGATIVE CONTROL: a single id in prose is not an enumeration', () => {
+  // Reading one means parsing the sentence around it, and each attempt flagged a TRUE sentence:
+  // `…give \`Website\` via componentDenylist and mistral gives \`le chat\` via incidentExclude` charged
+  // mistral to componentDenylist, and the answer was to rewrite correct prose.
+  assert.deepEqual(audit('cohere/groq/together/cerebras give `Website` via componentDenylist and mistral gives `le chat` via incidentExclude'), [])
+  assert.deepEqual(audit('// e.g. replicate: the ids → \'Inference and Training\'.\ncomponentGroups?: x', 'types.ts'), [])
+})
+
+test('#1444 NEGATIVE CONTROL: a negation BEFORE the citation governs the list after it', () => {
+  const line = 'Fireworks sets no `statusComponentIds`, so `resolveSvcStatus` returns at its FIRST branch'
+    + ' (the page overall indicator) — same as cohere/groq/together, which are in the identical bucket.'
+  assert.deepEqual(audit(line), [])
+})
+
+test('#1444 NEGATIVE CONTROL: a negation AFTER the list governs it too', () => {
+  const line = 'Positioned AFTER the `statusComponentIds` branch (BFL keeps its curated worst-of).'
+    + ' cohere/groq/together/fireworks have no statusComponent* so they returned at branch 1 already.'
+  assert.deepEqual(audit(line), [])
+})
+
+test('#1444 NEGATIVE CONTROL: a sentence break alone ends the binding, with no negation present', () => {
+  // kv-schema.md's real shape. Nothing here denies membership — the list simply belongs to the next
+  // sentence — so the binding, not the absence guard, has to be what declines it.
+  const across = 'see the `holdShortIncidents` row below). Tier-1 (`claude`/`openai`/`gemini`) stay alertable.'
+  assert.deepEqual(audit(across), [])
+  assert.equal(audit(across.replace('row below).', 'row below,')).length, 3, 'without the break it IS the claim')
+})
+
+test('#1444: a list written with backticks or bold is the same list', () => {
+  // `` `a`/`b` `` is the corpus's usual spelling; dropping the decoration tolerance loses it silently.
+  for (const run of ['cohere/groq/elevenlabs', '`cohere`/`groq`/`elevenlabs`', '**cohere**, **groq**, **elevenlabs**']) {
+    assert.deepEqual(audit(`\`displayAllComponents\` covers ${run}`), ['displayAllComponents<-elevenlabs'], run)
+  }
+})
+
+test('#1444 NEGATIVE CONTROL: an introducer longer than the reach is a different clause', () => {
+  // Straddles RUN_MAX_GAP by one character either side, so widening the reach reddens as loudly as
+  // narrowing it. Literals, not `RUN_MAX_GAP ± 1`: a fixture derived from the constant moves with it
+  // and pins nothing.
+  const at = (n) => `\`displayAllComponents\` ${'x'.repeat(n)} cohere/groq/elevenlabs`
+  assert.equal(audit(at(37)).length, 1, 'a 40-character introducer is within the reach')
+  assert.deepEqual(audit(at(38)), [], 'a 41-character one is not')
+})
+
+// ── mutation coverage: each guard, removed, must resurface a measured artifact ──
+
+test('#1444: `/** … */` blocks are part of the scanned corpus, not only `//` lines', () => {
+  // 25 of them in types.ts and 52 in services.ts. The real-tree assertion asserts EMPTINESS, so losing
+  // this branch removes corpus without reddening anything there.
+  const ts = ['/**', ' * `displayAllComponents` covers: cohere/groq/elevenlabs.', ' */', 'const x = 1'].join('\n')
+  assert.deepEqual(audit(tsCommentText(ts), 'types.ts'), ['displayAllComponents<-elevenlabs'])
+  assert.ok(tsCommentText(readFileSync(join(ROOT, 'worker/src/types.ts'), 'utf8')).includes('per-component breakdown'),
+    'a real `/** … */` docblock is missing from the extracted prose')
+})
+
+test('#1444 MUTATION: a naive `//` comment scan turns every https:// config line into prose', () => {
+  const ts = "  { id: 'zz', statusUrl: 'https://status.zz.io', incidentKeywords: ['claude'] },"
+  assert.equal(tsCommentText(ts), '', 'a URL is not a comment')
+  assert.ok((ts.match(/\/\/[^\n]*/g) || []).join('').includes('incidentKeywords'), 'the naive scan swallows it')
+})
+
+test('#1444 MUTATION: isSentenceEnd must read the NEXT character, not a regex that always matches', () => {
+  // `/\s|$/.test(ch)` is true for EVERY single character, because `$` matches at the end of it. That
+  // bug ends a sentence at the first `.`, `incident.io` and `2026-09-01` included.
+  assert.ok(!isSentenceEnd('incident.io page', 'incident'.length), 'a dot inside a token is not a sentence end')
+  assert.ok(isSentenceEnd('gone. Next', 4))
+  assert.ok(!isSentenceEnd('surfaces, e.g. elevenlabs', 'surfaces, e.g'.length), 'e.g. is not a sentence end')
+})
+
+test('#1444: a negation in the INTRODUCER denies the claim; one anywhere else does not', () => {
+  // The scope is the whole point. Judging the surrounding sentences instead silences five of the seven
+  // enumerations this check can see, each over a negation about something else — measured by injecting
+  // a non-member into every one of the seven: 2 of 7 caught that way, 7 of 7 this way.
+  for (const intro of ['is not set on', 'never covers', 'lists no service but']) {
+    assert.deepEqual(audit(`\`displayAllComponents\` ${intro} cohere/elevenlabs`), [], intro)
+  }
+  assert.deepEqual(audit('`displayAllComponents` covers cohere/elevenlabs'), ['displayAllComponents<-elevenlabs'])
+  assert.deepEqual(audit('`displayAllComponents` covers cohere/elevenlabs. It is not on replicate'),
+    ['displayAllComponents<-elevenlabs'], 'a negation in the NEXT sentence must not reach back')
+  assert.deepEqual(audit('`componentDenylist` is served no-store for cohere/elevenlabs'),
+    ['componentDenylist<-elevenlabs'], '`no-store` is not the word "no"')
+})
+
+test('#1444: fenced blocks ARE scanned for membership, unlike for the symbol lint', () => {
+  // directory-map.md's entire body is one fence, and it is where the per-module annotations live, so
+  // stripping it (as #1100 does, for code examples) drops that prose out of the scanned corpus.
+  const map = membershipDocs(ROOT).find((d) => d.file === 'docs/reference/directory-map.md')
+  assert.ok(/^[ \t]*```/m.test(map.content), 'the fence was stripped — the annotations went with it')
+  assert.ok(map.content.includes('flapSuppression'), 'the enumerations inside it are not in the corpus')
+})
+
+test('#1444: a field NO service sets is still checkable — its member set is empty, not absent', () => {
+  // Derived from the interface, not from observed keys. Otherwise deleting a field's last setter makes
+  // every claim about it MORE wrong and the gate GREENER, and 17 fields have exactly one setter today.
+  const declared = declaredConfigFields(readFileSync(join(ROOT, 'worker/src/types.ts'), 'utf8'))
+  assert.ok(declared.includes('componentGroupsInline'))
+  const members = fieldMembership(SERVICES, declared)
+  assert.deepEqual([...members.get('componentGroupsInline')], [], 'zero setters is a member set, not a gap')
+  assert.deepEqual(audit('`componentGroupsInline` is set on cohere/groq'),
+    ['componentGroupsInline<-cohere', 'componentGroupsInline<-groq'])
+  // and the inversion itself: wiping a field from every service must never REMOVE a finding
+  const claim = [{ file: 'k.md', content: '`componentGroups` folds models for kimi/cohere' }]
+  const before = auditMembership({ docs: claim, services: SERVICES, declared })
+  const wiped = SERVICES.map((s) => ({ ...s, keys: new Set([...s.keys].filter((k) => k !== 'componentGroups')) }))
+  assert.ok(auditMembership({ docs: claim, services: wiped, declared }).length >= before.length,
+    'deleting the last setter made the gate greener')
+})
+
+// ── real-tree assertion: this is what fails CI on a new wrong membership ──
+
+test('#1444: `file:field:id` allowlist, so a true sentence is never the thing that has to change', () => {
+  const line = '`displayAllComponents` covers cohere/elevenlabs'
+  const at = (file, allow) => auditMembership({
+    docs: [{ file, content: line }], services: SERVICES, declared: DECLARED, allow: new Map(allow),
+  }).length
+  assert.deepEqual(audit(line), ['displayAllComponents<-elevenlabs'])
+  assert.equal(at('a.md', [['a.md:displayAllComponents:elevenlabs', 'true sentence, not an enumeration']]), 0)
+  // #1444's evidence is the SAME wrong pair repeated across files, so an entry must not blanket them:
+  assert.equal(at('b.md', [['a.md:displayAllComponents:elevenlabs', 'written for a.md']]), 1,
+    'an entry for one file silenced the same claim in another')
+  for (const key of ['a.md:displayComponentIds:elevenlabs', 'a.md:displayAllComponents:replicate']) {
+    assert.equal(at('a.md', [[key, 'wrong pair']]), 1, `${key} must not silence a different pair`)
+  }
+})
+
+test('#1444 RATCHET: the number of enumerations this gate actually checks', () => {
+  // The real-tree assertion below asserts EMPTINESS, so it cannot tell "clean" from "nothing bound":
+  // a copy edit that lengthens an introducer past the reach deletes a site from coverage in silence.
+  // Only one site carries an anchor of its own, so this count is what makes such a drop visible.
+  // If it moved, find out WHICH site and why before touching the number.
+  const bound = membershipBindings({ docs: membershipDocs(ROOT), services: SERVICES, declared: DECLARED })
+  assert.equal(bound.length, 7, `coverage moved:\n${bound.map((b) => `  ${b.file}: ${b.field} <- ${b.run}`).join('\n')}`)
+  // and the number the CLI shows an operator has to BE that number, not a proxy that never moves
+  const out = execFileSync('node', [join(ROOT, 'scripts/check-doc-symbols.mjs')], { cwd: ROOT, encoding: 'utf8' })
+  assert.match(out, new RegExp(`doc-membership lint: ${bound.length} enumeration`))
+})
+
+test('#1444: the shipped allowlist is empty and every entry would need a reason', () => {
+  const { allow, noReason } = parseAllowlist(readFileSync(join(ROOT, MEMBERSHIP_ALLOW_FILE), 'utf8'))
+  assert.equal(allow.size, 0, 'the tree starts with no entries — #1444 exit condition')
+  assert.deepEqual(noReason, [])
+  assert.deepEqual(parseAllowlist('displayAllComponents:elevenlabs').noReason, ['displayAllComponents:elevenlabs'],
+    'a reason-less entry is itself a failure')
+})
+
+test('#1444 WIRING: the CLI passes `declared` and `allow`, neither of which moves a count', () => {
+  // `docs` and `services` are pinned by the ratchet, because cutting them moves the bound count. These
+  // two do not, so cutting either left all 50 tests green: the escape hatch stopped working, and a
+  // zero-setter field stopped being checked, in silence. Only behaviour at a real root catches it.
+  const root = mkdtempSync(join(tmpdir(), 'audit-tree-'))
+  const write = (rel, body) => {
+    mkdirSync(join(root, dirname(rel)), { recursive: true })
+    writeFileSync(join(root, rel), body)
+  }
+  write('worker/src/services.ts', 'export const SERVICES = [\n'
+    + "  { id: 'cohere', name: 'C', statusUrl: 'x', displayAllComponents: true },\n"
+    + "  { id: 'groq', name: 'G', statusUrl: 'y', displayAllComponents: true },\n]\n")
+  write('worker/src/types.ts', 'export interface ServiceConfig {\n  displayAllComponents?: boolean\n  componentGroupsInline?: boolean\n}\n')
+  // a zero-setter field with a list after it: only `declared` makes this checkable at all
+  write('CLAUDE.md', 'The `componentGroupsInline` layout is set on cohere/groq today.\n')
+  write('docs/reference/keep.md', '# keep\n')
+  write(MEMBERSHIP_ALLOW_FILE, '')
+  assert.deepEqual(auditTree(root).membership.map((f) => `${f.field}<-${f.id}`),
+    ['componentGroupsInline<-cohere', 'componentGroupsInline<-groq'], '`declared` is not wired in')
+
+  write(MEMBERSHIP_ALLOW_FILE, 'CLAUDE.md:componentGroupsInline:cohere  # true sentence\nCLAUDE.md:componentGroupsInline:groq  # ditto\n')
+  assert.deepEqual(auditTree(root).membership, [], '`allow` is not wired in')
+  write(MEMBERSHIP_ALLOW_FILE, 'CLAUDE.md:componentGroupsInline:cohere\n')
+  assert.deepEqual(auditTree(root).noReason, ['CLAUDE.md:componentGroupsInline:cohere'],
+    'a reason-less entry must be reported from the membership allowlist too')
+  rmSync(root, { recursive: true, force: true })
+})
+
+test('#1444 WIRING: membershipDocs reads every corpus the headline claim names', () => {
+  // Without this the whole corpus can go to `[]` and the real-tree assertion below still passes,
+  // because it asserts emptiness. Same poisoned-source shape as lint-korean-copy (#1094).
+  const docs = membershipDocs(ROOT)
+  for (const f of ['CLAUDE.md', 'worker/src/services.ts', 'worker/src/types.ts']) {
+    assert.ok(docs.find((x) => x.file === f)?.content.length > 500, `${f} is not in the scanned corpus`)
+  }
+  assert.ok(docs.some((x) => x.file.startsWith('docs/reference/')), 'docs/reference is not in the scanned corpus')
+  const poisoned = docs.map((x) => (x.file === 'CLAUDE.md'
+    ? { ...x, content: `${x.content}\nThe \`displayAllComponents\` set is cohere, groq, elevenlabs.` }
+    : x))
+  assert.ok(auditMembership({ docs: poisoned, services: SERVICES, declared: DECLARED }).some((f) => f.id === 'elevenlabs'))
+})
+
+test('#1444: the real docs + services.ts/types.ts comments carry no wrong membership', () => {
+  const findings = auditMembership({ docs: membershipDocs(ROOT), services: SERVICES, declared: DECLARED })
+  assert.deepEqual(
+    findings.map((f) => `${f.file}: \`${f.field}\` ← ${f.id} — «${f.run}»`), [],
+    'a doc or comment names a service on a config path it is not on — fix it, or delete the enumeration',
+  )
+})
+
+test('#1444 REAL DOCS: a wrong member planted in a real enumeration is caught', () => {
+  // A pure-function control cannot prove the gate reads the corpus it is pointed at.
+  const file = join(ROOT, 'docs/reference/api-endpoints.md')
+  const raw = readFileSync(file, 'utf8')
+  assert.ok(raw.includes('#606: cohere/groq'), 'anchor enumeration missing — re-anchor this test, do not delete it')
+  const mutated = raw.replace('#606: cohere/groq', '#606: cohere/groq/elevenlabs')
+  assert.notEqual(mutated, raw, 'mutation did not apply')
+  const findings = auditMembership({ docs: [{ file, content: mutated }], services: SERVICES, declared: DECLARED })
+  assert.deepEqual(findings.map((f) => f.id), ['elevenlabs'])
 })

@@ -1,0 +1,13 @@
+# #1444 — membership-claim allowlist for scripts/check-doc-symbols.mjs.
+#
+# One entry per line: `path/to/file:field:serviceId  # why this list is not that field's enumeration`.
+# The reason is mandatory — an entry without one is itself a lint failure. The path is part of the key
+# on purpose: #1444's own evidence is the same wrong pair repeated across files in different wording,
+# so an entry written for one true sentence must not blanket the others.
+#
+# Reach for this ONLY when the flagged sentence is true and the list is not an enumeration of the
+# field beside it. If the sentence is wrong, fix it; if the list mirrors a config set, delete the
+# list (#1110) — an enumeration nothing pins is unbounded verification debt either way.
+#
+# Empty on purpose: the current tree has no such site. The lists that sit near a field they do not
+# enumerate are held out by the reach, not by an entry here.
