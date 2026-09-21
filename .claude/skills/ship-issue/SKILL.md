@@ -122,6 +122,20 @@ is the *procedure* — follow it top to bottom.
    directory — kv-schema, ga4-events, fallback-tiers, status-determination, discord-alert-paths, etc.),
    README(.ko), `CONTRIBUTING.md`, `index.html` SEO meta, `aiwatch-reports/`. Adding a service → the
    full `adding-a-service.md` checklist.
+   - **Retiring a claim? Enumerate by SYMBOL first, then edit — never search for the words you are
+     changing.** When a change makes a previously-true statement about a mechanism false, that
+     statement is replicated across comments, docs and test names in spellings you will not predict.
+     Grep for the mechanism's **identifiers** (`grep -rln "trackFetchFailure\|failSince\|fetch-fail"`),
+     read every hit, and write the list down BEFORE editing any of it. A vocabulary sweep cannot
+     enumerate itself: on #1391 three consecutive rounds each swept, declared the claim gone, and the
+     next reviewer found another spelling (`structural block` → `persistent-block` → `structurally
+     dead` → `source block`), because each pattern was built from the wording already found. The
+     symbol frontier is finite and spelling-independent; a word list is neither.
+   - **Then leave ONE home.** Everywhere else points at it or says nothing. `kv-schema.md` already
+     does this (the reason vocabulary "is the `SourceParseFailure` union", not a list); a second home
+     is a deliberate choice that states why it exists, as `parse-failure-log.ts` does. Note that
+     `lint:docs` will NOT catch a stale copy: #1444 scopes it to identifier existence and membership
+     and declares behavioural claims a non-goal, so nothing gates this but the enumeration above.
 8. **Commit + PR** (gate #3 — only after the user confirms):
    - Commit message + PR body end with the required Co-Authored-By / 🤖 footer.
    - `closes #N` **only when ALL checklist items are done AND verified** — this includes
