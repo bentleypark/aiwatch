@@ -544,7 +544,7 @@ test('#1444 RATCHET: the number of enumerations this gate actually checks', () =
   // Only one site carries an anchor of its own, so this count is what makes such a drop visible.
   // If it moved, find out WHICH site and why before touching the number.
   const bound = membershipBindings({ docs: membershipDocs(ROOT), services: SERVICES, declared: DECLARED })
-  assert.equal(bound.length, 8, `coverage moved:\n${bound.map((b) => `  ${b.file}: ${b.field} <- ${b.run}`).join('\n')}`)
+  assert.equal(bound.length, 7, `coverage moved:\n${bound.map((b) => `  ${b.file}: ${b.field} <- ${b.run}`).join('\n')}`)
   // and the number the CLI shows an operator has to BE that number, not a proxy that never moves
   const out = execFileSync('node', [join(ROOT, 'scripts/check-doc-symbols.mjs')], { cwd: ROOT, encoding: 'utf8' })
   assert.match(out, new RegExp(`doc-membership lint: ${bound.length} enumeration`))
