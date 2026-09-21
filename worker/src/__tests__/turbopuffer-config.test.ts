@@ -6,8 +6,8 @@
 // Several load-bearing fields are intentionally ABSENT — a regression that silently ADDS them (or drops
 // addedAt) has no other runtime signal. Mirrors fal-config.test.ts (#758) / image-services-config.test.ts (#756).
 //
-// The uptime roster itself (15 regions, Dashboard excluded) + the worst-of parser are pinned in
-// turbopuffer-uptime.test.ts. This file pins the fields that must stay ABSENT.
+// The uptime roster (Dashboard excluded) is pinned by value below; the worst-of parser in
+// turbopuffer-uptime.test.ts.
 
 import { describe, it, expect } from 'vitest'
 import { SERVICES, SERVICE_ADDED_AT } from '../services'
@@ -39,6 +39,19 @@ describe('#857 turbopuffer vector service config', () => {
     const s = SERVICES.find((x) => x.id === 'turbopuffer')!
     expect(Array.isArray(s.incidentIoComponentId), 'turbopuffer uptime = worst-of a region roster').toBe(true)
     expect((s.incidentIoComponentId as string[]).length, 'an empty roster is a silent uptime drop').toBeGreaterThan(0)
+  })
+
+  it('turbopuffer\'s uptime roster is exactly the region ids, Dashboard excluded, pinned by value (#1452)', () => {
+    const s = SERVICES.find((x) => x.id === 'turbopuffer')!
+    expect(s.incidentIoComponentId).toEqual([
+      '01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA',
+      '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ',
+      '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1',
+      '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ',
+      '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD',
+      '01M1EB2MF3HY0FGY4G4XKG6NWD', '01M1ENXV57AJASWNHCRYDGS5N8', '01M1ENXV5779G7VTW967EJHE5H',
+      '01M1ENXV572CR9QK3M3RB2236R',
+    ])
   })
 
   it('turbopuffer carries addedAt so the #802 coverage gate holds it out of the ranking for 30 days', () => {

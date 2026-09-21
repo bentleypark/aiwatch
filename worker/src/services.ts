@@ -362,7 +362,7 @@ export const SERVICES: ServiceConfig[] = [
   // 84/good/high). The page published uptime the whole time (display_uptime_mode 'chart_and_percentage'
   // as of 2026-07). Should it ever flip to 'chart_only' the values become "$undefined" and this degrades
   // to "No official uptime" — the honest state, not a misreading.
-  // Uptime = worst-of across the 15 per-region API components. There is no group aggregate to read
+  // Uptime = worst-of across the per-region API components. There is no group aggregate to read
   // (every component is ungrouped), so a single region would be an arbitrary pick that reports 100%
   // while another region is down; worst-of matches the statusComponentIds badge convention (#379).
   // `Dashboard` (01K0Q5QSJV9KAZMEMMQ0NCHD9E) is deliberately EXCLUDED because it is not an API surface —
@@ -370,12 +370,12 @@ export const SERVICES: ServiceConfig[] = [
   // differs: excluding Run Ingestion stopped an over-good ~100% from hiding incidents, while excluding
   // Dashboard stops a non-API component from dragging the worst-of down. A new region must be added here;
   // `computeIncidentIoUptime` warns when a configured id no longer resolves (ULID rotation), and
-  // turbopuffer-uptime.test.ts pins the roster against the Dashboard id.
+  // turbopuffer-config.test.ts pins the roster by value.
   // The badge still rides the overall page indicator (status-determination step 4) — a region belongs on a
   // Region card, not the badge/breakdown — so no statusComponentId / displayComponentIds. Score keeps its
   // probe (api.turbopuffer.com → {"status":"🐡"}) and the #802 coverage gate still holds it out of the
   // ranking until 30d of coverage accrue, independent of this uptime fix.
-  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD'], addedAt: '2026-07-01' }, // #802 / #857
+  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD', '01M1EB2MF3HY0FGY4G4XKG6NWD', '01M1ENXV57AJASWNHCRYDGS5N8', '01M1ENXV5779G7VTW967EJHE5H', '01M1ENXV572CR9QK3M3RB2236R'], addedAt: '2026-07-01' }, // #802 / #857
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // Black Forest Labs / FLUX (#756) — image-generation sibling for Stability AI (un-blocks the image
   // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge
