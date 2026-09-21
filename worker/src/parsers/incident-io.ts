@@ -677,7 +677,7 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
 }
 
 // #1004 — incident.io's Statuspage-compatible API returns `components: []` on EVERY incident. Verified
-// across every incident.io page we monitor: status.jetbrains.cloud 0/14, status.smith.langchain.com
+// on four pages: status.jetbrains.cloud 0/14, status.smith.langchain.com
 // 0/25, status.langfuse.com 0/25, status.openai.com 0/25. So `parseIncidents` yields no
 // `componentNames`, and a service scoped by `incidentComponents` (an exact component-NAME allowlist,
 // #683) drops EVERY incident — permanently and silently, since the `includeUntaggedIncidents` valve is
