@@ -515,12 +515,11 @@ test('#1444: a field NO service sets is still checkable — its member set is em
   }).map((finding) => `${finding.field}<-${finding.id}`),
   ['zeroSetField<-cohere', 'zeroSetField<-groq'])
   // and the inversion itself: wiping a field from every service must never REMOVE a finding
-  const declared = declaredConfigFields(readFileSync(join(ROOT, 'worker/src/types.ts'), 'utf8'))
-  const claim = [{ file: 'k.md', content: '`componentGroups` folds models for kimi/cohere' }]
-  const before = auditMembership({ docs: claim, services: SERVICES, declared })
-  const wiped = SERVICES.map((s) => ({ ...s, keys: new Set([...s.keys].filter((k) => k !== 'componentGroups')) }))
-  assert.ok(auditMembership({ docs: claim, services: wiped, declared }).length >= before.length,
-    'deleting the last setter made the gate greener')
+  const claim = [{ file: 'k.md', content: '`zeroSetField` is set on cohere/groq' }]
+  const withSetter = SERVICES.map((s) => (s.id === 'cohere' ? { ...s, keys: new Set([...s.keys, 'zeroSetField']) } : s))
+  const ids = (services) => auditMembership({ docs: claim, services, declared: zeroDeclared }).map((f) => f.id)
+  assert.deepEqual(ids(withSetter), ['groq'])
+  assert.deepEqual(ids(SERVICES), ['cohere', 'groq'], 'deleting the last setter made the gate greener')
 })
 
 // ── real-tree assertion: this is what fails CI on a new wrong membership ──

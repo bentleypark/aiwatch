@@ -708,15 +708,15 @@ describe('prefetch + alert wiring (#1125)', () => {
     // The #1175 drift: chatgpt sat on status.openai.com beside page-mates reading the superset while it
     // resolved its own badge ids against summary.json's window. The prefetch reads one components.json
     // per PAGE, so a page-mate left off it buys nothing — it only narrows what that service can see.
-    // A lone `statusComponentId` counts too, and so does a name-matched `statusComponent`; dynamic
-    // `displayAllComponents` breakdowns count as well. BOUNDARY: the
+    // A lone `statusComponentId` counts too, and so does a name-matched `statusComponent`: both fall back
+    // to the page overall indicator when the component rotates out (the #783 shape). BOUNDARY: the
     // population is pages that ALREADY have a componentsUrl, so this is a page-mate consistency check,
     // not proof the defect class is closed — a page where NO service sets one is invisible here.
     const withUrl = new Set(SERVICES.filter((s) => s.componentsUrl && s.apiUrl).map((s) => s.apiUrl!))
     expect(withUrl.size, 'no page configures a componentsUrl — the assertion would be vacuous').toBeGreaterThan(0)
     const resolving = SERVICES.filter((s) => s.apiUrl && withUrl.has(s.apiUrl)
       && ((s.statusComponentIds?.length ?? 0) > 0 || (s.displayComponentIds?.length ?? 0) > 0
-        || !!s.statusComponentId || !!s.statusComponent || !!s.displayAllComponents))
+        || !!s.statusComponentId || !!s.statusComponent))
     expect(resolving.length, 'no component-resolving service on those pages').toBeGreaterThan(0)
     for (const s of resolving) {
       expect(s.componentsUrl, `${s.id} resolves components on ${s.apiUrl} but reads only summary.json`).toBeTruthy()

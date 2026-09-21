@@ -142,11 +142,9 @@ export interface ServiceStatus {
    *  ≥2 components matched; absent otherwise. */
   components?: ServiceComponent[]
   /** When true, the breakdown UI renders its sections (each componentGroups group as a collapsible
-   *  block; each consecutive run of ungrouped components as a surface grid) in COMPONENT-ARRAY order —
-   *  groups interleaved among surfaces exactly where the curated `displayComponentIds` array places
-   *  their first member — instead of the default "surfaces grid first, then all groups". Lets a curated
-   *  array fully control layout (replicate: API · Inference and Training · Website groups, then the
-   *  Registry/Official Models surface rows, then the Support group). Propagated from config via `base`. */
+   *  block; each consecutive run of ungrouped components as a surface grid) in resolved COMPONENT-ARRAY
+   *  order — each group placed where its first member appears — instead of the default "surfaces grid
+   *  first, then all groups". Propagated from config via `base`. */
   componentGroupsInline?: boolean
   // Per-day impact for the status calendar. Keys are either a bare UTC date `YYYY-MM-DD`
   // (statuspage/betterstack — already the source's daily bucket) OR a full ISO timestamp
