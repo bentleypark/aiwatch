@@ -206,6 +206,16 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     expect(gone.incidentSourceStale).toBe(true)
   })
 
+  it.each([401, 404, 410])('logs a gone config response before returning sourceDead (%i)', async (httpStatus) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    stubFetch(() => new Response('', { status: httpStatus }))
+
+    const service = await fetchService(openrouter, undefined, undefined, {})
+
+    expect(service.sourceDead).toBe(true)
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'openrouter', source: 'datadog-config', phase: 'http', httpStatus, latencyMs: expect.any(Number) }))
+  })
+
   it('records a config body read as transport, not HTTP', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const trackingStore = {}

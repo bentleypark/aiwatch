@@ -582,8 +582,13 @@ describe('readTrackingState / writeTrackingStateIfChanged (#1224 — the consoli
       expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
     })
 
-    it('drops an invalid source-read failure without discarding the fetch state', async () => {
-      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, sourceReadFailure: { source: 'aws-health', phase: 'http', httpStatus: '429' } } }) })
+    it.each([
+      { source: 'not-a-source', phase: 'http', httpStatus: 429 },
+      { source: 'aws-health', phase: 'not-a-phase', httpStatus: 429 },
+      { source: 'aws-health', phase: 'transport', errorKind: 'not-an-error-kind' },
+      { source: 'aws-health', phase: 'http', httpStatus: '429' },
+    ])('drops an invalid source-read failure without discarding the fetch state (%o)', async (sourceReadFailure) => {
+      const kv = mockKV({ 'tracking:state': JSON.stringify({ azure: { failCount: 1, failCountAt: AT, sourceReadFailure } }) })
       expect(await readTrackingState(kv)).toEqual({ azure: { failCount: 1, failCountAt: AT } })
     })
 

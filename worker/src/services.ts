@@ -2180,6 +2180,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       if (!configRes.ok) {
         console.error(`[fetchService] ${config.id} Datadog config.json returned HTTP ${configRes.status}`)
         configRes.body?.cancel()
+        const sourceReadFailure: StatusSourceReadFailure = { source: 'datadog-config', phase: 'http', httpStatus: configRes.status }
+        logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
         // Same split the Cloudflare arm makes: this is a static machine document, so an unambiguous
         // gone/auth 4xx is a retired source, while 403/429 can still be an egress restriction.
         if (GONE_STATUSES.has(configRes.status)) {
@@ -2191,8 +2193,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // `instatus-parse-fail:` (the counter kv-schema.md sends them to) sees zero while the source
         // is walled, and `fetch-fail:daily` cannot substitute: 48h TTL, rising edge only.
         await recordParseFailure(kv, Date.now(), config.id, 'dd-fetch-unreadable')
-        const sourceReadFailure: StatusSourceReadFailure = { source: 'datadog-config', phase: 'http', httpStatus: configRes.status }
-        logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
       }

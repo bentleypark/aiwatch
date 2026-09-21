@@ -225,8 +225,11 @@ export interface ServiceTrackingState {
 }
 export type TrackingStateBlob = Record<string, ServiceTrackingState>
 
+export const STATUS_SOURCE_READ_FAILURE_SOURCES = ['aws-health', 'datadog-config', 'instatus-scrape', 'rss', 'gcloud', 'betterstack'] as const
+type StatusSourceReadFailureSource = typeof STATUS_SOURCE_READ_FAILURE_SOURCES[number]
+
 export type StatusSourceReadFailure = {
-  source: 'aws-health' | 'datadog-config' | 'instatus-scrape' | 'rss' | 'gcloud' | 'betterstack'
+  source: StatusSourceReadFailureSource
   phase: 'transport' | 'http' | 'decode' | 'shape'
   httpStatus?: number
   errorKind?: 'timeout' | 'network' | 'unknown'
@@ -271,7 +274,7 @@ function sanitizeTrackingState(parsed: Record<string, unknown>): TrackingStateBl
     if (typeof v.uptimeMissingSince === 'string') entry.uptimeMissingSince = v.uptimeMissingSince
     if (v.sourceReadFailure && typeof v.sourceReadFailure === 'object' && !Array.isArray(v.sourceReadFailure)) {
       const failure = v.sourceReadFailure as Record<string, unknown>
-      if (['aws-health', 'datadog-config', 'instatus-scrape', 'rss', 'gcloud', 'betterstack'].includes(String(failure.source)) && ['transport', 'http', 'decode', 'shape'].includes(String(failure.phase)) &&
+      if (STATUS_SOURCE_READ_FAILURE_SOURCES.includes(failure.source as StatusSourceReadFailureSource) && ['transport', 'http', 'decode', 'shape'].includes(String(failure.phase)) &&
         (failure.httpStatus === undefined || (typeof failure.httpStatus === 'number' && Number.isInteger(failure.httpStatus))) &&
         (failure.errorKind === undefined || ['timeout', 'network', 'unknown'].includes(String(failure.errorKind)))) {
         entry.sourceReadFailure = failure as StatusSourceReadFailure
