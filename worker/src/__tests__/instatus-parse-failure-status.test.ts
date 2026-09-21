@@ -136,16 +136,24 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
 
   it('a 404 scrape does not read as "no incidents"', async () => {
     const calls = stubScrapeFailure(() => new Response('nope', { status: 404 }))
-    const svc = await fetchService(instatusSvc, undefined, undefined, {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const trackingStore = {}
+    const svc = await fetchService(instatusSvc, undefined, undefined, trackingStore)
     expectTwoSameUrl(calls)
     expect(svc.sourceUnknown, 'a 404 scrape must flag the source, not publish operational').toBe(true)
+    expect(trackingStore).toEqual({ fal: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'instatus-scrape', phase: 'http', httpStatus: 404 } } })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'fal', source: 'instatus-scrape', phase: 'http', httpStatus: 404, latencyMs: expect.any(Number) }))
   })
 
   it('a throwing scrape does not read as "no incidents"', async () => {
     const calls = stubScrapeFailure(() => { throw new Error('ECONNRESET') })
-    const svc = await fetchService(instatusSvc, undefined, undefined, {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const trackingStore = {}
+    const svc = await fetchService(instatusSvc, undefined, undefined, trackingStore)
     expectTwoSameUrl(calls)
     expect(svc.sourceUnknown).toBe(true)
+    expect(trackingStore).toEqual({ fal: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'instatus-scrape', phase: 'transport', errorKind: 'network' } } })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'fal', source: 'instatus-scrape', phase: 'transport', errorKind: 'network', latencyMs: expect.any(Number) }))
   })
 
   it('carries the measured latency through the guard', async () => {

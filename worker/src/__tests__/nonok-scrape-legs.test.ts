@@ -137,6 +137,7 @@ describe('#1234 — the RSS leg (xai)', () => {
     // counter ever reaching 3, so the badge could stay green through an unbounded run of bad reads.
     const store: Record<string, string> = {}
     const trackingStore: TrackingStateBlob = {}
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     vi.stubGlobal('fetch', routedFetch([[isXaiFeed, () => new Response('upstream error', { status: 503 })]]))
 
     const svc = await fetchService(xai, undefined, mockKV(store), trackingStore)
@@ -145,6 +146,8 @@ describe('#1234 — the RSS leg (xai)', () => {
     expect(svc.sourceUnknown, 'and it is disclosed as OUR read failing, not a verdict about xAI').toBe(true)
     expect(svc.incidents, 'nothing was readable, so nothing may be published').toEqual([])
     expect(svc.status, 'strike 1 of the ramp still publishes the badge — flagged, not fabricated').toBe('operational')
+    expect(trackingStore.xai?.sourceReadFailure).toEqual({ source: 'rss', phase: 'http', httpStatus: 503 })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'xai', source: 'rss', phase: 'http', httpStatus: 503, latencyMs: expect.any(Number) }))
   })
 
   it('the third consecutive bad read crosses into unknown', async () => {
@@ -209,6 +212,7 @@ describe('#1234 — the gcloud leg (gemini)', () => {
     // leaving it broken would let this assertion pass for the wrong reason.
     const store: Record<string, string> = {}
     const trackingStore: TrackingStateBlob = {}
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     vi.stubGlobal('fetch', routedFetch([
       [isGcloud, () => new Response('gateway timeout', { status: 504 })],
       [isAistudio, () => new Response(EMPTY_AISTUDIO, { status: 200 })],
@@ -219,6 +223,8 @@ describe('#1234 — the gcloud leg (gemini)', () => {
     expect(svc.sourceUnknown).toBe(true)
     expect(reasonsFor(store, 'gemini')).toEqual({ 'gcloud-unreadable': 1 })
     expect(trackingStore.gemini?.failCount).toBe(1)
+    expect(trackingStore.gemini?.sourceReadFailure).toEqual({ source: 'gcloud', phase: 'http', httpStatus: 504 })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'gemini', source: 'gcloud', phase: 'http', httpStatus: 504, latencyMs: expect.any(Number) }))
   })
 
   it('the third consecutive bad read crosses into unknown', async () => {
@@ -298,6 +304,7 @@ describe('#1234 — the BetterStack index.json leg (together)', () => {
     // disclosure AND the durable counter both vanish.
     const store: Record<string, string> = {}
     const trackingStore: TrackingStateBlob = {}
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     vi.stubGlobal('fetch', routedFetch([
       [isIndexJson, () => { throw new Error('ECONNRESET') }],
       [isTogetherFeed, () => new Response(EMPTY_FEED, { status: 200 })],
@@ -308,6 +315,8 @@ describe('#1234 — the BetterStack index.json leg (together)', () => {
     expect(svc.sourceUnknown).toBe(true)
     expect(reasonsFor(store, 'together')).toEqual({ 'betterstack-unreadable': 1 })
     expect(trackingStore.together?.failCount).toBe(1)
+    expect(trackingStore.together?.sourceReadFailure).toEqual({ source: 'betterstack', phase: 'transport', errorKind: 'network' })
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'together', source: 'betterstack', phase: 'transport', errorKind: 'network', latencyMs: expect.any(Number) }))
   })
 
   it('both legs readable → no flag, and the streak clears', async () => {
