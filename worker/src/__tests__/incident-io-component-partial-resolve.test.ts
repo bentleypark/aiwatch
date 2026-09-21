@@ -2,14 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchService } from '../services'
 import type { ServiceConfig } from '../types'
 
-// #957 sub-problems 2+3 — turbopuffer/fireworks configure a LIST `incidentIoComponentId` with no
-// `statusComponentId`/`statusComponentIds` at all, so they were structurally exempt from every existing
-// miss-detection signal (#135/#379/#606). This file drives the real `fetchService` wiring that reports
-// their drift through the SAME `trackPartialResolve` (#1179) mechanism `statusComponentIds` already
-// uses, tagged `scope: 'uptime'` so the alert body names the right symptom.
-//
-// Reproduced live 2026-09-15: fireworks was ACTUALLY in this state in production at the time this
-// shipped (7 of 12 configured ids absent from component_uptimes) — not a hypothetical.
+// #957 — drives the real `fetchService` wiring that reports a partial uptime-scope resolve through
+// `trackPartialResolve`, tagged `scope: 'uptime'`.
 
 const DAY = 86_400_000
 const esc = (o: unknown) => JSON.stringify(o).replace(/"/g, '\\"')
@@ -68,7 +62,7 @@ function fakeKv() {
 
 afterEach(() => vi.unstubAllGlobals())
 
-describe('fetchService reports a partial incidentIoComponentId resolve to trackPartialResolve (#957)', () => {
+describe('fetchService reports a partial uptime-scope resolve to trackPartialResolve (#957)', () => {
   it('writes an uptime-scoped record with exactly the ids that did not resolve', async () => {
     const config = multiIoConfig()
     const { kv, puts } = fakeKv()
@@ -110,7 +104,7 @@ describe('fetchService reports a partial incidentIoComponentId resolve to trackP
     // Real shape (not the synthetic list `multiIoConfig()` defaults to): every live dual-configured
     // service has `incidentIoComponentId` as a SCALAR member of `statusComponentIds` (not always
     // index 0 — langsmith's is index 1), which is exactly the shape a list-shaped fixture cannot
-    // exercise faithfully — see the file header and the `#957` comment in services.ts.
+    // exercise faithfully.
     const config = multiIoConfig({
       statusComponentIds: ['id-a', 'id-b'],
       statusComponentId: 'id-a',

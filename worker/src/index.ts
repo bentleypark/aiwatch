@@ -2028,7 +2028,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 
   // Partial component resolve detection (#1179, extended #957) — the miss alert above watches the
   // PRIMARY statusComponentId only, so a service resolving incompletely — its badge from some but
-  // not all `statusComponentIds`, or its uptime from some but not all `incidentIoComponentId`s —
+  // not all `statusComponentIds`, or its uptime from some but not all of its uptime-scope ids —
   // reaches nobody. Time-based (6h), so a source that rotates which ids it serves cannot page on a
   // single cycle.
   const partialNow = Date.now()

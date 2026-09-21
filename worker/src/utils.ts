@@ -680,7 +680,7 @@ export async function detectComponentMismatches(
 //
 // Two independent checks feed this one mechanism (see `PartialResolveEntry`'s `scope` field): the
 // original `statusComponentIds`/`breakdownComponents` badge check (#1179), and the
-// `incidentIoComponentId`/`computeIncidentIoUptime` uptime check (#957). Neither is visible to the
+// `computeIncidentIoUptime` uptime check (#957). Neither is visible to the
 // #135 alert, which watches the primary `statusComponentId` only. Rationale, and why this is not an
 // extension of #135: docs/reference/discord-alert-paths.md.
 //
@@ -729,12 +729,10 @@ export const HISTORY_RETENTION_DAYS = 90
  *
  * `scope` (#957) — which SYMPTOM this drift produces, so `formatPartialResolveAlert` can describe the
  * right one: `'badge'` for the `statusComponentIds`/`breakdownComponents` check (#1179's original
- * case, drives `resolveSvcStatus`'s worst-of badge), `'uptime'` for the `incidentIoComponentId`/
- * `computeIncidentIoUptime` check (#957, affects everything that function returns — not only the
- * displayed uptime figure — never the badge). The two call sites
- * in `services.ts` are gated to be mutually exclusive per service (see the `#957` comment there), so a
- * given service's `scope` is effectively fixed by its config, not re-derived per cycle — held stable
- * on refresh mainly so a config change mid-record does not retroactively relabel an in-flight drift.
+ * case, drives `resolveSvcStatus`'s worst-of badge), `'uptime'` for the `computeIncidentIoUptime`
+ * check (#957, affects everything that function returns — not only the displayed uptime figure —
+ * never the badge). Held stable on refresh so a config change mid-record does not retroactively
+ * relabel an in-flight drift.
  * Absent on a record written before this field existed → `parsePartialResolve` defaults it to
  * `'badge'`, the only scope that existed then.
  */
@@ -936,8 +934,8 @@ export function formatPartialResolveAlert(
   sinceIso: string,
   nowMs: number,
   viaSummary: boolean,
-  scope: 'badge' | 'uptime' = 'badge',
-  field: 'statusComponentIds' | 'incidentIoComponentId' = scope === 'uptime' ? 'incidentIoComponentId' : 'statusComponentIds',
+  scope: 'badge' | 'uptime',
+  field: 'statusComponentIds' | 'incidentIoComponentId',
 ): string {
   const elapsedH = Math.floor((nowMs - new Date(sinceIso).getTime()) / 3_600_000)
   const idList = missing.map((id) => `\`${id}\``).join(', ')

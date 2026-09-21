@@ -2765,8 +2765,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // real #1175 revert signal rather than a guess the alert would otherwise have to make.
           const viaSummary = Boolean(config.componentsUrl) && breakdownComponents === summaryData.components
           // #957 — explicit `scope: 'badge'`: this check reads `breakdownComponents`, which drives
-          // `resolveSvcStatus`'s worst-of badge, never `uptime30d`. See the #957 block above for the
-          // sibling `'uptime'`-scoped check, gated so it never reports for a service reaching HERE.
+          // `resolveSvcStatus`'s worst-of badge, never `uptime30d`.
           await trackPartialResolve(kv, config.id, missing, Date.now(), viaSummary, 'badge')
         }
       }
