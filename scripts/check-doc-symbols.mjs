@@ -355,8 +355,8 @@ export function splitTsSource(text) {
  *  wrapped prose, so its line breaks are not sentence ends and a claim written across two of them is
  *  still one claim.
  *
- *  A line that carries code ends the run even when it also carries a trailing comment — 29 config lines
- *  in services.ts do. Joining across one fuses a service's docblock, its config entry and the NEXT
+ *  A line that carries code ends the run even when it also carries a trailing comment — 29 lines in
+ *  services.ts do. Joining across one fuses a service's docblock, its config entry and the NEXT
  *  service's docblock into a single logical line, where a field name in one service's comment governs
  *  an id run in another's. The two halves keep their line numbering, which is what makes the code line
  *  visible from here. */
@@ -511,8 +511,8 @@ export function auditTree(root = ROOT) {
 }
 
 // ── CLI ──
-function main() {
-  const { noReason, docs, symbolAllowed, memberAllowed, findings, membership, bound } = auditTree()
+export function main(root) {
+  const { noReason, docs, symbolAllowed, memberAllowed, findings, membership, bound } = auditTree(root)
   if (noReason.length) {
     console.error(`❌ allowlist entries without a reason (add \`# why\`): ${noReason.join(', ')}`)
     process.exit(1)

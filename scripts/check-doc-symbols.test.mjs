@@ -4,7 +4,7 @@ import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   stripFencedBlocks, isCodeShaped, isMemoryPageName, isRemovalContext, REMOVAL_WINDOW_CHARS,
   extractInlineTokens, parseAllowlist, auditDocSymbols,
@@ -259,7 +259,7 @@ test('#1444: the two halves of splitTsSource stay line-aligned, literals include
 })
 
 test('#1444: a config line with a TRAILING comment ends the block, it does not fuse across it', () => {
-  // 29 config lines in services.ts carry one. Joining across a config entry fuses a service's docblock,
+  // 29 lines in services.ts carry one. Joining across a config entry fuses a service's docblock,
   // its entry, and the NEXT service's docblock into one logical line, where a field name in one
   // service's comment governs an id run in another's — a claim present in no comment.
   const ts = [
@@ -583,6 +583,34 @@ test('#1444 WIRING: the CLI passes `declared` and `allow`, neither of which move
   write(MEMBERSHIP_ALLOW_FILE, 'CLAUDE.md:componentGroupsInline:cohere\n')
   assert.deepEqual(auditTree(root).noReason, ['CLAUDE.md:componentGroupsInline:cohere'],
     'a reason-less entry must be reported from the membership allowlist too')
+  rmSync(root, { recursive: true, force: true })
+})
+
+test('#1444 WIRING: a membership finding exits 1 — printing it and exiting 0 is the failure this gate exists to prevent', () => {
+  const root = mkdtempSync(join(tmpdir(), 'audit-exit-'))
+  const write = (rel, body) => {
+    mkdirSync(join(root, dirname(rel)), { recursive: true })
+    writeFileSync(join(root, rel), body)
+  }
+  write('worker/src/services.ts', 'export const SERVICES = [\n'
+    + "  { id: 'cohere', name: 'C', statusUrl: 'x', displayAllComponents: true },\n"
+    + "  { id: 'groq', name: 'G', statusUrl: 'y', displayAllComponents: true },\n"
+    + "  { id: 'elevenlabs', name: 'E', statusUrl: 'z' },\n]\n")
+  write('worker/src/types.ts', 'export interface ServiceConfig {\n  displayAllComponents?: boolean\n}\n')
+  write('docs/reference/keep.md', '# keep\n')
+  write(MEMBERSHIP_ALLOW_FILE, '')
+  const status = (body) => {
+    write('CLAUDE.md', body)
+    const url = pathToFileURL(join(ROOT, 'scripts/check-doc-symbols.mjs')).href
+    try {
+      execFileSync('node', ['--input-type=module', '-e',
+        `const m = await import(${JSON.stringify(url)}); m.main(${JSON.stringify(root)})`], { stdio: 'pipe' })
+      return 0
+    } catch (e) { return e.status }
+  }
+  assert.equal(status('The `displayAllComponents` path covers cohere/groq/elevenlabs.\n'), 1)
+  assert.equal(status('The `displayAllComponents` path covers cohere/groq.\n'), 0)
+  assert.equal(status('Resolved by `noSuchSymbolInvented1444`.\n'), 1, 'the #1100 half exits 1 too')
   rmSync(root, { recursive: true, force: true })
 })
 
