@@ -168,6 +168,14 @@ describe('trackFetchFailure (#1224 — blob-based)', () => {
     expect(await trackFetchFailure(store, undefined, 'azure')).toBe(true)
   })
 
+  it('keeps the source-read cause frozen once the count stops advancing past the threshold', async () => {
+    const at = new Date().toISOString()
+    const http429 = { source: 'aws-health', phase: 'http', httpStatus: 429 } as const
+    const store: TrackingStateBlob = { bedrock: { failCount: 3, failCountAt: at, sourceReadFailure: http429 } }
+    await trackFetchFailure(store, undefined, 'bedrock', 3, Date.parse(at) + 60_000, { source: 'aws-health', phase: 'transport', errorKind: 'timeout' })
+    expect(store.bedrock).toEqual({ failCount: 3, failCountAt: at, sourceReadFailure: http429 })
+  })
+
   it('writes the daily accumulator via KV when threshold is reached (still a real key — #1224 kept this one out of the blob)', async () => {
     const dailyStore: Record<string, string> = {}
     const kv = mockKV(dailyStore)

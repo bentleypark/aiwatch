@@ -2889,9 +2889,18 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // would otherwise be indistinguishable from a decode that threw. The 30d reason counter exists
         // to outlive the logs, so it must not conflate the two: they take different fixes.
         const DECODE_FAILED = Symbol('decode-failed')
+        let body: ArrayBuffer
+        try {
+          body = await res.arrayBuffer()
+        } catch (err) {
+          const sourceReadFailure: StatusSourceReadFailure = { source: 'aws-health', phase: 'transport', httpStatus: res.status, errorKind: statusSourceTransportErrorKind(err) }
+          logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
+          const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+        }
         let json: unknown = DECODE_FAILED
         try {
-          json = decodeAwsHealthJson(await res.arrayBuffer(), res.headers.get('content-type'))
+          json = decodeAwsHealthJson(body, res.headers.get('content-type'))
         } catch {}
         // #1212 — the same verdict-not-a-list treatment the RSS leg gets. `parseAwsHealthEvents`
         // returns `[]` for anything it cannot read, which used to clear the streak and publish
