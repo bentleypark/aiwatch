@@ -797,8 +797,7 @@ describe('displayComponentIds config sanity (#606)', () => {
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
   // single statusComponentId badge (so the badge is unchanged; statusComponentIds plural absent).
   // junie: 2 — #1004 follow-on. Single statusComponentId badge (Central Console, the AI gateway) + a
-  // curated 2-row breakdown [Central Console, JetBrains AI]; no worst-of statusComponentIds (that would
-  // pin uptime to JetBrains AI's ~6d window).
+  // curated 2-row breakdown [Central Console, JetBrains AI]; no worst-of statusComponentIds.
   const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, junie: 2, voyageai: 2, pinecone: 6, twelvelabs: 11 }
 
   it('single-owner services carry the curated displayComponentIds count, keep their badge statusComponentId, and have no worst-of statusComponentIds', () => {
@@ -879,9 +878,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     // ChatGPT group — the same group `incidentIoGroupId` names and the badge scope is drawn from.
     expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API → chatgpt').toBe(true)
     // #1010 — `Sites` and `ChatGPT Work` are ChatGPT-group members that were held out on first pass
-    // while their `data_available_since` was under 30 days, and adopted once it cleared (see the
-    // chatgpt config comment in services.ts for the uptime-window mechanism, whose shortest-wins rule
-    // `junie-migration.test.ts` pins). Asserted on BOTH id lists rather than through `has`, which reads
+    // while their `data_available_since` was under 30 days, and adopted once it cleared. Asserted on BOTH id lists rather than through `has`, which reads
     // only `displayComponentIds`: the invariant here is `statusComponentIds` ≡ `displayComponentIds`,
     // so a one-sided edit has to fail with a message that names which side went missing.
     for (const [name, id] of [['Sites', '01KX45G1SHQQ9DTAX9S4W7FV8G'], ['ChatGPT Work', '01KX45G1SH21AX5DT93D4HMF0P']] as const) {

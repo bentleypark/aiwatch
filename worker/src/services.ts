@@ -181,13 +181,10 @@ export const SERVICES: ServiceConfig[] = [
   // `incidentIoComponentId` IS also a hand-maintained list here (mirrors turbopuffer's no-canonical-
   // component shape), but ONLY for the uptime worst-of via `computeIncidentIoUptime` — deliberately
   // NOT the full roster above, to avoid a churn trap distinct from the breakdown one:
-  // `computeIncidentIoUptime` takes the shortest `data_available_since` window across every listed id,
-  // so a brand-new model in the list pins the whole service's uptime window down to that model's age.
+  // a brand-new model in the list can shorten the whole service's uptime window to that model's age.
   // If you're reconciling the list and tempted to add one: check its `data_available_since` first, not
-  // just whether it's "missing" — only ids old enough not to shorten that window belong. Same
-  // fix junie already applies for
-  // the identical reason (see its config comment: "putting it in the badge scope pins uptimeWindowDays
-  // to 6... an incoherent '99.8% over 6d'"). Accepted tradeoffs: a model this list omits contributes no
+  // just whether it's "missing" — only ids old enough not to shorten that window belong.
+  // Accepted tradeoffs: a model this list omits contributes no
   // uptime signal until someone manually ages it in (real, not fabricated — matches the "no invented
   // value" rule, #713); a REMOVED id from this shorter list still warns via
   // `computeIncidentIoUptime`'s `resolved < ids.length` log.
@@ -226,12 +223,7 @@ export const SERVICES: ServiceConfig[] = [
   // **2026-09-18 (#1449): the page began serving a standalone `API` component** (id
   // `01M2R6E5FPASTEW3A3V8TSYHJ0`, added below to `statusComponentIds`/`displayComponentIds`) — detected
   // live via the #992 new-component alert. `statusComponent` (name-based) stays unset regardless; this
-  // scope is id-based. Putting a component this young into `statusComponentIds` is exactly the hazard
-  // the fireworks and junie config comments in this file warn about (check age, not just presence) —
-  // the live page's own `data_available_since` for it predates its debut by months, which is what keeps
-  // the window at 30 days today. That field is provider-controlled; the dependency and its known gap
-  // are recorded in `docs/reference/status-determination.md` and `perplexity-scope.test.ts` (#1448), not
-  // restated here.
+  // scope is id-based.
   //
   // `incidentIoComponentId` stays SINGLE while that scope is a list. It is what
   // `parseIncidentIoReportedUptime` reads for the provider-ATTRIBUTED disclosure, and over a list that
@@ -312,7 +304,7 @@ export const SERVICES: ServiceConfig[] = [
     datadogComponentGroupId: '62d944d3-1acb-471b-81a0-099b3da0164f' }, // API - Gateway
   // Voice & Speech AI
   // The curated availability surfaces, as ONE list: the #606 breakdown card, the #379 worst-of badge
-  // and the uptime scope all read it, so adding a member younger than 30 days shortens the window.
+  // and the uptime scope all read it.
   // #685 — ElevenCreative (01JJM5RKYAEWNM3XYRHXM8FJQ3) is the ONLY component reflecting Dubbing health
   // (a Voice-domain product within the ElevenCreative suite; no standalone Dubbing component exists). It
   // was previously omitted, so a Dubbing/ElevenCreative degradation flipped the badge while the
@@ -485,15 +477,8 @@ export const SERVICES: ServiceConfig[] = [
   //   reads. It also widened the breakdown, which the #1062 capability routing reads
   //   (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
   // #1010 — `Compliance API`, `Sites` and `ChatGPT Work` are ChatGPT-group members in the badge scope.
-  //   The last two were held out on first pass: badge scope is also uptime scope (see #1006 above), and
-  //   `computeIncidentIoUptime` takes the SHORTEST covered window across that scope
-  //   (`covered = Math.min(windowDays, now - data_available_since)`), so adopting a component created
-  //   less than 30 days ago drops this WHOLE service's uptime window below 30 and lights the #1004
-  //   short-history disclosure. Both were created `2026-07-09T19:25:56Z`; re-read from the page RSC on
-  //   2026-08-20 that is 42 days, so `covered` clamps to the full 30 and the window is unmoved.
-  //   **Re-check that field against today before adopting any further group member.** Same trade junie
-  //   declines — see its config comment below; it keeps its young component in the breakdown, which the
-  //   `statusComponentIds` ≡ `displayComponentIds` invariant forbids here.
+  //   The last two were held out until their `data_available_since` cleared 30 days. **Re-check that
+  //   field against today before adopting any further group member.**
   //   Two consequences every adoption carries, neither specific to these two: it WIDENS the #1032
   //   id-bypass, so a `fedramp` advisory tagged on the new id now survives `incidentExclude`
   //   (`openai-login-attribution.test.ts` carries the ChatGPT Work case) — the #990 firewall is the
@@ -583,11 +568,10 @@ export const SERVICES: ServiceConfig[] = [
   // Badge + uptime run on Central Console ALONE; JetBrains AI rides along only in the breakdown +
   // incident scope. Why not a worst-of-both badge (statusComponentIds): uptime is computed over the
   // SAME scope as the badge (`statusComponentIds ?? incidentIoComponentId`, the #1006 invariant that
-  // keeps uptime/calendar/badge aligned), and computeIncidentIoUptime reports the SHORTEST covered
-  // window across that scope. JetBrains AI's records start 2026-07-09 (~6d), so putting it in the badge
-  // scope pins uptimeWindowDays to 6 while the % reflects Console's 30 days — an incoherent "99.8% over
-  // 6d". Console's records reach 2026-05-29 → the honest 30d window. JetBrains AI is 100%/empty anyway,
-  // so the badge loses nothing by resolving on Console.
+  // keeps uptime/calendar/badge aligned). JetBrains AI's records start 2026-07-09 (~6d), so the two
+  // remain deliberately separated: Console carries the service's established uptime while JetBrains AI
+  // is a disclosed surface and incident scope. Console's records reach 2026-05-29 → the honest 30d
+  // window. JetBrains AI is 100%/empty anyway, so the badge loses nothing by resolving on Console.
   //   • displayComponentIds lists BOTH (≥2 → a real 2-row breakdown that discloses the JetBrains AI
   //     roll-up the KB names, alongside the Console gateway).
   //   • incidentComponents scopes to BOTH names, so if JetBrains ever starts tagging incidents on the

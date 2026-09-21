@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { SERVICES, filterIncidents, fetchService } from '../services'
+import { computeIncidentIoUptime } from '../parsers/incident-io'
 import type { Incident } from '../types'
 
 // #1390 — status.perplexity.com moved from Instatus to incident.io. The page carried its own migration
@@ -298,22 +299,19 @@ describe('#1390 wiring — the incident.io payload reaches incidents, uptime and
     expect(svc.uptime30d).toBeNull()
   })
 
-  it('surfaces uptimeWindowDays rather than dropping it silently if a scope member turns out young', async () => {
+  it('keeps the worst percentage paired with its own full window when another scoped component is young', async () => {
     // #1449: `API_ID`'s live `data_available_since` (2026-05-16) predates the component's
     // own 2026-09-18 page debut by months — the provider backdates it, and Computer's real impact
     // records (from 2026-06-30, before Computer's own 2026-08-24 debut) corroborate that this page does
     // genuinely backfill `data_available_since` rather than resetting it at component creation. But that
-    // is a provider-controlled field this file cannot pin — if it were ever corrected to something
-    // recent, `statusComponentIds` membership would pin perplexity's WHOLE disclosed window down to it
-    // (the exact hazard `services.ts`'s fireworks/junie config comments warn about: "check its age
-    // first, not just whether it's missing"). This test pins only that `uptimeWindowDays` gets populated
-    // in that case rather than silently staying absent — NOT that the accompanying `pct` would still
-    // describe the same window (`computeIncidentIoUptime` computes the worst `pct` and shortest `days`
-    // independently across the scope; they can already come from different components today, a
-    // pre-existing gap tracked separately, #1448 — this all-impact-free fixture cannot exercise it).
+    // is a provider-controlled field this file cannot pin. A Computer outage gives the full-history component the
+    // lowest percentage; API's shorter clean history must not relabel that value as a five-day result.
     const fiveDaysAgo = new Date(Date.now() - 5 * DAY).toISOString()
-    const svc = await fetchPerplexity(summary(), ioPageHtml(null, { [API_ID]: fiveDaysAgo }))
-    expect(svc.uptimeWindowDays).toBe(5)
+    const html = ioPageHtml({ componentId: COMPUTER_ID, hours: 24, status: 'full_outage' }, { [API_ID]: fiveDaysAgo })
+    expect(computeIncidentIoUptime(html, SCOPE, Date.now())).toMatchObject({ pct: 96.66, days: 30 })
+    const svc = await fetchPerplexity(summary(), html)
+    expect(svc.uptime30d).toBe(96.66)
+    expect(svc.uptimeWindowDays).toBeUndefined()
   })
 
   it('discloses the provider-published % for the primary component only', async () => {
