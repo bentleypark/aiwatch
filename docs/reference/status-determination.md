@@ -301,12 +301,10 @@ did, with older months computed on the 3-component scope. Unlike #1434, `uptime3
 one: the added component's own impact history is clean (verified against the live page's
 `component_impacts` — zero entries tagged to it), so today's worst-of is unchanged (99.81% before and
 after). `canIdBypass` is unaffected (perplexity sets no `incidentExclude`); `calendarDays` was already 30.
-The one live dependency: the added component's `data_available_since` predates its own page debut by
-months (provider-backdated, not something this repo controls), which is what keeps `uptimeWindowDays`
-absent today — see the config comment's citation of the fireworks/junie precedent and the
-`perplexity-scope.test.ts` case pinning that a shorter value cannot relabel a lower percentage from an
-established component: `computeIncidentIoUptime` returns the percentage and window from the same
-component (#1448).
+
+**#1448 side effects, disclosed:** `uptimeWindowDays` is now the window of the component that produced the published percentage. A scope whose young member is not the worst percentage no longer discloses a short window, and the #1017 archive restore (`uptime-archive.ts`), which is gated on that field, no longer fires for it.
+
+**#1447 side effects, disclosed:** reconciling fireworks' `incidentIoComponentId` (seven ids the page no longer serves dropped, six live components whose records already cover the 30-day window added) moved its published `uptime30d` **99.96 → 99.84** (measured against the live page, 2026-09-20). That step is definitional: the worst member is now Kimi K3 US, on its own impact records, and the dropped ids were already contributing nothing. The provider-published figure beside it moves 99.82 → 99.67, `dailyImpact` (the Overview sparkline and Status Calendar scope) now covers the same wider set, and `archive:monthly:*` crosses a definition boundary at the next deploy, with older months computed on the earlier roster. Every listed id clears 30 days by `data_available_since`, so no `uptimeWindowDays` disclosure is owed.
 
 **#1434 side effects, disclosed:** giving elevenlabs a scope moved its badge off the overall page
 indicator onto a worst-of over that scope, added it to the `canIdBypass` set, moved its Status Calendar

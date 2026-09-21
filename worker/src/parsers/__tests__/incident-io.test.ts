@@ -109,6 +109,17 @@ describe('computeIncidentIoUptime (#1006)', () => {
     expect(out).toEqual({ pct: 95, days: 20, todayWeightedOutageSec: 0, missing: [] }) // r2: 24h of 20 days = 95.00 (worse than r1's 100)
   })
 
+  it('a young clean component does not relabel the worst percentage of an established one (#1448)', () => {
+    const out = computeIncidentIoUptime(
+      html(
+        [{ id: 'r1', start: at(5), end: at(4), status: 'full_outage' }],
+        [{ id: 'r1', since: '2024-01-01T00:00:00Z' }, { id: 'r2', since: at(6) }],
+      ),
+      ['r1', 'r2'], NOW,
+    )
+    expect(out).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0, missing: [] }) // r1's 30d figure, not "96.66% over r2's 6d"
+  })
+
   it('ids that resolve to nothing are skipped, and the result reflects only what resolved', () => {
     const out = computeIncidentIoUptime(html([], [{ id: 'r1', since: '2024-01-01T00:00:00Z' }]), ['r1', 'gone'], NOW)
     // #957 — this IS the partial-resolve shape services.ts now reports to Discord: `missing` names

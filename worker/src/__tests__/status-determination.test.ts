@@ -842,11 +842,16 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(svc.displayAllComponents).toBe(true)
     expect(svc.componentDenylist).toBeUndefined()
     // incidentIoComponentId IS set — but only for the uptime worst-of (mirrors turbopuffer's
-    // no-canonical-component shape), NOT the full 16-model roster: deliberately scoped to the 12 ids
-    // ≥40 days old (ULID-verified).
-    expect(Array.isArray(svc.incidentIoComponentId)).toBe(true)
-    expect((svc.incidentIoComponentId as string[]).length).toBe(12)
-    expect(new Set(svc.incidentIoComponentId as string[]).size).toBe(12)
+    // no-canonical-component shape), NOT every page component: deliberately scoped to ids old enough
+    // that a brand-new model can't pin the uptime window down to its own age (see the config comment —
+    // the same failure junie's config avoids).
+    // Pinned by value so a roster change fails here and has to be made on purpose (drop, replace, add).
+    expect(svc.incidentIoComponentId).toEqual([
+      '01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KTM9G06402NMVSVM7WGEQEK2', '01KVEMYTCCD5S0RQWPBQZ431PE',
+      '01KVEMYTCCMV80Z2SSGE7YMRKX', '01KVEMZE3M15ZV46ZEB7X88H61', '01KXRHGRD149W1YP3WS59SWC2P',
+      '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8',
+      '01KZ7E1S4Z6PKCDYYNW358ATCX', '01M03TGQ7XTQ8HAKZ8MDQ44HH5',
+    ])
     // holdShortIncidents, NOT flapSuppression: incident.io titles carry no "— down/recovered" suffix,
     // so flapSuppression's isFlapNotice title regex would never match — see alerts.test.ts for the
     // behavioral coverage (a real per-model blip must still be held, using the real SERVICES config).
@@ -873,9 +878,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     // ChatGPT group — the same group `incidentIoGroupId` names and the badge scope is drawn from.
     expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API → chatgpt').toBe(true)
     // #1010 — `Sites` and `ChatGPT Work` are ChatGPT-group members that were held out on first pass
-    // while their `data_available_since` was under 30 days, and adopted once it cleared (see the
-    // chatgpt config comment in services.ts for the uptime-window mechanism, whose shortest-wins rule
-    // `junie-migration.test.ts` pins). Asserted on BOTH id lists rather than through `has`, which reads
+    // while their `data_available_since` was under 30 days, and adopted once it cleared. Asserted on BOTH id lists rather than through `has`, which reads
     // only `displayComponentIds`: the invariant here is `statusComponentIds` ≡ `displayComponentIds`,
     // so a one-sided edit has to fail with a message that names which side went missing.
     for (const [name, id] of [['Sites', '01KX45G1SHQQ9DTAX9S4W7FV8G'], ['ChatGPT Work', '01KX45G1SH21AX5DT93D4HMF0P']] as const) {

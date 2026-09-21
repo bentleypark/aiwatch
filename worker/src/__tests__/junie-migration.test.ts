@@ -62,9 +62,8 @@ describe('junie config (#1004 revert guard)', () => {
 
   it('routes uptime through Central Console — the 30d-window gateway, not the ~6d empty roll-up', () => {
     // incident.io keeps uptime in the page HTML's __next_f (component_uptimes), never in summary.json.
-    // Uptime is computed over `statusComponentIds ?? incidentIoComponentId` and reports the SHORTEST
-    // covered window, so "JetBrains AI" (data since 2026-07-09, ~6d) is kept OUT of the badge scope;
-    // Central Console (since 2026-05-29) keeps the honest 30d window.
+    // Uptime is computed over `statusComponentIds ?? incidentIoComponentId`; Central Console
+    // (since 2026-05-29) keeps the honest 30d window.
     expect(junie.incidentIoComponentId).toBe(CONSOLE_ID)
     expect(junie.incidentIoBaseUrl).toBe('https://status.jetbrains.cloud/incidents')
   })

@@ -246,7 +246,7 @@ export function computeIncidentIoUptime(
       worstPct = result.pct
       worstDays = result.days
     }
-    // #1017 — worst-of like pct/days above: the most-affected component's TODAY figure, not a sum
+    // #1017 — worst-of: the most-affected component's TODAY figure, not a sum
     // (a sum across components would double-count a shared outage worst-of'd elsewhere in this file).
     worstTodaySec = Math.max(worstTodaySec, result.todayWeightedOutageSec)
   }

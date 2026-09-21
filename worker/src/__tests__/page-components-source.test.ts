@@ -682,6 +682,10 @@ describe('prefetch + alert wiring (#1125)', () => {
     }
   })
 
+  it('fireworks reads its breakdown from components.json — summary.json omits rotating components (#1455)', () => {
+    expect(SERVICES.find((s) => s.id === 'fireworks')?.componentsUrl).toBe('https://status.fireworks.ai/api/v2/components.json')
+  })
+
   it('every service resolving components on such a page configures it too (#1175)', () => {
     // The #1175 drift: chatgpt sat on status.openai.com beside page-mates reading the superset while it
     // resolved its own badge ids against summary.json's window. The prefetch reads one components.json

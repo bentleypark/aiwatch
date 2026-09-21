@@ -176,18 +176,15 @@ export const SERVICES: ServiceConfig[] = [
   // page's overall indicator) — same as cohere/groq/together, which are in the identical bucket. The
   // badge is therefore NOT a dynamic worst-of; only `displayAllComponents`' BREAKDOWN is dynamic (every
   // page component minus componentDenylist, via `resolveSvcComponents`) — chosen because a hand-
-  // maintained breakdown id list would go stale the way cerebras' did pre-#992 (Fireworks' 16 are all
-  // per-model and the roster churns — new ones have appeared roughly every 1-4 weeks per the ULID
-  // creation-date spread below, as observed through 2026-08-02).
+  // maintained breakdown id list would go stale the way cerebras' did pre-#992 (Fireworks' components are all
+  // per-model and the roster churns).
   // `incidentIoComponentId` IS also a hand-maintained list here (mirrors turbopuffer's no-canonical-
   // component shape), but ONLY for the uptime worst-of via `computeIncidentIoUptime` — deliberately
-  // NOT the full 16-model roster above, to avoid a churn trap distinct from the breakdown one: incident.io
-  // stamps each component's `data_available_since` at CREATION. A clean new model cannot relabel a
-  // worse established component's percentage, but equal worst percentages use the shorter window as a
-  // conservative tie-breaker. Excludes 4 of the 16 as of #1198 (ULID creation
-  // timestamps decoded 2026-08-02): the "Kimi K3"/"Kimi K3 Fast"/"Kimi K3 US" trio and "GLM 5.2 Fast"
-  // `01KXRHGRD149W1YP3WS59SWC2P`. Scoped instead to the 12 ids ≥40 days old as of #1198. Accepted
-  // tradeoffs: a model this list omits contributes no
+  // NOT the full roster above, to avoid a churn trap distinct from the breakdown one:
+  // a brand-new model in the list can shorten the whole service's uptime window to that model's age.
+  // If you're reconciling the list and tempted to add one: check its `data_available_since` first, not
+  // just whether it's "missing" — only ids old enough not to shorten that window belong.
+  // Accepted tradeoffs: a model this list omits contributes no
   // uptime signal until someone manually ages it in (real, not fabricated — matches the "no invented
   // value" rule, #713); a REMOVED id from this shorter list still warns via
   // `computeIncidentIoUptime`'s `resolved < ids.length` log.
@@ -198,7 +195,7 @@ export const SERVICES: ServiceConfig[] = [
   // Discord New+Resolved pair apiece. holdShortIncidents (the mistral/langfuse mechanism, #792/#929)
   // holds on impact alone — real incident.io `impact` (not BetterStack's hardcoded null) still lets
   // `major`/`critical` through immediately, only non-major short blips get the ~9min hold.
-  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KTM9PHXTZPW4Z1VXF78MQ3WS', '01KTM9PHXTRAV1Q7H06Y4WWSBZ', '01KTM9G064204E1Q8XBQEYESSH', '01KTM9G064Y9AE48A0ZY1WTTB2', '01KTM9G06402NMVSVM7WGEQEK2', '01KTNFZQEJ62PJ2C68P6G2576M', '01KVEMVZJRNJ2RJVFKSRFKRM4E', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMYTCCMV80Z2SSGE7YMRKX', '01KVEMYTCC3B1ZSXC0EJHPY01P', '01KVEMZE3M15ZV46ZEB7X88H61'], displayAllComponents: true, holdShortIncidents: true },
+  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KTM9G06402NMVSVM7WGEQEK2', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMYTCCMV80Z2SSGE7YMRKX', '01KVEMZE3M15ZV46ZEB7X88H61', '01KXRHGRD149W1YP3WS59SWC2P', '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8', '01KZ7E1S4Z6PKCDYYNW358ATCX', '01M03TGQ7XTQ8HAKZ8MDQ44HH5'], componentsUrl: 'https://status.fireworks.ai/api/v2/components.json', displayAllComponents: true, holdShortIncidents: true },
   // Cerebras Inference (#391, #992) — Atlassian Statuspage, single-tenant, per-model. Its model lineup
   // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
   // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
@@ -226,12 +223,7 @@ export const SERVICES: ServiceConfig[] = [
   // **2026-09-18 (#1449): the page began serving a standalone `API` component** (id
   // `01M2R6E5FPASTEW3A3V8TSYHJ0`, added below to `statusComponentIds`/`displayComponentIds`) — detected
   // live via the #992 new-component alert. `statusComponent` (name-based) stays unset regardless; this
-  // scope is id-based. Putting a component this young into `statusComponentIds` is exactly the hazard
-  // the fireworks and junie config comments in this file warn about (check age, not just presence) —
-  // the live page's own `data_available_since` for it predates its debut by months, which is what keeps
-  // the window at 30 days today. That field is provider-controlled; the dependency and its known gap
-  // are recorded in `docs/reference/status-determination.md` and `perplexity-scope.test.ts` (#1448), not
-  // restated here.
+  // scope is id-based.
   //
   // `incidentIoComponentId` stays SINGLE while that scope is a list. It is what
   // `parseIncidentIoReportedUptime` reads for the provider-ATTRIBUTED disclosure, and over a list that
@@ -312,7 +304,7 @@ export const SERVICES: ServiceConfig[] = [
     datadogComponentGroupId: '62d944d3-1acb-471b-81a0-099b3da0164f' }, // API - Gateway
   // Voice & Speech AI
   // The curated availability surfaces, as ONE list: the #606 breakdown card, the #379 worst-of badge
-  // and the uptime scope all read it, so adding a member younger than 30 days shortens the window.
+  // and the uptime scope all read it.
   // #685 — ElevenCreative (01JJM5RKYAEWNM3XYRHXM8FJQ3) is the ONLY component reflecting Dubbing health
   // (a Voice-domain product within the ElevenCreative suite; no standalone Dubbing component exists). It
   // was previously omitted, so a Dubbing/ElevenCreative degradation flipped the badge while the
@@ -485,6 +477,8 @@ export const SERVICES: ServiceConfig[] = [
   //   reads. It also widened the breakdown, which the #1062 capability routing reads
   //   (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
   // #1010 — `Compliance API`, `Sites` and `ChatGPT Work` are ChatGPT-group members in the badge scope.
+  //   The last two were held out until their `data_available_since` cleared 30 days. **Re-check that
+  //   field against today before adopting any further group member.**
   //   Two consequences every adoption carries, neither specific to these two: it WIDENS the #1032
   //   id-bypass, so a `fedramp` advisory tagged on the new id now survives `incidentExclude`
   //   (`openai-login-attribution.test.ts` carries the ChatGPT Work case) — the #990 firewall is the
