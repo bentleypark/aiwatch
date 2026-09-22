@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { withRetry, buildUptimeEntry, envPositiveInt } from './scrape-mistral-status.mjs'
+import { withRetry, buildUptimeEntry, envPositiveInt, readComponentRow } from './scrape-mistral-status.mjs'
 
 // #1381 — `withRetry` is the only pure thing in the scraper, and it is the part that decides whether a
 // lost read becomes a missing incident. Reads from this page are lossy under rate limiting, so a
@@ -140,7 +140,8 @@ test('envPositiveInt falls back only when the variable is absent or empty', () =
 
 // KNOWN LIMIT, stated rather than papered over: these two tests cover the FUNCTION, not the fact
 // that `main()` calls it. `main()` drives a real browser, so nothing here executes the call site —
-// reverting line 111 to `Number(process.env.MAX_INCIDENTS || …)` leaves this file green. Verified by
+// reverting the `maxIncidents` assignment to `Number(process.env.MAX_INCIDENTS || …)` leaves this
+// file green. Verified by
 // reading (`grep -n "Number(process.env" scripts/scrape-mistral-status.mjs` returns nothing). A
 // source-text scanner would close it, and that is exactly the guard shape review retired earlier in
 // this PR for missing renames, modifiers and types; it is not worth re-introducing for two lines.
@@ -152,4 +153,31 @@ test('envPositiveInt REFUSES the values that used to read as "scrape nothing"', 
       `${JSON.stringify(bad)} must stop the run, not scrape zero incidents`,
     )
   }
+})
+
+// ── component rows (#1476) ───────────────────────────────────────────────────────────
+// Both strings were READ off status.mistral.ai in a headed browser on 2026-09-22T01:11Z, while the
+// OCR component was the one affected.
+const LIVE_AFFECTED = 'OCR API Affected 90 days ago 99.31% Today'
+const LIVE_OPERATIONAL = 'Agents API Operational 90 days ago 100.0% Today'
+
+test('reads the word an affected component renders', () => {
+  assert.deepEqual(readComponentRow(LIVE_AFFECTED), { name: 'OCR API', status: 'Affected' })
+})
+
+test('reads the word an operational component renders', () => {
+  assert.deepEqual(readComponentRow(LIVE_OPERATIONAL), { name: 'Agents API', status: 'Operational' })
+})
+
+// Coercing an unknown word to a status here would publish a state we did not read.
+test('an unknown status word reads null, not a guess', () => {
+  assert.deepEqual(readComponentRow('OCR API Wobbly 90 days ago 99.31% Today'),
+    { name: null, status: null })
+  assert.deepEqual(readComponentRow(''), { name: null, status: null })
+})
+
+// The name is whatever precedes the status word, so the status word decides where the name ends.
+test('the name stops at the status word, with the markup whitespace collapsed', () => {
+  assert.deepEqual(readComponentRow('  AI Registry\n  Prompts API   Operational  90 days ago '),
+    { name: 'AI Registry Prompts API', status: 'Operational' })
 })

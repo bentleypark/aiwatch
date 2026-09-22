@@ -101,6 +101,31 @@ export function buildUptimeEntry(chart, days, fetched) {
   }
 }
 
+/**
+ * Status words this reader accepts. A row whose text matches none of them yields `{name: null,
+ * status: null}`.
+ *
+ * Every word here must be one `mapRootlyComponentStatus` accepts, since the Worker maps what this
+ * emits; `rootly.test.ts` holds that.
+ */
+const COMPONENT_STATES = /\b(Operational|Affected|Degraded|Partial Outage|Major Outage|Under Maintenance)\b/
+
+/** The same words, for the cross-side test — read off the regex so the two cannot diverge. */
+export const COMPONENT_STATES_WORDS = COMPONENT_STATES.source.replace(/^\\b\(|\)\\b$/g, '').split('|')
+
+/**
+ * One component row's text → `{name, status}`; nulls when no status word is found. `status` is the
+ * matched word; `name` is what precedes it, whitespace-collapsed.
+ *
+ * Separated from the DOM query so the vocabulary is testable. Which element counts as a row is still
+ * decided in the browser, and no test reaches that.
+ */
+export function readComponentRow(text) {
+  const flat = text.replace(/\s+/g, ' ')
+  const m = COMPONENT_STATES.exec(flat)
+  return { name: m ? flat.slice(0, m.index).trim() : null, status: m ? m[1] : null }
+}
+
 async function main() {
   const WORKER_URL = process.env.WORKER_URL
   const TOKEN = process.env.MISTRAL_FEED_TOKEN
@@ -131,18 +156,12 @@ async function main() {
     // elements every poll. Presence in the DOM is the actual signal here.
     await page.waitForSelector('turbo-frame[id^="uptime-chart-"]', { state: 'attached', timeout: 60000 })
 
-    const components = await page.evaluate(() => {
-      const STATES = /\b(Operational|Degraded|Partial Outage|Major Outage|Under Maintenance)\b/;
-      return [...document.querySelectorAll('turbo-frame[id^="uptime-chart-"]')].map((f) => {
-        const text = ((f.closest('div')?.parentElement)?.textContent || '').replace(/\s+/g, ' ').trim();
-        const m = STATES.exec(text);
-        return {
-          id: f.id.replace('uptime-chart-', ''),
-          name: m ? text.slice(0, m.index).trim() : null,
-          status: m ? m[1] : null,
-        };
-      });
-    })
+    const componentRows = await page.evaluate(() =>
+      [...document.querySelectorAll('turbo-frame[id^="uptime-chart-"]')].map((f) => ({
+        id: f.id.replace('uptime-chart-', ''),
+        text: (f.closest('div')?.parentElement)?.textContent ?? '',
+      })))
+    const components = componentRows.map((r) => ({ id: r.id, ...readComponentRow(r.text) }))
 
     // ── Uptime charts ──────────────────────────────────────────────────────────────────────────
     // Read BEFORE navigating away: the charts live on the main page. Only the impacted bars need a
