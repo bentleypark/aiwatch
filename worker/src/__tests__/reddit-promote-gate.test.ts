@@ -2,8 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   promoteReason, promoteStatusGate, promoteJoinReading, promoteJoinIds, gatePromotes, isPromotable,
   buildPromoteRecord, PROMOTE_RECORD_PREFIX, PROMOTE_RECORD_TTL_SEC, REDDIT_TARGETS,
+  promoteIncidentWindows, matchPromoteIncident, PROMOTE_INCIDENT_LEAD_MS,
 } from '../reddit'
-import type { PromoteJoinReading } from '../reddit'
+import type { PromoteJoinReading, PromoteIncidentWindow } from '../reddit'
 import { SERVICES } from '../services'
 import { detectRedditPosts } from '../reddit'
 import { UPSTREAM_DEPS } from '../upstream-link'
@@ -307,5 +308,97 @@ describe('#1315 buildPromoteRecord', () => {
 
   it('the TTL matches the 90d documented in kv-schema.md', () => {
     expect(PROMOTE_RECORD_TTL_SEC).toBe(90 * 86400)
+  })
+})
+
+// #1472 — judged against when the post was WRITTEN. Each case is a real record from
+// `reddit:promote:rec:*` (2026-09), with the incident times from `incidents:monthly:2026-09`.
+describe('#1472 the gate judges the post’s creation time, not the decision time', () => {
+  const t = (iso: string) => Date.parse(iso)
+  const win = (id: string, start: string, end: string | null): PromoteIncidentWindow =>
+    ({ id, startMs: t(start), endMs: end === null ? null : t(end) })
+  const gate = (ids: string[], statuses: Record<string, ServiceStatusValue>, windows: Record<string, PromoteIncidentWindow[]>, posted: string) =>
+    promoteStatusGate(ids, read(statuses), { postCreatedMs: t(posted), windowsById: new Map(Object.entries(windows)) })
+
+  it('r/OpenAI "Codex down…" — posted mid-incident, read after it resolved: promotes', () => {
+    const windows = { codex: [win('codex-0903', '2026-09-03T14:58:00Z', '2026-09-03T16:55:00Z')] }
+    const ids = ['openai', 'chatgpt', 'codex']
+    const healthyNow = { openai: 'operational', chatgpt: 'operational', codex: 'operational' } as const
+    expect(promoteStatusGate(ids, read(healthyNow))).toBe('downgrade-healthy')
+    expect(gate(ids, healthyNow, windows, '2026-09-03T15:10:00Z')).toBe('allow')
+    expect(matchPromoteIncident(ids, new Map(Object.entries(windows)), t('2026-09-03T15:10:00Z')))
+      .toEqual({ serviceId: 'codex', incidentId: 'codex-0903' })
+  })
+
+  it('a member affected now still promotes, whatever the post time — `[monitor]` claims every member reads healthy', () => {
+    const ids = ['claude', 'claudeai', 'claudecode']
+    const now = { claude: 'degraded', claudeai: 'operational', claudecode: 'operational' } as const
+    const windows = { claude: [win('claude-0910', '2026-09-10T21:43:00Z', null)] }
+    expect(gate(ids, now, windows, '2026-09-10T20:31:00Z')).toBe('allow')
+  })
+
+  it('r/ChatGPT "Some tools are currently unavailable" — posted 30 min before the provider filed: promotes', () => {
+    const windows = { chatgpt: [win('chatgpt-0914', '2026-09-14T15:58:00Z', null)] }
+    expect(gate(['openai', 'chatgpt', 'codex'], { openai: 'operational', chatgpt: 'degraded', codex: 'operational' },
+      windows, '2026-09-14T15:28:00Z')).toBe('allow')
+  })
+
+  it('a post up to an hour before the provider filed still promotes once everything reads healthy again', () => {
+    const windows = { chatgpt: [win('chatgpt-0914', '2026-09-14T15:58:00Z', '2026-09-15T03:11:00Z')] }
+    const healthy = { openai: 'operational', chatgpt: 'operational', codex: 'operational' } as const
+    const ids = ['openai', 'chatgpt', 'codex']
+    expect(gate(ids, healthy, windows, '2026-09-14T15:28:00Z')).toBe('allow')
+    expect(gate(ids, healthy, windows, '2026-09-14T14:57:00Z')).toBe('downgrade-healthy')
+  })
+
+  it('an incident still open covers the post even when the service reads healthy', () => {
+    const windows = { cursor: [win('open', '2026-09-15T21:26:49Z', null)] }
+    expect(gate(['cursor'], { cursor: 'operational' }, windows, '2026-09-15T21:34:00Z')).toBe('allow')
+  })
+
+  it('the lead margin and the resolution are inclusive edges, and nothing past them matches', () => {
+    const w = new Map([['cursor', [win('c', '2026-09-15T21:26:49Z', '2026-09-15T22:00:04Z')]]])
+    const start = t('2026-09-15T21:26:49Z'), end = t('2026-09-15T22:00:04Z')
+    expect(matchPromoteIncident(['cursor'], w, start - PROMOTE_INCIDENT_LEAD_MS)).not.toBeNull()
+    expect(matchPromoteIncident(['cursor'], w, start - PROMOTE_INCIDENT_LEAD_MS - 1)).toBeNull()
+    expect(matchPromoteIncident(['cursor'], w, end)).not.toBeNull()
+    expect(matchPromoteIncident(['cursor'], w, end + 1)).toBeNull()
+  })
+
+  it('a window that covers nothing near the post does not promote a healthy member', () => {
+    expect(gate(['cursor'], { cursor: 'operational' }, { cursor: [win('old', '2026-09-14T00:00:00Z', '2026-09-14T01:00:00Z')] },
+      '2026-09-15T12:00:00Z')).toBe('downgrade-healthy')
+  })
+
+  it('stays fail-open: an unread member still allows, whatever the windows say', () => {
+    const m = read({ claude: 'operational' })
+    m.set('claudeai', { status: 'operational', sourceRead: false })
+    expect(promoteStatusGate(['claude', 'claudeai'], m, { postCreatedMs: t('2026-09-15T12:00:00Z'), windowsById: new Map() }))
+      .toBe('allow-unreadable')
+  })
+
+  it('promoteIncidentWindows drops incidents whose timestamps are not real instants, and bridged ones that cannot close', () => {
+    expect(promoteIncidentWindows([
+      { id: 'a', startedAt: '2026-09-03T14:58:00Z', resolvedAt: '2026-09-03T16:55:00Z' },
+      { id: 'b', startedAt: '2026-09-03T14:58:00Z', resolvedAt: null },
+      { id: 'c', startedAt: '2026-09-03T14:58:00Z', startUnknown: true },
+      { id: 'd', startedAt: '2026-09-03T00:00:00Z', derived: 'status_history' },
+      { id: 'e', startedAt: 'not a date' },
+      { id: 'f', startedAt: '2026-09-03T14:58:00Z', resolvedAt: null, retainedBridge: true },
+      { id: 'g', startedAt: '2026-09-03T14:58:00Z', resolvedAt: 'not a date' },
+    ])).toEqual([
+      { id: 'a', startMs: t('2026-09-03T14:58:00Z'), endMs: t('2026-09-03T16:55:00Z') },
+      { id: 'b', startMs: t('2026-09-03T14:58:00Z'), endMs: null },
+    ])
+  })
+
+  it('the decision record carries the matched incident, and null when none matched', () => {
+    const base = {
+      postId: 't3_x', subreddit: 'OpenAI', title: 'Codex down', reason: 'question' as const,
+      statusIds: ['codex'], statusById: read({ codex: 'operational' }), verdict: 'allow' as const, sent: true, ageSec: 10,
+    }
+    expect(buildPromoteRecord({ ...base, matchedIncident: { serviceId: 'codex', incidentId: 'i1' } }).value.matchedIncident)
+      .toEqual({ serviceId: 'codex', incidentId: 'i1' })
+    expect(buildPromoteRecord(base).value.matchedIncident).toBeNull()
   })
 })

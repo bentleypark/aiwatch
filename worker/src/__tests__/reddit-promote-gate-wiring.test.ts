@@ -117,6 +117,18 @@ describe('#1315 promote gate — driven through the real scheduled() handler', (
     expect(embeds[0]?.description).not.toContain('our status reads operational')
   })
 
+  it('#1472 — PROMOTES a post written during an incident that has since resolved, and records the match', async () => {
+    const p = post('Is Claude down?', ['claude', 'claudeai'])
+    const incident = {
+      id: 'inc-1472', title: 'Elevated errors', status: 'resolved', impact: 'major', duration: '25m', timeline: [],
+      startedAt: '2026-08-12T11:30:00.000Z', resolvedAt: '2026-08-12T11:55:00.000Z',
+    }
+    const { records, embeds } = await runCron([p], { claude: { incidents: [incident] as never } })
+    expect(records[0]?.verdict).toBe('allow')
+    expect(records[0]?.matchedIncident).toEqual({ serviceId: 'claude', incidentId: 'inc-1472' })
+    expect(embeds[0]?.title).toContain('🎯 PROMOTE')
+  })
+
   it('records `allow` when a joined service is actually affected', async () => {
     const p = post('Is Claude down?', ['claude', 'claudeai'])
     const { seen, records, discordSends } = await runCron([p], { claudeai: { status: 'down' } })
