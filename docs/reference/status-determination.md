@@ -655,8 +655,9 @@ pages `fetched`, their difference, the pre-cap `available` count, and lost uptim
 derives incident coverage as `complete` (`fetched === listed`), `partial` (`fetched < listed`), or
 `unavailable` (the run did not reach a payload), alongside delivery as `stored`, `rejected`, or
 `not-posted`. The event is written best-effort to Analytics Engine; it never changes the cached feed,
-the published status, or the Score. The bounded vocabulary and counters support a 90-day query of
-partial-run rate and total lost pages without storing incident URLs, titles, run ids, or raw errors.
+the published status, or the Score. The bounded vocabulary and counters support a query of partial-run
+rate and total lost pages without storing incident URLs, titles, run ids, or raw errors. Analytics
+Engine keeps rows for three months, so a window that must be complete stays shorter than that.
 
 ### Provenance in the monthly archive — absence is not neutral
 
