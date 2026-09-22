@@ -14,7 +14,7 @@
 import { defuseAutolinkDomain } from './alerts'
 import { appendStatusHint, appendUtm } from './utils'
 import { isAffectedStatus, isUnreadableStatus, type ServiceStatusValue } from './status-verdict'
-import type { ServiceConfig } from './types'
+import type { Incident, ServiceConfig } from './types'
 import { SERVICES } from './services'
 import { UPSTREAM_DEPS } from './upstream-link'
 
@@ -359,9 +359,54 @@ export function promoteJoinReading(
  */
 export type PromoteGateVerdict = 'allow' | 'allow-exempt' | 'allow-unreadable' | 'downgrade-healthy'
 
+/** #1472 — one incident as a time span. `endMs` null = still open. */
+export interface PromoteIncidentWindow {
+  id: string
+  startMs: number
+  endMs: number | null
+}
+
+/** #1472 — users post about an outage before the provider files it (2026-09-14: posted 15:28, filed 15:58). */
+export const PROMOTE_INCIDENT_LEAD_MS = 60 * 60 * 1000
+
+export function promoteIncidentWindows(incidents: readonly Pick<Incident, 'id' | 'startedAt' | 'resolvedAt' | 'startUnknown' | 'derived' | 'retainedBridge'>[]): PromoteIncidentWindow[] {
+  const out: PromoteIncidentWindow[] = []
+  for (const inc of incidents) {
+    if (inc.startUnknown || inc.derived === 'status_history' || inc.retainedBridge) continue
+    const startMs = Date.parse(inc.startedAt)
+    if (Number.isNaN(startMs)) continue
+    const endMs = inc.resolvedAt ? Date.parse(inc.resolvedAt) : null
+    if (Number.isNaN(endMs)) continue
+    out.push({ id: inc.id, startMs, endMs })
+  }
+  return out
+}
+
+export interface PromoteIncidentMatch {
+  serviceId: string
+  incidentId: string
+}
+
+/** #1472 — the first incident on a joined service whose span (with the lead margin) covers the post. */
+export function matchPromoteIncident(
+  statusIds: readonly string[] | undefined,
+  windowsById: ReadonlyMap<string, readonly PromoteIncidentWindow[]>,
+  postCreatedMs: number,
+): PromoteIncidentMatch | null {
+  for (const id of statusIds ?? []) {
+    for (const w of windowsById.get(id) ?? []) {
+      if (w.startMs - PROMOTE_INCIDENT_LEAD_MS <= postCreatedMs && (w.endMs === null || postCreatedMs <= w.endMs)) {
+        return { serviceId: id, incidentId: w.id }
+      }
+    }
+  }
+  return null
+}
+
 export function promoteStatusGate(
   statusIds: readonly string[] | undefined,
   statusById: ReadonlyMap<string, PromoteJoinReading>,
+  timing?: { postCreatedMs: number; windowsById: ReadonlyMap<string, readonly PromoteIncidentWindow[]> },
 ): PromoteGateVerdict {
   if (!statusIds || statusIds.length === 0) return 'allow-exempt'
 
@@ -373,6 +418,7 @@ export function promoteStatusGate(
       continue
     }
     if (isAffectedStatus(reading.status)) return 'allow'
+    if (timing && matchPromoteIncident([id], timing.windowsById, timing.postCreatedMs)) return 'allow'
   }
   return sawUnreadable ? 'allow-unreadable' : 'downgrade-healthy'
 }
@@ -427,6 +473,8 @@ export interface PromoteRecord {
    *  `null` — kept as a key rather than dropped, so the join is legible after the fact. */
   statusAtDecision: Record<string, PromoteJoinReading | null> | null
   verdict: PromoteGateVerdict
+  /** #1472 — the incident whose span covered the post's creation time, or null when none did. */
+  matchedIncident: PromoteIncidentMatch | null
   /** Whether the Discord send SUCCEEDED. Not "was selected": #1202 round 7 caught the same field
    *  meaning intent on `reddit:promote:last`, and this record exists to measure precision, so a
    *  numerator that counts undelivered sends corrupts the one number it produces. */
@@ -443,6 +491,7 @@ export function buildPromoteRecord(input: {
   statusIds?: readonly string[]
   statusById: ReadonlyMap<string, PromoteJoinReading>
   verdict: PromoteGateVerdict
+  matchedIncident?: PromoteIncidentMatch | null
   sent: boolean
   ageSec: number
   now?: Date
@@ -460,6 +509,7 @@ export function buildPromoteRecord(input: {
       statusIds: input.statusIds ? [...input.statusIds] : null,
       statusAtDecision: readings,
       verdict: input.verdict,
+      matchedIncident: input.matchedIncident ?? null,
       sent: input.sent,
       ageSec: Math.round(input.ageSec),
       at: (input.now ?? new Date()).toISOString(),

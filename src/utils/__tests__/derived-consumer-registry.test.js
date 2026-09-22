@@ -51,6 +51,7 @@ const CONSUMER = /\.incidents\b|\bincidents\s*[.[]|\??\.(?:duration|durationMin|
 
 /** Applies the rule: reads `derived` and changes behaviour. */
 const APPLIERS = {
+  'worker/src/reddit.ts': '#1472 promoteIncidentWindows never makes one a window — its startedAt is an anchor inside a day, not the instant a post can be matched against',
   'worker/src/score.ts': 'excludes from the MTTR sample AND the Recovery default (carriesRecoveryTime)',
   'worker/src/incident-history.ts': 'never enters the no-TTL RAG corpus (buildHistoryRecord returns null)',
   'worker/src/monthly-archive.ts': 'kept out of countedCount (the published "avg recovery"), kept in totalMinutes',
@@ -148,6 +149,7 @@ const SAFE = {
  *  judgment, while still letting DISPLAY/SCORE surfaces show it normally (that is the bridge's whole
  *  point — KNOWN LIMIT 1 in services.ts). Each entry names which round of #1384 review found it. */
 const RB_APPLIERS = {
+  'worker/src/reddit.ts': '#1472 promoteIncidentWindows excludes it — a bridged incident left open would be an unbounded window matching every later Reddit post',
   'worker/src/monthly-archive.ts': 'prunePhantomIncidents: counted in liveIds (guard 2, protects its OWN row) but excluded from oldestLiveStart (guard 3, cannot vouch for OTHER rows) — round 4 then round 5',
   'worker/src/ai-analysis.ts': 'refreshOrReanalyze excludes it from the active-incident set — no recurring re-analysis on a frozen snapshot — round 6',
   'worker/src/rss.ts': 'buildFeedWithMeta never emits it as an active RSS/Slack item — round 6',
@@ -257,6 +259,7 @@ const RB_SAFE = {
 /** Applies the rule: reads `startUnknown` and refuses to derive an elapsed time, or discloses that the
  *  start is an anchor. Each entry names what round 1 of #1390 found, where it found one. */
 const SU_APPLIERS = {
+  'worker/src/reddit.ts': '#1472 promoteIncidentWindows excludes it — neither timestamp is a real start, so no post can be matched against its span',
   'worker/src/score.ts': 'carriesRecoveryTime excludes it from the Recovery SAMPLE, not just the durations — otherwise the default scores Recovery 0 instead of abstaining at 15 (round 1, reproduced at -19 Score)',
   'worker/src/incident-history.ts': 'buildHistoryRecord returns null — a 0-minute row in the no-TTL corpus grades every prediction as over-predicted and grounds the next estimate',
   'worker/src/monthly-archive.ts': 'kept out of countedCount (the published "avg recovery" divisor) and out of longest; the reconstructed duration is null, never minutesToDurationString(0) = "0h 0m"; the flag itself survives the freeze',
@@ -379,7 +382,7 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // drops 30 files. A legitimate change moves this number in the same diff.
     // 72 → 73: #1381 added worker/src/parsers/rootly.ts, a producer (classified SAFE alongside the
     // other parsers). Moving it in the same diff is the point — the number is the scan's own health.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(73)
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(74)
   })
 
   it('leaves none unclassified', () => {
@@ -430,10 +433,10 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the two axes', () => {
-    // If this ever fails while the #1292 "finds the consumers" test above still passes at 73, the
+    // If this ever fails while the #1292 "finds the consumers" test above still passes at 74, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(73)
+    expect(all.length).toBe(74)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -479,7 +482,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(73)
+    expect(all.length).toBe(74)
   })
 
   it('leaves none unclassified for startUnknown', () => {
