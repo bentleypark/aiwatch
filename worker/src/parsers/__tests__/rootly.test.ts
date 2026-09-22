@@ -423,6 +423,11 @@ describe('mapRootlyComponentStatus', () => {
     expect(mapRootlyComponentStatus('Operational')).toBe('operational')
   })
 
+  it('maps the word an affected component actually renders', () => {
+    expect(mapRootlyComponentStatus('Affected')).toBe('degraded')
+    expect(mapRootlyComponentStatus('affected')).toBe('degraded')
+  })
+
   it('maps the impaired labels Rootly offers', () => {
     expect(mapRootlyComponentStatus('Degraded')).toBe('degraded')
     expect(mapRootlyComponentStatus('Partial Outage')).toBe('degraded')
@@ -437,10 +442,38 @@ describe('mapRootlyComponentStatus', () => {
   })
 
   it('returns null on an unrecognized word — NOT operational', () => {
-    // The whole point: only "Operational" was observed live, so the rest of the vocabulary is
-    // inferred. Coercing an unknown word to green would publish an all-clear we did not read.
+    // Coercing an unknown word to green would publish an all-clear we did not read.
     expect(mapRootlyComponentStatus('Elevated Errors')).toBeNull()
     expect(mapRootlyComponentStatus('')).toBeNull()
+  })
+})
+
+// The scraper emits the word it matched and the Worker maps it, so the scraper's vocabulary has to
+// stay a subset of this one (#1476).
+describe('the two status vocabularies stay in step (#1476)', () => {
+  it('maps every word the scraper can emit', async () => {
+    const { COMPONENT_STATES_WORDS } = await import('../../../../scripts/scrape-mistral-status.mjs')
+    expect(COMPONENT_STATES_WORDS.length).toBeGreaterThan(1)
+    for (const word of COMPONENT_STATES_WORDS) {
+      expect(mapRootlyComponentStatus(word), `scraper can emit "${word}"`).not.toBeNull()
+    }
+  })
+})
+
+describe('an Affected component (#1476)', () => {
+  const scope = REAL_FEED.components.map((c) => c.id)
+  const now = Date.parse('2026-09-10T02:00:00.000Z')
+  const affected = {
+    ...REAL_FEED,
+    components: REAL_FEED.components.map((c, i) => (i === 0 ? { ...c, status: 'Affected' } : c)),
+  }
+
+  it('does not refuse the feed', () => {
+    expect(isStorableRootlyFeed(affected, scope, now)).toBe(true)
+  })
+
+  it('carries the component into the badge as degraded, not unknown', () => {
+    expect(rootlyOverallStatus(affected.components, scope)).toBe('degraded')
   })
 })
 

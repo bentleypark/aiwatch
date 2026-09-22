@@ -283,15 +283,13 @@ export function parseRootlyTimestamp(text: string): number | null {
 /**
  * A component's RENDERED status word → our three-state.
  *
- * Returns null on anything unrecognized, and the caller must not coerce that to `operational`. The
- * page's vocabulary here is only partly observed: every one of the 14 components read "Operational"
- * on 2026-09-10, so "Degraded" / "Partial Outage" / "Major Outage" / "Under Maintenance" are the
- * labels Rootly's own UI offers rather than strings seen live. An unknown word therefore means "we
- * do not know", which is a different thing from "fine".
+ * Returns null on anything unrecognized, and the caller must not coerce that to `operational`. An
+ * unknown word means "we do not know", which is a different thing from "fine".
  */
 export function mapRootlyComponentStatus(raw: string): 'operational' | 'degraded' | 'down' | null {
   switch (String(raw || '').trim().toLowerCase()) {
     case 'operational': return 'operational'
+    case 'affected':
     case 'degraded':
     case 'degraded performance':
     case 'partial outage': return 'degraded'
