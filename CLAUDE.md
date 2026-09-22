@@ -275,7 +275,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident
   probe.ts probe-archival.ts   # Direct RTT probing (33 targets) + daily archival
   daily-summary.ts weekly-briefing.ts monthly-archive.ts monthly-narrative.ts  # Discord reports + archives
-  api-traffic.ts outage-audience.ts referral.ts vitals.ts mistral-feed-observation.ts   # WAE/KV instrumentation
+  api-traffic.ts outage-audience.ts referral.ts vitals.ts mistral-feed-observation.ts status-fetch-run.ts   # WAE/KV instrumentation
   kv-read-census.ts  # KV READ attribution (#1224) — every read bucketed by key
   growth-series.ts   # Durable daily series of the consent-free growth counters (#986) — the dataset #547's lift measurement reads
   reddit.ts security-monitor.ts changelog.ts platform-monitor.ts  # External monitoring

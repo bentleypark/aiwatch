@@ -40,6 +40,7 @@ import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, type StoredRootlyFeed } from './parsers/rootly'
 import { parseMistralFeedObservation, recordMistralFeedObservation } from './mistral-feed-observation'
+import { recordStatusFetchRun } from './status-fetch-run'
 import { maybeDispatchWorkflow, DEEPSEEK_DISPATCH_CONFIG, MISTRAL_DISPATCH_CONFIG } from './workflow-dispatch'
 import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, extReportCountKey, isExtReportSource, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
 
@@ -900,7 +901,9 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       if (probeRaw) {
         try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[cron] probe24h parse failed:', err instanceof Error ? err.message : err) }
       }
+      const fetchStartedAt = Date.now()
       const { raw: freshServices, pageComponents, upstreamFeeds: freshFeeds } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
+      recordStatusFetchRun(env.ANALYTICS, 'cron', Date.now() - fetchStartedAt, freshServices)
       if (freshServices.length > 0) {
         services = freshServices
         // Adopted only alongside a usable service list, so `services` and `upstreamFeeds` always come
@@ -5967,7 +5970,9 @@ export default {
         }
       }
 
+      const fetchStartedAt = Date.now()
       const { raw, enriched, upstreamFeeds } = await fetchAllServices(env.STATUS_CACHE, probe24h)
+      recordStatusFetchRun(env.ANALYTICS, 'live', Date.now() - fetchStartedAt, raw)
 
       // Cache results after cross-validation (probe-verified, no fallback substitution — prevents cache poisoning)
       // Await cacheWrite so badge/v1 endpoints see data immediately
