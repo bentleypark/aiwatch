@@ -19,7 +19,7 @@
 // `send` + a mock KV, per the "new worker logic → exported fn + unit test" rule.
 
 import { kvPut, readTrackingState, isFailSinceLive, shouldAlertPersistentFailure, formatPersistentFailureAlert, type KVLike, type PersistentFailureCause, type ServiceTrackingState } from './utils'
-import { parseFailKey, parseParseFailDay, slotOf, type ParseFailDay } from './parse-failure-log'
+import { parseFailKey, parseParseFailDay, reasonsFor, slotOf, type ParseFailDay } from './parse-failure-log'
 
 /** #1391 — how many 5-minute slots back a parse booking still counts as the current cause. Width is
  *  pinned by `persistent-failure.test.ts`, not by this line. */
@@ -36,9 +36,9 @@ function persistentFailureCause(
   const cause: PersistentFailureCause = {}
   const slot = day.slots[svcId]
   if (slot !== undefined && slotOf(nowMs) - slot <= PARSE_CAUSE_RECENCY_SLOTS) {
-    // Every reason booked that day, sorted. `slots` dates the LAST booking and names no reason, so
-    // singling one out would claim a currency the record cannot support.
-    cause.reasons = Object.keys(day.counts[svcId] ?? {}).sort()
+    // `slots` dates the LAST booking and names no reason, so singling one out would claim a
+    // currency the record cannot support.
+    cause.reasons = reasonsFor(day, svcId)
   }
   if (entry.sourceReadFailure) cause.failure = entry.sourceReadFailure
   return cause

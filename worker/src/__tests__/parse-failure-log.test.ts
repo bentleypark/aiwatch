@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
-  applyParseFailure, parseParseFailDay, recordParseFailure, parseFailKey, totalFor, slotOf,
+  applyParseFailure, parseParseFailDay, recordParseFailure, parseFailKey, totalFor, reasonsFor, slotOf,
   PARSE_FAIL_TTL_S, type ParseFailDay,
 } from '../parse-failure-log'
 import { fetchService, SERVICES } from '../services'
@@ -40,6 +40,23 @@ describe('#1089 follow-up — durable per-service parse-failure counter', () => 
     })
     expect(totalFor(d, 'mistral')).toBe(3)
     expect(totalFor(d, 'fal'), 'a service with no failures totals 0').toBe(0)
+  })
+
+  it('folds a day to its sorted reason set, per service', () => {
+    let d: ParseFailDay = { counts: {}, slots: {} }
+    d = applyParseFailure(d, 'mistral', 'no-nuxt-payload', 1)
+    d = applyParseFailure(d, 'mistral', 'bad-json', 2)
+    d = applyParseFailure(d, 'perplexity', 'next-shape-changed', 1)
+    expect(reasonsFor(d, 'mistral')).toEqual(['bad-json', 'no-nuxt-payload'])
+    expect(reasonsFor(d, 'perplexity')).toEqual(['next-shape-changed'])
+    expect(reasonsFor(d, 'fal'), 'a service with no failures folds to no reasons').toEqual([])
+  })
+
+  it('drops the per-reason counts it folds over', () => {
+    let d: ParseFailDay = { counts: {}, slots: {} }
+    for (const slot of [1, 2, 3]) d = applyParseFailure(d, 'mistral', 'bad-json', slot)
+    expect(totalFor(d, 'mistral')).toBe(3)
+    expect(reasonsFor(d, 'mistral')).toEqual(['bad-json'])
   })
 
   it('does not mutate the input', () => {

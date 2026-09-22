@@ -2,7 +2,7 @@
 
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
-import { recordParseFailure, type ScrapeLegParseFailure } from './parse-failure-log'
+import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
@@ -1958,6 +1958,10 @@ export function safeJsonParse(text: string): unknown {
   try { return JSON.parse(text) } catch { return null }
 }
 
+export function statuspageSummaryFailureReason(parsed: unknown): StatuspageParseFailure {
+  return parsed === null ? 'statuspage-non-json' : 'statuspage-summary-unreadable'
+}
+
 /** #1268 — is this body actually an Atlassian Statuspage summary, as opposed to merely valid JSON?
  *  The question every consumer below assumes has been answered: `resolveSvcStatus` falls back to the
  *  overall indicator and `parseIncidents` returns `[]`, so an unrelated JSON body (a gateway error
@@ -2247,6 +2251,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       let summaryData: StatuspageResponse
       let latency: number
       let rawIncData: StatuspageResponse | null
+      let incidentsLegFailure: StatuspageParseFailure | null = null
 
       if (prefetched) {
         summaryData = prefetched.summary
@@ -2256,8 +2261,16 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         const baseUrl = config.apiUrl.replace('/summary.json', '')
         const start = Date.now()
         const [summaryRes, incidentsRes] = await Promise.all([
-          fetchWithRetry(config.apiUrl, { svcId: config.id }),
-          fetchWithRetry(`${baseUrl}/incidents.json`, { svcId: config.id }).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); parseErrors++; return null }),
+          fetchWithRetry(config.apiUrl, { svcId: config.id }).catch(async (err) => {
+            await recordParseFailure(kv, Date.now(), config.id, 'statuspage-fetch-unreadable')
+            throw err
+          }),
+          fetchWithRetry(`${baseUrl}/incidents.json`, { svcId: config.id }).catch((err) => {
+            console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message)
+            parseErrors++
+            incidentsLegFailure = 'statuspage-incidents-unreadable'
+            return null
+          }),
         ])
         latency = Date.now() - start
         if (!summaryRes.ok) {
@@ -2277,6 +2290,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // the source-inactive alert HOLDS a prior dead state this cycle instead of misreading the
           // non-4xx outcome as "source recovered" (the Inactive/Recovered flap). (A 4xx — incl. 429 —
           // is classified `dead-source` above, NOT unknown.)
+          await recordParseFailure(kv, Date.now(), config.id, 'statuspage-fetch-unreadable')
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
         }
@@ -2300,6 +2314,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           summaryText = await summaryRes.text()
         } catch (err) {
           incidentsRes?.body?.cancel()  // the sibling body must not leak on the rethrow path
+          await recordParseFailure(kv, Date.now(), config.id, 'statuspage-fetch-unreadable')
           throw err
         }
         const summaryParsed = safeJsonParse(summaryText)
@@ -2311,6 +2326,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // separate a Statuspage tombstone from a CF challenge from a truncated response.
           console.error(`[fetchService] ${config.id} summary.json: HTTP ${summaryRes.status} content-type=${summaryRes.headers.get('content-type') ?? 'none'} is not a Statuspage summary — body[0..120]=${JSON.stringify(summaryText.slice(0, 120))}`)
           incidentsRes?.body?.cancel()
+          await recordParseFailure(kv, Date.now(), config.id, statuspageSummaryFailureReason(summaryParsed))
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           // No `incidentSourceStale` here on purpose — `sourceUnknown` IS the claim, and
           // `withUnreadFeedFlag` derives the ranking flag from it at the choke point. Setting it here
@@ -2379,6 +2395,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // above — so the badge withholds (→ `unknown` after the strike threshold, the #1004 display
           // rule) rather than inventing operational (#713). Auto-recovers the moment the RSC parses again.
           console.warn(`[fetchService] ${config.id}: incidentIoGlobalPage RSC unreadable (HTML ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — withholding status this cycle`)
+          await recordParseFailure(kv, Date.now(), config.id, 'incidentio-global-unreadable')
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
           return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
         }
@@ -2787,6 +2804,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // Successful fetch — reset or track based on parse errors
       if (parseErrors > 0) {
         console.warn(`[fetchService] ${config.id} completed with ${parseErrors} parse error(s)`)
+        if (incidentsLegFailure) await recordParseFailure(kv, Date.now(), config.id, incidentsLegFailure)
         await trackFetchFailure(trackingStore, kv, config.id)
       } else {
         resetFetchFailure(trackingStore, config.id)
