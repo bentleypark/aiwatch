@@ -66,6 +66,8 @@ Per-service status is resolved in `worker/src/services.ts` with this priority:
 
 AWS Health read failures, Datadog `config.json` non-OK responses and body-read failures, and Instatus scrape/RSS/Google Cloud `incidents.json`/Better Stack `index.json` fetch failures emit one failure-only structured Workers Log: `{ event: 'status_source_read_failure', serviceId, source, phase, latencyMs, httpStatus?, errorKind? }`. `source` is bounded to those six legs; `phase` is `transport`, `http`, `decode`, or `shape`; `errorKind` is present only for transport failures and is bounded to `timeout`, `network`, or `unknown`. No response body, URL, headers, or raw exception payload is logged. A failure-tracking update with a bounded cause retains it in `tracking:state`; one without a cause clears an earlier value, as does a successful read. No Analytics Engine record is created. A Datadog request that exhausts retries, and body-read failures after a successful Instatus/RSS/Google Cloud/Better Stack response, remain counter-only failures without a bounded cause or this log.
 
+**#1470 — `fetch-fail:daily` remains mixed.** It continues to count one source-unreadable episode regardless of whether the failed leg was transport or parsing; splitting the shared ramp would alter #500 behavior. The `instatus-parse-fail` record stores the bounded reason separately, and the daily #500 row prints the reasons observed for that service on the same UTC day.
+
 ## Operator incident suppression — orthogonal to `incidentExclude` (#904)
 
 `incidentExclude`/`incidentComponents` above are **source attribution** — "this incident belongs to a

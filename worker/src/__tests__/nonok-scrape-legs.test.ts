@@ -273,6 +273,18 @@ describe('#1234 — the gcloud leg (gemini)', () => {
     expect(trackingStore.gemini).toBeUndefined()
     expect(keysStartingWith(store, 'instatus-parse-fail:')).toEqual([])
   })
+
+  it('records a malformed AI Studio response with its own bounded reason', async () => {
+    const store: Record<string, string> = {}
+    vi.stubGlobal('fetch', routedFetch([
+      [isGcloud, () => new Response(JSON.stringify([]), { status: 200 })],
+      [isAistudio, () => new Response('<html>challenge</html>', { status: 200 })],
+    ]))
+
+    await fetchService(gemini, undefined, mockKV(store), {})
+
+    expect(reasonsFor(store, 'gemini')).toEqual({ 'aistudio-unreadable': 1 })
+  })
 })
 
 describe('#1234 — the BetterStack index.json leg (together)', () => {

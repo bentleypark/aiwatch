@@ -105,6 +105,7 @@ export interface DailySummaryData {
   vitals?: VitalsDaily | null
   probeSnapshots?: ProbeSnapshot[]
   fetchFailureCounts?: Record<string, number>   // svcId → times degraded threshold hit today
+  fetchFailureReasons?: Record<string, string[]> // svcId → bounded reasons observed today
   crossValidSuppressed?: Record<string, number> // svcId → times probe overrode to operational
   degradationCounts?: Record<string, number>          // svcId → RTT degradation spikes today (#464)
   degradationNoStatusCounts?: Record<string, number>  // svcId → degradations NOT on official status page
@@ -163,7 +164,7 @@ export function formatDarkFor(ms: number): string {
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, pushCount, webhookCounts, deliveryCounts, redditCount, vitals, fetchFailureCounts, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, pushCount, webhookCounts, deliveryCounts, redditCount, vitals, fetchFailureCounts, fetchFailureReasons, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -342,7 +343,9 @@ export function buildDailySummary(data: DailySummaryData): string {
           : suppressed > 0
             ? `${real} real, ${suppressed} probe-suppressed`
             : `${real} real`
-        return `   ${nameMap.get(id) ?? id}: ${total}× threshold hit (${detail})`
+        const reasons = fetchFailureReasons?.[id]
+        const reasonDetail = reasons?.length ? `; reasons: ${[...reasons].sort().join(', ')}` : ''
+        return `   ${nameMap.get(id) ?? id}: ${total}× threshold hit (${detail}${reasonDetail})`
       })
       .join('\n')
     lines.push(`\n⚠️ **Unreadable Status Sources Today** (#500)\n${items}`)

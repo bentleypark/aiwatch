@@ -2145,6 +2145,7 @@ import { detectRedditPosts, isRedditScanTick, formatRedditAlert, formatCompetiti
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
+import { parseFailKey, parseParseFailDay } from './parse-failure-log'
 import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
 import { searchBadgeEmbeds, diffBadgeRepoDiscovery, parseBadgeReposSeen, type BadgeRepoDiscoveryDiff } from './badge-repo-discovery'
@@ -4028,7 +4029,9 @@ export default {
             // cross-valid:suppressed:{svcId}:{date}: times probe overrode degraded → operational.
             // Individual .catch(() => null) absorb KV I/O errors; missing keys are treated as 0.
             const fetchFailureCounts: Record<string, number> = {}
+            const fetchFailureReasons: Record<string, string[]> = {}
             const crossValidSuppressed: Record<string, number> = {}
+            const parseFailDay = parseParseFailDay(await env.STATUS_CACHE.get(parseFailKey(today)).catch(() => null))
             await Promise.all(SERVICES.filter(s => s.apiUrl).map(async (svc) => {
               const [failRaw, supRaw] = await Promise.all([
                 env.STATUS_CACHE.get(`fetch-fail:daily:${svc.id}:${today}`).catch(() => null),
@@ -4037,6 +4040,8 @@ export default {
               const failCount = parseInt(failRaw ?? '0', 10) || 0
               const supCount = parseInt(supRaw ?? '0', 10) || 0
               if (failCount > 0) fetchFailureCounts[svc.id] = failCount
+              const reasons = Object.keys(parseFailDay.counts[svc.id] ?? {})
+              if (reasons.length > 0) fetchFailureReasons[svc.id] = reasons
               if (supCount > 0) crossValidSuppressed[svc.id] = supCount
             })).catch((err) => {
               console.warn('[daily-summary] fetch failure counts read failed:', err instanceof Error ? err.message : err)
@@ -4273,6 +4278,7 @@ export default {
               vitals: vitalsSummary,
               probeSnapshots,
               fetchFailureCounts,
+              fetchFailureReasons,
               crossValidSuppressed,
               degradationCounts,
               degradationNoStatusCounts,

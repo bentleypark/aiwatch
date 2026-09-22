@@ -43,6 +43,20 @@ import type { AwsRssParseFailure, AwsHealthParseFailure } from './parsers/aws'
 import type { CloudflareStatusParseFailure } from './parsers/cloudflare-status'
 import type { DatadogParseFailure } from './parsers/datadog'
 
+export type StatuspageParseFailure =
+  | 'statuspage-fetch-unreadable'
+  | 'statuspage-non-json'
+  | 'statuspage-summary-unreadable'
+  | 'statuspage-incidents-unreadable'
+  | 'incidentio-global-unreadable'
+
+export type SourceFetchParseFailure =
+  | 'cloudflare-fetch-unreadable'
+  | 'aws-health-fetch-unreadable'
+  | 'aws-rss-fetch-unreadable'
+  | 'betterstack-body-unreadable'
+  | 'aistudio-unreadable'
+
 /**
  * #1123 — the persisted reason vocabulary, joined in ONE place: the module that writes it. Typing
  * `recordParseFailure` with this (rather than a bare `string`) keeps the set of buckets that can
@@ -51,7 +65,7 @@ import type { DatadogParseFailure } from './parsers/datadog'
  * source's union on purpose, so an operator aggregating one reason over several services is never
  * summing two different parsers' failures — they take different fixes.
  */
-export type SourceParseFailure = InstatusParseFailure | AwsRssParseFailure | AwsHealthParseFailure | CloudflareStatusParseFailure | DatadogParseFailure | ScrapeLegParseFailure
+export type SourceParseFailure = InstatusParseFailure | AwsRssParseFailure | AwsHealthParseFailure | CloudflareStatusParseFailure | DatadogParseFailure | ScrapeLegParseFailure | StatuspageParseFailure | SourceFetchParseFailure
 
 /**
  * #1234 — the generic path's two fetch legs: the scrape (one fetch, addressing either an RSS feed or

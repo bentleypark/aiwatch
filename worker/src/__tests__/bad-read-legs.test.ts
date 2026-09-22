@@ -211,7 +211,9 @@ describe('#1212 — the AWS Health leg carries the same flag (bedrock)', () => {
     expect(svc.sourceUnknown).toBe(true)
     expect(svc.status).toBe('unknown')
     expect(trackingStore.bedrock?.sourceReadFailure).toEqual({ source: 'aws-health', phase: 'transport', httpStatus: 200, errorKind: 'network' })
-    expect(keysStartingWith(store, 'instatus-parse-fail:')).toHaveLength(0)
+    const booked = keysStartingWith(store, 'instatus-parse-fail:')
+    expect(booked).toHaveLength(1)
+    expect(JSON.parse(store[booked[0]]).counts.bedrock).toEqual({ 'aws-health-fetch-unreadable': 1 })
     expect(warn).toHaveBeenCalledOnce()
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({
       event: 'status_source_read_failure', serviceId: 'bedrock', source: 'aws-health', phase: 'transport', httpStatus: 200, errorKind: 'network', latencyMs: expect.any(Number),

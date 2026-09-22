@@ -336,6 +336,15 @@ describe('buildDailySummary — Unreadable Status Sources section (#500)', () =>
     expect(result).toContain('5 real')
   })
 
+  it('traces a threshold-hit row to its recorded source reason', () => {
+    const result = buildDailySummary({
+      ...BASE,
+      fetchFailureCounts: { claude: 1 },
+      fetchFailureReasons: { claude: ['statuspage-non-json'] },
+    })
+    expect(result).toContain('Claude API: 1× threshold hit (1 real; reasons: statuspage-non-json)')
+  })
+
   it('labels all as false positives when suppressed count equals total', () => {
     const result = buildDailySummary({
       ...BASE,
