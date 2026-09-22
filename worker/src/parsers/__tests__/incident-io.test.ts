@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeIncidentIoUptime, parseIncidentIoComponentImpacts, parseIncidentIoUpdates, applyTextCache, buildTextCache } from '../incident-io'
+import { computeIncidentIoUptime, parseIncidentIoComponentImpacts, parseIncidentIoIncidentComponentIds, parseIncidentIoUpdates, applyTextCache, buildTextCache } from '../incident-io'
 import type { IncidentTextCache } from '../incident-io'
 import type { Incident } from '../../types'
 
@@ -367,4 +367,49 @@ describe('applyTextCache', () => {
     const result = applyTextCache(inc, cache)
     expect(result.timeline[0].text).toBeNull()
   })
+})
+
+// #1474 — incident.io embeds a `component_impacts` array inside `scheduled_maintenances[]` and
+// `ongoing_incidents[]` too. When one of those shares an RSC chunk with the page-level array and comes
+// first, every reader must still read the page-level array (Groq, ElevenLabs on 2026-09-22).
+describe.each(['scheduled_maintenances', 'ongoing_incidents'])('an embedded %s component_impacts precedes the page-level array (#1474)', (key) => {
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const day = 86_400_000
+  const iso = (ms: number) => new Date(ms).toISOString()
+  const impact = (id: string, start: number, end: number, status: string, inc: string) =>
+    `{\\"component_id\\":\\"${id}\\",\\"end_at\\":\\"${iso(end)}\\",\\"id\\":\\"IMP-${inc}\\",` +
+    `\\"start_at\\":\\"${iso(start)}\\",\\"status\\":\\"${status}\\",\\"status_page_incident_id\\":\\"${inc}\\"}`
+  const html =
+    `<script>self.__next_f.push([1,"a:{\\"${key}\\":[{\\"affected_components\\":[{\\"component_id\\":\\"c1\\",\\"status\\":\\"under_maintenance\\"}],` +
+    `\\"component_impacts\\":[${impact('c1', NOW - 300 * day, NOW - 300 * day + 3_600_000, 'under_maintenance', 'EMBEDDED')}],` +
+    `\\"id\\":\\"EMBEDDED\\",\\"name\\":\\"Planned Maintenance\\"}]}\\n` +
+    `b:{\\"data\\":{\\"component_impacts\\":[${impact('c1', NOW - 5 * day, NOW - 4 * day, 'full_outage', 'INC')}],` +
+    `\\"component_uptimes\\":[{\\"component_id\\":\\"c1\\",\\"data_available_since\\":\\"2024-01-01T00:00:00Z\\",` +
+    `\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"99.00\\"}]}}\\n` +
+    `c:{\\"${key}\\":[{\\"component_impacts\\":[${impact('c1', NOW - 200 * day, NOW - 200 * day + 3_600_000, 'under_maintenance', 'LATER')}],\\"id\\":\\"LATER\\"}]}"])</script>`
+
+  it('uptime is computed from the page-level impacts, not withheld', () => {
+    expect(computeIncidentIoUptime(html, 'c1', NOW)).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0, missing: [] })
+  })
+
+  it('the calendar paints the page-level outage', () => {
+    expect(Object.values(parseIncidentIoComponentImpacts(html, 'c1'))).toContain('critical')
+  })
+
+  it('incident → component tags come from the page-level impacts', () => {
+    expect(parseIncidentIoIncidentComponentIds(html)).toEqual({ INC: ['c1'] })
+  })
+})
+
+it('#1474 — a later push carrying component_uptimes alone does not withhold uptime read from an earlier one', () => {
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const day = 86_400_000
+  const iso = (ms: number) => new Date(ms).toISOString()
+  const uptimes = `\\"component_uptimes\\":[{\\"component_id\\":\\"c1\\",\\"data_available_since\\":\\"2024-01-01T00:00:00Z\\",` +
+    `\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"99.00\\"}]`
+  const html =
+    `<script>self.__next_f.push([1,"a:{\\"component_impacts\\":[{\\"component_id\\":\\"c1\\",\\"end_at\\":\\"${iso(NOW - 4 * day)}\\",` +
+    `\\"id\\":\\"IMP\\",\\"start_at\\":\\"${iso(NOW - 5 * day)}\\",\\"status\\":\\"full_outage\\",\\"status_page_incident_id\\":\\"INC\\"}],${uptimes}}"])</script>` +
+    `<script>self.__next_f.push([1,"b:{${uptimes}}"])</script>`
+  expect(computeIncidentIoUptime(html, 'c1', NOW)).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0, missing: [] })
 })
