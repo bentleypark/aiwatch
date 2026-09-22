@@ -980,10 +980,14 @@ describe('SERVICES multi-component config sanity (#379)', () => {
     expect(cp.statusComponentIds).toEqual(['pjmpxvq2cmr2', 'cnnb39dkkk82'])
   })
 
-  it('windsurf tracks Cascade + Windsurf Tab', () => {
+  it('windsurf tracks Desktop Agent + Desktop Tab on the Devin status page (#1430)', () => {
     const ws = SERVICES.find((s) => s.id === 'windsurf')!
-    expect(ws.statusComponentId).toBe('r5wf1ykd7y1m')
-    expect(ws.statusComponentIds).toEqual(['r5wf1ykd7y1m', '8q19cygxvshj'])
+    expect(ws.name).toBe('Windsurf (Devin Desktop)')
+    expect(ws.apiUrl).toBe('https://www.devinstatus.com/api/v2/summary.json')
+    expect(ws.statusComponentId).toBe('h6z52njyz22z')
+    expect(ws.statusComponentIds).toEqual(['h6z52njyz22z', '170m7l75sh6m'])
+    expect(ws.incidentComponents).toEqual(['Desktop Agent', 'Desktop Tab'])
+    expect(ws.retainIncidentHistoryUntil).toBe('2026-10-23T00:00:00.000Z')
   })
 
   it('cerebras runs DYNAMIC (displayAllComponents), not a stale allowlist — churny per-model page (#992)', () => {

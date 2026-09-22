@@ -551,8 +551,11 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl'], displayComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl', 'xwjpvdf81qh9', 'sm5wkcnqkvr9'] },
   // copilot badge reflects worst-of: Copilot + Copilot AI Model Providers (direct upstream) (#379).
   { id: 'copilot', name: 'GitHub Copilot', provider: 'GitHub', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
-  // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
-  { id: 'windsurf', name: 'Windsurf', provider: 'Cognition', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m', statusComponentIds: ['r5wf1ykd7y1m', '8q19cygxvshj'] },
+  // #1430 — Windsurf was renamed Devin Desktop; the card reads www.devinstatus.com, scoped to the Desktop
+  // components (Desktop Agent primary + Desktop Tab); the page also carries Devin Cloud. The id stays
+  // `windsurf` — it keys KV, incident ids and archives.
+  // The retention bridge keeps the incidents AIWatch recorded from status.windsurf.com in the 30-day window.
+  { id: 'windsurf', name: 'Windsurf (Devin Desktop)', provider: 'Cognition', category: 'agent', statusUrl: 'https://www.devinstatus.com', apiUrl: 'https://www.devinstatus.com/api/v2/summary.json', statusComponentId: 'h6z52njyz22z', statusComponentIds: ['h6z52njyz22z', '170m7l75sh6m'], incidentComponents: ['Desktop Agent', 'Desktop Tab'], retainIncidentHistoryUntil: '2026-10-23T00:00:00.000Z' },
   // #1004 — JetBrains migrated this page Atlassian Statuspage (status.jetbrains.ai) → incident.io
   // (status.jetbrains.cloud) on 2026-07-09, then ~2026-07-15 REMOVED the standalone "Junie" component
   // the first migration adopted (→ #135 component-miss alert + null uptime/Score). Junie's status now

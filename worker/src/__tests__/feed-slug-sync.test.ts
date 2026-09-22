@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { feedSlug, IS_DOWN_SLUG_OVERRIDE, NO_IS_DOWN_PAGE } from '../rss'
 import { SERVICES } from '../services'
+import { REDDIT_TARGETS, formatRedditAlert } from '../reddit'
 import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE } from '../../../api/_is-down/slug-map'
 
 describe('feed slug ↔ api/is-down slug-map sync', () => {
@@ -50,5 +51,22 @@ describe('feed slug ↔ api/is-down slug-map sync', () => {
     for (const id of Object.keys(SERVICE_ID_TO_SLUG)) {
       expect(workerIds.has(id), `slug-map id '${id}'`).toBe(true)
     }
+  })
+})
+
+describe('Reddit promote share link ↔ api/is-down slug-map sync (#1430)', () => {
+  it('every subreddit that renders a share link points at a real is-down page', () => {
+    let linked = 0
+    for (const { subreddit } of REDDIT_TARGETS) {
+      const { description } = formatRedditAlert({
+        key: `reddit:seen:${subreddit}`, subreddit, type: 'outage',
+        post: { id: 'x', title: 't', author: 'a', subreddit, score: 1, url: 'https://www.reddit.com/', createdUtc: Math.floor(Date.now() / 1000) },
+      })
+      const slug = description.match(/ai-watch\.dev\/is-([a-z0-9-]+)-down/)?.[1]
+      if (!slug) continue
+      linked++
+      expect(SLUG_TO_SERVICE[slug], `r/${subreddit} → /is-${slug}-down`).toBeDefined()
+    }
+    expect(linked).toBeGreaterThan(0)
   })
 })

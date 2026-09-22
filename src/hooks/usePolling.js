@@ -645,7 +645,7 @@ export const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'windsurf', category: 'agent', name: 'Windsurf', provider: 'Cognition', status: 'operational',
+    id: 'windsurf', category: 'agent', name: 'Windsurf (Devin Desktop)', provider: 'Cognition', status: 'operational',
     latency: null, uptime30d: 98.80,
     history30d: hist([10, 27]),
     history3m: [{ month: '2026-01', uptime: 99.20 }, { month: '2026-02', uptime: 99.00 }, { month: '2026-03', uptime: 98.80 }],

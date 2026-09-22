@@ -112,7 +112,7 @@ export const SERVICE_SITE_URL = {
   // Observability
   langsmith: 'https://www.langchain.com/langsmith', helicone: 'https://helicone.ai', langfuse: 'https://langfuse.com',
   // Coding agents
-  cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://windsurf.com',
+  cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://devin.ai/desktop',
   junie: 'https://junie.jetbrains.com', claudecode: 'https://claude.com/product/claude-code', codex: 'https://developers.openai.com/codex',
   // Apps
   chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com', grok: 'https://grok.com',
@@ -164,6 +164,7 @@ const FEED_SLUG_OVERRIDE = {
   // #1165 — /is-xai-down became the xAI/Grok family group page; the single-service xAI API page
   // moved to 'xai-api'. 'grok' (the new consumer-app id) needs no override — its slug == id.
   xai:         'xai-api',
+  windsurf:    'devin-desktop', // #1430 — Windsurf was renamed Devin Desktop
 }
 
 // Services with no /is-{slug}-down page and therefore no RSS feed — estimate-only
