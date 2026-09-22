@@ -1,7 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { withRetry, buildUptimeEntry, envPositiveInt, readComponentRow } from './scrape-mistral-status.mjs'
+import { Window } from 'happy-dom'
+import {
+  withRetry, buildUptimeEntry, envPositiveInt, readComponentRow, parseUpdateRows, readIncidentPage,
+} from './scrape-mistral-status.mjs'
 
 // #1381 — `withRetry` is the only pure thing in the scraper, and it is the part that decides whether a
 // lost read becomes a missing incident. Reads from this page are lossy under rate limiting, so a
@@ -180,4 +183,157 @@ test('an unknown status word reads null, not a guess', () => {
 test('the name stops at the status word, with the markup whitespace collapsed', () => {
   assert.deepEqual(readComponentRow('  AI Registry\n  Prompts API   Operational  90 days ago '),
     { name: 'AI Registry Prompts API', status: 'Operational' })
+})
+
+// ── update rows ─────────────────────────────────────────────────────────────────────
+// The two fixtures are the `<main>` subtree of real incident pages, saved 2026-09-22 by a headed
+// browser (the page is behind a Cloudflare managed challenge). `UNTITLED` is /incidents/b0a485d8-…,
+// the one Mistral published with an empty `<h2>` — #1471 itself. `TITLED` is /incidents/bc85a3be-…,
+// three updates including the `Monitoring` word the other lacks.
+const fixture = (name) => readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url), 'utf8')
+const docOf = (html) => {
+  const window = new Window()
+  window.document.body.innerHTML = html
+  return window.document
+}
+const UNTITLED = () => docOf(fixture('rootly-incident-untitled.html'))
+const TITLED = () => docOf(fixture('rootly-incident-titled.html'))
+
+const CAPTURED_UNTITLED = readIncidentPage(UNTITLED()).rows
+
+// ── the DOM read, over the real pages ─────────────────────────────────────────────────
+// #1471 was a read no test could reach: the title came from a line offset in `document.body.innerText`
+// and shifted by one when the provider left the title blank. These drive the shipped reader over the
+// markup that produced that bug.
+
+test('reads the real untitled page: empty title, both update rows', () => {
+  const { title, rows } = readIncidentPage(UNTITLED())
+  // '' — the element is THERE and the provider left it blank. Not null, which means a broken read.
+  assert.strictEqual(title, '')
+  assert.deepEqual(parseUpdateRows(rows).updates, [
+    { status: 'Resolved', at: 'September 21, 2026 at 10:26 PM UTC', body: 'The incident has been resolved.' },
+    { status: 'Investigating', at: 'September 21, 2026 at 10:12 PM UTC',
+      body: 'We are currently investigating elevated error rates on Mistral Small 4.' },
+  ])
+})
+
+test('reads the real titled page: the provider title, all three rows in page order', () => {
+  const { title, rows } = readIncidentPage(TITLED())
+  assert.strictEqual(title, 'Vibe Code Web model is experiencing failures in some existing sessions')
+  assert.deepEqual(parseUpdateRows(rows).updates.map((u) => u.status),
+    ['Resolved', 'Monitoring', 'Investigating'])
+})
+
+// The bug the old read produced: the start-date subtitle, one line below the blank title, became the
+// incident's name. It sits in the same `<section>` as the title in the real markup.
+test('never returns the start-date subtitle as the title', () => {
+  for (const doc of [UNTITLED(), TITLED()]) {
+    assert.ok(!/^[A-Z][a-z]+ \d{1,2}, \d{4} at /.test(readIncidentPage(doc).title ?? ''),
+      'the date beside the title must never be read as the title')
+  }
+})
+
+// The conflation #1471 is about, in its other direction: "our selector matched nothing" must not
+// look like "the provider published no title", or a selector that moves renames every incident.
+test('a page with no title element reads null, not empty', () => {
+  const doc = UNTITLED()
+  doc.querySelector('main h2').remove()
+  assert.strictEqual(readIncidentPage(doc).title, null)
+})
+
+// The rows are read from every container under the panel, so a layout that splits them across two
+// blocks cannot drop one with all the counters reading clean — losing the Resolved row that way
+// publishes a permanently-ongoing incident that re-reads identically every cycle.
+test('rows split across two sibling containers are all read', () => {
+  const doc = UNTITLED()
+  const heading = [...doc.querySelectorAll('main h3')].find((h) => h.textContent.trim() === 'Updates')
+  const panel = heading.parentElement.nextElementSibling
+  const list = panel.firstElementChild
+  const second = doc.createElement('div')
+  second.appendChild(list.lastElementChild)   // move the oldest row into its own block
+  panel.appendChild(second)
+  assert.strictEqual(parseUpdateRows(readIncidentPage(doc).rows).updates.length, 2)
+})
+
+// An update published with no body element: the row must still be a row, and its timestamp must not
+// slide into the body slot.
+test('a row whose body element is absent is still read', () => {
+  const doc = UNTITLED()
+  doc.querySelector('.trix-content').remove()
+  const { updates, dropped } = parseUpdateRows(readIncidentPage(doc).rows)
+  assert.strictEqual(dropped, 0)
+  assert.deepEqual(updates[0], { status: 'Resolved', at: 'September 21, 2026 at 10:26 PM UTC', body: '' })
+})
+
+// The heading is the anchor for the whole row read; losing it must be LOUD, not a quiet empty page.
+// Neither capture carries a second heading, so neither pins the scoping in `main h2` nor the
+// heading-text match. A page with a second panel would otherwise anchor the row read to the wrong one.
+test('the title comes from main, not from a heading elsewhere on the page', () => {
+  const doc = UNTITLED()
+  const stray = doc.createElement('h2')
+  stray.textContent = 'Not the incident title'
+  doc.body.insertBefore(stray, doc.body.firstChild)
+  assert.strictEqual(readIncidentPage(doc).title, '')
+})
+
+test('the rows come from the Updates panel, not from another panel in main', () => {
+  const doc = UNTITLED()
+  const main = doc.querySelector('main')
+  const other = doc.createElement('div')
+  other.innerHTML = '<div><h3>Affected components</h3></div><div><div><div>x</div><div>OCR API</div></div></div>'
+  main.insertBefore(other, main.firstChild)
+  assert.deepEqual(parseUpdateRows(readIncidentPage(doc).rows).updates.map((u) => u.status),
+    ['Resolved', 'Investigating'])
+})
+
+test('losing the Updates heading yields no rows, which refuses the incident', () => {
+  const doc = UNTITLED()
+  for (const h of [...doc.querySelectorAll('main h3')]) h.remove()
+  assert.deepEqual(readIncidentPage(doc).rows, [])
+})
+
+// A row we cannot read may have been the Resolved one, and nothing here can tell which it was — an
+// incident published without its end re-reads identically every cycle and never resolves. So ONE bad
+// row voids the incident, and the scrape reports it as a failed read.
+test('one unreadable row voids the whole incident, not just that row', () => {
+  const { updates, dropped } = parseUpdateRows([
+    ...CAPTURED_UNTITLED,
+    ['Something', 'that is not an update', 'at all'],
+  ])
+  assert.strictEqual(dropped, 1)
+  assert.deepEqual(updates, [], 'a partly-read incident must not publish the updates it did read')
+})
+
+// The axis neither capture varies: a row that renders a different number of cells. Identifying cells
+// by position would put the timestamp in the body slot here and leave `at` undefined.
+test('a row published with no body keeps its timestamp out of the body slot', () => {
+  const { updates, dropped } = parseUpdateRows([['Identified', 'September 4, 2026 at 10:00 PM UTC']])
+  assert.strictEqual(dropped, 0)
+  assert.deepEqual(updates, [
+    { status: 'Identified', at: 'September 4, 2026 at 10:00 PM UTC', body: '' },
+  ])
+})
+
+test('a body that merely CONTAINS a status word does not become the status', () => {
+  const { updates } = parseUpdateRows([
+    ['Monitoring', 'Resolved for most users; we are still watching.', 'September 4, 2026 at 11:00 PM UTC'],
+  ])
+  assert.strictEqual(updates[0].status, 'Monitoring')
+  assert.strictEqual(updates[0].body, 'Resolved for most users; we are still watching.')
+})
+
+test('a row whose timestamp cell is not a timestamp is dropped rather than published', () => {
+  const { updates, dropped } = parseUpdateRows([
+    ['Investigating', 'Something is wrong.', 'a few minutes ago'],
+    ['Nonsense', 'body', 'September 4, 2026 at 10:00 PM UTC'],
+  ])
+  assert.deepEqual(updates, [])
+  assert.strictEqual(dropped, 2)
+})
+
+test('whitespace in a cell is collapsed, and a missing row list is not a crash', () => {
+  const { updates } = parseUpdateRows([['Resolved', '  The incident\n  has been   resolved. ',
+    'September 4, 2026 at 10:00 PM UTC']])
+  assert.strictEqual(updates[0].body, 'The incident has been resolved.')
+  assert.deepEqual(parseUpdateRows(undefined), { updates: [], dropped: 0 })
 })
