@@ -7,21 +7,18 @@ build() {
   exit 1
 }
 
-if [ "${VERCEL_ENV:-}" = "production" ]; then
-  exit 1
-fi
-
 if [ "${VERCEL_ENV:-}" != "preview" ]; then
-  build "unexpected VERCEL_ENV '${VERCEL_ENV:-unset}'"
+  build "VERCEL_ENV '${VERCEL_ENV:-unset}' is not preview"
 fi
 
-BASE=$(git merge-base HEAD origin/main) || build "origin/main is unavailable"
+PREV="${VERCEL_GIT_PREVIOUS_SHA:-}"
+[ -n "$PREV" ] || build "no previous successful deployment on this branch"
 
 diff_exit=0
-git diff --quiet "$BASE" HEAD -- src/ public/ index.html api/ vercel.json vite.config.js tests/ || diff_exit=$?
+git diff --quiet "$PREV" HEAD -- src/ public/ index.html api/ vercel.json vite.config.js tests/ || diff_exit=$?
 
 case $diff_exit in
   0) exit 0 ;;
   1) exit 1 ;;
-  *) build "git diff failed" ;;
+  *) build "git diff against $PREV failed" ;;
 esac

@@ -20,72 +20,92 @@ function commit(dir, files) {
   git(dir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'change')
 }
 
-function fixture({ includeBase = true, commits = [] } = {}) {
+function fixture(commits = []) {
   const dir = mkdtempSync(join(tmpdir(), 'vercel-ignore-'))
   git(dir, 'init', '-q')
   commit(dir, { 'README.md': 'base\n' })
-  git(dir, 'branch', '-M', 'main')
-  if (includeBase) git(dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
-  git(dir, 'checkout', '-qb', 'preview')
+  const base = git(dir, 'rev-parse', 'HEAD').trim()
   for (const files of commits) commit(dir, files)
-  return dir
+  return { dir, base, head: git(dir, 'rev-parse', 'HEAD').trim() }
 }
 
 function run(dir, env = {}, path = process.env.PATH) {
+  const { VERCEL_GIT_PREVIOUS_SHA: _inherited, ...inherited } = process.env
   return spawnSync('bash', [script], {
     cwd: dir,
     encoding: 'utf8',
-    env: { ...process.env, VERCEL_ENV: 'preview', PATH: path, ...env },
+    env: { ...inherited, VERCEL_ENV: 'preview', PATH: path, ...env },
   })
 }
 
-function withFixture(spec, fn) {
-  const dir = fixture(spec)
-  try { fn(dir) } finally { rmSync(dir, { recursive: true, force: true }) }
+function withFixture(commits, fn) {
+  const fx = fixture(commits)
+  try { fn(fx) } finally { rmSync(fx.dir, { recursive: true, force: true }) }
 }
 
-test('preview builds when any watched path changed before the tip commit (#1415)', () => {
+test('preview builds when a watched path changed since the last deployment, not only in the tip (#1415)', () => {
   for (const path of watchedPaths) {
-    withFixture({ commits: [{ [path]: 'changed\n' }, { 'docs/note.md': 'tip\n' }] }, (dir) => {
-      const result = run(dir)
+    withFixture([{ [path]: 'changed\n' }, { 'docs/note.md': 'tip\n' }], ({ dir, base }) => {
+      const result = run(dir, { VERCEL_GIT_PREVIOUS_SHA: base })
       assert.equal(result.status, 1, path)
-      assert.doesNotMatch(result.stderr, /git diff failed/, path)
+      assert.doesNotMatch(result.stderr, /failed/, path)
     })
   }
 })
 
-test('preview skips only after a successful whole-branch diff finds no watched paths (#1415)', () => {
-  withFixture({ commits: [{ 'worker/src/index.ts': 'changed\n' }, { 'docs/note.md': 'tip\n' }] }, (dir) => {
-    assert.equal(run(dir).status, 0)
+test('preview skips only after a successful diff since the last deployment finds no watched paths (#1415)', () => {
+  withFixture([{ 'worker/src/index.ts': 'changed\n' }, { 'docs/note.md': 'tip\n' }], ({ dir, base }) => {
+    assert.equal(run(dir, { VERCEL_GIT_PREVIOUS_SHA: base }).status, 0)
   })
 })
 
-test('production always builds even without a preview base ref (#1415)', () => {
-  withFixture({ includeBase: false }, (dir) => {
-    assert.equal(run(dir, { VERCEL_ENV: 'production' }).status, 1)
+test('a branch with no previous successful deployment builds (#1415)', () => {
+  withFixture([{ 'docs/note.md': 'only docs\n' }], ({ dir }) => {
+    for (const env of [{}, { VERCEL_GIT_PREVIOUS_SHA: '' }]) {
+      const result = run(dir, env)
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /no previous successful deployment/)
+    }
   })
 })
 
-test('a missing preview base keeps the build instead of skipping it (#1415)', () => {
-  withFixture({ includeBase: false }, (dir) => {
-    const result = run(dir)
+test('a previous SHA outside the shallow clone builds instead of skipping (#1415)', () => {
+  withFixture([{ 'docs/note.md': 'only docs\n' }], ({ dir }) => {
+    const result = run(dir, { VERCEL_GIT_PREVIOUS_SHA: 'f'.repeat(40) })
     assert.equal(result.status, 1)
-    assert.match(result.stderr, /origin\/main is unavailable/)
+    assert.match(result.stderr, /git diff against f{40} failed/)
   })
 })
 
 test('a git diff error keeps the build instead of being treated as unchanged (#1415)', () => {
-  withFixture({ commits: [{ 'api/intro.ts': 'changed\n' }] }, (dir) => {
+  withFixture([{ 'docs/note.md': 'only docs\n' }], ({ dir, base }) => {
     const bin = mkdtempSync(join(tmpdir(), 'vercel-ignore-bin-'))
     const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim()
     writeFileSync(join(bin, 'git'), `#!/usr/bin/env bash\nif [ "$1" = diff ]; then exit 2; fi\nexec ${realGit} "$@"\n`)
     chmodSync(join(bin, 'git'), 0o755)
     try {
-      const result = run(dir, {}, `${bin}:${process.env.PATH}`)
+      const result = run(dir, { VERCEL_GIT_PREVIOUS_SHA: base }, `${bin}:${process.env.PATH}`)
       assert.equal(result.status, 1)
-      assert.match(result.stderr, /git diff failed/)
+      assert.match(result.stderr, /git diff against .* failed/)
     } finally {
       rmSync(bin, { recursive: true, force: true })
+    }
+  })
+})
+
+test('production builds even when nothing changed since its previous deployment (#1415)', () => {
+  withFixture([{ 'src/App.jsx': 'changed\n' }], ({ dir, head }) => {
+    assert.equal(run(dir, { VERCEL_GIT_PREVIOUS_SHA: head }).status, 0, 'control: preview with an unchanged tree skips')
+    assert.equal(run(dir, { VERCEL_ENV: 'production', VERCEL_GIT_PREVIOUS_SHA: head }).status, 1)
+  })
+})
+
+test('any VERCEL_ENV other than preview builds even when nothing changed (#1415)', () => {
+  withFixture([{ 'docs/note.md': 'only docs\n' }], ({ dir, head }) => {
+    for (const VERCEL_ENV of ['', 'development', 'production']) {
+      const result = run(dir, { VERCEL_ENV, VERCEL_GIT_PREVIOUS_SHA: head })
+      assert.equal(result.status, 1, VERCEL_ENV)
+      assert.match(result.stderr, /is not preview/)
     }
   })
 })
