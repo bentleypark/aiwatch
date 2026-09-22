@@ -344,7 +344,7 @@ export function buildDailySummary(data: DailySummaryData): string {
             ? `${real} real, ${suppressed} probe-suppressed`
             : `${real} real`
         const reasons = fetchFailureReasons?.[id]
-        const reasonDetail = reasons?.length ? `; reasons: ${[...reasons].sort().join(', ')}` : ''
+        const reasonDetail = reasons?.length ? `; reasons: ${reasons.join(', ')}` : ''
         return `   ${nameMap.get(id) ?? id}: ${total}× threshold hit (${detail}${reasonDetail})`
       })
       .join('\n')

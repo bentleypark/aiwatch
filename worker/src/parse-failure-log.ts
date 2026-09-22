@@ -50,13 +50,6 @@ export type StatuspageParseFailure =
   | 'statuspage-incidents-unreadable'
   | 'incidentio-global-unreadable'
 
-export type SourceFetchParseFailure =
-  | 'cloudflare-fetch-unreadable'
-  | 'aws-health-fetch-unreadable'
-  | 'aws-rss-fetch-unreadable'
-  | 'betterstack-body-unreadable'
-  | 'aistudio-unreadable'
-
 /**
  * #1123 — the persisted reason vocabulary, joined in ONE place: the module that writes it. Typing
  * `recordParseFailure` with this (rather than a bare `string`) keeps the set of buckets that can
@@ -65,7 +58,7 @@ export type SourceFetchParseFailure =
  * source's union on purpose, so an operator aggregating one reason over several services is never
  * summing two different parsers' failures — they take different fixes.
  */
-export type SourceParseFailure = InstatusParseFailure | AwsRssParseFailure | AwsHealthParseFailure | CloudflareStatusParseFailure | DatadogParseFailure | ScrapeLegParseFailure | StatuspageParseFailure | SourceFetchParseFailure
+export type SourceParseFailure = InstatusParseFailure | AwsRssParseFailure | AwsHealthParseFailure | CloudflareStatusParseFailure | DatadogParseFailure | ScrapeLegParseFailure | StatuspageParseFailure
 
 /**
  * #1234 — the generic path's two fetch legs: the scrape (one fetch, addressing either an RSS feed or
@@ -184,6 +177,11 @@ export function applyParseFailure(day: ParseFailDay, svcId: string, reason: stri
 /** Total failures for a service across a day's counts, all reasons. Pure — for readers. */
 export function totalFor(day: ParseFailDay, svcId: string): number {
   return Object.values(day.counts[svcId] ?? {}).reduce((a, b) => a + b, 0)
+}
+
+/** Every reason booked for a service that day, sorted. Pure — the one fold both readers share. */
+export function reasonsFor(day: ParseFailDay, svcId: string): string[] {
+  return Object.keys(day.counts[svcId] ?? {}).sort()
 }
 
 /**
