@@ -52,6 +52,22 @@ export interface IncidentIoUptime {
   missing: string[]
 }
 
+/** The page-level `component_impacts` array of one RSC chunk, unescaped for `JSON.parse`. `undefined` when
+ *  the chunk carries none, `null` when the marker is there but no array follows it. Anchored on the marker
+ *  nearest `component_uptimes` because maintenance and incident objects embed arrays of the same name
+ *  (#1474). */
+function pageImpactsJson(chunk: string): string | null | undefined {
+  const idx2 = chunk.indexOf('component_uptimes')
+  if (idx2 === -1) return undefined
+  const idx1 = chunk.lastIndexOf('component_impacts', idx2)
+  if (idx1 === -1) return undefined
+  const segment = chunk.substring(idx1, idx2)
+  const arrStart = segment.indexOf('[')
+  const arrEnd = segment.lastIndexOf(']')
+  if (arrStart === -1 || arrEnd === -1) return null
+  return segment.substring(arrStart, arrEnd + 1).replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+}
+
 /** Every `component_impacts` entry on the page, parsed once. Returns [] when the page has no impacts
  *  array — which callers MUST treat as "no information", never as "no downtime". */
 // Returns [] ONLY when the page carries no `component_impacts` at all (a genuinely clean page). When a
@@ -68,16 +84,10 @@ export function parseIncidentIoImpacts(html: string): IncidentIoImpact[] | null 
   // pushes, and reading only the first would silently undercount the tail → inflated uptime. Duplicate
   // impacts across chunks are harmless — the sweep-line accumulator merges identical intervals.
   for (const chunk of chunks) {
-    if (!chunk.includes('component_impacts')) continue
-    const idx1 = chunk.indexOf('component_impacts')
-    const idx2 = chunk.indexOf('component_uptimes')
-    if (idx1 === -1 || idx2 === -1 || idx2 <= idx1) continue
+    const raw = pageImpactsJson(chunk)
+    if (raw === undefined) continue
     sawMarker = true
-    const segment = chunk.substring(idx1, idx2)
-    const arrStart = segment.indexOf('[')
-    const arrEnd = segment.lastIndexOf(']')
-    if (arrStart === -1 || arrEnd === -1) { failed = true; continue }
-    const raw = segment.substring(arrStart, arrEnd + 1).replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+    if (raw === null) { failed = true; continue }
     try {
       all.push(...(JSON.parse(raw) as IncidentIoImpact[]))
     } catch (err) {
@@ -584,19 +594,8 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
   const result: Record<string, DailyImpactLevel> = {}
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
-    if (!chunk.includes('component_impacts')) continue
-    // Extract array between component_impacts and component_uptimes
-    const idx1 = chunk.indexOf('component_impacts')
-    const idx2 = chunk.indexOf('component_uptimes')
-    if (idx1 === -1 || idx2 === -1 || idx2 <= idx1) continue
-    const segment = chunk.substring(idx1, idx2)
-    const arrStart = segment.indexOf('[')
-    const arrEnd = segment.lastIndexOf(']')
-    if (arrStart === -1 || arrEnd === -1) continue
-    let raw = segment.substring(arrStart, arrEnd + 1)
-    // Unescape: \\" → "
-    raw = raw.replace(/\\"/g, '"')
-    raw = raw.replace(/"\$undefined"/g, 'null')
+    const raw = pageImpactsJson(chunk)
+    if (raw == null) continue
 
     try {
       const impacts = JSON.parse(raw) as Array<{
@@ -696,15 +695,8 @@ export function parseIncidentIoIncidentComponentIds(html: string): Record<string
   const result: Record<string, string[]> = {}
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
-    if (!chunk.includes('component_impacts')) continue
-    const idx1 = chunk.indexOf('component_impacts')
-    const idx2 = chunk.indexOf('component_uptimes')
-    if (idx1 === -1 || idx2 === -1 || idx2 <= idx1) continue
-    const segment = chunk.substring(idx1, idx2)
-    const arrStart = segment.indexOf('[')
-    const arrEnd = segment.lastIndexOf(']')
-    if (arrStart === -1 || arrEnd === -1) continue
-    const raw = segment.substring(arrStart, arrEnd + 1).replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+    const raw = pageImpactsJson(chunk)
+    if (raw == null) continue
     try {
       const impacts = JSON.parse(raw) as Array<{ component_id?: string; status_page_incident_id?: string }>
       for (const impact of impacts) {
