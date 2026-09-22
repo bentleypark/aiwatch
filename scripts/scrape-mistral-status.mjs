@@ -140,6 +140,23 @@ export async function reportMistralFeedObservation(workerUrl, token, observation
   }
 }
 
+export async function deliverMistralFeed(workerUrl, token, state, payload, fetchImpl = fetch) {
+  state.payload = payload
+  if (payload.components.length === 0) throw new Error('no components read — refusing to push a blank page reading')
+  const res = await fetchImpl(`${workerUrl.replace(/\/+$/, '')}/api/internal/mistral-feed`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    state.delivery = 'rejected'
+    throw new Error(`push failed: HTTP ${res.status} ${text.slice(0, 300)}`)
+  }
+  state.delivery = 'stored'
+  console.log(`[scrape] pushed: ${text.slice(0, 300)}`)
+}
+
 /** Own the terminal observation so a scraper exception cannot skip it. */
 export async function runWithMistralFeedObservation(workerUrl, token, run, report = reportMistralFeedObservation) {
   const state = { payload: undefined, delivery: 'not-posted' }
@@ -374,7 +391,7 @@ async function main() {
       }
     }
 
-    state.payload = {
+    const payload = {
       fetchedAt: new Date().toISOString(),
       components,
       incidents,
@@ -385,20 +402,7 @@ async function main() {
       uptime,
     }
     console.log(`[scrape] components=${components.length} attempted=${urls.length} read=${incidents.length} failed=${failed}`)
-    if (state.payload.components.length === 0) throw new Error('no components read — refusing to push a blank page reading')
-
-    const res = await fetch(`${WORKER_URL.replace(/\/+$/, '')}/api/internal/mistral-feed`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(state.payload),
-    })
-    const text = await res.text()
-    if (!res.ok) {
-      state.delivery = 'rejected'
-      throw new Error(`push failed: HTTP ${res.status} ${text.slice(0, 300)}`)
-    }
-    state.delivery = 'stored'
-    console.log(`[scrape] pushed: ${text.slice(0, 300)}`)
+    await deliverMistralFeed(WORKER_URL, TOKEN, state, payload)
     } finally {
       if (browser) await browser.close()
     }
