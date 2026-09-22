@@ -184,6 +184,15 @@ grammar, markdown fence semantics, hook payload identity — and each attempt sh
 as protection. The convention they were guarding is already the practice: CLAUDE.md references
 `docs/reference/*` with markdown links (18 of them) and contains no `@` imports.
 
+## Vercel preview build decision (#1415)
+
+`vercel.json` delegates `ignoreCommand` to `scripts/vercel-should-build.sh`. Its exit contract is
+inverted: `0` cancels a build and `1` continues it. Production always continues. A preview skips only
+when `git diff` between `VERCEL_GIT_PREVIOUS_SHA` (the branch's last successful deployment) and `HEAD`
+succeeds and touches no watched frontend or Edge path. A branch's first deployment (empty SHA), a SHA
+outside Vercel's `--depth=10` clone, a failed Git command, or an unexpected environment continues the
+build. `origin/main` is not used: that clone is single-branch, so it never exists there.
+
 ## Related
 
 - [Reference Tooling](reference-tooling.md) — the `tooling-trigger.sh` trigger map (live upstream / docs / modern-web-guidance).
