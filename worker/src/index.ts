@@ -841,6 +841,8 @@ interface CronResult {
    *  This is the alerting snapshot, which is the `CACHE_KEY` payload itself unless it was stale
    *  (>10 min) and refetched — so it can be up to ~15 min behind, not live. */
   statusById: Map<string, PromoteJoinReading>
+  /** #1472 — each service's incidents as time spans, from the same snapshot as `statusById`. */
+  incidentWindowsById: Map<string, PromoteIncidentWindow[]>
 }
 
 // `scheduledTimeMs` is `event.scheduledTime`, not wall clock: time-of-day slot checks (e.g. the
@@ -852,7 +854,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // makes `promoteStatusGate` answer `allow-unreadable` for every id, so a cycle that read no status
   // suppresses no promote. Only the `services.length === 0` return can reach the gate (the binding
   // check below returns before the Reddit block runs), but both are empty for the same reason.
-  const empty: CronResult = { total: 0, operational: 0, issues: 0, unreadable: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0, statusById: new Map() }
+  const empty: CronResult = { total: 0, operational: 0, issues: 0, unreadable: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0, statusById: new Map(), incidentWindowsById: new Map() }
   if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return empty
 
   // Read cached service data — fetch live if cache is stale or missing
@@ -2130,6 +2132,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     downCount: sent.filter(a => a.key.startsWith('alerted:down:')).length,
     recoveredCount: sent.filter(a => a.key.startsWith('alerted:recovered:')).length,
     statusById: new Map(scored.map(s => [s.id, promoteJoinReading(s)])),
+    incidentWindowsById: new Map(scored.map(s => [s.id, promoteIncidentWindows(s.incidents)])),
   }
 }
 
@@ -2138,7 +2141,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 import { generateBadgeSvg, badgeStatusColor } from './badge'
 import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, FEED_TARGET_IDS, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
-import { detectRedditPosts, isRedditScanTick, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading } from './reddit'
+import { detectRedditPosts, isRedditScanTick, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, promoteIncidentWindows, matchPromoteIncident, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading, type PromoteIncidentWindow } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
@@ -3273,8 +3276,12 @@ export default {
           const decisions = outageAlerts.map((alert) => {
             const ageSec = nowSec - alert.post.createdUtc
             const reason = promoteReason(alert.post.title, ageSec)
-            const verdict = reason ? promoteStatusGate(alert.statusIds, result.statusById) : null
-            return { alert, ageSec, reason, verdict }
+            const postCreatedMs = alert.post.createdUtc * 1000
+            const verdict = reason
+              ? promoteStatusGate(alert.statusIds, result.statusById, { postCreatedMs, windowsById: result.incidentWindowsById })
+              : null
+            const matchedIncident = matchPromoteIncident(alert.statusIds, result.incidentWindowsById, postCreatedMs)
+            return { alert, ageSec, reason, verdict, matchedIncident }
           })
           for (const alert of outageAlerts) {
             await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
@@ -3336,6 +3343,7 @@ export default {
               statusIds: d.alert.statusIds,
               statusById: result.statusById,
               verdict: d.verdict,
+              matchedIncident: d.matchedIncident,
               sent: delivered.has(d.alert.post.id),
               ageSec: d.ageSec,
             })

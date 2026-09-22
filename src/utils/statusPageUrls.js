@@ -48,7 +48,7 @@ export const STATUS_URL = {
   claudecode:  'https://status.claude.com',
   copilot:     'https://githubstatus.com',
   cursor:      'https://status.cursor.com',
-  windsurf:    'https://status.windsurf.com',
+  windsurf:    'https://www.devinstatus.com',
   junie:       'https://status.jetbrains.cloud', // #1004 — moved off status.jetbrains.ai (Atlassian → incident.io)
   codex:       'https://status.openai.com',
 }

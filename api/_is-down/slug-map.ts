@@ -18,7 +18,9 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'cursor':          { id: 'cursor',     name: 'Cursor',           provider: 'Anysphere',   category: 'agent', group: 'agents' },
   'claude-code':     { id: 'claudecode', name: 'Claude Code',      provider: 'Anthropic',   category: 'agent', group: 'agents' },
   'openai-api':      { id: 'openai',     name: 'OpenAI API',       provider: 'OpenAI',      category: 'api', group: 'llm' },
-  'windsurf':        { id: 'windsurf',   name: 'Windsurf',         provider: 'Cognition',   category: 'agent', group: 'agents' },
+  // #1430 — Windsurf was renamed Devin Desktop; slug 'devin-desktop' ≠ worker id 'windsurf' (mirrored in
+  // worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE + src/utils/constants.js FEED_SLUG_OVERRIDE). /is-windsurf-down redirects here.
+  'devin-desktop':   { id: 'windsurf',   name: 'Windsurf (Devin Desktop)', provider: 'Cognition', category: 'agent', group: 'agents' },
   'claude-ai':       { id: 'claudeai',   name: 'claude.ai',        provider: 'Anthropic',   category: 'app', group: 'apps' },
   // Phase B — LLM APIs (#263)
   'mistral':         { id: 'mistral',    name: 'Mistral API',      provider: 'Mistral AI',  category: 'api', group: 'llm' },
@@ -92,15 +94,15 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   // Phase A
   'claude-api':     ['claude-ai', 'claude-code', 'openai-api', 'chatgpt'],
   'claude-ai':      ['claude-api', 'chatgpt', 'claude-code'],
-  'claude-code':    ['claude-api', 'cursor', 'github-copilot', 'windsurf', 'codex', 'junie'],
+  'claude-code':    ['claude-api', 'cursor', 'github-copilot', 'devin-desktop', 'codex', 'junie'],
   'chatgpt':        ['claude-ai', 'openai-api', 'claude-api', 'gemini'],
   'openai-api':     ['chatgpt', 'claude-api', 'gemini', 'mistral', 'cohere'],
   'gemini':         ['openai-api', 'claude-api', 'chatgpt'],
-  'github-copilot': ['cursor', 'windsurf', 'claude-code', 'codex', 'junie'],
-  'cursor':         ['windsurf', 'github-copilot', 'claude-code', 'codex', 'junie'],
-  'windsurf':       ['cursor', 'github-copilot', 'claude-code', 'codex', 'junie'],
-  'codex':          ['github-copilot', 'cursor', 'windsurf', 'claude-code', 'junie'],
-  'junie':          ['cursor', 'github-copilot', 'claude-code', 'codex', 'windsurf'],
+  'github-copilot': ['cursor', 'devin-desktop', 'claude-code', 'codex', 'junie'],
+  'cursor':         ['devin-desktop', 'github-copilot', 'claude-code', 'codex', 'junie'],
+  'devin-desktop':  ['cursor', 'github-copilot', 'claude-code', 'codex', 'junie'],
+  'codex':          ['github-copilot', 'cursor', 'devin-desktop', 'claude-code', 'junie'],
+  'junie':          ['cursor', 'github-copilot', 'claude-code', 'codex', 'devin-desktop'],
   // LLM APIs — same-tier alternatives
   'mistral':        ['cohere', 'groq', 'together', 'openai-api', 'claude-api'],
   'cohere':         ['mistral', 'groq', 'together', 'openai-api'],
@@ -211,7 +213,7 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   // Observability
   langsmith: 'https://www.langchain.com/langsmith', helicone: 'https://helicone.ai', langfuse: 'https://langfuse.com',
   // Coding agents
-  cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://windsurf.com',
+  cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://devin.ai/desktop',
   junie: 'https://junie.jetbrains.com', claudecode: 'https://claude.com/product/claude-code', codex: 'https://developers.openai.com/codex',
   // Apps
   chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com', grok: 'https://grok.com',

@@ -21,7 +21,8 @@
       "source": "/p/:slug",
       "destination": "/is-:slug-down?utm_source=claude-code&utm_medium=plugin&utm_campaign=outage",
       "permanent": false
-    }
+    },
+    { "source": "/is-windsurf-down", "destination": "/is-devin-desktop-down", "permanent": true }
   ],
   "rewrites": [
     { "source": "/is-claude-down", "destination": "/api/is-down-group?family=claude" },
@@ -33,7 +34,7 @@
     { "source": "/is-claude-code-down", "destination": "/api/is-down?slug=claude-code" },
     { "source": "/is-openai-down", "destination": "/api/is-down-group?family=openai" },
     { "source": "/is-openai-api-down", "destination": "/api/is-down?slug=openai-api" },
-    { "source": "/is-windsurf-down", "destination": "/api/is-down?slug=windsurf" },
+    { "source": "/is-devin-desktop-down", "destination": "/api/is-down?slug=devin-desktop" },
     { "source": "/is-claude-ai-down", "destination": "/api/is-down?slug=claude-ai" },
     { "source": "/is-mistral-down", "destination": "/api/is-down?slug=mistral" },
     { "source": "/is-cohere-down", "destination": "/api/is-down?slug=cohere" },

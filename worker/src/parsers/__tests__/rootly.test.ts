@@ -5,7 +5,7 @@ import {
   rootlyWindowTruncated, rootlyWindowCutoffDay, rootlyDayImpactMap,
   mapRootlyComponentStatus, rootlyOverallStatus,
   rootlySegmentImpact, parseRootlyDay, rootlyDayReading, computeRootlyUptime, attachRootlyImpact,
-  rootlyTodayWeightedOutageSec,
+  rootlyTodayWeightedOutageSec, rootlyIncidentTitle,
   type RootlyFeed, type RootlyUptimeComponent,
 } from '../rootly'
 
@@ -423,6 +423,11 @@ describe('mapRootlyComponentStatus', () => {
     expect(mapRootlyComponentStatus('Operational')).toBe('operational')
   })
 
+  it('maps the word an affected component actually renders', () => {
+    expect(mapRootlyComponentStatus('Affected')).toBe('degraded')
+    expect(mapRootlyComponentStatus('affected')).toBe('degraded')
+  })
+
   it('maps the impaired labels Rootly offers', () => {
     expect(mapRootlyComponentStatus('Degraded')).toBe('degraded')
     expect(mapRootlyComponentStatus('Partial Outage')).toBe('degraded')
@@ -437,10 +442,38 @@ describe('mapRootlyComponentStatus', () => {
   })
 
   it('returns null on an unrecognized word — NOT operational', () => {
-    // The whole point: only "Operational" was observed live, so the rest of the vocabulary is
-    // inferred. Coercing an unknown word to green would publish an all-clear we did not read.
+    // Coercing an unknown word to green would publish an all-clear we did not read.
     expect(mapRootlyComponentStatus('Elevated Errors')).toBeNull()
     expect(mapRootlyComponentStatus('')).toBeNull()
+  })
+})
+
+// The scraper emits the word it matched and the Worker maps it, so the scraper's vocabulary has to
+// stay a subset of this one (#1476).
+describe('the two status vocabularies stay in step (#1476)', () => {
+  it('maps every word the scraper can emit', async () => {
+    const { COMPONENT_STATES_WORDS } = await import('../../../../scripts/scrape-mistral-status.mjs')
+    expect(COMPONENT_STATES_WORDS.length).toBeGreaterThan(1)
+    for (const word of COMPONENT_STATES_WORDS) {
+      expect(mapRootlyComponentStatus(word), `scraper can emit "${word}"`).not.toBeNull()
+    }
+  })
+})
+
+describe('an Affected component (#1476)', () => {
+  const scope = REAL_FEED.components.map((c) => c.id)
+  const now = Date.parse('2026-09-10T02:00:00.000Z')
+  const affected = {
+    ...REAL_FEED,
+    components: REAL_FEED.components.map((c, i) => (i === 0 ? { ...c, status: 'Affected' } : c)),
+  }
+
+  it('does not refuse the feed', () => {
+    expect(isStorableRootlyFeed(affected, scope, now)).toBe(true)
+  })
+
+  it('carries the component into the badge as degraded, not unknown', () => {
+    expect(rootlyOverallStatus(affected.components, scope)).toBe('degraded')
   })
 })
 
@@ -956,5 +989,177 @@ describe('#1381 the gate accepts what the scraper actually emits', () => {
         `a derivation missing ${drop} must be refused, not defaulted`,
       ).toBe(false)
     }
+  })
+})
+
+// ── untitled incidents (#1471) ───────────────────────────────────────────────────────
+// Mistral published `/incidents/b0a485d8-…` (2026-09-21 22:12 UTC) with an empty `<h2>`. Read
+// positionally, the line after "Back" was the start-date subtitle, so the incident's NAME became
+// "September 21, 2026 at 10:12 PM UTC" — in the Discord alert, on the is-down card, in the no-TTL
+// history corpus, and as the retrieval key that returned zero past incidents to the AI analysis.
+describe('rootlyIncidentTitle', () => {
+  const at = '2026-09-21T22:12:00.000Z'
+  const from = (text: string | null) => rootlyIncidentTitle('', [{ stage: 'investigating', text, at }])
+
+  const timeline = [
+    { stage: 'investigating' as const, text: 'We are currently investigating elevated error rates on Mistral Small 4.', at },
+    { stage: 'resolved' as const, text: 'The incident has been resolved.', at: '2026-09-21T22:26:00.000Z' },
+  ]
+
+  it('keeps the provider title when there is one', () => {
+    expect(rootlyIncidentTitle('Availability drop for Mistral OCR 4', timeline))
+      .toBe('Availability drop for Mistral OCR 4')
+  })
+
+  it('treats a whitespace-only title as absent', () => {
+    expect(rootlyIncidentTitle('   ', timeline)).toBe('Elevated error rates on Mistral Small 4')
+  })
+
+  // Every string on the left was READ off status.mistral.ai on 2026-09-21, not invented.
+  it.each([
+    ['We are currently investigating elevated error rates on Mistral Small 4.',
+     'Elevated error rates on Mistral Small 4'],
+    ['Our team is currently investigating elevated error rates for Mistral OCR 4 models.',
+     'Elevated error rates for Mistral OCR 4 models'],
+    ['We are investigating reports of Vibe Work generating incoherent/incorrect responses.',
+     'Vibe Work generating incoherent/incorrect responses'],
+    ['We are currently investigating a degradation in Time-to-First-Token (TTFT) latency for GLM-5.2.',
+     'A degradation in Time-to-First-Token (TTFT) latency for GLM-5.2'],
+    ['We have noticed elevated error rates on many of our services. Investigations are currently ongoing.',
+     'Elevated error rates on many of our services. Investigations are currently ongoing'],
+  ])('strips the reporting preamble: %s', (body, expected) => {
+    expect(from(body)).toBe(expected)
+  })
+
+  // Most first-updates already read as a title; those pass through untouched but for the period.
+  it('leaves an update that is already title-shaped alone', () => {
+    expect(from('Vibe Code Web model is experiencing failures in some existing sessions'))
+      .toBe('Vibe Code Web model is experiencing failures in some existing sessions')
+    expect(from('GLM 5.2 Performance Degraded.')).toBe('GLM 5.2 Performance Degraded')
+  })
+
+  // Stripping wins only when what remains names something: "We are investigating the issue." strips
+  // to "The issue", a worse name than the sentence it came from.
+  it('keeps the sentence when the strip would leave a name for nothing', () => {
+    expect(from('We are investigating the issue.')).toBe('We are investigating the issue')
+    expect(from('We are currently investigating an incident.')).toBe('We are currently investigating an incident')
+  })
+
+  it('does not capitalize a first word that is an identifier', () => {
+    expect(from('mistral-ocr-2512 is not available')).toBe('mistral-ocr-2512 is not available')
+  })
+
+  // The earliest update is the only one that can name the incident. Falling through to a later one
+  // yields "The incident has been resolved" — a name that names nothing, written to the no-TTL
+  // corpus and used as the retrieval key, which is #1471's own failure reached by another door.
+  it('does NOT fall through to a later update when the first has no body', () => {
+    expect(rootlyIncidentTitle('', [
+      { stage: 'investigating', text: '', at },
+      { stage: 'resolved', text: 'The incident has been resolved.', at: '2026-09-21T22:26:00.000Z' },
+    ])).toBeNull()
+  })
+
+  // NULL, never ''. `attachRootlyImpact` joins on `label.includes(inc.title)`, and '' is a substring
+  // of every label — an unnameable incident would take the severity of whatever else broke that day,
+  // which `score.ts` then counts as a reliability incident.
+  it.each([[''], ['   '], ['.'], ['...'], ['?!'], [null]])(
+    'returns null, not an empty title, for body %j', (text) => {
+      expect(from(text)).toBeNull()
+    })
+
+  // An untitled incident would otherwise be named after its own closing line.
+  it.each([
+    ['This incident has been resolved.'],
+    ['The incident has been resolved'],
+    ['Resolved.'],
+    ['The issue is fixed.'],
+  ])('returns null for a closing line, which names nothing: %s', (text) => {
+    expect(from(text)).toBeNull()
+  })
+
+  it('still names an incident whose opening update describes a fix in progress', () => {
+    expect(from('We\u2019ve identified the issue and rolled out a fix.'))
+      .toBe('We\u2019ve identified the issue and rolled out a fix')
+  })
+
+  it('returns null when the incident has no updates at all', () => {
+    expect(rootlyIncidentTitle('', [])).toBeNull()
+  })
+})
+
+describe('normalizeRootlyIncidents naming (#1471)', () => {
+  const feedWith = (incidents: RootlyFeed['incidents']): RootlyFeed => ({ ...REAL_FEED, incidents })
+
+  // Minute precision plus a newest-first feed: without a tiebreak in the sort the resolution sits at
+  // timeline[0] and names the incident after itself.
+  it('names an incident that opened and resolved in the same minute from its OPENING update', () => {
+    const { incidents, droppedIncidents } = normalizeRootlyIncidents(feedWith([{
+      id: 'same-minute',
+      title: '',
+      updates: [
+        { status: 'Resolved', at: 'September 21, 2026 at 10:12 PM UTC', body: 'The incident has been resolved.' },
+        { status: 'Investigating', at: 'September 21, 2026 at 10:12 PM UTC', body: 'We are currently investigating elevated error rates on Mistral Small 4.' },
+      ],
+    }]))
+    expect(droppedIncidents).toBe(0)
+    expect(incidents[0].title).toBe('Elevated error rates on Mistral Small 4')
+  })
+
+  it('names the untitled incident, rather than dating it', () => {
+    const { incidents, droppedIncidents } = normalizeRootlyIncidents(feedWith([{
+      id: 'b0a485d8-2c02-42ed-b982-203f3b70b877',
+      title: '',
+      updates: [
+        { status: 'Resolved', at: 'September 21, 2026 at 10:26 PM UTC', body: 'The incident has been resolved.' },
+        { status: 'Investigating', at: 'September 21, 2026 at 10:12 PM UTC', body: 'We are currently investigating elevated error rates on Mistral Small 4.' },
+      ],
+    }]))
+    expect(droppedIncidents).toBe(0)
+    expect(incidents[0].title).toBe('Elevated error rates on Mistral Small 4')
+  })
+
+  it('DROPS an incident whose first update has no body, rather than naming it after the resolution', () => {
+    const { incidents, droppedIncidents } = normalizeRootlyIncidents(feedWith([{
+      id: 'no-first-body',
+      title: '',
+      updates: [
+        { status: 'Resolved', at: 'September 21, 2026 at 10:26 PM UTC', body: 'The incident has been resolved.' },
+        { status: 'Investigating', at: 'September 21, 2026 at 10:12 PM UTC', body: '' },
+      ],
+    }]))
+    expect(incidents).toEqual([])
+    expect(droppedIncidents).toBe(1)
+  })
+
+  it('DROPS an incident nothing can name, so no empty title reaches the severity join', () => {
+    const { incidents, droppedIncidents } = normalizeRootlyIncidents(feedWith([{
+      id: 'no-name',
+      title: '  ',
+      updates: [
+        { status: 'Investigating', at: 'September 21, 2026 at 10:12 PM UTC', body: '...' },
+        { status: 'Resolved', at: 'September 21, 2026 at 10:26 PM UTC', body: '' },
+      ],
+    }]))
+    expect(incidents).toEqual([])
+    expect(droppedIncidents).toBe(1)
+  })
+})
+
+describe('isStorableRootlyFeed title coverage (#1471)', () => {
+  const scope = REAL_FEED.components.map((c) => c.id)
+  const inc = (id: string, title: string) => ({
+    id, title,
+    updates: [{ status: 'Resolved', at: 'September 5, 2026 at 05:48 AM UTC', body: 'Resolved.' }],
+  })
+  const now = Date.parse('2026-09-10T02:00:00.000Z')
+
+  it('accepts a feed where ONE incident came through untitled', () => {
+    expect(isStorableRootlyFeed(
+      { ...REAL_FEED, incidents: [inc('a', ''), inc('b', 'Console Degraded')] }, scope, now)).toBe(true)
+  })
+
+  it('REFUSES a feed where every incident is untitled', () => {
+    expect(isStorableRootlyFeed(
+      { ...REAL_FEED, incidents: [inc('a', ''), inc('b', '   ')] }, scope, now)).toBe(false)
   })
 })

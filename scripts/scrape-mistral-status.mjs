@@ -150,6 +150,85 @@ export async function runWithMistralFeedObservation(workerUrl, token, run, repor
   }
 }
 
+/**
+ * Status words this reader accepts. A row whose text matches none of them yields `{name: null,
+ * status: null}`.
+ *
+ * Every word here must be one `mapRootlyComponentStatus` accepts, since the Worker maps what this
+ * emits; `rootly.test.ts` holds that.
+ */
+const COMPONENT_STATES = /\b(Operational|Affected|Degraded|Partial Outage|Major Outage|Under Maintenance)\b/
+
+/** The same words, for the cross-side test — read off the regex so the two cannot diverge. */
+export const COMPONENT_STATES_WORDS = COMPONENT_STATES.source.replace(/^\\b\(|\)\\b$/g, '').split('|')
+
+/**
+ * One component row's text → `{name, status}`; nulls when no status word is found. `status` is the
+ * matched word; `name` is what precedes it, whitespace-collapsed.
+ *
+ * Separated from the DOM query so the vocabulary is testable. Which element counts as a row is still
+ * decided in the browser, and no test reaches that.
+ */
+export function readComponentRow(text) {
+  const flat = text.replace(/\s+/g, ' ')
+  const m = COMPONENT_STATES.exec(flat)
+  return { name: m ? flat.slice(0, m.index).trim() : null, status: m ? m[1] : null }
+}
+
+/**
+ * Read one incident page's DOM into verbatim strings.
+ *
+ * Serialized into the browser by `page.evaluate`, so it must close over NOTHING. The `doc` default is
+ * what that call resolves to in the browser, and what a test overrides.
+ *
+ * `title` is `null` when no title ELEMENT matched — our selector is wrong, or the page moved — and
+ * `''` when the element is there and the provider left it blank (#1471). The caller must not conflate
+ * them: the first is a broken read, the second is an incident to name from its updates.
+ */
+export function readIncidentPage(doc = document) {
+  const h2 = doc.querySelector('main h2')
+  const heading = [...doc.querySelectorAll('main h3')].find((h) => h.textContent.trim() === 'Updates')
+  // Rows come from EVERY container under the updates panel, not just the first: a layout that splits
+  // them across two blocks would otherwise lose one silently, with every counter reading clean.
+  const panel = heading?.parentElement?.nextElementSibling
+  const rows = [...(panel?.children ?? [])].flatMap((container) =>
+    [...container.children].map((row) =>
+      // The row's content column, read per element.
+      [...(row.lastElementChild?.children ?? [])].map((cell) => cell.textContent)))
+  return { title: h2 ? h2.textContent.replace(/\s+/g, ' ').trim() : null, rows }
+}
+
+/** The four status words the page renders; anything else is not an update row. */
+const ROOTLY_STATUSES = new Set(['Resolved', 'Identified', 'Investigating', 'Monitoring'])
+/** "September 21, 2026 at 10:12 PM UTC" — shape only; `parseRootlyTimestamp` does the reading. */
+const ROOTLY_STAMP = /^[A-Z][a-z]+ \d{1,2}, \d{4} at \d{1,2}:\d{2} (?:AM|PM) UTC$/
+
+/**
+ * Turn each update row's cell texts into `{status, at, body}`, or refuse the lot.
+ *
+ * Cells are identified by SHAPE, not by position: a row that renders a different number of cells
+ * (an update published with no body) must not shift the timestamp into the body slot. `at` stays
+ * verbatim — the Worker owns every timestamp reading.
+ *
+ * An unreadable row yields NO updates at all, because nothing here can tell which update it was: if
+ * it was the Resolved one, the incident publishes as live with no end and re-reads identically every
+ * cycle. Same refusal `normalizeRootlyIncidents` makes on a lost timestamp, decided here so the rule
+ * sits in the function a test can drive rather than in the browser loop no test reaches.
+ */
+export function parseUpdateRows(rows) {
+  const updates = []
+  let dropped = 0
+  for (const cells of rows ?? []) {
+    const texts = (Array.isArray(cells) ? cells : [])
+      .map((c) => String(c ?? '').replace(/\s+/g, ' ').trim())
+    const status = texts.find((c) => ROOTLY_STATUSES.has(c))
+    const at = texts.find((c) => ROOTLY_STAMP.test(c))
+    if (!status || !at) { dropped++; continue }
+    updates.push({ status, at, body: texts.filter((c) => c !== status && c !== at).join(' ').trim() })
+  }
+  return dropped > 0 ? { updates: [], dropped } : { updates, dropped }
+}
+
 async function main() {
   const WORKER_URL = process.env.WORKER_URL
   const TOKEN = process.env.MISTRAL_FEED_TOKEN
@@ -181,18 +260,12 @@ async function main() {
     // elements every poll. Presence in the DOM is the actual signal here.
     await page.waitForSelector('turbo-frame[id^="uptime-chart-"]', { state: 'attached', timeout: 60000 })
 
-    const components = await page.evaluate(() => {
-      const STATES = /\b(Operational|Degraded|Partial Outage|Major Outage|Under Maintenance)\b/;
-      return [...document.querySelectorAll('turbo-frame[id^="uptime-chart-"]')].map((f) => {
-        const text = ((f.closest('div')?.parentElement)?.textContent || '').replace(/\s+/g, ' ').trim();
-        const m = STATES.exec(text);
-        return {
-          id: f.id.replace('uptime-chart-', ''),
-          name: m ? text.slice(0, m.index).trim() : null,
-          status: m ? m[1] : null,
-        };
-      });
-    })
+    const componentRows = await page.evaluate(() =>
+      [...document.querySelectorAll('turbo-frame[id^="uptime-chart-"]')].map((f) => ({
+        id: f.id.replace('uptime-chart-', ''),
+        text: (f.closest('div')?.parentElement)?.textContent ?? '',
+      })))
+    const components = componentRows.map((r) => ({ id: r.id, ...readComponentRow(r.text) }))
 
     // ── Uptime charts ──────────────────────────────────────────────────────────────────────────
     // Read BEFORE navigating away: the charts live on the main page. Only the impacted bars need a
@@ -280,30 +353,20 @@ async function main() {
         const detail = await withRetry(async () => {
           const r = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })
           if (!r || !r.ok()) throw new Error(`HTTP ${r ? r.status() : 'none'}`)
-          return await page.evaluate(() => {
-            const STAMP = /[A-Z][a-z]+ \d{1,2}, \d{4} at \d{1,2}:\d{2} (?:AM|PM) UTC/;
-            const t = document.body.innerText;
-            const title = (t.match(/Back\s*\n\s*(.+)\n/) || [])[1] || null;
-            // Updates render as: <Status>\n<body…>\n<Month D, YYYY at HH:MM AM/PM UTC>
-            const updates = [];
-            for (const part of t.split(/\n(?=Resolved\n|Identified\n|Investigating\n|Monitoring\n)/)) {
-              const st = (part.match(/^(Resolved|Identified|Investigating|Monitoring)\b/) || [])[1];
-              if (!st) continue;
-              const at = (part.match(STAMP) || [])[0];
-              if (!at) continue;                       // no timestamp → not an update block
-              const body = part.replace(/^(Resolved|Identified|Investigating|Monitoring)\s*/, '')
-                               .replace(STAMP, '').replace(/\s+/g, ' ').trim();
-              updates.push({ status: st, at, body });  // `at` stays VERBATIM — the Worker parses it
-            }
-            return { title, updates };
-          });
+          return await page.evaluate(readIncidentPage);
         })
-        if (!detail.title || detail.updates.length === 0) {
+        const { updates, dropped } = parseUpdateRows(detail.rows)
+        if (detail.title === null) {
           failed++
-          console.warn(`[scrape] incident page had no readable updates: ${url}`)
+          console.warn(`[scrape] incident page has no title element — selector moved?: ${url}`)
           continue
         }
-        incidents.push({ id, title: detail.title, updates: detail.updates })
+        if (updates.length === 0) {
+          failed++
+          console.warn(`[scrape] incident page had no readable updates (${dropped} rows dropped): ${url}`)
+          continue
+        }
+        incidents.push({ id, title: detail.title, updates })
         await new Promise((r) => setTimeout(r, paceMs))
       } catch (err) {
         failed++

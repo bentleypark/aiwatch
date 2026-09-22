@@ -96,7 +96,7 @@
 | Codex | OpenAI |
 | Cursor | Anysphere |
 | GitHub Copilot | GitHub |
-| Windsurf | Cognition |
+| Windsurf (Devin Desktop) | Cognition |
 | Junie | JetBrains |
 
 ### 음성 (3개)
@@ -346,7 +346,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `codex` | Codex | `bfl` | Black Forest Labs (FLUX) |
 | `cursor` | Cursor | `claudeai` | claude.ai |
 | `copilot` | GitHub Copilot | `chatgpt` | ChatGPT |
-| `windsurf` | Windsurf | `characterai` | Character.AI |
+| `windsurf` | Windsurf (Devin Desktop) | `characterai` | Character.AI |
 | `junie` | Junie | `deepseekapp` | DeepSeek App |
 | `grok` | Grok | | |
 
