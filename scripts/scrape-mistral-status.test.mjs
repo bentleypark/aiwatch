@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { Window } from 'happy-dom'
 import {
   withRetry, buildUptimeEntry, envPositiveInt, readComponentRow, parseUpdateRows, readIncidentPage,
+  buildMistralFeedObservation, reportMistralFeedObservation, runWithMistralFeedObservation, deliverMistralFeed,
 } from './scrape-mistral-status.mjs'
 
 // #1381 — `withRetry` is the only pure thing in the scraper, and it is the part that decides whether a
@@ -128,6 +129,113 @@ test('buildUptimeEntry passes unreadBars through instead of defaulting it', () =
     undefined,
     'a field the derivation did not produce must not be invented here',
   )
+})
+
+test('buildMistralFeedObservation retains a partial incident count and the independent tooltip loss', () => {
+  const observation = buildMistralFeedObservation({
+    coverage: { listed: 12, fetched: 8, available: 20 },
+    uptime: [{ coverage: { impacted: 3, fetched: 2 } }, { coverage: { impacted: 0, fetched: 0 } }],
+  }, 'stored')
+  assert.deepEqual(observation, { delivery: 'stored', listed: 12, fetched: 8, available: 20, uptimeLostTooltips: 1 })
+})
+
+test('buildMistralFeedObservation makes a pre-coverage failure observable without inventing zeroes', () => {
+  assert.deepEqual(buildMistralFeedObservation(undefined, 'not-posted'), { delivery: 'not-posted' })
+})
+
+test('reportMistralFeedObservation is fail-soft and uses the internal diagnostic endpoint', async () => {
+  const calls = []
+  await reportMistralFeedObservation('https://worker.example/', 'secret', { delivery: 'stored', listed: 1, fetched: 1, available: 1, uptimeLostTooltips: 0 }, async (url, init) => {
+    calls.push({ url, init })
+    return new Response('', { status: 200 })
+  })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, 'https://worker.example/api/internal/mistral-feed-observation')
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer secret')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { delivery: 'stored', listed: 1, fetched: 1, available: 1, uptimeLostTooltips: 0 })
+})
+
+test('reportMistralFeedObservation does not turn a telemetry timeout into a scraper failure', async () => {
+  const warn = console.warn
+  console.warn = () => {}
+  try {
+    let aborted = false
+    await reportMistralFeedObservation('https://worker.example', 'secret', { delivery: 'not-posted' }, async (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          aborted = true
+          reject(new Error('telemetry timeout'))
+        })
+      }), 1)
+    assert.equal(aborted, true)
+  } finally {
+    console.warn = warn
+  }
+})
+
+test('runWithMistralFeedObservation reports a partial payload after a stored feed', async () => {
+  const reports = []
+  await runWithMistralFeedObservation('https://worker.example', 'secret', async (state) => {
+    state.payload = { coverage: { listed: 12, fetched: 8, available: 20 }, uptime: [] }
+    state.delivery = 'stored'
+  }, async (...args) => reports.push(args))
+  assert.deepEqual(reports, [[
+    'https://worker.example', 'secret',
+    { delivery: 'stored', listed: 12, fetched: 8, available: 20, uptimeLostTooltips: 0 },
+  ]])
+})
+
+test('runWithMistralFeedObservation reports an unavailable run before rethrowing its scraper error', async () => {
+  const reports = []
+  await assert.rejects(
+    runWithMistralFeedObservation('https://worker.example', 'secret', async () => { throw new Error('browser blocked') }, async (...args) => reports.push(args)),
+    /browser blocked/,
+  )
+  assert.deepEqual(reports, [['https://worker.example', 'secret', { delivery: 'not-posted' }]])
+})
+
+const partialFeed = () => ({ components: [{ name: 'API' }], coverage: { listed: 12, fetched: 8, available: 20 }, uptime: [] })
+
+async function observeDelivery(payload, status) {
+  const reports = []
+  const posts = []
+  let error
+  const log = console.log
+  console.log = () => {}
+  try {
+    await runWithMistralFeedObservation('https://worker.example', 'secret', (state) =>
+      deliverMistralFeed('https://worker.example/', 'secret', state, payload, async (url, init) => {
+        posts.push({ url, init })
+        return new Response('{}', { status })
+      }), async (...args) => reports.push(args[2])).catch((err) => { error = err })
+  } finally {
+    console.log = log
+  }
+  return { observation: reports[0], posts, error }
+}
+
+test('deliverMistralFeed records a stored feed with its measured coverage', async () => {
+  const { observation, posts, error } = await observeDelivery(partialFeed(), 200)
+  assert.equal(error, undefined)
+  assert.equal(posts[0].url, 'https://worker.example/api/internal/mistral-feed')
+  assert.equal(posts[0].init.method, 'POST')
+  assert.equal(posts[0].init.headers.Authorization, 'Bearer secret')
+  assert.deepEqual(JSON.parse(posts[0].init.body), partialFeed())
+  assert.deepEqual(observation, { delivery: 'stored', listed: 12, fetched: 8, available: 20, uptimeLostTooltips: 0 })
+})
+
+test('deliverMistralFeed records a Worker refusal as rejected, keeping the coverage', async () => {
+  const { observation, error } = await observeDelivery(partialFeed(), 422)
+  assert.match(error?.message ?? '', /push failed: HTTP 422/)
+  assert.deepEqual(observation, { delivery: 'rejected', listed: 12, fetched: 8, available: 20, uptimeLostTooltips: 0 })
+})
+
+test('deliverMistralFeed refuses a blank reading without posting, and still reports its coverage', async () => {
+  const { observation, posts, error } = await observeDelivery({ ...partialFeed(), components: [] }, 200)
+  assert.match(error?.message ?? '', /no components read/)
+  assert.equal(posts.length, 0)
+  assert.deepEqual(observation, { delivery: 'not-posted', listed: 12, fetched: 8, available: 20, uptimeLostTooltips: 0 })
 })
 
 // ── env overrides ───────────────────────────────────────────────────────────────────────────────

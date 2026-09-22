@@ -39,6 +39,7 @@ import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edg
 import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, type StoredRootlyFeed } from './parsers/rootly'
+import { parseMistralFeedObservation, recordMistralFeedObservation } from './mistral-feed-observation'
 import { maybeDispatchWorkflow, DEEPSEEK_DISPATCH_CONFIG, MISTRAL_DISPATCH_CONFIG } from './workflow-dispatch'
 import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, extReportCountKey, isExtReportSource, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
 
@@ -2512,6 +2513,28 @@ export async function handleMistralFeed(request: Request, env: Env, cors: Record
   })
 }
 
+// ── POST /api/internal/mistral-feed-observation ────────────────────────────
+// #1383 — terminal Action telemetry is separate from the cached Rootly feed. A run may fail before
+// it can POST a feed at all; retaining that `unavailable` observation is what lets the operator
+// distinguish it from a complete page with zero incidents. Never record unauthorized input: this is
+// an internal Action channel, not request telemetry.
+export async function handleMistralFeedObservation(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.MISTRAL_FEED_TOKEN) return json(401, { ok: false, error: 'unauthorized' })
+  const auth = request.headers.get('Authorization') ?? ''
+  if (!constantTimeEqual(auth, `Bearer ${env.MISTRAL_FEED_TOKEN}`)) return json(401, { ok: false, error: 'unauthorized' })
+
+  let body: unknown
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+  const observation = parseMistralFeedObservation(body)
+  if (!observation) return json(400, { ok: false, error: 'invalid observation' })
+
+  recordMistralFeedObservation(env.ANALYTICS, observation)
+  return json(200, { ok: true, coverage: observation.coverage, delivery: observation.delivery })
+}
+
 // ── POST /api/admin/rebuild-archive ─────────────────────────────
 // Operator tool to regenerate a specific month's archive:monthly:{YYYY-MM} key.
 // Motivated by the discovery that earlier archive cron runs persisted score: null /
@@ -4753,6 +4776,10 @@ export default {
     // for Mistral (#1381), cached in KV for fetchService to normalize.
     if (request.method === 'POST' && url.pathname === '/api/internal/mistral-feed') {
       return handleMistralFeed(request, env, cors)
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/internal/mistral-feed-observation') {
+      return handleMistralFeedObservation(request, env, cors)
     }
 
     // POST /api/admin/rebuild-archive — operator tool to regenerate a specific month's

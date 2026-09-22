@@ -646,6 +646,18 @@ What is true today, per source:
 
 The **Score** does not sidestep this: its Incidents and Recovery components are 30-day (`incidents30d` + daily counters), but the **Uptime 40** component reads `uptime30d` without regard to its source or window — `score.ts` never branches on `uptimeSource` — so a blended-window `platform_avg` figure is rescaled onto the 40 points like any other, with the window stated nowhere.
 
+#### Rootly Action coverage diagnostics (#1383)
+
+The feed KV retains only the latest accepted Mistral scrape, so it cannot establish how often a prior
+Action lost incident detail pages. Every runnable Action therefore sends one authenticated terminal
+observation after its feed attempt. It records bounded counters only: incident pages `listed`, detail
+pages `fetched`, their difference, the pre-cap `available` count, and lost uptime tooltips. The Worker
+derives incident coverage as `complete` (`fetched === listed`), `partial` (`fetched < listed`), or
+`unavailable` (the run did not reach a payload), alongside delivery as `stored`, `rejected`, or
+`not-posted`. The event is written best-effort to Analytics Engine; it never changes the cached feed,
+the published status, or the Score. The bounded vocabulary and counters support a 90-day query of
+partial-run rate and total lost pages without storing incident URLs, titles, run ids, or raw errors.
+
 ### Provenance in the monthly archive — absence is not neutral
 
 `uptimeSource` is archived per service so the monthly report can print **Official** vs **Platform** from

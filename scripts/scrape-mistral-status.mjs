@@ -101,6 +101,72 @@ export function buildUptimeEntry(chart, days, fetched) {
   }
 }
 
+/** Build the bounded terminal diagnostic sent after EVERY runnable Action execution.
+ *
+ * The Worker derives `partial` from listed/fetched itself. The scraper reports only measurements it
+ * made, so it cannot accidentally disagree with the ingest-side definition. A run that did not reach
+ * a usable payload retains no page counters and is explicitly `unavailable` at the Worker.
+ */
+export function buildMistralFeedObservation(payload, delivery) {
+  if (!payload?.coverage) return { delivery }
+  const uptimeLostTooltips = Array.isArray(payload.uptime)
+    ? payload.uptime.reduce((total, chart) => total + (chart.coverage.impacted - chart.coverage.fetched), 0)
+    : 0
+  return {
+    delivery,
+    listed: payload.coverage.listed,
+    fetched: payload.coverage.fetched,
+    available: payload.coverage.available,
+    uptimeLostTooltips,
+  }
+}
+
+/** Diagnostics are fail-soft: a failed observation must not alter or indefinitely delay the scrape. */
+export async function reportMistralFeedObservation(workerUrl, token, observation, fetchImpl = fetch, timeoutMs = 10_000) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetchImpl(`${workerUrl.replace(/\/+$/, '')}/api/internal/mistral-feed-observation`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(observation),
+      signal: controller.signal,
+    })
+    if (!res.ok) console.warn(`[scrape] observation push failed: HTTP ${res.status}`)
+  } catch (err) {
+    console.warn(`[scrape] observation push failed: ${err?.message ?? err}`)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export async function deliverMistralFeed(workerUrl, token, state, payload, fetchImpl = fetch) {
+  state.payload = payload
+  if (payload.components.length === 0) throw new Error('no components read — refusing to push a blank page reading')
+  const res = await fetchImpl(`${workerUrl.replace(/\/+$/, '')}/api/internal/mistral-feed`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    state.delivery = 'rejected'
+    throw new Error(`push failed: HTTP ${res.status} ${text.slice(0, 300)}`)
+  }
+  state.delivery = 'stored'
+  console.log(`[scrape] pushed: ${text.slice(0, 300)}`)
+}
+
+/** Own the terminal observation so a scraper exception cannot skip it. */
+export async function runWithMistralFeedObservation(workerUrl, token, run, report = reportMistralFeedObservation) {
+  const state = { payload: undefined, delivery: 'not-posted' }
+  try {
+    return await run(state)
+  } finally {
+    await report(workerUrl, token, buildMistralFeedObservation(state.payload, state.delivery))
+  }
+}
+
 /**
  * Status words this reader accepts. A row whose text matches none of them yields `{name: null,
  * status: null}`.
@@ -194,12 +260,13 @@ async function main() {
     process.exit(2)
   }
 
-  const { chromium } = await import('playwright')
-  // headless:false is load-bearing — see the header. `channel: 'chrome'` drives the runner's
-  // preinstalled Chrome, so no browser download and no `playwright install` step.
-  const browser = await chromium.launch({ headless: false, channel: 'chrome' })
-  let payload
-  try {
+  await runWithMistralFeedObservation(WORKER_URL, TOKEN, async (state) => {
+    let browser
+    try {
+      const { chromium } = await import('playwright')
+    // headless:false is load-bearing — see the header. `channel: 'chrome'` drives the runner's
+    // preinstalled Chrome, so no browser download and no `playwright install` step.
+      browser = await chromium.launch({ headless: false, channel: 'chrome' })
     const page = await (await browser.newContext()).newPage()
     await withRetry(() => page.goto(STATUS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }))
     // Wait for the real page, not a fixed delay: the uptime charts are what proves the challenge
@@ -324,7 +391,7 @@ async function main() {
       }
     }
 
-    payload = {
+    const payload = {
       fetchedAt: new Date().toISOString(),
       components,
       incidents,
@@ -335,29 +402,17 @@ async function main() {
       uptime,
     }
     console.log(`[scrape] components=${components.length} attempted=${urls.length} read=${incidents.length} failed=${failed}`)
-  } finally {
-    await browser.close()
-  }
-
-  if (payload.components.length === 0) {
-    console.error('[scrape] no components read — refusing to push a blank page reading')
-    process.exit(1)
-  }
-
-  const res = await fetch(`${WORKER_URL.replace(/\/+$/, '')}/api/internal/mistral-feed`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    await deliverMistralFeed(WORKER_URL, TOKEN, state, payload)
+    } finally {
+      if (browser) await browser.close()
+    }
   })
-  const text = await res.text()
-  if (!res.ok) {
-    console.error(`[scrape] push failed: HTTP ${res.status} ${text.slice(0, 300)}`)
-    process.exit(1)
-  }
-  console.log(`[scrape] pushed: ${text.slice(0, 300)}`)
 }
 
 // Only run when executed directly, so `withRetry` stays importable by the unit test.
 if (process.argv[1] && process.argv[1].endsWith('scrape-mistral-status.mjs')) {
-  await main()
+  await main().catch((err) => {
+    console.error(`[scrape] ${err?.message ?? err}`)
+    process.exitCode = 1
+  })
 }
