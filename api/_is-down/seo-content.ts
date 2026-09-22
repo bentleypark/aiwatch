@@ -55,7 +55,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is GitHub Copilot down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors GitHub Copilot every 5 minutes using GitHub Status data.' },
       { q: 'Why is Copilot not suggesting code?', a: 'Copilot may be experiencing service issues. Check this page for current status. Also verify your subscription is active and your IDE extension is up to date.' },
-      { q: 'What can I use instead of GitHub Copilot?', a: 'When Copilot is down, Cursor and Windsurf are alternative AI coding assistants. Claude Code by Anthropic is another option for terminal-based AI coding.' },
+      { q: 'What can I use instead of GitHub Copilot?', a: 'When Copilot is down, Cursor and Windsurf (Devin Desktop) are alternative AI coding assistants. Claude Code by Anthropic is another option for terminal-based AI coding.' },
       { q: 'Does GitHub Copilot downtime affect GitHub?', a: 'Copilot outages may coincide with broader GitHub infrastructure issues. Check the incidents section for details on whether the outage is Copilot-specific or platform-wide.' },
     ],
   },
@@ -67,7 +67,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Cursor down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cursor every 5 minutes and shows real-time operational status.' },
       { q: 'Why is Cursor AI not working?', a: 'Cursor AI features may be down due to server issues or an upstream model provider outage. Check this page for current status details.' },
-      { q: 'What are alternatives to Cursor?', a: 'When Cursor is down, GitHub Copilot, Windsurf, or Claude Code are alternative AI coding tools. AIWatch shows which are currently operational.' },
+      { q: 'What are alternatives to Cursor?', a: 'When Cursor is down, GitHub Copilot, Windsurf (Devin Desktop), or Claude Code are alternative AI coding tools. AIWatch shows which are currently operational.' },
       { q: 'Is Cursor down because of an upstream model provider?', a: 'Cursor relies on external model providers as well as its own models. Check the AIWatch dashboard at ai-watch.dev to see whether a provider it uses is also experiencing issues.' },
     ],
   },
@@ -79,7 +79,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Claude Code down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Claude Code every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
       { q: 'Why is Claude Code not working?', a: 'Claude Code\'s default backend is Anthropic\'s Claude API, so a Claude API incident (model errors, rate limiting) can reach Claude Code too. Check this page for current status.' },
-      { q: 'What can I use instead of Claude Code?', a: 'When Claude Code is down, GitHub Copilot, Cursor, or Windsurf are alternative AI coding tools. AIWatch shows which are currently operational.' },
+      { q: 'What can I use instead of Claude Code?', a: 'When Claude Code is down, GitHub Copilot, Cursor, or Windsurf (Devin Desktop) are alternative AI coding tools. AIWatch shows which are currently operational.' },
       { q: 'Is Claude Code down because of Claude API?', a: 'Not always — enterprise deployments can route inference through a cloud provider instead. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
     ],
   },
@@ -107,16 +107,16 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check OpenAI API status?', a: 'You can check OpenAI status on this page (updated every 5 minutes), on the official OpenAI status page at status.openai.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
-  windsurf: {
-    displayName: 'Windsurf',
-    description: 'Windsurf is an AI-powered code editor by Cognition, offering intelligent code completions, multi-file editing, and an agentic coding experience. It supports multiple LLM backends and is designed as a Cursor alternative.',
-    insight: 'Windsurf relies on its own infrastructure plus upstream model providers. AIWatch tracks Windsurf independently — when Windsurf reports an issue, it may be Windsurf-specific or caused by an upstream model outage.',
-    whenDown: 'When Windsurf is down, developers lose AI code completions, multi-file editing, and agentic coding features. The editor may still function for basic editing, but all AI-powered features will be unavailable.',
+  'devin-desktop': {
+    displayName: 'Windsurf (Devin Desktop)',
+    description: 'Devin Desktop is Cognition\'s AI code editor, with a coding agent and Tab completions.',
+    insight: 'Devin Desktop shares its status page with Devin Cloud.',
+    whenDown: 'Not every incident takes the whole editor down: some past Windsurf incidents named a single model, so a different model may still work.',
     faqs: [
-      { q: 'Is Windsurf down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Windsurf every 5 minutes and shows real-time operational status.' },
-      { q: 'Why is Windsurf AI not working?', a: 'Windsurf AI features may be down due to Windsurf\'s own server issues or upstream model provider outages. Check this page for current status details.' },
-      { q: 'What are alternatives to Windsurf?', a: 'When Windsurf is down, Cursor, GitHub Copilot, or Claude Code are alternative AI coding tools. AIWatch shows which are currently operational.' },
-      { q: 'Is Windsurf better than Cursor?', a: 'Both are AI-native code editors with different strengths. Check AIWatch reliability rankings at ai-watch.dev/#ranking to compare uptime and incident history.' },
+      { q: 'Is Windsurf down right now?', a: 'Check the live status indicator at the top of this page. AIWatch checks it every 5 minutes.' },
+      { q: 'Why is Windsurf not working?', a: 'If this page shows an open incident, the problem is on Cognition\'s side.' },
+      { q: 'What are alternatives to Windsurf?', a: 'Cursor, GitHub Copilot, and Claude Code are other AI coding tools. AIWatch shows which are currently operational.' },
+      { q: 'Are Windsurf and Devin Desktop the same product?', a: 'Yes. Cognition renamed Windsurf to Devin Desktop, and windsurf.com now redirects to devin.ai/desktop.' },
     ],
   },
   junie: {
@@ -127,7 +127,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Junie down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Junie every 5 minutes via the JetBrains Cloud Platform status feed and shows real-time operational status.' },
       { q: 'Why are Junie\'s AI features not working?', a: 'Junie may be down due to JetBrains-specific issues or an upstream model provider outage.' },
-      { q: 'What are alternatives to Junie?', a: 'When Junie is down, Cursor, Claude Code, GitHub Copilot, Codex, or Windsurf are alternative AI coding agents. AIWatch shows which are currently operational and recommends the highest-scored alternative.' },
+      { q: 'What are alternatives to Junie?', a: 'When Junie is down, Cursor, Claude Code, GitHub Copilot, Codex, or Windsurf (Devin Desktop) are alternative AI coding agents. AIWatch shows which are currently operational and recommends the highest-scored alternative.' },
       { q: 'Does Junie work in every JetBrains IDE?', a: 'No — JetBrains ships the Junie plugin for a subset of its IDEs, each with its own minimum version. Check JetBrains\' documentation for the one you use.' },
     ],
   },
@@ -519,7 +519,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is Codex down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Codex every 5 minutes across its published surfaces and shows real-time operational status.' },
       { q: 'Is this the old Codex code-generation API?', a: 'No. This page tracks the current OpenAI Codex coding agent. The older code-generation API was retired in 2023 and is not what AIWatch monitors here.' },
       { q: 'Why is Codex not working?', a: 'Codex outages usually stem from one of: a broader OpenAI platform incident (also affects ChatGPT and the API), a Codex-specific backend issue, or an upstream model outage. Check the Recent Incidents section for current context.' },
-      { q: 'What are alternatives to Codex?', a: 'When Codex is down, Claude Code, GitHub Copilot, Cursor, or Windsurf are alternative coding agents. AIWatch shows which are currently operational.' },
+      { q: 'What are alternatives to Codex?', a: 'When Codex is down, Claude Code, GitHub Copilot, Cursor, or Windsurf (Devin Desktop) are alternative coding agents. AIWatch shows which are currently operational.' },
     ],
   },
   twelvelabs: {

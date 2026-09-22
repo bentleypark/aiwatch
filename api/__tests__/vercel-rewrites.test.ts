@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
 
 // Guards the #452 fix. The Vercel-proxied `/api/status/cached` rewrite MUST force
 // the statusline lite projection (`?src=statusline-*`). Without the tag the Worker
@@ -47,5 +48,27 @@ describe('vercel.json /p/:slug plugin redirect (#920)', () => {
     expect(rule, '/p/:slug redirect must exist').toBeDefined()
     expect(rule!.destination).toBe('/is-:slug-down?utm_source=claude-code&utm_medium=plugin&utm_campaign=outage')
     expect(rule!.permanent).toBe(false) // 307 — a service can toggle status; not a permanent move
+  })
+})
+
+describe('vercel.json is-down routes ↔ api/_is-down slug-map (#1430)', () => {
+  it('every is-down slug has its /is-{slug}-down rewrite', () => {
+    for (const slug of Object.keys(SLUG_TO_SERVICE)) {
+      const rule = vercelConfig.rewrites.find((r) => r.source === `/is-${slug}-down`)
+      expect(rule?.destination, `/is-${slug}-down`).toBe(`/api/is-down?slug=${slug}`)
+    }
+  })
+
+  it('every is-down slug is listed in the sitemap', () => {
+    const sitemap = readFileSync(join(repoRoot, 'public/sitemap.xml'), 'utf8')
+    for (const slug of Object.keys(SLUG_TO_SERVICE)) {
+      expect(sitemap.includes(`<loc>https://ai-watch.dev/is-${slug}-down</loc>`), `/is-${slug}-down`).toBe(true)
+    }
+  })
+
+  it('the pre-rename Windsurf URL permanently redirects to the Devin Desktop page', () => {
+    const rule = (vercelConfig.redirects ?? []).find((r) => r.source === '/is-windsurf-down')
+    expect(rule?.destination).toBe('/is-devin-desktop-down')
+    expect(rule?.permanent).toBe(true)
   })
 })

@@ -97,7 +97,7 @@ Grouped by the dashboard's category taxonomy (45 total — sidebar filters / Ove
 | Codex | OpenAI |
 | Cursor | Anysphere |
 | GitHub Copilot | GitHub |
-| Windsurf | Cognition |
+| Windsurf (Devin Desktop) | Cognition |
 | Junie | JetBrains |
 
 ### Voice (3)
@@ -347,7 +347,7 @@ Every monitored service — the same ids `/api/v1/status` returns.
 | `codex` | Codex | `bfl` | Black Forest Labs (FLUX) |
 | `cursor` | Cursor | `claudeai` | claude.ai |
 | `copilot` | GitHub Copilot | `chatgpt` | ChatGPT |
-| `windsurf` | Windsurf | `characterai` | Character.AI |
+| `windsurf` | Windsurf (Devin Desktop) | `characterai` | Character.AI |
 | `junie` | Junie | `deepseekapp` | DeepSeek App |
 | `grok` | Grok | | |
 

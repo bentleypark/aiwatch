@@ -86,8 +86,8 @@ export const REDDIT_TARGETS: ReadonlyArray<{ subreddit: string; service: string;
   { subreddit: 'ChatGPT',         service: 'ChatGPT',     statusId: 'chatgpt' },
   { subreddit: 'OpenAI',          service: 'OpenAI',      statusId: 'openai' },
   { subreddit: 'cursor',          service: 'Cursor',      statusId: 'cursor' },
-  { subreddit: 'windsurf',        service: 'Windsurf',    statusId: 'windsurf' },
-  { subreddit: 'Codeium',         service: 'Windsurf',    statusId: 'windsurf' },
+  { subreddit: 'windsurf',        service: 'Windsurf (Devin Desktop)', statusId: 'windsurf' },
+  { subreddit: 'Codeium',         service: 'Windsurf (Devin Desktop)', statusId: 'windsurf' },
   // Broader AI communities in outage mode — playbook engagement targets (#280).
   // r/LocalLLaMA was previously competitive mode; switched to outage so API-reliability
   // threads (the playbook's actual engagement hook) are caught. r/AINews added for
@@ -881,7 +881,7 @@ export async function detectRedditPosts(
 const SUBREDDIT_SLUG: Record<string, string> = {
   ClaudeAI: 'claude-api', ClaudeCode: 'claude-code',
   ChatGPT: 'chatgpt', OpenAI: 'openai-api',
-  cursor: 'cursor', windsurf: 'windsurf', Codeium: 'windsurf',
+  cursor: 'cursor', windsurf: 'devin-desktop', Codeium: 'devin-desktop',
 }
 
 /**
