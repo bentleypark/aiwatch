@@ -149,6 +149,11 @@ export function isStorableRootlyFeed(
   // Optional, but not free-form: `available` is the page's pre-cap count, so a value below `listed`
   // is incoherent and the truncation reading built on it would be backwards.
   if (available !== undefined && (!Number.isFinite(available) || available < listed)) return false
+  // Not ONE incident carried a provider title. The provider does publish untitled incidents (#1471),
+  // so one is not evidence of a broken read. This is the fail-closed path the scraper's old
+  // `!detail.title` guard provided before it had to allow a genuinely empty title through.
+  if (f.incidents.length > 0 && f.incidents.every((i) => !(i?.title ?? '').trim())) return false
+
   // Components are read from the main page, which is the one request that must have succeeded for
   // anything else to have been attempted. An empty list means the page did not render for us.
   if (f.components.length === 0) return false
@@ -345,13 +350,60 @@ export function mapRootlyStatus(raw: string): Incident['status'] | null {
   return STATUS_MAP[String(raw || '').trim().toLowerCase()] ?? null
 }
 
+/**
+ * The clause an update opens with before it says what broke. A local list rather than
+ * ai-analysis.ts's `BOILERPLATE_PATTERNS`, which covers neither `Our team is` nor `We have noticed`
+ * and whose other consumer would move with any edit made for this one.
+ */
+const REPORTING_PREAMBLE =
+  /^(?:we|our team)\s+(?:are|is|have)\s+(?:currently\s+|still\s+)?(?:investigating|looking into|aware of|noticed|seeing)\s+(?:reports of\s+)?/i
+
+/** A remainder that names nothing: "We are investigating the issue." strips to "The issue". */
+const NAMES_NOTHING = /^(?:the |this |an? )?(?:issue|incident|problem)$/i
+
+/** A closing line. It reports the end, so it cannot name what happened. */
+const CLOSING_LINE = /^(?:this |the )?(?:incident |issue )?(?:has been |is being |is )?(?:resolved|fixed)\b/i
+
+/** A first word safe to capitalize — plain letters, so a model id like `mistral-ocr-2512` is left alone. */
+const PLAIN_FIRST_WORD = /^[a-z]+(?=\s|$)/
+
+/**
+ * The incident's name: the provider's title, or — when it published none — a name derived from the
+ * earliest update. **Null when neither exists**, which the caller drops and counts.
+ *
+ * Null rather than `''` because `attachRootlyImpact` joins on `label.includes(inc.title)`
+ * — and an empty title matches every
+ * chart entry on the day, so an unnameable incident would inherit the severity of whichever other
+ * component was down, and `score.ts` gates `isReliabilityIncident` on that severity being non-null.
+ *
+ * The title is also the retrieval key for AI-analysis grounding (`findSimilarIncidents`,
+ * `findSimilarHistory` both score title-token overlap) and it is written to the no-TTL history
+ * corpus, so an untitled incident does not merely display badly: it matches nothing, and the model
+ * is told the outage has no precedent (#1471).
+ *
+ * Derived from the EARLIEST update only.
+ *
+ * `timeline` is expected in ascending order, as `normalizeRootlyIncidents` sorts it.
+ */
+export function rootlyIncidentTitle(title: string, timeline: TimelineEntry[]): string | null {
+  const given = (title ?? '').trim()
+  if (given) return given
+  const text = (timeline[0]?.text ?? '').replace(/\s+/g, ' ').trim()
+  if (!text || CLOSING_LINE.test(text)) return null
+  const stripped = text.replace(REPORTING_PREAMBLE, '').trim()
+  const named = stripped && !NAMES_NOTHING.test(stripped.replace(/[.!?]+$/, '')) ? stripped : text
+  const bare = named.replace(/[.!?]+$/, '').trim()
+  if (!bare) return null
+  return PLAIN_FIRST_WORD.test(bare) ? bare.charAt(0).toUpperCase() + bare.slice(1) : bare
+}
+
 export interface NormalizeResult {
   incidents: Incident[]
   /** Updates whose timestamp did not parse. Non-zero means the page's time format moved. */
   unparsedTimestamps: number
   /** Update statuses we do not recognize. Non-zero means the vocabulary moved. */
   unknownStatuses: number
-  /** Incidents dropped because not one of their updates yielded a usable instant. */
+  /** Incidents the feed described but this could not publish. */
   droppedIncidents: number
 }
 
@@ -403,12 +455,20 @@ export function normalizeRootlyIncidents(feed: RootlyFeed): NormalizeResult {
     // `investigating`, which is the phantom above reached by the other branch.
     if (earliest == null || lostUpdate) { droppedIncidents++; continue }
 
-    timeline.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+    // Minute precision: an incident that opens and resolves inside one minute has two updates at the
+    // same instant, and a stable sort would leave them in feed order — which is newest-first, so the
+    // resolution would come first and name the incident.
+    const feedIndex = new Map(timeline.map((e, i) => [e, i]))
+    timeline.sort((a, b) =>
+      Date.parse(a.at) - Date.parse(b.at) || feedIndex.get(b)! - feedIndex.get(a)!)
     const status: Incident['status'] = resolvedAt != null ? 'resolved' : (timeline[timeline.length - 1]?.stage ?? 'investigating')
+
+    const title = rootlyIncidentTitle(raw.title, timeline)
+    if (title == null) { droppedIncidents++; continue }
 
     incidents.push({
       id: raw.id,
-      title: raw.title,
+      title,
       status,
       impact: null,
       startedAt: new Date(earliest).toISOString(),
