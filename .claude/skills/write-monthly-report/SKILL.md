@@ -130,6 +130,12 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      in a worktree compares against that checkout's committed text.
      It prints each KO slot beside the same slot from the prior 3 months — the judgement stays yours.
      Read how those months phrased the slot you are about to write, before you write it.
+   - **Then hand the finished KO to a FRESH reviewer that has not seen the EN — your own re-read does not
+     count.** Spawn a `general-purpose` subagent (NOT `review-findings-only` — it is barred from
+     supplying the `수정안` column), give it ONLY the text of every KO `<details>` block this report carries
+     (markup stripped) plus the calque rules above, and ask for a numbered list of `구절 — 문제 — 수정안`.
+     YOU triage which to apply; the reviewer never edits the file. Re-run it when a later step changes
+     the KO.
    - **Claims discipline — hedge, and don't re-teach a standing caveat every month.** (1) *Don't overclaim
      causation.* A reporting artifact doesn't disprove a real problem — say a high per-model count
      **overstates the disruption**, NOT that it is *"not instability" / "not availability loss"* (correlation
