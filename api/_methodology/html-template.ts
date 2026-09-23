@@ -393,6 +393,8 @@ ${consentInitScript(nonce)}
   <h3 data-i18n="s6.counting.title">인시던트 집계</h3>
   <p data-i18n="s6.counting.body">인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — Anthropic은 모델별(Opus/Sonnet/Haiku)로 따로 보고해, 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.</p>
 
+  <p data-i18n="s6.counting.reconstructed">Better Stack을 쓰는 상태 페이지는 모니터가 자동으로 만들던 인시던트를 더 이상 게시하지 않기도 합니다. 그래서 피드가 다루지 않은 다운타임 날짜는 같은 페이지에 공개된 일별 가동 기록으로 채웁니다. 이때는 인시던트 하나를 1건으로 세지 않고, 컴포넌트마다 다운타임이 있었던 날짜를 하루에 1건씩 셉니다. 최근 30일까지만 채우고, 피드에 남은 가장 오래된 항목보다 이전 날짜는 채우지 않습니다. 하루 다운타임이 10분 미만인 날과 아직 끝나지 않은 당일도 제외합니다. 이렇게 채운 기록은 하루 합계라서 인시던트 하나의 길이가 아니므로 MTTR 계산에서 뺍니다.</p>
+
   <h3 data-i18n="s6.mttr.title">복구 시간 (MTTR)</h3>
   <p data-i18n="s6.mttr.body">Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 같은 중앙값 방식을 쓰지만 관측 기간(7일 vs 30일)이 달라 서로 다를 수 있으며, 이는 정상입니다.</p>
 
@@ -625,6 +627,7 @@ const i18n = {
     's6.title': '인시던트 · MTTR · 탐지',
     's6.counting.title': '인시던트 집계',
     's6.counting.body': '인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — Anthropic은 모델별(Opus/Sonnet/Haiku)로 따로 보고해, 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.',
+    's6.counting.reconstructed': 'Better Stack을 쓰는 상태 페이지는 모니터가 자동으로 만들던 인시던트를 더 이상 게시하지 않기도 합니다. 그래서 피드가 다루지 않은 다운타임 날짜는 같은 페이지에 공개된 일별 가동 기록으로 채웁니다. 이때는 인시던트 하나를 1건으로 세지 않고, 컴포넌트마다 다운타임이 있었던 날짜를 하루에 1건씩 셉니다. 최근 30일까지만 채우고, 피드에 남은 가장 오래된 항목보다 이전 날짜는 채우지 않습니다. 하루 다운타임이 10분 미만인 날과 아직 끝나지 않은 당일도 제외합니다. 이렇게 채운 기록은 하루 합계라서 인시던트 하나의 길이가 아니므로 MTTR 계산에서 뺍니다.',
     's6.mttr.title': '복구 시간 (MTTR)',
     's6.mttr.body': 'Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 같은 중앙값 방식을 쓰지만 관측 기간(7일 vs 30일)이 달라 서로 다를 수 있으며, 이는 정상입니다.',
     's6.detection.title': '탐지 (Detection)',
@@ -715,6 +718,7 @@ const i18n = {
     's6.title': 'Incidents · MTTR · Detection',
     's6.counting.title': 'Incident counting',
     's6.counting.body': 'Incident counts reflect all affected components per service. Providers differ in reporting granularity — Anthropic reports per-model (Opus/Sonnet/Haiku counted separately), inflating its totals versus service-level reporters. A higher count does not mean lower reliability; adjust for granularity before comparing across providers.',
+    's6.counting.reconstructed': 'A Better Stack status page may stop publishing the incidents its monitors used to create. AIWatch then fills the downtime days the feed does not cover from the daily availability record published on the same page. One incident is not one entry there: each component contributes one entry for every day it had downtime. Only the last 30 days are filled, and nothing older than the oldest item still in the feed. A day with under 10 minutes of downtime and the current, unfinished day are left out too. An entry built this way is a daily total rather than the length of one incident, so it is excluded from MTTR.',
     's6.mttr.title': 'Recovery time (MTTR)',
     's6.mttr.body': 'The Score\\\'s Recovery component uses a 30-day median. The ServiceDetails "Recovery" card is a separate display — a 7-day median + worst ("typical 15m · worst 29h34m"). The two windows differ, so the figures can legitimately differ — same lower-median convention, different observation window.',
     's6.detection.title': 'Detection',
