@@ -371,7 +371,7 @@ repaints **34 cells across 9** — the same six plus `fireworks` (11), `elevenla
 (1). Every `complete: true` service is byte-identical on both. That the two windows differ at all for one
 service is tracked separately (#1406); it is not introduced here.
 
-**#1390 — the impact calendar painted announced MAINTENANCE as an outage.** `parseIncidentIoComponentImpacts`
+**#1390/#1480 — the impact calendar painted announced MAINTENANCE as an outage.** `parseIncidentIoComponentImpacts`
 mapped `component_impacts[].status` with a trailing CATCH-ALL whose comment said `degraded_performance`,
 so `under_maintenance` fell into it and became a `minor` cell. Every other reader of those same rows
 already excluded it — `INCIDENT_IO_STATUS_WEIGHTS.under_maintenance` is `0`, `parseIncidentIoGlobalPage`
@@ -385,7 +385,7 @@ carrying two such days (2026-06-20, 2026-09-11) and no other service affected. F
 `correctIncidentIoImpossibleTimes` (`parsers/incident-io.ts`) replaces the record's whole timestamp pair
 from the page's own `component_impacts` — the SAME rows the impact calendar renders, so the list stops
 contradicting the cell beside it. **Both endpoints, not just the start**, and that is not a detail: on an
-impossible record `resolved_at` is one of the two discredited fields, and it is not always the end.
+unusable record `resolved_at` is one of the two discredited fields, and it is not always the end.
 ElevenLabs' `Increased Error Rate in US Region` publishes `created_at 17:42:12` / `resolved_at 17:04:00`
 while its own update text *and* its impact rows both say the outage ran `17:04 → 17:13` — so its
 `resolved_at` is the START. An earlier cut kept that field and compared the window's start against it;
@@ -393,13 +393,14 @@ being equal, the repair was rejected and a real 9-minute window sitting on the p
 
 It runs in `fetchService`'s `apiUrl` branch with **no service or platform gate**: the first cut gated on
 `incidentIoBaseUrl` and thereby skipped `turbopuffer`, an incident.io page configured without that field.
-Two deliberate limits: it fires **only** on the impossible ordering (a provider that merely backdates its
-impact window is not wrong, and several do it by hours — a blanket "impacts win" would re-time real
-incidents and their Scores), and it accepts a window only when that window is **internally** ordered
+Two deliberate limits: it fires **only** when the published interval is inverted or zero-length (a provider
+that merely backdates its impact window is not wrong, and several do it by hours — a blanket "impacts win"
+would re-time real incidents and their Scores), and it accepts a window only when that window is **internally** ordered
 (`start < end`), never by checking it against the record's own discredited `resolved_at`. Maintenance
 rows are skipped as a repair source, the same decision the calendar above makes about the same rows.
 
-When no usable window joins, the record gets `startUnknown: true`, `duration: null`, and `startedAt`
+When no usable incident.io window joins — or any other parser publishes a resolved exact-equality pair —
+the common post-parser guard gives the record `startUnknown: true`, `duration: null`, and `startedAt`
 collapsed onto `resolvedAt`. Both halves are load-bearing: the duration must not stay the fabricated
 minute MTTR reads, and the start must not stay the declaration time either, because a migration stamps
 every import with the import date and `score.ts` windows incidents on `startedAt` (`score.ts:232`) — so

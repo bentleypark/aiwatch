@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
-import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
+import { fetchWithTimeout, formatDuration, isZeroLengthResolvedInterval, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
@@ -2033,6 +2033,16 @@ export function withUnreadFeedFlag<T extends { sourceUnknown?: boolean; incident
     : svc
 }
 
+export function markZeroLengthResolvedIncidentsUnknown(incidents: Incident[]): Incident[] {
+  let changed = false
+  const marked = incidents.map((inc) => {
+    if (inc.status !== 'resolved' || inc.startUnknown || !isZeroLengthResolvedInterval(inc.startedAt, inc.resolvedAt)) return inc
+    changed = true
+    return { ...inc, startUnknown: true, duration: null }
+  })
+  return changed ? marked : incidents
+}
+
 /** #983 — the single tagging choke point. `fetchServiceUntagged` has ~10 return paths (flashduty feed,
  *  summary.json, AWS health, Azure RSS, BetterStack/Instatus/xAI/aistudio, plus the early operational
  *  and error bases); stamping `autoMonitor` on its result covers all of them, and is safe AFTER
@@ -2073,7 +2083,8 @@ export async function fetchService(config: ServiceConfig, prefetched: Prefetched
   // — the only ones that produce `uptime30d` for an Atlassian service — can fail on their own without
   // setting either. Whether an absence is worth reporting is `checkUptimeLiveness`'s call, at alert time.
   trackUptimeReading(trackingStore, config.id, svc.uptime30d != null)
-  const tagged = tagAutoMonitorIncidents(svc.incidents, config)  // matches ORIGINAL (e.g. Chinese) titles
+  const durationUnknown = markZeroLengthResolvedIncidentsUnknown(svc.incidents)
+  const tagged = tagAutoMonitorIncidents(durationUnknown, config)  // matches ORIGINAL (e.g. Chinese) titles
   const incidents = applyTitleMap(tagged, config)                // THEN rewrite to English
   // #1268 — the unread-feed invariant rides the same choke point, for the same reason the tagging does:
   // it must hold on every one of this function's ~10 return paths, and a per-return copy is a rule
@@ -2456,8 +2467,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           console.warn(`[fetchService] ${config.id} status-page HTML fetch failed:`, err instanceof Error ? err.message : err)
         }
       }
-      // #1390 — repair incidents whose published record recovered BEFORE it started, before anything
-      // reads their dates. Must precede filterIncidents for the #940 reason the tag attachers below
+      // #1390/#1480 — repair incidents whose published timestamps establish no usable window before
+      // anything reads their dates. Must precede filterIncidents for the #940 reason the tag attachers below
       // give, and it must precede `score.ts` / `buildIncidentAlerts` too: the fabricated `1m` it
       // removes is exactly what MTTR is computed from.
       //
@@ -2466,7 +2477,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // dispatch note above), and one of the four services measurably carrying the defect today. The
       // impossible ordering IS the gate; a config predicate beside it can only ever exclude someone.
       // It costs one `.some()` per service per cycle and returns the same array when nothing is
-      // impossible, which is every service on every ordinary cycle.
+      // unusable, which is every service on every ordinary cycle.
       //
       // Reach, stated rather than assumed: this is the `apiUrl` branch, so the Instatus / Rootly / RSS
       // / gcloud branches do not call it. Every service measured to carry the defect on 2026-09-14

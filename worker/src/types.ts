@@ -35,8 +35,9 @@ export interface Incident {
   componentIds?: string[]
   startedAt: string
   resolvedAt?: string | null
-  /** #1390 — the provider's own record for this incident is self-contradictory (it recovered BEFORE it
-   *  started) and the page carried no `component_impacts` window to recover the real one. On such a
+  /** #1390/#1480 — the provider's own record for this incident is self-contradictory (it recovered
+   *  BEFORE it started) or has no measurable interval (it resolved exactly when it started), and the
+   *  page carried no `component_impacts` window to recover the real one. On such a
    *  record NEITHER timestamp reliably means what its name says — ElevenLabs' `Increased Error Rate in
    *  US Region` publishes a `resolved_at` that its own update text shows is the START. `startedAt` is
    *  therefore collapsed onto `resolvedAt`: not because that instant is the end, but because it is the

@@ -2,7 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import type { StatuspageResponse } from './statuspage'
-import { fetchWithTimeout, formatDuration, isTimeOrderImpossible } from '../utils'
+import { fetchWithTimeout, formatDuration, isTimeOrderImpossible, isZeroLengthResolvedInterval } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
@@ -718,7 +718,7 @@ export function parseIncidentIoIncidentComponentIds(html: string): Record<string
   return result
 }
 
-/** #1390 — repair an incident whose published record claims it recovered BEFORE it started.
+/** #1390/#1480 — repair an incident whose published timestamps establish no usable outage window.
  *
  *  `isTimeOrderImpossible` (utils.ts) documents where these come from and how many there are. The
  *  repair material is on the SAME page we already fetched for uptime: `component_impacts` carries the
@@ -729,10 +729,10 @@ export function parseIncidentIoIncidentComponentIds(html: string): Record<string
  *
  *  Deliberately narrow, in two ways that matter:
  *
- *  1. It fires ONLY on the impossible ordering. A provider that merely backdates its impact window
- *     relative to declaration is not wrong, and several do it by hours — a blanket "impacts win" would
- *     re-time real incidents and their Scores. That is a different decision from this one, and it is
- *     not this issue's.
+ *  1. It fires ONLY on an inverted or zero-length published interval. A provider that merely backdates
+ *     its impact window relative to declaration is not wrong, and several do it by hours — a blanket
+ *     "impacts win" would re-time real incidents and their Scores. That is a different decision from
+ *     this one, and it is not this issue's.
  *  2. It accepts a window only when that window is INTERNALLY ordered (`start < end`), and never by
  *     checking it against the record's own `resolved_at` — see the comment on the `windows` map below
  *     for the record that made that distinction load-bearing.
@@ -750,7 +750,9 @@ export function parseIncidentIoIncidentComponentIds(html: string): Record<string
  *  implicit: `buildHistoryRecord` refuses it, and no reader may derive an elapsed time from a start we
  *  are openly saying we do not have. */
 export function correctIncidentIoImpossibleTimes(incidents: Incident[], html: string | undefined): Incident[] {
-  if (!incidents.some((i) => isTimeOrderImpossible(i.startedAt, i.resolvedAt))) return incidents
+  const needsRepair = (i: Incident) =>
+    isTimeOrderImpossible(i.startedAt, i.resolvedAt) || isZeroLengthResolvedInterval(i.startedAt, i.resolvedAt)
+  if (!incidents.some(needsRepair)) return incidents
   const impacts = html ? parseIncidentIoImpacts(html) : null
   // Three states, and the operator needs to tell them apart: no HTML at all, HTML whose
   // `component_impacts` marker was present but UNPARSEABLE (`null` — the window very likely exists and
@@ -786,7 +788,7 @@ export function correctIncidentIoImpossibleTimes(incidents: Incident[], html: st
         })
   }
   return incidents.map((inc) => {
-    if (!isTimeOrderImpossible(inc.startedAt, inc.resolvedAt)) return inc
+    if (!needsRepair(inc)) return inc
     const w = windows.get(inc.id)
     const startMs = w ? Date.parse(w.start) : NaN
     const endMs = w ? Date.parse(w.end) : NaN
@@ -821,7 +823,7 @@ function warnAnchored(incId: string, material: 'no-html' | 'unparseable' | 'read
     : material === 'no-html'
       ? 'no page HTML this cycle, so no window could be consulted'
       : 'the page carries no usable component_impacts window for it'
-  console.warn(`[correctIncidentIoImpossibleTimes] ${incId}: recovery predates start and ${why} — anchoring on resolvedAt with duration: null (was ${duration ?? 'null'}, startedAt ${startedAt})`)
+  console.warn(`[correctIncidentIoImpossibleTimes] ${incId}: incident timestamps establish no usable outage window and ${why} — anchoring on resolvedAt with duration: null (was ${duration ?? 'null'}, startedAt ${startedAt})`)
 }
 
 /** Test-only: reset the warn-once set so a test can assert the warn fires. */

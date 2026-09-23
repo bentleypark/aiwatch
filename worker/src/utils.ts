@@ -78,6 +78,13 @@ export function isTimeOrderImpossible(startedAt: string | undefined, resolvedAt:
   return end < start
 }
 
+export function isZeroLengthResolvedInterval(startedAt: string | undefined, resolvedAt: string | null | undefined): boolean {
+  if (!startedAt || !resolvedAt) return false
+  const start = Date.parse(startedAt)
+  const end = Date.parse(resolvedAt)
+  return Number.isFinite(start) && start === end
+}
+
 export function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
   const totalMin = displayedMinutes(diffMs)

@@ -148,7 +148,7 @@ const en = {
   'incidents.duration.ongoing': 'Ongoing',
   'incidents.duration.unknown': 'Duration unknown',
   'incidents.derived.note': 'The provider did not publish this as an incident. It is reconstructed from the daily availability record they do publish, so the date and that day’s downtime are known — but the start time and the progress updates are not.',
-  'incidents.startUnknown.note': 'The provider\u2019s own record has this incident recovering before it started, and no impact window was available to recover the real one. The time shown is what they published, but which end of the outage it marks is not established, and how long it ran is not known.',
+  'incidents.startUnknown.note': 'The provider\u2019s own record does not establish a usable outage window. The time shown is what they published, but which end of the outage it marks is not established, and how long it ran is not known.',
   'incidents.derived.dayTotal': 'that day',
   'incidents.time.started': 'Started',
   'incidents.time.updated': 'Updated',

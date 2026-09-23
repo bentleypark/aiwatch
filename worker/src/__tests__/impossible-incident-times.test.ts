@@ -5,7 +5,7 @@ import { isTimeOrderImpossible, formatDuration } from '../utils'
 import { buildHistoryRecord } from '../incident-history'
 import { calculateAIWatchScore } from '../score'
 import { markIncidentResolved } from '../recovery-mark'
-import { SERVICES, fetchService } from '../services'
+import { SERVICES, fetchService, markZeroLengthResolvedIncidentsUnknown } from '../services'
 import type { Incident } from '../types'
 
 // #1390 — incident.io's Atlassian-compat `incidents.json` sets `created_at` to when the incident was
@@ -126,7 +126,7 @@ describe('#1390 correctIncidentIoImpossibleTimes — the repair', () => {
       expect(out.startedAt).toBe('2025-12-14T21:28:00Z')
       expect(out.startUnknown, 'the fabricated zero length must be declared, not implied').toBe(true)
       const logged = warn.mock.calls.flat().join(' ')
-      expect(logged, 'an unrepairable record must not be silent').toContain('recovery predates start')
+      expect(logged, 'an unrepairable record must not be silent').toContain('timestamps establish no usable outage window')
       // The three states are NOT interchangeable to an operator: "we could not read it" sends them to
       // our parser, the other two send them to the provider's page. Conflating them was round 1's
       // finding, and asserting the same string for all three would pin the conflation.
@@ -315,6 +315,41 @@ describe('#1390 wiring — the repair reaches a service with no incidentIoBaseUr
     // The value MTTR is computed from — the reason this is not a display-only fix.
     expect(published!.duration).not.toBe(formatDuration(new Date('2025-12-16T05:24:23Z'), new Date('2025-12-14T21:28:00Z')))
   })
+
+  it('#1480 repairs an equal-timestamp record from its component-impact window before the generic unknown-duration guard', async () => {
+    const equal = {
+      id: 'tp-equal',
+      name: 'Documented outage with an equal top-level timestamp pair',
+      status: 'resolved',
+      impact: 'major',
+      created_at: '2026-09-11T08:00:00Z',
+      updated_at: '2026-09-11T08:00:00Z',
+      resolved_at: '2026-09-11T08:00:00Z',
+      incident_updates: [],
+      components: [],
+    }
+    const summary = {
+      page: { id: 'p', name: 'turbopuffer', updated_at: new Date().toISOString() },
+      status: { indicator: 'none', description: 'All Systems Operational' },
+      components: [{ id: turbopuffer.statusComponentId ?? 'c1', name: 'API', status: 'operational' }],
+      incidents: [equal],
+    }
+    const html = pageWithImpacts([
+      { component_id: 'c1', start_at: '2026-09-11T06:00:00Z', end_at: '2026-09-11T08:00:00Z', status: 'full_outage', status_page_incident_id: 'tp-equal' },
+    ])
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html></html>', { status: 200 })))
+
+    const svc = await fetchService(
+      turbopuffer,
+      { summary: summary as never, incidents: null, latency: 120, uptimeHtml: html } as never,
+      undefined,
+      {},
+    )
+    const published = svc.incidents.find((i) => i.id === 'tp-equal')
+
+    expect(published).toMatchObject({ startedAt: '2026-09-11T06:00:00Z', resolvedAt: '2026-09-11T08:00:00Z', duration: '2h 0m' })
+    expect(published!.startUnknown).toBeUndefined()
+  })
 })
 
 
@@ -397,6 +432,37 @@ describe('#1390 Score — an anchored incident makes Recovery ABSTAIN, never sco
     const recent = new Date(Date.now() - 3 * 86_400_000).toISOString()
     const nullDur = inc({ id: 'n1', startedAt: recent, resolvedAt: recent, duration: null, startUnknown: undefined })
     expect(recoveryOf([nullDur])).toBe(0)
+  })
+})
+
+describe('#1480 zero-length resolved incidents', () => {
+  it('marks only a parsed zero-length resolved record as having an unknown duration', () => {
+    const equal = inc({ startedAt: '2026-09-11T08:00:00Z', resolvedAt: '2026-09-11T08:00:00Z', duration: '1m' })
+    const short = inc({ id: 'short', startedAt: '2026-09-11T08:00:00Z', resolvedAt: '2026-09-11T08:00:20Z', duration: '1m' })
+    const out = markZeroLengthResolvedIncidentsUnknown([equal, short])
+
+    expect(out[0]).toMatchObject({ startUnknown: true, duration: null })
+    expect(out[1]).toEqual(short)
+  })
+
+  it('reaches an Atlassian Statuspage record before it can publish or score as 1m', async () => {
+    const cerebras = SERVICES.find((s) => s.id === 'cerebras')!
+    const at = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const summary = {
+      page: { id: 'p', name: 'Cerebras', updated_at: at },
+      status: { indicator: 'none', description: 'All Systems Operational' },
+      components: [{ id: cerebras.statusComponentId, name: 'Inference', status: 'operational' }],
+      incidents: [{
+        id: 'zero-length-atlassian', name: 'Service disruption', status: 'resolved', impact: 'major',
+        created_at: at, updated_at: at, resolved_at: at, incident_updates: [], components: [],
+      }],
+    }
+
+    const svc = await fetchService(cerebras, { summary: summary as never, incidents: null, latency: 100 } as never, undefined, {})
+    const [published] = svc.incidents
+
+    expect(published).toMatchObject({ id: 'zero-length-atlassian', startUnknown: true, duration: null })
+    expect(calculateAIWatchScore(svc, 30, { kind: 'unsupported' }).breakdown.recovery).toBe(15)
   })
 })
 
