@@ -17,8 +17,8 @@
 // incident row duration (`sumGroupDuration`) and the Uptime calendar span — agree with `durationMin`
 // rather than still painting the paperwork span.
 //
-// WHY A DEDICATED MECHANISM, NOT A ONE-OFF KV EDIT: `accumulateMonthlyIncidents` has a MONOTONIC guard
-// (`if (dur > oldDur)`) that re-inflates a manually-lowered duration back to the provider value on the
+// WHY A DEDICATED MECHANISM, NOT A ONE-OFF KV EDIT: `accumulateMonthlyIncidents` rewrites a stored duration
+// whenever the feed's differs (`dur !== oldDur`), overwriting a manually-lowered value on the
 // next cron while the incident is still in the live feed. An override is applied on READ/BUILD instead
 // (the same rebuild-safe shape as `filterSuppressedFromMonthly`), so it never fights the accumulator.
 //

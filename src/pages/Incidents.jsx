@@ -9,6 +9,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useMonthlyArchives } from '../hooks/useMonthlyArchives'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
+import { incidentNote } from '../utils/incidentNote'
 import { getResolvedTime, getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText } from '../utils/incidentSort'
 import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService, isWithinPeriod } from '../utils/archiveMerge'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
@@ -98,14 +99,13 @@ function FilterBar({ services, serviceFilter, setServiceFilter, statusFilter, se
   )
 }
 
-function DetailPanel({ incident, onClose, hideHeader, t, lang }) {
+export function DetailPanel({ incident, onClose, hideHeader, t, lang }) {
   return (
     <IncidentTimeline
       title={`${incident.serviceName} — ${incident.title}`}
       subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}  ·  ${t('incidents.col.duration')}: ${incidentDurationText(incident, t, t('incidents.duration.ongoing'))}`}
       timeline={incident.timeline}
-      note={incident.derived === 'status_history' ? t('incidents.derived.note')
-        : incident.startUnknown ? t('incidents.startUnknown.note') : undefined}
+      note={incidentNote(incident, t)}
       onClose={onClose}
       hideHeader={hideHeader}
       t={t}

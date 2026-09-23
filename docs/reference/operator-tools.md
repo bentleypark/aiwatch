@@ -178,8 +178,8 @@ row + Uptime calendar span agree. It also lands in the calendar-month `monthlySc
 reads the same durations — so the report's Score/ranking is corrected too, not just the display stats.
 
 **Caveats:**
-- **Applied on READ/BUILD, never by editing the accumulator** — `accumulateMonthlyIncidents`'s monotonic
-  `if (dur > oldDur)` guard would re-inflate a raw KV edit on the next cron while the incident is still in
+- **Applied on READ/BUILD, never by editing the accumulator** — `accumulateMonthlyIncidents` rewrites a stored duration whenever
+  the feed's differs (`dur !== oldDur`), so it would overwrite a raw KV edit on the next cron while the incident is still in
   the live feed. So a plain `wrangler kv put` correction does NOT stick; use this endpoint.
 - **Current-month dashboard lag**: for a still-live current-month incident, the live `/api/status` value
   wins in `mergeArchiveIntoMap`, so the corrected duration shows on the dashboard only once the incident

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { correctIncidentIoImpossibleTimes, parseIncidentIoComponentImpacts, computeIncidentIoUptime, __resetAnchoredWarnings } from '../parsers/incident-io'
-import { isTimeOrderImpossible, formatDuration } from '../utils'
+import { isTimeOrderImpossible, formatDuration, markZeroLengthResolvedIncidentsUnknown } from '../utils'
 import { buildHistoryRecord } from '../incident-history'
 import { calculateAIWatchScore } from '../score'
 import { markIncidentResolved } from '../recovery-mark'
@@ -126,7 +126,7 @@ describe('#1390 correctIncidentIoImpossibleTimes — the repair', () => {
       expect(out.startedAt).toBe('2025-12-14T21:28:00Z')
       expect(out.startUnknown, 'the fabricated zero length must be declared, not implied').toBe(true)
       const logged = warn.mock.calls.flat().join(' ')
-      expect(logged, 'an unrepairable record must not be silent').toContain('recovery predates start')
+      expect(logged, 'an unrepairable record must not be silent').toContain('timestamps establish no usable outage window')
       // The three states are NOT interchangeable to an operator: "we could not read it" sends them to
       // our parser, the other two send them to the provider's page. Conflating them was round 1's
       // finding, and asserting the same string for all three would pin the conflation.
@@ -315,6 +315,43 @@ describe('#1390 wiring — the repair reaches a service with no incidentIoBaseUr
     // The value MTTR is computed from — the reason this is not a display-only fix.
     expect(published!.duration).not.toBe(formatDuration(new Date('2025-12-16T05:24:23Z'), new Date('2025-12-14T21:28:00Z')))
   })
+
+  it('#1480 leaves an equal-timestamp incident.io record unknown even when component impacts span time', async () => {
+    const equal = {
+      id: 'tp-equal',
+      name: 'Documented outage with an equal top-level timestamp pair',
+      status: 'resolved',
+      impact: 'major',
+      created_at: '2026-09-11T08:00:00Z',
+      updated_at: '2026-09-11T08:00:00Z',
+      resolved_at: '2026-09-11T08:00:00Z',
+      incident_updates: [],
+      components: [],
+    }
+    const summary = {
+      page: { id: 'p', name: 'turbopuffer', updated_at: new Date().toISOString() },
+      status: { indicator: 'none', description: 'All Systems Operational' },
+      components: [{ id: turbopuffer.statusComponentId ?? 'c1', name: 'API', status: 'operational' }],
+      incidents: [equal],
+    }
+    const html = pageWithImpacts([
+      { component_id: 'c1', start_at: '2026-09-11T06:00:00Z', end_at: '2026-09-11T08:00:00Z', status: 'full_outage', status_page_incident_id: 'tp-equal' },
+    ])
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html></html>', { status: 200 })))
+
+    const svc = await fetchService(
+      turbopuffer,
+      { summary: summary as never, incidents: null, latency: 120, uptimeHtml: html } as never,
+      undefined,
+      {},
+    )
+    const published = svc.incidents.find((i) => i.id === 'tp-equal')
+
+    expect(published).toMatchObject({
+      startedAt: '2026-09-11T08:00:00Z', resolvedAt: '2026-09-11T08:00:00Z',
+      duration: null, startUnknown: true,
+    })
+  })
 })
 
 
@@ -397,6 +434,69 @@ describe('#1390 Score — an anchored incident makes Recovery ABSTAIN, never sco
     const recent = new Date(Date.now() - 3 * 86_400_000).toISOString()
     const nullDur = inc({ id: 'n1', startedAt: recent, resolvedAt: recent, duration: null, startUnknown: undefined })
     expect(recoveryOf([nullDur])).toBe(0)
+  })
+})
+
+describe('#1480 zero-length resolved incidents', () => {
+  it('marks EXACT equality only — a real sub-minute outage keeps its duration', () => {
+    // The whole predicate is `start === end`. Widening it by any tolerance blanks every genuine
+    // short outage on every service, dropping each from the Recovery sample, the no-TTL corpus and
+    // the archive divisor — so the negative case is what pins the axis, not the positive one.
+    const base = { status: 'resolved' as const, impact: 'minor' as const, title: 't', timeline: [] }
+    const equal = { ...base, id: 'equal', startedAt: '2026-09-11T08:00:00.000Z', resolvedAt: '2026-09-11T08:00:00.000Z', duration: '1m' }
+    const short = { ...base, id: 'short', startedAt: '2026-09-11T08:00:00.000Z', resolvedAt: '2026-09-11T08:00:20.000Z', duration: '1m' }
+    const active = { ...base, id: 'active', status: 'investigating' as const, startedAt: '2026-09-11T08:00:00.000Z', resolvedAt: null, duration: null }
+
+    const out = markZeroLengthResolvedIncidentsUnknown([equal, short, active] as never)
+    expect(out[0]).toMatchObject({ startUnknown: true, duration: null })
+    expect(out[1]).toEqual(short)
+    expect(out[2]).toEqual(active)
+  })
+
+  it('carries zeroLengthRecord, which the #1390 anchored path must NOT', () => {
+    // The two paths share `startUnknown` — every duration consumer treats them alike — and differ
+    // only in the note they render. #1390's note says which end the instant marks is unestablished,
+    // which is what licenses getContextualTime's `Resolved` label; on a zero-length record that
+    // claim is not what the source says, so the flags must stay distinguishable here.
+    const base = { status: 'resolved' as const, impact: 'minor' as const, title: 't', timeline: [] }
+    const [zeroLength] = markZeroLengthResolvedIncidentsUnknown([
+      { ...base, id: 'z', startedAt: '2026-09-11T08:00:00.000Z', resolvedAt: '2026-09-11T08:00:00.000Z', duration: '1m' },
+    ] as never)
+    expect(zeroLength).toMatchObject({ startUnknown: true, zeroLengthRecord: true })
+
+    // Through the REAL production order: the #1390 repair runs first and collapses `startedAt` onto
+    // `resolvedAt`, so the anchored record now looks zero-length to the predicate. Only the
+    // `inc.startUnknown` skip keeps it from acquiring #1480's flag — and therefore #1480's note,
+    // which would tell an inverted record that its source published one instant for both ends.
+    const repaired = correctIncidentIoImpossibleTimes([
+      { ...base, id: 'a', startedAt: '2026-09-11T08:00:00.000Z', resolvedAt: '2026-09-11T07:00:00.000Z', duration: '1m' },
+    ] as never, undefined)
+    expect(repaired[0], 'the #1390 repair no longer collapses, so this case stopped being reachable')
+      .toMatchObject({ startUnknown: true, startedAt: repaired[0].resolvedAt })
+
+    const [anchored] = markZeroLengthResolvedIncidentsUnknown(repaired)
+    expect(anchored).toMatchObject({ startUnknown: true })
+    expect(anchored.zeroLengthRecord, 'a #1390-anchored record acquired #1480\'s flag').toBeUndefined()
+  })
+
+  it('reaches an Atlassian Statuspage record before it can publish or score as 1m', async () => {
+    const cerebras = SERVICES.find((s) => s.id === 'cerebras')!
+    const at = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const summary = {
+      page: { id: 'p', name: 'Cerebras', updated_at: at },
+      status: { indicator: 'none', description: 'All Systems Operational' },
+      components: [{ id: cerebras.statusComponentId, name: 'Inference', status: 'operational' }],
+      incidents: [{
+        id: 'zero-length-atlassian', name: 'Service disruption', status: 'resolved', impact: 'major',
+        created_at: at, updated_at: at, resolved_at: at, incident_updates: [], components: [],
+      }],
+    }
+
+    const svc = await fetchService(cerebras, { summary: summary as never, incidents: null, latency: 100 } as never, undefined, {})
+    const [published] = svc.incidents
+
+    expect(published).toMatchObject({ id: 'zero-length-atlassian', startUnknown: true, duration: null })
+    expect(calculateAIWatchScore(svc, 30, { kind: 'unsupported' }).breakdown.recovery).toBe(15)
   })
 })
 

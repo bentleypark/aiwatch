@@ -35,19 +35,34 @@ export interface Incident {
   componentIds?: string[]
   startedAt: string
   resolvedAt?: string | null
-  /** #1390 — the provider's own record for this incident is self-contradictory (it recovered BEFORE it
-   *  started) and the page carried no `component_impacts` window to recover the real one. On such a
-   *  record NEITHER timestamp reliably means what its name says — ElevenLabs' `Increased Error Rate in
-   *  US Region` publishes a `resolved_at` that its own update text shows is the START. `startedAt` is
-   *  therefore collapsed onto `resolvedAt`: not because that instant is the end, but because it is the
-   *  one the provider published closest to the event, which keeps the incident on the right DAY instead
-   *  of the day it was filed — a migration stamps every import with the import date, which would land
-   *  ancient outages inside the Score's 30-day window (`score.ts` filters on `startedAt`). `duration` is
-   *  null, because none is derivable.
+  /** The start is not derivable from this record, so `duration` is null. Set by two paths. Every
+   *  duration consumer (Score's recovery sample, the no-TTL corpus, the archive divisor, the group
+   *  labels) treats them alike; only the reader-facing note distinguishes them, via
+   *  `zeroLengthRecord` below, because one path can say what the shown instant is and the other cannot:
+   *
+   *  **#1390 (incident.io, `correctIncidentIoImpossibleTimes`)** — the record recovered BEFORE it
+   *  started and the page carried no `component_impacts` window to recover the real one. NEITHER
+   *  timestamp reliably means what its name says: ElevenLabs' `Increased Error Rate in US Region`
+   *  publishes a `resolved_at` that its own update text shows is the START. `startedAt` is therefore
+   *  collapsed onto `resolvedAt` — not because that instant is the end, but because it is the one the
+   *  provider published closest to the event, which keeps the incident on the right DAY instead of the
+   *  day it was filed (a migration stamps every import with the import date, which would land ancient
+   *  outages inside the Score's 30-day window; `score.ts` filters on `startedAt`).
+   *
+   *  **#1480 (`markZeroLengthResolvedIncidentsUnknown`, over every parser's output)** — the record
+   *  resolved at exactly the instant it started. No page is consulted and BOTH timestamps are left as
+   *  published; what each one means is whatever its source says (`parsers/aws.ts`'s single-update RSS
+   *  items, for one, state theirs is the resolution time).
    *
    *  Readers that need a real elapsed time must check this: `buildHistoryRecord` refuses such a record
    *  outright, since `durationMin` would be a fabricated 0 in a corpus with no TTL. */
   startUnknown?: boolean
+  /** #1480 — narrows the `startUnknown` above: this record carries ONE instant for both ends, so the
+   *  absence of a duration is a property of the record's shape rather than of two unreliable
+   *  timestamps. Read by the reader-facing note ONLY. The #1390 note cannot be shown here — it says
+   *  which end the instant marks is unestablished, which is what licenses `getContextualTime`'s
+   *  `Resolved` label there, and is not what this record says. */
+  zeroLengthRecord?: boolean
   duration: string | null
   timeline: TimelineEntry[]
   // #983 — this incident was opened by the provider's AUTO-MONITOR, not written by a human.

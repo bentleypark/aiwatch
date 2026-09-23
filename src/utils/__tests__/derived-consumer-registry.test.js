@@ -37,6 +37,14 @@
 // touched. That is the #1292 story verbatim, which is why this axis is a registry and not a list of
 // patched files. The question here is neither precision nor freshness: it is **is an elapsed time, or a
 // real start instant, derivable from this incident at all?**
+//
+// #1480 adds a SECOND population to this same axis — a record whose source carries one instant for both
+// ends (`utils.ts` `markZeroLengthResolvedIncidentsUnknown`, over every parser's output) — because the
+// answer to that question is the same for both, so every file classified below treats them alike. The
+// one place they must NOT be treated alike is the reader-facing note: #1390's says which end the shown
+// instant marks is unestablished, and a zero-length source never said that. That population therefore
+// also carries `zeroLengthRecord`, and a file branching on THAT is making a display choice, not a
+// precision or freshness judgement — so it needs no fourth registry.
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -66,6 +74,7 @@ const APPLIERS = {
   'src/utils/recovery.js': 'excluded from the dashboard Recovery card',
   'src/utils/incidentSort.js': 'getContextualTime flags dayOnly so the anchor is never minute-precise',
   'src/utils/incidentGrouping.js': 'never flap-grouped (a group range carries no dayOnly)',
+  'src/utils/incidentNote.js': 'a status_history row gets incidents.derived.note, tested ahead of both startUnknown populations',
   'api/_is-down/html-template.ts': 'date precision + excluded from the "average recovery time" line',
   'api/_is-down/incident-grouping.ts': 'never flap-grouped — SSR mirror of the SPA rule',
   'api/is-down-group.ts': 'says "down Xh that day", not "resolved after Xh"',
@@ -217,6 +226,7 @@ const RB_SAFE = {
   'src/utils/recovery.js': 'excludes status_history by derived tag only — a retainedBridge incident has a real recovery time and is correctly included',
   'src/utils/incidentSort.js': 'dayOnly / same-day-order logic keys on derived === status_history only — a real timestamp needs no such handling',
   'src/utils/incidentGrouping.js': 'flap-grouping precision logic keys on derived === status_history only — a real timestamp needs no such handling',
+  'src/utils/incidentNote.js': 'picks a note by tag only; a retainedBridge row is a real incident whose note choice is the same as any other',
   'api/_is-down/html-template.ts': 'isDailyRecordIncident keys on derived === status_history only — a real timestamp needs no such handling',
   'api/_is-down/incident-grouping.ts': 'same-day-order precision logic keys on derived === status_history only — a real timestamp needs no such handling',
   'api/is-down-group.ts': 'day-bucket formatting keys on derived === status_history only — a real timestamp needs no such handling',
@@ -259,6 +269,7 @@ const RB_SAFE = {
 /** Applies the rule: reads `startUnknown` and refuses to derive an elapsed time, or discloses that the
  *  start is an anchor. Each entry names what round 1 of #1390 found, where it found one. */
 const SU_APPLIERS = {
+  'worker/src/utils.ts': 'markZeroLengthResolvedIncidentsUnknown STAMPS the flag; it reads it only to skip a #1390-anchored row, whose collapsed startedAt === resolvedAt would otherwise match the zero-length predicate and re-wrap an already-correct record, costing fetchService its array-identity fast path. Also hosts isTimeOrderImpossible and incidentDay, which bucket by an anchor that is a real instant whichever end of the outage it marks',
   'worker/src/reddit.ts': '#1472 promoteIncidentWindows excludes it — neither timestamp is a real start, so no post can be matched against its span',
   'worker/src/score.ts': 'carriesRecoveryTime excludes it from the Recovery SAMPLE, not just the durations — otherwise the default scores Recovery 0 instead of abstaining at 15 (round 1, reproduced at -19 Score)',
   'worker/src/incident-history.ts': 'buildHistoryRecord returns null — a 0-minute row in the no-TTL corpus grades every prediction as over-predicted and grounds the next estimate',
@@ -266,8 +277,7 @@ const SU_APPLIERS = {
   'worker/src/recovery-mark.ts': 'markIncidentResolved writes no duration — formatDuration over a zero-length interval floors to the same 1m the repair removed (round 1, reproduced on the KV marker)',
   'worker/src/rss.ts': 'the resolved item publishes no predicted-vs-actual line — durationMinOf over the anchored pair is 0, which would grade a real AI estimate against a duration we declined to state, in a public feed',
   'src/utils/incidentSort.js': 'sumGroupDuration counts it as unknownCount rather than letting it fall through to hasOngoing, and groupDurationText states the absence — a group of entirely resolved incidents read "Ongoing" before (round 1, executed)',
-  'src/pages/Incidents.jsx': 'renders incidents.startUnknown.note on the detail row and takes the group label from groupDurationText',
-  'src/pages/ServiceDetails.jsx': 'renders incidents.startUnknown.note beside the incident',
+  'src/utils/incidentNote.js': 'THE discriminator — gives a zeroLengthRecord row its own note instead of the #1390 one, which claims the provider published a recovery before the start; order is load-bearing because a zero-length record carries both flags',
   'src/pages/Overview.jsx': 'the flap-group label states the unknown rather than falling through to the ongoing label',
   'worker/src/monthly-narrative.ts': 'selectIncidentCandidates skips it — formatDurationLabel would call a resolved row with durationMin 0 "ongoing", the same mislabel sumGroupDuration was fixed for, and the prompt orders the model to copy durationLabel VERBATIM into the published report',
   'api/_is-down/html-template.ts': 'states the duration unknown rather than dropping the field, and discloses that no usable time range was available — it does NOT claim which end of the outage the shown instant marks, because nothing establishes that (see the startUnknown doc in worker/src/types.ts)',
@@ -283,7 +293,8 @@ const SU_FORWARDERS = {
 /** Cannot be reached by an anchored incident, or reads nothing it could get wrong. Each reason is a
  *  property of the CODE, not a recollection — if one stops holding, its file moves to SU_APPLIERS. */
 const SU_SAFE = {
-  // Producers. Only `parsers/incident-io.ts` stamps the flag; no other parser can emit one.
+  // Producers. `parsers/incident-io.ts` stamps the flag on its own anchored path; #1480's zero-length
+  // case is stamped once in `services.ts`, over every parser's output. No parser stamps it itself.
   'worker/src/parsers/incident-io.ts': 'PRODUCES it — correctIncidentIoImpossibleTimes is where the flag is stamped and where the repair is attempted first',
   'worker/src/parsers/betterstack.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload, never stamps startUnknown',
@@ -295,8 +306,9 @@ const SU_SAFE = {
   'worker/src/parsers/flashduty.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/rootly.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/types.ts': 'declares the Incident shape, including the startUnknown flag itself',
-  'worker/src/utils.ts': 'hosts isTimeOrderImpossible (the predicate the producer keys on) and incidentDay, which buckets by day — the anchor is a real instant the provider published about this incident, so its day is a day the incident was down whichever end of the outage it marks',
-  'worker/src/xai-regions.ts': 'xAI-only region collapsing; xAI is an RSS service and never reaches the incident.io repair',
+  'src/pages/Incidents.jsx': 'renders whatever note incidentNote() picks; it branches on no flag of its own',
+  'src/pages/ServiceDetails.jsx': 'same — the note choice moved to incidentNote(), which is the SU_APPLIER',
+  'worker/src/xai-regions.ts': 'mergeXaiRegionalIncidents runs inside the parser leg, before #1480\'s step in fetchService stamps anything — so the duration it recomputes from a pair is never one this flag has blanked',
 
   // Active-only. An anchored incident is `resolved` by construction — the flag is only ever set on a
   // record that published a `resolved_at`.
@@ -382,7 +394,9 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // drops 30 files. A legitimate change moves this number in the same diff.
     // 72 → 73: #1381 added worker/src/parsers/rootly.ts, a producer (classified SAFE alongside the
     // other parsers). Moving it in the same diff is the point — the number is the scan's own health.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(74)
+    // 74 → 75: #1480 added src/utils/incidentNote.js, which took the note choice out of both pages —
+    // so it is the SU_APPLIER and the two pages became SU_SAFE in the same diff.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(75)
   })
 
   it('leaves none unclassified', () => {
@@ -433,10 +447,10 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the two axes', () => {
-    // If this ever fails while the #1292 "finds the consumers" test above still passes at 74, the
+    // If this ever fails while the #1292 "finds the consumers" test above still passes at 75, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(74)
+    expect(all.length).toBe(75)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -482,7 +496,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(74)
+    expect(all.length).toBe(75)
   })
 
   it('leaves none unclassified for startUnknown', () => {

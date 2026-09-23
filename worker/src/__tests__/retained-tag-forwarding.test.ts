@@ -68,6 +68,7 @@ describe('#1390 — every qualifying tag survives the archive → live round tri
       id: 'e1', title: 'anchored', startedAt: '2026-09-05T07:09:00Z', resolvedAt: '2026-09-05T07:09:00Z',
       durationMin: 0, finalStatus: 'resolved', impact: 'major',
       autoMonitor: true, derived: 'status_history', derivedDay: '2026-09-05', startUnknown: true,
+      zeroLengthRecord: true,
       missedRuns: 2, // internal bookkeeping — must NOT reach the live incident
     } as unknown as MonthlyIncidentEntry
     const [out] = mergeRetainedIncidentHistory([], [entry], '2026-01-01T00:00:00Z')

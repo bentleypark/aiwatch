@@ -11,6 +11,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
+import { incidentNote } from '../utils/incidentNote'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { buildBadgeMarkdown } from '../utils/badge'
@@ -262,8 +263,7 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
             title={incident.title}
             subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: isDerived, day: incident.derivedDay })}  ·  ${incidentDurationText(incident, t, t('incidents.duration.ongoing'))}`}
             timeline={incident.timeline}
-            note={isDerived ? t('incidents.derived.note')
-              : incident.startUnknown ? t('incidents.startUnknown.note') : undefined}
+            note={incidentNote(incident, t)}
             onClose={() => setExpanded(false)}
             hideHeader
             t={t}

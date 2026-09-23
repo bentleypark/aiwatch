@@ -102,6 +102,7 @@ export function archiveIncidentToLive(archIncident, service) {
       ? undefined
       : formatRecoveryMin(archIncident.durationMin ?? 0),
     ...(archIncident.startUnknown ? { startUnknown: true } : {}),
+    ...(archIncident.zeroLengthRecord ? { zeroLengthRecord: true } : {}),
     // #1292 — forward the tag AND the day, or an archive-served incident silently loses every guard
     // the live one has: its anchor renders at minute precision again, on whatever date that anchor
     // happens to fall, and the modal falls back to "no timeline data" instead of explaining the
