@@ -749,6 +749,45 @@ describe('accumulateMonthlyIncidents', () => {
     expect(second.services.claude.totalMinutes).toBe(120) // unchanged
   })
 
+  it('#1480 removes a previously accumulated fabricated minute when the source later reports unknown duration', () => {
+    const first = accumulateMonthlyIncidents(null, [makeService('claude', [
+      { id: 'zero', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '1m' },
+      { id: 'real', startedAt: '2026-04-01T11:00:00Z', status: 'resolved', duration: '5m' },
+    ])], '2026-04', [])
+    const corrected = makeService('claude', [
+      { id: 'zero', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: null },
+      { id: 'real', startedAt: '2026-04-01T11:00:00Z', status: 'resolved', duration: '5m' },
+    ])
+    corrected.incidents[0].resolvedAt = corrected.incidents[0].startedAt
+    corrected.incidents[0].startUnknown = true
+
+    const second = accumulateMonthlyIncidents(first, [corrected], '2026-04', [])
+    expect(second.services.claude.totalMinutes).toBe(5)
+    expect(second.services.claude.longestMinutes).toBe(5)
+    expect(second.services.claude.durations.zero).toBe(0)
+    expect(second.services.claude.incidents!.find((e) => e.id === 'zero')).toMatchObject({ durationMin: 0, startUnknown: true })
+  })
+
+  it('#1480 recomputes the longest from the surviving durations when the corrected row WAS the longest', () => {
+    // The sibling above keeps its longest elsewhere, so a monotonic `if (dur > longest)` passes it.
+    // Here the lowered row is the maximum, which is the only shape that tells the two apart.
+    const first = accumulateMonthlyIncidents(null, [makeService('claude', [
+      { id: 'zero', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '3h 0m' },
+      { id: 'real', startedAt: '2026-04-01T11:00:00Z', status: 'resolved', duration: '5m' },
+    ])], '2026-04', [])
+    expect(first.services.claude.longestMinutes).toBe(180)
+
+    const corrected = makeService('claude', [
+      { id: 'zero', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: null },
+      { id: 'real', startedAt: '2026-04-01T11:00:00Z', status: 'resolved', duration: '5m' },
+    ])
+    corrected.incidents[0].resolvedAt = corrected.incidents[0].startedAt
+    corrected.incidents[0].startUnknown = true
+
+    const second = accumulateMonthlyIncidents(first, [corrected], '2026-04', [])
+    expect(second.services.claude.longestMinutes).toBe(5)
+  })
+
   // ── incident detail accumulation (#375) ─────────────────────────────
 
   it('captures per-incident detail (title, timestamps, status) on new entries', () => {

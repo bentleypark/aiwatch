@@ -73,6 +73,21 @@ describe('archiveIncidentToLive', () => {
     expect(live.serviceName).toBe('Mistral API')
   })
 
+  it('#1480 — carries zeroLengthRecord back onto the live shape, or the row is told the #1390 story', () => {
+    // The dashboard's 30/90-day list is served from the archive for short-window sources. Both
+    // populations store `startedAt === resolvedAt` (#1390 collapses them), so the frozen row cannot
+    // re-derive which it is — dropping the flag here makes an archive-served zero-length incident
+    // read "the provider published a recovery before it started", which its source never said.
+    const zeroLength = {
+      ...archIncident, startedAt: '2026-04-12T10:00:00Z', resolvedAt: '2026-04-12T10:00:00Z',
+      durationMin: 0, startUnknown: true, zeroLengthRecord: true,
+    }
+    expect(archiveIncidentToLive(zeroLength, service)).toMatchObject({ startUnknown: true, zeroLengthRecord: true })
+    // …and the #1390 population must NOT acquire it on the way back.
+    const anchored = { ...zeroLength, zeroLengthRecord: undefined }
+    expect(archiveIncidentToLive(anchored, service).zeroLengthRecord).toBeUndefined()
+  })
+
   it('formats a resolved entry\'s durationMin into a duration string (not the "Ongoing" placeholder)', () => {
     expect(archiveIncidentToLive(archIncident, service).duration).toBe('1h 30m') // 90 min
     expect(archiveIncidentToLive({ ...archIncident, durationMin: 9 }, service).duration).toBe('9m')

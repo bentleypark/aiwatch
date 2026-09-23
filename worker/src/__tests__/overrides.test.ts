@@ -154,7 +154,7 @@ describe('applyDurationOverrides', () => {
   })
 
   it('REGRESSION: survives a re-accumulation cycle that would re-inflate a raw KV edit', () => {
-    // The monotonic guard in accumulateMonthlyIncidents (`if (dur > oldDur)`) re-inflates any lowered
+    // The duration-sync in accumulateMonthlyIncidents (`if (dur !== oldDur)`) re-inflates any lowered
     // stored duration back to the provider value while the incident is still in the live feed. The
     // override is applied AFTER accumulation, so it wins regardless of what the accumulator holds.
     const stored = cursorMonthly()

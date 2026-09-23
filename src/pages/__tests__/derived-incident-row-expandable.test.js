@@ -75,8 +75,11 @@ describe('#1292 — ServiceDetails incident row expandability', () => {
   it('WIRES that note from ServiceDetails, not just from the component in isolation', () => {
     const el = ROW_SRC.match(/<IncidentTimeline\b[\s\S]*?\/>/)
     expect(el, 'ServiceDetails no longer renders an IncidentTimeline — this scan has gone blind').not.toBeNull()
-    expect(el[0], 'ServiceDetails renders IncidentTimeline without passing the derived note')
-      .toMatch(/note=\{[^}]*derived\.note/)
+    // #1480 moved the three-way choice into `incidentNote()`; the key names no longer appear here.
+    // What still has to hold is that the page routes its note through that decision at all — the
+    // derived case itself is asserted against the function in `src/utils/__tests__/incidentNote.test.js`.
+    expect(el[0], 'ServiceDetails renders IncidentTimeline without passing a note at all')
+      .toMatch(/note=\{incidentNote\(/)
   })
 
   it('gates the CLICK on the same flag as the cursor, not just the cursor', () => {

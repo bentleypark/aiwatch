@@ -78,11 +78,28 @@ export function isTimeOrderImpossible(startedAt: string | undefined, resolvedAt:
   return end < start
 }
 
-export function isZeroLengthResolvedInterval(startedAt: string | undefined, resolvedAt: string | null | undefined): boolean {
+function isZeroLengthResolvedInterval(startedAt: string | undefined, resolvedAt: string | null | undefined): boolean {
   if (!startedAt || !resolvedAt) return false
   const start = Date.parse(startedAt)
   const end = Date.parse(resolvedAt)
-  return Number.isFinite(start) && start === end
+  return start === end
+}
+
+/**
+ * Equal endpoints state no duration: `formatDuration` only floors the display to `1m`.
+ *
+ * One step over every parser's output rather than a call inside each: the judgement needs nothing a
+ * parser knows and the sources that could disagree cannot produce the shape — BetterStack's
+ * `status_history` synthesis skips a row whose `downtime_duration` is 0 or below its floor.
+ */
+export function markZeroLengthResolvedIncidentsUnknown(incidents: Incident[]): Incident[] {
+  let changed = false
+  const marked = incidents.map((inc) => {
+    if (inc.status !== 'resolved' || inc.startUnknown || !isZeroLengthResolvedInterval(inc.startedAt, inc.resolvedAt)) return inc
+    changed = true
+    return { ...inc, startUnknown: true, zeroLengthRecord: true, duration: null }
+  })
+  return changed ? marked : incidents
 }
 
 export function formatDuration(start: Date, end: Date): string {

@@ -2,7 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import type { StatuspageResponse } from './statuspage'
-import { fetchWithTimeout, formatDuration, isTimeOrderImpossible, isZeroLengthResolvedInterval } from '../utils'
+import { fetchWithTimeout, formatDuration, isTimeOrderImpossible } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
@@ -718,7 +718,7 @@ export function parseIncidentIoIncidentComponentIds(html: string): Record<string
   return result
 }
 
-/** #1390/#1480 — repair an incident whose published timestamps establish no usable outage window.
+/** #1390 — repair an incident whose published timestamps establish an impossible outage window.
  *
  *  `isTimeOrderImpossible` (utils.ts) documents where these come from and how many there are. The
  *  repair material is on the SAME page we already fetched for uptime: `component_impacts` carries the
@@ -729,7 +729,7 @@ export function parseIncidentIoIncidentComponentIds(html: string): Record<string
  *
  *  Deliberately narrow, in two ways that matter:
  *
- *  1. It fires ONLY on an inverted or zero-length published interval. A provider that merely backdates
+ *  1. It fires ONLY on an inverted published interval. A provider that merely backdates
  *     its impact window relative to declaration is not wrong, and several do it by hours — a blanket
  *     "impacts win" would re-time real incidents and their Scores. That is a different decision from
  *     this one, and it is not this issue's.
@@ -750,8 +750,7 @@ export function parseIncidentIoIncidentComponentIds(html: string): Record<string
  *  implicit: `buildHistoryRecord` refuses it, and no reader may derive an elapsed time from a start we
  *  are openly saying we do not have. */
 export function correctIncidentIoImpossibleTimes(incidents: Incident[], html: string | undefined): Incident[] {
-  const needsRepair = (i: Incident) =>
-    isTimeOrderImpossible(i.startedAt, i.resolvedAt) || isZeroLengthResolvedInterval(i.startedAt, i.resolvedAt)
+  const needsRepair = (i: Incident) => isTimeOrderImpossible(i.startedAt, i.resolvedAt)
   if (!incidents.some(needsRepair)) return incidents
   const impacts = html ? parseIncidentIoImpacts(html) : null
   // Three states, and the operator needs to tell them apart: no HTML at all, HTML whose

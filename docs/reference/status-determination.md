@@ -121,7 +121,7 @@ mirrors suppression: an `incident:duration-overrides` KV list of `{ id, duration
 (`sumGroupDuration`) and the Uptime calendar span — agree rather than still painting the paperwork span.
 It also flows into the calendar-month `monthlyScore` (#993), whose MTTR reads the same per-incident
 durations. Applied on **READ/BUILD** of the monthly accumulator — NOT
-by editing it — because `accumulateMonthlyIncidents`'s monotonic `if (dur > oldDur)` guard would re-inflate
+by editing it — because `accumulateMonthlyIncidents` rewrites a stored duration whenever the feed's differs (`dur !== oldDur`), so it would overwrite
 a lowered stored value on the next cron while the incident is still in the live feed. Three apply points,
 each right after suppression: `buildMonthlyArchive` (rebuild-safe), the `/api/report` current-month partial
 (dashboard 30/90-day list — but for a still-live current-month incident the live `/api/status` value wins
@@ -371,7 +371,7 @@ repaints **34 cells across 9** — the same six plus `fireworks` (11), `elevenla
 (1). Every `complete: true` service is byte-identical on both. That the two windows differ at all for one
 service is tracked separately (#1406); it is not introduced here.
 
-**#1390/#1480 — the impact calendar painted announced MAINTENANCE as an outage.** `parseIncidentIoComponentImpacts`
+**#1390 — the impact calendar painted announced MAINTENANCE as an outage.** `parseIncidentIoComponentImpacts`
 mapped `component_impacts[].status` with a trailing CATCH-ALL whose comment said `degraded_performance`,
 so `under_maintenance` fell into it and became a `minor` cell. Every other reader of those same rows
 already excluded it — `INCIDENT_IO_STATUS_WEIGHTS.under_maintenance` is `0`, `parseIncidentIoGlobalPage`
@@ -393,25 +393,50 @@ being equal, the repair was rejected and a real 9-minute window sitting on the p
 
 It runs in `fetchService`'s `apiUrl` branch with **no service or platform gate**: the first cut gated on
 `incidentIoBaseUrl` and thereby skipped `turbopuffer`, an incident.io page configured without that field.
-Two deliberate limits: it fires **only** when the published interval is inverted or zero-length (a provider
+Two deliberate limits: it fires **only** when the published interval is inverted (a provider
 that merely backdates its impact window is not wrong, and several do it by hours — a blanket "impacts win"
 would re-time real incidents and their Scores), and it accepts a window only when that window is **internally** ordered
 (`start < end`), never by checking it against the record's own discredited `resolved_at`. Maintenance
 rows are skipped as a repair source, the same decision the calendar above makes about the same rows.
 
-When no usable incident.io window joins — or any other parser publishes a resolved exact-equality pair —
-the common post-parser guard gives the record `startUnknown: true`, `duration: null`, and `startedAt`
-collapsed onto `resolvedAt`. Both halves are load-bearing: the duration must not stay the fabricated
-minute MTTR reads, and the start must not stay the declaration time either, because a migration stamps
-every import with the import date and `score.ts` windows incidents on `startedAt` (`score.ts:232`) — so
-outages from months or years earlier would be counted as this month's. The collapse is **not** a claim
-that the remaining instant is the end; ElevenLabs above shows it need not be. It is the one timestamp the
-provider published closest to the event, which is enough to put the incident on the right DAY, and
-`startUnknown` is what stops any reader deriving more than that. `buildHistoryRecord` refuses both shapes
-outright: the no-TTL corpus grounds the AI's next estimate via `findSimilarHistory` and its `accuracyOf`
-ratio is published daily, so a 0-minute record there is permanent. The production corpus and the monthly
-archives were both swept before this shipped and held no such record — the contamination was confined to
-the live list, which is re-derived every cycle.
+**#1480 — exact-equality timestamps establish no duration.** A resolved record whose source gives the same
+start and end does **not** establish a one-minute outage: `formatDuration` only floors the display to `1m`.
+What is absent is a duration in the **structured** fields, and some providers do state one in their update
+PROSE — Deepgram's `Between 07:13 and 09:00 UTC … until 11:30 UTC`. It is not promoted to a duration.
+Cerebras is the case that settles it: its own updates express the range as `Between … and …`,
+`from X - Y`, `starting at … back to …` and a parenthesised date, and one reads
+`Between 02:29 PM PT and 02:20 AM PT`, which is negative unless a day boundary is inferred. Extracting
+a number from that reinstates a fabricated figure in a more plausible shape. The reader is not left without
+it: the panel renders the provider's update text verbatim beside the absent duration.
+`markZeroLengthResolvedIncidentsUnknown` runs once in `fetchService`, over every parser's output: the
+judgement needs nothing a parser knows, and a call per source is one more place a newly added source can
+be missed with nothing to catch it. An incident.io `component_impacts` union is likewise not used to
+turn an equality pair into one outage: multiple component rows do not prove one continuous incident.
+
+This step sets `startUnknown: true` and `duration: null` and leaves both timestamps alone — unlike #1390's
+anchored branch above, which also collapses `startedAt` onto `resolvedAt`, because there the published
+start is discredited and `score.ts` windows incidents on `startedAt` (`score.ts:232`), so an import-dated
+start would bank an old outage into this month. An equality pair needs no such move: its two timestamps
+are the same instant already.
+
+It also sets **`zeroLengthRecord`**, which only the reader-facing note reads. Every other consumer gates
+on `startUnknown` and treats the two populations alike, because no elapsed time is derivable from
+either; `derived-consumer-registry.test.js`'s `SU_*` registries are the list, and they are derived.
+The note cannot be shared: #1390's says *which end of the outage the shown instant marks is not
+established*, which is what licenses `getContextualTime` keeping the precise `Resolved` label there, and
+a zero-length source never said that — `parsers/aws.ts`'s single-update RSS items state theirs is the
+resolution time. So `incidents.zeroLengthRecord.note` describes the record's shape instead, and the
+branch is order-sensitive: a zero-length record carries BOTH flags, so it must be tested first.
+`buildHistoryRecord` refuses it outright: the no-TTL corpus grounds the AI's next estimate via
+`findSimilarHistory` and its `accuracyOf` ratio is published daily, so a fabricated zero-minute record there
+would be permanent. The monthly accumulator also accepts duration corrections in both directions — but
+only for an id the CURRENT cycle's feed still carries, since that branch runs inside the live-incident
+loop. A banked minute on a row that has already aged out of its feed is frozen as it stands.
+Months already frozen in `archive:monthly:*` **do** hold the banked `1m` and are **not** corrected here.
+Read against the live archives, a service's stored aggregates do not always reproduce from its stored
+`incidentList` — `xai` 2026-05 publishes 48 downtime minutes over two rows of `durationMin: 1` — so
+recomputing them from those rows replaces a wrong minute with a wrong month. Correcting a frozen archive
+belongs to `archive-patch.ts`, whose reproduction gate refuses exactly that service.
 
 Readers must not call such an incident *ongoing*: `incidentDurationText` (`src/utils/incidentSort.js`)
 and the is-down template both state the absence instead.

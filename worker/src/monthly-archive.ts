@@ -61,6 +61,12 @@ export interface MonthlyIncidentEntry {
   // instant — and once frozen, nothing else in the row can tell those apart. Absent on pre-#1390
   // archives → treated as a normal incident, as before.
   startUnknown?: boolean
+  // #1480 — persisted for the same reason, and it is NOT re-derivable here either: both populations of
+  // `startUnknown` store `startedAt === resolvedAt` (the #1390 anchor collapses them; a zero-length
+  // record had them equal already), so the stored row cannot tell which one it is. Only the
+  // reader-facing note reads it, and without it an archive-served row is told the #1390 story — that
+  // the provider published a recovery before its start — which a zero-length record never did.
+  zeroLengthRecord?: boolean
   // #1292 — persisted for the same reason `autoMonitor` is, and it is even less re-derivable: it is a
   // property of HOW the incident was obtained (synthesized from a per-day `status_history` bucket
   // rather than read from a feed item), which nothing in the stored row reveals. Without it every
@@ -646,12 +652,13 @@ export function accumulateMonthlyIncidents(
       const finalStatus = mapIncidentStatus(inc.status)
 
       if (data.incidentIds.includes(inc.id)) {
-        // Update duration delta if incident resolved since last accumulation
+        // A parser correction can lower a previously fabricated `1m` to unknown (`0` in the
+        // accumulator), so this is a delta in either direction — not a resolution-only increase.
         const oldDur = data.durations[inc.id] ?? 0
-        if (dur > oldDur) {
+        if (dur !== oldDur) {
           data.totalMinutes += (dur - oldDur)
           data.durations[inc.id] = dur
-          if (dur > data.longestMinutes) data.longestMinutes = dur
+          data.longestMinutes = Math.max(0, ...Object.values(data.durations))
         }
         // Update detail entry (status / resolvedAt / durationMin) when the incident has progressed.
         // This lets a still-open incident get its resolvedAt + final status snapshotted on a later
@@ -675,6 +682,8 @@ export function accumulateMonthlyIncidents(
           existingDetail.startedAt = inc.startedAt
           if (inc.startUnknown) existingDetail.startUnknown = true
           else delete existingDetail.startUnknown
+          if (inc.zeroLengthRecord) existingDetail.zeroLengthRecord = true
+          else delete existingDetail.zeroLengthRecord
           // KNOWN LIMIT, two parts. `data.dates` was banked from the FIRST shape's `incidentDay(inc)`
           // and is not revisited, so a flip crossing a UTC day leaves the banked date stale. And a flip
           // crossing a MONTH never reaches this block at all — the period filter above drops the
@@ -715,6 +724,7 @@ export function accumulateMonthlyIncidents(
         ...(inc.autoMonitor ? { autoMonitor: true } : {}), // #989 — so the monthly Score excludes it too
         ...(inc.derived ? { derived: inc.derived, ...(inc.derivedDay ? { derivedDay: inc.derivedDay } : {}) } : {}), // #1292 — guard + the exact day survive the round-trip
         ...(inc.startUnknown ? { startUnknown: true } : {}), // #1390 — so the frozen row can still say "unknown", not "0 minutes"
+        ...(inc.zeroLengthRecord ? { zeroLengthRecord: true } : {}), // #1480 — so it is not told the #1390 story on read
       })
 
       const date = incidentDay(inc)
@@ -1437,8 +1447,8 @@ export function filterSuppressedFromMonthly(
 
 /** #915 — the per-service monthly downtime aggregates. Sums/maxes the per-incident FINAL durations
  *  (`incidents[].durationMin`) rather than the accumulator's `totalMinutes`/`longestMinutes`, which
- *  grow MONOTONICALLY (`accumulateMonthlyIncidents`: `if (dur > oldDur)`) and so lock in a long-open
- *  incident's inflated open-window duration — never corrected down when it resolves shorter (Deepgram
+ *  before #1480 grew MONOTONICALLY and so locked in a long-open
+ *  incident's inflated open-window duration — not corrected down when it resolved shorter (Deepgram
  *  June: 176h42m/141h10m aggregate vs the real 45h33m/27h from the incident list). The per-incident
  *  detail IS updated to the final duration, so it's the source of truth. Falls back to the accumulator
  *  ONLY when the list was TRUNCATED to the per-service cap (`incidents.length < count`), where it is
@@ -1557,6 +1567,7 @@ export function aggregateIncidentDurations(
     excludedStartUnknown,
   }
 }
+
 
 export async function buildMonthlyArchive(
   kv: KVNamespace,
@@ -1765,9 +1776,10 @@ export async function buildMonthlyArchive(
       : undefined
 
     // #915 — derive the downtime aggregates from the per-incident FINAL durations (incidentList),
-    // NOT the accumulator's `totalMinutes`/`longestMinutes`, which grow monotonically and lock in a
-    // long-open incident's inflated open-window duration (never corrected down when it resolves
-    // shorter — Deepgram June read 176h42m/141h10m vs the real 45h33m/27h). The per-incident
+    // NOT the accumulator's `totalMinutes`/`longestMinutes`. Before #1480 those only grew, locking in
+    // a long-open incident's inflated open-window duration (Deepgram June read 176h42m/141h10m vs the
+    // real 45h33m/27h); they now follow the feed in both directions, but only for an id still in it.
+    // The per-incident
     // durationMin is updated to the final value, so it's the source of truth; the accumulator is the
     // fallback only when the list was truncated (>MAX cap, no longer full-population).
     const { totalMin, countedTotalMin, longestMin, countedCount, excludedAutoMonitor, excludedAutoMonitorMin, excludedDerived, excludedDerivedMin, excludedStartUnknown } = aggregateIncidentDurations(
