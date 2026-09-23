@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
+import { fetchAllServices, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverridesCounted, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, type DurationOverride } from './overrides'
@@ -2064,7 +2064,11 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // when a provider ADDS a component AIWatch has never seen for that page. Bootstraps silently on first
   // sight (per page), so it never dumps a rich shared page's existing components. Data comes free from
   // the cron's live prefetch (cronPageComponents); a fresh-cache cycle leaves it empty and just skips.
-  for (const [apiUrl, components] of Object.entries(cronPageComponents)) {
+  // #1481 — the Rootly page joins the same loop. It arrives as a scraped feed in KV rather than in
+  // the prefetch map, so `buildPageComponents` never saw it and its new components landed silently.
+  // Its feed read sits off the status path, so a fault there costs this page's detection for a cycle
+  // and nothing else.
+  for (const [apiUrl, components] of Object.entries(await collectDetectablePages(env.STATUS_CACHE, cronPageComponents, stale))) {
     try {
       // Fail-CLOSED on a KV read error: a transient get() fault must NOT be read as "first sight"
       // (which bootstraps silently + overwrites the durable snapshot, permanently dropping the
@@ -2101,7 +2105,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       if (absorbed.length > 0) {
         console.warn(`[cron] ${apiUrl}: ${absorbed.length} of ${newComponents.length} first-seen component(s) suppressed as already tracked (#1125): ${absorbed.map(c => `${c.name} (${c.id})`).join(', ')}`)
       }
-      const pageSvcs = SERVICES.filter(s => s.apiUrl === apiUrl)
+      const pageSvcs = SERVICES.filter(s => s.apiUrl === apiUrl || (s.rootlyFeed && s.statusUrl === apiUrl))
       const dynamic = pageSvcs.some(s => s.displayAllComponents)
       const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
         title: `🆕 New status-page component${alertable.length === 1 ? '' : 's'}: ${pageSvcs.map(s => s.name).join(', ') || apiUrl}`,
