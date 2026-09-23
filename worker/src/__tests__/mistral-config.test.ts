@@ -23,11 +23,11 @@
 // Mirrors fal-config.test.ts (#758) / kimi-config.test.ts (#989).
 
 import { describe, it, expect } from 'vitest'
-import { SERVICES } from '../services'
+import { SERVICES, filterIncidents } from '../services'
 import { API_TIER, EXCLUDE_FALLBACK, capabilityOfComponent, CAPABILITY_TIER } from '../fallback'
 
-// The 13 API components, in the order the config lists them. `Console` is the 14th component on the
-// page and is deliberately absent — see below.
+// The 13 API components, in the order the config lists them. The page also carries non-API
+// components, which are deliberately absent from this list — see below.
 const API_GROUP: Array<[string, string]> = [
   ['304d5895-4dde-47be-b2e1-b7ebeb28dd4d', 'Agents API'],
   ['719fdf28-3a3d-48f9-bfe3-7766e55091b4', 'Audio API'],
@@ -78,6 +78,39 @@ describe('#1381 Mistral (Rootly) service config', () => {
     // No componentGroups: one shared label would collapse all 13 into a single row in
     // ServiceDetails, destroying the per-component visibility the card exists for.
     expect(svc().componentGroups).toBeUndefined()
+  })
+
+  it('#1481 — keeps every Vibe incident off the API card', () => {
+    // Titles as published by status.mistral.ai, read from /api/status on 2026-09-22. The last one
+    // does not start with the product name, so a prefix rule would have let it through.
+    const vibeTitles = [
+      'Vibe Work - Degraded output quality',
+      'Vibe Code Web model is experiencing failures in some existing sessions',
+      'Vibe Code Web is unable to provision a sandbox in new sessions',
+      'Vibe Code Web is failing to provision a sandbox in new sessions',
+      'Vibe Code Web is unable to create sandboxes in new sessions',
+      'Failing to start sandboxes in Vibe Code Web',
+    ]
+    const incidents = vibeTitles.map((title, i) => ({
+      id: `vibe-${i}`, title, status: 'resolved', impact: null,
+      startedAt: '2026-09-20T00:00:00.000Z', resolvedAt: '2026-09-20T01:00:00.000Z',
+    })) as unknown as Parameters<typeof filterIncidents>[0]
+    expect(filterIncidents(incidents, svc())).toEqual([])
+  })
+
+  it('#1481 — the Vibe exclusion does not swallow an API incident', () => {
+    // The counter-case to the test above: `incidentExclude` is a substring match, so a rule that
+    // over-matches would empty the card instead of scoping it.
+    const apiTitles = [
+      'Completion API Degraded - glm-5-2',
+      'Availability drop for Mistral OCR 4',
+      'Elevated error rates on Mistral Small 4',
+    ]
+    const incidents = apiTitles.map((title, i) => ({
+      id: `api-${i}`, title, status: 'resolved', impact: 'minor',
+      startedAt: '2026-09-20T00:00:00.000Z', resolvedAt: '2026-09-20T01:00:00.000Z',
+    })) as unknown as Parameters<typeof filterIncidents>[0]
+    expect(filterIncidents(incidents, svc()).map((i) => i.title)).toEqual(apiTitles)
   })
 
   it('carries none of the pre-migration Instatus ids', () => {

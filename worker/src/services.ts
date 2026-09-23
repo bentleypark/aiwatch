@@ -163,7 +163,7 @@ export const SERVICES: ServiceConfig[] = [
   // `le console` for the Instatus page, which appended the component to the title; Rootly publishes
   // the raw title and names that component `Console`, so the old entry could not match and
   // "Console Degraded" reached the API card. Pinned by a wiring test against the real title.
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, rootlyFeed: true, incidentExclude: ['console', 'le chat', 'documentation', 'website'], holdShortIncidents: true, displayComponentIds: ['304d5895-4dde-47be-b2e1-b7ebeb28dd4d', '719fdf28-3a3d-48f9-bfe3-7766e55091b4', 'ba3a6e31-16e8-48c1-9a0e-dc09d9f65b68', 'a4b27297-cd30-47b8-8ac0-1d1081fe905a', '4b32fcf7-6173-4456-85ba-048d384ae4a6', '74350cee-8e18-44bb-be49-9a5ae3f8f218', '951414e5-fcd1-4c1d-9f2f-acaf726bd245', '3e804d64-e876-488f-ba91-69913a2d54f9', '7ea6517b-2d19-42f8-b90f-39607552a60b', 'd16850a6-af05-4366-abc2-65d89959305d', '3abd6dd4-8de0-44ad-a65c-e11280a66ca9', '2b40e771-7a56-40b3-8e96-792740c301f4', '974aefe0-ee25-48a2-ac3d-4f12cc788c2d'] },
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, rootlyFeed: true, incidentExclude: ['console', 'le chat', 'vibe', 'documentation', 'website'], holdShortIncidents: true, displayComponentIds: ['304d5895-4dde-47be-b2e1-b7ebeb28dd4d', '719fdf28-3a3d-48f9-bfe3-7766e55091b4', 'ba3a6e31-16e8-48c1-9a0e-dc09d9f65b68', 'a4b27297-cd30-47b8-8ac0-1d1081fe905a', '4b32fcf7-6173-4456-85ba-048d384ae4a6', '74350cee-8e18-44bb-be49-9a5ae3f8f218', '951414e5-fcd1-4c1d-9f2f-acaf726bd245', '3e804d64-e876-488f-ba91-69913a2d54f9', '7ea6517b-2d19-42f8-b90f-39607552a60b', 'd16850a6-af05-4366-abc2-65d89959305d', '3abd6dd4-8de0-44ad-a65c-e11280a66ca9', '2b40e771-7a56-40b3-8e96-792740c301f4', '974aefe0-ee25-48a2-ac3d-4f12cc788c2d'] },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). The flat API omits the official Endpoints
   // group, so its two stable members are mapped explicitly; ungrouped components fold into Models.
@@ -1007,9 +1007,10 @@ export function uptimeScopeOf(config: Pick<ServiceConfig, 'statusComponentId' | 
 }
 
 /**
- * #992/#1125 — per-page component list (apiUrl → `{id,name}[]`) harvested from the prefetch, the input
- * to the cron's new-component change detector (`diffPageComponents`). The detector iterates this record,
- * so a page absent from it is skipped for the cycle, not diffed.
+ * #992/#1125 — per-page component list (apiUrl → `{id,name}[]`) harvested from the prefetch, the
+ * prefetch half of the input to the cron's new-component change detector (`diffPageComponents`).
+ * A page absent from it is diffed only if `collectDetectablePages` supplies it some other way,
+ * which #1481 is: the rootly page has no `apiUrl` and never appears here.
  *
  * Resolution goes through `pickBreakdownComponents` — the SAME precedence the badge/breakdown uses — so
  * the detector and the status path always mean the same thing by "this page's components". #1125: they
@@ -1055,6 +1056,70 @@ export function buildPageComponents(
     out[apiUrl] = valid.map((c) => ({ id: c.id, name: c.name }))
   }
   return out
+}
+
+/**
+ * #1481 — the Rootly page's components, in the same shape and for the same detector as
+ * `buildPageComponents`.
+ *
+ * That function is keyed by `apiUrl` and built from the summary/components.json prefetch, so a
+ * `rootlyFeed` service — which sets `apiUrl: null` and arrives as a scraped feed in KV — is outside
+ * it by construction, and this page has never had a `component-seen:` snapshot.
+ *
+ * This does NOT retro-detect `Vibe`: the first cycle bootstraps the whole roster silently, as
+ * `diffPageComponents` does for every page. It arms the page for the NEXT component.
+ *
+ * Keyed by `statusUrl`, which shares the `component-seen:` namespace with the `apiUrl` keys.
+ * `rootly-page-components.test.ts` asserts no `apiUrl` equals this `statusUrl`.
+ *
+ * Reads the ONE feed key the scraper writes, so it describes one page. A second Rootly page would
+ * need a per-service key first — this returns that page's components under whichever rootly service
+ * names it, and there is exactly one.
+ */
+async function readRootlyPageComponents(
+  kv: KVNamespace | undefined,
+): Promise<Record<string, PageComponent[]>> {
+  const config = SERVICES.find((s) => s.rootlyFeed)
+  if (!kv || !config) return {}
+  let raw: string | null
+  try {
+    raw = await kv.get(MISTRAL_FEED_KV_KEY)
+  } catch (err) {
+    console.warn('[readRootlyPageComponents] feed read failed:', err instanceof Error ? err.message : err)
+    return {}
+  }
+  if (!raw) return {}
+  let stored: StoredRootlyFeed
+  try {
+    stored = JSON.parse(raw) as StoredRootlyFeed
+  } catch (err) {
+    console.warn('[readRootlyPageComponents] feed parse failed:', err instanceof Error ? err.message : err)
+    return {}
+  }
+  const comps = stored?.feed?.components
+  if (!Array.isArray(comps)) return {}
+  const valid = recordableComponents(comps, config.statusUrl)
+  if (valid.length === 0) return {}
+  return { [config.statusUrl]: valid.map((c) => ({ id: c.id, name: c.name })) }
+}
+
+/**
+ * #1481 — the status pages offered to the #992 detector this cycle, keyed by page.
+ *
+ * The cron's prefetch covers the `apiUrl` pages; the Rootly page has to be read from KV. Both legs
+ * are gated on the same `stale` cycle, so detection never runs on a fresh-cache tick for one kind
+ * of page and not the other.
+ *
+ * This is the whole decision, as one exported value, so a test can assert which pages get diffed
+ * without standing up the cron entry point.
+ */
+export async function collectDetectablePages(
+  kv: KVNamespace | undefined,
+  prefetched: Record<string, PageComponent[]>,
+  stale: boolean,
+): Promise<Record<string, PageComponent[]>> {
+  if (!stale) return {}
+  return { ...prefetched, ...(await readRootlyPageComponents(kv)) }
 }
 
 /** #1125 — the entries of a page's component list that can safely be written to `component-seen`.
@@ -1832,7 +1897,7 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
   // affected-days AND the MTTR sample on `impact != null`: a month with a dozen real incidents would
   // score as if it were clean. That is why this is not deferred.
   const up = computeRootlyUptime(stored.feed.uptime ?? [], config.displayComponentIds, Date.parse(now))
-  // Filter BEFORE attributing. `incidentExclude` drops the page's non-API incidents (Console today),
+  // Filter BEFORE attributing. `incidentExclude` drops the page's non-API incidents,
   // and those components are outside `displayComponentIds`, so their chart days never enter
   // `up.days` — attributing them first counted every one of them as a lost read, permanently. The
   // published list is the filtered one either way, so this is also the only order in which the
@@ -1871,7 +1936,7 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
 
   const status = rootlyOverallStatus(stored.feed.components, config.displayComponentIds)
   // Scoped by the SAME ids as the badge. The breakdown card is an API-surface card (#761), so the
-  // page's non-API components — Console today — stay out of it; letting the card show a wider set
+  // page's non-API components stay out of it; letting the card show a wider set
   // than the badge is derived from puts two different answers on one screen.
   const scope = config.displayComponentIds
   const components = stored.feed.components
