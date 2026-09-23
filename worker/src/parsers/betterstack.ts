@@ -784,7 +784,7 @@ export const BS_HISTORY_MIN_DOWNTIME_SEC = 600
  *  serves: `together` exposes a per-model resource each, so a 90-day sweep can add hundreds of rows to
  *  `svc.incidents` → `services:latest` → `incidents:monthly`, whose per-service cap truncates OLDEST
  *  first and would let synthesized history evict real incidents. */
-const BS_HISTORY_WINDOW_DAYS = 30
+export const BS_HISTORY_WINDOW_DAYS = 30
 
 /** Row-level BACKSTOP, not the working bound — the window is. Deliberately set where real data does
  *  not reach it, because the previous value (20, taken by analogy to `parseRssIncidents`' per-service

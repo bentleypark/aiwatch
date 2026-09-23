@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { renderMethodologyPage } from '../html-template'
 import { PROBE_TARGETS } from '../../../worker/src/probe' // #678 — lockstep source of truth
 import { SERVICES } from '../../../worker/src/services' // #1110 — Better Stack roster lockstep
+import { BS_HISTORY_MIN_DOWNTIME_SEC, BS_HISTORY_WINDOW_DAYS } from '../../../worker/src/parsers/betterstack' // #1498 — reconstruction bounds lockstep
 
 // #673 — the public /methodology page. Renders once (no per-request data), so these assertions
 // guard: it renders without throwing, carries all 7 section anchors + the SEO head, is bilingual,
@@ -12,6 +13,27 @@ import { SERVICES } from '../../../worker/src/services' // #1110 — Better Stac
 const html = renderMethodologyPage()
 
 describe('renderMethodologyPage', () => {
+  // The i18n maps ship as inline-script text, not importable bindings, so three tests below read
+  // them out of the rendered HTML. Extracted once (#1498), when a third test needed the same parser.
+  const decl = html.slice(html.indexOf('const i18n = {'))
+  const koStart = decl.indexOf('ko: {')
+  const enStart = decl.indexOf('en: {')
+  const enEnd = decl.indexOf('function setLang')
+  const koBlock = decl.slice(koStart, enStart)
+  const enBlock = decl.slice(enStart, enEnd)
+  /** The value of one i18n key inside one language block. */
+  const entry = (block: string, key: string) => {
+    const m = block.match(new RegExp(`'${key.replaceAll('.', '\\.')}':\\s*'((?:\\\\'|[^'])*)'`))
+    expect(m, `i18n entry '${key}' not found in its language block`).not.toBeNull()
+    return m![1]
+  }
+  /** The inline (SSR default) copy for one data-i18n key. */
+  const inline = (key: string, close: string) => {
+    const m = html.match(new RegExp(`data-i18n="${key.replaceAll('.', '\\.')}"[^>]*>([\\s\\S]*?)</${close}>`))
+    expect(m, `inline default for '${key}' not found`).not.toBeNull()
+    return m![1]
+  }
+
   it('renders a full HTML document with the methodology title', () => {
     expect(html).toContain('<!DOCTYPE html>')
     expect(html).toContain('How AIWatch Works')
@@ -267,6 +289,26 @@ describe('renderMethodologyPage', () => {
     }
   })
 
+  it('keeps the reconstruction bounds in LOCKSTEP with the betterstack parser (#1498)', () => {
+    // The reconstruction paragraph publishes two bounds the parser owns. Derive both from the source
+    // of truth so changing 600s or the 30-day window fails HERE instead of leaving the public page
+    // asserting a rule the worker no longer applies. Assert inside the paragraph's OWN text in all
+    // three homes: a page-wide `toContain` is satisfied by unrelated copy \u2014 `s3.officialDesc`
+    // already says `\ucd5c\uadfc 30\uc77c\uce58`, which survived deleting this paragraph's window sentence.
+    const key = 's6.counting.reconstructed'
+    const ko = [['inline', inline(key, 'p')], ['ko map', entry(koBlock, key)]] as const
+    const en = entry(enBlock, key)
+
+    const minutes = BS_HISTORY_MIN_DOWNTIME_SEC / 60
+    expect(Number.isInteger(minutes), 'floor is no longer a whole number of minutes \u2014 reword the copy').toBe(true)
+    for (const [where, text] of ko) {
+      expect(text, `KO ${where}: downtime floor`).toContain(`${minutes}\ubd84 \ubbf8\ub9cc`)          // "N분 미만"
+      expect(text, `KO ${where}: fill window`).toContain(`\ucd5c\uadfc ${BS_HISTORY_WINDOW_DAYS}\uc77c`) // "최근 N일"
+    }
+    expect(en, 'EN: downtime floor').toContain(`${minutes} minutes`)
+    expect(en, 'EN: fill window').toContain(`last ${BS_HISTORY_WINDOW_DAYS} days`)
+  })
+
   it('keeps the honest detection framing — MTTD + RTT, explicitly disclaiming "faster than official" (#464)', () => {
     // #464: the page must NOT positively claim speed superiority over the official status page.
     // The honest framing is MTTD + RTT degradation; a sentence that explicitly DISCLAIMS the
@@ -283,16 +325,10 @@ describe('renderMethodologyPage', () => {
   // inline-script text (not an importable binding), so extract the KO/EN key sets from the
   // rendered HTML and assert they match, plus that every data-i18n key is translated in both.
   it('has matching KO/EN i18n key sets — no language drops a key (#673)', () => {
-    const decl = html.slice(html.indexOf('const i18n = {'))
-    const koStart = decl.indexOf('ko: {')
-    const enStart = decl.indexOf('en: {')
-    const enEnd = decl.indexOf('function setLang')
     expect(koStart).toBeGreaterThan(-1)
     expect(enStart).toBeGreaterThan(koStart)
     expect(enEnd).toBeGreaterThan(enStart)
 
-    const koBlock = decl.slice(koStart, enStart)
-    const enBlock = decl.slice(enStart, enEnd)
     const keysOf = (block: string) =>
       new Set([...block.matchAll(/'([A-Za-z0-9_.]+)':/g)].map((m) => m[1]))
 
@@ -321,33 +357,13 @@ describe('renderMethodologyPage', () => {
     const expected = SERVICES.filter((s) => s.betterStackUrl).map((s) => s.id)
     expect(expected.length).toBeGreaterThan(0) // sanity: the flag still exists
 
-    const decl = html.slice(html.indexOf('const i18n = {'))
-    const koStart = decl.indexOf('ko: {')
-    const enStart = decl.indexOf('en: {')
-    const enEnd = decl.indexOf('function setLang')
-    const koMap = decl.slice(koStart, enStart)
-    const enMap = decl.slice(enStart, enEnd)
-
-    /** The value of one i18n key inside one language block. */
-    const entry = (block: string, key: string) => {
-      const m = block.match(new RegExp(`'${key.replaceAll('.', '\\.')}':\\s*'((?:\\\\'|[^'])*)'`))
-      expect(m, `i18n entry '${key}' not found in its language block`).not.toBeNull()
-      return m![1]
-    }
-    /** The inline (SSR default) copy for one data-i18n key. */
-    const inline = (key: string, close: string) => {
-      const m = html.match(new RegExp(`data-i18n="${key.replaceAll('.', '\\.')}"[^>]*>([\\s\\S]*?)</${close}>`))
-      expect(m, `inline default for '${key}' not found`).not.toBeNull()
-      return m![1]
-    }
-
     const enumerations: Array<[string, string]> = [
       ['s2.partial inline', inline('s2.partial', 'p')],
-      ['s2.partial ko', entry(koMap, 's2.partial')],
-      ['s2.partial en', entry(enMap, 's2.partial')],
+      ['s2.partial ko', entry(koBlock, 's2.partial')],
+      ['s2.partial en', entry(enBlock, 's2.partial')],
       ['s3.platformDesc inline', inline('s3.platformDesc', 'span')],
-      ['s3.platformDesc ko', entry(koMap, 's3.platformDesc')],
-      ['s3.platformDesc en', entry(enMap, 's3.platformDesc')],
+      ['s3.platformDesc ko', entry(koBlock, 's3.platformDesc')],
+      ['s3.platformDesc en', entry(enBlock, 's3.platformDesc')],
     ]
 
     // Compare on the service ID, not the display name: the page writes the short marketing form
@@ -378,6 +394,6 @@ describe('renderMethodologyPage', () => {
     const NUMBER_WORD: Record<number, string> = { 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight' }
     const word = NUMBER_WORD[expected.length]
     expect(word, `add ${expected.length} to NUMBER_WORD — the EN copy spells this count out`).toBeDefined()
-    expect(entry(enMap, 's3.platformDesc')).toContain(`These ${word} status pages`)
+    expect(entry(enBlock, 's3.platformDesc')).toContain(`These ${word} status pages`)
   })
 })
