@@ -193,6 +193,24 @@ succeeds and touches no watched frontend or Edge path. A branch's first deployme
 outside Vercel's `--depth=10` clone, a failed Git command, or an unexpected environment continues the
 build. `origin/main` is not used: that clone is single-branch, so it never exists there.
 
+## The new-prose audit — a list, not a gate
+
+`npm run audit:prose -- --all` lists prose a diff adds: Markdown sentences, code comments and long
+string literals. Which files and constructs it reads is set by `EXT_KIND`, `SKIP_PATH` and the
+extractors in the script. The comparison point defaults to the merge base
+with `origin/main`; `--base=` and `--head=` change it (`defaultBase` in the script).
+
+A sentence is flagged when it carries a marker: `date`, `causal`, `absolute`, `quantity`, `history` or
+`negated` (`MARKERS` in the script). `[src]` means the sentence carries the shape of a source — an
+issue reference, a URL, or a backticked command (`SOURCE` in the script) — not that the source
+supports the claim. Without `--all` only flagged sentences print; `--all` also prints the rest, in
+line order within each file. `--strict` exits 1 when a flagged sentence has no `[src]`; `--json` prints the findings.
+
+Limits: the markers are word cues, so an unflagged sentence is not verified. Very short fragments are
+not listed. Korean prose is not handled reliably, and a string literal split over several lines or
+joined with `+` is missed — read those lines yourself. Each listed sentence needs a checkable source
+or a deletion before review, and the reviewer gets the list without the author's justification.
+
 ## Related
 
 - [Reference Tooling](reference-tooling.md) — the `tooling-trigger.sh` trigger map (live upstream / docs / modern-web-guidance).
