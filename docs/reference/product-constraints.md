@@ -34,6 +34,7 @@ tags: [architecture, deploy, ai-analysis, csp, edge]
     2. Before deploy → `npx wrangler deploy --config worker/wrangler.toml --dry-run` (build check)
     3. Deploy → after commit + user approval, **once only** `npm run deploy:worker`
     4. No repeated deploys — each Worker deployment resets the isolate, resetting KV write throttle
+    5. After deploy → once the next `*/5` slot has passed, confirm the cron fired on the new version (`cron:heartbeat`, command in [discord-alert-paths.md](discord-alert-paths.md#cron-stalled-1501--operator-ops-alert)) (#1501)
   - **IMPORTANT**: Always use the npm script to deploy the worker — never run `wrangler deploy` or `cd worker && wrangler deploy` directly (both pick up the wrong config and deploy the SPA):
     ```
     npm run deploy:worker

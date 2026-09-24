@@ -22,6 +22,7 @@ import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, pr
 import { markIncidentResolved, isMarkableOnStatusEdge } from './recovery-mark'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { checkUptimeLiveness } from './uptime-liveness'
+import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
 import { buildSupplyChainBanner } from './supply-chain'
@@ -3064,6 +3065,9 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
   })
 }
 
+// #1501 — per-isolate rate limit for the cron-heartbeat check that `fetch` runs.
+const cronWatchdogThrottle = createWatchdogThrottle(WATCHDOG_INTERVAL_MS)
+
 export default {
   async scheduled(event: ScheduledEvent, rawEnv: Env, ctx: ExecutionContext): Promise<void> {
     // Use the scheduled trigger time (not wall-clock) so time-of-day checks like
@@ -3093,6 +3097,10 @@ export default {
     // The body below is deliberately re-indented by exactly two spaces and otherwise unchanged —
     // `git diff -w` shows only the real edits.
     try {
+
+      // #1501 — stamp the run before anything else, so the stamp is a claim about the dispatch and not
+      // about how the work below went. Also where a recovery notice is sent after a stall.
+      await recordCronHeartbeat(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, Date.now(), sendDiscordAlert)
 
       // #629 — dispatch the deepseek-feed Action each */5 cycle in addition to its own `schedule`
       // trigger (see workflow-dispatch.ts's header for the mechanism). waitUntil so the GitHub POST
@@ -4532,6 +4540,15 @@ export default {
     const url = new URL(request.url)
     const origin = request.headers.get('Origin') ?? ''
     const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+
+    // #1501 — `fetch` is the path that stays alive when the cron stops, so it is where a stopped cron is noticed.
+    try {
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && cronWatchdogThrottle.claim(Date.now())) {
+        ctx.waitUntil(checkCronHeartbeat(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, Date.now(), sendDiscordAlert))
+      }
+    } catch (err) {
+      console.warn('[watchdog] #1501 could not start the heartbeat check:', err instanceof Error ? err.message : err)
+    }
 
     // Vitals endpoint — uses main CORS (origin-restricted, not open to all)
     // #842 — consent-free outbound-referral beacon (the is-down "Open ↗" wedge fetch-keepalive POSTs
