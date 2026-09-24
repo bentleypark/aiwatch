@@ -270,6 +270,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   withdrawn.ts       # Provider-DELETED incident tombstones (#1106) — the only material the Discord/RSS withdrawal notices render from
   withdrawal-log.ts  # Durable record that a withdrawal happened + whether its notice went out (#1106 Part 5) — every other trace expires within a week
   uptime-showcase.ts # Atlassian's lazy uptime endpoint (#1389)
+  cron-heartbeat.ts  # Cron watchdog (#1501)
   uptime-liveness.ts # Alert when a service stops publishing uptime (#1389/#957)
   suppression.ts     # Operator incident-suppression layer (#904)
   overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident
