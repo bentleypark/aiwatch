@@ -68,6 +68,11 @@ is the *procedure* — follow it top to bottom.
    - Worker (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker`.
    - New worker logic → extract to an exported fn + unit-test it. New `src/utils/` → Vitest test.
    - **Every bug fix ships a test that would have caught the bug.**
+4.5. **Audit new prose** — `npm run audit:prose -- --all` before the first review spawn. Each listed
+   sentence gets a checkable source (an issue, a URL, a command you ran) or is deleted; a claim about
+   history, a cause or a consequence that you cannot source does not go in the repo. Send the reviewer
+   the list of sentences, not your justification for them. The markers are word cues, so read the
+   unflagged sentences too ([workflow-hooks.md](../../../docs/reference/workflow-hooks.md#the-new-prose-audit--a-list-not-a-gate)).
 5. **PR review** — gate #2. Everything the caller needs is in this step; do not rely on having read
    another page (#1412).
    - **Every round, round 1 included, spawns `review-findings-only`** —
