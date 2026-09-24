@@ -192,6 +192,15 @@ export function readComponentRow(text) {
   return { name: m ? flat.slice(0, m.index).trim() : null, status: m ? m[1] : null }
 }
 
+/** Rows → components, logging each row whose status word could not be read: its id and the row text. */
+export function readComponents(rows, warn = console.warn) {
+  return rows.map((r) => {
+    const read = readComponentRow(r.text)
+    if (read.status === null) warn(`[scrape] unreadable component row ${r.id}: ${r.text.replace(/\s+/g, ' ').trim().slice(0, 120)}`)
+    return { id: r.id, ...read }
+  })
+}
+
 /**
  * Read one incident page's DOM into verbatim strings.
  *
@@ -282,7 +291,7 @@ async function main() {
         id: f.id.replace('uptime-chart-', ''),
         text: (f.closest('div')?.parentElement)?.textContent ?? '',
       })))
-    const components = componentRows.map((r) => ({ id: r.id, ...readComponentRow(r.text) }))
+    const components = readComponents(componentRows)
 
     // ── Uptime charts ──────────────────────────────────────────────────────────────────────────
     // Read BEFORE navigating away: the charts live on the main page. Only the impacted bars need a
