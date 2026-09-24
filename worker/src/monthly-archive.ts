@@ -9,7 +9,7 @@
 import type { ProbeDailyData } from './probe-archival'
 import { summariesFromDailyData } from './probe-archival'
 import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './types'
-import { calculateAIWatchScore, classifyProbe } from './score'
+import { calculateAIWatchScore, classifyProbe, dropRepublishedDuplicates } from './score'
 import type { AIWatchScore } from './score'
 import { resolveProbeId, PROBE_TARGETS } from './probe'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
@@ -1458,7 +1458,7 @@ export function aggregateIncidentDurations(
   count: number,
   accumulatorTotal: number,
   accumulatorLongest: number,
-): { totalMin: number | null; countedTotalMin: number | null; longestMin: number | null; countedCount: number | null; excludedAutoMonitor: number; excludedAutoMonitorMin: number; excludedDerived: number; excludedDerivedMin: number; excludedStartUnknown: number } {
+): { totalMin: number | null; countedTotalMin: number | null; longestMin: number | null; countedCount: number | null; excludedAutoMonitor: number; excludedAutoMonitorMin: number; excludedDerived: number; excludedDerivedMin: number; excludedStartUnknown: number; excludedRepublished: number } {
   if (!incidents || incidents.length === 0 || incidents.length < count) {
     // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source. It is a
     // pre-summed total that cannot be re-filtered per-incident, so NEITHER per-entry exclusion (#1021
@@ -1474,6 +1474,8 @@ export function aggregateIncidentDurations(
       countedTotalMin: accumulatorTotal > 0 ? accumulatorTotal : null,
       longestMin: accumulatorLongest > 0 ? accumulatorLongest : null,
       countedCount: null,
+      // #1502 — this branch cannot re-filter a pre-summed accumulator, so nothing was deduped either.
+      excludedRepublished: 0,
       excludedAutoMonitor: 0,
       excludedAutoMonitorMin: 0,
       excludedDerived: 0,
@@ -1524,6 +1526,7 @@ export function aggregateIncidentDurations(
   let excludedDerived = 0
   let excludedDerivedMin = 0
   let excludedStartUnknown = 0
+  const countable: MonthlyIncidentEntry[] = []
   for (const e of incidents) {
     if (e.derived === 'status_history') {
       const d = typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
@@ -1550,6 +1553,16 @@ export function aggregateIncidentDurations(
       excludedStartUnknown++
       continue
     }
+    countable.push(e)
+  }
+  // #1502 — a provider that re-publishes one incident hourly banks N rows whose durations all describe
+  // the same outage, and summing them inflates every figure below. Runs on the rows that survived the
+  // exclusions above, so July's already-excluded autoMonitor rows still report as
+  // `excludedAutoMonitor: 35` rather than 1. The rows themselves stay in the accumulator — its ids are
+  // what the prune reads, and an id that vanishes publishes as a withdrawal (#1106).
+  const counted = dropRepublishedDuplicates(countable)
+  const excludedRepublished = countable.length - counted.length
+  for (const e of counted) {
     countedCount++
     const d = typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
     total += d
@@ -1557,6 +1570,7 @@ export function aggregateIncidentDurations(
     if (d > longest) longest = d
   }
   return {
+    excludedRepublished,
     totalMin: total > 0 ? total : null,
     countedTotalMin: countedTotal > 0 ? countedTotal : null,
     longestMin: longest > 0 ? longest : null,
@@ -1782,7 +1796,7 @@ export async function buildMonthlyArchive(
     // The per-incident
     // durationMin is updated to the final value, so it's the source of truth; the accumulator is the
     // fallback only when the list was truncated (>MAX cap, no longer full-population).
-    const { totalMin, countedTotalMin, longestMin, countedCount, excludedAutoMonitor, excludedAutoMonitorMin, excludedDerived, excludedDerivedMin, excludedStartUnknown } = aggregateIncidentDurations(
+    const { totalMin, countedTotalMin, longestMin, countedCount, excludedAutoMonitor, excludedAutoMonitorMin, excludedDerived, excludedDerivedMin, excludedStartUnknown, excludedRepublished } = aggregateIncidentDurations(
       incidentList, incSvc?.count ?? 0, incSvc?.totalMinutes ?? 0, incSvc?.longestMinutes ?? 0,
     )
     // #1210 — the exclusion withholds three numbers, and a fully-excluded service archives
@@ -1809,12 +1823,18 @@ export async function buildMonthlyArchive(
       // a divisor that dropped.
       console.warn(`[monthly-archive] #1390-EXCLUDED ${id}: ${excludedStartUnknown}/${incidentList?.length ?? 0} incident(s) with no derivable duration count toward downtime but NOT toward the longest-incident or avg-recovery figures — their start is an anchor on their own resolvedAt`)
     }
+    if (excludedRepublished > 0) {
+      // Own prefix, same discipline as the three above: this one moves `totalDowntimeMin`,
+      // `countedIncidents` AND `avgResolutionMin` at once, and a downtime figure that drops with no
+      // line in the archive is exactly the fails-toward-fine shape the siblings needed a warn for.
+      console.warn(`[monthly-archive] #1502-EXCLUDED ${id}: ${excludedRepublished}/${incidentList?.length ?? 0} record(s) share a title and a close minute with an earlier one`)
+    }
     if (countedCount == null && (incSvc?.count ?? 0) > 0) {
       // Keyed on the BRANCH, not on flags among the surviving rows: truncation splices the OLDEST
       // entries first (accumulateMonthlyIncidents), and an auto-monitor burst is one contiguous block —
       // so the very case this warns about is the one whose evidence gets dropped. It also fires when
       // there is no detail at all, where `.some()` on an empty list would silently say "fine".
-      console.warn(`[monthly-archive] #1210-TRUNCATED ${id}: ${incidentList?.length ?? 0} of ${incSvc?.count ?? 0} detail rows retained — downtime aggregates come from the UNFILTERED accumulator, so the per-entry exclusions (#1021, #1210, #1292) did NOT apply — so "avg recovery" on this branch is computed over a population that mixes day-buckets with real recovery times. Flag detection on the retained rows is unreliable here (oldest dropped first).`)
+      console.warn(`[monthly-archive] #1210-TRUNCATED ${id}: ${incidentList?.length ?? 0} of ${incSvc?.count ?? 0} detail rows retained — downtime aggregates come from the UNFILTERED accumulator, so the per-entry exclusions (#1021, #1210, #1292, #1502) did NOT apply — so "avg recovery" on this branch is computed over a population that mixes day-buckets with real recovery times. Flag detection on the retained rows is unreliable here (oldest dropped first).`)
     }
     const totalDowntimeMin = totalMin
     const longestIncidentMin = longestMin
