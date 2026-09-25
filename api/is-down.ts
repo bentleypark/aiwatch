@@ -280,7 +280,7 @@ export default async function handler(req: Request) {
         const CAPABILITY_TIER: Record<string, number> = { image: 7, video: 5, audio: 4 }
         const CAPABILITY_LABEL: Record<string, string> = { image: 'Image generation', video: 'Video generation', audio: 'Audio / speech' }
         // #1062 facet C — inline mirror. Multimodal providers admitted into a dedicated capability tier's
-        // candidate pool (only OpenAI has monitored image/video/audio components → faithful health proxy).
+        // candidate pool (only OpenAI has monitored image/audio components → faithful health proxy; `video` has none, see fallback-tiers.md).
         const CAPABILITY_PROVIDERS: Record<string, string[]> = { image: ['openai'], video: ['openai'], audio: ['openai'] }
         const isCapabilityProvider = (candidateId: string, srcTier: number): boolean => {
           const cap = Object.keys(CAPABILITY_TIER).find(k => CAPABILITY_TIER[k] === srcTier)

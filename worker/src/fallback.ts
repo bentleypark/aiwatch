@@ -189,7 +189,7 @@ export function sharesCapability(a: string, b: string): boolean {
 }
 
 // #1062 facet B — a status-page component NAME (keyword) → the capability it represents. A multi-
-// capability service's page names distinct surfaces ("Images"/"Audio"/"Embeddings"/"Sora") separately
+// capability service's page names distinct surfaces ("Images"/"Audio"/"Embeddings") separately
 // from its primary LLM/chat surface ("Chat Completions"/"Responses"). First match wins; anything
 // unmatched is the primary capability 'llm'. Keep in lockstep with the two mirrors + api-tier-sync.test.ts.
 // FRAGILITY (accepted): the signal is coupled to today's status-page component NAMES and the list order.
@@ -266,9 +266,9 @@ export const CAPABILITY_TAG_LABEL: Record<string, string> = {
 // #1062 facet C — the REVERSE of routing: multimodal LLM services that ALSO provide a specialized
 // capability via a MONITORED component, so a DEDICATED capability service's outage (Stability image /
 // Runway video / ElevenLabs voice) can recommend them too, not only its same-tier sibling. Only OpenAI
-// qualifies today: it exposes `Images` / `Sora` / `Audio` as monitored statusComponentIds, so its
+// qualifies today: it exposes `Images` / `Audio` as monitored statusComponentIds, so its
 // overall status (worst-of those) is a faithful proxy for the capability's health — an operational
-// OpenAI necessarily has an operational image/video/audio component. Gemini's Imagen/Veo are SEPARATE
+// OpenAI necessarily has an operational image/audio component. `video` is the exception: no monitored OpenAI component maps to it (fallback-tiers.md). Gemini's Imagen/Veo are SEPARATE
 // Vertex products AIWatch does not monitor (no components[]), so it cannot be included faithfully.
 // Keep in lockstep with the two mirrors (pinned by api-tier-sync.test.ts).
 export const CAPABILITY_PROVIDERS: Record<string, string[]> = {
