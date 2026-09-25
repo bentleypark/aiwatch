@@ -89,6 +89,7 @@ const FORWARDERS = {
 /** Cannot be reached by a derived incident, or reads nothing it could get wrong. Each reason is a
  *  property of the CODE, not a recollection — if one stops holding, its file moves to APPLIERS. */
 const SAFE = {
+  'worker/src/mistral-public-api.ts': 'reads only the LENGTH of the public API\'s `incidents` array and keeps the raw text; builds no incident, publishes no duration, status or Score input (#1510 Slice 1 instrumentation)',
   // Producers — they build incidents from an upstream payload; a derived one never flows back in.
   'worker/src/parsers/betterstack.ts': 'PRODUCES them; the tag is stamped here',
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload',
@@ -182,6 +183,7 @@ const RB_FORWARDERS = {
 /** Cannot make a wrong "is this fresh" judgment, or reads nothing it could get wrong. Each reason is
  *  a property of the CODE, not a recollection — if one stops holding, its file moves to RB_APPLIERS. */
 const RB_SAFE = {
+  'worker/src/mistral-public-api.ts': 'reads only the length of the public API\'s `incidents` array; builds no incident and never sees the retainedBridge tag',
   // Producers + the creator/declarer — retainedBridge is stamped ONLY inside
   // mergeRetainedIncidentHistory (services.ts); no parser ever produces it, and xAI has no migration bridge.
   'worker/src/parsers/betterstack.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
@@ -293,6 +295,7 @@ const SU_FORWARDERS = {
 /** Cannot be reached by an anchored incident, or reads nothing it could get wrong. Each reason is a
  *  property of the CODE, not a recollection — if one stops holding, its file moves to SU_APPLIERS. */
 const SU_SAFE = {
+  'worker/src/mistral-public-api.ts': 'reads only the length of the public API\'s `incidents` array; builds no incident and never reads the startUnknown flag',
   // Producers. `parsers/incident-io.ts` stamps the flag on its own anchored path; #1480's zero-length
   // case is stamped once in `services.ts`, over every parser's output. No parser stamps it itself.
   'worker/src/parsers/incident-io.ts': 'PRODUCES it — correctIncidentIoImpossibleTimes is where the flag is stamped and where the repair is attempted first',
@@ -396,7 +399,9 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // other parsers). Moving it in the same diff is the point — the number is the scan's own health.
     // 74 → 75: #1480 added src/utils/incidentNote.js, which took the note choice out of both pages —
     // so it is the SU_APPLIER and the two pages became SU_SAFE in the same diff.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(75)
+    // 75 → 76: #1510 added worker/src/mistral-public-api.ts, which counts a public API's listed
+    // incidents and is SAFE on all three axes.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(76)
   })
 
   it('leaves none unclassified', () => {
@@ -447,10 +452,10 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the two axes', () => {
-    // If this ever fails while the #1292 "finds the consumers" test above still passes at 75, the
+    // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(75)
+    expect(all.length).toBe(76)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -496,7 +501,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(75)
+    expect(all.length).toBe(76)
   })
 
   it('leaves none unclassified for startUnknown', () => {
