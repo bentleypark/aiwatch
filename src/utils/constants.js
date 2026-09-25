@@ -311,8 +311,8 @@ export const CAPABILITY_TAG_LABEL = {
 
 // #1062 facet C — MIRROR of worker CAPABILITY_PROVIDERS. Multimodal LLM services that also provide a
 // specialized capability via a MONITORED component, so a dedicated capability service's outage (Stability
-// image / Runway video / ElevenLabs voice) also recommends them. Only OpenAI qualifies (Images/Sora/Audio
-// are monitored components → overall status is a faithful health proxy; Gemini's Imagen/Veo are unmonitored).
+// image / Runway video / ElevenLabs voice) also recommends them. Only OpenAI qualifies (Images/Audio
+// are monitored components → overall status is a faithful health proxy; `video` has no monitored component, see fallback-tiers.md; Gemini's Imagen/Veo are unmonitored).
 export const CAPABILITY_PROVIDERS = {
   image: ['openai'],
   video: ['openai'],
