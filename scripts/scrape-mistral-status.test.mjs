@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { Window } from 'happy-dom'
 import {
-  withRetry, buildUptimeEntry, envPositiveInt, readComponentRow, parseUpdateRows, readIncidentPage,
+  withRetry, buildUptimeEntry, envPositiveInt, readComponentRow, readComponents, parseUpdateRows, readIncidentPage,
   buildMistralFeedObservation, reportMistralFeedObservation, runWithMistralFeedObservation, deliverMistralFeed,
 } from './scrape-mistral-status.mjs'
 
@@ -285,6 +285,32 @@ test('an unknown status word reads null, not a guess', () => {
   assert.deepEqual(readComponentRow('OCR API Wobbly 90 days ago 99.31% Today'),
     { name: null, status: null })
   assert.deepEqual(readComponentRow(''), { name: null, status: null })
+})
+
+// The Worker only ever receives `status: null` for an unknown word, so this row text is the one place
+// the word survives.
+test('an unreadable row is logged with its id and the word the page rendered, and still read as null', () => {
+  const logged = []
+  const rows = [
+    { id: 'c1', text: LIVE_OPERATIONAL },
+    { id: 'c2', text: 'OCR API  Wobbly 90 days ago 99.31% Today' },
+    { id: 'c3', text: '' },
+  ]
+  assert.deepEqual(readComponents(rows, (l) => logged.push(l)), [
+    { id: 'c1', name: 'Agents API', status: 'Operational' },
+    { id: 'c2', name: null, status: null },
+    { id: 'c3', name: null, status: null },
+  ])
+  assert.deepEqual(logged, [
+    '[scrape] unreadable component row c2: OCR API Wobbly 90 days ago 99.31% Today',
+    '[scrape] unreadable component row c3: ',
+  ])
+  const quiet = []
+  readComponents([{ id: 'c1', text: LIVE_OPERATIONAL }, { id: 'c4', text: LIVE_AFFECTED }], (l) => quiet.push(l))
+  assert.deepEqual(quiet, [])
+  const capped = []
+  readComponents([{ id: 'c5', text: 'x'.repeat(500) }], (l) => capped.push(l))
+  assert.equal(capped[0], `[scrape] unreadable component row c5: ${'x'.repeat(120)}`)
 })
 
 // The name is whatever precedes the status word, so the status word decides where the name ends.
