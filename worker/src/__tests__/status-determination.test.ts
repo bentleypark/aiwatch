@@ -722,7 +722,7 @@ describe('displayComponentIds config sanity (#606)', () => {
   // #1008: "Codex in ChatGPT Desktop" moved from codex (5→4) to its official ChatGPT group (11→12).
   // #1010: `Compliance API` joined chatgpt's badge scope (12→13), then `Sites` + `ChatGPT Work` once
   // their `data_available_since` cleared 30 days (13→15) — see the chatgpt config comment in services.ts.
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 15, codex: 4 }
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 11, chatgpt: 15, codex: 4 }
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
@@ -822,7 +822,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(12 + 15 + 4) // #1008: codex(5→4) → chatgpt(11→12); #1010: chatgpt(12→13→15)
+    expect(all.length).toBe(11 + 15 + 4)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
@@ -891,8 +891,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const has = (id: string, compId: string) => SERVICES.find((s) => s.id === id)!.displayComponentIds!.includes(compId)
     // Agent is ChatGPT (not API) per the official grouping.
     expect(has('chatgpt', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'), 'Agent → chatgpt').toBe(true)
-    // Sora + the API Login are OpenAI API.
-    expect(has('openai', '01K9G527YRPY1EFRMHTKB5BKT5'), 'Sora → openai').toBe(true)
+    // The API Login is OpenAI API.
     expect(has('openai', '01JSM5RTJWHRWDTS6Q604VEW3B'), 'API Login → openai').toBe(true)
     // #693 follow-up — FedRAMP / Ads Manager / Ads API are adopted by no monitored service (orphaned
     // by design, so they never flip openai/chatgpt). Asserted through TRACKED_COMPONENT_IDS, which

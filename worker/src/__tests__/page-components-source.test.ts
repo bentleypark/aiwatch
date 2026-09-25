@@ -6,7 +6,7 @@
 // part rotates as the provider adds more (25 of the 34 in components.json when measured 2026-07-28).
 // Two consequences, both observed:
 //   • a component AIWatch ALREADY tracks false-alerts as new the moment it rotates into the window
-//     (`Images` 2026-07-22, `Sora` 2026-07-27 — both in openai's statusComponentIds, asserted below), and
+//     (`Images` 2026-07-22, `Sora` 2026-07-27), and
 //   • a component that never enters the window can never alert at all — the miss the detector exists
 //     to prevent, and one nothing would ever surface.
 // The status path already knew (#606 Cat B `componentsUrl` → `pickBreakdownComponents`); only the
@@ -36,17 +36,17 @@ const PAGE = OPENAI.apiUrl!
 const OTHER_PAGE = 'https://status.claude.com/api/v2/summary.json'
 
 const CHAT = '01JMXBRMFE6N2NNT7DG6XZQ6PW' // "Chat Completions" — openai's PRIMARY badge component
-const SORA = '01K9G527YRPY1EFRMHTKB5BKT5' // "Sora"             — the 2026-07-27 false alert
+const EMBEDDINGS = '01JMXBRMFEV0AJ0VVS68N9CD6R' // "Embeddings"       — a tracked openai component
 const IMAGES = '01JMXBRMFE4MAP2BHSJNZ787WX' // "Images"         — the 2026-07-22 false alert
 const UNTRACKED = 'zz-not-in-any-service-config' // a genuinely new, untracked component, in BOTH lists
 const LATE = 'zz-untracked-and-superset-only' // untracked AND components.json-only: the delayed alert
 
 const comp = (id: string, name: string, status = 'operational') => ({ id, name, status })
 
-// summary.json's rotating view: Images rotated in, Chat Completions + Sora fell out.
+// summary.json's rotating view: Images rotated in, Chat Completions + Embeddings fell out.
 const SUMMARY_SUBSET = [comp(IMAGES, 'Images'), comp(UNTRACKED, 'Ads API')]
 // components.json: the superset.
-const COMPONENTS_SUPERSET = [comp(CHAT, 'Chat Completions'), comp(SORA, 'Sora'), comp(IMAGES, 'Images'), comp(UNTRACKED, 'Ads API'), comp(LATE, 'Ads API v2')]
+const COMPONENTS_SUPERSET = [comp(CHAT, 'Chat Completions'), comp(EMBEDDINGS, 'Embeddings'), comp(IMAGES, 'Images'), comp(UNTRACKED, 'Ads API'), comp(LATE, 'Ads API v2')]
 
 const ok = (components: unknown) => ({ ok: true as const, components })
 const pageMap = (componentsFetch?: { ok: true; components: unknown } | { ok: false }) =>
@@ -63,7 +63,7 @@ const warnText = () => warn.mock.calls.map((c: unknown[]) => c.join(' ')).join('
 // The ULID fixtures above are only meaningful if they really are ids AIWatch tracks — otherwise every
 // "already tracked" assertion below is vacuous and would stay green if the config dropped them.
 describe('fixture premises (#1125)', () => {
-  it.each([['Chat Completions', CHAT], ['Sora', SORA], ['Images', IMAGES]])(
+  it.each([['Chat Completions', CHAT], ['Embeddings', EMBEDDINGS], ['Images', IMAGES]])(
     '%s is a component openai badges AND displays', (_name, id) => {
       expect(OPENAI.statusComponentIds).toContain(id)
       expect(OPENAI.displayComponentIds).toContain(id)
@@ -81,12 +81,12 @@ describe('buildPageComponents source precedence (#1125)', () => {
     const ids = comps(pageMap(ok(COMPONENTS_SUPERSET))).map((c) => c.id)
     // The two ids summary.json omitted this cycle are exactly what the old source could not see.
     expect(ids).toContain(CHAT)
-    expect(ids).toContain(SORA)
+    expect(ids).toContain(EMBEDDINGS)
     expect(ids).toHaveLength(5)
   })
 
   it('carries names through — the alert body names the component, not just its ULID', () => {
-    expect(comps(pageMap(ok(COMPONENTS_SUPERSET)))).toContainEqual({ id: SORA, name: 'Sora' })
+    expect(comps(pageMap(ok(COMPONENTS_SUPERSET)))).toContainEqual({ id: EMBEDDINGS, name: 'Embeddings' })
   })
 
   it('falls back to summary.json for a page that configures no componentsUrl', () => {
@@ -212,11 +212,11 @@ describe('the false alerts this fixes, end to end (#1125)', () => {
     // `seen` from the summary-only page (what production accumulated), `current` from the superset.
     const seenNarrow = comps(pageMap(undefined)).map((c) => c.id)
     const flagged = diffPageComponents(current(), seenNarrow).newComponents
-    expect(flagged.map((c) => c.id).sort()).toEqual([CHAT, SORA, LATE].sort())
+    expect(flagged.map((c) => c.id).sort()).toEqual([CHAT, EMBEDDINGS, LATE].sort())
     // …that is the burst the deploy would have produced. The filter absorbs every TRACKED one and
     // leaves only the component nobody has decided about yet.
     const { alertable, absorbed } = partitionFirstSeen(flagged, TRACKED_COMPONENT_IDS)
-    expect(absorbed.map((c) => c.id).sort()).toEqual([CHAT, SORA].sort())
+    expect(absorbed.map((c) => c.id).sort()).toEqual([CHAT, EMBEDDINGS].sort())
     expect(alertable.map((c) => c.id)).toEqual([LATE])
   })
 
@@ -254,7 +254,7 @@ describe('partitionFirstSeen (#1125)', () => {
   })
 
   it('leaves nothing to alert when every first-seen component is tracked — the deploy burst', () => {
-    const burst = [{ id: CHAT, name: 'Chat Completions' }, { id: SORA, name: 'Sora' }, { id: IMAGES, name: 'Images' }]
+    const burst = [{ id: CHAT, name: 'Chat Completions' }, { id: EMBEDDINGS, name: 'Embeddings' }, { id: IMAGES, name: 'Images' }]
     expect(partitionFirstSeen(burst, TRACKED_COMPONENT_IDS).alertable).toEqual([])
   })
 
@@ -315,14 +315,14 @@ describe('fetchService reuses the prefetched components (#1125)', () => {
     const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, latency: 100, componentsFetch: ok(COMPONENTS_SUPERSET) }, undefined, {})
     expect(componentsCalls(spy)).toHaveLength(0)
     // …and the breakdown still resolves off the superset, so the saved fetch cost nothing.
-    expect(svc.components?.map((c) => c.id)).toContain(SORA)
+    expect(svc.components?.map((c) => c.id)).toContain(EMBEDDINGS)
   })
 
   it('re-fetches when the prefetch could not read it — the badge must never ride the narrow list', async () => {
     const spy = stubFetch(COMPONENTS_SUPERSET)
     const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, latency: 100, componentsFetch: { ok: false } }, undefined, {})
     expect(componentsCalls(spy)).toHaveLength(1)
-    expect(svc.components?.map((c) => c.id)).toContain(SORA)
+    expect(svc.components?.map((c) => c.id)).toContain(EMBEDDINGS)
   })
 
   it('re-fetches when there is no prefetch entry for the page at all', async () => {
