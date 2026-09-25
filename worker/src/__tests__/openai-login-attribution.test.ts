@@ -14,7 +14,7 @@ import type { Incident, ServiceConfig } from '../types'
 // is that two ids share one name.
 const API_LOGIN = '01JSM5RTJWHRWDTS6Q604VEW3B' // "Login", APIs group      → openai.statusComponentIds
 const CHATGPT_LOGIN = '01JMXBNJXG1S2D9V65P1ZZTD94' // "Login", ChatGPT group → chatgpt.statusComponentIds
-const SORA = '01K9G527YRPY1EFRMHTKB5BKT5' // "Sora"    → openai.statusComponentIds AND displayComponentIds
+const FILES = '01JMXBRMFESJCBGJR10PDD3WCQ' // "Files"    → openai.statusComponentIds AND displayComponentIds
 const FEDRAMP = '01KKAD7C71MCCH3FTREMJH4AAS' // "FedRAMP" → in NO service's statusComponentIds
 
 /** Uses the REAL SERVICES config so a future edit to the excludes/badge groups fails loudly here. */
@@ -92,11 +92,11 @@ describe('filterIncidents — id-keyed exclude-bypass (#1032)', () => {
     expect(filterIncidents([sso([CHATGPT_LOGIN, API_LOGIN])], cfg('chatgpt'))).toHaveLength(1)
   })
 
-  it('openai: KEEPS a Sora API incident tagged onto the Sora component it already badges', () => {
-    // Same defect class as Login: 'sora' is excluded by title while the Sora component sits in
+  it('openai: KEEPS a Files API incident tagged onto the Files component it already badges', () => {
+    // Same defect class as Login: 'file' is excluded by title while the Files component sits in
     // openai's statusComponentIds AND displayComponentIds, so it already moves the badge.
-    const sora = apiIncident('SORA1', 'Elevated Errors for Sora API', [SORA])
-    expect(filterIncidents([sora], cfg('openai')).map((i) => i.id)).toEqual(['SORA1'])
+    const files = apiIncident('FILES1', 'Elevated Errors for Files API', [FILES])
+    expect(filterIncidents([files], cfg('openai')).map((i) => i.id)).toEqual(['FILES1'])
   })
 
   it('#990 non-regression: the FedRAMP kitchen-sink advisory stays dropped on chatgpt + codex even when tagged', () => {
@@ -157,7 +157,7 @@ const OPENAI_API_MAIN = '01JMXBRMFE6N2NNT7DG6XZQ6PW' // openai.statusComponentId
 describe('incidentTagsOwnBadge — the shared id-axis primitive (#1032/#1038)', () => {
   it('true only when componentIds intersect the badge group of a canIdBypass service', () => {
     expect(incidentTagsOwnBadge(apiIncident('X', 't', [OPENAI_API_MAIN]), cfg('openai'))).toBe(true)
-    expect(incidentTagsOwnBadge(apiIncident('X', 't', [SORA]), cfg('openai'))).toBe(true)
+    expect(incidentTagsOwnBadge(apiIncident('X', 't', [FILES]), cfg('openai'))).toBe(true)
   })
 
   it('false when the tags name only a SIBLING product group (the #1032 collision)', () => {
@@ -233,7 +233,7 @@ describe('#1038 Part A blast-radius replay — the 2026-07-16 keyword-misses, cl
   // FIDELITY NOTES — the tags are PROXIES chosen to preserve the tested property, not literal copies:
   //   • SUBS: the real incident tags 'GPTs, Agent, ChatGPT Atlas, Conversations, …' (no 'Login'). We use
   //     [CHATGPT_LOGIN] as a stand-in ChatGPT-group id — what matters is ∩ openai badge = ∅, which it is.
-  //   • GPT4OMINI: the real tag set is all 12 API components; [OPENAI_API_MAIN, SORA] is a faithful subset
+  //   • GPT4OMINI: the real tag set is all 12 API components; [OPENAI_API_MAIN, FILES] is a faithful subset
   //     (non-empty intersection is the property, so 2 openai-badge ids suffice).
   //   • `apiIncident` hardcodes impact:'minor' for all four (the issue lists WEBSITE/MODELSEL as none).
   //     IMMATERIAL here — `filterIncidents` never reads `impact` — but do NOT extend this replay to
@@ -243,7 +243,7 @@ describe('#1038 Part A blast-radius replay — the 2026-07-16 keyword-misses, cl
     ['WEBSITE', 'OpenAI website and Help Center content may be unavailable', undefined, false, 'website content, not the API — untagged'],
     ['MODELSEL', 'Users are experiencing elevated errors when selecting models', undefined, false, 'untagged ⇒ unattributable, fail-closed'],
     ['SUBS', 'Small Number of Users Have Incorrectly Cancelled Subscription', [CHATGPT_LOGIN], false, 'all ChatGPT-group — a billing issue, ∩ openai badge empty'],
-    ['GPT4OMINI', 'gpt-4o-mini high error rate', [OPENAI_API_MAIN, SORA], true, 'tagged onto openai API-group components — the real miss'],
+    ['GPT4OMINI', 'gpt-4o-mini high error rate', [OPENAI_API_MAIN, FILES], true, 'tagged onto openai API-group components — the real miss'],
   ] as const
 
   it.each(cases)('%s → keep=%s (via %s)', (id, title, componentIds, shouldKeep) => {
