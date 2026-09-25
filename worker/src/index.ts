@@ -22,6 +22,7 @@ import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, pr
 import { markIncidentResolved, isMarkableOnStatusEdge } from './recovery-mark'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { checkUptimeLiveness } from './uptime-liveness'
+import { runMistralPublicApiProbe } from './mistral-public-api'
 import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
@@ -3117,6 +3118,8 @@ export default {
           console.warn('[cron] mistral dispatch failed:', err instanceof Error ? err.message : err)
         )
       )
+      // #1510 Slice 1 — instrumentation only; waitUntil so it never delays the cycle.
+      ctx.waitUntil(runMistralPublicApiProbe(env, scheduledNow.toISOString()))
 
       // Health check probing (Phase 2) — runs every cron cycle
       if (env.STATUS_CACHE) {
