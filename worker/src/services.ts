@@ -195,7 +195,7 @@ export const SERVICES: ServiceConfig[] = [
   // Discord New+Resolved pair apiece. holdShortIncidents (the mistral/langfuse mechanism, #792/#929)
   // holds on impact alone — real incident.io `impact` (not BetterStack's hardcoded null) still lets
   // `major`/`critical` through immediately, only non-major short blips get the ~9min hold.
-  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KTM9G06402NMVSVM7WGEQEK2', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMYTCCMV80Z2SSGE7YMRKX', '01KVEMZE3M15ZV46ZEB7X88H61', '01KXRHGRD149W1YP3WS59SWC2P', '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8', '01KZ7E1S4Z6PKCDYYNW358ATCX', '01M03TGQ7XTQ8HAKZ8MDQ44HH5'], componentsUrl: 'https://status.fireworks.ai/api/v2/components.json', displayAllComponents: true, holdShortIncidents: true },
+  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMZE3M15ZV46ZEB7X88H61', '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8', '01M03TGQ7XTQ8HAKZ8MDQ44HH5'], componentsUrl: 'https://status.fireworks.ai/api/v2/components.json', displayAllComponents: true, holdShortIncidents: true },
   // Cerebras Inference (#391, #992) — Atlassian Statuspage, single-tenant, per-model. Its model lineup
   // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
   // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
@@ -559,20 +559,13 @@ export const SERVICES: ServiceConfig[] = [
   // #1004 — JetBrains migrated this page Atlassian Statuspage (status.jetbrains.ai) → incident.io
   // (status.jetbrains.cloud) on 2026-07-09, then ~2026-07-15 REMOVED the standalone "Junie" component
   // the first migration adopted (→ #135 component-miss alert + null uptime/Score). Junie's status now
-  // spans the TWO components "JetBrains AI" (01KX3EN535A0SKSZK3S84949V1) and "JetBrains Central Console"
-  // (01KST6ZB60NWW1MAB3ECRMJFS0); its badge, uptime and breakdown all read BOTH (`statusComponentIds` ≡
-  // `displayComponentIds`).
-  // The provider tags incidents on either component (#1462: with the badge on Central Console alone, an
-  // ACTIVE incident tagged only JetBrains AI was dropped while the card read operational), so a scope of
-  // one goes blind to the other. `statusComponentId` stays Central Console as the primary — it drives
-  // the #135 miss-check and `calendarDays`; `incidentIoComponentId` (Console) gates the incident.io
-  // uptime arm and selects the provider-published figure beside `uptime30d`.
-  //   • incidentComponents scopes to BOTH names.
+  // reads "JetBrains AI" (01KX3EN535A0SKSZK3S84949V1) alone: `statusComponentId`, `statusComponentIds`,
+  // `displayComponentIds` and `incidentIoComponentId` all name it.
   // We EXCLUDE the upstream provider components (Anthropic/OpenAI/Gemini — their own cards; #683
   // neutrality) and Grazie (sibling NLP product; #683 drops Grazie-only incidents).
   // The #802 coverage gate keys on `addedAt`, not the provider window — junie is established (no
   // addedAt) → full coverage, high-confidence Score.
-  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.cloud', apiUrl: 'https://status.jetbrains.cloud/api/v2/summary.json', statusComponentId: '01KST6ZB60NWW1MAB3ECRMJFS0', statusComponentIds: ['01KST6ZB60NWW1MAB3ECRMJFS0', '01KX3EN535A0SKSZK3S84949V1'], incidentIoBaseUrl: 'https://status.jetbrains.cloud/incidents', incidentIoComponentId: '01KST6ZB60NWW1MAB3ECRMJFS0', displayComponentIds: ['01KST6ZB60NWW1MAB3ECRMJFS0', '01KX3EN535A0SKSZK3S84949V1'], incidentComponents: ['JetBrains AI', 'JetBrains Central Console'] },
+  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.cloud', apiUrl: 'https://status.jetbrains.cloud/api/v2/summary.json', statusComponentId: '01KX3EN535A0SKSZK3S84949V1', statusComponentIds: ['01KX3EN535A0SKSZK3S84949V1'], incidentIoBaseUrl: 'https://status.jetbrains.cloud/incidents', incidentIoComponentId: '01KX3EN535A0SKSZK3S84949V1', displayComponentIds: ['01KX3EN535A0SKSZK3S84949V1'], incidentComponents: ['JetBrains AI'] },
 ]
 
 /**

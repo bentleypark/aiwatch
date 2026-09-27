@@ -13,8 +13,8 @@ import type { TrackingStateBlob } from '../utils'
 // fallback: a FALSE `degraded` badge for a service JetBrains reported as fully operational.
 //
 // #1004 follow-on (~2026-07-15) — JetBrains then REMOVED the standalone "Junie" component the first
-// migration had adopted. Junie's badge, uptime and breakdown now span "JetBrains Central Console" and
-// "JetBrains AI" (#1462).
+// migration had adopted, and later "JetBrains Central Console" too (#1517). Junie's badge, uptime and
+// breakdown now read "JetBrains AI" alone.
 //
 // The tests below are deliberately of two kinds, because they catch different things:
 //   - the CONFIG assertions are a REVERT guard. They pin our own constants, so a future upstream
@@ -26,9 +26,8 @@ import type { TrackingStateBlob } from '../utils'
 //     being fixed, and invisible to any config pin.
 
 // #1004 follow-on — JetBrains REMOVED the standalone "Junie" component (DEAD_JUNIE_ID) ~2026-07-15,
-// a week after the first migration adopted it. Junie now scopes to the TWO components "JetBrains AI" and
-// "JetBrains Central Console". Grazie + the upstream provider components stay OUT (#683 neutrality).
-// Badge, uptime and breakdown read BOTH (#1462).
+// a week after the first migration adopted it, and later "JetBrains Central Console" (CONSOLE_ID, #1517).
+// Junie scopes to "JetBrains AI"; Grazie + the upstream provider components stay OUT (#683 neutrality).
 const AI_ID = '01KX3EN535A0SKSZK3S84949V1'         // "JetBrains AI"
 const CONSOLE_ID = '01KST6ZB60NWW1MAB3ECRMJFS0'    // "JetBrains Central Console"
 const GRAZIE_ID = '01KX3EN5354CVBD36GANTX2BC4'     // a sibling product; a Grazie-only incident must not touch Junie
@@ -44,19 +43,22 @@ describe('junie config (#1004 revert guard)', () => {
     expect(JSON.stringify(junie)).not.toContain('status.jetbrains.ai')
   })
 
-  it('badge, uptime and breakdown span Central Console and JetBrains AI (#1462)', () => {
-    expect(junie.statusComponentId).toBe(CONSOLE_ID)                       // primary: miss-check + calendarDays
-    expect(junie.statusComponentIds).toEqual([CONSOLE_ID, AI_ID])          // worst-of badge + uptime scope
-    expect(junie.displayComponentIds).toEqual([CONSOLE_ID, AI_ID])         // ≡ statusComponentIds
-    expect(junie.incidentComponents).toEqual(['JetBrains AI', 'JetBrains Central Console'])
-    // both the retired Atlassian hash AND the removed standalone-Junie ULID must be gone everywhere.
+  it('badge, uptime and breakdown read JetBrains AI alone (#1517)', () => {
+    expect(junie.statusComponentId).toBe(AI_ID)                            // primary: miss-check + calendarDays
+    expect(junie.statusComponentIds).toEqual([AI_ID])                      // worst-of badge + uptime scope
+    expect(junie.displayComponentIds).toEqual([AI_ID])                     // ≡ statusComponentIds
+    expect(junie.incidentComponents).toEqual(['JetBrains AI'])
+    // the retired Atlassian hash, the removed standalone-Junie ULID AND the removed Central Console
+    // ULID and name must be gone from every field.
     expect(JSON.stringify(junie)).not.toContain('9vbyyqkkjxl4')
     expect(JSON.stringify(junie)).not.toContain(DEAD_JUNIE_ID)
+    expect(JSON.stringify(junie)).not.toContain(CONSOLE_ID)
+    expect(JSON.stringify(junie)).not.toContain('Central Console')
   })
 
-  it('pins incidentIoComponentId to Central Console — the uptime gate and the published-figure source', () => {
+  it('pins incidentIoComponentId to JetBrains AI — the uptime gate and the published-figure source', () => {
     // incident.io keeps uptime in the page HTML's __next_f (component_uptimes), never in summary.json.
-    expect(junie.incidentIoComponentId).toBe(CONSOLE_ID)
+    expect(junie.incidentIoComponentId).toBe(AI_ID)
     expect(junie.incidentIoBaseUrl).toBe('https://status.jetbrains.cloud/incidents')
   })
 })
@@ -122,7 +124,6 @@ const pageHtml = (impacts: string[], uptimes: string[] = [uptimeEntry(AI_ID, '10
 
 const COMPONENTS = [
   { id: AI_ID, name: 'JetBrains AI' },
-  { id: CONSOLE_ID, name: 'JetBrains Central Console' },
   { id: GRAZIE_ID, name: 'Grazie' },
 ]
 
@@ -177,40 +178,35 @@ describe('attachIncidentIoComponentNames (#1004)', () => {
 // `incidentKeywords`, which junie does not set). #940's lesson: a transform must be proven through the
 // real filter, not asserted in isolation.
 describe('junie incidents survive filterIncidents on the incident.io feed (#1004 + #683)', () => {
-  // INC1 = JetBrains AI, INC3 = Central Console (both in Junie's scope); INC2 = Grazie (scoped out).
-  const html = pageHtml([impact('INC1', AI_ID), impact('INC2', GRAZIE_ID), impact('INC3', CONSOLE_ID)])
+  // INC1 = JetBrains AI (in Junie's scope); INC2 = Grazie (scoped out).
+  const html = pageHtml([impact('INC1', AI_ID), impact('INC2', GRAZIE_ID)])
   const fromApi = [
     apiIncident('INC1', 'JetBrains AI requests failing'),
     apiIncident('INC2', 'Raised error rates from NLP services'),
-    apiIncident('INC3', 'Central Console incident'),
   ]
 
   it('WITHOUT the tag rebuild, every incident is dropped (the bug)', () => {
     expect(filterIncidents(fromApi, junie)).toEqual([])
   })
 
-  it('WITH the tag rebuild, JetBrains AI + Central Console survive and the Grazie one is scoped out', () => {
+  it('WITH the tag rebuild, the JetBrains AI incident survives and the Grazie one is scoped out', () => {
     const tagged = attachIncidentIoComponentNames(fromApi, html, COMPONENTS)
     const filtered = filterIncidents(tagged, junie)
-    expect(filtered.map((i) => i.id).sort()).toEqual(['INC1', 'INC3'])
+    expect(filtered.map((i) => i.id).sort()).toEqual(['INC1'])
   })
 })
 
 // #1462 — with the badge on Central Console alone, an outage tagged only on JetBrains AI left the badge
 // `operational` and dropped the ACTIVE incident (`filterByComponentStatus` removes an unresolved incident
 // while the badge reads operational), so it only surfaced once resolved.
-describe('junie reads BOTH components for badge, incidents and uptime (#1462)', () => {
-  const summary = (aiStatus: string, consoleStatus = 'operational') => ({
+describe('junie reads JetBrains AI for badge, incidents and uptime (#1462, #1517)', () => {
+  const summary = (aiStatus: string) => ({
     status: { indicator: 'none' },
-    components: [
-      { id: CONSOLE_ID, name: 'JetBrains Central Console', status: consoleStatus },
-      { id: AI_ID, name: 'JetBrains AI', status: aiStatus },
-    ],
+    components: [{ id: AI_ID, name: 'JetBrains AI', status: aiStatus }],
   })
 
   it('a JetBrains-AI-only outage moves the badge off operational', () => {
     expect(resolveSvcStatus(junie, summary('partial_outage'), [])).not.toBe('operational')
-    expect(resolveSvcStatus(junie, summary('operational', 'partial_outage'), [])).not.toBe('operational')
     expect(resolveSvcStatus(junie, summary('operational'), [])).toBe('operational')
   })
 
@@ -220,12 +216,9 @@ describe('junie reads BOTH components for badge, incidents and uptime (#1462)', 
     expect(filterByComponentStatus([active], status, junie, COMPONENTS)).toHaveLength(1)
   })
 
-  it('uptime is a worst-of over both: an outage on JetBrains AI lowers it, over the full 30d window', () => {
+  it('uptime: an outage on JetBrains AI lowers it, over the full 30d window', () => {
     const now = Date.parse('2026-07-15T00:00:00Z')
-    const html = pageHtml([impact('INC1', AI_ID)], [
-      uptimeEntry(CONSOLE_ID, '100.00', '2026-05-29T00:00:00Z'),
-      uptimeEntry(AI_ID, '100.00', '2025-02-12T00:00:00Z'),
-    ])
+    const html = pageHtml([impact('INC1', AI_ID)], [uptimeEntry(AI_ID, '100.00', '2025-02-12T00:00:00Z')])
     const out = computeIncidentIoUptime(html, junie.statusComponentIds!, now)
     expect(out).toMatchObject({ days: 30, missing: [] })
     expect(out!.pct).toBeLessThan(100)
