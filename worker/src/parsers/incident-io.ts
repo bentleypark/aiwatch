@@ -2,7 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import type { StatuspageResponse } from './statuspage'
-import { fetchWithTimeout, formatDuration, isTimeOrderImpossible } from '../utils'
+import { fetchInSlot, formatDuration, isTimeOrderImpossible, type ConnectionLimiter } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
@@ -954,7 +954,7 @@ export function buildTextCache(inc: Incident): IncidentTextCache {
 // pageUrls: incidentId → direct detail page URL (from Atlassian API shortlink).
 // Constructing URLs from inc.id is unreliable because incident.io Atlassian-compat IDs
 // may differ from the native ULID used in detail page URLs.
-export async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>, kv?: KVNamespace): Promise<Incident[]> {
+export async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>, kv: KVNamespace | undefined, limiter: ConnectionLimiter | undefined): Promise<Incident[]> {
   // Phase 1: Apply cached text from KV for all incidents that have null-text entries.
   // KV reads do not count against the per-invocation subrequest cap, so we read for all candidates freely.
   let workingIncidents = incidents
@@ -989,7 +989,7 @@ export async function enrichIncidentIoText(incidents: Incident[], baseUrl: strin
   await Promise.all(toEnrich.map(async (inc) => {
     try {
       const url = pageUrls.get(inc.id) ?? `${baseUrl}/${inc.id}`
-      const res = await fetchWithTimeout(url, 5000)
+      const res = await fetchInSlot(url, 5000, undefined, limiter)
       if (!res.ok) {
         console.warn(`[enrichIncidentIoText] ${inc.id} returned HTTP ${res.status}`)
         res.body?.cancel()
@@ -1057,8 +1057,8 @@ export async function enrichIncidentIoText(incidents: Incident[], baseUrl: strin
       enriched.set(inc.id, enrichedIncident)
 
       // Phase 3: Persist scraped text to KV. Must be awaited — unawaited KV writes are cancelled
-      // when the Worker terminates after the response. Latency is negligible (~10-50ms) since
-      // we already spent up to 5s on HTTP scraping. A single write failure is non-critical
+      // when the Worker terminates after the response. Latency is negligible (~10-50ms).
+      // A single write failure is non-critical
       // (next invocation re-scrapes), but persistent failures exhaust the enrichment budget.
       // Resolved: 90-day TTL (rarely changes). Active: 30-min TTL (may receive new updates).
       if (kv) {

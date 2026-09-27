@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
-import { fetchWithTimeout, formatDuration, markZeroLengthResolvedIncidentsUnknown, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
+import { fetchInSlot, createConnectionLimiter, type ConnectionLimiter, formatDuration, markZeroLengthResolvedIncidentsUnknown, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
@@ -894,8 +894,8 @@ export function pickBreakdownComponents(
  * a failed read. That keeps `ok` meaning "we have this page's real component list": treated as success
  * it would suppress `fetchService`'s re-fetch, leaving the badge on the narrower list.
  */
-export async function fetchPageComponents(componentsUrl: string): Promise<PageComponentsFetch> {
-  const res = await fetchWithTimeout(componentsUrl, 8000).catch((err) => {
+export async function fetchPageComponents(componentsUrl: string, limiter: ConnectionLimiter | undefined): Promise<PageComponentsFetch> {
+  const res = await fetchInSlot(componentsUrl, 8000, undefined, limiter).catch((err) => {
     console.warn(`[prefetch] components.json fetch failed for ${componentsUrl}:`, err instanceof Error ? err.message : err)
     return null
   })
@@ -1737,7 +1737,7 @@ function statusSourceTransportErrorKind(error: unknown): StatusSourceReadFailure
 }
 
 // Retry once on failure to reduce false-positive 'down' from transient network issues
-// Retry uses shorter timeout to keep total wall-clock time under ~12s per service
+// The retry uses a shorter timeout (3 s).
 //
 // `onRetry` fires immediately before the second attempt (#1211), so a caller can restart whatever
 // clock it publishes. Only the Azure RSS leg passes one; the Atlassian callers below time both legs
@@ -1748,11 +1748,11 @@ function statusSourceTransportErrorKind(error: unknown): StatusSourceReadFailure
 // the attempt reasons above it — which is the half that says whether the source stalled or refused.
 async function fetchWithRetry(
   url: string,
-  { timeoutMs = 8000, onRetry, svcId }: { timeoutMs?: number; onRetry?: () => void; svcId?: string } = {},
+  { timeoutMs = 8000, onRetry, svcId, limiter }: { timeoutMs?: number; onRetry?: () => void; svcId?: string; limiter: ConnectionLimiter | undefined },
 ): Promise<Response> {
   const who = svcId ? `${svcId} ${url}` : url
   try {
-    return await fetchWithTimeout(url, timeoutMs)
+    return await fetchInSlot(url, timeoutMs, undefined, limiter)
   } catch (err) {
     // The reason is logged, not just the fact: "aborted at the timeout" (a stall) and "connection
     // reset in 200ms" (a block) call for different fixes, and attempt 1's reason is otherwise lost.
@@ -1760,7 +1760,7 @@ async function fetchWithRetry(
     await new Promise((r) => setTimeout(r, 1000))
     onRetry?.()
     try {
-      return await fetchWithTimeout(url, Math.min(timeoutMs, 3000))
+      return await fetchInSlot(url, Math.min(timeoutMs, 3000), undefined, limiter)
     } catch (retryErr) {
       console.error(`[fetchWithRetry] retry also failed for ${who}:`, retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : retryErr)
       throw retryErr
@@ -2118,8 +2118,8 @@ export function withUnreadFeedFlag<T extends { sourceUnknown?: boolean; incident
 // silently hand every call its own throwaway `{}`, so a streak could never persist and the fetch-fail
 // degrade path + #500 alert would quietly stop firing with no type error (the #970 "optional param
 // re-empties the derived set" shape). Callers with nothing to track pass `{}` explicitly.
-export async function fetchService(config: ServiceConfig, prefetched: PrefetchedData | undefined, kv: KVNamespace | undefined, trackingStore: TrackingStateBlob): Promise<ServiceStatus> {
-  const svc = await fetchServiceUntagged(config, prefetched, kv, trackingStore)
+export async function fetchService(config: ServiceConfig, prefetched: PrefetchedData | undefined, kv: KVNamespace | undefined, trackingStore: TrackingStateBlob, limiter?: ConnectionLimiter): Promise<ServiceStatus> {
+  const svc = await fetchServiceUntagged(config, prefetched, kv, trackingStore, limiter)
   // #1389 — record whether official uptime survived THIS cycle, at this choke point for the same
   // reason the tagging is here: what the #957 detector needs to know is whether the READER got a
   // number, not which of the six uptime sources was asked. Placed here, a vendor migration and a
@@ -2151,7 +2151,7 @@ export async function fetchService(config: ServiceConfig, prefetched: Prefetched
 // utils.ts's tracking-state block); `fetchAllServices` reads it once and writes it back once, so
 // every call site below is a synchronous in-memory op except `trackFetchFailure`'s own rare daily-
 // counter write, which still needs `kv`.
-async function fetchServiceUntagged(config: ServiceConfig, prefetched: PrefetchedData | undefined, kv: KVNamespace | undefined, trackingStore: TrackingStateBlob): Promise<ServiceStatus> {
+async function fetchServiceUntagged(config: ServiceConfig, prefetched: PrefetchedData | undefined, kv: KVNamespace | undefined, trackingStore: TrackingStateBlob, limiter: ConnectionLimiter | undefined): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
   // #1089 — set when the Instatus incident parse failed STRUCTURALLY (payload shape moved), as
@@ -2215,7 +2215,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
 
     if (config.cloudflareStatusComponentIds) {
       const start = Date.now()
-      const summaryRes = await fetchWithRetry('https://www.cloudflarestatus.com/api/v3/summary', { svcId: config.id })
+      const summaryRes = await fetchWithRetry('https://www.cloudflarestatus.com/api/v3/summary', { svcId: config.id, limiter })
       const latency = Date.now() - start
       if (!summaryRes.ok) {
         console.error(`[fetchService] ${config.id} Cloudflare Status summary returned HTTP ${summaryRes.status}`)
@@ -2247,7 +2247,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
     if (config.datadogStatusUrl) {
       const start = Date.now()
       const configUrl = `${config.datadogStatusUrl.replace(/\/$/, '')}/config.json`
-      const configRes = await fetchWithRetry(configUrl, { svcId: config.id })
+      const configRes = await fetchWithRetry(configUrl, { svcId: config.id, limiter })
       const latency = Date.now() - start
       if (!configRes.ok) {
         console.error(`[fetchService] ${config.id} Datadog config.json returned HTTP ${configRes.status}`)
@@ -2327,11 +2327,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         const baseUrl = config.apiUrl.replace('/summary.json', '')
         const start = Date.now()
         const [summaryRes, incidentsRes] = await Promise.all([
-          fetchWithRetry(config.apiUrl, { svcId: config.id }).catch(async (err) => {
+          fetchWithRetry(config.apiUrl, { svcId: config.id, limiter }).catch(async (err) => {
             await recordParseFailure(kv, Date.now(), config.id, 'statuspage-fetch-unreadable')
             throw err
           }),
-          fetchWithRetry(`${baseUrl}/incidents.json`, { svcId: config.id }).catch((err) => {
+          fetchWithRetry(`${baseUrl}/incidents.json`, { svcId: config.id, limiter }).catch((err) => {
             console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message)
             parseErrors++
             incidentsLegFailure = 'statuspage-incidents-unreadable'
@@ -2443,7 +2443,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       if (config.incidentIoGlobalPage) {
         if (!uptimeHtml) {
           try {
-            const htmlRes = await fetchWithTimeout(config.statusUrl, 5000)
+            const htmlRes = await fetchInSlot(config.statusUrl, 5000, undefined, limiter)
             if (htmlRes.ok) uptimeHtml = await htmlRes.text()
             else { console.warn(`[fetchService] ${config.id} global-page HTML returned HTTP ${htmlRes.status}`); htmlRes.body?.cancel() }
           } catch (err) { console.warn(`[fetchService] ${config.id} global-page HTML fetch failed:`, err instanceof Error ? err.message : err) }
@@ -2509,7 +2509,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         try {
           // 3s, not the prefetch's 5s: the prefetch already waited on this same host this cycle, so a
           // serial 5+5s would eat the batch's budget on exactly the page that's already slow.
-          const htmlRes = await fetchWithTimeout(config.statusUrl, 3000)
+          const htmlRes = await fetchInSlot(config.statusUrl, 3000, undefined, limiter)
           if (htmlRes.ok) uptimeHtml = await htmlRes.text()
           else {
             // #1032 — a non-OK response logged NOTHING before, and the canIdBypass services depend on
@@ -2604,7 +2604,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         if (reusable?.ok) {
           breakdownComponents = pickBreakdownComponents(summaryData.components, reusable.components)
         } else {
-          const cRes = await fetchWithTimeout(config.componentsUrl, 8000).catch(() => null)
+          const cRes = await fetchInSlot(config.componentsUrl, 8000, undefined, limiter).catch(() => null)
           if (cRes?.ok) {
             try {
               const cJson = await cRes.json() as { components?: unknown }
@@ -2638,7 +2638,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         filtered = includeUntaggedIncidents(filtered, incidents, config, breakdownComponents ?? [], summaryData.status?.indicator ?? 'none')
       }
       if (config.incidentIoBaseUrl) {
-        filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
+        filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv, limiter)
       }
 
       // Compute daily impact for calendar from uptimeData HTML (Statuspage services only).
@@ -2902,9 +2902,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       if (config.awsHealthApi) {
         const start = Date.now()
         let transportError: unknown
-        const res = await fetchWithTimeout(config.awsHealthApi.url, 8000, {
+        const res = await fetchInSlot(config.awsHealthApi.url, 8000, {
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIWatch/1.0; +https://ai-watch.dev)' },
-        }).catch((err) => {
+        }, limiter).catch((err) => {
           transportError = err
           return null
         })
@@ -2996,15 +2996,12 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // #1211 — retried, on a 4s first attempt rather than the 8s default. This leg intermittently
         // aborts on its own timeout, and three such polls cross `trackFetchFailure`'s threshold into a
         // `degraded` that describes our connection rather than Azure. Nothing else catches it: one
-        // source, no probe target, no cross-validation phase it qualifies for. 4s + the helper's 1s
-        // backoff + its 3s retry cap keeps the worst case at the 8s this leg already cost. The budget
-        // derivation is in docs/reference/status-determination.md — not repeated here, since it is not
-        // checkable from this file.
+        // source, no probe target, no cross-validation phase it qualifies for.
         //
         // `start` is reset before the retry so the published latency is the served response's own RTT
         // rather than the abandoned attempt plus the backoff.
         let start = Date.now()
-        const rssRes = await fetchWithRetry(config.azureRssUrl, { timeoutMs: 4000, onRetry: () => { start = Date.now() }, svcId: config.id }).catch((err) => {
+        const rssRes = await fetchWithRetry(config.azureRssUrl, { timeoutMs: 4000, onRetry: () => { start = Date.now() }, svcId: config.id, limiter }).catch((err) => {
           console.warn(`[fetchService] ${config.id} Azure RSS failed:`, err instanceof Error ? err.message : err)
           return null
         })
@@ -3067,9 +3064,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       let scrapeTransportError: unknown
       let betterStackTransportError: unknown
       const [res, scrapeRes, betterStackRes, aistudioRes] = await Promise.all([
-        fetchWithTimeout(config.statusUrl),
+        fetchInSlot(config.statusUrl, undefined, undefined, limiter),
         scrapeUrl
-          ? fetchWithTimeout(scrapeUrl).catch((err) => {
+          ? fetchInSlot(scrapeUrl, undefined, undefined, limiter).catch((err) => {
               scrapeTransportError = err
               console.warn(`[fetchService] ${config.id} scrape failed:`, err instanceof Error ? err.message : err)
               parseErrors++
@@ -3077,7 +3074,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
             })
           : Promise.resolve(null),
         config.betterStackUrl
-          ? fetchWithTimeout(`${config.betterStackUrl}/index.json`, 5000).catch((err) => {
+          ? fetchInSlot(`${config.betterStackUrl}/index.json`, 5000, undefined, limiter).catch((err) => {
               betterStackTransportError = err
               console.warn(`[fetchService] ${config.id} BetterStack uptime fetch failed:`, err instanceof Error ? err.message : err)
               parseErrors++
@@ -3088,11 +3085,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // Failure is silent — never break the primary gcloud Vertex feed if Google
         // rotates the public API key or tightens referer enforcement.
         config.aistudioStatus
-          ? fetchWithTimeout(AISTUDIO_ENDPOINT, 5000, {
+          ? fetchInSlot(AISTUDIO_ENDPOINT, 5000, {
               method: 'POST',
               headers: AISTUDIO_HEADERS,
               body: AISTUDIO_BODY,
-            }).catch((err) => {
+            }, limiter).catch((err) => {
               console.warn(`[fetchService] ${config.id} aistudio fetch failed:`, err instanceof Error ? err.message : err)
               return null
             })
@@ -4052,6 +4049,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // separate KV reads PER SERVICE.
   const trackingBefore = await readTrackingState(kv)
   const trackingStore = JSON.parse(JSON.stringify(trackingBefore)) as typeof trackingBefore
+  const limiter = createConnectionLimiter()
   // #1224 — drop entries for ids no longer in SERVICES. Nothing else ever touches a retired/renamed
   // service's entry again (no track/reset call names it), so without this an orphaned `failSince`
   // would page the #500 persistent-failure alert once every 24h forever. Pruned on the WORKING copy
@@ -4079,12 +4077,12 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       // must not inflate. `fetchPageComponents` never rejects, so this can't produce an unhandled
       // rejection on the early-return path below.
       const componentsUrl = SERVICES.find((s) => s.apiUrl === apiUrl && s.componentsUrl)?.componentsUrl
-      const componentsFetch = componentsUrl ? fetchPageComponents(componentsUrl) : Promise.resolve(undefined)
+      const componentsFetch = componentsUrl ? fetchPageComponents(componentsUrl, limiter) : Promise.resolve(undefined)
       // Use fetchWithTimeout (no retry) — prefetch failure falls through to direct fetch
       // in fetchService, so retrying here would waste 2 subrequests before the fallback.
       const [summaryRes, incidentsRes] = await Promise.all([
-        fetchWithTimeout(apiUrl, 8000),
-        fetchWithTimeout(`${baseUrl}/incidents.json`, 8000).catch((err) => {
+        fetchInSlot(apiUrl, 8000, undefined, limiter),
+        fetchInSlot(`${baseUrl}/incidents.json`, 8000, undefined, limiter).catch((err) => {
           console.warn(`[prefetch] incidents.json failed for ${baseUrl}:`, err.message)
           return null
         }),
@@ -4138,7 +4136,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       let uptimeHtml: string | undefined
       if (needsHtml) {
         try {
-          const htmlRes = await fetchWithTimeout(statusUrl, 5000)
+          const htmlRes = await fetchInSlot(statusUrl, 5000, undefined, limiter)
           if (htmlRes.ok) uptimeHtml = await htmlRes.text()
           else htmlRes.body?.cancel()
         } catch (err) { console.warn(`[prefetch] HTML fetch failed for ${statusUrl}:`, err instanceof Error ? err.message : err) }
@@ -4157,7 +4155,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       // costs no request at all.
       const scope = uptimeScopeForPage(apiUrl)
       const uptimeTimelines = (uptimeHtml && scope.length > 0 && hasLazyUptimeShowcase(uptimeHtml))
-        ? await fetchUptimeShowcase(statusUrl, scope, 3000)
+        ? await fetchUptimeShowcase(statusUrl, scope, 3000, limiter)
         : undefined
       prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml, uptimeTimelines: uptimeTimelines ?? undefined, componentsFetch: await componentsFetch })
     } catch (err) {
@@ -4181,7 +4179,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     for (let i = 0; i < SERVICES.length; i += BATCH_SIZE) {
       const batch = SERVICES.slice(i, i + BATCH_SIZE)
       const batchResults = await Promise.allSettled(
-        batch.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv, trackingStore))
+        batch.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv, trackingStore, limiter))
       )
       results.push(...batchResults)
     }
