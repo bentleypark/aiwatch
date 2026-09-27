@@ -342,6 +342,26 @@ export function parseUptimeShowcase(payload: unknown): UptimeTimelines | null {
   return timelines as UptimeTimelines
 }
 
+/**
+ * #1518 — every component `summary.json`/`componentsUrl` carries, as a roster-audit entry:
+ * `dataAvailableSince` is the component's own `created_at`, verified present on every component on every
+ * page checked live 2026-09-27 (bfl, runway, cursor).
+ *
+ * NOT derived from `/uptime_showcase`'s day-by-day timelines — that endpoint pads every requested
+ * component to a FIXED 90-day window regardless of the component's real age (verified live: a component
+ * created 2026-08-17 still returns a chart starting 2026-06-30, with the pre-creation days carrying
+ * `outages: {}` — a defined-but-empty object indistinguishable from a genuinely clean real day). A
+ * component's age is therefore not decidable from its timeline at all; `created_at` is the actual answer
+ * the page publishes, and reading it needs no request beyond the ONE `componentsUrl`/`apiUrl` fetch this
+ * roster audit already makes for names.
+ */
+export function atlassianRosterEntries(components: Array<{ id: string; created_at?: unknown }>): { id: string; dataAvailableSince: string | null }[] {
+  return components.map((c) => ({
+    id: c.id,
+    dataAvailableSince: typeof c.created_at === 'string' && !Number.isNaN(Date.parse(c.created_at)) ? c.created_at : null,
+  }))
+}
+
 function computeUptimeDataSingle(data: UptimeTimelines | null, componentId: string, windowDays = 30, warnOnMiss = false, nowMs: number = Date.now()): UptimeDataResult {
   const result: UptimeDataResult = { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null, todayWeightedOutageSec: null }
   if (!data) return result

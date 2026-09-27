@@ -444,6 +444,25 @@ export interface ServiceConfig {
    *  group figure (APIs 99.97%), not the member component's (API 100.00%) — so `uptimeReported` reads it
    *  and the detail page can put the provider's own number beside ours. Omit when the page has no group. */
   incidentIoGroupId?: string
+  // #1518 — roster-audit exclusions: component ids on this service's page (`statusUrl`) that the (b)
+  // aged-in-out-of-scope check must NOT report, because they are out of scope on purpose, for a reason
+  // specific to that service — see the comment directly above its config in this file for what each one
+  // is. Spans both roster-audited platforms (incident.io, Atlassian) — the check itself is
+  // platform-agnostic; only its age SOURCE differs per platform (Rootly/Mistral is NOT audited: no
+  // per-component age signal survived verification, see discord-alert-paths.md). Unlike the
+  // Fireworks/turbopuffer age-in queue, these never age into scope regardless of age. A new exclusion is
+  // therefore a reviewed diff here, not a silent audit suppression.
+  rosterAuditExclude?: string[]
+  // #1518 — set when this service's uptime scope is PERMANENTLY pinned to one (or a few) anchor
+  // component(s) on a page whose OWN roster is structurally unbounded — a per-model catalog
+  // (`displayAllComponents`: cohere/groq's incident.io pages, bfl's Atlassian one) rather than a curated
+  // allowlist meant to grow (fireworks/turbopuffer). Skips the (b) aged-in-out-of-scope check for the
+  // WHOLE page: `rosterAuditExclude` cannot express this — the excluded set would need a new entry for
+  // every model the page could ever add, exactly the hand-maintained-roster trap #992's
+  // `displayAllComponents` already avoids for the breakdown. On the incident.io branch, (a)
+  // young-in-scope is unaffected — it only ever reads the one/few anchor id(s); Atlassian never runs
+  // (a) at all, regardless of this flag.
+  rosterAuditFixedScope?: boolean
   betterStackUrl?: string
   // #677 — AWS Health Dashboard public events JSON API (start+end+typeCode per incident). Replaced
   // the legacy per-region RSS for Bedrock: real start/end timestamps → correct duration, one event

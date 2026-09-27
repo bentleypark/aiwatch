@@ -173,6 +173,35 @@ export function parseIncidentIoDataAvailableSince(html: string, componentId: str
   return null
 }
 
+/** Every `component_uptimes` entry on the page: id + `data_available_since` (#1518 roster audit — a
+ *  multi-id generalization of `parseIncidentIoDataAvailableSince` above, which resolves one KNOWN id at
+ *  a time and so cannot discover an id AIWatch does not already ask for). Group entries
+ *  (`component_id: "$undefined"`, a page-grouped aggregate) carry no per-component id and are skipped.
+ *  `dataAvailableSince` is `null` for the same reasons the single-id reader returns null: absent, empty,
+ *  or unparseable. Deduplicated by id — a page can repeat an entry across RSC chunks; the FIRST chunk
+ *  to name an id wins, whether or not it resolves, matching the single-id reader's own first-match
+ *  behavior (it also returns on the first chunk it finds the id in, null included). */
+export function parseIncidentIoAllComponentUptimes(html: string): { id: string; dataAvailableSince: string | null }[] {
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  const byId = new Map<string, string | null>()
+  for (const chunk of chunks) {
+    if (!chunk.includes('component_uptimes')) continue
+    const section = chunk.substring(chunk.indexOf('component_uptimes'))
+    // Same bounded gap as parseIncidentIoDataAvailableSince, made global across every entry in the
+    // section instead of anchored to one id.
+    const re = /\\"component_id\\":\\"([^\\"]+)\\"[\s\S]{0,200}?\\"data_available_since\\":\\"([^\\"]*)\\"/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(section))) {
+      const id = m[1]
+      if (id === '$undefined') continue
+      if (byId.has(id)) continue // first chunk to resolve this id wins
+      const raw = m[2]
+      byId.set(id, raw === '$undefined' || raw === '' || Number.isNaN(Date.parse(raw)) ? null : raw)
+    }
+  }
+  return [...byId.entries()].map(([id, dataAvailableSince]) => ({ id, dataAvailableSince }))
+}
+
 /** Uptime for ONE component over the trailing window, from its impact records.
  *  null when the page doesn't track the component (no `data_available_since`) — absence of impacts is
  *  NOT evidence of absence of downtime, so we withhold rather than invent a 100%.

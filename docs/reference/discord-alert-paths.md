@@ -67,6 +67,105 @@ The third member of the component-drift family, and the one the other two could 
 
 Pinned by: `worker/src/__tests__/incident-io-component-partial-resolve.test.ts` drives the real `fetchService` wiring, including a dual-configured-service case built on the real shape (`incidentIoComponentId` a scalar, matching every live dual-configured service); `computeIncidentIoUptime`'s own `missing`-reporting is pinned in `worker/src/parsers/__tests__/incident-io.test.ts` and `worker/src/__tests__/turbopuffer-uptime.test.ts`; `formatPartialResolveAlert`'s scope-selected body and `isBadgePartialGroup`/`isUptimePartialGroup`'s roster boundary are pinned in `partial-component-resolve.test.ts` against synthetic configs.
 
+### Roster audit (#1518) — operator ops alert
+
+The fourth member of the component-drift family, and the one none of the other three could see: a
+config drift that isn't a mismatch, a partial resolve, or a new component — it's the SAME id list,
+just wrong for its age. Two checks, both against the page's live `component_uptimes`, not a recorded
+snapshot:
+
+- **Young in scope** (#1266's original gap) — a configured uptime-scope id whose `data_available_since`
+  is under 30 days. `computeIncidentIoUptime` pairs its worst percentage with the WINDOW of the
+  component that produced it, so one young id in an all-100% scope shortens the whole page's disclosed
+  `uptimeWindowDays` — silently, because a short window is not itself an error.
+- **Aged in, out of scope** — a page component that has now cleared 30 days and was never added. It
+  contributes nothing to the uptime worst-of, so an outage on it is invisible in the reported
+  percentage. #992's new-component alert cannot catch this: it fires once, on first sight, regardless of
+  age, and for a `displayAllComponents` page says "Action: none" — neither is "has this now aged in".
+
+**A removed id is neither check's job.** It is absent from `component_uptimes` entirely, so it never
+reaches either list — the #135 component-mismatch and #957 partial-resolve alerts above already own
+that case, and duplicating it here would double the notification and let two checks disagree.
+
+**Extended to Atlassian — (b) only.** The same aged-in-out-of-scope check runs against the 5 Atlassian
+services with a multi-id `statusComponentIds` (bfl, runway, cursor, copilot, windsurf). (a) is not
+implemented on this branch. Datadog is excluded on principle, not by oversight: its scope follows the
+PROVIDER'S OWN component group rather than a hand-maintained id list, so there is no roster to drift
+(`datadog.ts`'s own docblock: "this path has none of the machinery... a member list... fails in BOTH
+directions").
+
+`atlassianRosterAuditServices` (services.ts) is the `rosterAuditPages` counterpart for this branch —
+every service with `statusComponentIds.length > 1` and no `incidentIoComponentId` (the two branches
+never compute uptime for the same service). Each of today's 5 is single-tenant on its own page, so no
+cross-service union is needed. The reader (`atlassianRosterEntries`, statuspage.ts) reads each
+component's `created_at` directly off the SAME `componentsUrl`/`apiUrl` payload already fetched for
+names — ONE fetch per service, no second request. It does NOT read `/uptime_showcase`'s day-by-day
+timeline: that endpoint pads every requested component to a FIXED 90-day window regardless of real age
+(verified live: a component created 2026-08-17 still returned a chart starting 2026-06-30, with the
+pre-creation days carrying `outages: {}` — a defined-but-empty object indistinguishable from a
+genuinely clean real day), so a component's age was not decidable from it at all — this was a Critical
+finding on an earlier round of this diff, fixed by dropping the showcase reader entirely rather than
+patching it. `rosterAuditFixedScope` (bfl only, of today's 5) is the same opt-out as cohere/groq below —
+its uptime anchor never expands and its `displayAllComponents` catalog is unbounded, so the check is
+skipped for the whole service rather than demanding a `rosterAuditExclude` entry per FLUX model shipped.
+
+**NOT extended to Rootly (Mistral).** Tried the chart's `data-…-since-value` as an age source; verified
+live (headed browser) that it is the CHART'S shared window start, identical across all 15 components on
+the page — not a per-component creation date, so unusable. `barCount` (day bars the chart rendered,
+`computeRootlyUptime`'s own existing short-window signal) was not independently verified either way for
+this purpose. This check does not run for Mistral until a proven per-component signal is found — a real,
+accepted gap, not a silent one.
+
+Each `rosterAuditExclude` entry is out of scope on purpose, for a reason specific to that service; the
+reasoning sits on a comment directly above the relevant service in `services.ts`, not enumerated here.
+`grep -n "rosterAuditExclude:"
+worker/src/services.ts` is the current, authoritative list of which services set it — an enumerated
+count here would need editing every time a service's exclude entries change, and the LIST itself is what
+kept going stale in earlier drafts of this section (once missing a service entirely, more than once
+miscounting one), not any single sentence in it.
+- **`rosterAuditFixedScope`, not a list** — cohere, groq and bfl's per-model catalogs, structurally
+  unbounded (`displayAllComponents`, the same reason #992's own detector avoids a hand-maintained list
+  for these pages), so no finite exclude list would stay correct; see the flag's own docblock in
+  `types.ts`.
+
+**Scope and grouping.** `rosterAuditPages` groups every service with an `incidentIoComponentId` by the
+status page it shares (`statusUrl`), then unions each co-located service's uptime scope
+(`statusComponentIds ?? incidentIoComponentId` — the same expression `fetchService` computes uptime
+over) and its `rosterAuditExclude`. Page-level, not service-level, because a component in codex's scope
+must not read as "out of scope" when auditing openai on the shared `status.openai.com` page.
+`rosterAuditExclude` names a component that is out of scope ON PURPOSE, at any age, for a reason
+specific to that service (see its own comment in `services.ts`). Verified live 2026-09-27: without it,
+junie's page reports all nine siblings and openai's page reports FedRAMP + Ads API on the very first run.
+
+**Dedup shrinks, unlike #992's `component-seen`.** `nextRosterFindingSeen` persists the CURRENT finding
+set, not a durable union — a finding is a live fact about today's config and today's page, and it can
+legitimately resolve (an id gets added to scope, ages past the window, or gains an exclusion) and later
+RECUR (a later config edit reverts it). `component-seen`'s "once per component, ever" semantics would
+silently swallow that regression. So there is no separate `alerted:` dedup key here: the seen-set diff
+itself is the dedup, stored in `roster-audit-seen:{statusUrl}:young` / `:agedin`, written after a
+confirmed alert send OR when the set's size changed on a cycle with nothing new to alert (a finding
+cleared) — an unchanged set writes nothing. A cycle whose fetch succeeds but yields zero entries is
+treated as unreadable, not as a clean page, and never touches this key — a real incident.io page always
+carries `component_uptimes`, so an empty read is the same "payload unusable" case a non-200 response is,
+and writing `[]` from it would re-alert every standing finding in full once parsing recovers.
+
+**Cadence and cost.** Daily (UTC 06:00-06:04), not every cron tick — a roster drift does not need
+5-minute detection. Each incident.io page costs two fetches (its `statusUrl` RSC page for component ages,
+plus `apiUrl` summary.json for names — cosmetic only: a name lookup failure falls back to the bare id,
+never to an empty alert). Each Atlassian service costs ONE — the same `componentsUrl`/`apiUrl` fetch it
+would make anyway for names, since `created_at` lives on that same payload. `formatRosterAuditAlert`
+renders only the ids that are NEW this cycle, split into the two sections above (empty for every
+Atlassian send, which reports (b) only); the dedup write happens only after a confirmed send, matching
+#500/#992/#957.
+
+Pure `auditYoungIdsInScope` / `auditAgedInOutOfScope` / `nextRosterFindingSeen` / `rosterAgedInFindings`
+unit- and mutation-tested in `roster-audit.test.ts` / `roster-agedin-findings.test.ts`; the incident.io
+multi-id page parser (`parseIncidentIoAllComponentUptimes`) in `incident-io-all-component-uptimes.test.ts`;
+`rosterAuditPages`' grouping/union (real config + synthetic shared-page cases) in
+`roster-audit-pages.test.ts`; the Atlassian `created_at` reader (`atlassianRosterEntries`) in
+`atlassian-roster-entries.test.ts`; its service-selection counterpart (`atlassianRosterAuditServices`,
+incl. the real bfl `rosterAuditFixedScope` pin) in `atlassian-roster-audit-services.test.ts`.
+
 ### Uptime stopped publishing (#1389/#957) — operator ops alert
 
 Fires when a service that **was** publishing an uptime figure has published none for **6h+**. The point: #500 fires on 1h+ of failed reads, #689 on a 4xx, #135 on an unresolvable component id, and none of them on this — on 2026-09-10 Atlassian moved its uptime payload to a separate endpoint, leaving 14 pages answering `200` with a full component list while the NUMBER vanished. Nothing said so for a day.
