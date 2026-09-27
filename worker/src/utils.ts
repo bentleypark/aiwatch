@@ -1216,18 +1216,74 @@ export function isNonReliabilityAdvisory(text: string): boolean {
   return !!text && NON_RELIABILITY_RE.test(text) && !OUTAGE_SIGNAL_RE.test(text)
 }
 
+/** #1489 — Workers let one invocation hold 6 connections waiting for response headers and queue the
+ *  rest. Create one per invocation: isolate-level state is shared by concurrent invocations. The
+ *  deadline is measured from creation: nothing starts after it, and a queued fetch waits for a slot
+ *  until it, not for its own timeout. */
+export const WORKER_CONNECTION_SLOTS = 6
+export const STATUS_RUN_DEADLINE_MS = 90_000
+
+export interface ConnectionLimiter {
+  run<T>(task: () => Promise<T>): Promise<T>
+}
+
+export function createConnectionLimiter(slots = WORKER_CONNECTION_SLOTS, deadlineMs = STATUS_RUN_DEADLINE_MS): ConnectionLimiter {
+  const deadlineAt = Date.now() + deadlineMs
+  let active = 0
+  const waiting: Array<() => void> = []
+  return {
+    async run<T>(task: () => Promise<T>): Promise<T> {
+      const remaining = deadlineAt - Date.now()
+      if (remaining <= 0) throw new DOMException('The operation was aborted', 'AbortError')
+      if (active >= slots) {
+        await new Promise<void>((resolve, reject) => {
+          const admit = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+          const timer = setTimeout(() => {
+            waiting.splice(waiting.indexOf(admit), 1)
+            reject(new DOMException('The operation was aborted', 'AbortError'))
+          }, remaining)
+          waiting.push(admit)
+        })
+      } else active++
+      try {
+        return await task()
+      } finally {
+        const next = waiting.shift()
+        if (next) next()
+        else active--
+      }
+    },
+  }
+}
+
 export async function fetchWithTimeout(
   url: string,
   timeoutMs = 8000,
   init?: RequestInit,
+  limiter?: ConnectionLimiter,
 ): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch(url, { ...init, signal: controller.signal, redirect: 'follow' })
-  } finally {
-    clearTimeout(timer)
+  const send = async () => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      return await fetch(url, { ...init, signal: controller.signal, redirect: 'follow' })
+    } finally {
+      clearTimeout(timer)
+    }
   }
+  return limiter ? limiter.run(send) : send()
+}
+
+export function fetchInSlot(
+  url: string,
+  timeoutMs: number | undefined,
+  init: RequestInit | undefined,
+  limiter: ConnectionLimiter | undefined,
+): Promise<Response> {
+  return fetchWithTimeout(url, timeoutMs, init, limiter)
 }
 
 /**

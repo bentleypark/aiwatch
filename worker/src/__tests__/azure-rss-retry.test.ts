@@ -201,9 +201,7 @@ describe('#1211 — the timing the fix is actually about', () => {
   it('abandons the first attempt at 4s — not the 8s default — and publishes the RETRY\'s latency', async () => {
     // Two claims in one run, because they share a timeline.
     //
-    // (a) The budget. 4s + 1s + 3s keeps the worst case at the 8s this leg already cost, while a stall
-    //     is detected in half the time. Reverting to the 8s default silently doubles the worst case,
-    //     and nothing else in the suite would notice.
+    // (a) The first attempt is abandoned at 4s, not the 8s default.
     // (b) The latency. `start` is reset before the retry, so the served response's own RTT is what
     //     gets published. Measuring across the whole helper would charge the abandoned attempt and the
     //     backoff to the response that arrived, into `/api/v1/status` and the `latency:24h` series,
@@ -232,9 +230,8 @@ describe('#1211 — the timing the fix is actually about', () => {
       .toBeLessThan(1_000)
   })
 
-  it('caps the retry at 3s, so the whole leg still resolves within its old 8s budget', async () => {
-    // The other half of the budget claim. The retry inherits `Math.min(timeoutMs, 3000)`; widening it
-    // to the caller's 4s would push the worst case past the 8s this change promised not to exceed.
+  it('caps the retry at 3s', async () => {
+    // The retry inherits `Math.min(timeoutMs, 3000)`, not the caller's 4s.
     vi.useFakeTimers()
     let calls = 0
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => { calls++; return hangUntilAborted(init) }))

@@ -10,7 +10,11 @@ tags: [worker, cron, data-flow]
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (45 services)
+    → parallel fetch (45 services) through one per-invocation `createConnectionLimiter` (#1489): at most 6
+      requests wait for headers at once, and each `fetchWithTimeout` timeout starts when its slot is held,
+      not when it is queued — the runtime's own queue had been aborting reads that would have answered.
+      One run deadline (`STATUS_RUN_DEADLINE_MS`, 90 s from the limiter's creation): a fetch waits for a
+      slot until it, and nothing starts after it.
     → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes (#717: failed aistudio read holds last-known ACTIVE aistudio incidents from services:latest instead of dropping to vertex-only, so the incident doesn't flap in/out per refresh; successful read is authoritative)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters), THROTTLED to 10-min (cacheWrite)

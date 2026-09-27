@@ -197,7 +197,7 @@ The #498 shape above is a **block**: the connection is refused fast, and the fix
 
 `azureopenai` is where that reaches the card unopposed: one source, no probe target (`probe.ts`), and `getServicePlatform` resolves to `'other'` so neither the quorum nor the metastatuspage phase covers it. Three stalls therefore crossed `trackFetchFailure`'s threshold into a `degraded` that described our connection rather than Azure.
 
-**Fix**: retry the leg (`fetchWithRetry`) with a **4s** first attempt instead of the 8s default. Budget: 4s + the helper's 1s backoff + its 3s retry cap = the 8s the leg already cost.
+**Fix**: retry the leg (`fetchWithRetry`) with a **4s** first attempt instead of the 8s default.
 
 Where 4s came from: on 2026-08-06 the `latency:24h` series (48 half-hourly samples) held 36 successful polls between 31ms and 1185ms and 12 failures at exactly the 8000ms timeout, with no sample in between. That is a sample, not a census, and those 8000ms entries were the bug writing its own abort budget into the series — after this change neither stall outcome reaches `latency:24h` at all.
 

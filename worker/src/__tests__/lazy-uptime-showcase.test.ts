@@ -151,7 +151,7 @@ describe('fetchUptimeShowcase fails OPEN — it can return data or nothing, neve
 
   it('returns the timelines on a good response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ timelines: TIMELINES }), { status: 200 })))
-    expect(await fetchUptimeShowcase(PAGE, [CLAUDE_API])).toEqual(TIMELINES)
+    expect(await fetchUptimeShowcase(PAGE, [CLAUDE_API], 5000, undefined)).toEqual(TIMELINES)
   })
 
   it.each([
@@ -162,7 +162,7 @@ describe('fetchUptimeShowcase fails OPEN — it can return data or nothing, neve
     ['a thrown fetch', async () => { throw new Error('TLS: cert does not match host') }],
   ])('returns null on %s', async (_label, impl) => {
     vi.stubGlobal('fetch', vi.fn(impl))
-    expect(await fetchUptimeShowcase(PAGE, [CLAUDE_API])).toBeNull()
+    expect(await fetchUptimeShowcase(PAGE, [CLAUDE_API], 5000, undefined)).toBeNull()
   })
 
   it('returns an EMPTY map as itself — a page that publishes nothing for our component', async () => {
@@ -170,13 +170,13 @@ describe('fetchUptimeShowcase fails OPEN — it can return data or nothing, neve
     // not a 404. It must read as "asked, answered, nothing tracked" and NOT as a transport failure —
     // the call site depends on that distinction to fall through to the inline blob.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ components: {}, timelines: {}, values: [] }), { status: 200 })))
-    expect(await fetchUptimeShowcase(PAGE, [CLAUDE_API])).toEqual({})
+    expect(await fetchUptimeShowcase(PAGE, [CLAUDE_API], 5000, undefined)).toEqual({})
   })
 
   it('does not fire a request when there is nothing to ask for', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    expect(await fetchUptimeShowcase(PAGE, [])).toBeNull()
+    expect(await fetchUptimeShowcase(PAGE, [], 5000, undefined)).toBeNull()
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
