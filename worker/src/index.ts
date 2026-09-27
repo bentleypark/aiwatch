@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, type ServiceStatus } from './services'
+import { fetchAllServices, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverridesCounted, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, type DurationOverride } from './overrides'
@@ -15,7 +15,9 @@ import type { AlertCandidate } from './alerts'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout } from './utils'
+import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
+import { auditYoungIdsInScope, rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
 import { recordRestoreObservations, type RestoreObservation } from './uptime-archive-trace'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
@@ -41,6 +43,7 @@ import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edg
 import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, type StoredRootlyFeed } from './parsers/rootly'
+import { atlassianRosterEntries } from './parsers/statuspage'
 import { parseMistralFeedObservation, recordMistralFeedObservation } from './mistral-feed-observation'
 import { recordStatusFetchRun } from './status-fetch-run'
 import { maybeDispatchWorkflow, DEEPSEEK_DISPATCH_CONFIG, MISTRAL_DISPATCH_CONFIG } from './workflow-dispatch'
@@ -3502,6 +3505,149 @@ export default {
         } catch (err) {
           console.warn('[cron] GitHub competitive monitoring failed:', err instanceof Error ? err.message : err)
         }
+      }
+
+      // #1518 — incident.io roster audit, daily UTC 06:00-06:04. Reads each incident.io page's LIVE
+      // `component_uptimes`, not a recorded snapshot, so a young id already in scope (shortens the
+      // whole page's disclosed uptime window, #1266) and an aged-in id still out of scope (an outage on
+      // it is invisible in the reported uptime) are both caught the day they happen rather than on a
+      // human's next manual reconciliation. A REMOVED id is neither check's job — the existing
+      // "Component ID Mismatch"/"Partial Component Resolve" alerts own that case.
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCHours() === 6 && now.getUTCMinutes() < 5) {
+        for (const page of rosterAuditPages()) {
+          try {
+            const [pageRes, apiRes] = await Promise.all([
+              fetchWithTimeout(page.statusUrl, 8000),
+              // Names are cosmetic (the alert falls back to the bare id) — a single page's config
+              // JSON isn't known here without re-deriving apiUrl per service, so this reads it off the
+              // FIRST co-located service that has one; a page with none just alerts by id.
+              (async () => {
+                const svc = SERVICES.find((s) => s.statusUrl === page.statusUrl && s.apiUrl)
+                return svc?.apiUrl ? fetchWithTimeout(svc.apiUrl, 8000) : null
+              })(),
+            ])
+            if (!pageRes.ok) {
+              console.warn(`[cron] roster audit: ${page.statusUrl} returned HTTP ${pageRes.status} — skipping this page this cycle`)
+              pageRes.body?.cancel()
+              continue
+            }
+            const html = await pageRes.text()
+            const entries = parseIncidentIoAllComponentUptimes(html)
+            if (entries.length === 0) {
+              // A 200 that yields no entries is not a genuinely component-free page — every real
+              // incident.io page carries `component_uptimes` — it is the same "read succeeded, payload
+              // unusable" case `!pageRes.ok` handles above. Treating it as a clean audit would WRITE an
+              // empty seen-set (below), and every standing finding would re-alert in full the next time
+              // parsing recovers — the whole-value-rewrite failure mode this codebase fails closed on
+              // elsewhere. Skip the page entirely rather than touch its KV state on an unreadable cycle.
+              console.warn(`[cron] roster audit: ${page.statusUrl} returned 200 but yielded no component_uptimes entries — treating as unreadable, skipping this page this cycle`)
+              continue
+            }
+            const names = new Map<string, string>()
+            if (apiRes?.ok) {
+              try {
+                const parsed = (await apiRes.json()) as { components?: Array<{ id?: string; name?: string }> }
+                for (const c of parsed.components ?? []) if (typeof c.id === 'string' && typeof c.name === 'string') names.set(c.id, c.name)
+              } catch (err) {
+                console.warn(`[cron] roster audit: ${page.statusUrl} summary.json parse failed (names will fall back to ids):`, err instanceof Error ? err.message : err)
+              }
+            } else {
+              apiRes?.body?.cancel()
+            }
+
+            const young = auditYoungIdsInScope(entries, page.scopeIds, Date.now())
+            const agedIn = rosterAgedInFindings(entries, page.scopeIds, page.excludeIds, page.fixedScope, Date.now())
+
+            const youngKey = `roster-audit-seen:${page.statusUrl}:young`
+            const agedInKey = `roster-audit-seen:${page.statusUrl}:agedin`
+            const [youngSeenRaw, agedInSeenRaw] = await Promise.all([
+              env.STATUS_CACHE.get(youngKey).catch(() => null),
+              env.STATUS_CACHE.get(agedInKey).catch(() => null),
+            ])
+            const parseSeen = (raw: string | null): string[] | null => {
+              if (raw === null) return null
+              try { const p = JSON.parse(raw); return Array.isArray(p) ? p : null } catch { return null }
+            }
+            const youngDiff = nextRosterFindingSeen(parseSeen(youngSeenRaw), young)
+            const agedInDiff = nextRosterFindingSeen(parseSeen(agedInSeenRaw), agedIn)
+
+            if (youngDiff.toAlert.length > 0 || agedInDiff.toAlert.length > 0) {
+              const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+                title: `📋 Roster audit: ${page.services.map((s) => s.name).join(', ') || page.statusUrl}`,
+                description: formatRosterAuditAlert(page.services.map((s) => s.name), youngDiff.toAlert, agedInDiff.toAlert, names),
+                color: 0x3B82F6,
+              })
+              // Dedup writes only on a confirmed send, same posture as #957/#992's sibling checks — a
+              // webhook hiccup must retry at the NEXT DAILY run (this check is gated to once a day, not
+              // every cron tick), not silently mark the finding as already alerted.
+              if (sent) {
+                await kvPut(env.STATUS_CACHE, youngKey, JSON.stringify(youngDiff.nextSeen))
+                await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(agedInDiff.nextSeen))
+              } else {
+                console.error(`[cron] roster audit alert for ${page.statusUrl} was NOT delivered — not deduped, retries at tomorrow's run`)
+              }
+            } else {
+              // Nothing NEW to alert, but the seen set can still have shrunk (a finding cleared) — persist
+              // that so a later regression is recognized as new again rather than staying silently suppressed.
+              if (youngDiff.nextSeen.length !== (parseSeen(youngSeenRaw) ?? []).length) await kvPut(env.STATUS_CACHE, youngKey, JSON.stringify(youngDiff.nextSeen))
+              if (agedInDiff.nextSeen.length !== (parseSeen(agedInSeenRaw) ?? []).length) await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(agedInDiff.nextSeen))
+            }
+          } catch (err) {
+            console.error(`[cron] roster audit failed for ${page.statusUrl}:`, err instanceof Error ? err.message : err)
+          }
+        }
+
+        // #1518 — the SAME aged-in-out-of-scope check (b), extended to Atlassian's own multi-id
+        // `statusComponentIds` services. (a) is not implemented on this branch. Age comes from each
+        // component's own `created_at` (summary.json/componentsUrl), NOT from `/uptime_showcase`'s
+        // day-by-day timeline — that endpoint pads every requested component to a fixed 90-day window
+        // regardless of real age (verified live: a component created 2026-08-17 still returned a chart
+        // starting 2026-06-30), so a component's real age was not decidable from it at all. Datadog is
+        // excluded on purpose: its scope follows the PROVIDER'S OWN group, not a hand-maintained list,
+        // so there is nothing to drift (`datadog.ts`'s own docblock). Rootly (Mistral) is NOT extended
+        // here either — its `data-…-since-value` turned out to be the CHART'S shared window start,
+        // identical across every component (verified live), not a per-component date. See
+        // discord-alert-paths.md for the full account.
+        for (const config of atlassianRosterAuditServices()) {
+          try {
+            const componentsUrl = config.componentsUrl ?? config.apiUrl!
+            const componentsRes = await fetchWithTimeout(componentsUrl, 8000)
+            if (!componentsRes.ok) {
+              console.warn(`[cron] roster audit (atlassian): ${config.id} components fetch returned HTTP ${componentsRes.status} — skipping this cycle`)
+              componentsRes.body?.cancel()
+              continue
+            }
+            const parsed = (await componentsRes.json()) as { components?: Array<{ id?: string; name?: string; created_at?: unknown }> }
+            const rawComponents = (parsed.components ?? []).filter((c): c is { id: string; name?: string; created_at?: unknown } => typeof c.id === 'string')
+            const names = new Map<string, string>()
+            for (const c of rawComponents) if (typeof c.name === 'string') names.set(c.id, c.name)
+            if (rawComponents.length === 0) {
+              console.warn(`[cron] roster audit (atlassian): ${config.id} returned 200 but no usable component ids — treating as unreadable, skipping this cycle`)
+              continue
+            }
+            const entries = atlassianRosterEntries(rawComponents)
+            const scopeIds = uptimeScopeOf(config)
+            const agedIn = rosterAgedInFindings(entries, scopeIds, config.rosterAuditExclude ?? [], config.rosterAuditFixedScope ?? false, Date.now())
+            const agedInKey = `roster-audit-seen:${config.statusUrl}:agedin`
+            const seenRaw = await env.STATUS_CACHE.get(agedInKey).catch(() => null)
+            const prevSeen = (() => { if (seenRaw === null) return null; try { const p = JSON.parse(seenRaw); return Array.isArray(p) ? p : null } catch { return null } })()
+            const diff = nextRosterFindingSeen(prevSeen, agedIn)
+            if (diff.toAlert.length > 0) {
+              const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+                title: `📋 Roster audit: ${config.name}`,
+                description: formatRosterAuditAlert([config.name], [], diff.toAlert, names),
+                color: 0x3B82F6,
+              })
+              if (sent) await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(diff.nextSeen))
+              else console.error(`[cron] roster audit alert for ${config.id} was NOT delivered — not deduped, retries at tomorrow's run`)
+            } else if (diff.nextSeen.length !== (prevSeen ?? []).length) {
+              await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(diff.nextSeen))
+            }
+          } catch (err) {
+            console.error(`[cron] roster audit (atlassian) failed for ${config.id}:`, err instanceof Error ? err.message : err)
+          }
+        }
+
       }
 
       // Changelog RSS collection — every hour at :00 (3 sources, write only on new entries)

@@ -129,7 +129,14 @@ export const SERVICES: ServiceConfig[] = [
   // "FedRAMP workspaces and API orgs …" incident still surfaces here; a bare 'workspaces' dropped it. ChatGPT consumer/Team Workspaces incidents are
   // still excluded via 'chatgpt'/'login'/'conversation' + the narrowed term, and an incident only
   // reaches openai if it also matches the api/region incidentKeywords.
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'chatgpt workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'], statusComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', statusComponentIds: ['01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01JSM5RTJWHRWDTS6Q604VEW3B'], displayComponentIds: ['01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JSM5RTJWHRWDTS6Q604VEW3B'] },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'chatgpt workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'], statusComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', statusComponentIds: ['01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01JSM5RTJWHRWDTS6Q604VEW3B'], displayComponentIds: ['01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JSM5RTJWHRWDTS6Q604VEW3B'],
+    // #1518 — FedRAMP (compliance) and Ads Manager/Ads API (billing) are on this shared page but are
+    // never an AI-service reliability surface for openai/chatgpt/codex, at any age — verified live
+    // 2026-09-27: FedRAMP and Ads API already clear 30 days. (Ads Manager's own id carries no
+    // `component_uptimes` entry on the live page at all, so the audit cannot age it in either way; kept
+    // here so an id an upstream fix later makes readable is excluded from day one, not day two.)
+    rosterAuditExclude: ['01KKAD7C71MCCH3FTREMJH4AAS', '01KTQBYVARFJ5KMCSECM06VKCF', '01KVR95C58GGWHV7RYBT32NP11'],
+  },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://aistudio.google.com/status', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
   { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null,
     // #677 — AWS Health public events JSON (all regions in one fetch, real start+end timestamps)
@@ -167,8 +174,14 @@ export const SERVICES: ServiceConfig[] = [
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). The flat API omits the official Endpoints
   // group, so its two stable members are mapped explicitly; ungrouped components fold into Models.
-  { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE', componentsUrl: 'https://status.cohere.com/api/v2/components.json', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['Coral', 'Infrastructure', 'Playground'], componentGroups: { '01M1ETCNNYXYNTJY9J6RMJYKWB': 'Endpoints', '01HQ6CA39NZ5X3PRFPN71Q89TE': 'Endpoints' }, componentGroupsInline: true },
-  { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'] },
+  // #1518 — rosterAuditFixedScope: uptime reads the one `embeddings` anchor id forever; the per-model
+  // catalog `displayAllComponents` renders is structurally unbounded (32 components live 2026-09-27),
+  // so an exclude LIST here would need a new entry every time a model ships.
+  { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE', componentsUrl: 'https://status.cohere.com/api/v2/components.json', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['Coral', 'Infrastructure', 'Playground'], componentGroups: { '01M1ETCNNYXYNTJY9J6RMJYKWB': 'Endpoints', '01HQ6CA39NZ5X3PRFPN71Q89TE': 'Endpoints' }, componentGroupsInline: true, rosterAuditFixedScope: true },
+  // #1518 — rosterAuditFixedScope: same shape as cohere above — uptime reads the `API` anchor id
+  // forever, the per-model catalog is unbounded (20 components live 2026-09-27, all older than 30 days
+  // already, including a `Website` id that is not a model at all).
+  { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'], rosterAuditFixedScope: true },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true, componentDenylist: ['Website'] },
   // #1198 — migrated off BetterStack (dead: /index.json and /feed both 404) onto the incident.io
   // Statuspage-compat API, same shape as cohere/groq above. Fireworks sets no `statusComponent`/
@@ -182,10 +195,11 @@ export const SERVICES: ServiceConfig[] = [
   // component shape), but ONLY for the uptime worst-of via `computeIncidentIoUptime` — deliberately
   // NOT the full roster above, to avoid a churn trap distinct from the breakdown one:
   // a brand-new model in the list can shorten the whole service's uptime window to that model's age.
-  // If you're reconciling the list and tempted to add one: check its `data_available_since` first, not
-  // just whether it's "missing" — only ids old enough not to shorten that window belong.
+  // #1518 — the roster audit reports a still-young id in this list, and a page component that has
+  // aged past 30 days without being added here, at its next daily run (post-deploy — not a pre-merge
+  // gate; #1266 wanted the latter and was closed in favor of this live check instead).
   // Accepted tradeoffs: a model this list omits contributes no
-  // uptime signal until someone manually ages it in (real, not fabricated — matches the "no invented
+  // uptime signal until it's added (real, not fabricated — matches the "no invented
   // value" rule, #713); a REMOVED id from this shorter list still warns via
   // `computeIncidentIoUptime`'s `resolved < ids.length` log.
   // holdShortIncidents, NOT flapSuppression: live incident.io titles ("Service Degradation for one of
@@ -309,7 +323,12 @@ export const SERVICES: ServiceConfig[] = [
   // was previously omitted, so a Dubbing/ElevenCreative degradation flipped the badge while the
   // breakdown stayed all-operational — a visible contradiction. The row label reads
   // 'ElevenCreative' (broader suite), the accepted trade-off since no finer-grained component exists.
-  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], statusComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', statusComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'] },
+  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], statusComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', statusComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'],
+    // #1518 — "Other"/"Quality"/"UI"/"Integrations" read as non-core-API surfaces by name, distinct from the 7
+    // product surfaces (TTS/STT/Conversations/Telephony/other-API-endpoints/RAG/ElevenCreative) already
+    // in scope. Flag for re-review if any of these four ever carries a real incident.
+    rosterAuditExclude: ['01JJM5RKYA9JEH292W21YBXGNJ', '01JY3H5SJJR949SZ8K1ZR9F7FT', '01JY3H5SJJN08K456SBNE0Y947', '01KX3Y9AN8ZJT82MA125Z5ZACC'],
+  },
   // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
   // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
   // — the card shows the per-surface children). Display-only — badge stays on statusComponentId.
@@ -366,7 +385,11 @@ export const SERVICES: ServiceConfig[] = [
   // Region card, not the badge/breakdown — so no statusComponentId / displayComponentIds. Score keeps its
   // probe (api.turbopuffer.com → {"status":"🐡"}) and the #802 coverage gate still holds it out of the
   // ranking until 30d of coverage accrue, independent of this uptime fix.
-  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD', '01M1EB2MF3HY0FGY4G4XKG6NWD', '01M1ENXV57AJASWNHCRYDGS5N8', '01M1ENXV5779G7VTW967EJHE5H', '01M1ENXV572CR9QK3M3RB2236R'], addedAt: '2026-07-01' }, // #802 / #857
+  // #1518 — `Dashboard` (01K0Q5QSJV9KAZMEMMQ0NCHD9E), excluded from the uptime scope above for not being
+  // an API surface (turbopuffer has no badge scope at all — see the paragraph above), needs the matching
+  // roster-audit exclusion too — without it the audit reports it as aged-in-out-of-scope, the exact
+  // false positive an exclude list exists to prevent.
+  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD', '01M1EB2MF3HY0FGY4G4XKG6NWD', '01M1ENXV57AJASWNHCRYDGS5N8', '01M1ENXV5779G7VTW967EJHE5H', '01M1ENXV572CR9QK3M3RB2236R'], addedAt: '2026-07-01', rosterAuditExclude: ['01K0Q5QSJV9KAZMEMMQ0NCHD9E'] }, // #802 / #857
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // Black Forest Labs / FLUX (#756) — image-generation sibling for Stability AI (un-blocks the image
   // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge
@@ -376,7 +399,10 @@ export const SERVICES: ServiceConfig[] = [
   // Per-component breakdown (#606): displayAllComponents per-model page — API + Finetuning stay
   // individual surfaces; the FLUX model tiers fold into the collapsed "Models" group; the "Image
   // Generation Services" group-header component is denylisted (its children are already shown).
-  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentDenylist: ['Image Generation Services'], componentSurfaces: ['API (api.bfl.ai)', 'Finetuning'], addedAt: '2026-06-24' }, // #802
+  // #1518 — rosterAuditFixedScope: uptime reads 2 anchor ids (API + the Image Generation Services group)
+  // forever; the per-model FLUX catalog `displayAllComponents` renders is structurally unbounded (14
+  // components live 2026-09-27), same shape as cohere/groq.
+  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentDenylist: ['Image Generation Services'], componentSurfaces: ['API (api.bfl.ai)', 'Finetuning'], addedAt: '2026-06-24', rosterAuditFixedScope: true }, // #802
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
   { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website'] },
@@ -424,7 +450,13 @@ export const SERVICES: ServiceConfig[] = [
   // component (whose published `component_uptimes` figure — a rolling window, not consumed by the Score —
   // becomes uptimeReported). New components' data_available_since is 2026-07-10, so uptime reports a <30-day
   // window until the migration clock catches up (#1006 uptimeWindowDays).
-  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://global.status.smith.langchain.com/gcp-us', apiUrl: 'https://global.status.smith.langchain.com/gcp-us/api/v2/summary.json', incidentIoGlobalPage: true, statusComponentId: '01KX6FV0RR5XXJ0SM3NXZRKMBY', statusComponentIds: ['01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RRKA56PXCRWEHJTMXM'], displayComponentIds: ['01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9'], incidentIoBaseUrl: 'https://global.status.smith.langchain.com/gcp-us/incidents', incidentIoComponentId: '01KX6FV0RRSSTKC5V2GPAMCEQR', addedAt: '2026-06-11' }, // #802
+  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://global.status.smith.langchain.com/gcp-us', apiUrl: 'https://global.status.smith.langchain.com/gcp-us/api/v2/summary.json', incidentIoGlobalPage: true, statusComponentId: '01KX6FV0RR5XXJ0SM3NXZRKMBY', statusComponentIds: ['01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RRKA56PXCRWEHJTMXM'], displayComponentIds: ['01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9'], incidentIoBaseUrl: 'https://global.status.smith.langchain.com/gcp-us/incidents', incidentIoComponentId: '01KX6FV0RRSSTKC5V2GPAMCEQR', addedAt: '2026-06-11',
+    // #1518 — the 7 OTHER `displayComponentIds` members: already shown in the breakdown, deliberately
+    // held out of the narrower uptime scope. Deliberately NOT exhaustive — a page component in neither
+    // this list nor the uptime scope still surfaces as a genuine roster-audit finding, which is what
+    // caught `01M26K8BYHD6NJP0PMEPB8S0RV` live 2026-09-27: an id in none of this service's fields at all.
+    rosterAuditExclude: ['01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9'],
+  }, // #802
   // #601 — LLM observability siblings for LangSmith (un-blocks the observability fallback sub-tier).
   // Helicone: Better Stack (mirror together/luma — official uptime + RSS). Langfuse: incident.io
   // (mirror langsmith — summary.json + incidents). Both data-rich (verified uptime / incident history).
@@ -435,7 +467,15 @@ export const SERVICES: ServiceConfig[] = [
   // not component-scoped). Acceptable: a real Langfuse outage hits the primary region; widen the ID set
   // here if cross-region badge escalation is later wanted.
   { id: 'helicone', name: 'Helicone', provider: 'Helicone', category: 'api', statusUrl: 'https://status.helicone.ai', apiUrl: null, rssFeedUrl: 'https://status.helicone.ai/feed', betterStackUrl: 'https://status.helicone.ai', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-06-23' }, // #802
-  { id: 'langfuse', name: 'Langfuse', provider: 'Langfuse', category: 'api', statusUrl: 'https://status.langfuse.com', apiUrl: 'https://status.langfuse.com/api/v2/summary.json', statusComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', statusComponentIds: ['01KS5BHY7AKJD8YEM4MFYMB35Z', '01KS5BHY7AX99XYA7AS7AAP7QG', '01KS5BHY7AH52EZHZQ9TYD53TY'], incidentIoBaseUrl: 'https://status.langfuse.com/incidents', incidentIoComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', holdShortIncidents: true, addedAt: '2026-06-23' }, // #802
+  { id: 'langfuse', name: 'Langfuse', provider: 'Langfuse', category: 'api', statusUrl: 'https://status.langfuse.com', apiUrl: 'https://status.langfuse.com/api/v2/summary.json', statusComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', statusComponentIds: ['01KS5BHY7AKJD8YEM4MFYMB35Z', '01KS5BHY7AX99XYA7AS7AAP7QG', '01KS5BHY7AH52EZHZQ9TYD53TY'], incidentIoBaseUrl: 'https://status.langfuse.com/incidents', incidentIoComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', holdShortIncidents: true, addedAt: '2026-06-23',
+    // #1518 — the OTHER 3 regions' copies of Ingestion/Public/Prompts (the paragraph above already
+    // explains why only the primary region is in scope), all 4 regions' copies of LLM-as-a-judge (never
+    // in badge scope, in any region — a 4th component type the paragraph above doesn't name), and all 4
+    // UI ids (not an API surface, judgement call). 9 + 4 + 4 = all 17 non-scope ids the live page
+    // carries 2026-09-27 — a finite region set, unlike cohere/groq/bfl's structurally unbounded
+    // per-model catalogs (`rosterAuditFixedScope`, not a list, below).
+    rosterAuditExclude: ['01KS5BHY7AQZN74BX0TEMTS3XE', '01KS5BHY7ASC5JG762X54T67QX', '01KS5BHY7ATZPQZ0XPQXAPJ2BB', '01KS5BHY7A3HJRB2KE5VGHJEB9', '01KS5BHY7APM6XA5BM745H8VTZ', '01KS5BHY7ABBY77WFSX35Z0RNS', '01KS5BHY7AG4M66PCKP697F34T', '01KS5BHY7AJXF5S0FRDP3J40MB', '01KS5BHY7APSF7Y2EXDQWC457N', '01KS5BHY7AFATEYY04ANXFR09S', '01KS5BHY7AQ6B4BBSK82X8SSHD', '01KS5BHY7ACRPCZ3002ZQV5AHA', '01KS5BHY7AAE6HZM0QWSW8HM9Y', '01KS5BHY7ACB1GMB7XCXGAA8JV', '01KS5BHY7AZDZNQBHMN2PVNCM9', '01KS5BHY7A7RPSR4SH63ZEFKTM', '01KS5BHY7AX8DPJCHRWE8ASF2C'],
+  }, // #802
   // Runway (#393) — hosted generative-video AI (Gen-4 / Act-Two), AIWatch's first video provider. Native
   // Atlassian Statuspage (page s9lfdrzmhryw) → statuspage.ts covers it, no new parser. Multi-component
   // worst-of (#379): badge tracks the three availability surfaces (Public API + App + Backend); Billing +
@@ -443,7 +483,9 @@ export const SERVICES: ServiceConfig[] = [
   // incidentKeywords. Probed since #678 (api.runwayml.com/v1/tasks → 401, auth not needed for RTT).
   // is-down slug == id ('runway'), so no slug override.
   // Lumped under `inference` for now (avoid a single-member video category until Luma/Pika are added).
-  { id: 'runway', name: 'Runway', provider: 'Runway', category: 'api', statusUrl: 'https://status.runwayml.com', apiUrl: 'https://status.runwayml.com/api/v2/summary.json', statusComponentId: 'w3jcq3dwljp4', statusComponentIds: ['w3jcq3dwljp4', '2fr8tksxj5ns', 'hl94rh0mg6xt'], addedAt: '2026-06-11' }, // #802
+  // #1518 — Billing and Support are the other 2 of the page's 5 components: non-availability business
+  // surfaces, matching the FedRAMP/Ads precedent above.
+  { id: 'runway', name: 'Runway', provider: 'Runway', category: 'api', statusUrl: 'https://status.runwayml.com', apiUrl: 'https://status.runwayml.com/api/v2/summary.json', statusComponentId: 'w3jcq3dwljp4', statusComponentIds: ['w3jcq3dwljp4', '2fr8tksxj5ns', 'hl94rh0mg6xt'], addedAt: '2026-06-11', rosterAuditExclude: ['pxc5jjl6wty0', 'f8yl6htsys9v'] }, // #802
   // Luma / Dream Machine (#602, #601 Phase 1) — generative-video AI (Dream Machine, Ray, UNI-1), added
   // as a Runway sibling. Better Stack status page (status.lumalabs.ai) → betterstack.ts parser via
   // rssFeedUrl (incidents) + betterStackUrl /index.json (status + uptime). flapSuppression: true — the
@@ -476,8 +518,9 @@ export const SERVICES: ServiceConfig[] = [
   //   reads. It also widened the breakdown, which the #1062 capability routing reads
   //   (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
   // #1010 — `Compliance API`, `Sites` and `ChatGPT Work` are ChatGPT-group members in the badge scope.
-  //   The last two were held out until their `data_available_since` cleared 30 days. **Re-check that
-  //   field against today before adopting any further group member.**
+  //   The last two were held out until their `data_available_since` cleared 30 days. #1518's roster
+  //   audit now reports any further group member once it ages past 30 days, at its next daily run —
+  //   in place of the manual check, not before a merge.
   //   Two consequences every adoption carries, neither specific to these two: it WIDENS the #1032
   //   id-bypass, so a `fedramp` advisory tagged on the new id now survives `incidentExclude`
   //   (`openai-login-attribution.test.ts` carries the ChatGPT Work case) — the #990 firewall is the
@@ -548,14 +591,24 @@ export const SERVICES: ServiceConfig[] = [
   // statusComponentIds ONLY when displayComponentIds is absent, so displayComponentIds here MUST be a
   // superset of statusComponentIds (mirrors codex/openai/langsmith) or the breakdown card silently
   // loses the core rows the moment this field exists at all.
-  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl'], displayComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl', 'xwjpvdf81qh9', 'sm5wkcnqkvr9'] },
+  // #1518 — rosterAuditExclude: Origin + Grok Bot are the 2 `displayComponentIds`-only members the
+  // paragraph above already excludes from uptime scope by name; `cursor.com` (the marketing site) is a
+  // new judgement call, matching the FedRAMP/Ads precedent above.
+  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl'], displayComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl', 'xwjpvdf81qh9', 'sm5wkcnqkvr9'], rosterAuditExclude: ['xwjpvdf81qh9', 'sm5wkcnqkvr9', 'jh0714rgjgt4'] },
   // copilot badge reflects worst-of: Copilot + Copilot AI Model Providers (direct upstream) (#379).
-  { id: 'copilot', name: 'GitHub Copilot', provider: 'GitHub', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
+  // #1518 — the other 10 components on this page are GitHub's own platform (Git/Webhooks/API Requests/
+  // Issues/PRs/Actions/Packages/Pages/Codespaces/the www redirect notice), not Copilot's — the same
+  // "read-only upstream, no card/Score/uptime" boundary `upstream-feed.ts` already draws for GitHub
+  // platform status.
+  { id: 'copilot', name: 'GitHub Copilot', provider: 'GitHub', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'], rosterAuditExclude: ['8l4ygp009s5s', '4230lsnqdsld', '0l2p9nhqnxpd', 'brv1bkgrwx7q', 'kr09ddfgbfsf', 'hhtssxt0f5v2', 'br0l2tvcx85d', 'st3j38cctv9l', 'vg70hn9s2tyj', 'h2ftsgbw7kmk'] },
   // #1430 — Windsurf was renamed Devin Desktop; the card reads www.devinstatus.com, scoped to the Desktop
   // components (Desktop Agent primary + Desktop Tab); the page also carries Devin Cloud. The id stays
   // `windsurf` — it keys KV, incident ids and archives.
   // The retention bridge keeps the incidents AIWatch recorded from status.windsurf.com in the 30-day window.
-  { id: 'windsurf', name: 'Windsurf (Devin Desktop)', provider: 'Cognition', category: 'agent', statusUrl: 'https://www.devinstatus.com', apiUrl: 'https://www.devinstatus.com/api/v2/summary.json', statusComponentId: 'h6z52njyz22z', statusComponentIds: ['h6z52njyz22z', '170m7l75sh6m'], incidentComponents: ['Desktop Agent', 'Desktop Tab'], retainIncidentHistoryUntil: '2026-10-23T00:00:00.000Z' },
+  // #1518 — the other 8 components: Devin Cloud (a different product, per the comment above) and the
+  // Enterprise tier of every component (Desktop Agent/Tab included) — a different customer segment
+  // AIWatch does not track for any service.
+  { id: 'windsurf', name: 'Windsurf (Devin Desktop)', provider: 'Cognition', category: 'agent', statusUrl: 'https://www.devinstatus.com', apiUrl: 'https://www.devinstatus.com/api/v2/summary.json', statusComponentId: 'h6z52njyz22z', statusComponentIds: ['h6z52njyz22z', '170m7l75sh6m'], incidentComponents: ['Desktop Agent', 'Desktop Tab'], retainIncidentHistoryUntil: '2026-10-23T00:00:00.000Z', rosterAuditExclude: ['d87cp5jknh1c', 'y4zznb49vqqy', 'q72cy1kjpk4r', 'c20stk646s0v', 'n7v68h5h9010', 'jmr17mx1kt4c', 'hgmbfbs72ryp', '92j5h0ttqxfb'] },
   // #1004 — JetBrains migrated this page Atlassian Statuspage (status.jetbrains.ai) → incident.io
   // (status.jetbrains.cloud) on 2026-07-09, then ~2026-07-15 REMOVED the standalone "Junie" component
   // the first migration adopted (→ #135 component-miss alert + null uptime/Score). Junie's status now
@@ -565,7 +618,14 @@ export const SERVICES: ServiceConfig[] = [
   // neutrality) and Grazie (sibling NLP product; #683 drops Grazie-only incidents).
   // The #802 coverage gate keys on `addedAt`, not the provider window — junie is established (no
   // addedAt) → full coverage, high-confidence Score.
-  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.cloud', apiUrl: 'https://status.jetbrains.cloud/api/v2/summary.json', statusComponentId: '01KX3EN535A0SKSZK3S84949V1', statusComponentIds: ['01KX3EN535A0SKSZK3S84949V1'], incidentIoBaseUrl: 'https://status.jetbrains.cloud/incidents', incidentIoComponentId: '01KX3EN535A0SKSZK3S84949V1', displayComponentIds: ['01KX3EN535A0SKSZK3S84949V1'], incidentComponents: ['JetBrains AI'] },
+  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.cloud', apiUrl: 'https://status.jetbrains.cloud/api/v2/summary.json', statusComponentId: '01KX3EN535A0SKSZK3S84949V1', statusComponentIds: ['01KX3EN535A0SKSZK3S84949V1'], incidentIoBaseUrl: 'https://status.jetbrains.cloud/incidents', incidentIoComponentId: '01KX3EN535A0SKSZK3S84949V1', displayComponentIds: ['01KX3EN535A0SKSZK3S84949V1'], incidentComponents: ['JetBrains AI'],
+    // #1518 — every OTHER component on this shared page: the upstream provider cards (Anthropic/OpenAI/
+    // Gemini/xAI — their own cards elsewhere; #683 neutrality), Grazie (sibling NLP product), and Mellum/
+    // Air Teams/Air Context/Air Automations (a different JetBrains product suite). None is ever Junie's
+    // scope regardless of age — without this list the roster audit would report all nine as "aged in,
+    // out of scope" the first time it ran (verified live 2026-09-27: all nine already clear 30 days).
+    rosterAuditExclude: ['01KT3TKKVHP9JNBCP6D63MZC9Z', '01KT3TKKVHB8J2H181X7CXWG2N', '01KT3TKKVH6PHX9PRSVTKWW1J1', '01KT3TKKVHBXFS0ZY0JP5N8JJY', '01KX3EN5354CVBD36GANTX2BC4', '01KXKAD3T0PWTN9V9Y8KZX7PQ4', '01KXKAD3T062J5MV4MJS9AF5WW', '01KXFRGMR34YYVMFEWHW02SMK2', '01KXKAD3T0VVB85VS1E08F9ZEH'],
+  },
 ]
 
 /**
@@ -997,6 +1057,68 @@ export function uptimeScopeForPage(apiUrl: string): string[] {
 export function uptimeScopeOf(config: Pick<ServiceConfig, 'statusComponentId' | 'statusComponentIds'>): string[] {
   if (!config.statusComponentId) return []
   return config.statusComponentIds ?? [config.statusComponentId]
+}
+
+/**
+ * #1518 — the incident.io UPTIME scope, the SAME expression the `fetchService` call site computes
+ * (`grep 'const uptimeScope' worker/src/services.ts`): `statusComponentIds ?? incidentIoComponentId`,
+ * normalized to an array. Deliberately a separate reader from `uptimeScopeOf` above, which is the
+ * ATLASSIAN branch's own scope (`statusComponentId`-gated) — the two branches decide their uptime scope
+ * from different fields and folding them into one function would make a change to either branch's
+ * fallback silently reach the other.
+ */
+export function incidentIoUptimeScopeOf(config: Pick<ServiceConfig, 'statusComponentIds' | 'incidentIoComponentId'>): string[] {
+  const scope = config.statusComponentIds ?? config.incidentIoComponentId
+  if (!scope) return []
+  return Array.isArray(scope) ? scope : [scope]
+}
+
+/**
+ * #1518 — every incident.io service GROUPED by the page it shares (`statusUrl`), for the roster audit:
+ * `scopeIds` is the UNION of every co-located service's uptime scope (openai/chatgpt/codex share one
+ * page, so a component in codex's scope must not read as "out of scope" when auditing openai's), and
+ * `excludeIds` is likewise the union of every co-located service's `rosterAuditExclude`. `services` are
+ * the AIWatch service ids/names sharing the page, for attributing an alert to who should read it.
+ * `fixedScope` is true when ANY co-located service sets `rosterAuditFixedScope` — in practice these are
+ * single-tenant pages, so "any" and "every" coincide; the (b) aged-in check skips the whole page rather
+ * than needing an exclude entry per model the provider ever ships.
+ */
+export interface RosterAuditPage {
+  statusUrl: string
+  services: { id: string; name: string }[]
+  scopeIds: string[]
+  excludeIds: string[]
+  fixedScope: boolean
+}
+
+export function rosterAuditPages(services: ServiceConfig[] = SERVICES): RosterAuditPage[] {
+  const byPage = new Map<string, RosterAuditPage>()
+  for (const s of services) {
+    if (!s.incidentIoComponentId) continue
+    let page = byPage.get(s.statusUrl)
+    if (!page) { page = { statusUrl: s.statusUrl, services: [], scopeIds: [], excludeIds: [], fixedScope: false }; byPage.set(s.statusUrl, page) }
+    page.services.push({ id: s.id, name: s.name })
+    page.scopeIds.push(...incidentIoUptimeScopeOf(s))
+    page.excludeIds.push(...(s.rosterAuditExclude ?? []))
+    if (s.rosterAuditFixedScope) page.fixedScope = true
+  }
+  for (const page of byPage.values()) {
+    page.scopeIds = [...new Set(page.scopeIds)]
+    page.excludeIds = [...new Set(page.excludeIds)]
+  }
+  return [...byPage.values()]
+}
+
+/**
+ * #1518 — Atlassian services whose BADGE/uptime scope is a multi-id list (`statusComponentIds.length >
+ * 1`), the roster-audit equivalent of `rosterAuditPages` for the incident.io branch. Excludes any
+ * service that ALSO sets `incidentIoComponentId` via this function's own `!s.incidentIoComponentId`
+ * filter — those go through the incident.io roster (`rosterAuditPages`) instead. Each of today's 5 (bfl, runway, cursor,
+ * copilot, windsurf) is alone on its own status page — no cross-service union like the incident.io
+ * openai/chatgpt/codex case, so this returns configs directly rather than a grouped page type.
+ */
+export function atlassianRosterAuditServices(services: ServiceConfig[] = SERVICES): ServiceConfig[] {
+  return services.filter((s) => Array.isArray(s.statusComponentIds) && s.statusComponentIds.length > 1 && !s.incidentIoComponentId)
 }
 
 /**
