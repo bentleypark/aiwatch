@@ -575,13 +575,12 @@ claims the whole day. Names are matched longest-first and case-insensitively, si
 - **Window**: 30 completed days, matching the Score's own, not the 90 the page serves. A per-model page
   exposes one resource each, and an unbounded sweep would cost KV reads on every `/feed` poll and push
   real incidents out of `incidents:monthly`, whose per-service cap truncates oldest-first.
-- Sub-threshold flaps drop at `BS_HISTORY_MIN_DOWNTIME_SEC` (600s) in both the synthesized incident
-  path and `parseBetterStackDailyImpact`; the calendar evaluates its affected-resource RATIO only after
-  that shared floor. Announced maintenance is excluded to match how the **incident** path has always treated
+- Sub-threshold flaps drop at `BS_HISTORY_MIN_DOWNTIME_SEC` (600s), per resource-day, in both the
+  synthesized incident path and `parseBetterStackDailyImpact`; the calendar's affected-resource RATIO
+  counts only the resources past that floor. Announced maintenance is excluded to match how the **incident** path has always treated
   it (`parseRssIncidents` drops maintenance titles; `services.ts` drops `report_type: 'maintenance'`).
-  The other two readers of this field do NOT exclude it: a maintenance day with non-zero downtime is
-  counted by `parseBetterStackUptime` and reddens the calendar. That divergence is inherited, not
-  introduced here.
+  The other two readers of this field, `parseBetterStackUptime` and `parseBetterStackDailyImpact`, do
+  NOT exclude it. That divergence is inherited, not introduced here.
 - `impact: 'minor'` (matching what `mapBetterStackImpact` scored the RSS posts these replace) and **no
   `autoMonitor` tag** — that flag would make `isReliabilityIncident` (#989) drop them from
   affectedDays/MTTR, leaving the Score exactly as broken as before.

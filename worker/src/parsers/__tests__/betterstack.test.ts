@@ -1117,6 +1117,22 @@ describe('parseBetterStackDailyImpact', () => {
     expect(parseBetterStackDailyImpact({ included: [...affected, ...healthy] })).toBeNull()
   })
 
+  it('does not let a sub-10min blip on another resource raise the level (#1486)', () => {
+    const long = makeResources(1, '2026-03-25', 'downtime', 600)
+    const blip = makeResources(1, '2026-03-25', 'downtime', 29)
+    const healthy = makeResources(6, '2026-03-25', 'operational', 0)
+    expect(parseBetterStackDailyImpact({ included: [...long, ...blip, ...healthy] }))
+      .toEqual({ '2026-03-25': 'major' })
+  })
+
+  it('colours a resource at exactly 600s and skips one at 599s (#1486)', () => {
+    const healthy = makeResources(19, '2026-03-25', 'operational', 0)
+    expect(parseBetterStackDailyImpact({ included: [...makeResources(1, '2026-03-25', 'downtime', 600), ...healthy] }))
+      .toEqual({ '2026-03-25': 'minor' })
+    expect(parseBetterStackDailyImpact({ included: [...makeResources(1, '2026-03-25', 'downtime', 599), ...healthy] }))
+      .toBeNull()
+  })
+
   // --- Affected resource ratio thresholds ---
 
   it('critical when 25%+ resources are affected (even with short downtime)', () => {

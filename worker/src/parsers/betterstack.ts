@@ -588,9 +588,9 @@ export function parseBetterStackDailyImpact(data: BetterStackIndex): Record<stri
       }
       stat.totalForDay++
       if (day.status === 'operational') continue
-      // Non-operational with actual downtime (maintenance with 0 downtime is intentionally skipped)
+      // Non-operational with downtime at or past the incident floor (maintenance with 0 downtime is intentionally skipped)
       const downSec = day.downtime_duration ?? 0
-      if (downSec === 0) continue
+      if (downSec < BS_HISTORY_MIN_DOWNTIME_SEC) continue
       if (downSec > stat.maxDownSec) stat.maxDownSec = downSec
       stat.affectedCount++
     }
@@ -599,17 +599,15 @@ export function parseBetterStackDailyImpact(data: BetterStackIndex): Record<stri
   // Pass 2: classify using combined thresholds (duration + affected ratio)
   const dailyImpact: Record<string, DailyImpactLevel> = {}
   for (const [day, stat] of Object.entries(dayStats)) {
-    if (stat.maxDownSec < BS_HISTORY_MIN_DOWNTIME_SEC) continue
-    const affectedRatio = stat.totalForDay > 0 ? stat.affectedCount / stat.totalForDay : 0
+    if (stat.affectedCount === 0) continue
+    const affectedRatio = stat.affectedCount / stat.totalForDay
     let impact: DailyImpactLevel
     if (stat.maxDownSec >= 14400 || affectedRatio >= 0.25) {
       impact = 'critical'   // 4h+ single resource OR 25%+ resources affected
     } else if (stat.maxDownSec >= 3600 || affectedRatio >= 0.12) {
       impact = 'major'      // 1h+ single resource OR 12%+ resources affected
-    } else if (stat.maxDownSec >= 600) {
-      impact = 'minor'      // 10min+ single resource
     } else {
-      continue              // negligible downtime, skip
+      impact = 'minor'      // 10min+ single resource
     }
     dailyImpact[day] = impact
   }
@@ -771,10 +769,8 @@ function addDays(day: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
 }
 
-/** A day's downtime is at least this long before it can become an incident. Aligned with
- *  `parseBetterStackDailyImpact`'s 600s floor for `minor` — below it the calendar already treats the
- *  day as negligible, so synthesizing an incident there would make the two signals disagree in the
- *  opposite direction. It also keeps the monitor flaps these pages emit out of affectedDays (helicone
+/** A day's downtime is at least this long before it can become an incident. Shared with
+ *  `parseBetterStackDailyImpact`, which ignores a resource-day below it. It also keeps the monitor flaps these pages emit out of affectedDays (helicone
  *  recorded a 43-second and a 5-minute one in August 2026), which every one of these services already
  *  asks for via `flapSuppression`. */
 export const BS_HISTORY_MIN_DOWNTIME_SEC = 600
@@ -894,10 +890,9 @@ export function parseBetterStackDowntimeIncidents(
       // drops `MAINTENANCE_TITLE` items and `services.ts` drops `index.json` `report_type:
       // 'maintenance'` ids. Note the two OTHER readers of this same field do NOT — measured
       // 2026-08-29, a `status: 'maintenance'` day with non-zero `downtime_duration` scores identically
-      // to a `downtime` day in `parseBetterStackUptime` (91.66 either way) and reddens
-      // `parseBetterStackDailyImpact`. So a maintenance day shows on the calendar and in uptime while
-      // carrying no incident — a deliberate divergence inherited from the incident path, not an
-      // oversight, and NOT something this parser is making consistent.
+      // to a `downtime` day in `parseBetterStackUptime` (91.66 either way). So a maintenance day counts
+      // against uptime while carrying no incident — a deliberate divergence inherited from the incident
+      // path, not an oversight, and NOT something this parser is making consistent.
       if (d.status === 'maintenance' || d.status === 'under_maintenance') continue
       if ((d.maintenance_duration ?? 0) > 0 && (d.downtime_duration ?? 0) <= (d.maintenance_duration ?? 0)) continue
       const sec = d.downtime_duration ?? 0
