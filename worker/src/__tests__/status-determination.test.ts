@@ -877,13 +877,28 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(svc.incidentIoComponentId).toEqual([
       '01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMZE3M15ZV46ZEB7X88H61',
       '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8',
-      '01M03TGQ7XTQ8HAKZ8MDQ44HH5',
+      '01M03TGQ7XTQ8HAKZ8MDQ44HH5', '01M0VEYRP3Q4KM0RDEFG6EBBZC', '01M0VEYRP3YY99KM87D9CNZ7MG',
     ])
     // holdShortIncidents, NOT flapSuppression: incident.io titles carry no "— down/recovered" suffix,
     // so flapSuppression's isFlapNotice title regex would never match — see alerts.test.ts for the
     // behavioral coverage (a real per-model blip must still be held, using the real SERVICES config).
     expect(svc.flapSuppression).toBeUndefined()
     expect(svc.holdShortIncidents).toBe(true)
+  })
+
+  it('langsmith shows LLM Gateway in the breakdown and holds it out of the badge and the roster audit (#1518)', () => {
+    const svc = SERVICES.find((s) => s.id === 'langsmith')!
+    const gateway = '01M26K8BYHD6NJP0PMEPB8S0RV'
+    expect(svc.displayComponentIds).toContain(gateway)
+    expect(svc.rosterAuditExclude).toContain(gateway)
+    expect(svc.statusComponentIds).not.toContain(gateway)
+    // Application, API, Run Ingestion, Deployments Control/Data Plane, Billing, PromptHub, Fleet,
+    // Sandboxes, Bulk Exports, LLM Gateway — the official page's order, 2026-09-28.
+    expect(svc.displayComponentIds).toEqual([
+      '01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RR46HM5EVSKG4BVY01',
+      '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RRHHPK0Y474ESRYV0X',
+      '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR0E7AJPG60HR2ZTT9', gateway,
+    ])
   })
 
   it('pins the non-obvious official-group assignments (the ones the comments justify)', () => {
