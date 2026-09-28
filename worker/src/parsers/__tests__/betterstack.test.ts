@@ -1111,6 +1111,12 @@ describe('parseBetterStackDailyImpact', () => {
     expect(parseBetterStackDailyImpact({ included: [...affected, ...healthy] })).toBeNull()
   })
 
+  it('skips a sub-10min blip even when one of three resources is affected (#1486)', () => {
+    const affected = makeResources(1, '2026-03-25', 'downtime', 29)
+    const healthy = makeResources(2, '2026-03-25', 'operational', 0)
+    expect(parseBetterStackDailyImpact({ included: [...affected, ...healthy] })).toBeNull()
+  })
+
   // --- Affected resource ratio thresholds ---
 
   it('critical when 25%+ resources are affected (even with short downtime)', () => {
@@ -1119,6 +1125,13 @@ describe('parseBetterStackDailyImpact', () => {
     const healthy = makeResources(24, '2026-03-25', 'operational', 0)
     const data = { included: [...affected, ...healthy] }
     expect(parseBetterStackDailyImpact(data)).toEqual({ '2026-03-25': 'critical' })
+  })
+
+  it('still escalates a day above the 10min floor when three of eight resources are affected (#1486)', () => {
+    const affected = makeResources(3, '2026-03-25', 'downtime', 1200)
+    const healthy = makeResources(5, '2026-03-25', 'operational', 0)
+    expect(parseBetterStackDailyImpact({ included: [...affected, ...healthy] }))
+      .toEqual({ '2026-03-25': 'critical' })
   })
 
   it('major when 12-25% resources are affected', () => {

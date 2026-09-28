@@ -599,6 +599,7 @@ export function parseBetterStackDailyImpact(data: BetterStackIndex): Record<stri
   // Pass 2: classify using combined thresholds (duration + affected ratio)
   const dailyImpact: Record<string, DailyImpactLevel> = {}
   for (const [day, stat] of Object.entries(dayStats)) {
+    if (stat.maxDownSec < BS_HISTORY_MIN_DOWNTIME_SEC) continue
     const affectedRatio = stat.totalForDay > 0 ? stat.affectedCount / stat.totalForDay : 0
     let impact: DailyImpactLevel
     if (stat.maxDownSec >= 14400 || affectedRatio >= 0.25) {
