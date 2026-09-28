@@ -5,7 +5,7 @@ import { fetchService, SERVICES } from '../services'
 import { parseIncidentIoComponentOrder, sortByPageOrder } from '../parsers/incident-io'
 
 // status.fireworks.ai captured 2026-09-28: only the RSC chunk that carries `structure`.
-const PAGE = readFileSync(join(__dirname, '..', 'parsers', '__tests__', 'fixtures', 'fireworks-page-structure-2026-09-28.html'), 'utf8')
+const PAGE = readFileSync(join(__dirname, '..', 'parsers', '__tests__', 'fixtures', 'fireworks-page-2026-09-28.html'), 'utf8')
 
 // components.json on the same day, in the order it serves them.
 const API_ORDER: Array<[string, string]> = [
