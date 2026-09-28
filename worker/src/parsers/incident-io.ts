@@ -411,6 +411,38 @@ function extractJsonArray(s: string, key: string): string | null {
   return sliceArray(s, s.indexOf('[', marker))
 }
 
+interface RscStructureItem {
+  component?: { component_id?: string | null } | null
+  group?: { components?: Array<{ component_id?: string | null }> | null } | null
+}
+
+/** Component ids in the order the page renders them — the RSC `structure.items` list, a group's
+ *  members expanded in place. The Statuspage-compat `components.json` `position` does not carry this
+ *  order. [] when the structure is absent or unparseable. */
+export function parseIncidentIoComponentOrder(html: string): string[] {
+  const s = html.replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+  const at = s.indexOf('"structure":{')
+  if (at === -1) return []
+  const arr = extractJsonArray(s.substring(at), 'items')
+  if (!arr) return []
+  let items: RscStructureItem[]
+  try { items = JSON.parse(arr) as RscStructureItem[] } catch { return [] }
+  const ids: string[] = []
+  for (const it of items) {
+    const members = it.component ? [it.component] : (it.group?.components ?? [])
+    for (const c of members) if (c.component_id && !ids.includes(c.component_id)) ids.push(c.component_id)
+  }
+  return ids
+}
+
+/** Stable sort of `items` by their id's index in `order`; ids absent from `order` keep their relative
+ *  order after every listed one. */
+export function sortByPageOrder<T extends { id: string }>(items: T[], order: string[]): T[] {
+  const rank = new Map(order.map((id, i) => [id, i]))
+  const at = (id: string) => rank.get(id) ?? order.length
+  return [...items].sort((a, b) => at(a.id) - at(b.id))
+}
+
 /** Parse the FIRST `"<key>":[…]` array from an unescaped RSC string into a typed list, [] on absence/error. */
 function parseRscArray<T>(s: string, key: string): T[] {
   const arr = extractJsonArray(s, key)

@@ -17,7 +17,7 @@ import {
   type StoredRootlyFeed,
 } from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoComponentOrder, sortByPageOrder } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -209,7 +209,7 @@ export const SERVICES: ServiceConfig[] = [
   // Discord New+Resolved pair apiece. holdShortIncidents (the mistral/langfuse mechanism, #792/#929)
   // holds on impact alone — real incident.io `impact` (not BetterStack's hardcoded null) still lets
   // `major`/`critical` through immediately, only non-major short blips get the ~9min hold.
-  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMZE3M15ZV46ZEB7X88H61', '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8', '01M03TGQ7XTQ8HAKZ8MDQ44HH5'], componentsUrl: 'https://status.fireworks.ai/api/v2/components.json', displayAllComponents: true, holdShortIncidents: true },
+  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KVEMYTCCD5S0RQWPBQZ431PE', '01KVEMZE3M15ZV46ZEB7X88H61', '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8', '01M03TGQ7XTQ8HAKZ8MDQ44HH5', '01M0VEYRP3Q4KM0RDEFG6EBBZC', '01M0VEYRP3YY99KM87D9CNZ7MG'], componentsUrl: 'https://status.fireworks.ai/api/v2/components.json', displayAllComponents: true, holdShortIncidents: true },
   // Cerebras Inference (#391, #992) — Atlassian Statuspage, single-tenant, per-model. Its model lineup
   // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
   // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
@@ -430,18 +430,17 @@ export const SERVICES: ServiceConfig[] = [
   // it is NO LONGER covered by statuspage.ts directly — `incidentIoGlobalPage` routes it through
   // parseIncidentIoGlobalPage (see the #1066 note below). Multi-component worst-of (#379): badge
   // tracks the three load-bearing surfaces (Run Ingestion + API + Application); the other components
-  // (Billing, Sandboxes, Bulk Exports, PromptHub, Fleet, Deployments Data/Control Plane) are excluded
-  // so non-availability blips don't flip the badge. Single-tenant (dedicated) page → no
+  // are excluded so non-availability blips don't flip the badge. Single-tenant (dedicated) page → no
   // incidentKeywords needed. is-down slug is 'langchain' (see slug-map.ts / rss.ts).
   // The API component's published `component_uptimes` figure is surfaced as `uptimeReported` — NOT the
   // statuspage uptime-showcase (incident.io pages don't emit it). The API surface is the developer-facing one and tracks
   // the real incident activity; Run Ingestion reads ~100% despite the incidents, so it would understate.
   // That API component is also statusComponentIds[1], so it doubles as one of the three worst-of badge
   // inputs.
-  // #1066 — `displayComponentIds` shows ALL 10 page components in the breakdown (decoupled from the
+  // #1066 — `displayComponentIds` shows ALL 11 page components in the breakdown (decoupled from the
   // 3-component badge, #606): the badge stays on the availability core (API/Run Ingestion/Application)
   // so a Billing/Bulk-Exports blip can't flip it, while the dashboard mirrors the official page's full
-  // component list. Order: badge core first, then the remaining surfaces.
+  // component list, in the official page's order.
   // #1066 — LangSmith migrated to an incident.io "global"/multi-region page: status.smith.langchain.com
   // now 301s to global.status.smith.langchain.com/gcp-us, whose Atlassian v2 compat API returns
   // `components: []`. `incidentIoGlobalPage` routes it through parseIncidentIoGlobalPage, which rebuilds
@@ -450,12 +449,12 @@ export const SERVICES: ServiceConfig[] = [
   // component (whose published `component_uptimes` figure — a rolling window, not consumed by the Score —
   // becomes uptimeReported). New components' data_available_since is 2026-07-10, so uptime reports a <30-day
   // window until the migration clock catches up (#1006 uptimeWindowDays).
-  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://global.status.smith.langchain.com/gcp-us', apiUrl: 'https://global.status.smith.langchain.com/gcp-us/api/v2/summary.json', incidentIoGlobalPage: true, statusComponentId: '01KX6FV0RR5XXJ0SM3NXZRKMBY', statusComponentIds: ['01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RRKA56PXCRWEHJTMXM'], displayComponentIds: ['01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9'], incidentIoBaseUrl: 'https://global.status.smith.langchain.com/gcp-us/incidents', incidentIoComponentId: '01KX6FV0RRSSTKC5V2GPAMCEQR', addedAt: '2026-06-11',
-    // #1518 — the 7 OTHER `displayComponentIds` members: already shown in the breakdown, deliberately
+  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://global.status.smith.langchain.com/gcp-us', apiUrl: 'https://global.status.smith.langchain.com/gcp-us/api/v2/summary.json', incidentIoGlobalPage: true, statusComponentId: '01KX6FV0RR5XXJ0SM3NXZRKMBY', statusComponentIds: ['01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RRKA56PXCRWEHJTMXM'], displayComponentIds: ['01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR0E7AJPG60HR2ZTT9', '01M26K8BYHD6NJP0PMEPB8S0RV'], incidentIoBaseUrl: 'https://global.status.smith.langchain.com/gcp-us/incidents', incidentIoComponentId: '01KX6FV0RRSSTKC5V2GPAMCEQR', addedAt: '2026-06-11',
+    // #1518 — the 8 OTHER `displayComponentIds` members: already shown in the breakdown, deliberately
     // held out of the narrower uptime scope. Deliberately NOT exhaustive — a page component in neither
     // this list nor the uptime scope still surfaces as a genuine roster-audit finding, which is what
-    // caught `01M26K8BYHD6NJP0PMEPB8S0RV` live 2026-09-27: an id in none of this service's fields at all.
-    rosterAuditExclude: ['01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9'],
+    // caught `01M26K8BYHD6NJP0PMEPB8S0RV` (LLM Gateway) live 2026-09-27, before it was added to both lists.
+    rosterAuditExclude: ['01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9', '01M26K8BYHD6NJP0PMEPB8S0RV'],
   }, // #802
   // #601 — LLM observability siblings for LangSmith (un-blocks the observability fallback sub-tier).
   // Helicone: Better Stack (mirror together/luma — official uptime + RSS). Langfuse: incident.io
@@ -2993,7 +2992,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
 
       // #604 — preserve the curated per-component snapshot for the breakdown UI (source picked above).
       // resolveSvcComponents self-gates to ≥2 matched (a single component is redundant with the badge).
-      const components = resolveSvcComponents(config, { ...summaryData, components: breakdownComponents })
+      const pageOrdered = config.displayAllComponents && config.incidentIoComponentId && uptimeHtml && breakdownComponents
+        ? sortByPageOrder(breakdownComponents, parseIncidentIoComponentOrder(uptimeHtml))
+        : breakdownComponents
+      const components = resolveSvcComponents(config, { ...summaryData, components: pageOrdered })
 
       return {
         ...base,
