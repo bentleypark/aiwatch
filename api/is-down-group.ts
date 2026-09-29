@@ -505,7 +505,7 @@ export default async function handler(req: Request) {
     let shareIncidentStartedMs = -Infinity
     let isFallback = true
     try {
-      const res = await fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${WORKER_API}/api/status/cached?series=0`, { signal: AbortSignal.timeout(5000) })
       if (res.ok) {
         const data = await res.json() as {
           services: Array<{

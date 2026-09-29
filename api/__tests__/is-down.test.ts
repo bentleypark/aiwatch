@@ -104,6 +104,14 @@ describe('is-down.ts cache-header divergence (#378)', () => {
       status: 200, headers: { 'Content-Type': 'application/json' },
     }))
     await handler(makeReq('gemini'))
+    // #1531 — headers arrive, then the timeout fires while the body is still streaming.
+    fetchMock.mockResolvedValueOnce(Object.assign(new Response('{}', { status: 200 }), {
+      json: () => Promise.reject(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })),
+    }))
+    await handler(makeReq('chatgpt'))
+    // Genuinely malformed body stays parse_error.
+    fetchMock.mockResolvedValueOnce(new Response('{not json', { status: 200 }))
+    await handler(makeReq('cursor'))
 
     // #1368 — surface and slug are asserted alongside reason, not just reason. The Worker keys its
     // 5-minute dedup on `surface:slug`, so a call site passing a constant slug (or transposing slug
@@ -114,7 +122,16 @@ describe('is-down.ts cache-header divergence (#378)', () => {
       { surface: 'is-down', slug: 'claude-api', reason: 'worker_timeout' },
       { surface: 'is-down', slug: 'openai-api', reason: 'worker_http_502' },
       { surface: 'is-down', slug: 'gemini', reason: 'service_missing' },
+      { surface: 'is-down', slug: 'chatgpt', reason: 'worker_timeout' },
+      { surface: 'is-down', slug: 'cursor', reason: 'parse_error' },
     ])
+  })
+
+  it('requests the cached payload without the time series it never reads (#1531)', async () => {
+    fetchMock.mockResolvedValueOnce(makeWorkerSuccess())
+    await handler(makeReq('claude-api'))
+    const statusCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/status/cached'))
+    expect(new URL(String(statusCall?.[0])).searchParams.get('series')).toBe('0')
   })
 
   it('returns 404 for an unknown slug regardless of Worker state', async () => {

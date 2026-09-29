@@ -15,7 +15,7 @@ import type { AlertCandidate } from './alerts'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, omitsTimeSeries } from './utils'
 import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
 import { auditYoungIdsInScope, rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
@@ -5872,13 +5872,13 @@ export default {
         }
         const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
         if (cached) {
-          // Read latency + probe data first (needed for Mistral noise filtering before AI analysis)
           let latency24h: Array<{ t: string; data: Record<string, number> }> = []
           let probe24h: ProbeSnapshot[] = []
-          const [latRaw, probeRaw] = await Promise.all([
+          const withSeries = !omitsTimeSeries(url.searchParams)
+          const [latRaw, probeRaw] = withSeries ? await Promise.all([
             env.STATUS_CACHE!.get('latency:24h').catch(() => null),
             env.STATUS_CACHE!.get('probe:24h').catch(() => null),
-          ])
+          ]) : [null, null]
           if (latRaw) {
             try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
           }
@@ -5977,7 +5977,7 @@ export default {
             services: scoredCached,
             lastUpdated: cached.cachedAt,
             cached: true,
-            latency24h,
+            ...(withSeries ? { latency24h } : {}),
             ...(probe24h.length > 0 ? { probe24h } : {}),
             ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
             ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
