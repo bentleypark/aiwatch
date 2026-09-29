@@ -22,7 +22,8 @@ on:
   schedule:
     - cron: '23 * * * *'      # also triggers independently of the Worker cron dispatch above;
                               # off-the-hour to dodge GitHub's top-of-hour congestion.
-  workflow_dispatch: {}       # dispatched by the Worker cron, and available for manual runs
+  workflow_dispatch: {}       # dispatched by the Worker cron and its email() handler (#1510), and
+                              # available for manual runs
 
 # A scheduled run and a dispatch must not double-push.
 concurrency:
