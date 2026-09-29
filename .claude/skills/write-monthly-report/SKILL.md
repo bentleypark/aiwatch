@@ -27,7 +27,9 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
 2. **Local verify (step 3.5)** — serve the draft and get the USER's **in-browser confirmation** before
    commit. Your own render check does not satisfy this.
 3. **Commit / merge / publish only after the user asks or confirms.** Work on a `report/YYYY-MM` branch.
-4. **No nag** — report results and stop; don't append "shall I publish?".
+4. **Data-grounding review (step 5.5)** — hand-written prose is checked against `_data` by a fresh
+   reviewer before the local-verify handoff, until 0 Critical/Important.
+5. **No nag** — report results and stop; don't append "shall I publish?".
 
 ## Steps (follow in order)
 
@@ -238,6 +240,26 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
    that line. A service **added mid-month**
    (has an `addedAt`) must not inflate a *historical* month's count; the ranking gate (aiwatch-reports#45)
    holds a <full-month-coverage service out of the ranking, so don't narrate it as if fully ranked.
+
+5.5. **Data-grounding review — before the local-verify handoff.** Step 2's grounding rules and the
+   draft's AUTHORING SELF-CHECK are self-checks, and a browser check does not surface a number that
+   disagrees with a table. The 2026-08 draft carried four such contradictions past both self-checks
+   (found 2026-09-29 against `aiwatch-reports/_data/2026-08.json`): a "highest Score outside the
+   coding-agent tier" that missed a higher-scoring LLM API, a 100.00% uptime where the Uptime table
+   printed 99.99%, an "only major-impact entry" when the archive held two, and a grade-tally net change
+   read as "two services moved up, the middle sat still" while seven mid-table services changed grade.
+   - Spawn `review-findings-only` on the draft. Give it `_data/NNNN-NN.json`, the prior month's
+     `_data`, and the template's ROLE BOUNDARY / AUTHORING SELF-CHECK comments. Ask it to check, in every
+     hand-written section (Summary, Recommendations, Key Insight, Notable Incidents, Observations) and
+     every KO `<details>` mirror:
+     each number, rank, grade, duration and percentage against the archive and the report's own tables,
+     showing the computation for a mismatch; each superlative or absolute ("only", "highest", "all",
+     "none", "first") against every peer in scope; and any claim about individual services inferred from
+     a net tally.
+   - An uptime figure in prose is `officialUptime` — what the 30-Day Uptime table renders
+     (`officialUptimeFor`) — never the archive's daily-counter `uptime` (aiwatch#951).
+   - Loop fix → re-review until a round has 0 Critical/Important, as in `ship-issue` steps 5–6. Re-run it
+     after any later prose change.
 
 6. **Local verify (step 3.5).** Serve the draft (drafts are `published: false`, so `--unpublished` is
    required to render them):
