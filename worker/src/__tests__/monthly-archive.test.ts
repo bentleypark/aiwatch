@@ -1190,14 +1190,25 @@ describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
     expect(r.longestMin).toBe(500)
   })
 
+  it('keeps a still-open incident out of the avg-recovery divisor (#1536 — OpenAI 2026-08)', () => {
+    const resolved = { id: 'img', title: 'Elevated errors with image generation', startedAt: '2026-08-10T00:00:00Z', resolvedAt: '2026-08-10T08:27:00Z', durationMin: 507, finalStatus: 'resolved' as const, impact: 'minor' as const }
+    const open = { id: 'resp', title: 'Elevated latency in the Responses API', startedAt: '2026-08-30T00:00:00Z', resolvedAt: null, durationMin: 1000, finalStatus: 'monitoring' as const, impact: 'minor' as const }
+    const r = aggregateIncidentDurations([resolved, open], 2, 0, 0)
+    expect(r.countedCount).toBe(1)
+    expect(r.countedTotalMin).toBe(507)
+    expect(r.longestMin).toBe(507)
+    expect(r.totalMin).toBe(1507)
+    expect(r.excludedUnresolved).toBe(1)
+  })
+
   it('returns null/null when there are no incidents', () => {
-    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0 })
-    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0 })
+    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0, excludedUnresolved: 0 })
+    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0, excludedUnresolved: 0 })
   })
 
   it('treats a full list of zero-duration incidents as null (no downtime)', () => {
     const r = aggregateIncidentDurations([entry(0), entry(0)], 2, 0, 0)
-    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0 })
+    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0, excludedUnresolved: 0 })
   })
 })
 
@@ -1273,7 +1284,7 @@ describe('aggregateIncidentDurations (#1210 — autoMonitor exclusion)', () => {
     // The other 43 services carry no autoMonitor entries — the fix must be a no-op for them.
     const unflagged = REAL_DURATIONS.map(real)
     const r = aggregateIncidentDurations(unflagged, unflagged.length, 0, 0)
-    expect(r).toEqual({ totalMin: 47, countedTotalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0 })
+    expect(r).toEqual({ totalMin: 47, countedTotalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0, excludedUnresolved: 0 })
   })
 
   it('treats an ABSENT flag as false, so pre-#989 archives still count (no retroactive deflation)', () => {
@@ -1378,7 +1389,7 @@ describe('buildMonthlyArchive', () => {
               claude: {
                 count: 1, totalMinutes: 800, longestMinutes: 800, dates: ['2026-03-01'],
                 incidentIds: ['a'], durations: { a: 800 },
-                incidents: [{ id: 'a', title: 'Elevated errors', startedAt: '2026-03-01T00:00:00Z', resolvedAt: '2026-03-01T13:20:00Z', durationMin: 800, status: 'resolved' }],
+                incidents: [{ id: 'a', title: 'Elevated errors', startedAt: '2026-03-01T00:00:00Z', resolvedAt: '2026-03-01T13:20:00Z', durationMin: 800, status: 'resolved', finalStatus: 'resolved' }],
               },
             },
           })

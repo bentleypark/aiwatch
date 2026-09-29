@@ -1458,7 +1458,7 @@ export function aggregateIncidentDurations(
   count: number,
   accumulatorTotal: number,
   accumulatorLongest: number,
-): { totalMin: number | null; countedTotalMin: number | null; longestMin: number | null; countedCount: number | null; excludedAutoMonitor: number; excludedAutoMonitorMin: number; excludedDerived: number; excludedDerivedMin: number; excludedStartUnknown: number; excludedRepublished: number } {
+): { totalMin: number | null; countedTotalMin: number | null; longestMin: number | null; countedCount: number | null; excludedAutoMonitor: number; excludedAutoMonitorMin: number; excludedDerived: number; excludedDerivedMin: number; excludedStartUnknown: number; excludedRepublished: number; excludedUnresolved: number } {
   if (!incidents || incidents.length === 0 || incidents.length < count) {
     // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source. It is a
     // pre-summed total that cannot be re-filtered per-incident, so NEITHER per-entry exclusion (#1021
@@ -1481,6 +1481,7 @@ export function aggregateIncidentDurations(
       excludedDerived: 0,
       excludedDerivedMin: 0,
       excludedStartUnknown: 0,
+      excludedUnresolved: 0,
     }
   }
   // #1021 — EXCLUDE non-reliability advisories (usage-limits / quota / billing / deprecation / model-access,
@@ -1526,6 +1527,7 @@ export function aggregateIncidentDurations(
   let excludedDerived = 0
   let excludedDerivedMin = 0
   let excludedStartUnknown = 0
+  let excludedUnresolved = 0
   const countable: MonthlyIncidentEntry[] = []
   for (const e of incidents) {
     if (e.derived === 'status_history') {
@@ -1551,6 +1553,11 @@ export function aggregateIncidentDurations(
     if (e.startUnknown) {
       total += typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
       excludedStartUnknown++
+      continue
+    }
+    if (e.finalStatus !== 'resolved') {
+      total += typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
+      excludedUnresolved++
       continue
     }
     countable.push(e)
@@ -1579,6 +1586,7 @@ export function aggregateIncidentDurations(
     // rule this function's own siblings above state. Counted, so an unexplained drop in countedCount is
     // attributable rather than a mystery.
     excludedStartUnknown,
+    excludedUnresolved,
   }
 }
 
@@ -1796,7 +1804,7 @@ export async function buildMonthlyArchive(
     // The per-incident
     // durationMin is updated to the final value, so it's the source of truth; the accumulator is the
     // fallback only when the list was truncated (>MAX cap, no longer full-population).
-    const { totalMin, countedTotalMin, longestMin, countedCount, excludedAutoMonitor, excludedAutoMonitorMin, excludedDerived, excludedDerivedMin, excludedStartUnknown, excludedRepublished } = aggregateIncidentDurations(
+    const { totalMin, countedTotalMin, longestMin, countedCount, excludedAutoMonitor, excludedAutoMonitorMin, excludedDerived, excludedDerivedMin, excludedStartUnknown, excludedRepublished, excludedUnresolved } = aggregateIncidentDurations(
       incidentList, incSvc?.count ?? 0, incSvc?.totalMinutes ?? 0, incSvc?.longestMinutes ?? 0,
     )
     // #1210 — the exclusion withholds three numbers, and a fully-excluded service archives
@@ -1822,6 +1830,9 @@ export async function buildMonthlyArchive(
       // fails-toward-fine combination #1292 needed a line for, and nothing else in the archive explains
       // a divisor that dropped.
       console.warn(`[monthly-archive] #1390-EXCLUDED ${id}: ${excludedStartUnknown}/${incidentList?.length ?? 0} incident(s) with no derivable duration count toward downtime but NOT toward the longest-incident or avg-recovery figures — their start is an anchor on their own resolvedAt`)
+    }
+    if (excludedUnresolved > 0) {
+      console.warn(`[monthly-archive] #1536-EXCLUDED ${id}: ${excludedUnresolved}/${incidentList?.length ?? 0} incident(s) with a finalStatus other than resolved count toward downtime but NOT toward the longest-incident or avg-recovery figures`)
     }
     if (excludedRepublished > 0) {
       // Own prefix, same discipline as the three above: this one moves `totalDowntimeMin`,

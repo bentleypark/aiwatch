@@ -42,7 +42,7 @@ const PAPERWORK_ACCUMULATOR = JSON.stringify({
       dates: ['2026-07-02'], incidentIds: ['inc-1'], durations: { 'inc-1': 800 },
       incidents: [{
         id: 'inc-1', title: 'Elevated errors', startedAt: '2026-07-02T00:00:00Z',
-        resolvedAt: '2026-07-02T13:20:00Z', durationMin: 800, status: 'resolved',
+        resolvedAt: '2026-07-02T13:20:00Z', durationMin: 800, status: 'resolved', finalStatus: 'resolved',
       }],
     },
   },
