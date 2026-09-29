@@ -5870,11 +5870,17 @@ export default {
             },
           })
         }
+        const withSeries = !omitsTimeSeries(url.searchParams)
+        // #1531 — the Edge is-down fetch sends no Origin; a browser request would need its own CORS headers.
+        const leanCacheKey = !withSeries && !origin ? new Request(`${url.origin}${url.pathname}?series=0`) : null
+        if (leanCacheKey) {
+          const hit = await caches.default.match(leanCacheKey)
+          if (hit) return hit
+        }
         const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
         if (cached) {
           let latency24h: Array<{ t: string; data: Record<string, number> }> = []
           let probe24h: ProbeSnapshot[] = []
-          const withSeries = !omitsTimeSeries(url.searchParams)
           const [latRaw, probeRaw] = withSeries ? await Promise.all([
             env.STATUS_CACHE!.get('latency:24h').catch(() => null),
             env.STATUS_CACHE!.get('probe:24h').catch(() => null),
@@ -5973,7 +5979,7 @@ export default {
           // #1072 — feeds ride in the same snapshot (see cacheRead: absent on a pre-#1072 snapshot).
           const upstreamLinks = buildUpstreamLinks(scoredCached, cached.upstreamFeeds ?? [], Date.now())
 
-          return new Response(JSON.stringify({
+          const res = new Response(JSON.stringify({
             services: scoredCached,
             lastUpdated: cached.cachedAt,
             cached: true,
@@ -5990,6 +5996,8 @@ export default {
             status: 200,
             headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
           })
+          if (leanCacheKey) ctx.waitUntil(caches.default.put(leanCacheKey, res.clone()))
+          return res
         }
         return new Response(JSON.stringify({ error: 'no cached data' }), {
           status: 503,
