@@ -502,7 +502,7 @@ describe('POST /api/admin/rebuild-archive', () => {
           claude: {
             count: 1, totalMinutes: 60, longestMinutes: 60,
             dates: ['2026-07-02'], incidentIds: ['inc-1'], durations: { 'inc-1': 60 },
-            incidents: [{ id: 'inc-1', title: 'FedRAMP paperwork', startedAt: '2026-07-02T00:00:00Z', resolvedAt: '2026-07-02T01:00:00Z', durationMin: 60, status: 'resolved' }],
+            incidents: [{ id: 'inc-1', title: 'FedRAMP paperwork', startedAt: '2026-07-02T00:00:00Z', resolvedAt: '2026-07-02T01:00:00Z', durationMin: 60, status: 'resolved', finalStatus: 'resolved' }],
           },
         },
       }),
@@ -580,7 +580,7 @@ describe('POST /api/admin/rebuild-archive', () => {
         claude: {
           count: 1, totalMinutes: 800, longestMinutes: 800,
           dates: ['2026-07-02'], incidentIds: ['inc-1'], durations: { 'inc-1': 800 },
-          incidents: [{ id: 'inc-1', title: 'Elevated errors', startedAt: '2026-07-02T00:00:00Z', resolvedAt: '2026-07-02T13:20:00Z', durationMin: 800, status: 'resolved' }],
+          incidents: [{ id: 'inc-1', title: 'Elevated errors', startedAt: '2026-07-02T00:00:00Z', resolvedAt: '2026-07-02T13:20:00Z', durationMin: 800, status: 'resolved', finalStatus: 'resolved' }],
         },
       },
     })
