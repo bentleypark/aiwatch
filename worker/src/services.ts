@@ -396,13 +396,12 @@ export const SERVICES: ServiceConfig[] = [
   // worst-of (#379): the developer-facing API surface + the "Image Generation Services" group (rolls
   // up every FLUX model tier), so a single model-tier blip doesn't flip the badge unless API or the
   // whole image group degrades.
-  // Per-component breakdown (#606): displayAllComponents per-model page — API + Finetuning stay
-  // individual surfaces; the FLUX model tiers fold into the collapsed "Models" group; the "Image
-  // Generation Services" group-header component is denylisted (its children are already shown).
+  // Per-component breakdown (#606): displayAllComponents per-model page. The page publishes its own
+  // groups (Image / Video Generation Services), so the breakdown follows them and the page order (#1525).
   // #1518 — rosterAuditFixedScope: uptime reads 2 anchor ids (API + the Image Generation Services group)
   // forever; the per-model FLUX catalog `displayAllComponents` renders is structurally unbounded (14
   // components live 2026-09-27), same shape as cohere/groq.
-  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentDenylist: ['Image Generation Services'], componentSurfaces: ['API (api.bfl.ai)', 'Finetuning'], addedAt: '2026-06-24', rosterAuditFixedScope: true }, // #802
+  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentGroupsInline: true, addedAt: '2026-06-24', rosterAuditFixedScope: true }, // #802
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
   { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website'] },
@@ -781,7 +780,7 @@ export function worstStatus(statuses: NormalizedStatus[]): NormalizedStatus {
 // types from a parser module unnecessarily.
 type StatusResolverSummary = {
   status?: { indicator?: string } | null
-  components?: Array<{ id: string; name: string; status: string }>
+  components?: Array<{ id: string; name: string; status: string; group?: boolean; group_id?: string | null; position?: number }>
 }
 type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds' | 'displayComponentIds' | 'displayAllComponents' | 'componentDenylist' | 'componentSurfaces' | 'componentGroups'>
 
@@ -861,7 +860,7 @@ export function resolveSvcStatus(
  *
  * Component source, in precedence order:
  *   1. `displayAllComponents` (#606 cohere/groq) — DYNAMIC: every page component except
- *      `componentDenylist` names (case-insensitive). For per-model statuspages where a
+ *      `componentDenylist` names (case-insensitive) and the page's own group headers (#1525). For per-model statuspages where a
  *      hardcoded id list would go stale; the UI collapses the long list. Takes precedence.
  *   2. `displayComponentIds ?? statusComponentIds` (#606/#604) — an explicit curated allowlist
  *      (display-only, decoupled from the badge) or the multi-component badge ids reused.
@@ -881,12 +880,26 @@ export function resolveSvcComponents(
   if (!summaryData.components) return []
 
   // 1. Dynamic mode — all components minus the (small, stable) denylist by name. Curated
-  // componentGroups preserve a provider-published group the flat API omits; each remaining
-  // non-surface component is tagged `group: 'Models'` so the UI collapses them under one header.
+  // componentGroups preserve a provider-published group the flat API omits; on a page without its
+  // own groups, each remaining non-surface component is tagged `group: 'Models'` so the UI collapses them under one header.
   if (config.displayAllComponents) {
     const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
-    const surfaces = new Set((config.componentSurfaces ?? []).map((n) => n.toLowerCase()))
     const groups = config.componentGroups
+    // #1525 — a page that publishes its own groups (Atlassian `group: true` + members' `group_id`)
+    // is rendered with those groups, in the page's `position` order; the header component itself is dropped.
+    const pageGroups = new Map(summaryData.components.filter((c) => c.group).map((c) => [c.id, c.name]))
+    if (pageGroups.size > 0) {
+      const matched = orderByPagePosition(summaryData.components, pageGroups)
+        .filter((c) => !c.group && !deny.has(c.name.toLowerCase()))
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          status: normalizeStatus(c.status),
+          ...(groups?.[c.id] ? { group: groups[c.id] } : c.group_id && pageGroups.has(c.group_id) ? { group: pageGroups.get(c.group_id)! } : {}),
+        }))
+      return matched.length >= 2 ? matched : []
+    }
+    const surfaces = new Set((config.componentSurfaces ?? []).map((n) => n.toLowerCase()))
     const matched = summaryData.components
       .filter((c) => !deny.has(c.name.toLowerCase()))
       .map((c) => ({
@@ -916,6 +929,18 @@ export function resolveSvcComponents(
     }))
   // ≥2 only — a one-row breakdown adds nothing the badge doesn't already say.
   return matched.length >= 2 ? matched : []
+}
+
+type SummaryComponent = NonNullable<StatusResolverSummary['components']>[number]
+
+/** Top-level components by `position`, each group header followed by its members in source order. */
+export function orderByPagePosition(components: SummaryComponent[], pageGroups: Map<string, string>): SummaryComponent[] {
+  const byPosition = (a: SummaryComponent, b: SummaryComponent) => (a.position ?? 0) - (b.position ?? 0)
+  const isMember = (c: SummaryComponent) => c.group_id != null && pageGroups.has(c.group_id)
+  return components
+    .filter((c) => !isMember(c))
+    .sort(byPosition)
+    .flatMap((c) => (c.group ? [c, ...components.filter((m) => m.group_id === c.id)] : [c]))
 }
 
 /**

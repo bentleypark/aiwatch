@@ -113,7 +113,8 @@ export interface ServiceComponent {
   // #606 — optional group label for the collapsible breakdown. Components sharing a
   // group (e.g. 'Models') collapse under one header row; ungrouped components ("surfaces"
   // like API/Console) render individually. Set by the worker in displayAllComponents mode
-  // (everything not in componentSurfaces → the Models group); absent for curated services.
+  // (everything not in componentSurfaces → the Models group; on a page that publishes its own
+  // groups, the page's group name, #1525); absent for curated services.
   group?: string
 }
 
@@ -156,7 +157,7 @@ export interface ServiceStatus {
    *  above but retained here for the ServiceDetails / is-down breakdown. Present only when
    *  ≥2 components matched; absent otherwise. */
   components?: ServiceComponent[]
-  /** When true, the breakdown UI renders its sections (each componentGroups group as a collapsible
+  /** When true, the breakdown UI renders its sections (each group as a collapsible
    *  block; each consecutive run of ungrouped components as a surface grid) in resolved COMPONENT-ARRAY
    *  order — each group placed where its first member appears — instead of the default "surfaces grid
    *  first, then all groups". Propagated from config via `base`. */
@@ -394,9 +395,8 @@ export interface ServiceConfig {
   // component into the badge would be too noisy (e.g. a Billing blip).
   // When both are set, the breakdown prefers displayComponentIds.
   displayComponentIds?: string[]
-  // Per-component-id → group label, mirroring the OFFICIAL status page's component groups
-  // (the v2 summary/components JSON does NOT expose group membership, so it must be curated
-  // here). Applied in both breakdown paths: a matched component whose id is
+  // Per-component-id → group label, mirroring the OFFICIAL status page's component groups.
+  // Applied in both breakdown paths: a matched component whose id is
   // present is tagged `group: <label>` so the UI collapses same-label components under one
   // header (worst-of status shown on the collapsed header), exactly like the dynamic
   // `MODEL_GROUP` path. Ids absent from this map render as individual top-level surface rows.
@@ -409,7 +409,7 @@ export interface ServiceConfig {
   // #606 Category A (cohere/groq) — DYNAMIC breakdown for per-model statuspages with
   // many, frequently-changing components. Instead of a hardcoded id list (which goes
   // stale as models ship/retire), surface EVERY page component except `componentDenylist`
-  // names. Zero model-churn maintenance. The UI collapses the (long) list to a
+  // names and the page's own group headers (#1525). Zero model-churn maintenance. The UI collapses the (long) list to a
   // "N of M operational" summary + non-operational rows when it exceeds a threshold.
   // Display-only (never feeds resolveSvcStatus), like displayComponentIds; takes
   // precedence over both id lists when set. Pair with componentDenylist.
@@ -421,7 +421,7 @@ export interface ServiceConfig {
   // OTHER displayAllComponents component is folded into a collapsible "Models" group (#606,
   // matching the official status page's Endpoints/Models split). e.g. groq: ['API'];
   // cohere: ['Coral','Infrastructure','Playground'] (its endpoint members use componentGroups).
-  // Empty/absent → all grouped.
+  // Empty/absent → all grouped. Not consulted when the page publishes its own groups (#1525).
   componentSurfaces?: string[]
   // #606 Cat B — source the breakdown's component LIST from this URL (an Atlassian/incident.io
   // `components.json`) instead of the `apiUrl` summary.json. Needed when a shared status page
