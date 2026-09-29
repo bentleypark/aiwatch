@@ -25,6 +25,7 @@ import { markIncidentResolved, isMarkableOnStatusEdge } from './recovery-mark'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { checkUptimeLiveness } from './uptime-liveness'
 import { runMistralPublicApiProbe } from './mistral-public-api'
+import { handleMistralEmail } from './mistral-email'
 import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
@@ -82,9 +83,12 @@ interface Env {
   MISTRAL_FEED_TOKEN?: string
   // #629/#1395: fine-grained GitHub PAT (actions: write on this repo) so the */5 cron can dispatch
   // deepseek-feed AND mistral-feed itself rather than relying on GitHub's own `schedule` alone (see
-  // workflow-dispatch.ts's header). Set via `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the
-  // worker skips both dispatches.
+  // workflow-dispatch.ts's header), and so the #1510 email() handler can dispatch mistral-feed. Set
+  // via `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the worker skips all three dispatches.
   GH_DISPATCH_TOKEN?: string
+  // #1510 Part B: verified Email Routing destination the email() handler forwards every mail to. Set
+  // via `wrangler secret put MISTRAL_EMAIL_FORWARD_TO`. Absent → mail is not forwarded.
+  MISTRAL_EMAIL_FORWARD_TO?: string
   // #1158: classic GitHub PAT (public_repo scope) for the weekly badge-repo-discovery sweep
   // (GitHub Code Search API — which public repos embed an AIWatch badge). Distinct from
   // GH_DISPATCH_TOKEN above (actions:write only, cannot search). Set via
@@ -6319,5 +6323,9 @@ export default {
         console.error('[fetch] #1224 kv read census FAILED', censusErr instanceof Error ? censusErr.message : censusErr)
       }
     }
+  },
+  // #1510 Part B — Email Routing delivers status.mistral.ai's notifications here (see mistral-email.ts).
+  async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
+    await handleMistralEmail(message, env, ctx)
   },
 }

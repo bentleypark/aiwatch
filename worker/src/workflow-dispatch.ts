@@ -70,8 +70,8 @@ export const DEEPSEEK_DISPATCH_CONFIG: WorkflowDispatchConfig = {
 // the alternative, and the "more often risks worse rate-limiting" reasoning above is itself an
 // extrapolation from within-run tooltip pacing, not a measurement of repeated-run frequency — see
 // #1397 for the full reasoning, not restated here. The `timeout-minutes: 12` ceiling on
-// `mistral-feed.yml` is the real worst-case run length to design a cooldown against: whatever value
-// is chosen, the realized dispatch-to-dispatch interval must clear 12min so a full-timeout run cannot
+// `mistral-feed.yml` is the real worst-case run length to design a cooldown against: whatever cooldownS
+// is chosen here, the realized dispatch-to-dispatch interval must clear 12min so a full-timeout run cannot
 // still be running when the next dispatch lands (which would cost a cancelled pending run under the
 // workflow's `concurrency` group).
 //
@@ -97,6 +97,16 @@ export const MISTRAL_DISPATCH_CONFIG: WorkflowDispatchConfig = {
   cooldownKey: 'mistral:dispatch:cooldown',
   cooldownS: 13 * 60,
   failCooldownS: 13 * 60,
+}
+
+// #1510 Part B — a Rootly notification mail dispatches the same workflow at once, outside the cron's
+// cooldown. Its own key: several mails of one burst collapse into one dispatch, and the cron's cadence
+// is left as it is.
+export const MISTRAL_EMAIL_DISPATCH_CONFIG: WorkflowDispatchConfig = {
+  workflowFile: 'mistral-feed.yml',
+  cooldownKey: 'mistral:dispatch:email',
+  cooldownS: 5 * 60,
+  failCooldownS: 5 * 60,
 }
 
 interface DispatchEnv {
