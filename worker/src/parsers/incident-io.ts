@@ -413,13 +413,15 @@ function extractJsonArray(s: string, key: string): string | null {
 
 interface RscStructureItem {
   component?: { component_id?: string | null } | null
-  group?: { components?: Array<{ component_id?: string | null }> | null } | null
+  group?: { name?: string | null; components?: Array<{ component_id?: string | null }> | null } | null
 }
 
-/** Component ids in the order the page renders them — the RSC `structure.items` list, a group's
- *  members expanded in place. The Statuspage-compat `components.json` `position` does not carry this
- *  order. [] when the structure is absent or unparseable. */
-export function parseIncidentIoComponentOrder(html: string): string[] {
+/** One rendered row of the page: a standalone component, or a named group with its member ids. */
+export type IncidentIoPageItem = { group: string | null; ids: string[] }
+
+/** The page's rendered structure from the RSC `structure.items` list — the Statuspage-compat
+ *  `components.json` carries neither this order nor group membership. [] when absent or unparseable. */
+export function parseIncidentIoPageStructure(html: string): IncidentIoPageItem[] {
   const s = html.replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
   const at = s.indexOf('"structure":{')
   if (at === -1) return []
@@ -427,21 +429,47 @@ export function parseIncidentIoComponentOrder(html: string): string[] {
   if (!arr) return []
   let items: RscStructureItem[]
   try { items = JSON.parse(arr) as RscStructureItem[] } catch { return [] }
-  const ids: string[] = []
+  const out: IncidentIoPageItem[] = []
   for (const it of items) {
-    const members = it.component ? [it.component] : (it.group?.components ?? [])
-    for (const c of members) if (c.component_id && !ids.includes(c.component_id)) ids.push(c.component_id)
+    const ids = (it.component ? [it.component] : (it.group?.components ?? []))
+      .map((c) => c.component_id)
+      .filter((id): id is string => !!id)
+    if (ids.length > 0) out.push({ group: it.component ? null : (it.group?.name ?? null), ids })
   }
-  return ids
+  return out
 }
 
-/** Stable sort of `items` by their id's index in `order`; ids absent from `order` keep their relative
- *  order after every listed one. */
-export function sortByPageOrder<T extends { id: string }>(items: T[], order: string[]): T[] {
-  const rank = new Map(order.map((id, i) => [id, i]))
-  const at = (id: string) => rank.get(id) ?? order.length
-  return [...items].sort((a, b) => at(a.id) - at(b.id))
+type PageShapedComponent = { id: string; name: string; status: string; group?: boolean; group_id?: string; position?: number }
+
+/**
+ * #1528 — rewrite `components` into the Atlassian group shape `resolveSvcComponents` reads (#1525):
+ * a synthetic `group: true` header per page group, members tagged `group_id`, everything in page order
+ * with `position`. Components the structure does not list follow, in their original order. With no
+ * structure the list is returned unchanged.
+ */
+export function applyIncidentIoPageStructure(
+  components: Array<{ id: string; name: string; status: string }>,
+  structure: IncidentIoPageItem[],
+): PageShapedComponent[] {
+  if (structure.length === 0) return components
+  const byId = new Map(components.map((c) => [c.id, c]))
+  const placed = new Set<string>()
+  const out: PageShapedComponent[] = []
+  structure.forEach((item, i) => {
+    const members = item.ids.filter((id) => byId.has(id) && !placed.has(id))
+    members.forEach((id) => placed.add(id))
+    if (item.group === null) {
+      for (const id of members) out.push({ ...byId.get(id)!, position: out.length })
+      return
+    }
+    const groupId = `page-group-${i}`
+    out.push({ id: groupId, name: item.group, status: 'operational', group: true, position: out.length })
+    for (const id of members) out.push({ ...byId.get(id)!, group_id: groupId })
+  })
+  for (const c of components) if (!placed.has(c.id)) out.push({ ...c, position: out.length })
+  return out
 }
+
 
 /** Parse the FIRST `"<key>":[…]` array from an unescaped RSC string into a typed list, [] on absence/error. */
 function parseRscArray<T>(s: string, key: string): T[] {
