@@ -1079,20 +1079,52 @@ export function partitionFirstSeen<T extends { id: string }>(
 
 /**
  * #992 — operator Discord body for a page that gained ≥1 new component. `pageServices` are the AIWatch
- * service names monitoring the page (context: which service's config to update); `dynamic` flags a
- * displayAllComponents page where the component is ALREADY auto-tracked (informational, no action).
+ * service names monitoring the page (context: which service's config to update). A placement is taken
+ * from the same cycle's resolved breakdown; its absence means the component is not shown there.
  */
+export type NewComponentPlacement =
+  | { kind: 'row'; source?: 'page-structure' }
+  | { kind: 'group'; name: string; source: 'page-structure' | 'models-fallback' | 'configured' }
+  | { kind: 'not-shown' }
+
+export type NewComponentAlertItem = {
+  id: string
+  name: string
+  placement?: NewComponentPlacement
+}
+
 export function formatNewComponentAlert(
   pageServices: string[],
-  newComponents: Array<{ id: string; name: string }>,
-  dynamic: boolean,
+  newComponents: NewComponentAlertItem[],
 ): string {
-  const list = newComponents.map((c) => `• \`${c.name}\` (\`${c.id}\`)`).join('\n')
+  const placementText = (placement: NewComponentPlacement) => {
+    if (placement.kind === 'not-shown') return 'not shown in the breakdown (page header or denylisted)'
+    if (placement.kind === 'row') return placement.source === 'page-structure' ? 'individual row (page structure)' : 'individual row'
+    const origin = placement.source === 'page-structure'
+      ? 'page structure'
+      : placement.source === 'models-fallback'
+        ? 'Models fallback'
+        : 'configured grouping'
+    return `${placement.name} group (${origin})`
+  }
+  const list = newComponents.map((c) => `• \`${c.name}\` (\`${c.id}\`)${c.placement ? ` — ${placementText(c.placement)}` : ''}`).join('\n')
   const who = pageServices.length > 0 ? pageServices.join(', ') : '(no AIWatch service)'
-  const action = dynamic
-    ? '**Action**: none — this page runs `displayAllComponents`, so the component is already auto-tracked. Heads-up only.'
-    : `**Action**: decide whether to track it. To include, add the id to \`statusComponentIds\`/\`displayComponentIds\` for the relevant service in \`worker/src/services.ts\`; otherwise ignore (this fires once per component, ever).`
-  return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${action}`
+  const dynamic = newComponents.some((c) => c.placement != null)
+  if (!dynamic) {
+    const action = `**Action**: decide whether to track it. To include, add the id to \`statusComponentIds\`/\`displayComponentIds\` for the relevant service in \`worker/src/services.ts\`; otherwise ignore (this fires once per component, ever).`
+    return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${action}`
+  }
+  const shownCount = newComponents.filter((c) => c.placement?.kind !== 'not-shown').length
+  const scope = shownCount === newComponents.length
+    ? '**Scope**: Displayed in the breakdown. Not in the badge / uptime scope. Add to `statusComponentIds` if it should count.'
+    : shownCount === 0
+      ? '**Scope**: Not shown in the breakdown, and not in the badge / uptime scope.'
+      : `**Scope**: ${shownCount} displayed component${shownCount === 1 ? '' : 's'} are outside the badge / uptime scope; the remaining component${newComponents.length - shownCount === 1 ? ' is' : 's are'} not shown.`
+  const hasModelsFallback = newComponents.some((c) => c.placement?.kind === 'group' && c.placement.source === 'models-fallback')
+  const action = hasModelsFallback
+    ? '**Action**: Confirm it is a model. If not, add it to `componentSurfaces` (or `componentDenylist`).'
+    : '**Action**: no display action — the published placement is shown above.'
+  return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${scope}\n\n${action}`
 }
 
 /** Parse a stored `{ snapshots: [...] }` rolling window (#1256).

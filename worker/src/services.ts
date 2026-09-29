@@ -895,7 +895,11 @@ export function resolveSvcComponents(
           id: c.id,
           name: c.name,
           status: normalizeStatus(c.status),
-          ...(groups?.[c.id] ? { group: groups[c.id] } : c.group_id && pageGroups.has(c.group_id) ? { group: pageGroups.get(c.group_id)! } : {}),
+          ...(groups?.[c.id]
+            ? { group: groups[c.id], placementSource: 'configured' as const }
+            : c.group_id && pageGroups.has(c.group_id)
+              ? { group: pageGroups.get(c.group_id)!, placementSource: 'page-structure' as const }
+              : { placementSource: 'page-structure' as const }),
         }))
       return matched.length >= 2 ? matched : []
     }
@@ -906,7 +910,11 @@ export function resolveSvcComponents(
         id: c.id,
         name: c.name,
         status: normalizeStatus(c.status),
-        ...(groups?.[c.id] ? { group: groups[c.id] } : surfaces.has(c.name.toLowerCase()) ? {} : { group: MODEL_GROUP }),
+        ...(groups?.[c.id]
+          ? { group: groups[c.id], placementSource: 'configured' as const }
+          : surfaces.has(c.name.toLowerCase())
+            ? {}
+            : { group: MODEL_GROUP, placementSource: 'models-fallback' as const }),
       }))
     return matched.length >= 2 ? matched : []
   }

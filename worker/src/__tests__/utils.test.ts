@@ -803,23 +803,46 @@ describe('diffPageComponents (#992 — new-component change detection)', () => {
 
 describe('formatNewComponentAlert (#992)', () => {
   it('curated page → actionable "add the id" guidance', () => {
-    const body = formatNewComponentAlert(['OpenAI API', 'Codex'], [{ id: 'z1', name: 'New Model' }], false)
+    const body = formatNewComponentAlert(['OpenAI API', 'Codex'], [{ id: 'z1', name: 'New Model' }])
     expect(body).toContain('OpenAI API, Codex')
     expect(body).toContain('`New Model`')
     expect(body).toContain('`z1`')
     expect(body).toContain('statusComponentIds')
+    expect(body).toContain('decide whether to track it')
+    expect(body).not.toContain('Displayed in the breakdown')
+  })
+
+  it('reports a page-structure group and its actual scope', () => {
+    const body = formatNewComponentAlert(['Black Forest Labs (FLUX)'], [{
+      id: 'api-eu', name: 'API EU', placement: { kind: 'group', name: 'API Services', source: 'page-structure' },
+    }])
+    expect(body).toContain('API Services group (page structure)')
+    expect(body).toContain('Displayed in the breakdown. Not in the badge / uptime scope.')
+    expect(body).toContain('no display action')
     expect(body).not.toContain('already auto-tracked')
   })
 
-  it('dynamic page → heads-up only, no action', () => {
-    const body = formatNewComponentAlert(['Cerebras Inference'], [{ id: 'g', name: 'Gemma4-31B-Multimodal' }], true)
-    expect(body).toContain('already auto-tracked')
-    expect(body).toContain('1 new component')
+  it('asks for confirmation when the Models fallback placed the component', () => {
+    const body = formatNewComponentAlert(['Cerebras Inference'], [{
+      id: 'g', name: 'Gemma4-31B-Multimodal', placement: { kind: 'group', name: 'Models', source: 'models-fallback' },
+    }])
+    expect(body).toContain('Models group (Models fallback)')
+    expect(body).toContain('Confirm it is a model')
+    expect(body).toContain('componentSurfaces')
+    expect(body).toContain('componentDenylist')
+  })
+
+  it('identifies a dynamic component that is not shown in the breakdown', () => {
+    const body = formatNewComponentAlert(['Cerebras Inference'], [{
+      id: 'header', name: 'Endpoints', placement: { kind: 'not-shown' },
+    }])
+    expect(body).toContain('not shown in the breakdown (page header or denylisted)')
+    expect(body).toContain('Not shown in the breakdown, and not in the badge / uptime scope.')
   })
 
   it('pluralizes correctly', () => {
-    const one = formatNewComponentAlert(['X'], [{ id: 'a', name: 'A' }], false)
-    const two = formatNewComponentAlert(['X'], [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], false)
+    const one = formatNewComponentAlert(['X'], [{ id: 'a', name: 'A' }])
+    const two = formatNewComponentAlert(['X'], [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }])
     expect(one).toContain('1 new component:')
     expect(two).toContain('2 new components:')
   })

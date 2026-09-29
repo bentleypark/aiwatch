@@ -646,9 +646,11 @@ describe('prefetch + alert wiring (#1125)', () => {
     expect(measured).toBeLessThan(consumed)
   })
 
-  it('the cron filters the alert through partitionFirstSeen before sending', () => {
+  it('the cron filters the alert through partitionFirstSeen and looks up alert placement from this cycle before sending', () => {
     expect(INDEX_SRC).toMatch(/const \{ alertable, absorbed \} = partitionFirstSeen\(newComponents, TRACKED_COMPONENT_IDS\)/)
-    expect(INDEX_SRC).toMatch(/formatNewComponentAlert\([^;]*\balertable\b/)
+    expect(INDEX_SRC).toMatch(/const pageStatuses = services\.filter/)
+    expect(INDEX_SRC).toMatch(/flatMap\(s => s\.components \?\? \[\]\)\.find/)
+    expect(INDEX_SRC).toMatch(/formatNewComponentAlert\([^;]*\bcomponentsWithPlacement\b/)
   })
 
   it('records an all-already-tracked page — the UNION, not the old set — instead of re-evaluating forever', () => {
