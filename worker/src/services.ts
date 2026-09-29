@@ -17,7 +17,7 @@ import {
   type StoredRootlyFeed,
 } from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoComponentOrder, sortByPageOrder } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -3018,7 +3018,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // #604 — preserve the curated per-component snapshot for the breakdown UI (source picked above).
       // resolveSvcComponents self-gates to ≥2 matched (a single component is redundant with the badge).
       const pageOrdered = config.displayAllComponents && config.incidentIoComponentId && uptimeHtml && breakdownComponents
-        ? sortByPageOrder(breakdownComponents, parseIncidentIoComponentOrder(uptimeHtml))
+        ? applyIncidentIoPageStructure(breakdownComponents, parseIncidentIoPageStructure(uptimeHtml))
         : breakdownComponents
       const components = resolveSvcComponents(config, { ...summaryData, components: pageOrdered })
 
