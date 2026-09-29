@@ -1319,3 +1319,8 @@ export function incidentDay(inc: { startedAt: string; derived?: string; derivedD
 export function statedDay(inc: { derived?: string; derivedDay?: string }): string | null {
   return inc.derived === 'status_history' && inc.derivedDay ? inc.derivedDay : null
 }
+
+// #1531 — `/api/status/cached?series=0` omits the probe + latency time series.
+export function omitsTimeSeries(searchParams: URLSearchParams): boolean {
+  return searchParams.get('series') === '0'
+}

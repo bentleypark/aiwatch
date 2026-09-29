@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, parseSnapshotWindow, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, parseSnapshotWindow, omitsTimeSeries, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
 import type { Incident } from '../types'
 
 describe('appendStatusHint (#539)', () => {
@@ -861,5 +861,15 @@ describe('parseSnapshotWindow (#1256)', () => {
     expect(parseSnapshotWindow('{"snapshots":null}')).toBeNull()
     expect(parseSnapshotWindow('{"snapshots":{"t":"x"}}')).toBeNull()
     expect(parseSnapshotWindow('null')).toBeNull()
+  })
+})
+
+describe('omitsTimeSeries (#1531)', () => {
+  it('omits only on the exact opt-in, so the default /api/status/cached response keeps its series', () => {
+    expect(omitsTimeSeries(new URLSearchParams('series=0'))).toBe(true)
+    expect(omitsTimeSeries(new URLSearchParams('src=is-down&series=0'))).toBe(true)
+    expect(omitsTimeSeries(new URLSearchParams(''))).toBe(false)
+    expect(omitsTimeSeries(new URLSearchParams('series=1'))).toBe(false)
+    expect(omitsTimeSeries(new URLSearchParams('series='))).toBe(false)
   })
 })

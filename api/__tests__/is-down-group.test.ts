@@ -35,6 +35,14 @@ describe('is-down-group.ts', () => {
     fetchMock?.mockRestore()
   })
 
+  it('requests the cached payload without the time series it never reads (#1531)', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+    ]))
+    await handler(makeReq('claude'))
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('series')).toBe('0')
+  })
+
   it('404s for an unknown family', async () => {
     const res = await handler(makeReq('gemini'))
     expect(res.status).toBe(404)

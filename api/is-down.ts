@@ -30,6 +30,14 @@ function readEnv(name: string): string | undefined {
 const workerApi = readEnv('VERCEL_ENV') === 'production'
   ? WORKER_API
   : readEnv('AIWATCH_WORKER_API') || WORKER_API
+// #1368 — `AbortSignal.timeout()` rejects with TimeoutError; AbortError is what an explicit
+// `AbortController.abort()` produces. Both are accepted because the caller cannot tell which
+// the running engine emits, and keying on one of them mislabels a real timeout.
+function isAbortTimeout(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name
+  return name === 'TimeoutError' || name === 'AbortError'
+}
+
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
 const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
 
@@ -101,7 +109,7 @@ export default async function handler(req: Request) {
     let fallbackReason: string = 'unknown'
 
     const result = await Promise.allSettled([
-      fetch(`${workerApi}/api/status/cached`, { signal: AbortSignal.timeout(5000) }),
+      fetch(`${workerApi}/api/status/cached?series=0`, { signal: AbortSignal.timeout(5000) }),
     ])
 
     if (result[0].status === 'fulfilled' && result[0].value.ok) {
@@ -452,18 +460,17 @@ export default async function handler(req: Request) {
         // #1053 — cross-provider upstream note (the dependent's OWN claim; see upstream-note.ts).
         upstreamNote = buildUpstreamNote(data.upstreamLinks, entry.id)
       } catch (parseErr) {
-        fallbackReason = 'parse_error'
-        console.error(`[is-down/${slug}] JSON parse failed:`, parseErr instanceof Error ? parseErr.message : parseErr)
+        // #1531 — the timeout signal also covers the body read, so a slow transfer lands here.
+        const timedOut = isAbortTimeout(parseErr)
+        fallbackReason = timedOut ? 'worker_timeout' : 'parse_error'
+        console.error(`[is-down/${slug}] ${timedOut ? 'body read timeout' : 'JSON parse failed'}:`, parseErr instanceof Error ? parseErr.message : parseErr)
       }
     } else if (result[0].status === 'fulfilled' && !result[0].value.ok) {
       fallbackReason = `worker_http_${result[0].value.status}`
       console.error(`[is-down/${slug}] API returned HTTP ${result[0].value.status}`)
     } else if (result[0].status === 'rejected') {
       const err = result[0].reason
-      // #1368 — `AbortSignal.timeout()` rejects with TimeoutError; AbortError is what an explicit
-      // `AbortController.abort()` produces. Both are accepted because this branch cannot tell which
-      // the running engine emits, and keying on one of them mislabels a real timeout.
-      const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+      const timedOut = isAbortTimeout(err)
       fallbackReason = timedOut ? 'worker_timeout' : 'worker_unreachable'
       console.error(`[is-down/${slug}] API fetch ${timedOut ? 'timeout' : 'failed'}:`, err?.message)
     }
