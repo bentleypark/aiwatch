@@ -506,9 +506,8 @@ export const SERVICES: ServiceConfig[] = [
   // (not the API group, despite the name). Login here is the ChatGPT Login (the APIs group has a
   // separate API-Login id).
   // #1008: "Codex in ChatGPT Desktop" (01KMKFAMWKQ81YWSE1Z18R6VHR) is officially a ChatGPT-group
-  //   component (Codex surfaced inside the ChatGPT desktop app, sits between ChatGPT Atlas / ChatGPT
-  //   Work on the official page), so it belongs here — NOT under codex, where it used to be
-  //   mis-attributed and let a ChatGPT-only incident flip the Codex badge to degraded.
+  //   component (Codex surfaced inside the ChatGPT desktop app), so it belongs here — NOT under
+  //   codex, where it used to be mis-attributed and let a ChatGPT-only incident flip the Codex badge to degraded.
   // #1175 — componentsUrl, like its page-mates. The badge is a worst-of over every id below, so
   //   resolving them against summary.json's partial rotating window (#1125) narrowed it to whichever
   //   ids that window happened to serve, leaving the card green on an outage in any of the rest. "Its
@@ -576,8 +575,7 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606 Cat B): the official "Codex" group (4) on status.openai.com —
   // Codex API + CLI + VS Code extension + Codex Web. Display-only; disjoint from openai/chatgpt.
   // #1008: "Codex in ChatGPT Desktop" (01KMKFAMWKQ81YWSE1Z18R6VHR) is NOT a Codex-group component —
-  //   it's officially in the ChatGPT group (Codex surfaced inside the ChatGPT desktop app, sits among
-  //   ChatGPT Atlas / ChatGPT Work on the page). It was mis-attributed here, so a ChatGPT-only
+  //   it's officially in the ChatGPT group (Codex surfaced inside the ChatGPT desktop app). It was mis-attributed here, so a ChatGPT-only
   //   incident flipped it to partial_outage and dragged the Codex badge to degraded while the real
   //   Codex product (API/CLI/VS Code/Web) was operational. Removed from BOTH arrays and moved to
   //   chatgpt where it belongs.
