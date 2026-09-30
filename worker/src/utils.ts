@@ -1,6 +1,6 @@
 // Shared utility functions for AIWatch Worker
 
-import type { Incident } from './types'
+import type { Incident, PlacementSource, ServiceConfig, ServiceStatus } from './types'
 
 const IMPACT_RANK: Record<string, number> = { critical: 3, major: 2, minor: 1 }
 
@@ -1079,13 +1079,13 @@ export function partitionFirstSeen<T extends { id: string }>(
 
 /**
  * #992 — operator Discord body for a page that gained ≥1 new component. `pageServices` are the AIWatch
- * service names monitoring the page (context: which service's config to update). A placement is taken
- * from the same cycle's resolved breakdown; its absence means the component is not shown there.
+ * service names monitoring the page (context: which service's config to update).
  */
 export type NewComponentPlacement =
-  | { kind: 'row'; source?: 'page-structure' }
-  | { kind: 'group'; name: string; source: 'page-structure' | 'models-fallback' | 'configured' }
+  | { kind: 'row'; source?: PlacementSource }
+  | { kind: 'group'; name: string; source?: PlacementSource }
   | { kind: 'not-shown' }
+  | { kind: 'unread' }
 
 export type NewComponentAlertItem = {
   id: string
@@ -1093,38 +1093,53 @@ export type NewComponentAlertItem = {
   placement?: NewComponentPlacement
 }
 
+export function placeNewComponents<T extends { id: string; name: string }>(
+  components: T[],
+  pageServices: Array<Pick<ServiceConfig, 'id' | 'displayAllComponents'>>,
+  statuses: Array<Pick<ServiceStatus, 'id' | 'components'>>,
+): Array<T & { placement?: NewComponentPlacement }> {
+  if (!pageServices.some((s) => s.displayAllComponents)) return components
+  const breakdown = statuses.filter((s) => pageServices.some((p) => p.id === s.id)).flatMap((s) => s.components ?? [])
+  if (breakdown.length === 0) return components.map((component) => ({ ...component, placement: { kind: 'unread' } }))
+  return components.map((component) => {
+    const shown = breakdown.find((c) => c.id === component.id)
+    const placement: NewComponentPlacement = !shown
+      ? { kind: 'not-shown' }
+      : shown.group
+        ? { kind: 'group', name: shown.group, source: shown.placementSource }
+        : { kind: 'row', source: shown.placementSource }
+    return { ...component, placement }
+  })
+}
+
+const PLACEMENT_ORIGIN: Record<PlacementSource, string> = {
+  'page-structure': 'page structure',
+  'models-fallback': 'Models fallback',
+  configured: 'AIWatch config',
+}
+
 export function formatNewComponentAlert(
   pageServices: string[],
   newComponents: NewComponentAlertItem[],
 ): string {
   const placementText = (placement: NewComponentPlacement) => {
-    if (placement.kind === 'not-shown') return 'not shown in the breakdown (page header or denylisted)'
-    if (placement.kind === 'row') return placement.source === 'page-structure' ? 'individual row (page structure)' : 'individual row'
-    const origin = placement.source === 'page-structure'
-      ? 'page structure'
-      : placement.source === 'models-fallback'
-        ? 'Models fallback'
-        : 'configured grouping'
-    return `${placement.name} group (${origin})`
+    if (placement.kind === 'not-shown') return 'not shown in the breakdown'
+    if (placement.kind === 'unread') return 'no breakdown this cycle'
+    const where = placement.kind === 'row' ? 'individual row' : `${placement.name} group`
+    return `${where} (${placement.source ? PLACEMENT_ORIGIN[placement.source] : 'not in the page structure'})`
   }
   const list = newComponents.map((c) => `• \`${c.name}\` (\`${c.id}\`)${c.placement ? ` — ${placementText(c.placement)}` : ''}`).join('\n')
   const who = pageServices.length > 0 ? pageServices.join(', ') : '(no AIWatch service)'
-  const dynamic = newComponents.some((c) => c.placement != null)
-  if (!dynamic) {
-    const action = `**Action**: decide whether to track it. To include, add the id to \`statusComponentIds\`/\`displayComponentIds\` for the relevant service in \`worker/src/services.ts\`; otherwise ignore (this fires once per component, ever).`
-    return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${action}`
+  const header = `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}`
+  const placements = newComponents.flatMap((c) => (c.placement ? [c.placement] : []))
+  if (placements.length === 0) {
+    return `${header}\n\n**Action**: decide whether to track it. To include, add the id to \`statusComponentIds\`/\`displayComponentIds\` for the relevant service in \`worker/src/services.ts\`; otherwise ignore (this fires once per component, ever).`
   }
-  const shownCount = newComponents.filter((c) => c.placement?.kind !== 'not-shown').length
-  const scope = shownCount === newComponents.length
-    ? '**Scope**: Displayed in the breakdown. Not in the badge / uptime scope. Add to `statusComponentIds` if it should count.'
-    : shownCount === 0
-      ? '**Scope**: Not shown in the breakdown, and not in the badge / uptime scope.'
-      : `**Scope**: ${shownCount} displayed component${shownCount === 1 ? '' : 's'} are outside the badge / uptime scope; the remaining component${newComponents.length - shownCount === 1 ? ' is' : 's are'} not shown.`
-  const hasModelsFallback = newComponents.some((c) => c.placement?.kind === 'group' && c.placement.source === 'models-fallback')
-  const action = hasModelsFallback
-    ? '**Action**: Confirm it is a model. If not, add it to `componentSurfaces` (or `componentDenylist`).'
-    : '**Action**: no display action — the published placement is shown above.'
-  return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${scope}\n\n${action}`
+  const shown = placements.filter((p) => p.kind !== 'not-shown')
+  const actions: string[] = []
+  if (shown.some((p) => p.kind !== 'unread' && p.source === 'models-fallback')) actions.push('Confirm it is a model. If not, add it to `componentSurfaces` (or `componentDenylist`).')
+  if (shown.some((p) => p.kind === 'unread' || !p.source)) actions.push('Check its placement on the status page — AIWatch did not read it from the page this cycle.')
+  return `${header}\n\n**Action**: ${actions.length > 0 ? actions.join(' ') : 'no display action.'}`
 }
 
 /** Parse a stored `{ snapshots: [...] }` rolling window (#1256).

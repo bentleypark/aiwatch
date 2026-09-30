@@ -15,7 +15,7 @@ import type { AlertCandidate } from './alerts'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, omitsTimeSeries } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, omitsTimeSeries } from './utils'
 import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
 import { auditYoungIdsInScope, rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
@@ -2115,17 +2115,9 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         console.warn(`[cron] ${apiUrl}: ${absorbed.length} of ${newComponents.length} first-seen component(s) suppressed as already tracked (#1125): ${absorbed.map(c => `${c.name} (${c.id})`).join(', ')}`)
       }
       const pageSvcs = SERVICES.filter(s => s.apiUrl === apiUrl || (s.rootlyFeed && s.statusUrl === apiUrl))
-      const pageStatuses = services.filter(s => pageSvcs.some(config => config.id === s.id))
-      const componentsWithPlacement = alertable.map(component => {
-        if (!pageSvcs.some(s => s.displayAllComponents)) return component
-        const displayed = pageStatuses.flatMap(s => s.components ?? []).find(c => c.id === component.id)
-        if (!displayed) return { ...component, placement: { kind: 'not-shown' as const } }
-        if (!displayed.group) return { ...component, placement: { kind: 'row' as const, ...(displayed.placementSource === 'page-structure' ? { source: 'page-structure' as const } : {}) } }
-        return { ...component, placement: { kind: 'group' as const, name: displayed.group, source: displayed.placementSource ?? 'configured' as const } }
-      })
       const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
         title: `🆕 New status-page component${alertable.length === 1 ? '' : 's'}: ${pageSvcs.map(s => s.name).join(', ') || apiUrl}`,
-        description: formatNewComponentAlert(pageSvcs.map(s => s.name), componentsWithPlacement),
+        description: formatNewComponentAlert(pageSvcs.map(s => s.name), placeNewComponents(alertable, pageSvcs, services)),
         color: 0x3B82F6,
       })
       // Persist ONLY after a CONFIRMED send — sendDiscordAlert returns false (does NOT throw) on a

@@ -780,7 +780,7 @@ export function worstStatus(statuses: NormalizedStatus[]): NormalizedStatus {
 // types from a parser module unnecessarily.
 type StatusResolverSummary = {
   status?: { indicator?: string } | null
-  components?: Array<{ id: string; name: string; status: string; group?: boolean; group_id?: string | null; position?: number }>
+  components?: Array<{ id: string; name: string; status: string; group?: boolean; group_id?: string | null; position?: number; unplaced?: true }>
 }
 type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds' | 'displayComponentIds' | 'displayAllComponents' | 'componentDenylist' | 'componentSurfaces' | 'componentGroups'>
 
@@ -899,7 +899,7 @@ export function resolveSvcComponents(
             ? { group: groups[c.id], placementSource: 'configured' as const }
             : c.group_id && pageGroups.has(c.group_id)
               ? { group: pageGroups.get(c.group_id)!, placementSource: 'page-structure' as const }
-              : { placementSource: 'page-structure' as const }),
+              : c.unplaced ? {} : { placementSource: 'page-structure' as const }),
         }))
       return matched.length >= 2 ? matched : []
     }
@@ -913,7 +913,7 @@ export function resolveSvcComponents(
         ...(groups?.[c.id]
           ? { group: groups[c.id], placementSource: 'configured' as const }
           : surfaces.has(c.name.toLowerCase())
-            ? {}
+            ? { placementSource: 'configured' as const }
             : { group: MODEL_GROUP, placementSource: 'models-fallback' as const }),
       }))
     return matched.length >= 2 ? matched : []
@@ -1028,8 +1028,7 @@ type PageComponent = { id: string; name: string }
  *
  * Ids are the only membership signal, so a page whose components AIWatch tracks WITHOUT naming ids
  * (`displayAllComponents`, or a name-matched `statusComponent`) contributes none and still alerts —
- * for `displayAllComponents` that is the pre-#1125 design, and `formatNewComponentAlert` already says
- * "already auto-tracked — heads-up only" there.
+ * for `displayAllComponents` that is the pre-#1125 design.
  *
  * Filters the ALERT only. The snapshot must still record everything, or a component absorbed here
  * would be re-evaluated — and alert — later.

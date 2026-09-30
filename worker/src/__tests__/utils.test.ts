@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, parseSnapshotWindow, omitsTimeSeries, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
-import type { Incident } from '../types'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, placeNewComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, parseSnapshotWindow, omitsTimeSeries, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
+import type { Incident, ServiceComponent } from '../types'
 
 describe('appendStatusHint (#539)', () => {
   it('uses ? when the URL has no query, & when it already has one', () => {
@@ -801,6 +801,36 @@ describe('diffPageComponents (#992 — new-component change detection)', () => {
   })
 })
 
+describe('placeNewComponents (#1527)', () => {
+  const breakdown: ServiceComponent[] = [
+    { id: 'g', name: 'G', status: 'operational', group: 'API Services', placementSource: 'page-structure' },
+    { id: 'm', name: 'M', status: 'operational', group: 'Models', placementSource: 'models-fallback' },
+    { id: 'r', name: 'R', status: 'operational', placementSource: 'page-structure' },
+    { id: 'u', name: 'U', status: 'operational' },
+  ]
+
+  it('leaves a curated page without placements, even when its service carries a breakdown', () => {
+    expect(placeNewComponents([{ id: 'x', name: 'X' }], [{ id: 'openai' }], [{ id: 'openai', components: breakdown }])).toEqual([{ id: 'x', name: 'X' }])
+  })
+
+  it('marks placements unread when the dynamic service has no breakdown this cycle', () => {
+    expect(placeNewComponents([{ id: 'n1', name: 'N' }], [{ id: 'cerebras', displayAllComponents: true }], [{ id: 'cerebras' }])).toEqual([
+      { id: 'n1', name: 'N', placement: { kind: 'unread' } },
+    ])
+  })
+
+  it('reads each placement from the dynamic page services\' breakdowns by id', () => {
+    const statuses = [{ id: 'dyn', components: breakdown.slice(0, 2) }, { id: 'dyn2', components: breakdown.slice(2) }, { id: 'other', components: [{ id: 'x', name: 'X', status: 'operational' as const, placementSource: 'page-structure' as const }] }]
+    expect(placeNewComponents(['g', 'm', 'r', 'u', 'x'].map((id) => ({ id, name: id })), [{ id: 'dyn', displayAllComponents: true }, { id: 'dyn2' }], statuses).map((c) => c.placement)).toEqual([
+      { kind: 'group', name: 'API Services', source: 'page-structure' },
+      { kind: 'group', name: 'Models', source: 'models-fallback' },
+      { kind: 'row', source: 'page-structure' },
+      { kind: 'row', source: undefined },
+      { kind: 'not-shown' },
+    ])
+  })
+})
+
 describe('formatNewComponentAlert (#992)', () => {
   it('curated page → actionable "add the id" guidance', () => {
     const body = formatNewComponentAlert(['OpenAI API', 'Codex'], [{ id: 'z1', name: 'New Model' }])
@@ -817,9 +847,17 @@ describe('formatNewComponentAlert (#992)', () => {
       id: 'api-eu', name: 'API EU', placement: { kind: 'group', name: 'API Services', source: 'page-structure' },
     }])
     expect(body).toContain('API Services group (page structure)')
-    expect(body).toContain('Displayed in the breakdown. Not in the badge / uptime scope.')
-    expect(body).toContain('no display action')
+    expect(body).toContain('**Action**: no display action.')
     expect(body).not.toContain('already auto-tracked')
+    expect(body).not.toContain('badge')
+  })
+
+  it('treats a placement from AIWatch config as needing no check', () => {
+    const body = formatNewComponentAlert(['Cerebras Inference'], [{
+      id: 'dc', name: 'Developer Console', placement: { kind: 'row', source: 'configured' },
+    }])
+    expect(body).toContain('individual row (AIWatch config)')
+    expect(body).toContain('**Action**: no display action.')
   })
 
   it('asks for confirmation when the Models fallback placed the component', () => {
@@ -836,8 +874,26 @@ describe('formatNewComponentAlert (#992)', () => {
     const body = formatNewComponentAlert(['Cerebras Inference'], [{
       id: 'header', name: 'Endpoints', placement: { kind: 'not-shown' },
     }])
-    expect(body).toContain('not shown in the breakdown (page header or denylisted)')
-    expect(body).toContain('Not shown in the breakdown, and not in the badge / uptime scope.')
+    expect(body).toContain('`Endpoints` (`header`) — not shown in the breakdown\n')
+    expect(body).toContain('**Action**: no display action.')
+  })
+
+  it('asks for a placement check, not "no display action", when the page structure did not list the component', () => {
+    const body = formatNewComponentAlert(['Fireworks AI'], [{
+      id: 'n', name: 'New Endpoint', placement: { kind: 'row' },
+    }])
+    expect(body).toContain('individual row (not in the page structure)')
+    expect(body).toContain('Check its placement on the status page')
+    expect(body).not.toContain('no display action')
+  })
+
+  it('asks for a placement check, not "no display action", when the page had no breakdown this cycle', () => {
+    const body = formatNewComponentAlert(['Cerebras Inference'], [{
+      id: 'n1', name: 'Status Page API', placement: { kind: 'unread' },
+    }])
+    expect(body).toContain('`Status Page API` (`n1`) — no breakdown this cycle')
+    expect(body).toContain('Check its placement on the status page')
+    expect(body).not.toContain('no display action')
   })
 
   it('pluralizes correctly', () => {

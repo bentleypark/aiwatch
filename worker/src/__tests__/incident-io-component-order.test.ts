@@ -91,7 +91,7 @@ describe('applyIncidentIoPageStructure', () => {
     const resolved = resolveSvcComponents({ displayAllComponents: true }, { components: out })
     expect(resolved.map((c) => [c.id, c.group ?? null, c.placementSource ?? null])).toEqual([
       ['api', null, 'page-structure'], ['m1', 'G1', 'page-structure'], ['m2', 'G1', 'page-structure'],
-      ['b', null, 'page-structure'], ['m3', 'G2', 'page-structure'], ['new', null, 'page-structure'],
+      ['b', null, 'page-structure'], ['m3', 'G2', 'page-structure'], ['new', null, null],
     ])
   })
 

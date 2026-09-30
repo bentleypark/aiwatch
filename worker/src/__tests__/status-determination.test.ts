@@ -534,7 +534,7 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
     expect(resolveSvcComponents(dyn, summary)).toEqual([
       { id: 'm1', name: 'llama-3.3-70b', status: 'down', group: 'Models', placementSource: 'models-fallback' },
       { id: 'm2', name: 'whisper-large-v3', status: 'degraded', group: 'Models', placementSource: 'models-fallback' },
-      { id: 'api', name: 'API', status: 'operational' }, // no group — individual surface row
+      { id: 'api', name: 'API', status: 'operational', placementSource: 'configured' }, // no group — individual surface row
     ])
   })
 
@@ -569,7 +569,7 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
       ['All Endpoints', 'Endpoints', 'configured'],
       ['embeddings', 'Endpoints', 'configured'],
       ['command-a', 'Models', 'models-fallback'],
-      ['Infrastructure', undefined, undefined],
+      ['Infrastructure', undefined, 'configured'],
     ])
   })
 

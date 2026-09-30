@@ -118,8 +118,10 @@ export interface ServiceComponent {
   group?: string
   // The source of the breakdown placement when it matters to an operator alert. A page structure
   // is published by the provider; the Models fallback is AIWatch's grouping for an unstructured page.
-  placementSource?: 'page-structure' | 'models-fallback' | 'configured'
+  placementSource?: PlacementSource
 }
+
+export type PlacementSource = 'page-structure' | 'models-fallback' | 'configured'
 
 export interface ServiceStatus {
   id: string
