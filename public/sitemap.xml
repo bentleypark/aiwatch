@@ -159,6 +159,18 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://ai-watch.dev/reports/2026-08/</loc>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://ai-watch.dev/reports/2026-07/</loc>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://ai-watch.dev/reports/2026-06/</loc>
     <lastmod>2026-07-15</lastmod>
     <changefreq>monthly</changefreq>
