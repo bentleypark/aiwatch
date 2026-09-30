@@ -419,6 +419,10 @@ export interface AlertCandidate {
    *  to them — so a service joining an already-alerted incident doesn't re-draft/re-notify the
    *  services that already fired. Absent on status alerts (down/degraded/recovered). */
   svcIds?: string[]
+  /** #1546 — new-incident alerts only: the ids already in this incident's `alerted:new:` roster when
+   *  the alert was built. A joiner's alert carries only itself in `svcIds`, so the group-vs-single
+   *  link decisions count these too (`familyMembersForAlert`). */
+  priorSvcIds?: string[]
   /** #1021 — set on a non-reliability ADVISORY alert (usage-limits/quota/…, reframed ℹ️/blue).
    *  Downstream consumers read it through the shared `isNonOutageAlert` predicate. The dedup `key`
    *  is unchanged. */
@@ -745,6 +749,7 @@ export function buildIncidentAlerts(
       color: isAdvisory ? 0x5865F2 : 0xED4245, // blurple (informational) vs red (outage)
       url: `https://ai-watch.dev/#${ids[0]}`,
       svcIds: ids, // #545 — the not-yet-alerted subset (all affected on first fire, only the joiner after)
+      ...(alertedNewMap.get(incId)?.size ? { priorSvcIds: [...alertedNewMap.get(incId)!] } : {}),
       ...(isAdvisory ? { advisory: true } : {}),
     })
   }
@@ -1154,6 +1159,20 @@ export const FAMILY_OF_SERVICE: Record<string, { slug: string; name: string }> =
   Object.values(FAMILY_GROUPS).flatMap((family) => family.members.map((id) => [id, { slug: family.slug, name: family.name }])),
 )
 
+/** #1546 — per provider family this alert touches, the in-scope members it covers, counting the
+ *  incident's already-alerted roster (`priorSvcIds`). A family only appears when one of this alert's own
+ *  `svcIds` belongs to it. */
+export function familyMembersForAlert(alert: AlertCandidate, svcIds: string[], inScope: (id: string) => boolean): Map<string, string[]> {
+  const touched = new Set(svcIds.filter(inScope).map((id) => FAMILY_OF_SERVICE[id]?.slug).filter(Boolean))
+  const out = new Map<string, string[]>()
+  for (const id of new Set([...svcIds, ...(alert.priorSvcIds ?? [])])) {
+    const slug = FAMILY_OF_SERVICE[id]?.slug
+    if (!slug || !touched.has(slug) || !inScope(id)) continue
+    out.set(slug, [...(out.get(slug) ?? []), id])
+  }
+  return out
+}
+
 // Headroom under X's 280-char limit. Literal .length is conservative: X counts any URL as 23 chars
 // (t.co) regardless of its literal length, so a cap on the literal string can never under-count.
 const TWEET_MAX = 270
@@ -1364,15 +1383,9 @@ export function buildTweetDrafts(
   const drafts: TweetDraft[] = []
 
   // #1164 — group draft(s) first: bucket in-scope ids by family, one group draft per family with 2+
-  // members covered by THIS alert (a single-member "family" is just the normal per-service draft below).
-  const byFamily = new Map<string, string[]>()
-  for (const id of inScopeIds) {
-    const family = FAMILY_OF_SERVICE[id]
-    if (!family) continue
-    const bucket = byFamily.get(family.slug) ?? []
-    bucket.push(id)
-    byFamily.set(family.slug, bucket)
-  }
+  // members covered by this alert or already alerted for its incident (#1546) — a single-member "family"
+  // is just the normal per-service draft below.
+  const byFamily = familyMembersForAlert(alert, svcIds, (id) => !!TWEET_DRAFT_SERVICES[id])
   for (const ids of byFamily.values()) {
     if (ids.length < 2) continue
     const members = ids.map((id) => services.find((s) => s.id === id)).filter((s): s is ScoredService => !!s)
@@ -1565,7 +1578,7 @@ export function buildReplyDraft(alert: AlertCandidate, services: ScoredService[]
   const token = incidentTokenForAlert(alert)
   const family = FAMILY_OF_SERVICE[id]
   const familyMemberCount = family
-    ? svcIds.filter((s) => TWEET_DRAFT_SERVICES[s] && FAMILY_OF_SERVICE[s]?.slug === family.slug).length
+    ? familyMembersForAlert(alert, svcIds, (s) => !!TWEET_DRAFT_SERVICES[s]).get(family.slug)?.length ?? 0
     : 0
   const isGroup = !!family && familyMemberCount >= 2
   const linkSlug = isGroup ? family!.slug : slug
@@ -1811,12 +1824,7 @@ export function resolveEngageSurfaces(
   }
 
   // #1193 — bucket by family first, same shape as buildTweetDrafts' group-draft pass.
-  const byFamily = new Map<string, string[]>()
-  for (const id of inScopeIds) {
-    const family = FAMILY_OF_SERVICE[id]
-    if (!family) continue
-    byFamily.set(family.slug, [...(byFamily.get(family.slug) ?? []), id])
-  }
+  const byFamily = familyMembersForAlert(alert, inScopeIds, (id) => inScope(id) && !!TWEET_SEARCH_TERMS[id])
 
   const out: EngageSurface[] = []
   const emittedFamilies = new Set<string>()
