@@ -477,6 +477,23 @@ describe('an Affected component (#1476)', () => {
   })
 })
 
+describe('a Maintenance component (#1476)', () => {
+  const scope = REAL_FEED.components.map((c) => c.id)
+  const now = Date.parse('2026-09-10T02:00:00.000Z')
+  const maintenance = {
+    ...REAL_FEED,
+    components: REAL_FEED.components.map((c, i) => (i === 0 ? { ...c, status: 'Maintenance' } : c)),
+  }
+
+  it('does not refuse the feed', () => {
+    expect(isStorableRootlyFeed(maintenance, scope, now)).toBe(true)
+  })
+
+  it('carries the component into the badge as operational, not unknown', () => {
+    expect(rootlyOverallStatus(maintenance.components, scope)).toBe('operational')
+  })
+})
+
 describe('rootlyOverallStatus', () => {
   const c = (id: string, status: string) => ({ id, status })
 

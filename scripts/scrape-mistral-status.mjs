@@ -174,7 +174,7 @@ export async function runWithMistralFeedObservation(workerUrl, token, run, repor
  * Every word here must be one `mapRootlyComponentStatus` accepts, since the Worker maps what this
  * emits; `rootly.test.ts` holds that.
  */
-const COMPONENT_STATES = /\b(Operational|Affected|Degraded|Partial Outage|Major Outage|Under Maintenance)\b/
+const COMPONENT_STATES = /\b(Operational|Affected|Degraded|Partial Outage|Major Outage|Under Maintenance|Maintenance)\b/
 
 /** The same words, for the cross-side test — read off the regex so the two cannot diverge. */
 export const COMPONENT_STATES_WORDS = COMPONENT_STATES.source.replace(/^\\b\(|\)\\b$/g, '').split('|')

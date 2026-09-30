@@ -301,7 +301,8 @@ export function mapRootlyComponentStatus(raw: string): 'operational' | 'degraded
     case 'major outage': return 'down'
     // Announced maintenance is not a live outage for the badge — `instatus.ts` states it directly
     // ("a scheduled-maintenance row shouldn't read as an outage") and `incident-io.ts` weights it 0.
-    case 'under maintenance': return 'operational'
+    case 'under maintenance':
+    case 'maintenance': return 'operational'
     default: return null
   }
 }
