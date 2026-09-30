@@ -1781,8 +1781,14 @@ export function buildRedditEngageTargets(alert: AlertCandidate, services: Scored
     // #548 — utm_source=reddit is what attributes the click to the Reddit channel in the
     // outage-audience classifier; `?e=reddit` namespaces the social-card unfurl (#539). Same
     // construction formatRedditAlert uses, so both Reddit surfaces tag identically.
-    replyLink: appendUtm(appendStatusHint(`https://ai-watch.dev/is-${s.linkSlug}-down`, 'reddit'), 'reddit'),
+    replyLink: engageReplyLink(s.linkSlug, 'reddit'),
   }))
+}
+
+/** The is-down reply link an engage block hands out: `?e=` namespaces the social-card unfurl (#539),
+ *  `utm_source` attributes the click to the channel (#548). */
+export function engageReplyLink(linkSlug: string, platform: EngagePlatform): string {
+  return appendUtm(appendStatusHint(`https://ai-watch.dev/is-${linkSlug}-down`, platform), platform)
 }
 
 /** One line of an operator reply-assist block: a single surface, or a collapsed provider family. */
@@ -1939,7 +1945,7 @@ export function buildBlueskyEngageTargets(alert: AlertCandidate, services: Score
     serviceId: s.serviceId,
     serviceName: s.serviceName,
     searchUrl: buildBlueskySearchUrl(s.term),
-    replyLink: appendUtm(appendStatusHint(`https://ai-watch.dev/is-${s.linkSlug}-down`, 'bsky'), 'bsky'),
+    replyLink: engageReplyLink(s.linkSlug, 'bsky'),
   }))
 }
 
@@ -1952,6 +1958,103 @@ export function appendBlueskySection(description: string, targets: BlueskyEngage
     .join('')
   const full = `\n${div}\n🦋 **FIND BLUESKY POSTS TO REPLY TO**${body}`
   return description.length + full.length <= cap ? description + full : description
+}
+
+// #1548 — operator-only Hacker News reply assist, the HN twin of the Bluesky block above: a search
+// link the operator opens in a browser + a utm_source=hn is-down link. No HN request is made.
+// HN stories name the product, not the question, and match the status-page URL they link, so the
+// query is the bare product term rather than TWEET_SEARCH_TERMS' "is X down".
+export const HN_SEARCH_TERMS: Record<string, string> = {
+  claude: 'claude',
+  claudeai: 'claude',
+  claudecode: 'claude',
+  openai: 'openai',
+  chatgpt: 'chatgpt',
+  codex: 'codex',
+  gemini: 'gemini',
+}
+
+export function buildHnSearchUrl(term: string): string {
+  return `https://hn.algolia.com/?dateRange=last24h&page=0&prefix=false&query=${encodeURIComponent(term)}&sort=byDate&type=story`
+}
+
+export interface HnEngageTarget {
+  serviceId: string
+  serviceName: string
+  searchUrl: string
+  replyLink: string
+}
+
+export function buildHnEngageTargets(alert: AlertCandidate, services: ScoredService[]): HnEngageTarget[] {
+  return resolveEngageSurfaces(alert, services, (id) => !!HN_SEARCH_TERMS[id]).map((s) => ({
+    serviceId: s.serviceId,
+    serviceName: s.serviceName,
+    searchUrl: buildHnSearchUrl(s.memberIds.length >= 2 ? HN_SEARCH_TERMS[s.linkSlug] : HN_SEARCH_TERMS[s.memberIds[0]]),
+    replyLink: engageReplyLink(s.linkSlug, 'hn'),
+  }))
+}
+
+const HN_NORMS_LINE = '⚖️ data-first comment · one link · no promo wording'
+
+export function appendHnSection(description: string, targets: HnEngageTarget[], div: string): string {
+  if (targets.length === 0) return description
+  const cap = DISCORD_EMBED_DESC_MAX - 16
+  const body = targets
+    .map((t) => `\n→ ${defuseAutolinkDomain(t.serviceName)}: [search Hacker News](${t.searchUrl})\n   🔗 \`${t.replyLink}\``)
+    .join('')
+  const full = `\n${div}\n📰 **FIND HACKER NEWS THREADS TO REPLY TO**${body}\n${HN_NORMS_LINE}`
+  return description.length + full.length <= cap ? description + full : description
+}
+
+export type EngagePlatform = 'reddit' | 'bsky' | 'hn'
+
+export interface EngageReplyDraft {
+  platform: EngagePlatform
+  text: string
+}
+
+const BSKY_MAX_CHARS = 300
+
+/**
+ * #1548 — one copyable reply per engage platform, for a NEW incident alert only.
+ */
+export function buildEngageReplyDrafts(alert: AlertCandidate, services: ScoredService[]): EngageReplyDraft[] {
+  if (kindFromKey(alert.key) !== 'new') return []
+  const incId = incidentTokenForAlert(alert)
+  const incident = incId ? services.flatMap((s) => s.incidents ?? []).find((i) => i.id === incId) : undefined
+
+  const first = (inScope: (id: string) => boolean) => {
+    const surface = resolveEngageSurfaces(alert, services, inScope)[0]
+    if (!surface) return null
+    const members = surface.memberIds.map((id) => services.find((s) => s.id === id)).filter((s): s is ScoredService => !!s)
+    return {
+      surface,
+      state: members.some((s) => s.status === 'down') ? 'down' : 'having issues',
+      provider: members[0]?.provider,
+      memberNames: members.map((s) => s.name),
+    }
+  }
+
+  const drafts: EngageReplyDraft[] = []
+  const reddit = first((id) => !!REDDIT_ENGAGE_SUBS[id])
+  if (reddit) {
+    const name = defuseAutolinkDomain(reddit.surface.serviceName)
+    drafts.push({ platform: 'reddit', text: `Not just you — ${name} is ${reddit.state} right now, and the official status page lists an open incident. Live status and affected components: ${engageReplyLink(reddit.surface.linkSlug, 'reddit')}` })
+  }
+  const bsky = first(() => true)
+  if (bsky) {
+    const name = defuseAutolinkDomain(bsky.surface.serviceName)
+    const text = `Not just you — ${name} is ${bsky.state} right now. Live status: ${engageReplyLink(bsky.surface.linkSlug, 'bsky')}`
+    if ([...text].length <= BSKY_MAX_CHARS) drafts.push({ platform: 'bsky', text })
+  }
+  const hn = first((id) => !!HN_SEARCH_TERMS[id])
+  if (hn) {
+    const page = hn.provider ? `The ${hn.provider} status page` : 'The official status page'
+    const title = incident?.title ? `: "${sanitize(incident.title)}"` : ''
+    const affected = hn.memberNames.length ? ` Affected: ${hn.memberNames.join(', ')}.` : ''
+    drafts.push({ platform: 'hn', text: `${page} lists an open incident${title}.${affected} Live per-surface status: ${engageReplyLink(hn.surface.linkSlug, 'hn')}` })
+  }
+  return drafts
 }
 
 export interface PushTarget {

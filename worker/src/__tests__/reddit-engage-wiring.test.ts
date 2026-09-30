@@ -155,3 +155,33 @@ describe('#1330 - the age disclosure reaches the embed', () => {
     expect(INDEX_SRC).toMatch(line)
   })
 })
+
+describe('hacker news block + engage reply drafts wiring (#1548)', () => {
+  it('assigns the HN section inside one try, after the Bluesky block', () => {
+    const block = assemblyBlock()
+    const bskyIdx = block.indexOf('appendBlueskySection(withReddit, bskyTargets, DIV)')
+    const hnIdx = block.indexOf('operatorDescription = appendHnSection(withBluesky, hnTargets, DIV)')
+    expect(hnIdx).toBeGreaterThan(bskyIdx)
+    const tryIdx = block.lastIndexOf('try {', hnIdx)
+    const catchIdx = block.indexOf('} catch', hnIdx)
+    expect(block.indexOf('buildHnEngageTargets(alert, scored)')).toBeGreaterThan(tryIdx)
+    expect(catchIdx).toBeGreaterThan(hnIdx)
+    expect(block).toContain('#1548 hacker news section dropped (embed cap)')
+  })
+
+  it('sends each draft to the OPERATOR webhook as its own message, after the X reply', () => {
+    const xReplyIdx = INDEX_SRC.indexOf('await sendDiscordMessage(env.DISCORD_WEBHOOK_URL, reply.text)')
+    const loopIdx = INDEX_SRC.indexOf('for (const draft of operatorSent ? engageDrafts : [])')
+    expect(xReplyIdx).toBeGreaterThan(-1)
+    expect(loopIdx).toBeGreaterThan(xReplyIdx)
+    const loop = INDEX_SRC.slice(loopIdx, INDEX_SRC.indexOf('\n    }\n', loopIdx))
+    expect(loop).toContain('await sendDiscordMessage(env.DISCORD_WEBHOOK_URL, draft.text)')
+    expect(loop).toContain('#1548 engage reply message failed (operator alert sent):\', draft.platform, alert.key')
+  })
+
+  it('builds the drafts inside a try so a throw cannot abort the send loop', () => {
+    const buildIdx = INDEX_SRC.indexOf('engageDrafts = buildEngageReplyDrafts(alert, scored)')
+    expect(buildIdx).toBeGreaterThan(-1)
+    expect(INDEX_SRC.lastIndexOf('try {', buildIdx)).toBeGreaterThan(INDEX_SRC.lastIndexOf('} catch', buildIdx))
+  })
+})

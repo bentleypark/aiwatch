@@ -12,7 +12,7 @@ import { createReadCensus, formatCensus } from './kv-read-census'
 import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
-import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, omitsTimeSeries } from './utils'
@@ -1808,6 +1808,23 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     } catch (err) {
       console.error('[cron] bluesky engage build/render failed (alert still sent):', alert.key, err instanceof Error ? (err.stack ?? err.message) : err)
     }
+    // #1548 — operator-only Hacker News reply assist, same boundary and guard as the Bluesky block above.
+    const withBluesky = operatorDescription
+    try {
+      const hnTargets = buildHnEngageTargets(alert, scored)
+      operatorDescription = appendHnSection(withBluesky, hnTargets, DIV)
+      if (hnTargets.length > 0 && operatorDescription === withBluesky) {
+        console.warn('[cron] #1548 hacker news section dropped (embed cap):', alert.key, 'desc=', withBluesky.length, 'targets=', hnTargets.length)
+      }
+    } catch (err) {
+      console.error('[cron] hacker news engage build/render failed (alert still sent):', alert.key, err instanceof Error ? (err.stack ?? err.message) : err)
+    }
+    let engageDrafts: ReturnType<typeof buildEngageReplyDrafts> = []
+    try {
+      engageDrafts = buildEngageReplyDrafts(alert, scored)
+    } catch (err) {
+      console.error('[cron] #1548 engage reply draft build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
+    }
     const operatorSent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: defuseAutolinkDomain(alert.title),
       description: operatorDescription,
@@ -1845,6 +1862,12 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         await sendDiscordMessage(env.DISCORD_WEBHOOK_URL, reply.text)
       } catch (err) {
         console.error('[cron] reply copy message failed (operator alert sent):', alert.key, err instanceof Error ? err.message : err)
+      }
+    }
+    // #1548 — one plain message per engage platform.
+    for (const draft of operatorSent ? engageDrafts : []) {
+      if (!(await sendDiscordMessage(env.DISCORD_WEBHOOK_URL, draft.text))) {
+        console.error('[cron] #1548 engage reply message failed (operator alert sent):', draft.platform, alert.key)
       }
     }
     // #778 — operator phone push for a Tier-1-family NEW down/degraded incident, so the short (~1–2h)
