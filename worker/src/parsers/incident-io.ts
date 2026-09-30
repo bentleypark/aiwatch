@@ -439,7 +439,7 @@ export function parseIncidentIoPageStructure(html: string): IncidentIoPageItem[]
   return out
 }
 
-type PageShapedComponent = { id: string; name: string; status: string; group?: boolean; group_id?: string; position?: number }
+type PageShapedComponent = { id: string; name: string; status: string; group?: boolean; group_id?: string; position?: number; unplaced?: true }
 
 /**
  * #1528 — rewrite `components` into the Atlassian group shape `resolveSvcComponents` reads (#1525):
@@ -466,7 +466,7 @@ export function applyIncidentIoPageStructure(
     out.push({ id: groupId, name: item.group, status: 'operational', group: true, position: out.length })
     for (const id of members) out.push({ ...byId.get(id)!, group_id: groupId })
   })
-  for (const c of components) if (!placed.has(c.id)) out.push({ ...c, position: out.length })
+  for (const c of components) if (!placed.has(c.id)) out.push({ ...c, position: out.length, unplaced: true })
   return out
 }
 
