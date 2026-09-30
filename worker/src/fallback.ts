@@ -44,7 +44,7 @@ export const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
-  elevenlabs: 4, assemblyai: 4, deepgram: 4,
+  elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
   // Tier 5 = generative Video (#602 / #601 step B). A distinct tier so a degraded video service
   // recommends its video sibling (distance 0) over a tier-3 LLM router / infra service.
   runway: 5, luma: 5,
@@ -175,6 +175,7 @@ export const SERVICE_CAPABILITY: Record<string, string[]> = {
   elevenlabs: ['tts'],
   assemblyai: ['stt'],
   deepgram: ['stt', 'tts'],
+  fishaudio: ['tts'],
 }
 
 // #1062 — two services are mutually substitutable only if they share ≥1 capability. When EITHER lacks a

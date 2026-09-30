@@ -10,7 +10,7 @@ tags: [worker, cron, data-flow]
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (45 services) through one per-invocation `createConnectionLimiter` (#1489): at most 6
+    → parallel fetch (46 services) through one per-invocation `createConnectionLimiter` (#1489): at most 6
       requests wait for headers at once, and each `fetchWithTimeout` timeout starts when its slot is held,
       not when it is queued — the runtime's own queue had been aborting reads that would have answered.
       One run deadline (`STATUS_RUN_DEADLINE_MS`, 90 s from the limiter's creation): a fetch waits for a
@@ -27,7 +27,7 @@ Browser (React SPA, 60s polling)
     → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
     → probe cross-validation: individual probe RTT normal → hold operational (prevents false positives during status page failures)
   → React state (usePolling hook via PollingContext)
-    → overlay probe RTT onto service.latency (33 probe services)
+    → overlay probe RTT onto service.latency (34 probe services)
     → non-probe services (bedrock, azureopenai, modal) keep status page latency
   → all pages read from context
 

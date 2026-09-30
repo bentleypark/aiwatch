@@ -76,10 +76,11 @@ describe('PROBE_TARGETS', () => {
     'turbopuffer', // #857 — no official uptime, probe is the sole measured signal
     'cursor', // #883 — coding agent with its own API infra (api2.cursor.sh), independent signal
     'characterai', // #921 — app whose Statuspage died (#689/#800); neo.character.ai/health backend probe
+    'fishaudio', // #1549
   ]
 
-  it('has all 33 probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(33)
+  it('has all 34 probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(34)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)

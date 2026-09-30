@@ -358,6 +358,14 @@ describe('#1062 facet A — Voice tier STT/TTS capability gating', () => {
     ]
     expect(getFallbacks('elevenlabs', 'api', services)).toEqual([])
   })
+
+  it('Fish Audio (TTS, #1549) recommends the TTS siblings, never AssemblyAI (STT)', () => {
+    const services = [
+      ...voice,
+      { id: 'fishaudio', category: 'api', name: 'Fish Audio', status: 'down', aiwatchScore: 70 },
+    ]
+    expect(getFallbacks('fishaudio', 'api', services)).toEqual([{ name: 'Deepgram', score: 85 }, { name: 'ElevenLabs', score: 80 }])
+  })
 })
 
 describe('buildFallbackText', () => {

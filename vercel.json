@@ -53,6 +53,7 @@
     { "source": "/is-elevenlabs-down", "destination": "/api/is-down?slug=elevenlabs" },
     { "source": "/is-assemblyai-down", "destination": "/api/is-down?slug=assemblyai" },
     { "source": "/is-deepgram-down", "destination": "/api/is-down?slug=deepgram" },
+    { "source": "/is-fish-audio-down", "destination": "/api/is-down?slug=fish-audio" },
     { "source": "/is-huggingface-down", "destination": "/api/is-down?slug=huggingface" },
     { "source": "/is-replicate-down", "destination": "/api/is-down?slug=replicate" },
     { "source": "/is-fal-down", "destination": "/api/is-down?slug=fal" },

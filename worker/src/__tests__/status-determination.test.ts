@@ -856,7 +856,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     // it in #1198). A hardcoded roster is exactly how that omission happened, so derive it from the real
     // config instead — the length pin below is what forces this test to notice the NEXT roster change.
     const betterStackIds = SERVICES.filter((s) => s.betterStackUrl).map((s) => s.id)
-    expect(betterStackIds.length, 'BetterStack roster changed — update this comment/count if intentional').toBe(5)
+    expect(betterStackIds.length, 'BetterStack roster changed — update this comment/count if intentional').toBe(6)
     for (const id of betterStackIds) {
       const svc = SERVICES.find((s) => s.id === id)!
       expect(svc.componentDenylist, id).toEqual(['Website'])
