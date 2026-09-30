@@ -721,8 +721,8 @@ describe('displayComponentIds config sanity (#606)', () => {
   // #606 Category B — shared status.openai.com page split across 3 services by the official groups.
   // #1008: "Codex in ChatGPT Desktop" moved from codex (5→4) to its official ChatGPT group (11→12).
   // #1010: `Compliance API` joined chatgpt's badge scope (12→13), then `Sites` + `ChatGPT Work` once
-  // their `data_available_since` cleared 30 days (13→15) — see the chatgpt config comment in services.ts.
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 11, chatgpt: 15, codex: 4 }
+  // their `data_available_since` cleared 30 days (13→15). One retired component later left the scope (15→14).
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 11, chatgpt: 14, codex: 4 }
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
@@ -749,6 +749,13 @@ describe('displayComponentIds config sanity (#606)', () => {
       expect(svc.statusComponentId, id).toBe(SHARED_PAGE_PRIMARY[id])
       expect(svc.statusComponentIds![0], id).toBe(SHARED_PAGE_PRIMARY[id])
     }
+  })
+
+  it('does not retain the retired ChatGPT component in either fixed scope (#1544)', () => {
+    const retired = '01K8C008QVXHA6JX98PAS42VPD'
+    const chatgpt = SERVICES.find((s) => s.id === 'chatgpt')!
+    expect(chatgpt.statusComponentIds).not.toContain(retired)
+    expect(chatgpt.displayComponentIds).not.toContain(retired)
   })
 
   // `componentsUrl` per service is asserted in component-mismatch.test.ts (#783/#1175), beside the
@@ -822,7 +829,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(11 + 15 + 4)
+    expect(all.length).toBe(11 + 14 + 4)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing

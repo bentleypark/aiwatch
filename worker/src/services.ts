@@ -506,9 +506,8 @@ export const SERVICES: ServiceConfig[] = [
   // (not the API group, despite the name). Login here is the ChatGPT Login (the APIs group has a
   // separate API-Login id).
   // #1008: "Codex in ChatGPT Desktop" (01KMKFAMWKQ81YWSE1Z18R6VHR) is officially a ChatGPT-group
-  //   component (Codex surfaced inside the ChatGPT desktop app, sits between ChatGPT Atlas / ChatGPT
-  //   Work on the official page), so it belongs here — NOT under codex, where it used to be
-  //   mis-attributed and let a ChatGPT-only incident flip the Codex badge to degraded.
+  //   component (Codex surfaced inside the ChatGPT desktop app), so it belongs here — NOT under
+  //   codex, where it used to be mis-attributed and let a ChatGPT-only incident flip the Codex badge to degraded.
   // #1175 — componentsUrl, like its page-mates. The badge is a worst-of over every id below, so
   //   resolving them against summary.json's partial rotating window (#1125) narrowed it to whichever
   //   ids that window happened to serve, leaving the card green on an outage in any of the rest. "Its
@@ -525,7 +524,7 @@ export const SERVICES: ServiceConfig[] = [
   //   FedRAMP component id specifically, never the environment scope; and a component matching no
   //   `COMPONENT_CAPABILITY` regex classifies `llm`, so co-degrading it with a routed capability
   //   widens `degraded` and #1062 returns null (a missed reroute, the fail-safe direction).
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P'] },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P'], displayComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P'] },
   // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
   // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
@@ -576,8 +575,7 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606 Cat B): the official "Codex" group (4) on status.openai.com —
   // Codex API + CLI + VS Code extension + Codex Web. Display-only; disjoint from openai/chatgpt.
   // #1008: "Codex in ChatGPT Desktop" (01KMKFAMWKQ81YWSE1Z18R6VHR) is NOT a Codex-group component —
-  //   it's officially in the ChatGPT group (Codex surfaced inside the ChatGPT desktop app, sits among
-  //   ChatGPT Atlas / ChatGPT Work on the page). It was mis-attributed here, so a ChatGPT-only
+  //   it's officially in the ChatGPT group (Codex surfaced inside the ChatGPT desktop app). It was mis-attributed here, so a ChatGPT-only
   //   incident flipped it to partial_outage and dragged the Codex badge to degraded while the real
   //   Codex product (API/CLI/VS Code/Web) was operational. Removed from BOTH arrays and moved to
   //   chatgpt where it belongs.

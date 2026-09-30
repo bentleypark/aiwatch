@@ -1144,7 +1144,7 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
   // before it, `components[]` carried only the subset summary.json's rotating window served that cycle.)
   const CHATGPT_COMPONENTS = [
     'Conversations', 'Connectors/Apps', 'Search', 'GPTs', 'Image Generation', 'Login', 'Agent',
-    'Codex in ChatGPT Desktop', 'Voice mode', 'Deep Research', 'File uploads', 'ChatGPT Atlas',
+    'Codex in ChatGPT Desktop', 'Voice mode', 'Deep Research', 'File uploads',
     'Compliance API', // #1010
     'Sites', 'ChatGPT Work', // #1010 second pass — routing consequence pinned below
   ]
