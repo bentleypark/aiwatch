@@ -857,7 +857,6 @@ describe('displayComponentIds config sanity (#606)', () => {
   })
 
   it('#1198 — fireworks migrated off BetterStack to the incident.io compat API (overall-indicator badge, dynamic breakdown, worst-of uptime over a stable id subset)', () => {
-    const retiredComponentId = '01KVEMYTCCD5S0RQWPBQZ431PE'
     const svc = SERVICES.find((s) => s.id === 'fireworks')!
     expect(svc.betterStackUrl).toBeUndefined()
     expect(svc.rssFeedUrl).toBeUndefined()
@@ -880,7 +879,6 @@ describe('displayComponentIds config sanity (#606)', () => {
       '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8',
       '01M03TGQ7XTQ8HAKZ8MDQ44HH5', '01M0VEYRP3Q4KM0RDEFG6EBBZC', '01M0VEYRP3YY99KM87D9CNZ7MG',
     ])
-    expect(svc.incidentIoComponentId).not.toContain(retiredComponentId)
     // holdShortIncidents, NOT flapSuppression: incident.io titles carry no "— down/recovered" suffix,
     // so flapSuppression's isFlapNotice title regex would never match — see alerts.test.ts for the
     // behavioral coverage (a real per-model blip must still be held, using the real SERVICES config).
