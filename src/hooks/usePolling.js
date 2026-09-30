@@ -417,6 +417,13 @@ export const MOCK_SERVICES = [
     incidents: [],
   },
   {
+    id: 'fishaudio', category: 'api', name: 'Fish Audio', provider: 'Fish Audio', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
     id: 'pinecone', category: 'api', name: 'Pinecone', provider: 'Pinecone', status: 'operational',
     latency: 320, uptime30d: null,
     history30d: hist(),

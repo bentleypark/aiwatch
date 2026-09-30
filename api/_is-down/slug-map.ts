@@ -42,6 +42,9 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'elevenlabs':      { id: 'elevenlabs', name: 'ElevenLabs',       provider: 'ElevenLabs',  category: 'api', group: 'voice' },
   'assemblyai':      { id: 'assemblyai', name: 'AssemblyAI',       provider: 'AssemblyAI',  category: 'api', group: 'voice' },
   'deepgram':        { id: 'deepgram',   name: 'Deepgram',         provider: 'Deepgram',    category: 'api', group: 'voice' },
+  // Fish Audio (#1549) — TTS / voice cloning. Slug 'fish-audio' ≠ worker id 'fishaudio'; mirrored in
+  // worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE + src/utils/constants.js FEED_SLUG_OVERRIDE.
+  'fish-audio':      { id: 'fishaudio',  name: 'Fish Audio',       provider: 'Fish Audio',  category: 'api', group: 'voice' },
   // Inference / infrastructure (#263)
   'huggingface':     { id: 'huggingface', name: 'Hugging Face',    provider: 'Hugging Face', category: 'api', group: 'inference' },
   'replicate':       { id: 'replicate',  name: 'Replicate',        provider: 'Replicate',   category: 'api', group: 'inference' },
@@ -116,9 +119,10 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'kimi':           ['deepseek', 'mistral', 'openai-api', 'claude-api'],
   'openrouter':     ['openai-api', 'claude-api', 'mistral'],
   // Voice — same category
-  'elevenlabs':     ['assemblyai', 'deepgram'],
+  'elevenlabs':     ['fish-audio', 'deepgram', 'assemblyai'],
   'assemblyai':     ['deepgram', 'elevenlabs'],
-  'deepgram':       ['assemblyai', 'elevenlabs'],
+  'deepgram':       ['assemblyai', 'elevenlabs', 'fish-audio'],
+  'fish-audio':     ['elevenlabs', 'deepgram', 'assemblyai'],
   // Inference / vector / image
   'huggingface':    ['replicate', 'fal', 'modal', 'together'],
   'replicate':      ['huggingface', 'fal', 'stability', 'modal'],
@@ -189,7 +193,7 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   deepseek: 'https://www.deepseek.com', kimi: 'https://www.moonshot.ai', xai: 'https://x.ai', perplexity: 'https://www.perplexity.ai',
   openrouter: 'https://openrouter.ai',
   // Voice & speech (#842 category extension)
-  elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com',
+  elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com', fishaudio: 'https://fish.audio',
   // Vector DB (#857) — pinecone + turbopuffer are now fallback candidates (Tier 8), so the "Open ↗"
   // referral wedge needs their product URLs (without these the actual relevant vector sibling had no button).
   pinecone: 'https://www.pinecone.io', turbopuffer: 'https://turbopuffer.com',

@@ -338,6 +338,9 @@ export const SERVICES: ServiceConfig[] = [
   // real degradation behind an operational base row — surfacing it makes the breakdown honest.
   { id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', category: 'api', statusUrl: 'https://status.assemblyai.com', apiUrl: 'https://status.assemblyai.com/api/v2/summary.json', statusComponentId: '50txf4qfk2kv', displayComponentIds: ['kygwc83t1rfg', '20vm7q71wjcn', 'trxjzz9bwdmc', 'psxcg5mfhznq', 'rfh9swc12f9h', '12wrfd55ml3r'] },
   { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
+  // Fish Audio (#1549) — TTS / voice cloning. Better Stack page (mirror helicone/luma); its per-model
+  // resources sit in their own page section, which parseBetterStackComponents already groups.
+  { id: 'fishaudio', name: 'Fish Audio', provider: 'Fish Audio', category: 'api', statusUrl: 'https://status.fish.audio', apiUrl: null, rssFeedUrl: 'https://status.fish.audio/feed', betterStackUrl: 'https://status.fish.audio', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-09-30' }, // #802
   // Inference / Infrastructure
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true, componentDenylist: ['Website'] },
   // #1384 — Replicate joined Cloudflare and the retired Statuspage v2 URL now 301s to HTML. The

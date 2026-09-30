@@ -314,6 +314,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Deepgram status?', a: 'You can check Deepgram status on this page, on the official Deepgram status page at status.deepgram.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  'fish-audio': {
+    displayName: 'Fish Audio',
+    description: 'Fish Audio provides text-to-speech and voice cloning APIs, served through its Platform API and Text-to-Speech API.',
+    insight: 'AIWatch tracks Fish Audio\'s status page (Better Stack) — the Platform API, the Text-to-Speech API, and each TTS model it lists — so an outage of a single model shows up even while the API itself answers.',
+    whenDown: 'When Fish Audio is down, text-to-speech generation and voice cloning requests fail, so voice agents, narration pipelines, and apps that synthesize speech on demand lose their audio output.',
+    faqs: [
+      { q: 'Is Fish Audio down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Fish Audio every 5 minutes and shows real-time operational status.' },
+      { q: 'Why is Fish Audio text-to-speech failing?', a: 'Fish Audio lists each TTS model separately on its status page, so one model can be down while others work. Check this page for active incidents, then try another model or verify your API key and credit balance.' },
+      { q: 'What are alternatives to Fish Audio?', a: 'For text-to-speech, ElevenLabs and Deepgram are alternatives AIWatch also tracks. AIWatch shows current availability for each voice service.' },
+      { q: 'How do I check Fish Audio status?', a: 'You can check Fish Audio status on this page, on the official Fish Audio status page at status.fish.audio, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   // Inference & infrastructure (#263)
   huggingface: {
     displayName: 'Hugging Face',

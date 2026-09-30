@@ -18,7 +18,7 @@ export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate', 'fal',
   'elevenlabs', 'xai', 'deepseek', 'kimi', 'openrouter', 'bedrock', 'azureopenai',
-  'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'twelvelabs', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram',
+  'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'twelvelabs', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram', 'fishaudio',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -35,7 +35,7 @@ export const SERVICE_AND_APP_IDS = [
   'claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'kimi', 'openrouter',
   // voice & speech AI
-  'elevenlabs', 'assemblyai', 'deepgram',
+  'elevenlabs', 'assemblyai', 'deepgram', 'fishaudio',
   // inference / infrastructure
   'huggingface', 'replicate', 'fal', 'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'twelvelabs',
   // LLM observability (#601)
@@ -58,7 +58,7 @@ export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'kimi', 'openrouter'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
-  voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram'] }, // #658 — STT/TTS
+  voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram', 'fishaudio'] }, // #658 — STT/TTS
   inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'pinecone', 'turbopuffer', 'twelvelabs'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone/turbopuffer, #857). Observability (#601) and image (#756) split out to their own categories; vector stays here as a sidebar group (its ≥2-member split is a fallback tier only, #857) — remaining single-service sub-domains stay until they gain siblings
   observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
   video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
@@ -97,7 +97,7 @@ export const SERVICE_SITE_URL = {
   deepseek: 'https://www.deepseek.com', kimi: 'https://www.moonshot.ai', xai: 'https://x.ai', perplexity: 'https://www.perplexity.ai',
   openrouter: 'https://openrouter.ai',
   // Voice & speech
-  elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com',
+  elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com', fishaudio: 'https://fish.audio',
   // Vector DB (#857) — pinecone + turbopuffer are now fallback candidates (Tier 8); keep in sync with api/is-down/slug-map.ts
   pinecone: 'https://www.pinecone.io', turbopuffer: 'https://turbopuffer.com',
   // Image
@@ -157,6 +157,7 @@ const FEED_SLUG_OVERRIDE = {
   langsmith:   'langchain',
   deepseekapp: 'deepseek-app',
   bfl:         'flux', // #756 — SEO-friendly "is flux down" slug
+  fishaudio:   'fish-audio', // #1549
   // #1164 — /is-claude-down and /is-openai-down became provider-family group pages; the
   // single-service pages moved to '-api' slugs.
   claude:      'claude-api',
@@ -199,7 +200,7 @@ export const API_TIER = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
-  elevenlabs: 4, assemblyai: 4, deepgram: 4,
+  elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
   // Tier 5 = generative Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts.
   runway: 5, luma: 5,
   // Tier 6 = LLM Observability (#601) — LangSmith + Helicone + Langfuse; LangSmith un-excluded.
@@ -252,6 +253,7 @@ export const SERVICE_CAPABILITY = {
   elevenlabs: ['tts'],
   assemblyai: ['stt'],
   deepgram: ['stt', 'tts'],
+  fishaudio: ['tts'],
 }
 
 // #1062 — two services are mutually substitutable only if they share ≥1 capability. EITHER lacking a tag

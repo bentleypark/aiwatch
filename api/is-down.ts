@@ -238,7 +238,7 @@ export default async function handler(req: Request) {
           claude: 1, openai: 1, gemini: 1,
           mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, xai: 2, perplexity: 2,
           bedrock: 3, azureopenai: 3, openrouter: 3,
-          elevenlabs: 4, assemblyai: 4, deepgram: 4,
+          elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
           runway: 5, luma: 5, // Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts
           langsmith: 6, helicone: 6, langfuse: 6, // Observability (#601) — keep in sync with worker/src/fallback.ts
           stability: 7, bfl: 7, // Image (#756) — keep in sync with worker/src/fallback.ts
@@ -266,7 +266,7 @@ export default async function handler(req: Request) {
         // api-tier-sync.test.ts deep-equals this DATA block vs the worker copy AND asserts the filter still
         // calls sharesCapability below; the 3-line body is kept identical to the worker copy by hand.
         const SERVICE_CAPABILITY: Record<string, string[]> = {
-          elevenlabs: ['tts'], assemblyai: ['stt'], deepgram: ['stt', 'tts'],
+          elevenlabs: ['tts'], assemblyai: ['stt'], deepgram: ['stt', 'tts'], fishaudio: ['tts'],
         }
         const sharesCapability = (a: string, b: string): boolean => {
           const ca = SERVICE_CAPABILITY[a], cb = SERVICE_CAPABILITY[b]

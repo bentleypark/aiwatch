@@ -39,6 +39,7 @@ export const STATUS_URL = {
   luma:        'https://status.lumalabs.ai',
   assemblyai:  'https://status.assemblyai.com',
   deepgram:    'https://status.deepgram.com',
+  fishaudio:   'https://status.fish.audio',
   azureopenai: 'https://azure.status.microsoft/en-us/status',
   characterai: 'https://status.character.ai',
   claudeai:    'https://status.claude.com',
