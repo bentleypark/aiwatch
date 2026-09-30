@@ -276,6 +276,14 @@ test('reads the word an affected component renders', () => {
   assert.deepEqual(readComponentRow(LIVE_AFFECTED), { name: 'OCR API', status: 'Affected' })
 })
 
+test('reads the bare maintenance word the page legend renders', () => {
+  assert.deepEqual(readComponentRow('OCR API Maintenance 90 days ago 99.31% Today'), { name: 'OCR API', status: 'Maintenance' })
+})
+
+test('still reads Under Maintenance as the whole phrase', () => {
+  assert.deepEqual(readComponentRow('OCR API Under Maintenance 90 days ago 99.31% Today'), { name: 'OCR API', status: 'Under Maintenance' })
+})
+
 test('reads the word an operational component renders', () => {
   assert.deepEqual(readComponentRow(LIVE_OPERATIONAL), { name: 'Agents API', status: 'Operational' })
 })
