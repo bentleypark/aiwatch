@@ -478,7 +478,7 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
  * Count resources reporting a real issue (degraded or downtime), excluding planned
  * maintenance and operational ones. Surfaced as `partialCount` so the UI can show a
  * "N affected" badge when `parseBetterStackStatus` collapses a partial outage to
- * `operational` via the <30% threshold (#447) — closes the perception gap between
+ * `operational` below `BETTERSTACK_DEGRADE_THRESHOLD` (#447) — closes the perception gap between
  * BetterStack's "Some services are down" header and the AIWatch card without
  * reintroducing the per-model flap noise the threshold deliberately suppresses.
  *
