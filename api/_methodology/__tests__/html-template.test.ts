@@ -397,14 +397,28 @@ describe('renderMethodologyPage', () => {
       ['ko', entry(koBlock, 's2.partial')],
       ['en', entry(enBlock, 's2.partial')],
     ]
+    const rule = (gate: string, below: string, kept: string, atOrAbove: string) => new RegExp(
+      `${gate}[\\s\\S]*${below}[^<]*${kept}[^<]*<strong>Partial</strong>[\\s\\S]*${atOrAbove}[^<]*<strong>Degraded</strong>[^<]*<strong>Down</strong>`,
+    )
+    const ko = rule('장애를 보고하면', `${threshold} 미만`, '정상으로 두고', `${threshold} 이상`)
+    const en = rule('reports a problem', `Below ${threshold}`, 'stays operational', `${threshold} or more`)
     for (const [where, text] of partials) {
-      expect(text, `${where} Partial copy must name the parser threshold`).toContain(threshold)
-      expect(text, `${where} Partial copy must not enumerate Better Stack services`).not.toMatch(/Together|HuggingFace|Modal|Luma|Helicone|Fish Audio/)
+      expect(text, `${where}: Partial below the threshold, Degraded/Down at or above it`).toMatch(where === 'en' ? en : ko)
     }
-    expect(entry(enBlock, 's2.partial')).toContain(`fewer than ${threshold}`)
-    expect(entry(koBlock, 's2.partial')).toContain(`${threshold} 미만`)
-    for (const [where, text] of partials) {
-      expect(text, `${where} copy must retain the two escalated display states`).toMatch(/Degraded[\s\S]*Down/)
+  })
+
+  it('links s2.partial to a heading that exists in status-determination.md (#1552)', () => {
+    const doc = readFileSync(join(process.cwd(), 'docs', 'reference', 'status-determination.md'), 'utf8')
+    const slug = (h: string) => h.trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/ /g, '-')
+    const anchors = new Set([...doc.matchAll(/^#{1,6} (.+)$/gm)].map((m) => slug(m[1])))
+    for (const [where, text] of [
+      ['inline', inline('s2.partial', 'p')],
+      ['ko', entry(koBlock, 's2.partial')],
+      ['en', entry(enBlock, 's2.partial')],
+    ] as const) {
+      const anchor = text.match(/status-determination\.md#([^"]+)"/)?.[1]
+      expect(anchor, `${where}: s2.partial must deep-link the reference section`).toBeDefined()
+      expect(anchors.has(anchor!), `${where}: #${anchor} matches no heading in status-determination.md`).toBe(true)
     }
   })
 })

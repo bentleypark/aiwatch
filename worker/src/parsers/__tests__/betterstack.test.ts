@@ -877,8 +877,8 @@ describe('parseBetterStackStatus', () => {
     })).toBe('operational')
   })
 
-  it('counts maintenance as non-operational in the "degraded" roll-up threshold (#1552)', () => {
-    // Unlike a page-level maintenance roll-up, a degraded roll-up treats every
+  it.each(['degraded', 'downtime'])('counts maintenance as non-operational in the "%s" roll-up threshold (#1552)', (state) => {
+    // Unlike a page-level maintenance roll-up, a degraded or downtime roll-up treats every
     // non-operational resource — including maintenance — as part of the numerator.
     // 1 downtime + 1 maintenance / 11 total resources = 18.2% → degraded.
     const resources = Array.from({ length: 9 }, () => ({
@@ -887,7 +887,7 @@ describe('parseBetterStackStatus', () => {
     resources.push({ type: 'status_page_resource', attributes: { status: 'downtime' } })
     resources.push({ type: 'status_page_resource', attributes: { status: 'maintenance' } })
     expect(parseBetterStackStatus({
-      data: { attributes: { aggregate_state: 'degraded' } },
+      data: { attributes: { aggregate_state: state } },
       included: resources,
     })).toBe('degraded')
   })
