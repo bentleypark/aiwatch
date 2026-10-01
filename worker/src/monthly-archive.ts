@@ -2003,6 +2003,8 @@ export interface ArchiveCensus {
   servicesWithUptime: number
   servicesWithScore: number
   servicesWithLatency: number
+  servicesWithOfficialUptime: string[]
+  servicesWithComponents: string[]
   sectionKeys: string[]
   incidentIds: string[]
 }
@@ -2023,13 +2025,17 @@ export function archiveContentCensus(raw: unknown): ArchiveCensus | null {
 
   const entries = Object.values(archive.services)
   const incidentIds: string[] = []
+  const servicesWithOfficialUptime: string[] = []
+  const servicesWithComponents: string[] = []
   let servicesWithUptime = 0
   let servicesWithScore = 0
   let servicesWithLatency = 0
-  for (const svc of entries) {
+  for (const [id, svc] of Object.entries(archive.services)) {
     if (svc?.uptime != null) servicesWithUptime++
     if (svc?.score != null) servicesWithScore++
     if (svc?.avgLatencyMs != null) servicesWithLatency++
+    if (svc?.officialUptime != null) servicesWithOfficialUptime.push(id)
+    if (Array.isArray(svc?.components)) servicesWithComponents.push(id)
     const list = svc?.incidentList
     if (Array.isArray(list)) {
       for (const inc of list) {
@@ -2055,6 +2061,8 @@ export function archiveContentCensus(raw: unknown): ArchiveCensus | null {
     servicesWithUptime,
     servicesWithScore,
     servicesWithLatency,
+    servicesWithOfficialUptime,
+    servicesWithComponents,
     sectionKeys,
     incidentIds,
   }
@@ -2075,6 +2083,10 @@ export function censusRegressions(
   }
   const lostSections = prior.sectionKeys.filter((k) => !next.sectionKeys.includes(k))
   if (lostSections.length > 0) out.push(`sections:${lostSections.join('+')}`)
+  for (const key of ['servicesWithOfficialUptime', 'servicesWithComponents'] as const) {
+    const lost = prior[key].filter((id) => !next[key].includes(id))
+    if (lost.length > 0) out.push(`${key}:${lost.join('+')}`)
+  }
   const nextIds = new Set(next.incidentIds)
   const unexplained = prior.incidentIds.filter((id) => !nextIds.has(id) && !explainedMissingIds.has(id))
   if (unexplained.length > 0) out.push('incidents')

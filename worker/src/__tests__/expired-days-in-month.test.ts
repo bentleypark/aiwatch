@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import archive202608 from './fixtures/archive-2026-08-census-fields.json'
 import { expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions } from '../monthly-archive'
 
 // #1260 — `buildMonthlyArchive` reads every day of uptime from `history:{date}`, which expires, and
@@ -118,7 +119,8 @@ describe('archiveContentCensus (#1260)', () => {
 describe('censusRegressions (#1260)', () => {
   const census = (o: Record<string, unknown> = {}) => ({
     daysCollected: 0, services: 0, servicesWithUptime: 0, servicesWithScore: 0,
-    servicesWithLatency: 0, sectionKeys: [] as string[], incidentIds: [] as string[], ...o,
+    servicesWithLatency: 0, servicesWithOfficialUptime: [] as string[], servicesWithComponents: [] as string[],
+    sectionKeys: [] as string[], incidentIds: [] as string[], ...o,
   }) as Parameters<typeof censusRegressions>[0]
 
   it('reports every numeric entry that shrank', () => {
@@ -142,5 +144,31 @@ describe('censusRegressions (#1260)', () => {
 
   it('reports nothing when the rebuild holds at least as much', () => {
     expect(censusRegressions(census({ services: 1 }), census({ services: 2, sectionKeys: ['security'] }))).toEqual([])
+  })
+
+  it('names a service that lost officialUptime or components even when another gained one (#1504)', () => {
+    const prior = census({ servicesWithOfficialUptime: ['replicate'], servicesWithComponents: ['mistral'] })
+    const next = census({ servicesWithOfficialUptime: ['kimi'], servicesWithComponents: ['kimi'] })
+    expect(censusRegressions(prior, next)).toEqual([
+      'servicesWithOfficialUptime:replicate',
+      'servicesWithComponents:mistral',
+    ])
+  })
+})
+
+describe('the real 2026-08 rebuild loss (#1504)', () => {
+  // archive:monthly:2026-08 as stored on 2026-10-01, reduced to its per-service measurement fields.
+  const prior = archive202608 as { services: Record<string, Record<string, unknown>> }
+  // What the #1504 rebuild wrote: the six fields that issue lists went empty, and nothing else.
+  const rebuilt = structuredClone(prior)
+  rebuilt.services.replicate.officialUptime = null
+  rebuilt.services.replicate.uptimeSource = null
+  for (const id of ['replicate', 'mistral', 'perplexity', 'windsurf']) rebuilt.services[id].components = null
+
+  it('is now reported as a regression, naming the services that lost data', () => {
+    expect(censusRegressions(archiveContentCensus(prior)!, archiveContentCensus(rebuilt)!)).toEqual([
+      'servicesWithOfficialUptime:replicate',
+      'servicesWithComponents:mistral+perplexity+replicate+windsurf',
+    ])
   })
 })

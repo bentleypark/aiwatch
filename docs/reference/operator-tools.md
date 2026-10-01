@@ -87,8 +87,8 @@ IS the remedy (while `incidents:monthly` still exists, 60d).
 
 **After adding a suppression for a past month**, run `POST /api/admin/rebuild-archive` for that month so the
 archive + dashboard 90-day history reflect it. (The CURRENT month's 90-day view + weekly briefing filter the
-raw accumulator live — no rebuild needed there.) The rebuild reads the suppression list, so this shrink is
-expected and passes the guard below without a `force`.
+raw accumulator live — no rebuild needed there.) The rebuild reads the suppression list, so its incident shrink is
+expected and does not count against the guard below.
 
 ### The rebuild refuses when it would hold less than what is stored (#1260)
 
@@ -104,7 +104,7 @@ archive, and answers:
 |---|---|
 | **`503` `retryable:true`** | a read taken BEFORE the build could not be completed. Retry; `force` does not override it. |
 | **`500` `retryable:false`** | an operator list is present but unusable. Retrying never clears it — repair the KV value by hand. Both lists are checked to the same depth (#1274, #1318): a value that does not parse, parses to a non-array, or holds rows the normalizer rejects (a quoted `"18"` for `durationMin`, a suppression row with no `scope`) is refused, with `reason` and `droppedRows` in the body. |
-| **`409`** | the rebuild measurably holds less than what is stored — `regressed` names what, alongside `prior` and `rebuilt`. Incidents the suppression list accounts for are NOT a loss, so the suppress-then-rebuild flow above passes without a `force`. |
+| **`409`** | the rebuild measurably holds less than what is stored — `regressed` names what, alongside `prior` and `rebuilt`. Incidents the suppression list accounts for are NOT a loss. |
 | **`409`** | the stored archive is unparseable, so the comparison could not be made at all. |
 | **`400`** | the month is not a real calendar month, or has not ENDED yet — the current month included (#1274). |
 | **`200`** | otherwise — including a first-ever build of an old month, where nothing is stored and so nothing can be lost. |

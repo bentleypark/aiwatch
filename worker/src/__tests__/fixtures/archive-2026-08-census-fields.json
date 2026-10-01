@@ -1,0 +1,1472 @@
+{
+ "period": "2026-08",
+ "daysCollected": 31,
+ "services": {
+  "claude": {
+   "uptime": 97.86,
+   "score": 74,
+   "avgLatencyMs": 127,
+   "officialUptime": 99.71,
+   "uptimeSource": "official",
+   "components": null
+  },
+  "openai": {
+   "uptime": 100,
+   "score": 74,
+   "avgLatencyMs": 150,
+   "officialUptime": 99.9,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01JP8CD9JR3HR6Y7G4Q75N4DVW",
+     "name": "Responses",
+     "uptime": 99.31
+    },
+    {
+     "id": "01JMXBRMFE6N2NNT7DG6XZQ6PW",
+     "name": "Chat Completions",
+     "uptime": 99.34
+    },
+    {
+     "id": "01JMXBRMFESJCBGJR10PDD3WCQ",
+     "name": "Files",
+     "uptime": 99.74
+    },
+    {
+     "id": "01JMXBRMFEKVBWKK82B44QFMCE",
+     "name": "Audio",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBRMFE5ESNNV8JDHVCGSRD",
+     "name": "Batch",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBRMFEV0AJ0VVS68N9CD6R",
+     "name": "Embeddings",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBRMFEMZK0HPK19RYET250",
+     "name": "Fine-tuning",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBRMFE4MAP2BHSJNZ787WX",
+     "name": "Images",
+     "uptime": 100
+    },
+    {
+     "id": "01JSM5RTJWHRWDTS6Q604VEW3B",
+     "name": "Login",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBRMFEVZ7E0X9GD9FWR9WX",
+     "name": "Moderations",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBRMFEQW613TFE89F45035",
+     "name": "Realtime",
+     "uptime": 100
+    },
+    {
+     "id": "01K9G527YRPY1EFRMHTKB5BKT5",
+     "name": "Sora",
+     "uptime": 100
+    }
+   ]
+  },
+  "gemini": {
+   "uptime": 100,
+   "score": 60,
+   "avgLatencyMs": 64,
+   "officialUptime": null,
+   "uptimeSource": null,
+   "components": null
+  },
+  "bedrock": {
+   "uptime": 100,
+   "score": null,
+   "avgLatencyMs": null,
+   "officialUptime": null,
+   "uptimeSource": null,
+   "components": null
+  },
+  "azureopenai": {
+   "uptime": 100,
+   "score": null,
+   "avgLatencyMs": null,
+   "officialUptime": null,
+   "uptimeSource": null,
+   "components": null
+  },
+  "mistral": {
+   "uptime": 99.56,
+   "score": 74,
+   "avgLatencyMs": 132,
+   "officialUptime": 94.9,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "9f01cfda-c067-426b-b1aa-081541169174",
+     "name": "Conversations API",
+     "uptime": 89.86
+    },
+    {
+     "id": "c4869a5a-054c-4c1b-88d1-3d195ba58511",
+     "name": "Chat Completions API",
+     "uptime": 89.98
+    },
+    {
+     "id": "6d1417e5-81f5-44f4-bfd4-d2eb44d95988",
+     "name": "Embeddings API",
+     "uptime": 92.89
+    },
+    {
+     "id": "d7e0541d-b743-4cad-96cb-dd1395422904",
+     "name": "Agents API",
+     "uptime": 99.64
+    },
+    {
+     "id": "7fadf202-f02f-40a2-84a4-c4f4041b7865",
+     "name": "AI Registry Prompts API",
+     "uptime": 99.68
+    },
+    {
+     "id": "033ab409-a16e-4574-aef5-f2f0afc1f6cd",
+     "name": "Integrations API",
+     "uptime": 99.71
+    },
+    {
+     "id": "4051fbf9-fea4-434a-90c1-b347c16e02ba",
+     "name": "Files API",
+     "uptime": 99.83
+    },
+    {
+     "id": "bd64fd4f-286c-4a86-bd31-006a7ea5aa03",
+     "name": "AI Registry Skills API",
+     "uptime": 99.89
+    },
+    {
+     "id": "09f74bbf-a6e6-4751-a057-70da6c502c06",
+     "name": "OCR API",
+     "uptime": 99.9
+    },
+    {
+     "id": "d8e1e02e-48a4-4d97-8168-a8aabc1c51fb",
+     "name": "Audio API",
+     "uptime": 99.93
+    },
+    {
+     "id": "02a249ad-72d5-432a-8937-a5ab69a0b7f8",
+     "name": "Workflows API",
+     "uptime": 99.94
+    },
+    {
+     "id": "78e74758-aa8f-4067-9147-d7f1ab90849a",
+     "name": "Batch API",
+     "uptime": 100
+    }
+   ]
+  },
+  "cohere": {
+   "uptime": 99.91,
+   "score": 82,
+   "avgLatencyMs": 150,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01KYQV7WSC41TY9VVH041KE3X4",
+     "name": "c4ai-aya-expanse-32b",
+     "uptime": 100
+    },
+    {
+     "id": "01KYQTZ68786Y6TG2KXP4HAXEA",
+     "name": "c4ai-aya-vision-32b",
+     "uptime": 100
+    },
+    {
+     "id": "01JPJY4Y5P9N4AYA7FXXKQ71FA",
+     "name": "command-a-03-2025",
+     "uptime": 100
+    },
+    {
+     "id": "01KYQTZ68795V66QKF6BHY22EF",
+     "name": "command-a-plus-05-2026",
+     "uptime": 100
+    },
+    {
+     "id": "01K3615WHHNP4YXCG1S7Y9DWJJ",
+     "name": "command-a-reasoning-08-2025",
+     "uptime": 100
+    },
+    {
+     "id": "01KYQTZ687HVZFYF4Z5DXJBQ24",
+     "name": "command-a-translate-08-2025",
+     "uptime": 100
+    },
+    {
+     "id": "01JDSM6NYV4NB4B000NKMN0GD0",
+     "name": "command-r-08-2024",
+     "uptime": 100
+    },
+    {
+     "id": "01JFBAF0C96Z5SGTH6158ZYX42",
+     "name": "command-r7b-12-2024",
+     "uptime": 100
+    },
+    {
+     "id": "01HTJQBPX6PV33KCJVX6FHRRB1",
+     "name": "embed-english-light-v3.0",
+     "uptime": 100
+    },
+    {
+     "id": "01HTJQBPX6BPFRKNY2EQJ2S3ZA",
+     "name": "embed-english-v3.0",
+     "uptime": 100
+    },
+    {
+     "id": "01HQ6CA39NK5QH224R8VYAQ8AG",
+     "name": "embed-multilingual-light-v3.0",
+     "uptime": 100
+    },
+    {
+     "id": "01HQ6CA39NZXA9MTA2W4QM5K51",
+     "name": "embed-multilingual-v3.0",
+     "uptime": 100
+    },
+    {
+     "id": "01JVSVZEEWNAY445Z6KQ2FWBHV",
+     "name": "embed-v4.0",
+     "uptime": 100
+    },
+    {
+     "id": "01HQ6CA39NZ5X3PRFPN71Q89TE",
+     "name": "embeddings",
+     "uptime": 100
+    },
+    {
+     "id": "01HTQRNEDQQ9E16WRMZF16HH40",
+     "name": "Playground",
+     "uptime": 100
+    },
+    {
+     "id": "01HVPXG9XDKMV4J7QHD4DR77BT",
+     "name": "rerank-english-v3.0",
+     "uptime": 100
+    },
+    {
+     "id": "01HVPXG9XD4PZWMT2E6WJWKEYG",
+     "name": "rerank-multilingual-v3.0",
+     "uptime": 100
+    },
+    {
+     "id": "01JE3W0DMZT3SQZKJDRSMQR6TS",
+     "name": "rerank-v3.5",
+     "uptime": 100
+    },
+    {
+     "id": "01KC9J08TST7F3FPCWBZM2QNVM",
+     "name": "rerank-v4.0-fast",
+     "uptime": 100
+    },
+    {
+     "id": "01KC9J08TSXWHF9GKWDY20S4XF",
+     "name": "rerank-v4.0-pro",
+     "uptime": 100
+    },
+    {
+     "id": "01KYQV7WSCBZHX1WCJW6CZ4PA7",
+     "name": "tiny-aya-base",
+     "uptime": 100
+    },
+    {
+     "id": "01KYQV7WSC17KQQKVTXFDW2TP9",
+     "name": "tiny-aya-earth",
+     "uptime": 100
+    },
+    {
+     "id": "01KYQV7WSCFB23SCVT6AB829NV",
+     "name": "tiny-aya-fire",
+     "uptime": 100
+    },
+    {
+     "id": "01KYQV7WSCPG58AWXBAAAEKZSR",
+     "name": "tiny-aya-global",
+     "uptime": 100
+    },
+    {
+     "id": "01KYQV7WSCJMD30XTAXDVWSKE7",
+     "name": "tiny-aya-water",
+     "uptime": 100
+    }
+   ]
+  },
+  "groq": {
+   "uptime": 100,
+   "score": 89,
+   "avgLatencyMs": 152,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01K053E2FAKWKEYHXEV7WAHJBM",
+     "name": "API",
+     "uptime": 100
+    },
+    {
+     "id": "01KD6DG59NFJREPYMMSF9A48GJ",
+     "name": "Canopy Labs Orpheus Arabic Saudi",
+     "uptime": 100
+    },
+    {
+     "id": "01KD6DE2KKE9AZKYPBN7E8BKT6",
+     "name": "Canopy Labs Orpheus English",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9B8GNTTX2MQFCAS3MX",
+     "name": "groq/compound",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BV96KK16JNHQC6H09",
+     "name": "groq/compound-mini",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BDH78Q7P0GAVJ7PX1",
+     "name": "llama-3.1-8b-instant",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BWXJATX45RHX9SQEV",
+     "name": "llama-3.3-70b-versatile",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BSWJ2SGHJT92HG53X",
+     "name": "meta-llama/llama-4-maverick-17b-128e-instruct",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BXTFV76A9WK0AFGM3",
+     "name": "meta-llama/llama-4-scout-17b-16e-instruct",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9B4D28CW023BVEHRWC",
+     "name": "meta-llama/llama-guard-4-12b",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BWQMK2RSC6SX46019",
+     "name": "meta-llama/llama-prompt-guard-2-22m",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9B0EC9MMK29ZBRS5YR",
+     "name": "meta-llama/llama-prompt-guard-2-86m",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9B02E51XN6DK0BQWJK",
+     "name": "moonshotai/kimi-k2-instruct-0905",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BBBKD92266DJ23AGX",
+     "name": "openai/gpt-oss-120b",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BFXCCZGAP08KRFX0C",
+     "name": "openai/gpt-oss-20b",
+     "uptime": 100
+    },
+    {
+     "id": "01K8R45PBNMKVK1GM18WXJ6F54",
+     "name": "openai/gpt-oss-safeguard-20b",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BT3JCHWXKKB98GD0N",
+     "name": "qwen/qwen3-32b",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BVFH7CWEXN74MND4V",
+     "name": "whisper-large-v3",
+     "uptime": 100
+    },
+    {
+     "id": "01K6Y7AE9BZFN4QCY3TNQXFBHC",
+     "name": "whisper-large-v3-turbo",
+     "uptime": 100
+    }
+   ]
+  },
+  "together": {
+   "uptime": 100,
+   "score": 72,
+   "avgLatencyMs": 216,
+   "officialUptime": 99.47,
+   "uptimeSource": "platform_avg",
+   "components": null
+  },
+  "fireworks": {
+   "uptime": 99.11,
+   "score": 85,
+   "avgLatencyMs": 140,
+   "officialUptime": 99.77,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01KYQT4MDWSVEMPWCVPC90ZSA8",
+     "name": "Kimi K3 US",
+     "uptime": 97.37
+    },
+    {
+     "id": "01KYQSPPP8VB3N85P4Y2A01RSR",
+     "name": "Kimi K3",
+     "uptime": 97.8
+    },
+    {
+     "id": "01KXRHGRD149W1YP3WS59SWC2P",
+     "name": "GLM 5.2 Fast",
+     "uptime": 98.74
+    },
+    {
+     "id": "01KTM9PHXTZPW4Z1VXF78MQ3WS",
+     "name": "DeepSeek V4 Flash",
+     "uptime": 98.9
+    },
+    {
+     "id": "01KTM9G06402NMVSVM7WGEQEK2",
+     "name": "Kimi K2.6",
+     "uptime": 99.17
+    },
+    {
+     "id": "01KVEMZE3M15ZV46ZEB7X88H61",
+     "name": "MiniMax M3",
+     "uptime": 99.22
+    },
+    {
+     "id": "01KYQSPPP80JDA3M7X73DNKHHD",
+     "name": "Kimi K3 Fast",
+     "uptime": 99.25
+    },
+    {
+     "id": "01KVEMYTCC3B1ZSXC0EJHPY01P",
+     "name": "Kimi K2.7 Code Fast",
+     "uptime": 99.4
+    },
+    {
+     "id": "01KVEMYTCCMV80Z2SSGE7YMRKX",
+     "name": "Kimi K2.7 Code",
+     "uptime": 99.42
+    },
+    {
+     "id": "01KZ7E1S4Z6PKCDYYNW358ATCX",
+     "name": "Deepseek V4 Flash 0731",
+     "uptime": 99.43
+    },
+    {
+     "id": "01KTNFZQEJ62PJ2C68P6G2576M",
+     "name": "Kimi K2.6 Fast",
+     "uptime": 99.46
+    },
+    {
+     "id": "01KTM9G064204E1Q8XBQEYESSH",
+     "name": "DeepSeek V4 Pro",
+     "uptime": 99.47
+    },
+    {
+     "id": "01KVEMYTCCD5S0RQWPBQZ431PE",
+     "name": "GLM 5.2",
+     "uptime": 99.58
+    },
+    {
+     "id": "01M03TGQ7XTQ8HAKZ8MDQ44HH5",
+     "name": "Qwen 3.8 Max",
+     "uptime": 99.68
+    },
+    {
+     "id": "01KTM9PHXTRAV1Q7H06Y4WWSBZ",
+     "name": "GPT-OSS 20B",
+     "uptime": 99.82
+    },
+    {
+     "id": "01KTM9G064Y9AE48A0ZY1WTTB2",
+     "name": "MiniMax M2.7",
+     "uptime": 99.82
+    },
+    {
+     "id": "01KTM9PHXTQ0YX1ZM3TRVACTK8",
+     "name": "GPT-OSS 120B",
+     "uptime": 99.83
+    },
+    {
+     "id": "01KVEMVZJRNJ2RJVFKSRFKRM4E",
+     "name": "Qwen 3.7 Plus",
+     "uptime": 99.83
+    },
+    {
+     "id": "01M0VEYRP312N2Q98NPNB2EZW8",
+     "name": "Deepseek V4 Pro 0813",
+     "uptime": 100
+    },
+    {
+     "id": "01M0VEYRP3Q4KM0RDEFG6EBBZC",
+     "name": "Nemotron 3 Ultra",
+     "uptime": 100
+    },
+    {
+     "id": "01M0VEYRP3YY99KM87D9CNZ7MG",
+     "name": "Nemotron 3.5 Lightning",
+     "uptime": 100
+    }
+   ]
+  },
+  "cerebras": {
+   "uptime": 100,
+   "score": 87,
+   "avgLatencyMs": 224,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "83h1cchw4vs4",
+     "name": "Developer Console",
+     "uptime": 100
+    },
+    {
+     "id": "v4csn3rc690h",
+     "name": "Gemma-4-31B",
+     "uptime": 100
+    },
+    {
+     "id": "hgfykfsb36gn",
+     "name": "GPT-OSS-120B",
+     "uptime": 100
+    },
+    {
+     "id": "8ygyx5vydlm2",
+     "name": "ZAI-GLM-4.7",
+     "uptime": 100
+    }
+   ]
+  },
+  "perplexity": {
+   "uptime": 100,
+   "score": 79,
+   "avgLatencyMs": 261,
+   "officialUptime": 99.81,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "cmr18ih7201l20rqmap66bx4l",
+     "name": "Computer",
+     "uptime": 99.72
+    },
+    {
+     "id": "clyiakn7i60113hvojwho6za6j",
+     "name": "API",
+     "uptime": 100
+    },
+    {
+     "id": "clyi6jhgg31469ihojbwbsmeeg",
+     "name": "Website",
+     "uptime": 100
+    }
+   ]
+  },
+  "xai": {
+   "uptime": 100,
+   "score": 69,
+   "avgLatencyMs": 376,
+   "officialUptime": null,
+   "uptimeSource": null,
+   "components": null
+  },
+  "deepseek": {
+   "uptime": 99.34,
+   "score": 76,
+   "avgLatencyMs": 556,
+   "officialUptime": 99.8,
+   "uptimeSource": "official",
+   "components": null
+  },
+  "kimi": {
+   "uptime": 99.98,
+   "score": 72,
+   "avgLatencyMs": 511,
+   "officialUptime": 99.94,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "8psr5dfdld0s",
+     "name": "Open API",
+     "uptime": 99.98
+    },
+    {
+     "id": "rf64wcbxt3r2",
+     "name": "API Service",
+     "uptime": 100
+    },
+    {
+     "id": "z2zfp65lvb2z",
+     "name": "K2 Model",
+     "uptime": 100
+    },
+    {
+     "id": "x0zsqgy57b75",
+     "name": "Model",
+     "uptime": 100
+    },
+    {
+     "id": "wmn9wzv84k1v",
+     "name": "Research Model",
+     "uptime": 100
+    },
+    {
+     "id": "p1j9ttb7jwhp",
+     "name": "Text Model",
+     "uptime": 100
+    },
+    {
+     "id": "lk7q3z0fcylp",
+     "name": "Thinking Model",
+     "uptime": 100
+    },
+    {
+     "id": "8rkd3yj051gl",
+     "name": "Vision Model",
+     "uptime": 100
+    }
+   ]
+  },
+  "openrouter": {
+   "uptime": 100,
+   "score": 76,
+   "avgLatencyMs": 336,
+   "officialUptime": 99.99,
+   "uptimeSource": "official",
+   "components": null
+  },
+  "elevenlabs": {
+   "uptime": 100,
+   "score": 61,
+   "avgLatencyMs": 379,
+   "officialUptime": 99.86,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01JJM5RKYAEWNM3XYRHXM8FJQ3",
+     "name": "ElevenCreative",
+     "uptime": 96.87
+    },
+    {
+     "id": "01JYDTNNSJBT4X90MAC47YPM9S",
+     "name": "Speech to Text",
+     "uptime": 99.89
+    },
+    {
+     "id": "01JP2RQVGDHPEEDAFM5KV2MH9P",
+     "name": "Text to Speech",
+     "uptime": 99.89
+    },
+    {
+     "id": "01JY3H5SJJZNC33AYMAE4SK4TH",
+     "name": "Conversations",
+     "uptime": 100
+    },
+    {
+     "id": "01JY3H5SJJFKTXYQHG5A8Z1KYH",
+     "name": "Other API endpoints",
+     "uptime": 100
+    },
+    {
+     "id": "01JY3H5SJJD2BMSGSW5FZE08ST",
+     "name": "RAG",
+     "uptime": 100
+    },
+    {
+     "id": "01JY3H5SJJJG47J60JPKX882H8",
+     "name": "Telephony",
+     "uptime": 100
+    }
+   ]
+  },
+  "assemblyai": {
+   "uptime": 99.99,
+   "score": 79,
+   "avgLatencyMs": 804,
+   "officialUptime": 99.99,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "kygwc83t1rfg",
+     "name": "Asynchronous API",
+     "uptime": 99.6
+    },
+    {
+     "id": "20vm7q71wjcn",
+     "name": "Streaming API",
+     "uptime": 99.86
+    },
+    {
+     "id": "12wrfd55ml3r",
+     "name": "Dashboard",
+     "uptime": 100
+    },
+    {
+     "id": "psxcg5mfhznq",
+     "name": "LLM Gateway",
+     "uptime": 100
+    },
+    {
+     "id": "rfh9swc12f9h",
+     "name": "Playground",
+     "uptime": 100
+    },
+    {
+     "id": "trxjzz9bwdmc",
+     "name": "Transcription Queue",
+     "uptime": 100
+    }
+   ]
+  },
+  "deepgram": {
+   "uptime": 100,
+   "score": 59,
+   "avgLatencyMs": 2059,
+   "officialUptime": null,
+   "uptimeSource": null,
+   "components": [
+    {
+     "id": "cvbdk3fslx9v",
+     "name": "Developer Console",
+     "uptime": 99.92
+    },
+    {
+     "id": "vm1x1v101qtn",
+     "name": "Management APIs",
+     "uptime": 99.92
+    },
+    {
+     "id": "m49xkwqkc4kh",
+     "name": "Batch API",
+     "uptime": 99.94
+    },
+    {
+     "id": "s6v5z4lsl658",
+     "name": "Streaming API",
+     "uptime": 99.94
+    },
+    {
+     "id": "t80v4qz2jdsf",
+     "name": "API Playground",
+     "uptime": 100
+    },
+    {
+     "id": "6854s60zwxgw",
+     "name": "TTS API",
+     "uptime": 100
+    },
+    {
+     "id": "jgfq9ffjsfqk",
+     "name": "Usage API",
+     "uptime": 100
+    },
+    {
+     "id": "r2z04fcdhhzb",
+     "name": "Voice Agent API",
+     "uptime": 100
+    },
+    {
+     "id": "7n3stjcbj4bx",
+     "name": "Voice Agent API: Downstream Providers",
+     "uptime": 100
+    }
+   ]
+  },
+  "huggingface": {
+   "uptime": 100,
+   "score": 66,
+   "avgLatencyMs": 276,
+   "officialUptime": 99.85,
+   "uptimeSource": "platform_avg",
+   "components": null
+  },
+  "replicate": {
+   "uptime": 99.71,
+   "score": 45,
+   "avgLatencyMs": 326,
+   "officialUptime": 99.85,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01JRGA5ZQKJX2NMG45VCFP9Y9C",
+     "name": "A100 Hardware",
+     "uptime": 99.71
+    },
+    {
+     "id": "01JRG9WZ84ABEY9ZJBB72CJBS8",
+     "name": "H100 Hardware",
+     "uptime": 99.9
+    },
+    {
+     "id": "01JRGA5ZQKF3SW674WMFD92PAC",
+     "name": "L40S Hardware",
+     "uptime": 99.9
+    },
+    {
+     "id": "01JS0AB43BH206N6Z4WNSB0Z0F",
+     "name": "Billing",
+     "uptime": 100
+    },
+    {
+     "id": "01JS0A88GKZAMP8BD3W9BCCBWX",
+     "name": "CPU Hardware",
+     "uptime": 100
+    },
+    {
+     "id": "01JRJYHBWCXHFZ0NHMP1N7T2G3",
+     "name": "HTTP API",
+     "uptime": 100
+    },
+    {
+     "id": "01JS0AB43BGQC1H06HKGPHP1F2",
+     "name": "Official Models",
+     "uptime": 100
+    },
+    {
+     "id": "01J5NNACBNTG5GR693P6RH5Q6J",
+     "name": "Playground",
+     "uptime": 100
+    },
+    {
+     "id": "01JXJT0JC265GZN0BAJ446XBD2",
+     "name": "Replicate Registry (r8.im)",
+     "uptime": 100
+    },
+    {
+     "id": "01JRJYHBWC358ZXKRXZD0BENPD",
+     "name": "Streaming API",
+     "uptime": 100
+    },
+    {
+     "id": "01JS0AB43BNHTEGYYQBSWS3KDP",
+     "name": "Support Tickets",
+     "uptime": 100
+    },
+    {
+     "id": "01JS0A88GKRF5DNW74REX185D3",
+     "name": "T4 Hardware",
+     "uptime": 100
+    }
+   ]
+  },
+  "fal": {
+   "uptime": 100,
+   "score": 86,
+   "avgLatencyMs": 715,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "clzmj6mnv0283gwmwtdqtt9u3",
+     "name": "API",
+     "uptime": 100
+    },
+    {
+     "id": "clzu5ivf0385762icocgwepue4u",
+     "name": "Official Models",
+     "uptime": 100
+    },
+    {
+     "id": "clzmj6mni0276gwmw95xftvtd",
+     "name": "Website",
+     "uptime": 100
+    }
+   ]
+  },
+  "pinecone": {
+   "uptime": 100,
+   "score": 67,
+   "avgLatencyMs": 787,
+   "officialUptime": 99.99,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "pxr1b208pdh1",
+     "name": "Assistant",
+     "uptime": 100
+    },
+    {
+     "id": "jhky1rj0ps27",
+     "name": "Console",
+     "uptime": 100
+    },
+    {
+     "id": "hrgtfbcqygpc",
+     "name": "Index Management",
+     "uptime": 100
+    },
+    {
+     "id": "34h37xk5ltv1",
+     "name": "Inference",
+     "uptime": 100
+    },
+    {
+     "id": "g7400gqyfhh9",
+     "name": "Pod Indexes",
+     "uptime": 100
+    },
+    {
+     "id": "r7tngp2p3sjd",
+     "name": "Serverless Indexes",
+     "uptime": 100
+    }
+   ]
+  },
+  "turbopuffer": {
+   "uptime": 99.95,
+   "score": 77,
+   "avgLatencyMs": 1081,
+   "officialUptime": 99.87,
+   "uptimeSource": "official",
+   "components": null
+  },
+  "stability": {
+   "uptime": 100,
+   "score": 76,
+   "avgLatencyMs": 541,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": null
+  },
+  "bfl": {
+   "uptime": 100,
+   "score": 86,
+   "avgLatencyMs": 846,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "ws9rrzk6n2j7",
+     "name": "API (api.bfl.ai)",
+     "uptime": 99.03
+    },
+    {
+     "id": "8jg9v8zhstys",
+     "name": "Finetuning",
+     "uptime": 100
+    },
+    {
+     "id": "6yncdw0dwc1s",
+     "name": "FLUX .1 Kontext [pro]",
+     "uptime": 100
+    },
+    {
+     "id": "lzj5bpsmhwt6",
+     "name": "FLUX 1.1 [pro]",
+     "uptime": 100
+    },
+    {
+     "id": "ppxtlh70k466",
+     "name": "FLUX 1.1 [pro] Ultra",
+     "uptime": 100
+    },
+    {
+     "id": "h4v0br1sctqx",
+     "name": "FLUX.1 [dev]",
+     "uptime": 100
+    },
+    {
+     "id": "70p23r3xs7b0",
+     "name": "FLUX.1 [pro]",
+     "uptime": 100
+    },
+    {
+     "id": "qcvzszkj9m47",
+     "name": "FLUX.1 Canny [pro]",
+     "uptime": 100
+    },
+    {
+     "id": "l27p2yhv77bj",
+     "name": "FLUX.1 Depth [pro]",
+     "uptime": 100
+    },
+    {
+     "id": "thvty5dzd95w",
+     "name": "FLUX.1 Fill [pro]",
+     "uptime": 100
+    },
+    {
+     "id": "bvfp4p0szk5y",
+     "name": "FLUX.1 Kontext [max]",
+     "uptime": 100
+    },
+    {
+     "id": "k1f1dgrqqc9g",
+     "name": "FLUX.2",
+     "uptime": 100
+    },
+    {
+     "id": "67vphhw599hb",
+     "name": "FLUX.2 [klein]",
+     "uptime": 100
+    }
+   ]
+  },
+  "voyageai": {
+   "uptime": 99.69,
+   "score": 81,
+   "avgLatencyMs": 699,
+   "officialUptime": 99.83,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "g74wmxgm0zxr",
+     "name": "API",
+     "uptime": 99.69
+    },
+    {
+     "id": "p4zzcfjd8p5q",
+     "name": "User Dashboard",
+     "uptime": 100
+    }
+   ]
+  },
+  "modal": {
+   "uptime": 100,
+   "score": 92,
+   "avgLatencyMs": null,
+   "officialUptime": 99.95,
+   "uptimeSource": "platform_avg",
+   "components": null
+  },
+  "twelvelabs": {
+   "uptime": 99.99,
+   "score": 84,
+   "avgLatencyMs": 1031,
+   "officialUptime": 99.99,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "jnvb5r3v74q1",
+     "name": "Video Indexing Task API - Marengo3.0",
+     "uptime": 99.7
+    },
+    {
+     "id": "hr353rqqmwmk",
+     "name": "Embed API - Marengo3.0 - Async",
+     "uptime": 99.97
+    },
+    {
+     "id": "3t1cjx55dyrf",
+     "name": "Analyze API - Pegasus1.5 (Segment Based Metadata)",
+     "uptime": 99.98
+    },
+    {
+     "id": "yklrkrhkd1by",
+     "name": "Analyze API - Pegasus1.5 (General)",
+     "uptime": 100
+    },
+    {
+     "id": "751304vy1s9x",
+     "name": "Embed API - Marengo3.0 - Sync",
+     "uptime": 100
+    },
+    {
+     "id": "j21c5rdfj8kf",
+     "name": "Index list API",
+     "uptime": 100
+    },
+    {
+     "id": "2zsl201s8df5",
+     "name": "Search by Image API - Marengo3.0",
+     "uptime": 100
+    },
+    {
+     "id": "mrclkkqtj01j",
+     "name": "Search by Text API - Marengo3.0",
+     "uptime": 100
+    },
+    {
+     "id": "91lzwtn6071h",
+     "name": "Video list API",
+     "uptime": 100
+    }
+   ]
+  },
+  "langsmith": {
+   "uptime": 100,
+   "score": 75,
+   "avgLatencyMs": 887,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01KX6FV0RRHHPK0Y474ESRYV0X",
+     "name": "LangSmith Fleet",
+     "uptime": 98.75
+    },
+    {
+     "id": "01KX6FV0RR46HM5EVSKG4BVY01",
+     "name": "LangSmith Deployments Control Plane",
+     "uptime": 99.58
+    },
+    {
+     "id": "01KX6FV0RRSSTKC5V2GPAMCEQR",
+     "name": "LangSmith API",
+     "uptime": 100
+    },
+    {
+     "id": "01KX6FV0RRKA56PXCRWEHJTMXM",
+     "name": "LangSmith Application",
+     "uptime": 100
+    },
+    {
+     "id": "01KX6FV0RR5Q12SE5Q6SH2RF8E",
+     "name": "LangSmith Billing",
+     "uptime": 100
+    },
+    {
+     "id": "01KX6FV0RR0E7AJPG60HR2ZTT9",
+     "name": "LangSmith Bulk Exports",
+     "uptime": 100
+    },
+    {
+     "id": "01KX6FV0RRY9DS9G7ZGB46MQQ2",
+     "name": "LangSmith Deployments Data Plane",
+     "uptime": 100
+    },
+    {
+     "id": "01KX6FV0RRSDVTKHP03BBR1799",
+     "name": "LangSmith PromptHub",
+     "uptime": 100
+    },
+    {
+     "id": "01KX6FV0RR5XXJ0SM3NXZRKMBY",
+     "name": "LangSmith Run Ingestion",
+     "uptime": 100
+    },
+    {
+     "id": "01KX6FV0RR6F81Q8VM6KMACNXQ",
+     "name": "LangSmith Sandboxes",
+     "uptime": 100
+    }
+   ]
+  },
+  "helicone": {
+   "uptime": 99.55,
+   "score": 86,
+   "avgLatencyMs": 1449,
+   "officialUptime": 96.68,
+   "uptimeSource": "platform_avg",
+   "components": null
+  },
+  "langfuse": {
+   "uptime": 100,
+   "score": 77,
+   "avgLatencyMs": 1280,
+   "officialUptime": 99.94,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01KS5BHY7AKJD8YEM4MFYMB35Z",
+     "name": "Ingestion API",
+     "uptime": 99.79
+    },
+    {
+     "id": "01KS5BHY7AH52EZHZQ9TYD53TY",
+     "name": "Prompts API",
+     "uptime": 100
+    },
+    {
+     "id": "01KS5BHY7AX99XYA7AS7AAP7QG",
+     "name": "Public API",
+     "uptime": 100
+    }
+   ]
+  },
+  "runway": {
+   "uptime": 100,
+   "score": 81,
+   "avgLatencyMs": 1022,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "hl94rh0mg6xt",
+     "name": "Backend",
+     "uptime": 99.33
+    },
+    {
+     "id": "w3jcq3dwljp4",
+     "name": "Public API",
+     "uptime": 99.93
+    },
+    {
+     "id": "2fr8tksxj5ns",
+     "name": "App",
+     "uptime": 100
+    }
+   ]
+  },
+  "luma": {
+   "uptime": 100,
+   "score": 52,
+   "avgLatencyMs": 1077,
+   "officialUptime": 100,
+   "uptimeSource": "platform_avg",
+   "components": null
+  },
+  "claudeai": {
+   "uptime": 97.98,
+   "score": 80,
+   "avgLatencyMs": null,
+   "officialUptime": 99.58,
+   "uptimeSource": "official",
+   "components": null
+  },
+  "characterai": {
+   "uptime": 100,
+   "score": 76,
+   "avgLatencyMs": 1206,
+   "officialUptime": null,
+   "uptimeSource": null,
+   "components": null
+  },
+  "chatgpt": {
+   "uptime": 99.76,
+   "score": 74,
+   "avgLatencyMs": null,
+   "officialUptime": 98.62,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01JMXBNJXGV1T5GT2M9XA83XNG",
+     "name": "Conversations",
+     "uptime": 93.64
+    },
+    {
+     "id": "01KX45G1SH21AX5DT93D4HMF0P",
+     "name": "ChatGPT Work",
+     "uptime": 96.96
+    },
+    {
+     "id": "01JQ7EKW990MSPSWVXC7VPV2ZJ",
+     "name": "Image Generation",
+     "uptime": 97.66
+    },
+    {
+     "id": "01JSFK5QX36ZRW0TW0ZV0ZYFXQ",
+     "name": "GPTs",
+     "uptime": 98.86
+    },
+    {
+     "id": "01JMXBNJXG1S2D9V65P1ZZTD94",
+     "name": "Login",
+     "uptime": 99.9
+    },
+    {
+     "id": "01JSG1XMJ9RVJJQ0E85NVSJ2AZ",
+     "name": "Agent",
+     "uptime": 99.92
+    },
+    {
+     "id": "01K8C008QVXHA6JX98PAS42VPD",
+     "name": "ChatGPT Atlas",
+     "uptime": 100
+    },
+    {
+     "id": "01KMKFAMWKQ81YWSE1Z18R6VHR",
+     "name": "Codex in ChatGPT Desktop",
+     "uptime": 100
+    },
+    {
+     "id": "01JNKS9D9S72PMP1938PVFFQN4",
+     "name": "Compliance API",
+     "uptime": 100
+    },
+    {
+     "id": "01K6TVGGGDCP0PPGCHXAG3AQX8",
+     "name": "Connectors/Apps",
+     "uptime": 100
+    },
+    {
+     "id": "01JSYVYQSWMJ9QG35XHP08BHA7",
+     "name": "Deep Research",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBNJXG1YMQPPCPCQX3MPA2",
+     "name": "File uploads",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBNJXGKKP51D4DEJ2HZJ8Q",
+     "name": "Search",
+     "uptime": 100
+    },
+    {
+     "id": "01KX45G1SHQQ9DTAX9S4W7FV8G",
+     "name": "Sites",
+     "uptime": 100
+    },
+    {
+     "id": "01JMXBNJXGGT5SR5DB9J7GYY48",
+     "name": "Voice mode",
+     "uptime": 100
+    }
+   ]
+  },
+  "deepseekapp": {
+   "uptime": 99.9,
+   "score": 87,
+   "avgLatencyMs": null,
+   "officialUptime": 99.95,
+   "uptimeSource": "official",
+   "components": null
+  },
+  "grok": {
+   "uptime": 100,
+   "score": null,
+   "avgLatencyMs": null,
+   "officialUptime": null,
+   "uptimeSource": null,
+   "components": null
+  },
+  "claudecode": {
+   "uptime": 97.47,
+   "score": 72,
+   "avgLatencyMs": null,
+   "officialUptime": 99.58,
+   "uptimeSource": "official",
+   "components": null
+  },
+  "codex": {
+   "uptime": 100,
+   "score": 84,
+   "avgLatencyMs": null,
+   "officialUptime": 99.98,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01KMP3KP5MGE23B80K1EK4S8PV",
+     "name": "Codex API",
+     "uptime": 99.97
+    },
+    {
+     "id": "01KMKFAMWKNQ84Z1766MV08ZDE",
+     "name": "CLI",
+     "uptime": 100
+    },
+    {
+     "id": "01JVCV8YSWZFRSM1G5CVP253SK",
+     "name": "Codex Web",
+     "uptime": 100
+    },
+    {
+     "id": "01KMP3KP5M8X0EBTVW6KN327EE",
+     "name": "VS Code extension",
+     "uptime": 100
+    }
+   ]
+  },
+  "cursor": {
+   "uptime": 98.53,
+   "score": 62,
+   "avgLatencyMs": 1359,
+   "officialUptime": 99.55,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "mwv1g9sc7kdh",
+     "name": "Cloud Agents",
+     "uptime": 91.7
+    },
+    {
+     "id": "k0trcq273dr6",
+     "name": "Automations",
+     "uptime": 92.01
+    },
+    {
+     "id": "rflc60xp5jp2",
+     "name": "IDE",
+     "uptime": 93.54
+    },
+    {
+     "id": "vsny1qv7v86c",
+     "name": "CLI",
+     "uptime": 95.81
+    }
+   ]
+  },
+  "copilot": {
+   "uptime": 98.87,
+   "score": 78,
+   "avgLatencyMs": null,
+   "officialUptime": 99.06,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "cnnb39dkkk82",
+     "name": "Copilot AI Model Providers",
+     "uptime": 98.78
+    },
+    {
+     "id": "pjmpxvq2cmr2",
+     "name": "Copilot",
+     "uptime": 99.17
+    }
+   ]
+  },
+  "windsurf": {
+   "uptime": 100,
+   "score": 100,
+   "avgLatencyMs": null,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "r5wf1ykd7y1m",
+     "name": "Cascade",
+     "uptime": 100
+    },
+    {
+     "id": "8q19cygxvshj",
+     "name": "Windsurf Tab",
+     "uptime": 100
+    }
+   ]
+  },
+  "junie": {
+   "uptime": 100,
+   "score": 96,
+   "avgLatencyMs": null,
+   "officialUptime": 100,
+   "uptimeSource": "official",
+   "components": [
+    {
+     "id": "01KX3EN535A0SKSZK3S84949V1",
+     "name": "JetBrains AI",
+     "uptime": 100
+    },
+    {
+     "id": "01KST6ZB60NWW1MAB3ECRMJFS0",
+     "name": "JetBrains Central Console",
+     "uptime": 100
+    }
+   ]
+  }
+ }
+}

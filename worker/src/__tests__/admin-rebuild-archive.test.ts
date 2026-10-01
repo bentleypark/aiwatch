@@ -441,6 +441,30 @@ describe('POST /api/admin/rebuild-archive', () => {
     expect(regressed).toContain('sections:degradation+security')
   })
 
+  it('refuses a rebuild that empties officialUptime or components (#1504)', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      [`archive:monthly:${month}`]: JSON.stringify({
+        period: month,
+        daysCollected: 0,
+        services: {
+          replicate: {
+            uptime: 99.71, score: 45, avgLatencyMs: 326, officialUptime: 99.85, uptimeSource: 'official',
+            components: [{ id: '01JRGA5ZQKJX2NMG45VCFP9Y9C', name: 'A100 Hardware', uptime: 99.71 }],
+          },
+        },
+      }),
+    })
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(409)
+    const body = await res.json() as { regressed: string[]; hint: string }
+    expect(body.regressed).toContain('servicesWithOfficialUptime:replicate')
+    expect(body.regressed).toContain('servicesWithComponents:replicate')
+    expect(body.hint).not.toMatch(/gone|expired|lost/i)
+  })
+
   it('rejects a month string that parses to no real calendar month', async () => {
     const res = await workerModule.fetch(req({ month: '0000-01' }, { 'X-Admin-Key': 'test-admin-key' }), envWith(makeKV().kv), ctx)
     expect(res.status).toBe(400)
