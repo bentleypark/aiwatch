@@ -156,7 +156,7 @@ describe('selectIncidentCandidates', () => {
     // comment above the code explicitly forbade and which is the opposite of true for a synthesized
     // row: that IS an outage, counted in the downtime total, it just carries no recovery time. The
     // divisor is named; the reason is not.
-    expect(prompt).toContain('6 incidents (the average recovery is over the 1 that carry a comparable recovery time)')
+    expect(prompt).toContain('6 incidents (the average recovery is over 1 impact windows)')
     expect(prompt).not.toContain('Kimi: score 80 (good), 6 incidents, 45m avg recovery')
     // States the EFFECT, never a cause: the gap can also come from a #1021 advisory, and asserting
     // "auto-monitor duplicates" would write a fabricated fact into a permanent archived draft.

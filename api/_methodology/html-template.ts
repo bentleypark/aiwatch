@@ -396,7 +396,7 @@ ${consentInitScript(nonce)}
   <p data-i18n="s6.counting.reconstructed">Better Stack을 쓰는 상태 페이지는 모니터가 자동으로 만들던 인시던트를 더 이상 게시하지 않기도 합니다. 그래서 피드가 다루지 않은 다운타임 날짜는 같은 페이지에 공개된 일별 가동 기록으로 채웁니다. 이때는 인시던트 하나를 1건으로 세지 않고, 컴포넌트마다 다운타임이 있었던 날짜를 하루에 1건씩 셉니다. 최근 30일까지만 채우고, 피드에 남은 가장 오래된 항목보다 이전 날짜는 채우지 않습니다. 하루 다운타임이 10분 미만인 날과 아직 끝나지 않은 당일도 제외합니다. 이렇게 채운 기록은 하루 합계라서 인시던트 하나의 길이가 아니므로 MTTR 계산에서 뺍니다.</p>
 
   <h3 data-i18n="s6.mttr.title">복구 시간 (MTTR)</h3>
-  <p data-i18n="s6.mttr.body">Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 같은 중앙값 방식을 쓰지만 관측 기간(7일 vs 30일)이 달라 서로 다를 수 있으며, 이는 정상입니다.</p>
+  <p data-i18n="s6.mttr.body">Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 서로 다를 수 있으며, 이는 정상입니다.</p>
 
   <h3 data-i18n="s6.detection.title">탐지 (Detection)</h3>
   <p data-i18n="s6.detection.body">탐지 지표는 두 가지입니다 — MTTD(평균 탐지 시간, AIWatch가 인시던트를 감지하기까지 걸린 시간)와 RTT 저하 탐지(probe RTT 급증으로 잡는 조기 신호). 상태 페이지 폴링은 공식 발표보다 늦을 수밖에 없으므로, AIWatch는 <strong>"공식 상태 페이지보다 빠르다"고 절대 주장하지 않고</strong> 이 두 지표로만 정직하게 표현합니다. 이 지표는 월간 리포트에 집계되며, AIWatch Score나 대시보드 숫자에는 반영되지 않습니다.</p>
@@ -474,7 +474,7 @@ ${consentInitScript(nonce)}
         </tbody>
       </table>
     </div>
-    <p class="note" data-i18n="s4.rec.note">MTTR은 해결된 인시던트 지속 시간의 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록).</p>
+    <p class="note" data-i18n="s4.rec.note">MTTR은 해결된 인시던트의 장애 구간 길이로 구한 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록). 시간이 겹치는 인시던트는 하나의 구간으로 합칩니다.</p>
   </div>
 
   <!-- Responsiveness sub -->
@@ -604,7 +604,7 @@ const i18n = {
     's4.inc.note': '표의 값은 critical/major 영향(가중치 1.0)을 기준으로 합니다. minor만 발생한 날은 가중치 0.3입니다 — 예: minor 5일 ≈ 가중 1.5일 ≈ 21.5점.',
     's4.inc.why': '<strong>영향 일수를 쓰는 이유:</strong> 일부 서비스(Anthropic 등)는 모델별(Opus/Sonnet/Haiku)로 인시던트를 따로 보고해 같은 장애가 여러 건으로 집계됩니다. 그래서 건수가 아닌 영향 일수를 쓰고, 각 날짜를 그날의 가장 심각한 영향도로 가중합니다 — critical/major = 1.0, minor = 0.3, 정보성/null = 제외.',
     's4.rec.title': 'Recovery Score (0~15)',
-    's4.rec.note': 'MTTR은 해결된 인시던트 지속 시간의 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록).',
+    's4.rec.note': 'MTTR은 해결된 인시던트의 장애 구간 길이로 구한 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록). 시간이 겹치는 인시던트는 하나의 구간으로 합칩니다.',
     's4.resp.title': 'Responsiveness Score (0~20)',
     's4.resp.desc': '5분 간격 health-check probe로 실제 엔드포인트의 응답 속도와 안정성을 측정합니다(34개 AI 서비스). 응답 속도와 일관성을 함께 반영합니다.',
     's4.resp.speed': 'Speed (0~10) — p50 RTT 지수 감쇠',
@@ -629,7 +629,7 @@ const i18n = {
     's6.counting.body': '인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — Anthropic은 모델별(Opus/Sonnet/Haiku)로 따로 보고해, 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.',
     's6.counting.reconstructed': 'Better Stack을 쓰는 상태 페이지는 모니터가 자동으로 만들던 인시던트를 더 이상 게시하지 않기도 합니다. 그래서 피드가 다루지 않은 다운타임 날짜는 같은 페이지에 공개된 일별 가동 기록으로 채웁니다. 이때는 인시던트 하나를 1건으로 세지 않고, 컴포넌트마다 다운타임이 있었던 날짜를 하루에 1건씩 셉니다. 최근 30일까지만 채우고, 피드에 남은 가장 오래된 항목보다 이전 날짜는 채우지 않습니다. 하루 다운타임이 10분 미만인 날과 아직 끝나지 않은 당일도 제외합니다. 이렇게 채운 기록은 하루 합계라서 인시던트 하나의 길이가 아니므로 MTTR 계산에서 뺍니다.',
     's6.mttr.title': '복구 시간 (MTTR)',
-    's6.mttr.body': 'Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 같은 중앙값 방식을 쓰지만 관측 기간(7일 vs 30일)이 달라 서로 다를 수 있으며, 이는 정상입니다.',
+    's6.mttr.body': 'Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 서로 다를 수 있으며, 이는 정상입니다.',
     's6.detection.title': '탐지 (Detection)',
     's6.detection.body': '탐지 지표는 두 가지입니다 — MTTD(평균 탐지 시간, AIWatch가 인시던트를 감지하기까지 걸린 시간)와 RTT 저하 탐지(probe RTT 급증으로 잡는 조기 신호). 상태 페이지 폴링은 공식 발표보다 늦을 수밖에 없으므로, AIWatch는 <strong>"공식 상태 페이지보다 빠르다"고 절대 주장하지 않고</strong> 이 두 지표로만 정직하게 표현합니다. 이 지표는 월간 리포트에 집계되며, AIWatch Score나 대시보드 숫자에는 반영되지 않습니다.',
     's6.limit.label': '한계',
@@ -695,7 +695,7 @@ const i18n = {
     's4.inc.note': 'Table values assume critical/major impact days (weight 1.0). Minor-only days are weighted 0.3 — e.g. 5 minor days ≈ 1.5 weighted days ≈ 21.5 points.',
     's4.inc.why': '<strong>Why affected days:</strong> some services (e.g. Anthropic) report incidents per model (Opus/Sonnet/Haiku), so one outage gets counted multiple times. We use affected days instead of raw count, each day weighted by its worst impact — critical/major = 1.0, minor = 0.3, informational/null = excluded.',
     's4.rec.title': 'Recovery Score (0–15)',
-    's4.rec.note': 'MTTR is the 30-day median of resolved-incident durations (for a small sample of fewer than 3, an unusually long value is eased toward a 1-hour baseline so a single long incident cannot over-penalize a low-incident service).',
+    's4.rec.note': 'MTTR is the 30-day median of resolved-incident impact windows (for a small sample of fewer than 3, an unusually long value is eased toward a 1-hour baseline so a single long incident cannot over-penalize a low-incident service). Incidents that overlap in time are merged into one window.',
     's4.resp.title': 'Responsiveness Score (0–20)',
     's4.resp.desc': 'Measures actual endpoint speed and stability via 5-minute health-check probes (34 AI services). Combines response speed and consistency.',
     's4.resp.speed': 'Speed (0–10) — exp decay on p50 RTT',
@@ -720,7 +720,7 @@ const i18n = {
     's6.counting.body': 'Incident counts reflect all affected components per service. Providers differ in reporting granularity — Anthropic reports per-model (Opus/Sonnet/Haiku counted separately), inflating its totals versus service-level reporters. A higher count does not mean lower reliability; adjust for granularity before comparing across providers.',
     's6.counting.reconstructed': 'A Better Stack status page may stop publishing the incidents its monitors used to create. AIWatch then fills the downtime days the feed does not cover from the daily availability record published on the same page. One incident is not one entry there: each component contributes one entry for every day it had downtime. Only the last 30 days are filled, and nothing older than the oldest item still in the feed. A day with under 10 minutes of downtime and the current, unfinished day are left out too. An entry built this way is a daily total rather than the length of one incident, so it is excluded from MTTR.',
     's6.mttr.title': 'Recovery time (MTTR)',
-    's6.mttr.body': 'The Score\\\'s Recovery component uses a 30-day median. The ServiceDetails "Recovery" card is a separate display — a 7-day median + worst ("typical 15m · worst 29h34m"). The two windows differ, so the figures can legitimately differ — same lower-median convention, different observation window.',
+    's6.mttr.body': 'The Score\\\'s Recovery component uses a 30-day median. The ServiceDetails "Recovery" card is a separate display — a 7-day median + worst ("typical 15m · worst 29h34m"). The figures can legitimately differ.',
     's6.detection.title': 'Detection',
     's6.detection.body': 'Detection is measured two ways — MTTD (mean time to detect: how long AIWatch took to spot the incident) and RTT degradation detection (an early signal from probe RTT spikes). Because status-page polling is necessarily later than an official publish, AIWatch <strong>never claims to be "faster than the official status page"</strong> and reports only these two honest metrics. This is surfaced in the monthly report and does not feed the AIWatch Score or any dashboard number.',
     's6.limit.label': 'Limit',
