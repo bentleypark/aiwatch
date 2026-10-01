@@ -5,6 +5,7 @@ import { Window } from 'happy-dom'
 import {
   withRetry, buildUptimeEntry, envPositiveInt, readComponentRow, readComponents, parseUpdateRows, readIncidentPage,
   buildMistralFeedObservation, reportMistralFeedObservation, runWithMistralFeedObservation, deliverMistralFeed,
+  isCloudflareChallenge,
 } from './scrape-mistral-status.mjs'
 
 // #1381 — `withRetry` is the only pure thing in the scraper, and it is the part that decides whether a
@@ -82,6 +83,32 @@ test('429 is matched as a status token, not as any occurrence of the digits', as
     attempts: 2, delayMs: 300, rateLimitMs: 5000, sleep: async (ms) => slept.push(ms),
   }))
   assert.deepEqual(slept, [300])
+})
+
+// ── Cloudflare challenge detection (#1510) ─────────────────────────────────────────────────────
+// `page.goto` does not throw on a served challenge — it's a normal 403 response — so the old code
+// always fell through to the 60s chart wait even on a run the measured evidence says will not clear.
+
+test('a served challenge is detected from the response header', () => {
+  assert.equal(isCloudflareChallenge({ 'cf-mitigated': 'challenge' }), true)
+})
+
+test('header name casing from Playwright is already lower-cased, and the value is matched case-insensitively', () => {
+  assert.equal(isCloudflareChallenge({ 'cf-mitigated': 'Challenge' }), true)
+})
+
+test('a clean response is not a challenge', () => {
+  assert.equal(isCloudflareChallenge({ 'content-type': 'text/html' }), false)
+  assert.equal(isCloudflareChallenge({}), false)
+})
+
+test('a missing response (goto returned null) is not read as a challenge', () => {
+  assert.equal(isCloudflareChallenge(undefined), false)
+})
+
+test('another cf-mitigated value is not treated as a challenge', () => {
+  // Cloudflare's own header carries other values too; only the exact measured one short-circuits.
+  assert.equal(isCloudflareChallenge({ 'cf-mitigated': 'banned' }), false)
 })
 
 // ── the pushed payload's SHAPE ──────────────────────────────────────────────────────────────────
