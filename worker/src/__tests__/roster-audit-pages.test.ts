@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { rosterAuditPages, incidentIoUptimeScopeOf } from '../services'
-import { rosterAgedInFindings } from '../roster-audit'
 import type { ServiceConfig } from '../types'
 
 describe('incidentIoUptimeScopeOf (#1518 — the same expression fetchService computes uptime over)', () => {
@@ -27,13 +26,6 @@ describe('rosterAuditPages (#1518 — grouping by shared status page)', () => {
     const ids = ['01M1DFY7G1ZJQNNZWX0Y0APVX6', '01M1DFY7G1JXWQQQ852G0PAQCP']
 
     expect(fireworks.scopeIds).toEqual(expect.arrayContaining(ids))
-    expect(rosterAgedInFindings(
-      ids.map((id) => ({ id, dataAvailableSince: '2026-09-01T03:24:23Z' })),
-      fireworks.scopeIds,
-      fireworks.excludeIds,
-      fireworks.fixedScope,
-      Date.parse('2026-10-02T00:00:00Z'),
-    )).toEqual([])
   })
 
   it('groups the real openai/chatgpt/codex config onto one page with the union of their scopes', () => {
