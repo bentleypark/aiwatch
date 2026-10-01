@@ -545,8 +545,7 @@ claims the whole day. Names are matched longest-first and case-insensitively, si
 - **`longestMinutes` in `incidents:monthly` becomes "longest downtime DAY"**, capped at 24h, since the
   accumulator banks each day separately — a 59h outage reports a 24h longest. That is the raw
   accumulator field; the figure actually PUBLISHED as `MonthlyArchive.longestIncidentMin` comes from
-  `aggregateIncidentDurations`, which skips synthesized rows so it keeps meaning "the longest single
-  incident". `totalMinutes` stays honest on both: it is real downtime either way.
+  `aggregateIncidentDurations`, which skips synthesized rows. `totalMinutes` stays honest on both: it is real downtime either way.
 - **Days are deliberately NOT joined across midnight.** An earlier design merged consecutive days into
   runs and reconstructed a multi-day outage's true boundaries from the first and last day's partial
   seconds — reproducing helicone's Jul 2–4 outage to the minute. It was removed because the incident

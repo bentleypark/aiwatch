@@ -1172,7 +1172,7 @@ describe('accumulateIncidentsOnlyIfChanged (#587)', () => {
 // ── buildMonthlyArchive ──────────────────────────────────────────────
 
 describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
-  const entry = (durationMin: number) => ({ id: String(durationMin), title: 't', startedAt: '2026-06-01', resolvedAt: null, durationMin, finalStatus: 'resolved' as const, impact: null })
+  const entry = (durationMin: number, i = 0) => ({ id: `${durationMin}-${i}`, title: 't', startedAt: `2026-06-${String(1 + i * 3).padStart(2, '0')}T00:00:00Z`, resolvedAt: null, durationMin, finalStatus: 'resolved' as const, impact: null })
 
   it('sums/maxes the per-incident FINAL durations (the Deepgram case — ignores the inflated accumulator)', () => {
     // 6 incidents summing to 2733m / max 1620m; accumulator monotonically inflated to 10602/8470.
@@ -1202,13 +1202,13 @@ describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
   })
 
   it('returns null/null when there are no incidents', () => {
-    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0, excludedUnresolved: 0 })
-    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0, excludedUnresolved: 0 })
+    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, mergedRecords: 0, excludedUnresolved: 0 })
+    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, mergedRecords: 0, excludedUnresolved: 0 })
   })
 
   it('treats a full list of zero-duration incidents as null (no downtime)', () => {
-    const r = aggregateIncidentDurations([entry(0), entry(0)], 2, 0, 0)
-    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0, excludedUnresolved: 0 })
+    const r = aggregateIncidentDurations([entry(0, 0), entry(0, 1)], 2, 0, 0)
+    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 2, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, mergedRecords: 0, excludedUnresolved: 0 })
   })
 })
 
@@ -1284,7 +1284,7 @@ describe('aggregateIncidentDurations (#1210 — autoMonitor exclusion)', () => {
     // The other 43 services carry no autoMonitor entries — the fix must be a no-op for them.
     const unflagged = REAL_DURATIONS.map(real)
     const r = aggregateIncidentDurations(unflagged, unflagged.length, 0, 0)
-    expect(r).toEqual({ totalMin: 47, countedTotalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, excludedRepublished: 0, excludedUnresolved: 0 })
+    expect(r).toEqual({ totalMin: 47, countedTotalMin: 47, longestMin: 19, countedCount: 5, excludedAutoMonitor: 0, excludedAutoMonitorMin: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, mergedRecords: 0, excludedUnresolved: 0 })
   })
 
   it('treats an ABSENT flag as false, so pre-#989 archives still count (no retroactive deflation)', () => {
@@ -1808,7 +1808,7 @@ describe('buildMonthlyArchive', () => {
     // Deepgram June shape: accumulator locked at 176h42m/141h10m (a long-open incident's peak) while
     // the per-incident detail carries the corrected final durations summing to 2733m (45h33m) / max 1620m.
     const detail = [1620, 601, 1, 137, 373, 1].map((d, i) => ({
-      id: `d${i}`, title: `t${i}`, startedAt: '2026-03-10', resolvedAt: '2026-03-11',
+      id: `d${i}`, title: `t${i}`, startedAt: `2026-03-${String(1 + i * 3).padStart(2, '0')}T00:00:00Z`, resolvedAt: '2026-03-31',
       durationMin: d, finalStatus: 'resolved' as const, impact: null,
     }))
     const kv = {

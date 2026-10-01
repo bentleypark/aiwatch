@@ -139,7 +139,7 @@ describe('applyDurationOverrides', () => {
     const svc = out.services.cursor
     const agg = aggregateIncidentDurations(svc.incidents, svc.count, svc.totalMinutes, svc.longestMinutes)
     expect(agg.longestMin).toBe(92)   // was 799 before the override
-    expect(agg.totalMin).toBe(128)
+    expect(agg.totalMin).toBe(113)  // #1505 — the two 07-14 records overlap: one 21m window + 92
   })
 
   it('is identity when no id matches or the list is empty', () => {

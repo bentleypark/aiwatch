@@ -217,7 +217,7 @@ export function buildMonthlyNarrativePrompt(
       const n = s.countedIncidents === 0
         ? `${s.incidents} incidents (none of them carry a comparable recovery time, so no average is stated)`
         : s.countedIncidents != null && s.countedIncidents !== s.incidents
-          ? `${s.incidents} incidents (the average recovery is over the ${s.countedIncidents} that carry a comparable recovery time)`
+          ? `${s.incidents} incidents (the average recovery is over ${s.countedIncidents} impact windows)`
           : `${s.incidents} incidents`
       return `- ${s.name}: score ${s.score ?? 'N/A'} (${s.grade ?? 'N/A'}), ${n}, ${rec}`
     })

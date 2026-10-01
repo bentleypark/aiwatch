@@ -87,7 +87,7 @@ export function carriesRecoveryTime<T extends { derived?: string; startUnknown?:
   return i.derived !== 'status_history' && !i.startUnknown
 }
 
-/** MTTR (hours) from resolved-impactful incident durations (minutes). ≥3 → the robust MEDIAN (one
+/** MTTR (hours) from resolved-impactful impact-window lengths (minutes, #1505). ≥3 → the robust MEDIAN (one
  *  outlier can't move it). 1–2 → an ASYMMETRIC shrinkage toward `MTTR_PRIOR_MIN`: shrink toward the prior
  *  ONLY when the thin-sample mean is WORSE (longer) than the prior, so a single paperwork-inflated / one-off
  *  long incident can't tank a low-incident service, while a genuinely fast recovery keeps its score
@@ -161,45 +161,30 @@ export function isReliabilityIncident<T extends Pick<Incident, 'impact' | 'autoM
   return i.impact != null && !i.autoMonitor
 }
 
-/** #1502 — drop the duplicate records a provider leaves when several of them describe one outage.
- *  They close within the same minute, because the provider closes the set when the event ends (the
- *  seconds differ), and the earliest record spans the rest — so keep it and drop its siblings.
- *
- *  Keyed on `(title, close minute)`. The title alone is not enough — per-model (Anthropic) and
- *  per-resource (Together) rows repeat one constantly — and it is not the provider's to keep stable:
- *  `autoMonitorTitles` keys on registered titles and misses any alarm title nobody registered (#1502).
- *  `republished-duplicates.test.ts` holds both directions against real archived rows.
- *
- *  Reads only what both the live `Incident` and the archived `MonthlyIncidentEntry` carry, so ONE
- *  primitive serves the Score's recovery sample and the archive's downtime aggregation. It is NOT
- *  applied to every per-incident sum: `weekly-briefing.ts` sums the same rows and applies none of the
- *  archive's exclusions (#1021/#1210/#1292 either), so it is out of scope here rather than missed.
- *  It must NOT run on the live incident list: those ids key
- *  alert dedup and the durable accumulator, and an id that disappears is read as a provider
- *  WITHDRAWAL and published as one (#1106, and the #1349/#1384 precedents).
- *
- *  Skips records whose timestamps are not the provider's own — `startUnknown` has no real start to
- *  take the earliest of, `derived` is synthesized per day by AIWatch (#1292). Returns the same array
- *  reference when nothing is dropped. */
-export function dropRepublishedDuplicates<
-  T extends { title: string; startedAt: string; resolvedAt?: string | null; startUnknown?: boolean; derived?: string },
->(incidents: T[]): T[] {
-  if (incidents.length < 2) return incidents
-  const groups = new Map<string, T[]>()
-  for (const inc of incidents) {
-    if (!inc.resolvedAt || inc.startUnknown || inc.derived) continue
-    const key = `${inc.title}\u0000${inc.resolvedAt.slice(0, 16)}`
-    const g = groups.get(key)
-    if (g) g.push(inc)
-    else groups.set(key, [inc])
+/** #1505 — the union of a service's impact intervals, as one length in minutes per merged window.
+ *  Each record is `[start, start + minutes]`; records that overlap or touch collapse into one window,
+ *  so every minute of impact is counted once however many records the provider filed for it (per
+ *  model, per resource, or re-published on a timer). Serves both the archive's downtime aggregation
+ *  and the Score's recovery sample. A record with an unparseable start is its own window. */
+export function mergeImpactWindows(intervals: ReadonlyArray<{ startMs: number; minutes: number }>): number[] {
+  const out: number[] = []
+  const timed: Array<[number, number]> = []
+  for (const { startMs, minutes } of intervals) {
+    if (Number.isFinite(startMs)) timed.push([startMs, startMs + minutes * 60_000])
+    else out.push(minutes)
   }
-  const dropped = new Set<T>()
-  for (const g of groups.values()) {
-    if (g.length < 2) continue
-    const earliest = g.reduce((a, b) => (Date.parse(a.startedAt) <= Date.parse(b.startedAt) ? a : b))
-    for (const inc of g) if (inc !== earliest) dropped.add(inc)
+  timed.sort((a, b) => a[0] - b[0])
+  let cur: [number, number] | null = null
+  for (const [s, e] of timed) {
+    if (cur && s <= cur[1]) {
+      cur[1] = Math.max(cur[1], e)
+    } else {
+      if (cur) out.push(Math.round((cur[1] - cur[0]) / 60_000))
+      cur = [s, e]
+    }
   }
-  return dropped.size === 0 ? incidents : incidents.filter((inc) => !dropped.has(inc))
+  if (cur) out.push(Math.round((cur[1] - cur[0]) / 60_000))
+  return out
 }
 
 function parseDurationMin(d: string): number {
@@ -329,9 +314,7 @@ export function calculateAIWatchScore(
   // revocation, deprecation) has a duration but is NOT a reliability recovery, so counting it would
   // zero the Recovery score on a service that never actually went down (symmetric with the #261
   // null-impact exclusion from affectedDays / the uptime estimate).
-  const impactfulWindowIncidents = dropRepublishedDuplicates(  // #1502 — one event, not N records
-    windowIncidents.filter(isReliabilityIncident),  // #989 — excl. autoMonitor
-  )
+  const impactfulWindowIncidents = windowIncidents.filter(isReliabilityIncident)  // #989 — excl. autoMonitor
   // #1292 — a `status_history`-derived incident's `duration` is ONE DAY'S total downtime, not a time
   // to recover: the source is a per-day seconds bucket with no start, no end and no recovery event.
   // Feeding it to MTTR is a category error with a perverse sign — a handful of short synthesized days
@@ -345,10 +328,12 @@ export function calculateAIWatchScore(
   // marks — the same treatment #707 already gives a window whose only incidents are advisories. The
   // downtime itself is still carried by Uptime and by `affectedDays`.
   const recoveryCandidates = impactfulWindowIncidents.filter(carriesRecoveryTime)
-  const durations = recoveryCandidates
-    .filter((i) => i.status === 'resolved' && i.duration)
-    .map((i) => parseDurationMin(i.duration!))
-    .filter((m) => m > 0)
+  const durations = mergeImpactWindows(  // #1505 — one event, not N records
+    recoveryCandidates
+      .filter((i) => i.status === 'resolved' && i.duration)
+      .map((i) => ({ startMs: Date.parse(i.startedAt), minutes: parseDurationMin(i.duration!) }))
+      .filter((w) => w.minutes > 0),
+  )
 
   // #1019 Part B — ≥3: robust median; 1–2: asymmetric shrinkage toward the prior (see computeMttrHours).
   const mttrHours = computeMttrHours(durations)
