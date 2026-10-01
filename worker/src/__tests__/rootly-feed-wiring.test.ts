@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fetchService, SERVICES } from '../services'
+import { fetchService, SERVICES, downclassifyAdvisoryIncidents } from '../services'
+import { scoreFor } from '../index'
+import { calculateAIWatchScore } from '../score'
+import { accumulateMonthlyIncidents } from '../monthly-archive'
+import storedFeed20261001 from './fixtures/mistral-feed-2026-10-01.json'
 import { MISTRAL_FEED_KV_KEY, type RootlyFeed } from '../parsers/rootly'
 
 // #1381 — the WIRING half. `parsers/__tests__/rootly.test.ts` pins that the pure functions read the
@@ -231,9 +235,6 @@ describe('#1381 — fetchService computes uptime and severity from the chart', (
     const svc = await fetchService(mistral, undefined, kv as never, {})
     expect(svc.uptime30d).toBeCloseTo(99.7, 1)
     expect(svc.uptimeSource).toBe('official')
-    // THE point of reading the chart: without this the incident stays `impact: null`, and
-    // score.ts's `isReliabilityIncident` gates affected-days AND the MTTR sample on impact,
-    // so a month of real incidents would score as clean.
     expect(svc.incidents[0].impact).toBe('minor')
   })
 
@@ -420,5 +421,76 @@ describe('#1381 round-1 regressions — the invariants the first draft broke', (
     const svc = await fetchService(mistral, undefined, kv as never, {})
     expect(svc.status).toBe('unknown')
     expect(svc.incidentSourceStale, 'a partial roster must not clear the gate').toBe(true)
+  })
+})
+
+describe('#1557 — an incident the chart cannot attribute still scores', () => {
+  // `mistral:feed` as stored on 2026-10-01 (fetchedAt 03:59Z). The 09-29 incidents appear on none of
+  // the 15 charted components; 09-21 "Availability drop for Mistral OCR 4" has a red segment.
+  beforeEach(() => vi.useFakeTimers({ now: new Date('2026-10-01T04:00:00Z'), toFake: ['Date'] }))
+
+  it('the published list keeps null; the live Score counts the uncharted incidents as minor', async () => {
+    const { kv } = kvWith(JSON.stringify(storedFeed20261001))
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    const byTitle = (t: string) => svc.incidents.find((i) => i.title === t)
+    expect(byTitle('Elevated error rate on some of our services')?.impact).toBeNull()
+    expect(byTitle('Availability drop for Mistral OCR 4')?.impact).toBe('major')
+
+    const scored = scoreFor(svc, undefined)
+    const unscored = calculateAIWatchScore(svc, 30, { kind: 'unavailable' })
+    expect(scored.metrics.affectedDays30d).toBeGreaterThan(unscored.metrics.affectedDays30d)
+  })
+
+  it('keeps the default to Rootly services — a null-impact incident elsewhere stays informational', () => {
+    const claude = {
+      id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', status: 'operational',
+      latency: null, uptime30d: 99.9, lastChecked: '2026-10-01T04:00:00Z',
+      incidents: [{ id: 'n1', title: 'Post-incident report published', status: 'resolved', impact: null,
+        startedAt: '2026-09-29T10:00:00Z', resolvedAt: '2026-09-29T12:00:00Z', duration: '2h 0m', timeline: [] }],
+    }
+    expect(scoreFor(claude as never, undefined).metrics.affectedDays30d).toBe(0)
+  })
+
+  it('an advisory-titled Rootly incident stays out of the live Score', async () => {
+    vi.useFakeTimers({ now: new Date('2026-09-10T12:00:00Z'), toFake: ['Date'] })
+    const advisory = feed({
+      incidents: [{
+        id: 'adv-1',
+        title: 'Usage limits depleting faster than expected',
+        updates: [
+          { status: 'Resolved', at: 'September 5, 2026 at 05:48 AM UTC', body: 'resolved' },
+          { status: 'Identified', at: 'September 4, 2026 at 10:00 PM UTC', body: 'identified' },
+        ],
+      }],
+    })
+    const { kv } = kvWith(JSON.stringify({ fetchedAt: new Date().toISOString(), feed: advisory }))
+    const svc = downclassifyAdvisoryIncidents([await fetchService(mistral, undefined, kv as never, {})])[0]
+    expect(scoreFor(svc, undefined).metrics.affectedDays30d).toBe(0)
+  })
+
+  it('does not overwrite a stored major once the chart day leaves the window', async () => {
+    const red = (date: string) => feed({
+      incidents: [{
+        id: 'r1',
+        title: 'Batch API Degraded',
+        updates: [
+          { status: 'Resolved', at: 'October 1, 2026 at 03:00 AM UTC', body: 'resolved' },
+          { status: 'Identified', at: 'October 1, 2026 at 02:00 AM UTC', body: 'identified' },
+        ],
+      }],
+      uptime: SCOPE.map((id, n) => n === 0
+        ? { componentId: id, barCount: 91, unreadBars: 0, coverage: { impacted: 1, fetched: 1 },
+            days: [{ date, label: 'Batch API Degraded', segments: [{ cls: 'bg-red-500', width: 5 }, { cls: 'bg-green-400', width: 95 }] }] }
+        : { componentId: id, barCount: 91, unreadBars: 0, coverage: { impacted: 0, fetched: 0 }, days: [] }),
+    })
+    vi.useFakeTimers({ now: new Date('2026-10-05T12:00:00Z'), toFake: ['Date'] })
+    const early = await fetchService(mistral, undefined, kvWith(JSON.stringify({ fetchedAt: new Date().toISOString(), feed: red('Oct 1, 2026') })).kv as never, {})
+    expect(early.incidents[0].impact).toBe('major')
+    const stored = accumulateMonthlyIncidents(null, [early], '2026-10', [])
+
+    vi.useFakeTimers({ now: new Date('2026-10-31T12:00:00Z'), toFake: ['Date'] })
+    const late = await fetchService(mistral, undefined, kvWith(JSON.stringify({ fetchedAt: new Date().toISOString(), feed: red('Oct 1, 2026') })).kv as never, {})
+    const after = accumulateMonthlyIncidents(stored, [late], '2026-10', [])
+    expect(after.services.mistral.incidents?.find((e) => e.id === "r1")?.impact).toBe("major")
   })
 })

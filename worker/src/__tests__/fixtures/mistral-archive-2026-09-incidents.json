@@ -1,0 +1,677 @@
+[
+ {
+  "id": "a0f7135c-4b1e-451c-a6bd-14b4ec72b3c1",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T11:35:10.062Z",
+  "resolvedAt": "2026-09-01T11:43:33.062Z",
+  "durationMin": 9,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "80a6b0ff-c56a-43ac-ad0e-dc9390eb9e54",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T12:05:06.832Z",
+  "resolvedAt": "2026-09-01T12:18:40.832Z",
+  "durationMin": 14,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "29e6393b-76ff-4a67-aa2c-49e0836d5447",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T13:39:43.159Z",
+  "resolvedAt": "2026-09-01T13:54:48.159Z",
+  "durationMin": 16,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "a4532d96-3ee5-4ce8-9820-a263efab951b",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T14:15:15.170Z",
+  "resolvedAt": "2026-09-01T14:24:45.170Z",
+  "durationMin": 10,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "e987cf71-4736-421a-b0bd-148d46f92d98",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T14:40:11.685Z",
+  "resolvedAt": "2026-09-01T14:44:13.685Z",
+  "durationMin": 5,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "f9d26cb7-11a5-49be-8baa-7a20da7aaa7c",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T15:09:43.631Z",
+  "resolvedAt": "2026-09-01T15:29:00.631Z",
+  "durationMin": 20,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "fd3ff31a-6986-4c8f-b0b2-508b0f49cb26",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-02T09:14:43.052Z",
+  "resolvedAt": "2026-09-02T09:24:08.052Z",
+  "durationMin": 10,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "e1494538-38fd-49be-8655-138b5a0fda05",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-02T11:50:13.146Z",
+  "resolvedAt": "2026-09-02T11:54:34.146Z",
+  "durationMin": 5,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "45c88dc1-c248-4313-b23b-97656b573b74",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-02T23:07:53.725Z",
+  "resolvedAt": "2026-09-02T23:10:47.725Z",
+  "durationMin": 3,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "0ef54c57-d861-4f60-81cd-b27cebabf7b4",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-03T01:38:48.827Z",
+  "resolvedAt": "2026-09-03T01:45:21.827Z",
+  "durationMin": 7,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "4224a6a6-4a22-4a3e-86b8-33583c65a942",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-03T06:02:52.968Z",
+  "resolvedAt": "2026-09-03T06:09:47.968Z",
+  "durationMin": 7,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "581ab454-42e9-476f-b5aa-67a28377dcc3",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-03T07:05:52.773Z",
+  "resolvedAt": "2026-09-03T07:08:42.773Z",
+  "durationMin": 3,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "bac9427a-c64a-447d-8fae-de4b53bc1283",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-03T07:15:14.921Z",
+  "resolvedAt": "2026-09-03T07:20:02.921Z",
+  "durationMin": 5,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "1874121f-9929-41a6-a6a5-44af41115d42",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-03T07:13:55.223Z",
+  "resolvedAt": "2026-09-03T07:22:49.223Z",
+  "durationMin": 9,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "f0151c87-169e-4bbc-bf18-9020b1ceb07e",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-03T14:25:55.086Z",
+  "resolvedAt": "2026-09-03T14:41:48.086Z",
+  "durationMin": 16,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "b822d6a1-968f-45b3-9686-5e5f3fc8646b",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-03T14:35:17.701Z",
+  "resolvedAt": "2026-09-03T14:44:52.701Z",
+  "durationMin": 10,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "42d40d86-1afb-43ab-a24b-09658eae5953",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-03T14:54:38.291Z",
+  "resolvedAt": "2026-09-03T15:03:36.291Z",
+  "durationMin": 9,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "f4a10a95-ae80-467f-bb10-ca9aa98652ae",
+  "title": "AI Registry Skills API Degraded",
+  "startedAt": "2026-09-04T01:11:12.861Z",
+  "resolvedAt": "2026-09-04T01:21:06.861Z",
+  "durationMin": 10,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "04dbc8d6-bbd3-44fc-b236-371e1edeb00e",
+  "title": "Audio API Text-to-Speech Degraded",
+  "startedAt": "2026-09-04T10:26:24.415Z",
+  "resolvedAt": "2026-09-04T10:34:53.415Z",
+  "durationMin": 9,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "395324c5-09d0-4f54-b0b3-b90fcfd7b529",
+  "title": "Audio API Text-to-Speech Degraded",
+  "startedAt": "2026-09-04T10:39:24.455Z",
+  "resolvedAt": "2026-09-04T10:43:19.455Z",
+  "durationMin": 4,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "f6c48e28-38e2-464c-8669-024534972135",
+  "title": "Model mistral-ocr-2512 not available · OCR API",
+  "startedAt": "2026-09-04T13:30:46.628Z",
+  "resolvedAt": "2026-09-04T14:31:08.628Z",
+  "durationMin": 61,
+  "finalStatus": "resolved",
+  "impact": "major"
+ },
+ {
+  "id": "d0eca2ab-09b1-422c-95b9-d0307d90a6c6",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-04T14:31:43.744Z",
+  "resolvedAt": "2026-09-04T14:43:20.744Z",
+  "durationMin": 12,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "08959438-23b5-4715-8ab7-c65b2e663e7b",
+  "title": "AI Registry Prompts API Degraded",
+  "startedAt": "2026-09-04T15:19:57.464Z",
+  "resolvedAt": "2026-09-04T15:59:46.464Z",
+  "durationMin": 40,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "01e4e59d-33cb-4b0d-b3e1-a30be943dd6c",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T15:18:22.961Z",
+  "resolvedAt": "2026-09-04T15:20:23.961Z",
+  "durationMin": 3,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "7316f046-2ad5-442b-8c90-2bbc000201e1",
+  "title": "Files API Degraded",
+  "startedAt": "2026-09-04T15:16:13.533Z",
+  "resolvedAt": "2026-09-04T15:36:16.533Z",
+  "durationMin": 21,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "f8f6252f-0feb-4139-8ba8-f660ce8e59f8",
+  "title": "AI Registry Skills API Degraded",
+  "startedAt": "2026-09-04T15:26:26.131Z",
+  "resolvedAt": "2026-09-04T15:51:06.131Z",
+  "durationMin": 25,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "27d5ca10-a159-43c4-bc48-5fc73ccb85f4",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T15:47:22.568Z",
+  "resolvedAt": "2026-09-04T15:50:24.568Z",
+  "durationMin": 4,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "8041e0d6-40c9-4e73-9d13-aa725e19b52b",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T16:35:22.766Z",
+  "resolvedAt": "2026-09-04T16:36:22.766Z",
+  "durationMin": 1,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "5e6cdda0-0807-48d0-ada2-9acd2655e39f",
+  "title": "Degraded OCR 4.1 Availability · OCR API",
+  "startedAt": "2026-09-04T22:00:00.000Z",
+  "resolvedAt": "2026-09-05T05:48:20.000Z",
+  "durationMin": 469,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "dd2adb8b-bbe9-4b58-b065-550d20e296cb",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-09T08:13:29.241Z",
+  "resolvedAt": "2026-09-09T08:29:10.241Z",
+  "durationMin": 16,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "49e06606-3826-4f69-a49a-da4cb0988c34",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-09T08:51:30.932Z",
+  "resolvedAt": "2026-09-09T09:11:11.932Z",
+  "durationMin": 20,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "07047967-9507-4b1d-8828-bbef2805d31b",
+  "title": "Completion API Degraded - glm-5-2 · Chat Completions API",
+  "startedAt": "2026-09-09T09:43:22.982Z",
+  "resolvedAt": "2026-09-09T09:53:21.982Z",
+  "durationMin": 10,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "8eb8a3a6-286f-48ab-8581-121d6394b28d",
+  "title": "GLM 5.2 Service Degraded",
+  "startedAt": "2026-09-10T16:50:00.000Z",
+  "resolvedAt": "2026-09-10T20:32:00.000Z",
+  "durationMin": 222,
+  "finalStatus": "resolved",
+  "impact": "major"
+ },
+ {
+  "id": "5e5018d9-a0fb-4fdd-a1c5-ff255fd7e7e7",
+  "title": "Degraded OCR 4.1 Availability",
+  "startedAt": "2026-09-04T22:00:00.000Z",
+  "resolvedAt": "2026-09-05T05:48:00.000Z",
+  "durationMin": 468,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "804b6e0a-bf4d-4b6f-a9c0-0f8f73910a2c",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T16:35:00.000Z",
+  "resolvedAt": "2026-09-04T16:36:00.000Z",
+  "durationMin": 1,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "fcc5614f-9511-4d63-afa5-15b02f32a9cc",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T15:57:00.000Z",
+  "resolvedAt": "2026-09-04T15:58:00.000Z",
+  "durationMin": 1,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "65e92b3f-aec4-49c7-bf21-1c9b58500146",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T15:47:00.000Z",
+  "resolvedAt": "2026-09-04T15:50:00.000Z",
+  "durationMin": 3,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "ccaf861e-ecd8-48b8-b02c-1cfe95ea7b3c",
+  "title": "AI Registry Skills API Degraded",
+  "startedAt": "2026-09-04T15:26:00.000Z",
+  "resolvedAt": "2026-09-04T15:51:00.000Z",
+  "durationMin": 25,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "298ea3b6-316b-4df3-bf9f-47cef8e2d7dc",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T15:25:00.000Z",
+  "resolvedAt": "2026-09-04T15:26:00.000Z",
+  "durationMin": 1,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "c52b0041-4b9e-4720-84db-d36f1a69235b",
+  "title": "AI Registry Prompts API Degraded",
+  "startedAt": "2026-09-04T15:19:00.000Z",
+  "resolvedAt": "2026-09-04T15:59:00.000Z",
+  "durationMin": 40,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "6536c035-3296-4174-a070-584a2e7df68b",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T15:18:00.000Z",
+  "resolvedAt": "2026-09-04T15:20:00.000Z",
+  "durationMin": 2,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "37271356-ec67-47ce-89af-b600455e2f2f",
+  "title": "Files API Degraded",
+  "startedAt": "2026-09-04T15:16:00.000Z",
+  "resolvedAt": "2026-09-04T15:36:00.000Z",
+  "durationMin": 20,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "1fd43a9c-a2d8-46e3-8e8f-41f6f9b56ea6",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T15:11:00.000Z",
+  "resolvedAt": "2026-09-04T15:12:00.000Z",
+  "durationMin": 1,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "e9482952-2264-4bc8-a16b-4e7c6f04808f",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-04T14:31:00.000Z",
+  "resolvedAt": "2026-09-04T14:43:00.000Z",
+  "durationMin": 12,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "50c6a843-c60b-4d40-8361-e8b2661e8955",
+  "title": "Model mistral-ocr-2512 not available",
+  "startedAt": "2026-09-04T13:30:00.000Z",
+  "resolvedAt": "2026-09-04T14:31:00.000Z",
+  "durationMin": 61,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "8f9359f1-2e2b-4f93-9d2d-3a0bdd4eb670",
+  "title": "Audio API Text-to-Speech Degraded",
+  "startedAt": "2026-09-04T10:39:00.000Z",
+  "resolvedAt": "2026-09-04T10:43:00.000Z",
+  "durationMin": 4,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "915aba37-c943-4010-ab78-a7435f3b7a43",
+  "title": "Audio API Text-to-Speech Degraded",
+  "startedAt": "2026-09-04T10:26:00.000Z",
+  "resolvedAt": "2026-09-04T10:34:00.000Z",
+  "durationMin": 8,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "568ea58b-d89c-42be-b654-abe480249d44",
+  "title": "Integrations API Degraded",
+  "startedAt": "2026-09-04T01:13:00.000Z",
+  "resolvedAt": "2026-09-04T01:14:00.000Z",
+  "durationMin": 1,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "f13f8232-2acc-4e18-a5e5-4f4718d727fb",
+  "title": "AI Registry Skills API Degraded",
+  "startedAt": "2026-09-04T01:11:00.000Z",
+  "resolvedAt": "2026-09-04T01:21:00.000Z",
+  "durationMin": 10,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "7da3b455-c6b6-47ca-925d-3f4f161fcc57",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-03T14:54:00.000Z",
+  "resolvedAt": "2026-09-03T15:03:00.000Z",
+  "durationMin": 9,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "c703f630-406c-47c5-8ab7-69e4c3a9fb18",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-03T14:35:00.000Z",
+  "resolvedAt": "2026-09-03T14:44:00.000Z",
+  "durationMin": 9,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "bd0e1e7c-368f-4443-9be6-c8a7a788f7f2",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-03T14:25:00.000Z",
+  "resolvedAt": "2026-09-03T14:41:00.000Z",
+  "durationMin": 16,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "fb3f05c0-8ebb-4e20-a468-f6e3465e2a2d",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-03T07:15:00.000Z",
+  "resolvedAt": "2026-09-03T07:20:00.000Z",
+  "durationMin": 5,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "75c7497f-7051-4374-805f-2deaf73c831a",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-03T07:13:00.000Z",
+  "resolvedAt": "2026-09-03T07:22:00.000Z",
+  "durationMin": 9,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "5183f3b2-785d-411a-af94-9f7412215f4a",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-03T07:05:00.000Z",
+  "resolvedAt": "2026-09-03T07:08:00.000Z",
+  "durationMin": 3,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "caae47e0-0df7-4d7f-9541-b56b63ba3cad",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-03T06:02:00.000Z",
+  "resolvedAt": "2026-09-03T06:09:00.000Z",
+  "durationMin": 7,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "ee0bcc08-c52f-4978-934c-97517918039b",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-03T03:19:00.000Z",
+  "resolvedAt": "2026-09-03T03:20:00.000Z",
+  "durationMin": 1,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "29d0d316-b1c3-4b8d-95bf-334092c134fa",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-03T01:38:00.000Z",
+  "resolvedAt": "2026-09-03T01:45:00.000Z",
+  "durationMin": 7,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "e69d37d9-e33e-4c7b-9ee0-47a49526b8ac",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-02T23:07:00.000Z",
+  "resolvedAt": "2026-09-02T23:10:00.000Z",
+  "durationMin": 3,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "970a6f11-f214-4f98-b974-525ab0c3c2fa",
+  "title": "Completion API Degraded - glm-5-2",
+  "startedAt": "2026-09-02T22:11:00.000Z",
+  "resolvedAt": "2026-09-02T22:12:00.000Z",
+  "durationMin": 1,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "b9d12d03-0fb0-4995-acff-cd310e3f05b7",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-02T11:50:00.000Z",
+  "resolvedAt": "2026-09-02T11:54:00.000Z",
+  "durationMin": 4,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "335919dd-8eb9-4f39-b1fd-7edbf1c035ad",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-02T09:14:00.000Z",
+  "resolvedAt": "2026-09-02T09:24:00.000Z",
+  "durationMin": 10,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "a3bb8247-b680-4b7d-a3a2-fae5086ae87e",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T15:09:00.000Z",
+  "resolvedAt": "2026-09-01T15:29:00.000Z",
+  "durationMin": 20,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "885563a2-fd9e-46e1-8f3b-103e4ba0f822",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T14:40:00.000Z",
+  "resolvedAt": "2026-09-01T14:44:00.000Z",
+  "durationMin": 4,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "3f7c3088-e82b-4130-af6e-aa537fe094ab",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T14:15:00.000Z",
+  "resolvedAt": "2026-09-01T14:24:00.000Z",
+  "durationMin": 9,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "c54c43b7-1360-419c-a876-022e00ca7015",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T13:39:00.000Z",
+  "resolvedAt": "2026-09-01T13:54:00.000Z",
+  "durationMin": 15,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "912dfebb-ad6e-41ad-b157-13e4a33637eb",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T12:05:00.000Z",
+  "resolvedAt": "2026-09-01T12:18:00.000Z",
+  "durationMin": 13,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "32465b09-f7d2-45bb-bb04-ff36fffed2e2",
+  "title": "Conversations API Degraded",
+  "startedAt": "2026-09-01T11:35:00.000Z",
+  "resolvedAt": "2026-09-01T11:43:00.000Z",
+  "durationMin": 8,
+  "finalStatus": "resolved",
+  "impact": "minor"
+ },
+ {
+  "id": "c6b50a39-a474-4150-9203-cc63b2467f53",
+  "title": "GLM 5.2 Performance Degraded",
+  "startedAt": "2026-09-15T19:58:00.000Z",
+  "resolvedAt": "2026-09-15T20:43:00.000Z",
+  "durationMin": 45,
+  "finalStatus": "resolved",
+  "impact": "major"
+ },
+ {
+  "id": "613a1b78-2b21-4016-bc6a-f0394c2d1550",
+  "title": "Availability drop for mistral-ocr-4-1",
+  "startedAt": "2026-09-21T15:52:00.000Z",
+  "resolvedAt": "2026-09-21T18:34:00.000Z",
+  "durationMin": 162,
+  "finalStatus": "resolved",
+  "impact": "major"
+ },
+ {
+  "id": "b0a485d8-2c02-42ed-b982-203f3b70b877",
+  "title": "September 21, 2026 at 10:12 PM UTC",
+  "startedAt": "2026-09-21T22:12:00.000Z",
+  "resolvedAt": "2026-09-21T22:26:00.000Z",
+  "durationMin": 14,
+  "finalStatus": "resolved",
+  "impact": null
+ },
+ {
+  "id": "9923dbd8-a719-4145-81d5-0f11b7502684",
+  "title": "September 22, 2026 at 12:53 AM UTC",
+  "startedAt": "2026-09-22T00:53:00.000Z",
+  "resolvedAt": "2026-09-22T01:14:00.000Z",
+  "durationMin": 21,
+  "finalStatus": "resolved",
+  "impact": null
+ },
+ {
+  "id": "55900af9-ab84-4c4a-91fa-75b1479ed983",
+  "title": "Skill creation and updates unavailable",
+  "startedAt": "2026-09-22T09:25:00.000Z",
+  "resolvedAt": "2026-09-22T09:53:00.000Z",
+  "durationMin": 28,
+  "finalStatus": "resolved",
+  "impact": "major"
+ },
+ {
+  "id": "68cba3b9-4115-4b47-a415-e0e571d48278",
+  "title": "Audio speech to text degradation",
+  "startedAt": "2026-09-29T07:45:00.000Z",
+  "resolvedAt": "2026-09-29T08:06:00.000Z",
+  "durationMin": 21,
+  "finalStatus": "resolved",
+  "impact": null
+ },
+ {
+  "id": "fcc64184-7c9a-45d8-9fb4-e2c862f7e195",
+  "title": "Elevated error rate on some of our services",
+  "startedAt": "2026-09-29T12:54:00.000Z",
+  "resolvedAt": "2026-09-29T15:34:00.000Z",
+  "durationMin": 160,
+  "finalStatus": "resolved",
+  "impact": null
+ }
+]

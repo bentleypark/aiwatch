@@ -19,7 +19,7 @@
 // it. That is why normalization consumes incident pages rather than list rows: a year inferred from
 // a month header is a second hand-written parser, and it would be wrong for exactly one week a year.
 import type { Incident, TimelineEntry } from '../types'
-import { formatDuration } from '../utils'
+import { formatDuration, isNonReliabilityAdvisory } from '../utils'
 import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
 
 /** One incident as the scraper read it — every field verbatim, no interpretation. */
@@ -557,8 +557,7 @@ export function rootlyDayReading(day: RootlyUptimeDay): DayReading {
   // absent or not an array used to become `[]` here, which weighs as zero downtime — the direction
   // every gap on this source must never fail in. `label` is required for the same reason one level
   // on: `attachRootlyImpact` matches an incident by `label.includes(title)`, so an absent label
-  // silently costs every incident on the day its severity, and `score.ts` drops a null-impact
-  // incident from both `affectedDays` and the MTTR sample.
+  // silently costs every incident on the day its severity.
   if (!day || !Array.isArray(day.segments) || typeof day.label !== 'string') {
     return { fraction: null, impact: null }
   }
@@ -773,14 +772,24 @@ export function computeRootlyUptime(
   }
 }
 
+/** #1557 — the severity the Score uses for a Rootly incident the uptime chart could not attribute. */
+const ROOTLY_DEFAULT_IMPACT = 'minor' as const
+
+/** #1557 — the impact a Rootly incident is SCORED at. Applied by the live and monthly Score only, never
+ *  to the published list: the accumulator refreshes a stored impact with `inc.impact ?? stored`, so a
+ *  default there would overwrite a `major` the chart gave while the day was still in its window. */
+export function rootlyScoringImpact(inc: { impact?: Incident['impact']; title?: string }): Incident['impact'] {
+  if (inc.impact != null) return inc.impact
+  return isNonReliabilityAdvisory(inc.title ?? '') ? null : ROOTLY_DEFAULT_IMPACT
+}
+
 /**
  * Give each incident the severity its component-day carries.
  *
  * Joined on (UTC start day, title appearing in that day's tooltip label) because the incident pages
  * name no component — checked on a real one, the affected-component list simply is not rendered. An
- * incident that finds no matching day keeps `impact: null` and is COUNTED: it then stays out of the
- * Score's affected-days and MTTR (both gate on `impact != null`), which understates rather than
- * invents.
+ * incident that finds no matching day keeps `impact: null` and is COUNTED; the Score reads it through
+ * `rootlyScoringImpact`.
  */
 export function attachRootlyImpact(
   incidents: Incident[],

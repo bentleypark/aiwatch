@@ -2040,9 +2040,6 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
   const norm = normalizeRootlyIncidents(stored.feed)
   // The uptime chart is read in the SAME scrape as the incidents, because it is the only place this
   // source states severity — the incident titles carry none (verified across all 93 impacted days).
-  // Without it every incident stays `impact: null`, and `score.ts`'s `isReliabilityIncident` gates
-  // affected-days AND the MTTR sample on `impact != null`: a month with a dozen real incidents would
-  // score as if it were clean. That is why this is not deferred.
   const up = computeRootlyUptime(stored.feed.uptime ?? [], config.displayComponentIds, Date.parse(now))
   // Filter BEFORE attributing. `incidentExclude` drops the page's non-API incidents,
   // and those components are outside `displayComponentIds`, so their chart days never enter

@@ -12,6 +12,7 @@ import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './typ
 import { calculateAIWatchScore, classifyProbe, mergeImpactWindows } from './score'
 import type { AIWatchScore } from './score'
 import { resolveProbeId, PROBE_TARGETS } from './probe'
+import { rootlyScoringImpact } from './parsers/rootly'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
@@ -1125,7 +1126,7 @@ export function computeMonthlyScore(
 ): { score: number | null; grade: ScoreGrade | null; confidence: ScoreConfidence } {
   // Adapt the archived incident entries to the minimal Incident shape calculateAIWatchScore reads
   // (startedAt, impact, status, duration). finalStatus → status; durationMin → the "Xh Ym" string
-  // its MTTR parser expects (lossless for integer minutes); missing impact → null (informational).
+  // its MTTR parser expects (lossless for integer minutes); missing impact → null (informational), except a Rootly row (#1557).
   const incidents: Incident[] = (monthIncidents ?? []).map((e) => ({
     id: e.id,
     title: e.title,
@@ -1137,7 +1138,7 @@ export function computeMonthlyScore(
     // open across the deploy boundary, whose stored 'minor' a later live null never overwrites
     // (accumulateMonthlyIncidents nullish-coalesces impact) — would otherwise drop the advisory from
     // downtime yet still count it in the Score, an internally-contradictory report (the Codex June case).
-    impact: isNonReliabilityAdvisory(e.title ?? '') ? null : (e.impact ?? null),
+    impact: isNonReliabilityAdvisory(e.title ?? '') ? null : svcConfig?.rootlyFeed ? rootlyScoringImpact(e) : (e.impact ?? null),
     // #989 — carry the persisted auto-monitor tag through so isReliabilityIncident excludes it from the
     // monthly Score exactly as on the live path (a pre-#989 archive has it absent → counts, as before).
     autoMonitor: e.autoMonitor,
