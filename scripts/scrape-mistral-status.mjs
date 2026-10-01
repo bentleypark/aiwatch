@@ -7,6 +7,13 @@
 // on a runner means `xvfb-run`. Verified end to end from a GitHub ubuntu-latest runner in run
 // 34421800205: plain fetch 403, headless 403, xvfb-headed 200 with 14 uptime charts.
 //
+// #1510 — headed does NOT reliably SOLVE a served challenge: in-run retries cleared it only 1 of 21
+// times (measured on a diagnostic branch, since deleted). The sampled PASSING runs saw no challenge
+// at all on their first navigation — the egress was not challenged that time, not that the browser
+// beat Turnstile. A run that IS challenged on its first navigation is very unlikely to clear it by
+// waiting, so the `isCloudflareChallenge` check below exits such a run immediately instead of
+// waiting out the 60s chart timeout.
+//
 // This differs from the DeepSeek workaround (#618) it is modelled on. That page blocks on TLS
 // FINGERPRINT, so any browser context clears it and `chromium.launch()` (headless) suffices there.
 // Copying that launch here returns 403 every time.
@@ -180,6 +187,19 @@ const COMPONENT_STATES = /\b(Operational|Affected|Degraded|Partial Outage|Major 
 export const COMPONENT_STATES_WORDS = COMPONENT_STATES.source.replace(/^\\b\(|\)\\b$/g, '').split('|')
 
 /**
+ * Whether a navigation response is Cloudflare's managed challenge interstitial, not the real page.
+ *
+ * #1510 — `page.goto` does not throw on a 403; the challenge arrives as a normal response, so the
+ * old code always fell through to the 60s `waitForSelector` wait regardless (see the file header
+ * for the measured evidence that the wait will not succeed). `headers()` is synchronous and
+ * lower-cases header names (Playwright `Response.headers()`), so this needs no `await` and no case
+ * handling of its own.
+ */
+export function isCloudflareChallenge(headers) {
+  return (headers?.['cf-mitigated'] ?? '').toLowerCase() === 'challenge'
+}
+
+/**
  * One component row's text → `{name, status}`; nulls when no status word is found. `status` is the
  * matched word; `name` is what precedes it, whitespace-collapsed.
  *
@@ -277,7 +297,12 @@ async function main() {
     // preinstalled Chrome, so no browser download and no `playwright install` step.
       browser = await chromium.launch({ headless: false, channel: 'chrome' })
     const page = await (await browser.newContext()).newPage()
-    await withRetry(() => page.goto(STATUS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }))
+    const gotoResponse = await withRetry(() => page.goto(STATUS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }))
+    // #1510 — a served challenge is a normal (403) response, not a thrown error, so it survives
+    // `withRetry` and would otherwise fall through to the 60s wait below and time out there instead.
+    if (isCloudflareChallenge(gotoResponse?.headers())) {
+      throw new Error('cf-mitigated: challenge — served to this run; skipping the chart wait (#1510)')
+    }
     // Wait for the real page, not a fixed delay: the uptime charts are what proves the challenge
     // cleared, and an interstitial has none.
     //

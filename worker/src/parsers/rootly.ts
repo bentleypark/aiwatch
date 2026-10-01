@@ -2,9 +2,11 @@
 //
 // The Worker cannot read this source at all: the page sits behind a Cloudflare MANAGED CHALLENGE,
 // which a plain `fetch()` never clears and — unlike DeepSeek's TLS-fingerprint wall (#618) — a
-// HEADLESS browser does not clear either. Only a headed browser does (measured: bundled Chromium,
+// HEADLESS browser does not clear either. Only a headed browser has (measured: bundled Chromium,
 // full-Chromium new-headless and real-Chrome-channel headless are all 403; headed is 200. Confirmed
-// from a GitHub runner under xvfb, run 34421800205). So a scheduled Action browses the page and POSTs
+// from a GitHub runner under xvfb, run 34421800205). #1510 — headed does not reliably SOLVE a served
+// challenge (in-run retries cleared it only 1 of 21 times); most passes are simply not challenged in
+// the first place. So a scheduled Action browses the page and POSTs
 // what it read; this module owns every INTERPRETATION of that payload, so the fragile parts are pure
 // functions a test can pin rather than DOM code running in a browser nobody can assert on.
 //

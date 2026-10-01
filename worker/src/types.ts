@@ -533,7 +533,9 @@ export interface ServiceConfig {
   // mistral-feed Action. Distinct from `flashdutyFeed` in the wall it works around, which is why it
   // is a separate flag rather than a shared "fed" boolean: DeepSeek's page blocks on TLS fingerprint
   // (any browser context clears it, so that Action runs headless), while Rootly's Cloudflare managed
-  // challenge admits only a HEADED browser under xvfb. The two cannot share a scraper.
+  // challenge only a HEADED browser under xvfb has ever gotten past. #1510 — headed does not reliably
+  // SOLVE a served challenge; most passes are simply not challenged in the first place. The two cannot
+  // share a scraper.
   // When set, fetchService reads MISTRAL_FEED_KV_KEY; there is no apiUrl mirror to fall through to.
   // This path never clears `incidentSourceStale`; the reason is on `readRootlyStatus`.
   rootlyFeed?: boolean

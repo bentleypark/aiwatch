@@ -7,8 +7,14 @@ name: Mistral status feed
 # It is NOT a copy of deepseek-feed.yml, and the difference is load-bearing. DeepSeek's page blocks on
 # TLS FINGERPRINT, which any browser context clears — so that job runs headless. Mistral's challenge
 # refuses every headless variant (bundled Chromium, full-Chromium new-headless, real Chrome channel:
-# all 403) and admits only a HEADED browser, which on a runner means `xvfb-run`. Measured end to end
-# on a runner in run 34421800205: plain fetch 403, headless 403, xvfb-headed 200 with 14 uptime charts.
+# all 403) and only a HEADED browser (xvfb-run on a runner) has ever gotten a clean 200. Measured end
+# to end on a runner in run 34421800205: plain fetch 403, headless 403, xvfb-headed 200 with 14
+# uptime charts.
+#
+# #1510 — headed does NOT reliably SOLVE the challenge once one is served (in-run retries cleared it
+# only 1 of 21 times, measured on a diagnostic branch since deleted). The sampled passing runs saw no
+# challenge at all on their first navigation — see scrape-mistral-status.mjs for what a challenged
+# run does about it.
 #
 # No `playwright install`: the script drives the runner's preinstalled Chrome via `channel: 'chrome'`,
 # so there is no ~280MB browser download and no cache to keep warm.

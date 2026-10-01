@@ -2519,8 +2519,10 @@ export async function handleDeepseekFeed(request: Request, env: Env, cors: Recor
 // ── POST /api/internal/mistral-feed ──────────────────────
 // #1381: status.mistral.ai moved from Instatus to Rootly and now sits behind a Cloudflare MANAGED
 // challenge. Unlike DeepSeek's TLS-fingerprint wall (#618), a headless browser does not clear it
-// either — only a headed one, which on a runner means xvfb. So a scheduled Action reads the page and
-// POSTs what it saw; we cache it and `fetchService('mistral')` normalizes at READ time via
+// either — only a headed one, which on a runner means xvfb, has ever gotten past. #1510 — headed does
+// not reliably SOLVE a served challenge; most passes are simply not challenged in the first place. So
+// a scheduled Action reads the page and POSTs what it saw; we cache it and `fetchService('mistral')`
+// normalizes at READ time via
 // parsers/rootly.ts, so a malformed push cannot corrupt the served status mid-write.
 //
 // The gate is `isStorableRootlyFeed`, and it is a REJECTION test rather than a coercion: the cached
