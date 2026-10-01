@@ -39,6 +39,7 @@ on:
       - 'scripts/lint-okf-bundle.mjs'      # the guard guards itself
       - 'scripts/check-doc-symbols.mjs'    # #1100 — ditto, the doc-symbol lint
       - 'scripts/check-instruction-budget.mjs'   # #1285 — ditto, the instruction-budget ratchet
+      - 'scripts/check-conflict-markers.mjs'   # ditto, the conflict-marker check
       - 'api/__tests__/service-count-lockstep.test.ts'   # ditto, for the count lockstep
       - 'vitest.config.js'                 # passWithNoTests there would disarm the lockstep gate
       - '.github/workflows/docs-lint.yml'
@@ -52,6 +53,7 @@ on:
       - 'scripts/lint-okf-bundle.mjs'
       - 'scripts/check-doc-symbols.mjs'
       - 'scripts/check-instruction-budget.mjs'
+      - 'scripts/check-conflict-markers.mjs'
       - 'api/__tests__/service-count-lockstep.test.ts'
       - 'vitest.config.js'
       - '.github/workflows/docs-lint.yml'
@@ -77,6 +79,7 @@ jobs:
       # Zero-dependency script (node: builtins only) — deliberately no `npm ci`.
       # Checks: frontmatter integrity, unquoted-`#` truncation, dangling cross-links, index.md drift.
       - run: node scripts/lint-okf-bundle.mjs
+      - run: node scripts/check-conflict-markers.mjs
 
   count-lockstep:
     name: Service Count Lockstep

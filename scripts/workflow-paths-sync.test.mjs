@@ -201,6 +201,7 @@ for (const trigger of ['push', 'pull_request']) {
     assert.ok(watched.includes('scripts/lint-okf-bundle.mjs'), 'a change to the lint must re-run the lint')
     assert.ok(watched.includes('scripts/check-doc-symbols.mjs'), 'a change to the doc-symbol lint must re-run it')
     assert.ok(watched.includes('scripts/check-instruction-budget.mjs'), 'a change to the budget ratchet must re-run it')
+    assert.ok(watched.includes('scripts/check-conflict-markers.mjs'), 'a change to the conflict-marker check must re-run it')
     assert.ok(watched.includes('api/__tests__/service-count-lockstep.test.ts'), 'a change to the count lockstep must re-run it')
     assert.ok(watched.includes('vitest.config.js'), 'the lockstep gate depends on vitest defaults — a config change must re-run it')
     assert.ok(watched.includes('.github/workflows/docs-lint.yml'), 'a change to the guard must re-run the guard')
@@ -359,6 +360,13 @@ test('docs-lint.yml actually RUNS the instruction-budget ratchet (#1285)', () =>
     'the job must RUN the ratchet in an uncommented step with no `||` fallback swallowing its exit code',
   )
   assertCannotBeSkipped(code, 'instruction-budget')
+})
+
+test('docs-lint.yml actually RUNS the conflict-marker check', () => {
+  const code = stripComments(jobBlock(wf('docs-lint.yml'), 'okf-lint'))
+  assert.ok(code.length > 0, 'the okf-lint job block must be parseable')
+  assert.match(code, /^\s+- run: node scripts\/check-conflict-markers\.mjs\s*$/m)
+  assertCannotBeSkipped(code, 'okf-lint')
 })
 
 // #1285 — the OTHER half of the instruction budget's coverage story. `.claude/hooks/workflow-gates.txt`
