@@ -225,6 +225,16 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
    the pre-publish CI lint (aiwatch-reports#55)** (`scripts/lint-recurrence.js`). Search the file for `AUTO-DRAFT` and
    `RECURRENCE CHECK` and confirm zero remain.
 
+4.5. **Check for a story told in full twice — after all four narrative sections are filled
+   (aiwatch-reports#122).** Step 2's cross-section rule has no mechanical check; this prints its input:
+   ```bash
+   node scripts/lint-narrative-repeats.js NNNN-NN/index.md     # from the checkout holding the draft
+   ```
+   It lists every figure (`45h 11m`, `99.97%`, `88 → 56`, `24 of 64`) that appears in 3 or more of
+   Summary / Key Insight / Notable Incidents / Observations. For each hit, keep the full telling in one
+   section and make the others point at it. A legitimate contrast can stay. Only those four figure
+   shapes are counted — a story retold through a bare Score, a latency or no figure does not show up here.
+
 5. **Service-count / category lockstep.** The header line — **both** the count and the category
    breakdown (`Services monitored: 41 — 15 LLM APIs, 6 coding agents, …`) — is **generated**
    (`[SERVICE_COUNT]` aiwatch-reports#97, `[SERVICE_BREAKDOWN]` aiwatch-reports#98), counted over the same archive
