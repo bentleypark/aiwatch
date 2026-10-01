@@ -43,7 +43,7 @@ import { EXT_INDEX, PLUGIN_MONITOR_INDEX, PLUGIN_BRIEF_INDEX, recordCacheReadOut
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, type StoredRootlyFeed } from './parsers/rootly'
+import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, rootlyScoringImpact, type StoredRootlyFeed } from './parsers/rootly'
 import { atlassianRosterEntries } from './parsers/statuspage'
 import { parseMistralFeedObservation, recordMistralFeedObservation } from './mistral-feed-observation'
 import { recordStatusFetchRun } from './status-fetch-run'
@@ -472,8 +472,13 @@ export function scoreFor(svc: ServiceStatus, summaries: Map<string, ProbeSummary
   // its Responsiveness comes from the parent's already-measured endpoint instead of the probe-less
   // rescale. resolveProbeId is identity for everyone else (incl. the directly-probed cursor).
   const probeId = resolveProbeId(svc.id)
-  return calculateAIWatchScore(svc, 30, classifyProbe(probeId, PROBED_SERVICE_IDS.has(probeId), summaries))
+  const scored = ROOTLY_SERVICE_IDS.has(svc.id)
+    ? { ...svc, incidents: svc.incidents.map((i) => ({ ...i, impact: rootlyScoringImpact(i) })) }
+    : svc
+  return calculateAIWatchScore(scored, 30, classifyProbe(probeId, PROBED_SERVICE_IDS.has(probeId), summaries))
 }
+
+const ROOTLY_SERVICE_IDS = new Set(SERVICES.filter((s) => s.rootlyFeed).map((s) => s.id))
 
 // Read probe summaries from KV with logging — distinguishes infra failure from genuine missing data.
 // Exported for direct testing of the catch behavior — the .catch is the load-bearing translation
