@@ -68,7 +68,7 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
    Keep the provider-side moves of a status page or platform, and any switch AIWatch made to the page it
    reads for a service (a rename such as Windsurf → Devin Desktop counts), and check each against the tables:
    did the service lose its official uptime, change table, or lose incident coverage for part of the
-   month? Write the moves in the template's `## Status Page Changes` section, checking each "from" platform
+   month? Write the moves in the template's `## Status Source Changes` section, checking each "from" platform
    against the service's pre-move config rather than the issue title, and delete that block when there are
    none. Point at the section from a Summary bullet (and its KO mirror) only when a move changed a table. The search depends on
    title wording and on the issue's creation date, so a move found the following month is missed.
