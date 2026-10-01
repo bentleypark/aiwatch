@@ -244,9 +244,7 @@ export interface ServiceStatus {
    *  passing a short one off as a 30-day figure. */
   uptimeWindowDays?: number
   detectedAt?: string
-  /** BetterStack only: count of resources reporting a real issue (degraded/downtime)
-   *  while the service stays operational under the <30% threshold (#447). UI shows a
-   *  "N affected" badge; absent when 0. */
+  /** BetterStack only: `parseBetterStackPartialCount` (#447); absent when 0. */
   partialCount?: number
   /** #591 — AIWatch cannot currently read this service's incident source, so its incident list and
    *  uptime read as current but are not: an empty or frozen 30-day window scores full incidents+recovery

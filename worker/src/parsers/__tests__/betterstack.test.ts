@@ -849,7 +849,7 @@ describe('parseBetterStackStatus', () => {
     })).toBe('degraded')
   })
 
-  it('returns degraded when real issues are ≥30% of non-maintenance peers despite being a small fraction overall', () => {
+  it('returns degraded when real issues reach the threshold among non-maintenance peers despite being a small fraction overall', () => {
     // Worst-case scenario flagged by review: 25/31 in maintenance, 5/31 in downtime, 1 operational.
     // Naive ratio 5/31 = 16% would underflag the genuine 5-resource outage. Correct ratio uses
     // the non-maintenance denominator: 5/(31-25) = 5/6 = 83% → escalate.

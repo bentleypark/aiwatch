@@ -141,7 +141,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
             // about the SERVICE — see `readsResolved` in utils/liveIncident.
             const allRecovered = analyses.every(a => !!a.resolvedAt)
             // Surface the gap between the operational status dot and active analyses
-            // (e.g. BetterStack per-model churn below the <30% threshold leaves the service
+            // (e.g. BetterStack per-model churn below `BETTERSTACK_DEGRADE_THRESHOLD` leaves the service
             // operational while individual model incidents are still being analyzed).
             // Restrict to single-service groups — a sibling-shared incident that happens to
             // show operational on every surface is a real cross-service incident, not an
