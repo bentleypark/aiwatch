@@ -2800,7 +2800,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       // Deliberately no cause: this handler cannot tell an expired key from a KV blip — every helper
       // below `buildMonthlyArchive` swallows its own reads — and a guessed cause is worse than none,
       // because "the data is gone" points at `force` when a retry would have fixed it (#1260 r3).
-      hint: 'retry first; if it still refuses, the source data is gone and force:true overwrites anyway',
+      hint: 'retry first; if it still refuses, force:true overwrites anyway',
     })
   }
 
