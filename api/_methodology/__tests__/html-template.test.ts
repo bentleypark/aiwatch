@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { renderMethodologyPage } from '../html-template'
 import { PROBE_TARGETS } from '../../../worker/src/probe' // #678 — lockstep source of truth
 import { SERVICES } from '../../../worker/src/services' // #1110 — Better Stack roster lockstep
-import { BS_HISTORY_MIN_DOWNTIME_SEC, BS_HISTORY_WINDOW_DAYS } from '../../../worker/src/parsers/betterstack' // #1498 — reconstruction bounds lockstep
+import { BETTERSTACK_DEGRADE_THRESHOLD, BS_HISTORY_MIN_DOWNTIME_SEC, BS_HISTORY_WINDOW_DAYS } from '../../../worker/src/parsers/betterstack' // #1498 — reconstruction bounds lockstep
 
 // #673 — the public /methodology page. Renders once (no per-request data), so these assertions
 // guard: it renders without throwing, carries all 7 section anchors + the SEO head, is bilingual,
@@ -343,24 +343,18 @@ describe('renderMethodologyPage', () => {
     expect([...usedKeys].filter((k) => !koKeys.has(k) || !enKeys.has(k))).toEqual([])
   })
 
-  // #1110 — the Better Stack roster is hand-listed in SIX strings: `s2.partial` and `s3.platformDesc`,
-  // each existing three times (the inline KO default in the HTML, the `i18n.ko` map, the `i18n.en` map).
-  // It had already drifted: Helicone was added to SERVICES in #802 and never reached `s2.partial`, so
-  // the page told readers five services behaved a way six of them do. That is the drift class the
-  // probe-count lockstep above already guards, so pin the roster the same way — to `betterStackUrl`,
-  // the flag that actually routes a service to `parseBetterStackUptime`, not to a hand-kept list.
+  // #1110 — the Better Stack roster is hand-listed three times in `s3.platformDesc` (the inline KO
+  // default in the HTML, the `i18n.ko` map, the `i18n.en` map). Pin it to `betterStackUrl`, the flag
+  // that actually routes a service to `parseBetterStackUptime`, not to a hand-kept list.
   //
-  // Covering all six matters: a first cut of this guard matched only `data-i18n="…"` attributes, which
+  // Covering all three matters: a first cut of this guard matched only `data-i18n="…"` attributes, which
   // exist ONLY in the inline KO HTML, so dropping Helicone from either i18n map still passed 18/18.
   // A guard whose default state is `pass` has to be mutated against itself before it is believed.
-  it('every Better Stack service is named in all six /methodology enumerations (#1110)', () => {
+  it('every Better Stack service is named in the three platform-description enumerations (#1110)', () => {
     const expected = SERVICES.filter((s) => s.betterStackUrl).map((s) => s.id)
     expect(expected.length).toBeGreaterThan(0) // sanity: the flag still exists
 
     const enumerations: Array<[string, string]> = [
-      ['s2.partial inline', inline('s2.partial', 'p')],
-      ['s2.partial ko', entry(koBlock, 's2.partial')],
-      ['s2.partial en', entry(enBlock, 's2.partial')],
       ['s3.platformDesc inline', inline('s3.platformDesc', 'span')],
       ['s3.platformDesc ko', entry(koBlock, 's3.platformDesc')],
       ['s3.platformDesc en', entry(enBlock, 's3.platformDesc')],
@@ -373,8 +367,7 @@ describe('renderMethodologyPage', () => {
       new Set(block.split(/[·(),—]/).map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean))
 
     // Subset AND superset: a missing service is the drift that started this, but a service listed here
-    // that is NOT on Better Stack is the same lie in the other direction — and `s2.partial` states no
-    // count in either language, so nothing else would catch an over-listing there.
+    // that is NOT on Better Stack is the same lie in the other direction.
     const otherIds = new Set(SERVICES.map((s) => s.id).filter((id) => !expected.includes(id)))
     for (const [where, block] of enumerations) {
       const present = tokens(block)
@@ -395,5 +388,37 @@ describe('renderMethodologyPage', () => {
     const word = NUMBER_WORD[expected.length]
     expect(word, `add ${expected.length} to NUMBER_WORD — the EN copy spells this count out`).toBeDefined()
     expect(entry(enBlock, 's3.platformDesc')).toContain(`These ${word} status pages`)
+  })
+
+  it('states Better Stack Partial only below the degradation threshold (#1552)', () => {
+    const threshold = `${BETTERSTACK_DEGRADE_THRESHOLD * 100}%`
+    const partials: Array<[string, string]> = [
+      ['inline', inline('s2.partial', 'p')],
+      ['ko', entry(koBlock, 's2.partial')],
+      ['en', entry(enBlock, 's2.partial')],
+    ]
+    const rule = (gate: string, below: string, kept: string, atOrAbove: string) => new RegExp(
+      `${gate}[\\s\\S]*${below}[^<]*${kept}[^<]*<strong>Partial</strong>[\\s\\S]*${atOrAbove}[^<]*<strong>Degraded</strong>[^<]*<strong>Down</strong>`,
+    )
+    const ko = rule('장애를 보고하면', `${threshold} 미만`, '정상으로 두고', `${threshold} 이상`)
+    const en = rule('reports a problem', `Below ${threshold}`, 'stays operational', `${threshold} or more`)
+    for (const [where, text] of partials) {
+      expect(text, `${where}: Partial below the threshold, Degraded/Down at or above it`).toMatch(where === 'en' ? en : ko)
+    }
+  })
+
+  it('links s2.partial to a heading that exists in status-determination.md (#1552)', () => {
+    const doc = readFileSync(join(process.cwd(), 'docs', 'reference', 'status-determination.md'), 'utf8')
+    const slug = (h: string) => h.trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/ /g, '-')
+    const anchors = new Set([...doc.matchAll(/^#{1,6} (.+)$/gm)].map((m) => slug(m[1])))
+    for (const [where, text] of [
+      ['inline', inline('s2.partial', 'p')],
+      ['ko', entry(koBlock, 's2.partial')],
+      ['en', entry(enBlock, 's2.partial')],
+    ] as const) {
+      const anchor = text.match(/status-determination\.md#([^"]+)"/)?.[1]
+      expect(anchor, `${where}: s2.partial must deep-link the reference section`).toBeDefined()
+      expect(anchors.has(anchor!), `${where}: #${anchor} matches no heading in status-determination.md`).toBe(true)
+    }
   })
 })
