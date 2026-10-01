@@ -55,6 +55,24 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
    (or the generator's draft PR branch). Never author on `main`. `git status` must show only the intended
    `NNNN-NN/` files — this repo often carries an in-progress `report/YYYY-MM` narrative on another branch.
 
+1.5. **List the month's status-source changes (interim, until the archive records them).** The archive
+   has no field saying a provider moved its status page, so the generated tables show the effect (a
+   service leaving the ranking, an uptime source changing) and never the cause. Find candidates by issue
+   title (`NEXT` is the first month after the report month). The first line is the number of issues the search
+   found; 0 means the date range is wrong, not that nothing moved:
+   ```bash
+   gh issue list -R bentleypark/aiwatch --state all --limit 400 \
+     --search "created:>=NNNN-NN-01 created:<NEXT-01" --json number,title \
+     | jq -r '"\(length) issues searched", (.[] | select(.title|test("moved|migrat|is now|status page|redirect|no longer";"i")) | "#\(.number) \(.title)")'
+   ```
+   Keep the provider-side moves of a status page or platform, and any switch AIWatch made to the page it
+   reads for a service (a rename such as Windsurf → Devin Desktop counts), and check each against the tables:
+   did the service lose its official uptime, change table, or lose incident coverage for part of the
+   month? Write the moves in the template's `## Status Page Changes` section, checking each "from" platform
+   against the service's pre-move config rather than the issue title, and delete that block when there are
+   none. Point at the section from a Summary bullet (and its KO mirror) only when a move changed a table. The search depends on
+   title wording and on the issue's creation date, so a move found the following month is missed.
+
 2. **Fill the hand-authored sections** — everything the generator leaves as a placeholder/AUTO-DRAFT:
    - **Summary** (EN bullets: Most reliable / Riskiest / High incident count / Watch out) **AND the KO
      `<details>` mirror** — keep both in lockstep.
