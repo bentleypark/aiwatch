@@ -425,8 +425,7 @@ export function parseFlashdutyFeed(feed: FlashdutyFeed, opts: ParseFlashdutyOpti
   // `component_impacts` (the same start/end intervals this parser already turns into `dailyImpact`
   // below) rather than copied from the feed's published `component_uptimes` aggregate, so every AIWatch
   // uptime figure sits on the SAME 30-day/1.0-0.3-weighted basis (comparable across services) — DO NOT
-  // generalise that to every source: `platform_avg` (Better Stack) applies no severity weighting at all
-  // and narrows its window per resource, and Instatus's Next.js path honours a provider-published
+  // generalise that to every source: `platform_avg` (Better Stack) narrows its window per resource, and Instatus's Next.js path honours a provider-published
   // `customImpactPercentage`. Worst-of across components when the service isn't scoped to one: a
   // multi-component service's availability is gated by its weakest surface.
   const flashdutyUptime = computeFlashdutyUptime(

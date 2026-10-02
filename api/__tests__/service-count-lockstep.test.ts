@@ -337,8 +337,7 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     // whether a parse yielded uptime30d — there is no static constant to derive it from, and the value
     // is a FLOOR (a transient fetch failure moves a service out), so even a correct number is unstable.
     // It had already drifted (live: 31, after kimi #1067 landed with official uptime). A number this
-    // suite structurally cannot guard does not belong in published copy — the sibling "Platform" bullet
-    // NAMES its services instead, which is the pattern to follow if a count is wanted back.
+    // suite structurally cannot guard does not belong in published copy.
     const html = renderMethodologyPage()
     expect(html).not.toMatch(/\(\d+개 서비스\)/)
     expect(html).not.toMatch(/status page \(\d+ services\)/)

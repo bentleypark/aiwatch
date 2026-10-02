@@ -95,7 +95,7 @@ export interface MonthlyServiceData {
   /** #1006 — WHERE the records `officialUptime` was computed from came from: 'official' = the provider's
    *  own incident/outage records; 'platform_avg' = the status-page platform's own monitors (Better
    *  Stack), which is a measurement rather than the provider declaring an incident. #1110 — the two are
-   *  NOT the same computation: `platform_avg` applies no severity weighting and drops unmonitored days
+   *  NOT the same computation: `platform_avg` weights severity per day, not per incident (#1580), and drops unmonitored days
    *  from its window, so a report must not present the two columns as like-for-like. Absent on archives written
    *  before #1006, and on a service with no uptime at all. The report's "Uptime Source" column reads this
    *  instead of inferring the taxonomy from a hand-maintained service list (which drifted, aiwatch#951). */

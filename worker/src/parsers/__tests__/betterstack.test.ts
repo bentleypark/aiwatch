@@ -1007,6 +1007,23 @@ describe('parseBetterStackUptime (#1006 — computed, not copied)', () => {
     expect(result).toBe(99.83)
   })
 
+  it('#1580 — weighs a degraded day at 0.3 and a downtime day at 1.0', () => {
+    const quiet = Array.from({ length: 29 }, () => ({}))
+    const down = days([{ status: 'downtime', down: 86_400 }, ...quiet])
+    const degraded = days([{ status: 'degraded', down: 86_400 }, ...quiet])
+    // 1 day of 30 → 96.66%; at 0.3 → 99.00%
+    expect(parseBetterStackUptime({ included: [resource(down)] })).toBe(96.66)
+    expect(parseBetterStackUptime({ included: [resource(degraded)] })).toBe(99)
+    // Same seconds, one day of each → (86400 + 0.3 × 86400) / (30 × 86400) → 95.66%
+    const mixed = days([{ status: 'downtime', down: 86_400 }, { status: 'degraded', down: 86_400 }, ...quiet.slice(1)])
+    expect(parseBetterStackUptime({ included: [resource(mixed)] })).toBe(95.66)
+    // Every non-degraded status that carries downtime seconds stays at 1.0
+    for (const status of ['maintenance', 'recovered', 'some_new_status']) {
+      const other = days([{ status, down: 86_400 }, ...quiet])
+      expect(parseBetterStackUptime({ included: [resource(other)] }), status).toBe(96.66)
+    }
+  })
+
   it('EXCLUDES announced maintenance — a provider must not be penalised for announcing a window', () => {
     const history = days([{ status: 'maintenance', maint: 86_400 }, ...Array.from({ length: 29 }, () => ({}))])
     expect(parseBetterStackUptime({ included: [resource(history)] })).toBe(100)

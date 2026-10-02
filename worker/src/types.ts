@@ -221,9 +221,9 @@ export interface ServiceStatus {
    *    'platform_avg'  → an AIWatch computation over BetterStack's OWN monitoring history
    *                      (`status_history`) rather than the provider's incident declarations, averaged
    *                      across the page's resources. The label marks a DIFFERENT computation, not just
-   *                      different evidence (#1110): `parseBetterStackUptime` ignores severity — every
-   *                      measured `downtime_duration` second counts at weight 1.0, `downtime` and
-   *                      `degraded` alike — and measures each resource only over the days it was
+   *                      different evidence (#1110): `parseBetterStackUptime` weights severity per DAY
+   *                      (#1580) — a day's `downtime_duration` counts at 0.3 when its `status` is
+   *                      `degraded` and 1.0 otherwise — and measures each resource only over the days it was
    *                      monitored (`not_monitored` days leave the denominator) before averaging, so one
    *                      page's figure can blend a 7-day monitor with 30-day ones. It emits no
    *                      `uptimeWindowDays`. Do not describe it as "the same window and weights as

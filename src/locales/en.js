@@ -209,8 +209,8 @@ const en = {
   'uptime.sub.official.partial': "Computed by AIWatch · provider's records go back only {d}d",
   'uptime.partialWindow.tooltip': "The provider's records for this component only go back {d} days (e.g. a status-page migration). It returns to a full 30-day window automatically.",
   // #1110 — this label is NOT "the same computation on different evidence". `parseBetterStackUptime`
-  // ignores severity: every measured `downtime_duration` second counts at weight 1.0, `downtime` and
-  // `degraded` alike (`status` is read only to drop `not_monitored` days). Each resource is measured
+  // weights severity per DAY (#1580): a day's `downtime_duration` counts at 0.3 when its `status` is
+  // `degraded` and 1.0 otherwise. Each resource is measured
   // over its OWN monitored-day count before the resources are averaged as equals, so one page's figure
   // can blend a 7-day monitor with 30-day ones, and no `uptimeWindowDays` is emitted. Only /methodology
   // §3 Platform states that difference; this label and the Uptime page's `avg` legend flag different
