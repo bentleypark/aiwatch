@@ -135,30 +135,38 @@ const TOTAL_SCORE_MAX = 100
 const INSUFFICIENT_PROBE_PENALTY = 0.95 // 5% confidence penalty for probed services lacking ≥7d data
 
 /** #989 — an incident counts toward the reliability penalty (affectedDays, weighted days, MTTR,
- *  Recovery default) only when the provider assigned it a real impact AND it is not a machine-emitted
- *  `autoMonitor` incident. A provider auto-monitor (Moonshot's `Agentic 模型错误报警`) opens frequent
- *  `critical` incidents whose recorded durations are paperwork-inflated (open long after the brief
- *  actual error — the #1019 pattern) and whose severity is blanket-`critical`, so both the duration and
- *  the severity are unusable as a Score signal; counting them craters the Score while the API gateway is
- *  healthy. Symmetric with the #707/#261 null-impact exclusion. NOTE the alert-side parallel is only
- *  partial: #983 holds/flap-suppresses NON-`critical` auto-monitor incidents, but a `critical` one
- *  bypasses every hold/flap path (alerts.ts short-circuits on `critical` first) and alerts immediately —
- *  its Discord flood is instead prevented by `filterByComponentStatus` (#970). This Score exclusion is
- *  what handles the `critical` auto-monitor case on the SCORE side.
- *
- *  ACCEPTED LIMITATION (not a safety guarantee): a genuine sustained model-tier outage reported ONLY
- *  through this auto-monitor channel is NOT reflected in the Score — the tag excludes it here, and (for
- *  a single-`statusComponentId` service like Kimi, whose auto-monitor incidents attach to no badge
- *  component) it never lowers `uptime30d` either. This is accepted because the channel's duration and
- *  severity are not trustworthy enough to score; the badge/uptime still reflect the monitored gateway
- *  component's own health.
+ *  Recovery default) only when the provider assigned it a real impact. #1505 — the `autoMonitor` tag no
+ *  longer decides membership: overlapping records already collapse into one window (mergeImpactWindows).
  *
  *  Type predicate so the `impact != null` narrowing flows to callers (no `impact!` at the use sites).
  *  Exported for unit testing. */
-export function isReliabilityIncident<T extends Pick<Incident, 'impact' | 'autoMonitor'>>(
+export function isReliabilityIncident<T extends Pick<Incident, 'impact'>>(
   i: T,
 ): i is T & { impact: NonNullable<T['impact']> } {
-  return i.impact != null && !i.autoMonitor
+  return i.impact != null
+}
+
+export function groupImpactWindows<T>(items: ReadonlyArray<T>, toInterval: (item: T) => { startMs: number; minutes: number }): T[][] {
+  const out: T[][] = []
+  const timed: Array<{ item: T; s: number; e: number }> = []
+  for (const item of items) {
+    const { startMs, minutes } = toInterval(item)
+    if (Number.isFinite(startMs)) timed.push({ item, s: startMs, e: startMs + minutes * 60_000 })
+    else out.push([item])
+  }
+  timed.sort((a, b) => a.s - b.s)
+  let cur: { items: T[]; end: number } | null = null
+  for (const { item, s, e } of timed) {
+    if (cur && s <= cur.end) {
+      cur.items.push(item)
+      cur.end = Math.max(cur.end, e)
+    } else {
+      if (cur) out.push(cur.items)
+      cur = { items: [item], end: e }
+    }
+  }
+  if (cur) out.push(cur.items)
+  return out
 }
 
 /** #1505 — the union of a service's impact intervals, as one length in minutes per merged window.
@@ -167,24 +175,12 @@ export function isReliabilityIncident<T extends Pick<Incident, 'impact' | 'autoM
  *  model, per resource, or re-published on a timer). Serves both the archive's downtime aggregation
  *  and the Score's recovery sample. A record with an unparseable start is its own window. */
 export function mergeImpactWindows(intervals: ReadonlyArray<{ startMs: number; minutes: number }>): number[] {
-  const out: number[] = []
-  const timed: Array<[number, number]> = []
-  for (const { startMs, minutes } of intervals) {
-    if (Number.isFinite(startMs)) timed.push([startMs, startMs + minutes * 60_000])
-    else out.push(minutes)
-  }
-  timed.sort((a, b) => a[0] - b[0])
-  let cur: [number, number] | null = null
-  for (const [s, e] of timed) {
-    if (cur && s <= cur[1]) {
-      cur[1] = Math.max(cur[1], e)
-    } else {
-      if (cur) out.push(Math.round((cur[1] - cur[0]) / 60_000))
-      cur = [s, e]
-    }
-  }
-  if (cur) out.push(Math.round((cur[1] - cur[0]) / 60_000))
-  return out
+  return groupImpactWindows(intervals, (i) => i).map((group) => {
+    if (group.length === 1 && !Number.isFinite(group[0].startMs)) return group[0].minutes
+    const start = Math.min(...group.map((i) => i.startMs))
+    const end = Math.max(...group.map((i) => i.startMs + i.minutes * 60_000))
+    return Math.round((end - start) / 60_000)
+  })
 }
 
 function parseDurationMin(d: string): number {
@@ -273,8 +269,7 @@ export function calculateAIWatchScore(
   const windowIncidents = (service.incidents ?? []).filter(inWindow)
   const incidentCount = windowIncidents.length
 
-  // Affected days — only count incidents with measurable impact (#261) that are not machine-emitted
-  // autoMonitor noise (#989, isReliabilityIncident). null-impact entries are informational (component
+  // Affected days — only count incidents with measurable impact (#261, isReliabilityIncident). null-impact entries are informational (component
   // renames, post-mortems) — including them in affected_days inflates services like cohere/groq whose
   // feeds mix info posts with real incidents, producing scores ~10pts lower than reality.
   const impactfulDays = new Set(
@@ -294,7 +289,7 @@ export function calculateAIWatchScore(
   const dailyMaxWeight = new Map<string, number>()
   const unknownImpacts = new Set<string>()
   for (const inc of windowIncidents) {
-    if (!isReliabilityIncident(inc)) continue  // #989 — skip null-impact + autoMonitor machine noise
+    if (!isReliabilityIncident(inc)) continue
     const weight = INCIDENT_IO_IMPACT_WEIGHTS[inc.impact]  // non-null: narrowed by the predicate above
     if (weight === undefined) {
       unknownImpacts.add(String(inc.impact))
@@ -314,7 +309,7 @@ export function calculateAIWatchScore(
   // revocation, deprecation) has a duration but is NOT a reliability recovery, so counting it would
   // zero the Recovery score on a service that never actually went down (symmetric with the #261
   // null-impact exclusion from affectedDays / the uptime estimate).
-  const impactfulWindowIncidents = windowIncidents.filter(isReliabilityIncident)  // #989 — excl. autoMonitor
+  const impactfulWindowIncidents = windowIncidents.filter(isReliabilityIncident)
   // #1292 — a `status_history`-derived incident's `duration` is ONE DAY'S total downtime, not a time
   // to recover: the source is a per-day seconds bucket with no start, no end and no recovery event.
   // Feeding it to MTTR is a category error with a perverse sign — a handful of short synthesized days

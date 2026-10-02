@@ -925,9 +925,6 @@ export function parseBetterStackDowntimeIncidents(
         // The RSS monitor posts these replace carried no severity wording either, so
         // `mapBetterStackImpact` scored every one of them `minor`. Matching that keeps the monthly
         // series continuous — and it must be NON-null, or the #261 filter drops it from affectedDays.
-        // Deliberately NOT `autoMonitor`: that flag makes `isReliabilityIncident` exclude the incident
-        // from affectedDays/MTTR (#989), which would leave the Score exactly as broken as it is today.
-        // These services carry no `autoMonitorTitles`, so their RSS incidents were untagged too.
         impact: 'minor',
         componentNames: [name],
         startedAt: new Date(startMs).toISOString(),

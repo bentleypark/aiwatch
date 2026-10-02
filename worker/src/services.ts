@@ -287,9 +287,8 @@ export const SERVICES: ServiceConfig[] = [
   //     surface rows.
   //   • The auto-monitor opens frequent `critical` incidents titled `Agentic 模型错误报警` that attach to
   //     no component (verified 2026-07-18) and carry paperwork-inflated durations (recorded hours vs
-  //     minutes of real impact — the #1019 pattern). autoMonitorTitles tags them → grouped in the UI +
-  //     excluded from the Score (isReliabilityIncident, #989) as an unusable signal — see that helper
-  //     for the accepted limitation. titleMap renders the Chinese titles English on every surface.
+  //     minutes of real impact — the #1019 pattern). autoMonitorTitles tags them → grouped in the UI;
+  //     #1505 — they count toward downtime and the Score like any other row. titleMap renders the Chinese titles English on every surface.
   //   • NO holdShortIncidents/flapSuppression: a `critical` incident bypasses every hold/flap path
   //     (alerts.ts), so both are inert here — the Discord flood is prevented instead by
   //     filterByComponentStatus (#970: an active non-null-impact incident is dropped while Open API is

@@ -17,6 +17,7 @@
 import { GEMMA_MODEL } from './ai-analysis'
 import { callAnthropicMessages } from './anthropic'
 import type { MonthlyArchive, MonthlyIncidentEntry } from './monthly-archive'
+import { groupImpactWindows } from './score'
 
 // ── Public types ─────────────────────────────────────────────────────
 
@@ -90,17 +91,8 @@ export function selectIncidentCandidates(
   let excludedDerived = 0
   let excludedStartUnknown = 0
   for (const [id, svc] of Object.entries(archive.services)) {
-    // Only skip where the downtime aggregates ALSO excluded them. On the truncated branch they did not,
-    // so skipping here would recreate the contradiction from the other side: an inflated published total
-    // with nothing from the service responsible for it.
-    const filtered = svc.countedIncidents != null && svc.countedIncidents !== svc.incidents
+    const flagged: MonthlyIncidentEntry[] = []
     for (const inc of svc.incidentList ?? []) {
-      // #1210 — skip provider auto-monitor entries. They rank by `durationMin`, and an auto-monitor that
-      // opens hourly through one outage produces a descending staircase of 20-to-35h paperwork durations
-      // that crowds every genuine incident out of the top-N (Kimi 2026-07 alone would have filled 14 of
-      // 14). Ranking them here would also contradict the same archive's downtime aggregates, which
-      // exclude them (aggregateIncidentDurations) — the "two halves of one archive disagree" defect.
-      if (inc.autoMonitor && filtered) continue
       // #1292 — a `status_history`-derived entry is a per-DAY downtime bucket, not an event. It has no
       // start time, no updates and no remediation, yet this list feeds the Notable Incidents prompt,
       // which orders the model to "Copy service, title, durationLabel VERBATIM" and then write "what
@@ -119,6 +111,12 @@ export function selectIncidentCandidates(
       // it is excluded from the per-EVENT narrative rather than given one. Its downtime is untouched in
       // the totals, exactly as the day-bucket exclusion above leaves its own.
       if (inc.startUnknown) { excludedStartUnknown++; continue }
+      if (inc.autoMonitor) { flagged.push(inc); continue }
+      flat.push({ ...inc, serviceId: id, serviceName: serviceNames[id] ?? id })
+    }
+    const groups = groupImpactWindows(flagged, (e) => ({ startMs: Date.parse(e.startedAt), minutes: Math.max(0, e.durationMin) }))
+    for (const g of groups) {
+      const inc = g.reduce((a, b) => (b.durationMin > a.durationMin ? b : a))
       flat.push({ ...inc, serviceId: id, serviceName: serviceNames[id] ?? id })
     }
   }
@@ -131,12 +129,12 @@ export function selectIncidentCandidates(
     return b.durationMin - a.durationMin
   })
   if (excludedDerived > 0) {
-    // Named, like #1210-EXCLUDED: a candidate list that quietly shrinks is indistinguishable from a
+    // Named: a candidate list that quietly shrinks is indistinguishable from a
     // quiet month, and these services are precisely the ones whose feed went silent.
     console.warn(`[monthly-narrative] #1292-EXCLUDED ${excludedDerived} status_history-derived day-bucket(s) from the Notable Incident candidates — their downtime remains in the published totals`)
+  }
   if (excludedStartUnknown > 0) {
     console.warn(`[monthly-narrative] #1390-EXCLUDED ${excludedStartUnknown} anchored incident(s) with no derivable duration from the Notable Incident candidates — their downtime remains in the published totals`)
-  }
   }
   return flat.slice(0, MAX_INCIDENT_CANDIDATES)
 }
@@ -206,8 +204,7 @@ export function buildMonthlyNarrativePrompt(
       // #1210 — `avgResolutionMin` is computed over `countedIncidents`, not `incidents`, whenever an
       // exclusion fired. Handing the model the raw pair reads as "40 incidents, 9m avg recovery" for a
       // month whose real event was a ~35h outage, so name the divisor rather than letting it be inferred.
-      // Name the divisor, NOT a cause: the gap is a #1210 auto-monitor duplicate, a #1021
-      // non-reliability advisory, or a #1292 synthesized day-bucket, and asserting one would write a
+      // Name the divisor, NOT a cause: asserting one would write a
       // fabricated fact into a permanent draft. The old wording DID assert one — "excluded as
       // non-outage" — which is the opposite of true for a #1292 row: that IS an outage, it simply
       // carries no recovery time, and it is counted in the downtime total.
