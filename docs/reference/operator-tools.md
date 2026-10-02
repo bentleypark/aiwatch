@@ -109,6 +109,8 @@ archive, and answers:
 | **`400`** | the month is not a real calendar month, or has not ENDED yet — the current month included (#1274). |
 | **`200`** | otherwise — including a first-ever build of an old month, where nothing is stored and so nothing can be lost. |
 
+**Fields judged by today's state are kept, not emptied (#1504).** Whether `officialUptime` and `components` are written, and the build-day score itself, are decided by today's `services:latest` and `SERVICES` config, so a past month can rebuild to nothing for them. Where the rebuild yields no value for any field the stored group holds, the stored group is kept whole, absences included; `carried` in the `200` response names each one. The groups are `BUILD_DAY_FIELD_GROUPS` in `monthly-archive.ts`; the official uptime and the build-day score are one group, so they are kept or replaced together. Otherwise the rebuilt group replaces the stored one, and incident aggregates always replace.
+
 **A `200` is not evidence that every read succeeded.** The reads the handler takes before the build fail closed and are answered above. Reads taken further in still absorb their own faults, and whether that surfaces depends on the content census: it counts presence, so a fault that removes a whole section registers, while one that only changes per-service VALUES does not. The duration-override read was the live instance of the second kind (#1274) and is now taken up front; the shape is not eliminated.
 
 Widening the census to per-service values was tried and rejected in #1260: it produces false refusals faster than it closes gaps, and a refused rebuild teaches the operator to keep `force` typed, which disarms every guard behind it. The safety property is the unconditional `:prev:` copy below.

@@ -465,28 +465,64 @@ describe('POST /api/admin/rebuild-archive', () => {
     expect(regressed).toContain('sections:degradation+security')
   })
 
-  it('refuses a rebuild that empties officialUptime or components (#1504)', async () => {
+  it('keeps the stored build-day groups a rebuild re-judges to empty, and says so (#1504)', async () => {
     const month = monthsAgo(1)
-    const { kv } = makeKV({
+    const [y, m] = month.split('-').map(Number)
+    const lastDay = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+    const components = [
+      { id: '01JRGA5ZQKJX2NMG45VCFP9Y9C', name: 'A100 Hardware', uptime: 99.71 },
+      { id: '01JRG9WZ84ABEY9ZJBB72CJBS8', name: 'H100 Hardware', uptime: 99.9 },
+    ]
+    const { store, kv } = makeKV({
+      // Today replicate publishes no uptime, so its live Score is medium and the build withholds the month-end figure.
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'replicate', uptime30d: undefined, uptimeSource: undefined })] }),
+      [`history:${lastDay}`]: JSON.stringify({ replicate: { ok: 288, total: 288, officialUptime: 99.85 } }),
       [`archive:monthly:${month}`]: JSON.stringify({
         period: month,
-        daysCollected: 0,
+        daysCollected: 1,
         services: {
-          replicate: {
-            uptime: 99.71, score: 45, avgLatencyMs: 326, officialUptime: 99.85, uptimeSource: 'official',
-            components: [{ id: '01JRGA5ZQKJX2NMG45VCFP9Y9C', name: 'A100 Hardware', uptime: 99.71 }],
-          },
+          replicate: { uptime: 100, score: 45, officialUptime: 99.85, uptimeSource: 'official', components },
         },
       }),
     })
 
     const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
 
-    expect(res.status).toBe(409)
-    const body = await res.json() as { regressed: string[]; hint: string }
-    expect(body.regressed).toContain('servicesWithOfficialUptime:replicate')
-    expect(body.regressed).toContain('servicesWithComponents:replicate')
-    expect(body.hint).not.toMatch(/gone|expired|lost/i)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { carried: { service: string; fields: string[] }[] }
+    expect(body.carried).toEqual([
+      { service: 'replicate', fields: ['officialUptime', 'uptimeSource', 'score', 'grade', 'scoreConfidence'] },
+      { service: 'replicate', fields: ['components'] },
+    ])
+    const written = JSON.parse(store[`archive:monthly:${month}`]).services.replicate
+    expect(written.officialUptime).toBe(99.85)
+    expect(written.uptimeSource).toBe('official')
+    expect(written.components).toEqual(components)
+    expect(written.score).toBe(45)
+  })
+
+  it('drafts the narrative from, and counts scores in, the archive it writes after a carry (#1504)', async () => {
+    const month = monthsAgo(1)
+    const [y, m] = month.split('-').map(Number)
+    const lastDay = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+    const { store, kv } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'replicate', uptime30d: undefined, uptimeSource: undefined })] }),
+      [`history:${lastDay}`]: JSON.stringify({ replicate: { ok: 288, total: 288, officialUptime: 99.85 } }),
+      [`archive:monthly:${month}`]: JSON.stringify({
+        period: month,
+        daysCollected: 1,
+        services: { replicate: { uptime: 100, score: 45, grade: 'fair', scoreConfidence: 'high', officialUptime: 99.85, uptimeSource: 'official' } },
+      }),
+    })
+    const prompts: string[] = []
+    const env = { ...envWith(kv), AI: { run: async (_model: string, input: unknown) => { prompts.push(JSON.stringify(input)); return { response: '{}' } } } } as unknown as Parameters<typeof workerModule.fetch>[1]
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(200)
+    expect(JSON.parse(store[`archive:monthly:${month}`]).services.replicate.score).toBe(45)
+    expect(prompts.join('\n')).toContain('score 45 (fair)')
+    expect((await res.json() as { servicesWithScore: number }).servicesWithScore).toBe(1)
   })
 
   it('rejects a month string that parses to no real calendar month', async () => {

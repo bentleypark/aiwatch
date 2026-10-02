@@ -2199,7 +2199,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -2755,18 +2755,18 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
   }
   const overrides = overrideRead.list
 
-  let archive
+  let archive: MonthlyArchive
   try {
-    // Regenerate the AI narrative on rebuild too — an operator rebuilding after a
-    // bug-fix deploy gets a fresh draft. Best-effort; null on AI failure.
-    archive = await buildMonthlyArchive(env.STATUS_CACHE, year, monthNum, scoreData, {
-      ai: env.AI,
-      apiKey: env.ANTHROPIC_API_KEY,
-      serviceNames,
-    }, suppressions, overrides, priorParsed)
+    archive = await buildMonthlyArchive(env.STATUS_CACHE, year, monthNum, scoreData, undefined, suppressions, overrides, priorParsed)
   } catch (err) {
     return json(502, { ok: false, error: 'archive build failed', detail: err instanceof Error ? err.message : String(err) })
   }
+
+  let carried: CarriedFieldGroup[] = []
+  if (priorCensus !== null && priorParsed) ({ archive, carried } = mergeRebuiltArchive(priorParsed, archive))
+  // Regenerate the AI narrative on rebuild too — an operator rebuilding after a
+  // bug-fix deploy gets a fresh draft. Best-effort; null on AI failure.
+  await attachMonthlyNarrative(archive, { ai: env.AI, apiKey: env.ANTHROPIC_API_KEY, serviceNames })
 
   // #1260 — ONE decision, taken after the (read-only) build so the operator sees what they would be
   // trading. The age check is only a proxy for "are the days still there"; this is the real question,
@@ -2831,7 +2831,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
         hint: 'the forced overwrite was NOT performed',
       })
     }
-    console.error(`[admin/rebuild-archive] overwriting ${archiveKey} — ${unmeasurable ? 'prior UNREADABLE, losses unmeasurable' : regressions.length ? `losing ${regressions.join(', ')}` : 'no measured regression'} — prior value saved to ${backupKey}`)
+    console.error(`[admin/rebuild-archive] overwriting ${archiveKey} — ${unmeasurable ? 'prior UNREADABLE, losses unmeasurable' : regressions.length ? `losing ${regressions.join(', ')}` : 'no measured regression'}${carried.length ? ` — kept stored ${carried.map((c) => `${c.service}.${c.fields.join('+')}`).join(', ')}` : ''} — prior value saved to ${backupKey}`)
   }
 
   try {
@@ -2851,10 +2851,11 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
     ...(backupKey ? { backupKey, prior: priorCensus, rebuilt: nextCensus } : {}),
     ...(regressions.length > 0 ? { forcedOver: regressions } : {}),
     ...(unmeasurable ? { priorUnreadable: true } : {}),
+    ...(carried.length > 0 ? { carried } : {}),
     period: archive.period,
     services: Object.keys(archive.services).length,
     daysCollected: archive.daysCollected,
-    servicesWithScore: scoreData.filter(s => s.aiwatchScore !== null).length,
+    servicesWithScore: Object.values(archive.services).filter((s) => s.score != null).length,
   })
 }
 
