@@ -439,7 +439,14 @@ export function prunePhantomIncidents(
   if (!data?.services || typeof data.services !== 'object') return data
 
   const liveBySvc = new Map<string, Incident[]>()
-  for (const svc of services) liveBySvc.set(svc.id, svc.incidents ?? [])
+  // #1510 — services whose THIS-CYCLE live list only ever lists active incidents (Mistral's
+  // active-incident overlay, when its scrape feed is unreadable — `grep -n liveIncidentsActiveOnly
+  // worker/src/types.ts` for why absence from a list like that is not evidence of deletion).
+  const activeOnlySvcIds = new Set<string>()
+  for (const svc of services) {
+    liveBySvc.set(svc.id, svc.incidents ?? [])
+    if (svc.liveIncidentsActiveOnly) activeOnlySvcIds.add(svc.id)
+  }
 
   let touched = false
   const nextServices: Record<string, MonthlyIncidentServiceData> = {}
@@ -474,11 +481,17 @@ export function prunePhantomIncidents(
     // from `live` itself). Compared as ISO strings, which sort lexicographically. Non-ISO values are
     // ignored, which can only move the watermark LATER, making guard 3 harder to satisfy — i.e. it
     // fails toward not pruning.
+    // #1510 — an active-only live list is never evidence of the feed's reach: skipping this loop
+    // leaves `oldestLiveStart` at `null`, which guard 3 below treats as "can't tell deleted from
+    // merely absent", so this service is never pruned off an active-only cycle's list. `liveIds`
+    // above is unaffected (`grep -n "never prunes off an active-only" worker/src/__tests__/monthly-archive.test.ts`).
     let oldestLiveStart: string | null = null
-    for (const i of live) {
-      if (i?.retainedBridge) continue
-      const s = i?.startedAt
-      if (isIsoish(s) && (oldestLiveStart === null || s < oldestLiveStart)) oldestLiveStart = s
+    if (!activeOnlySvcIds.has(svcId)) {
+      for (const i of live) {
+        if (i?.retainedBridge) continue
+        const s = i?.startedAt
+        if (isIsoish(s) && (oldestLiveStart === null || s < oldestLiveStart)) oldestLiveStart = s
+      }
     }
 
     const pruned = new Set<string>()
