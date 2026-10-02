@@ -2190,6 +2190,7 @@ import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
 import { parseFailKey, parseParseFailDay, reasonsFor } from './parse-failure-log'
 import { collectChangelogs, getStaleSources } from './changelog'
+import { runProviderChanges } from './provider-changes'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
 import { searchBadgeEmbeds, diffBadgeRepoDiscovery, parseBadgeReposSeen, type BadgeRepoDiscoveryDiff } from './badge-repo-discovery'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
@@ -3692,6 +3693,14 @@ export default {
           }
         } catch (err) {
           console.warn('[cron] changelog collection failed:', err instanceof Error ? err.message : err)
+        }
+        if (env.DISCORD_WEBHOOK_URL) {
+          const webhook = env.DISCORD_WEBHOOK_URL
+          ctx.waitUntil(
+            runProviderChanges(env.STATUS_CACHE, (embed) => sendDiscordAlert(webhook, embed)).catch((err) =>
+              console.warn('[cron] provider changes failed:', err instanceof Error ? err.message : err)
+            )
+          )
         }
       }
 
