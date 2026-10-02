@@ -1062,9 +1062,7 @@ export function computeMonthlyOfficialUptime(
  *
  *  Historical archives written before this shipped still carry the contaminated values and are corrected
  *  out-of-band — do NOT reach for `/api/admin/rebuild-archive`. It is not idempotent (it re-snapshots
- *  `score` from the CURRENT `services:latest`), and because this gate reads that same current confidence,
- *  rebuilding a month whose service has since LOST its source (Character.AI, #689/#800) also withholds the
- *  uptime it genuinely published back then. Patch the `archive:{period}` KV entry directly instead. */
+ *  `score` from the CURRENT `services:latest`). Patch the `archive:{period}` KV entry directly instead. */
 export function resolveArchiveOfficialUptime(
   monthEndValue: number | undefined,
   scoreSvc: ArchiveScoreInput | undefined,
@@ -2045,6 +2043,11 @@ export async function buildMonthlyArchive(
     predictionAccuracy,
   }
 
+  await attachMonthlyNarrative(archive, narrativeOpts)
+  return archive
+}
+
+export async function attachMonthlyNarrative(archive: MonthlyArchive, narrativeOpts?: NarrativeAiOptions): Promise<void> {
   // AI retrospective narrative (#426). Best-effort — generateMonthlyNarrative
   // never throws (catches internally and returns null), but the extra guard
   // here is defense-in-depth: a narrative-generation hiccup must never lose the
@@ -2053,12 +2056,10 @@ export async function buildMonthlyArchive(
     try {
       archive.narrative = await generateMonthlyNarrative(archive, narrativeOpts)
     } catch (err) {
-      console.error(`[monthly-archive] narrative generation threw for ${period}:`, err instanceof Error ? err.message : err)
+      console.error(`[monthly-archive] narrative generation threw for ${archive.period}:`, err instanceof Error ? err.message : err)
       archive.narrative = null
     }
   }
-
-  return archive
 }
 
 /** `expiredDaysInMonth` sentinel: `month` is a real calendar month that has not ended, so it is not
@@ -2109,6 +2110,47 @@ export function expiredDaysInMonth(month: string, retentionDays: number, nowMs: 
     if (ageDays >= retentionDays) expired++
   }
   return expired
+}
+
+/** #1504 — per-service field groups whose presence a rebuild decides from today's `scoreData` and `SERVICES`
+ *  config. Where the rebuild produces no value for any field the stored group holds, the stored group is kept whole. */
+export const BUILD_DAY_FIELD_GROUPS = [
+  ['officialUptime', 'uptimeSource', 'score', 'grade', 'scoreConfidence'],
+  ['components'],
+  ['incidentSourceStale'],
+] as const satisfies readonly (readonly (keyof MonthlyServiceData)[])[]
+
+export interface CarriedFieldGroup {
+  service: string
+  fields: string[]
+}
+
+export function mergeRebuiltArchive(
+  prior: MonthlyArchive,
+  rebuilt: MonthlyArchive,
+): { archive: MonthlyArchive; carried: CarriedFieldGroup[] } {
+  const carried: CarriedFieldGroup[] = []
+  const services: Record<string, MonthlyServiceData> = {}
+  for (const [id, next] of Object.entries(rebuilt.services)) {
+    const stored = (prior.services as Record<string, unknown>)?.[id]
+    if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) {
+      services[id] = next
+      continue
+    }
+    const from = stored as Record<string, unknown>
+    let out: Record<string, unknown> = next as unknown as Record<string, unknown>
+    for (const group of BUILD_DAY_FIELD_GROUPS) {
+      if (!group.some((f) => out[f] == null && from[f] != null)) continue
+      out = { ...out }
+      for (const f of group) {
+        if (f in from) out[f] = from[f]
+        else delete out[f]
+      }
+      carried.push({ service: id, fields: [...group] })
+    }
+    services[id] = out as unknown as MonthlyServiceData
+  }
+  return { archive: { ...rebuilt, services }, carried }
 }
 
 /**
