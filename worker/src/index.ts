@@ -2198,7 +2198,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -2655,7 +2655,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
     })
   }
   let priorCensus: ArchiveCensus | null = null
-  let priorParsed: { services?: Record<string, unknown> } | null = null
+  let priorParsed: MonthlyArchive | null = null
   if (priorRaw !== null) {
     try {
       priorParsed = JSON.parse(priorRaw)
@@ -2762,7 +2762,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       ai: env.AI,
       apiKey: env.ANTHROPIC_API_KEY,
       serviceNames,
-    }, suppressions, overrides)
+    }, suppressions, overrides, priorParsed)
   } catch (err) {
     return json(502, { ok: false, error: 'archive build failed', detail: err instanceof Error ? err.message : String(err) })
   }

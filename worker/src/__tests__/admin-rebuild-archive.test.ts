@@ -321,15 +321,39 @@ describe('POST /api/admin/rebuild-archive', () => {
     expect(res.status).toBe(200)
   })
 
-  it('refuses when the rebuild loses incidents even though the uptime days are intact', async () => {
-    // `incidents:monthly` expires at 60d, `history:` at 90d, so this is reachable for a month older
-    // than two months: the uptime rebuilds fine and the incident list silently empties.
+  it('#1537 retains the stored incident list when the rebuild has no monthly accumulator', async () => {
     const month = monthsAgo(1)
     const { kv } = makeKV({
       [`archive:monthly:${month}`]: JSON.stringify({
         period: month,
         daysCollected: 0,
         services: { claude: { incidentList: [{ id: 'a' }, { id: 'b' }] } },
+      }),
+    })
+    const env = envWith(kv)
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), env, ctx)
+
+    expect(res.status).toBe(200)
+    const writes = (kv.put as unknown as { mock: { calls: [string, string][] } }).mock.calls
+    const rebuilt = writes.find(([key]) => key === `archive:monthly:${month}`)
+    expect(rebuilt).toBeDefined()
+    expect(JSON.parse(rebuilt![1]).services.claude.incidentList.map((inc: { id: string }) => inc.id)).toEqual(['a', 'b'])
+  })
+
+  it('#1537 refuses (409) a rebuild that would silently publish a truncated service with no incidents, instead of a half-recovered total', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      [`archive:monthly:${month}`]: JSON.stringify({
+        period: month,
+        daysCollected: 0,
+        services: {
+          // `incidents` (250) exceeds `incidentList.length` (1) — the archive's own detail was
+          // already truncated when first built. monthlyIncidentsFromArchive skips recovering this
+          // service rather than handing it to the rebuild with an incomplete `durations` map, so its
+          // incidents vanish from the rebuilt census and the existing #1260 guard must still refuse.
+          claude: { incidents: 250, totalDowntimeMin: 5000, longestIncidentMin: 900, incidentList: [{ id: 'a' }] },
+        },
       }),
     })
     const env = envWith(kv)

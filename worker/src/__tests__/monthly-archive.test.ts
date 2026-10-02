@@ -11,6 +11,8 @@ import {
   isInMonthlyArchiveWindow,
   buildMonthlyArchive,
   accumulateMonthlyIncidents,
+  reconcileMonthlyIncidentResolutions,
+  monthlyIncidentsFromArchive,
   prunePhantomIncidents,
   PHANTOM_PRUNE_AFTER_MISSED_RUNS,
   accumulateIncidentsOnlyIfChanged,
@@ -638,6 +640,209 @@ describe('accumulateMonthlyIncidents', () => {
       id: i.id, title: `Incident ${i.id}`, status: i.status as any, impact: null,
       startedAt: i.startedAt, duration: i.duration, timeline: [],
     })),
+  })
+
+  it('#1537 reconciles a start-month monitoring row from durable resolution history', () => {
+    const accumulated = accumulateMonthlyIncidents(null, [makeService('openai', [
+      { id: 'cross-month', startedAt: '2026-08-31T22:27:56Z', status: 'monitoring', duration: null },
+      { id: 'still-open', startedAt: '2026-08-30T00:00:00Z', status: 'investigating', duration: null },
+    ])], '2026-08', [])
+    const reconciled = reconcileMonthlyIncidentResolutions(accumulated, {
+      openai: [{
+        svcId: 'openai', incId: 'cross-month', title: 'Responses latency', provider: 'OpenAI', category: 'api', impact: 'minor',
+        startedAt: '2026-08-31T22:27:56Z', resolvedAt: '2026-09-01T19:05:46Z', durationMin: 1238,
+      }],
+    })
+
+    expect(accumulated.services.openai.incidents!.find(e => e.id === 'cross-month')).toMatchObject({ finalStatus: 'monitoring', durationMin: 0 })
+    expect(reconciled.services.openai.incidents!.find(e => e.id === 'cross-month')).toMatchObject({ finalStatus: 'resolved', resolvedAt: '2026-09-01T19:05:46Z', durationMin: 1238 })
+    expect(reconciled.services.openai.incidents!.find(e => e.id === 'still-open')).toMatchObject({ finalStatus: 'investigating', durationMin: 0 })
+    expect(reconciled.services.openai.totalMinutes).toBe(1238)
+  })
+
+  it('#1537 never overwrites an already-resolved row, even when a history record exists for its id', () => {
+    // The feed-published resolution is the source of truth once an incident is resolved; a durable
+    // history record with DIFFERENT values for the same id (a plausible stale/corrected re-fetch) must
+    // not silently replace it. Without the `finalStatus === 'resolved'` guard, every already-resolved
+    // row with a matching history record would be overwritten on every reconcile call, including the
+    // month-end cron's regular build, not just a rebuild.
+    const accumulated = accumulateMonthlyIncidents(null, [makeService('openai', [
+      { id: 'already-resolved', startedAt: '2026-08-01T00:00:00Z', status: 'resolved', duration: '5m' },
+    ])], '2026-08', [])
+    const reconciled = reconcileMonthlyIncidentResolutions(accumulated, {
+      openai: [{
+        svcId: 'openai', incId: 'already-resolved', title: 'x', provider: 'OpenAI', category: 'api', impact: 'minor',
+        startedAt: '2026-08-01T00:00:00Z', resolvedAt: '2026-08-01T20:00:00Z', durationMin: 1200,
+      }],
+    })
+    expect(reconciled).toBe(accumulated)
+    expect(reconciled.services.openai.incidents!.find(e => e.id === 'already-resolved')).toMatchObject({ finalStatus: 'resolved', durationMin: 5 })
+  })
+
+  it('#1537 totals include durations outside the capped incident-detail array', () => {
+    // 'old-1' was truncated out of `incidents` (the per-service detail cap) but its duration survives
+    // in `durations`, which accumulateMonthlyIncidents never caps — the recompute below must still
+    // count it, not just the entries present in the (possibly truncated) `incidents` array.
+    const existing: MonthlyIncidents = {
+      lastUpdated: '2026-08-01T00:00:00Z',
+      services: {
+        openai: {
+          count: 3, totalMinutes: 530, longestMinutes: 500,
+          dates: [], incidentIds: ['old-1', 'old-2', 'cross-month'],
+          durations: { 'old-1': 30, 'old-2': 500, 'cross-month': 0 },
+          incidents: [
+            { id: 'old-2', title: 'x', startedAt: '2026-08-01T00:00:00Z', resolvedAt: '2026-08-01T08:20:00Z', durationMin: 500, finalStatus: 'resolved' },
+            { id: 'cross-month', title: 'y', startedAt: '2026-08-31T22:27:56Z', resolvedAt: null, durationMin: 0, finalStatus: 'monitoring' },
+          ],
+        },
+      },
+    }
+    const reconciled = reconcileMonthlyIncidentResolutions(existing, {
+      openai: [{
+        svcId: 'openai', incId: 'cross-month', title: 'y', provider: 'OpenAI', category: 'api', impact: 'minor',
+        startedAt: '2026-08-31T22:27:56Z', resolvedAt: '2026-09-01T19:05:46Z', durationMin: 1238,
+      }],
+    })
+    expect(reconciled.services.openai.totalMinutes).toBe(30 + 500 + 1238)
+    expect(reconciled.services.openai.longestMinutes).toBe(1238)
+  })
+
+  it('#1537 skips recovering a service whose archived incidentList was itself truncated, rather than handing downstream an incomplete population', () => {
+    // The archive never stored the live accumulator's uncapped durations/incidentIds map, only the
+    // capped incidentList plus the three summary fields. filterSuppressedFromMonthly and
+    // applyDurationOverrides are shared with the live accumulator (where durations IS always complete)
+    // and recompute totals from it unconditionally — handing them a service whose count (250) exceeds
+    // what durations holds (1 row here) corrupts the published total the moment either one touches it.
+    // Rather than trying to make a half-complete object safe for three different readers, this service
+    // is skipped entirely: it must not appear in the output at all.
+    const source = monthlyIncidentsFromArchive({
+      period: '2026-08', generatedAt: '2026-09-01T00:00:00Z', daysCollected: 31, services: {
+        openai: {
+          uptime: null, officialUptime: null, score: null, grade: null,
+          incidents: 250, countedIncidents: 0,
+          avgResolutionMin: null, totalDowntimeMin: 5000, longestIncidentMin: 900, avgLatencyMs: null,
+          p95LatencyMs: null, latencySpikes: null, p50LatencyMs: null, cvCombined: null,
+          incidentList: [{ id: 'x', title: 't', startedAt: '2026-08-01T00:00:00Z', resolvedAt: '2026-08-01T00:05:00Z', durationMin: 5, finalStatus: 'resolved', impact: 'minor' }],
+        },
+        together: {
+          uptime: null, officialUptime: null, score: null, grade: null,
+          incidents: 1, countedIncidents: 0,
+          avgResolutionMin: null, totalDowntimeMin: 50, longestIncidentMin: 20, avgLatencyMs: null,
+          p95LatencyMs: null, latencySpikes: null, p50LatencyMs: null, cvCombined: null,
+          incidentList: [{ id: 'y', title: 't2', startedAt: '2026-08-02T00:00:00Z', resolvedAt: '2026-08-02T00:20:00Z', durationMin: 20, finalStatus: 'resolved', impact: 'minor' }],
+        },
+      }, security: null, degradation: null, predictionAccuracy: null,
+    })
+    expect(source?.services.openai).toBeUndefined()
+    // A non-truncated service (count === incidentList.length) in the same archive is unaffected, and
+    // its totals are derived from the recovered incidentList itself (not the archive's separately
+    // stored totalDowntimeMin/longestIncidentMin, which aggregateIncidentDurations's own non-truncated
+    // branch ignores anyway and recomputes fresh with its #1210/#1021/#1505 exclusion and union logic).
+    expect(source?.services.together).toMatchObject({ count: 1, totalMinutes: 20, longestMinutes: 20 })
+  })
+
+  it('#1537 reconcile on a non-truncated archive-recovered service applies normally (the common case)', () => {
+    // Every service this function DOES produce now has count === incidentIds.length by construction
+    // (the truncated case is skipped above), so reconcileMonthlyIncidentResolutions's "durations is
+    // complete" assumption holds, and it works exactly as it does on the live accumulator.
+    const source = monthlyIncidentsFromArchive({
+      period: '2026-08', generatedAt: '2026-09-01T00:00:00Z', daysCollected: 31, services: {
+        openai: {
+          uptime: null, officialUptime: null, score: null, grade: null,
+          incidents: 2, countedIncidents: 0,
+          avgResolutionMin: null, totalDowntimeMin: 15, longestIncidentMin: 10, avgLatencyMs: null,
+          p95LatencyMs: null, latencySpikes: null, p50LatencyMs: null, cvCombined: null,
+          incidentList: [
+            { id: 'cross-month', title: 'y', startedAt: '2026-08-31T22:27:56Z', resolvedAt: null, durationMin: 5, finalStatus: 'monitoring', impact: 'minor' },
+            { id: 'other', title: 'z', startedAt: '2026-08-02T00:00:00Z', resolvedAt: '2026-08-02T00:10:00Z', durationMin: 10, finalStatus: 'resolved', impact: 'minor' },
+          ],
+        },
+      }, security: null, degradation: null, predictionAccuracy: null,
+    })!
+    const reconciled = reconcileMonthlyIncidentResolutions(source, {
+      openai: [{
+        svcId: 'openai', incId: 'cross-month', title: 'y', provider: 'OpenAI', category: 'api', impact: 'minor',
+        startedAt: '2026-08-31T22:27:56Z', resolvedAt: '2026-09-01T19:05:46Z', durationMin: 1238,
+      }],
+    })
+    expect(reconciled.services.openai.totalMinutes).toBe(1238 + 10)
+    expect(reconciled.services.openai.longestMinutes).toBe(1238)
+    expect(reconciled.services.openai.count).toBe(2)
+  })
+
+  it('#1537 suppression on a non-truncated archive-recovered service applies normally (the common case)', () => {
+    // The actual gap round 6 found: no test ran filterSuppressedFromMonthly on archive-recovered
+    // input at all. Reproduces it directly: suppressing 'other' must drop it from count/durations/
+    // incidents and recompute the total from what's left, exactly as it does on the live accumulator.
+    const source = monthlyIncidentsFromArchive({
+      period: '2026-08', generatedAt: '2026-09-01T00:00:00Z', daysCollected: 31, services: {
+        openai: {
+          uptime: null, officialUptime: null, score: null, grade: null,
+          incidents: 2, countedIncidents: 0,
+          avgResolutionMin: null, totalDowntimeMin: 15, longestIncidentMin: 10, avgLatencyMs: null,
+          p95LatencyMs: null, latencySpikes: null, p50LatencyMs: null, cvCombined: null,
+          incidentList: [
+            { id: 'keep', title: 'y', startedAt: '2026-08-01T00:00:00Z', resolvedAt: '2026-08-01T00:05:00Z', durationMin: 5, finalStatus: 'resolved', impact: 'minor' },
+            { id: 'suppress-me', title: 'Suppress Me', startedAt: '2026-08-02T00:00:00Z', resolvedAt: '2026-08-02T00:10:00Z', durationMin: 10, finalStatus: 'resolved', impact: 'minor' },
+          ],
+        },
+      }, security: null, degradation: null, predictionAccuracy: null,
+    })!
+    const filtered = filterSuppressedFromMonthly(source, [{ scope: 'incident', incId: 'suppress-me' }])
+    expect(filtered.services.openai.count).toBe(1)
+    expect(filtered.services.openai.totalMinutes).toBe(5)
+    expect(filtered.services.openai.incidentIds).toEqual(['keep'])
+  })
+
+  it('#1537 falls back to the incident-list length when the archived count is not a number', () => {
+    const source = monthlyIncidentsFromArchive({
+      period: '2026-08', generatedAt: '2026-09-01T00:00:00Z', daysCollected: 31, services: {
+        openai: {
+          uptime: null, officialUptime: null, score: null, grade: null,
+          incidents: 'corrupt' as unknown as number, countedIncidents: 0,
+          avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: null,
+          p95LatencyMs: null, latencySpikes: null, p50LatencyMs: null, cvCombined: null,
+          incidentList: [{ id: 'x', title: 't', startedAt: '2026-08-01T00:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'monitoring', impact: 'minor' }],
+        },
+      }, security: null, degradation: null, predictionAccuracy: null,
+    })
+    expect(source?.services.openai.count).toBe(1)
+  })
+
+  it('#1537 retains permanent archive incident rows as a rebuild input after the monthly key expires', () => {
+    const source = monthlyIncidentsFromArchive({
+      period: '2026-08', generatedAt: '2026-09-01T00:00:00Z', daysCollected: 31, services: {
+        openai: {
+          uptime: null, officialUptime: null, score: null, grade: null, incidents: 1, countedIncidents: 0,
+          avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: null,
+          p95LatencyMs: null, latencySpikes: null, p50LatencyMs: null, cvCombined: null,
+          incidentList: [{ id: 'cross-month', title: 'Responses latency', startedAt: '2026-08-31T22:27:56Z', resolvedAt: null, durationMin: 0, finalStatus: 'monitoring', impact: 'minor' }],
+        },
+      }, security: null, degradation: null, predictionAccuracy: null,
+    })
+    expect(source?.services.openai.incidents).toHaveLength(1)
+    expect(source?.services.openai.incidents![0]).toMatchObject({ id: 'cross-month', finalStatus: 'monitoring' })
+  })
+
+  it('#1537 applies durable resolution history while building the incident archive', async () => {
+    const accumulated = accumulateMonthlyIncidents(null, [makeService('openai', [
+      { id: 'cross-month', startedAt: '2026-08-31T22:27:56Z', status: 'monitoring', duration: null },
+    ])], '2026-08', [])
+    const kv = {
+      get: async (key: string) => {
+        if (key === 'incidents:monthly:2026-08') return JSON.stringify(accumulated)
+        if (key === 'incident:history:openai') return JSON.stringify([{
+          svcId: 'openai', incId: 'cross-month', title: 'Responses latency', provider: 'OpenAI', category: 'api', impact: 'minor',
+          startedAt: '2026-08-31T22:27:56Z', resolvedAt: '2026-09-01T19:05:46Z', durationMin: 1238,
+        }])
+        return null
+      },
+      put: async () => {}, delete: async () => {}, list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kv, 2026, 8)
+    expect(archive.services.openai.incidentList![0]).toMatchObject({ finalStatus: 'resolved', resolvedAt: '2026-09-01T19:05:46Z', durationMin: 1238 })
+    expect(archive.services.openai.avgResolutionMin).toBe(1238)
   })
 
   it('accumulates incidents from services', () => {
