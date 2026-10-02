@@ -3,6 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down-group'
+import { REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
+import { makeLocalStorage } from '../../src/utils/__tests__/localStorageStub.js'
 
 // Every handler invocation begins with the status fetch, and a degraded/down fixture may make a
 // second, best-effort report-feed request. Keep any unlisted call local to the test so a fixture
@@ -37,6 +39,7 @@ interface MockService {
   uptime30d?: number | null
   aiwatchScore?: number | null
   scoreGrade?: string | null
+  scoreConfidence?: string | null
   partialCount?: number
   incidentSourceStale?: boolean
   incidents?: MockIncident[]
@@ -156,7 +159,7 @@ describe('is-down-group.ts', () => {
     // The report IIFE follows the copy-button listener in the same inline script. Its leading
     // semicolon is load-bearing: without it JavaScript treats the preceding addEventListener call
     // as the IIFE's callee and aborts before registering the report button click handler.
-    expect(html).toContain("\n;(function(){\n  function reportKey")
+    expect(html).toContain(`\n;(function(){\n${REPORT_GUARD_CLIENT_JS}`)
     expect(html).toContain('Monthly AI reliability reports')
     expect(html).toContain('View monthly reports &rarr;')
     expect(html).toContain('data-ga-source="footer">Monthly reports</a>')
@@ -199,10 +202,62 @@ describe('is-down-group.ts', () => {
     expect(html).not.toContain('Uptime: 99.90%')
     expect(html).not.toContain('AIWatch Score: 95')
     expect(html).toContain('Incident history unavailable')
-    expect(html).toContain('0 incidents across monitored services')
+    expect(html).not.toContain('30-day family summary')
     expect(html).toContain('"WebApplication"')
     expect(html).toContain('"FAQPage"')
     expect(html).toContain('"BreadcrumbList"')
+  })
+
+  it('withholds the family summary when the status fetch fails', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('worker unreachable'))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('30-day family summary')
+    expect(html).not.toContain('incidents across monitored services')
+  })
+
+  it('withholds the family summary when a member status is unknown, even if others carry incidents', async () => {
+    const recent = new Date(Date.now() - 60 * 60_000).toISOString()
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'unknown', incidents: [{ id: 'a', title: 'A', status: 'resolved', startedAt: recent, duration: '1h 0m' }] },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational', incidents: [{ id: 'b', title: 'B', status: 'resolved', startedAt: recent, duration: '2h 0m' }] },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('30-day family summary')
+  })
+
+  it('withholds the family summary when a member is missing from the payload', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('30-day family summary')
+  })
+
+  it('excludes a status_history-derived incident from the family average recovery', async () => {
+    const recent = new Date(Date.now() - 60 * 60_000).toISOString()
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational', incidents: [
+        { id: 'real', title: 'Real', status: 'resolved', startedAt: recent, duration: '1h 0m' },
+        { id: 'day', title: 'Daily bucket', status: 'resolved', startedAt: recent, duration: '9h 0m', derived: 'status_history', derivedDay: recent.slice(0, 10) } as MockIncident,
+      ] },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('2 incidents across monitored services · average recovery: 1h 0m')
+  })
+
+  it('marks a medium-confidence score, like the per-service page', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational', aiwatchScore: 80, scoreGrade: 'good', scoreConfidence: 'medium' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational', aiwatchScore: null, scoreGrade: null, scoreConfidence: 'low' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational', aiwatchScore: 95, scoreGrade: 'excellent', scoreConfidence: 'high' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('AIWatch Score: 80 (Good, no official uptime metric)')
+    expect(html).toContain('AIWatch Score: 95 (Excellent)')
   })
 
   it('worst-of headline: one member down dominates the others being operational', async () => {
@@ -1159,13 +1214,15 @@ describe('is-down-group.ts — delegated [data-ga] listener, executed (#1243)', 
     ]))
     const html = await (await handler(makeReq('claude'))).text()
     const shareRow = html.match(/<div class="share-row">[\s\S]*?<\/div>/)
-    const alertCta = html.match(/<p class="alert-cta">[\s\S]*?<\/p>/)
+    const alertCta = html.match(/<p class="cta-alt">[\s\S]*?<\/p>/)
+    const monthly = html.match(/<section class="monthly-report"[\s\S]*?<\/section>/)
     const listener = html.match(/document\.addEventListener\('click', function\(e\)\{[\s\S]*?\n\}\)\n/)
     expect(shareRow, 'share bar markup not found — the harness selector needs updating').toBeTruthy()
     expect(alertCta, 'alerts CTA markup not found — the harness selector needs updating').toBeTruthy()
     expect(listener, 'delegated listener not found — the harness selector needs updating').toBeTruthy()
     expect(listener![0], 'the slice is not the whole listener').toContain("gtag('event', g.dataset.ga, p)")
-    document.body.innerHTML = shareRow![0] + alertCta![0]
+    expect(monthly, 'monthly reports markup not found — the harness selector needs updating').toBeTruthy()
+    document.body.innerHTML = shareRow![0] + alertCta![0] + monthly![0]
     // Capture the registered handler so afterEach can unbind it; `new Function` gives us no reference.
     const realAdd = document.addEventListener.bind(document)
     const spy = vi.spyOn(document, 'addEventListener').mockImplementation((type, fn, opts) => {
@@ -1197,7 +1254,16 @@ describe('is-down-group.ts — delegated [data-ga] listener, executed (#1243)', 
     await mountListener()
 
     ;(document.querySelector('[data-ga="click_cta_alerts"]') as HTMLAnchorElement).click()
-    expect(gtag).toHaveBeenCalledWith('event', 'click_cta_alerts', { location: 'is_down_group_page' })
+    expect(gtag).toHaveBeenCalledWith('event', 'click_cta_alerts', { location: 'is_down_group_page', source: 'status_banner_secondary' })
+  })
+
+  it('forwards the monthly reports link\'s source', async () => {
+    const gtag = vi.fn()
+    vi.stubGlobal('gtag', gtag)
+    await mountListener()
+
+    ;(document.querySelector('.monthly-report a[data-ga="click_reports"]') as HTMLAnchorElement).click()
+    expect(gtag).toHaveBeenCalledWith('event', 'click_reports', { location: 'is_down_group_page', source: 'family_summary' })
   })
 
   it('stays silent on the copy button, which reports from its own success path', async () => {
@@ -1393,5 +1459,184 @@ describe('is-down-group.ts - the AI card splits durable from perishable prose (#
   it('a pre-split analysis appends no stray separator in either state', async () => {
     expect(await page('investigating')).toContain(DURABLE + '</p>')
     expect(await page('resolved')).toContain(DURABLE + '</p>')
+  })
+})
+
+describe('is-down-group.ts — the report modal gates on the shared guard (#1369)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+
+  async function bootReportModal(stored: Record<string, string>) {
+    vi.stubGlobal('localStorage', makeLocalStorage())
+    for (const [svc, day] of Object.entries(stored)) localStorage.setItem(`aiwatch-reported-${svc}`, day)
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    const start = html.indexOf(`\n;(function(){\n${REPORT_GUARD_CLIENT_JS}`)
+    expect(start, 'report IIFE not found — the harness selector needs updating').toBeGreaterThan(-1)
+    const iife = [html.slice(start, html.indexOf('\n})()\n', start) + '\n})()\n'.length)]
+    document.body.innerHTML = html.slice(html.indexOf('<body'), html.indexOf('<script', html.indexOf('<body')))
+    new Function(iife![0])()
+    return {
+      open: document.getElementById('report-open') as HTMLButtonElement,
+      modal: document.getElementById('report-modal') as HTMLElement,
+      service: document.getElementById('report-service') as HTMLSelectElement,
+      submit: document.getElementById('report-submit') as HTMLButtonElement,
+      message: document.getElementById('report-msg') as HTMLElement,
+    }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.parse('2026-09-09T12:00:00Z'))
+  })
+  afterEach(() => {
+    fetchMock?.mockRestore()
+    document.body.innerHTML = ''
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('opens with submit disabled for a member already reported today', async () => {
+    const { open, modal, submit, message } = await bootReportModal({ claude: '2026-09-09' })
+    open.click()
+    expect(modal.hidden).toBe(false)
+    expect(submit.disabled).toBe(true)
+    expect(message.textContent).toContain('Already reported for this service today')
+  })
+
+  it('re-enables submit when the selection moves to a member not reported today', async () => {
+    const { open, service, submit } = await bootReportModal({ claude: '2026-09-09' })
+    open.click()
+    service.value = 'claudeai'
+    service.dispatchEvent(new Event('change'))
+    expect(submit.disabled).toBe(false)
+  })
+
+  it("treats the legacy permanent '1' as not reported", async () => {
+    const { open, submit } = await bootReportModal({ claude: '1' })
+    open.click()
+    expect(submit.disabled).toBe(false)
+  })
+
+  it('stamps the selected member with the UTC day after a successful submit', async () => {
+    const { open, submit } = await bootReportModal({})
+    open.click()
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 200 }))
+    submit.click()
+    await vi.waitFor(() => expect(localStorage.getItem('aiwatch-reported-claude')).toBe('2026-09-09'))
+  })
+
+  it('stamps the member chosen in the picker, not the default one', async () => {
+    const { open, service, submit } = await bootReportModal({})
+    open.click()
+    service.value = 'claudecode'
+    service.dispatchEvent(new Event('change'))
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 200 }))
+    submit.click()
+    await vi.waitFor(() => expect(localStorage.getItem('aiwatch-reported-claudecode')).toBe('2026-09-09'))
+    expect(localStorage.getItem('aiwatch-reported-claude')).toBeNull()
+  })
+
+  it('leaves the member reportable when the POST fails', async () => {
+    const { open, submit, message } = await bootReportModal({})
+    open.click()
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 500 }))
+    submit.click()
+    await vi.waitFor(() => expect(message.textContent).toContain('Could not send'))
+    expect(localStorage.getItem('aiwatch-reported-claude')).toBeNull()
+    expect(submit.disabled).toBe(false)
+  })
+})
+
+describe('is-down-group.ts — the alert block matches the per-service page, per selected member', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+
+  async function render(statuses: Record<string, string> = {}) {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: statuses.claude ?? 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: statuses.claudeai ?? 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: statuses.claudecode ?? 'operational' },
+    ]))
+    return (await handler(makeReq('claude'))).text()
+  }
+
+  async function bootAlerts() {
+    const html = await render()
+    const block = html.match(/<div class="cta">[\s\S]*?\n<\/div>/)
+    expect(block, 'alert block not found — the harness selector needs updating').toBeTruthy()
+    const start = html.indexOf('function copyRss(b){')
+    expect(start, 'alert copy script not found — the harness selector needs updating').toBeGreaterThan(-1)
+    const script = html.slice(start, html.indexOf('\n})()\n', start) + '\n})()\n'.length)
+    document.body.innerHTML = block![0]
+    new Function(script)()
+    return {
+      picker: document.getElementById('alert-service') as HTMLSelectElement,
+      slack: document.getElementById('alert-slack') as HTMLButtonElement,
+      rss: document.getElementById('alert-rss') as HTMLButtonElement,
+    }
+  }
+
+  afterEach(() => {
+    fetchMock?.mockRestore()
+    document.body.innerHTML = ''
+    vi.unstubAllGlobals()
+  })
+
+  it('offers every member and points the buttons at the first member feed by default', async () => {
+    const html = await render()
+    expect(html).toContain('<option value="claude" data-slug="claude-api">Claude API</option>')
+    expect(html).toContain('<option value="claudeai" data-slug="claude-ai">claude.ai</option>')
+    expect(html).toContain('<option value="claudecode" data-slug="claude-code">Claude Code</option>')
+    expect(html).toContain('data-slack="/feed subscribe https://ai-watch.dev/feed/claude-api" data-svc="claude"')
+    expect(html).toContain('data-rss="https://ai-watch.dev/feed/claude-api" data-svc="claude"')
+    expect(html).toContain('Get notified the next time Anthropic (Claude) goes down.')
+  })
+
+  it('uses the per-service status-aware headline for the family verdict', async () => {
+    expect(await render({ claudeai: 'degraded' })).toContain('Anthropic (Claude) is having issues right now. Stop refreshing')
+  })
+
+  it('copies the selected member Slack command and reports it with the group location', async () => {
+    const gtag = vi.fn()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('gtag', gtag)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const { picker, slack } = await bootAlerts()
+    picker.value = 'claudecode'
+    picker.dispatchEvent(new Event('change'))
+    slack.click()
+    expect(writeText).toHaveBeenCalledWith('/feed subscribe https://ai-watch.dev/feed/claude-code')
+    await vi.waitFor(() => expect(gtag).toHaveBeenCalledWith('event', 'copy_slack_feed', { location: 'is_down_group_page', service_id: 'claudecode' }))
+  })
+
+  it('copies the member the picker shows even when the browser restored it without a change event', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('gtag', vi.fn())
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const html = await render()
+    const block = html.match(/<div class="cta">[\s\S]*?\n<\/div>/)
+    const start = html.indexOf('function copyRss(b){')
+    const script = html.slice(start, html.indexOf('\n})()\n', start) + '\n})()\n'.length)
+    document.body.innerHTML = block![0]
+    ;(document.getElementById('alert-service') as HTMLSelectElement).value = 'claudecode'
+    new Function(script)()
+    ;(document.getElementById('alert-slack') as HTMLButtonElement).click()
+    expect(writeText).toHaveBeenCalledWith('/feed subscribe https://ai-watch.dev/feed/claude-code')
+  })
+
+  it('copies the selected member RSS link', async () => {
+    const gtag = vi.fn()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('gtag', gtag)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const { picker, rss } = await bootAlerts()
+    picker.value = 'claudeai'
+    picker.dispatchEvent(new Event('change'))
+    rss.click()
+    expect(writeText).toHaveBeenCalledWith('https://ai-watch.dev/feed/claude-ai')
+    await vi.waitFor(() => expect(gtag).toHaveBeenCalledWith('event', 'copy_rss', { location: 'is_down_group_page', service_id: 'claudeai' }))
   })
 })

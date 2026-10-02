@@ -321,7 +321,7 @@ function statusColor(status: string): string {
   return '#8b949e'   // #1233 — unrecognised → neutral grey, not red
 }
 
-function timeAgo(iso: string): string {
+export function timeAgo(iso: string): string {
   const time = new Date(iso).getTime()
   if (Number.isNaN(time)) return 'unknown'
   const diff = Date.now() - time
@@ -350,6 +350,22 @@ function formatDate(iso: string, dayOnly = false, derivedDay?: string): string {
 /** True when this incident's timestamp was reconstructed by AIWatch rather than published. */
 function isDailyRecordIncident(inc: { derived?: string } | null | undefined): boolean {
   return inc?.derived === 'status_history'
+}
+
+export function averageRecoveryMinutes(incidents: ReadonlyArray<{ status: string; duration?: string | null; derived?: string }>): number | null {
+  const resolved = incidents.filter((i) => i.status === 'resolved' && i.duration && !isDailyRecordIncident(i))
+  if (resolved.length === 0) return null
+  const totalMins = resolved.reduce((sum, i) => {
+    const h = i.duration!.match(/(\d+)h/)
+    const m = i.duration!.match(/(\d+)m/)
+    return sum + (h ? parseInt(h[1]) * 60 : 0) + (m ? parseInt(m[1]) : 0)
+  }, 0)
+  const avg = Math.round(totalMins / resolved.length)
+  return avg > 0 ? avg : null
+}
+
+export function formatRecoveryMinutes(avg: number): string {
+  return avg >= 60 ? `${Math.floor(avg / 60)}h ${avg % 60}m` : `${avg} minutes`
 }
 
 // #539→og-fix — maps the social share `?e=` hint to an OG card status the generator renders
@@ -590,17 +606,7 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .fallback-try:hover{background:#2ea043;color:#fff}
 .fallback-disclosure{font-size:11px;color:#8b949e;opacity:0.85;margin:10px 2px 0}
 .footer{text-align:center;padding:32px 0;font-size:13px;color:#484f58;border-top:1px solid rgba(255,255,255,0.07);margin-top:40px}
-.btn{display:inline-block;padding:8px 20px;background:#161b22;border:1px solid rgba(255,255,255,0.14);border-radius:6px;color:#e6edf3;font-size:13px;font-weight:500;transition:background 0.2s}
-.btn:hover{background:#1c2230;text-decoration:none}
-.btn-primary{background:#1a3d22;border-color:#3fb950;color:#3fb950}
-.btn-primary:hover{background:#224a2a}
-button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
-.cta{background:#0d1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:16px 20px;text-align:center;margin:16px 0}
-.cta-title{font-size:14px;font-weight:600;margin-bottom:10px}
-.cta-buttons{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-.cta-help{font-size:11.5px;margin-top:8px;color:#8b949e;line-height:1.5}
-.cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
-.cta-alt a{color:#8b949e;text-decoration:underline}
+${ALERT_CTA_CSS}
 /* #888 — quiet standalone install strip below the answer/alert block (NOT a loud promo banner; muted card tone to avoid banner-blindness). */
 .ext-strip{margin:12px 0 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
 .ext-strip a{color:#8b949e;text-decoration:none}
@@ -637,7 +643,6 @@ textarea.report-input{min-height:72px;resize:vertical}
 .rep-toggle:checked~.rep-more-label .rep-more-open{display:none}
 .rep-toggle:checked~.rep-more-label .rep-more-close{display:inline}
 .rep-toggle:focus-visible~.rep-more-label{outline:2px solid #58a6ff;outline-offset:2px}
-.cta-alt a:hover{color:#c9d1d9}
 .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .links a{font-size:13px;padding:6px 12px;background:#161b22;border:1px solid rgba(255,255,255,0.07);border-radius:4px;color:#8b949e}
 .links a:hover{color:#e6edf3;text-decoration:none}
@@ -1310,8 +1315,49 @@ function renderReportFeed(reports: Array<{ cat: string; desc: string; ts: number
 <div class="card"><p class="report-feed-note">Visitor-submitted and shown only because an independent signal also indicates a problem &mdash; not an official AIWatch verdict.</p><div id="report-feed-list">${preview}${more}</div></div>`
 }
 
-export function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string): string {
+export const ALERT_CTA_CSS = `.btn{display:inline-block;padding:8px 20px;background:#161b22;border:1px solid rgba(255,255,255,0.14);border-radius:6px;color:#e6edf3;font-size:13px;font-weight:500;transition:background 0.2s}
+.btn:hover{background:#1c2230;text-decoration:none}
+.btn-primary{background:#1a3d22;border-color:#3fb950;color:#3fb950}
+.btn-primary:hover{background:#224a2a}
+button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
+.cta{background:#0d1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:16px 20px;text-align:center;margin:16px 0}
+.cta-title{font-size:14px;font-weight:600;margin-bottom:10px}
+.cta-buttons{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.cta-help{font-size:11.5px;margin-top:8px;color:#8b949e;line-height:1.5}
+.cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
+.cta-alt a{color:#8b949e;text-decoration:underline}
+.cta-alt a:hover{color:#c9d1d9}
+`
+
+export function alertCtaTitle(displayName: string, status: string): string {
   const isDown = status === 'down' || status === 'degraded'
+  const stateLead = status === 'down'
+    ? `${displayName} is down right now.`
+    : `${displayName} is having issues right now.`
+  return status === 'unknown'
+    ? `AIWatch can't read ${displayName}'s status page right now — get notified when it's readable again.`
+    : isDown
+    ? `${stateLead} Stop refreshing — we'll ping you when it's back.`
+    : `Get notified the next time ${displayName} goes down.`
+}
+
+export function alertCopyClientJs(location: string): string {
+  return `function copyRss(b){
+  var u=b.dataset.rss, orig=b.textContent;
+  function done(){b.textContent='Copied! Paste into your RSS reader';setTimeout(function(){b.textContent=orig},2200);typeof gtag==='function'&&gtag('event','copy_rss',{location:'${location}',service_id:b.dataset.svc})}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(u).then(done).catch(function(){prompt('Copy RSS URL:',u)})}
+  else{prompt('Copy RSS URL:',u)}
+}
+function copySlackFeed(b){
+  var c=b.dataset.slack, orig=b.textContent;
+  function done(){b.textContent='Copied! Paste into any Slack channel';setTimeout(function(){b.textContent=orig},2200);typeof gtag==='function'&&gtag('event','copy_slack_feed',{location:'${location}',service_id:b.dataset.svc})}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c).then(done).catch(function(){prompt('Copy Slack command:',c)})}
+  else{prompt('Copy Slack command:',c)}
+}
+`
+}
+
+export function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string): string {
   // Positioned directly below the status header (#297) so the alert-subscription
   // prompt catches the visitor at peak intent — before they bounce after reading
   // the status. GA4 source='status_banner' distinguishes this placement from the
@@ -1319,17 +1365,10 @@ export function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: 
   // #546: during an outage the visitor is here at peak intent for one reason \u2014
   // confirm it's down + be told when it's back. Lead with that exact need (status-
   // accurate: "down" vs "having issues" for degraded), label the button to match.
-  const stateLead = status === 'down'
-    ? `${seo.displayName} is down right now.`
-    : `${seo.displayName} is having issues right now.`
   // #1004 — 'unknown' must NOT fall through to the outage lead: the CTA sits directly under the status
   // header (#297), so a header saying "we can't read the source" above a line saying "X is having issues
   // right now" asserts and denies the outage in adjacent paragraphs. It gets its own copy.
-  const message = status === 'unknown'
-    ? `AIWatch can't read ${seo.displayName}'s status page right now — get notified when it's readable again.`
-    : isDown
-    ? `${stateLead} Stop refreshing — we'll ping you when it's back.`
-    : `Get notified the next time ${seo.displayName} goes down.`
+  const message = alertCtaTitle(seo.displayName, status)
   // #547/#696: the outage-day funnel leaked — 9 is-down sessions on the 6/11 Claude outage → 0
   // copy_rss / 0 click_cta_alerts. "Notify me via RSS" reads as power-user jargon (it copies a feed
   // URL the panic visitor can't use without an RSS reader). So #696 reframes around the lowest-friction
@@ -1376,19 +1415,7 @@ export function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: 
 </div>
 </div>
 <script>
-function copyRss(b){
-  var u=b.dataset.rss, orig=b.textContent;
-  function done(){b.textContent='Copied! Paste into your RSS reader';setTimeout(function(){b.textContent=orig},2200);typeof gtag==='function'&&gtag('event','copy_rss',{location:'is_down_page',service_id:b.dataset.svc})}
-  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(u).then(done).catch(function(){prompt('Copy RSS URL:',u)})}
-  else{prompt('Copy RSS URL:',u)}
-}
-function copySlackFeed(b){
-  var c=b.dataset.slack, orig=b.textContent;
-  function done(){b.textContent='Copied! Paste into any Slack channel';setTimeout(function(){b.textContent=orig},2200);typeof gtag==='function'&&gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})}
-  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c).then(done).catch(function(){prompt('Copy Slack command:',c)})}
-  else{prompt('Copy Slack command:',c)}
-}
-// #575 crowd-report modal (no framework — plain DOM). The honest feedback NEVER shows a count; the
+${alertCopyClientJs('is_down_page')}// #575 crowd-report modal (no framework — plain DOM). The honest feedback NEVER shows a count; the
 // localStorage guard mirrors the server's per-IP/day dedup — one report per service per UTC DAY
 // (#1369), inlined from REPORT_GUARD_CLIENT_JS. NOTE this adds an inline <script> like
 // the existing copyRss/copySlackFeed ones — fine under today's report-only CSP, but it's part of the
@@ -1606,20 +1633,8 @@ function buildDataSummary(service: ServiceData | null, displayName: string): str
   // #1292 — a `status_history`-derived incident is excluded: its `duration` is one DAY'S downtime,
   // not a time to recover, so averaging it publishes a fabricated recovery figure on the SEO answer
   // surface — two sections above the header that already says the start time is not published.
-  const resolved = recent.filter((i) => i.status === 'resolved' && i.duration && !isDailyRecordIncident(i))
-  let mttrText = ''
-  if (resolved.length > 0) {
-    const totalMins = resolved.reduce((sum, i) => {
-      const h = i.duration!.match(/(\d+)h/)
-      const m = i.duration!.match(/(\d+)m/)
-      return sum + (h ? parseInt(h[1]) * 60 : 0) + (m ? parseInt(m[1]) : 0)
-    }, 0)
-    const avg = Math.round(totalMins / resolved.length)
-    if (avg > 0) {
-      const mttrStr = avg >= 60 ? `${Math.floor(avg / 60)}h ${avg % 60}m` : `${avg} minutes`
-      mttrText = ` with an average recovery time of ${mttrStr}`
-    }
-  }
+  const avg = averageRecoveryMinutes(recent)
+  const mttrText = avg !== null ? ` with an average recovery time of ${formatRecoveryMinutes(avg)}` : ''
 
   // #654 — uptime leads as its own sentence (see the count===0 branch); "last 30 days" scopes only
   // the incident count + MTTR, not the source-window-varying uptime.

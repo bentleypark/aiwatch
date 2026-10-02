@@ -17,6 +17,7 @@ import { cspForHtml } from './_shared/csp-hash'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { cookieBannerHtml } from './_shared/cookie-banner'
+import { ALERT_CTA_CSS, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, formatRecoveryMinutes, timeAgo } from './_is-down/html-template'
 
 export const config = { runtime: 'edge' }
 
@@ -32,6 +33,7 @@ interface MemberStatus {
   uptime30d?: number | null
   aiwatchScore?: number | null
   scoreGrade?: string | null
+  scoreConfidence?: string | null
   partialCount?: number
   incidentSourceStale?: boolean
 }
@@ -119,34 +121,10 @@ function safeJsonLd(data: unknown): string {
   return JSON.stringify(data).replace(/</g, '\\u003c')
 }
 
-function timeAgo(iso: string): string {
-  const time = new Date(iso).getTime()
-  if (Number.isNaN(time)) return 'unknown'
-  const mins = Math.floor((Date.now() - time) / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
-
-function formatDuration(minutes: number): string {
-  return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes} minutes`
-}
-
 function recentFamilySummary(incidents: FamilyIncident[]): FamilySummary {
   const cutoff = Date.now() - 30 * 86_400_000
   const recent = incidents.filter((inc) => new Date(inc.startedAt).getTime() >= cutoff)
-  const resolved = recent.filter((inc) => inc.status === 'resolved' && inc.duration && inc.derived !== 'status_history')
-  const minutes = resolved.map((inc) => {
-    const hours = inc.duration!.match(/(\d+)h/)
-    const mins = inc.duration!.match(/(\d+)m/)
-    return (hours ? Number(hours[1]) * 60 : 0) + (mins ? Number(mins[1]) : 0)
-  }).filter((value) => value > 0)
-  return {
-    incidents: recent.length,
-    averageRecoveryMinutes: minutes.length > 0 ? Math.round(minutes.reduce((sum, value) => sum + value, 0) / minutes.length) : null,
-  }
+  return { incidents: recent.length, averageRecoveryMinutes: averageRecoveryMinutes(recent) }
 }
 
 function reportRelativeTime(timestamp: number): string {
@@ -212,7 +190,7 @@ function renderGroupPage(
   family: ServiceFamily,
   members: MemberStatus[],
   incidents: FamilyIncident[],
-  summary: FamilySummary,
+  summary: FamilySummary | null,
   communityReports: CommunityReport[],
   otherFamilies: Array<{ slug: string; name: string; status: MemberStatus['status'] }>,
   ogStatusHint?: string | null,
@@ -277,8 +255,10 @@ function renderGroupPage(
     const uptime = showMeasurements && typeof m.uptime30d === 'number' && Number.isFinite(m.uptime30d)
       ? `Uptime: ${m.uptime30d.toFixed(2)}%`
       : ''
+    const grade = m.scoreGrade ? `${m.scoreGrade.charAt(0).toUpperCase()}${m.scoreGrade.slice(1)}` : ''
+    const gradeNote = [grade, m.scoreConfidence === 'medium' ? 'no official uptime metric' : ''].filter(Boolean).join(', ')
     const score = showMeasurements && typeof m.aiwatchScore === 'number' && Number.isFinite(m.aiwatchScore)
-      ? `AIWatch Score: ${m.aiwatchScore}${m.scoreGrade ? ` (${m.scoreGrade.charAt(0).toUpperCase()}${m.scoreGrade.slice(1)})` : ''}`
+      ? `AIWatch Score: ${m.aiwatchScore}${gradeNote ? ` (${gradeNote})` : ''}`
       : ''
     const measurements = [uptime, score].filter(Boolean).join(' · ')
     const checked = m.lastChecked ? `Last checked: ${timeAgo(m.lastChecked)}` : ''
@@ -293,10 +273,10 @@ function renderGroupPage(
     </li>`
   }).join('')
 
-  const summarySection = `<section class="family-summary" aria-label="30-day family summary">
+  const summarySection = summary ? `<section class="family-summary" aria-label="30-day family summary">
   <strong>30-day family summary</strong>
-  <span>${summary.incidents} incident${summary.incidents === 1 ? '' : 's'} across monitored services${summary.averageRecoveryMinutes != null ? ` · average recovery: ${formatDuration(summary.averageRecoveryMinutes)}` : ''}</span>
-</section>`
+  <span>${summary.incidents} incident${summary.incidents === 1 ? '' : 's'} across monitored services${summary.averageRecoveryMinutes != null ? ` · average recovery: ${formatRecoveryMinutes(summary.averageRecoveryMinutes)}` : ''}</span>
+</section>` : ''
 
   // A family is a navigation and status-summary concept, not a reportable service. The worker accepts
   // only real service ids so reports remain attributable and its per-service, per-day deduplication
@@ -376,11 +356,19 @@ function renderGroupPage(
 <section class="community-reports"><p>Visitor-submitted and shown only because an independent signal also indicates a problem — not an official AIWatch verdict.</p>
 ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><strong>${esc(report.serviceName)} · ${esc(report.category)}</strong>${report.description ? `<span>${esc(report.description)}</span>` : ''}<time>${esc(reportRelativeTime(report.timestamp))}</time></div>`).join('')}</section>`
 
-  // #1164 review — same "set up alerts" entry point the individual pages' secondary CTA links to
-  // (https://ai-watch.dev/#settings?focus=alerts). No per-family feed exists (RSS/Slack subscribe is
-  // per-service, /feed/{slug}), so this points at the central settings screen rather than inventing
-  // one — the user can enable alerts for any/all of this family's members there.
-  const alertSection = `<p class="alert-cta"><a href="https://ai-watch.dev/#settings?focus=alerts" data-ga="click_cta_alerts" data-ga-loc="is_down_group_page">🔔 Get notified when ${esc(family.name)} status changes</a></p>`
+  const alertFeed = (slug: string) => `https://ai-watch.dev/feed/${esc(slug)}`
+  const alertOptions = members.map((member) => `<option value="${esc(member.id)}" data-slug="${esc(member.slug)}">${esc(member.name)}</option>`).join('')
+  const firstMember = members[0]
+  const alertSection = `<div class="cta">
+<p class="cta-title">${esc(alertCtaTitle(family.name, headline))}</p>
+<label class="cta-member" for="alert-service">Alerts for <select id="alert-service" class="report-input">${alertOptions}</select></label>
+<div class="cta-buttons">
+<button type="button" class="btn btn-primary" id="alert-slack" data-slack="/feed subscribe ${alertFeed(firstMember.slug)}" data-svc="${esc(firstMember.id)}">💬 Get alerts in Slack</button>
+<button type="button" class="btn" id="alert-rss" data-rss="${alertFeed(firstMember.slug)}" data-svc="${esc(firstMember.id)}">🔗 Copy alert link (RSS)</button>
+</div>
+<p class="cta-help">💬 Slack: paste the command into any channel — done. &middot; 🔗 RSS: paste the link into Slack, Teams, or any reader.</p>
+<p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts" data-ga="click_cta_alerts" data-ga-loc="is_down_group_page" data-ga-source="status_banner_secondary">Prefer Discord push alerts? Set up here &rarr;</a></p>
+</div>`
 
   // #1164 review — a share affordance, matching the individual is-down pages (X + copy link). Kept
   // deliberately simple (no Threads/Kakao) for the v1 group page.
@@ -528,8 +516,8 @@ ${consentInitScript()}
   .incident-ai-alt a:hover { text-decoration:underline; }
   .also-check { margin-top:16px; color:#9ca3af; }
   .also-check a { color:#58a6ff; }
-  .alert-cta { margin-top:20px; padding:12px 16px; border:1px solid #1f2937; border-radius:8px; background:#161b22; text-align:center; }
-  .alert-cta a { color:#58a6ff; text-decoration:none; }
+${ALERT_CTA_CSS}  .cta-member { display:flex; align-items:center; justify-content:center; gap:8px; margin:0 0 10px; color:#8b949e; font-size:12px; }
+  .cta-member .report-input { width:auto; padding-top:6px; padding-bottom:6px; font-size:13px; }
   .ext-strip { margin:20px 0 0; padding:9px 14px; border:1px solid #21262d; border-radius:8px; background:#0d1117; text-align:center; font-size:13px; line-height:1.45; }
   .ext-strip a { color:#8b949e; text-decoration:none; }
   .ext-strip a:hover { color:#c9d1d9; }
@@ -551,6 +539,7 @@ ${consentInitScript()}
   .report-input { box-sizing:border-box; width:100%; padding:10px 12px; border:1px solid rgba(255,255,255,0.14); border-radius:6px; background:#0d1117; color:#e6edf3; font:14px inherit; }
   .report-input:is(select) { appearance:none; -webkit-appearance:none; padding-right:38px; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%238b949e' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 14px center; }
   textarea.report-input { min-height:72px; resize:vertical; }
+  .report-input:focus { outline:none; border-color:#58a6ff; }
   .report-actions { display:flex; gap:10px; margin-top:18px; }
   .report-actions .btn { flex:1; }
   .report-msg { margin:12px 0 0; color:#3fb950; font-size:13px; }
@@ -617,15 +606,18 @@ if (copyBtn) copyBtn.addEventListener('click', function(){
   // Two-callback form, so fail() only ever sees a clipboard rejection and never a throw from done().
   navigator.clipboard.writeText(text).then(done, fail)
 })
+${alertCopyClientJs('is_down_group_page')};(function(){
+  var picker = document.getElementById('alert-service'), slackBtn = document.getElementById('alert-slack'), rssBtn = document.getElementById('alert-rss')
+  if (!picker || !slackBtn || !rssBtn) return
+  function selectedFeed(){ return 'https://ai-watch.dev/feed/' + picker.options[picker.selectedIndex].getAttribute('data-slug') }
+  slackBtn.addEventListener('click', function(){ slackBtn.dataset.slack = '/feed subscribe ' + selectedFeed(); slackBtn.dataset.svc = picker.value; copySlackFeed(slackBtn) })
+  rssBtn.addEventListener('click', function(){ rssBtn.dataset.rss = selectedFeed(); rssBtn.dataset.svc = picker.value; copyRss(rssBtn) })
+})()
 // The worker rate-limits reports by selected service and UTC day. Keep the client-side gate on the
 // same key so changing the selection never leaves a previously reported service writable, while a
 // different member remains reportable.
 ;(function(){
-  function reportKey(svc){ return 'aiwatch-reported-' + svc }
-  function reportDay(){ return new Date().toISOString().slice(0, 10) }
-  function reportedToday(svc){ try { return localStorage.getItem(reportKey(svc)) === reportDay() } catch (err) { return false } }
-  function markReported(svc){ try { localStorage.setItem(reportKey(svc), reportDay()) } catch (err) {} }
-  var modal = document.getElementById('report-modal'), openBtn = document.getElementById('report-open')
+${REPORT_GUARD_CLIENT_JS}  var modal = document.getElementById('report-modal'), openBtn = document.getElementById('report-open')
   var service = document.getElementById('report-service'), category = document.getElementById('report-cat')
   var description = document.getElementById('report-desc'), descN = document.getElementById('report-desc-n')
   var submit = document.getElementById('report-submit'), cancel = document.getElementById('report-cancel'), message = document.getElementById('report-msg')
@@ -634,7 +626,7 @@ if (copyBtn) copyBtn.addEventListener('click', function(){
   function resetMessage(){ message.hidden = true; message.textContent = ''; submit.disabled = false }
   function syncReported(){
     resetMessage()
-    if (reportedToday(selectedService())) { submit.disabled = true; message.hidden = false; message.textContent = '✓ Already reported for this service today — thanks' }
+    if (reportGuardHasToday(selectedService())) { submit.disabled = true; message.hidden = false; message.textContent = '✓ Already reported for this service today — thanks' }
   }
   function close(){ modal.hidden = true }
   openBtn.addEventListener('click', function(){ syncReported(); modal.hidden = false; service.focus(); try { if (typeof gtag === 'function') gtag('event', 'report_open', { location: 'is_down_group_page', service_id: selectedService() }) } catch (err) {} })
@@ -645,11 +637,11 @@ if (copyBtn) copyBtn.addEventListener('click', function(){
   description.addEventListener('input', function(){ descN.textContent = String(description.value.length) })
   submit.addEventListener('click', function(){
     var svcId = selectedService()
-    if (reportedToday(svcId)) { syncReported(); return }
+    if (reportGuardHasToday(svcId)) { syncReported(); return }
     submit.disabled = true
     fetch(${JSON.stringify(REPORT_ENDPOINT)}, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ svcId: svcId, category: category.value, description: description.value }) })
       .then(function(response){ return response.ok ? response.json().catch(function(){ return {} }) : Promise.reject() })
-      .then(function(){ markReported(svcId); message.hidden = false; message.textContent = '✓ Thanks — we factor this into our monitoring'; try { if (typeof gtag === 'function') gtag('event', 'report_issue', { location: 'is_down_group_page', service_id: svcId, category: category.value }) } catch (err) {} setTimeout(close, 1400) })
+      .then(function(){ reportGuardMarkToday(svcId); message.hidden = false; message.textContent = '✓ Thanks — we factor this into our monitoring'; try { if (typeof gtag === 'function') gtag('event', 'report_issue', { location: 'is_down_group_page', service_id: svcId, category: category.value }) } catch (err) {} setTimeout(close, 1400) })
       .catch(function(){ message.hidden = false; message.textContent = 'Could not send — please try again later'; submit.disabled = false })
   })
 })()
@@ -661,6 +653,7 @@ document.addEventListener('click', function(e){
   if (!g || typeof gtag !== 'function') return
   var p = {}
   if (g.dataset.gaLoc) p.location = g.dataset.gaLoc
+  if (g.dataset.gaSource) p.source = g.dataset.gaSource
   // #1243 — the X Post link carried no data-ga, so its clicks were never counted. item_id is the
   // family name. The copy button deliberately has no data-ga: it reports from its own success path
   // instead, since a click that fails to copy is not a share (two would also double-count).
@@ -710,7 +703,7 @@ export default async function handler(req: Request) {
     })
     let incidents: FamilyIncident[] = []
     let communityReports: CommunityReport[] = []
-    let summary: FamilySummary = { incidents: 0, averageRecoveryMinutes: null }
+    let summary: FamilySummary | null = null
     // #1243 — the NEWEST unresolved incident id across the family, taken from the RAW worker payload
     // rather than from `incidents` (which the display filters below prune). See the comment at the
     // assignment site. Stays null on a fetch failure: never fabricate a card identity.
@@ -724,6 +717,7 @@ export default async function handler(req: Request) {
           services: Array<{
             id: string; name: string; status: string; lastChecked?: string
             uptime30d?: number | null; aiwatchScore?: number | null; scoreGrade?: string | null
+            scoreConfidence?: string | null
             partialCount?: number
             incidentSourceStale?: boolean
             incidents?: Array<{
@@ -744,7 +738,7 @@ export default async function handler(req: Request) {
           if (!s) return { id, name: resolvedName(id, slug), slug, status: 'unknown' as const }
           return {
             id, name: s.name, slug, status: normalizeStatus(s.status), lastChecked: s.lastChecked,
-            uptime30d: s.uptime30d, aiwatchScore: s.aiwatchScore, scoreGrade: s.scoreGrade, partialCount: s.partialCount,
+            uptime30d: s.uptime30d, aiwatchScore: s.aiwatchScore, scoreGrade: s.scoreGrade, scoreConfidence: s.scoreConfidence, partialCount: s.partialCount,
             incidentSourceStale: s.incidentSourceStale,
           }
         })
@@ -855,7 +849,9 @@ export default async function handler(req: Request) {
             return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
           })
           .slice(0, RECENT_INCIDENTS_MAX)
-        summary = recentFamilySummary(Array.from(allIncidentsById.values()))
+        summary = members.every((member) => !member.incidentSourceStale && member.status !== 'unknown')
+          ? recentFamilySummary(Array.from(allIncidentsById.values()))
+          : null
         // Same gate as api/is-down.ts: the report feed is read only when the provider reports a
         // problem (or Better Stack exposes a sub-threshold partial). An operational family can still
         // collect reports, but never publishes them as an implied outage.
