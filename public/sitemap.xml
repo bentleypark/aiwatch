@@ -138,6 +138,14 @@
     <priority>0.7</priority>
   </url>
 
+  <!-- AI Status Badges gallery (Edge SSR, #805) -->
+  <url>
+    <loc>https://ai-watch.dev/badges</loc>
+    <lastmod>2026-10-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
   <!-- Claude Code plugin landing (Edge SSR, #920) -->
   <url>
     <loc>https://ai-watch.dev/plugin</loc>

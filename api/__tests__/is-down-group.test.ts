@@ -1,8 +1,19 @@
 // #1164 — provider-family group pages (/is-claude-down, /is-openai-down after the API pages moved
 // to /is-claude-api-down, /is-openai-api-down). Mirrors is-down.test.ts's fetch-mocking pattern.
 
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down-group'
+
+// Every handler invocation begins with the status fetch, and a degraded/down fixture may make a
+// second, best-effort report-feed request. Keep any unlisted call local to the test so a fixture
+// cannot fall through to the real Worker after its explicitly queued responses are consumed.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn())
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 function makeReq(family: string, extraParams?: Record<string, string>): Request {
   const params = new URLSearchParams({ family, ...extraParams })
@@ -18,8 +29,21 @@ interface MockIncident {
   duration: string | null
 }
 
+interface MockService {
+  id: string
+  name: string
+  status: string
+  lastChecked?: string
+  uptime30d?: number | null
+  aiwatchScore?: number | null
+  scoreGrade?: string | null
+  partialCount?: number
+  incidentSourceStale?: boolean
+  incidents?: MockIncident[]
+}
+
 function statusResponse(
-  services: Array<{ id: string; name: string; status: string; incidents?: MockIncident[] }>,
+  services: MockService[],
   aiAnalysis?: Record<string, Array<{ incidentId: string; summary: string; progress?: string; estimatedRecovery: string }>>,
 ): Response {
   return new Response(
@@ -96,6 +120,89 @@ describe('is-down-group.ts', () => {
     expect(html).toContain('/is-claude-api-down')
     expect(html).toContain('/is-claude-ai-down')
     expect(html).toContain('/is-claude-code-down')
+  })
+
+  it('renders member measurements and a deduplicated 30-day family summary from the cached payload', async () => {
+    const recent = new Date(Date.now() - 60 * 60_000).toISOString()
+    const earlier = new Date(Date.now() - 14 * 86_400_000).toISOString()
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational', lastChecked: new Date().toISOString(), uptime30d: 99.95, aiwatchScore: 92, scoreGrade: 'excellent', incidents: [{ id: 'shared', title: 'API latency', status: 'resolved', startedAt: recent, duration: '1h 0m' }, { id: 'older', title: 'Earlier outage', status: 'resolved', startedAt: earlier, duration: '2h 0m' }] },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational', lastChecked: new Date().toISOString(), uptime30d: 99.9, aiwatchScore: 90, scoreGrade: 'good', incidents: [{ id: 'shared', title: 'API latency', status: 'resolved', startedAt: recent, duration: '1h 0m' }] },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational', lastChecked: new Date().toISOString(), uptime30d: 100, aiwatchScore: 95, scoreGrade: 'excellent' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('Uptime: 99.95%')
+    expect(html).toContain('AIWatch Score: 92 (Excellent)')
+    expect(html).toContain('30-day family summary')
+    expect(html).toContain('2 incidents across monitored services')
+    expect(html).toContain('average recovery: 1h 30m')
+  })
+
+  it('keeps issue reports attributable to a selected member and exposes monthly reports like single-service pages', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational' },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).toContain('id="report-open"')
+    expect(html).toContain('id="report-service"')
+    expect(html).toContain('<option value="openai">OpenAI API</option>')
+    expect(html).toContain('<option value="chatgpt">ChatGPT</option>')
+    expect(html).toContain('svcId: svcId')
+    expect(html).toContain('aiwatch-reported-')
+    expect(html).toContain('.report-input:is(select)')
+    expect(html).toContain('padding-right:38px')
+    // The report IIFE follows the copy-button listener in the same inline script. Its leading
+    // semicolon is load-bearing: without it JavaScript treats the preceding addEventListener call
+    // as the IIFE's callee and aborts before registering the report button click handler.
+    expect(html).toContain("\n;(function(){\n  function reportKey")
+    expect(html).toContain('Monthly AI reliability reports')
+    expect(html).toContain('View monthly reports &rarr;')
+    expect(html).toContain('data-ga-source="footer">Monthly reports</a>')
+  })
+
+  it('shows community reports only for a member with an independent problem signal', async () => {
+    const now = Date.now()
+    fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(statusResponse([
+        { id: 'claude', name: 'Claude API', status: 'degraded' },
+        { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+        { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+      ]))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ reports: [{ cat: 'errors', desc: '500 responses', ts: now }] }), { status: 200 }))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('Recent user reports')
+    expect(html).toContain('Claude API · errors')
+    expect(html).toContain('500 responses')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/report-feed?svc=claude')
+  })
+
+  it('does not fetch or publish community reports for an operational family', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('Recent user reports')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('withholds stale member measurements and publishes the same structured-data types as individual pages', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational', uptime30d: 99.9, aiwatchScore: 95, incidentSourceStale: true, incidents: [{ id: 'stale', title: 'Unverified incident', status: 'resolved', startedAt: new Date().toISOString(), duration: '1h 0m' }] },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).not.toContain('Uptime: 99.90%')
+    expect(html).not.toContain('AIWatch Score: 95')
+    expect(html).toContain('Incident history unavailable')
+    expect(html).toContain('0 incidents across monitored services')
+    expect(html).toContain('"WebApplication"')
+    expect(html).toContain('"FAQPage"')
+    expect(html).toContain('"BreadcrumbList"')
   })
 
   it('worst-of headline: one member down dominates the others being operational', async () => {

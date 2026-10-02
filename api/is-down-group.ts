@@ -21,12 +21,19 @@ import { cookieBannerHtml } from './_shared/cookie-banner'
 export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
+const REPORT_ENDPOINT = `${WORKER_API}/api/report-issue`
 
 interface MemberStatus {
   id: string
   name: string
   slug: string
   status: 'operational' | 'degraded' | 'down' | 'unknown'
+  lastChecked?: string
+  uptime30d?: number | null
+  aiwatchScore?: number | null
+  scoreGrade?: string | null
+  partialCount?: number
+  incidentSourceStale?: boolean
 }
 
 interface FamilyIncident {
@@ -58,6 +65,18 @@ interface FamilyIncident {
    *  split. */
   aiProgress?: string
   aiEstimatedRecovery?: string
+}
+
+interface FamilySummary {
+  incidents: number
+  averageRecoveryMinutes: number | null
+}
+
+interface CommunityReport {
+  serviceName: string
+  category: string
+  description: string
+  timestamp: number
 }
 
 // Recent-incidents window + cap — mirrors the single-service page's "Last 7 days" framing, capped to
@@ -94,6 +113,47 @@ const STATUS_LABEL: Record<MemberStatus['status'], string> = {
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function safeJsonLd(data: unknown): string {
+  return JSON.stringify(data).replace(/</g, '\\u003c')
+}
+
+function timeAgo(iso: string): string {
+  const time = new Date(iso).getTime()
+  if (Number.isNaN(time)) return 'unknown'
+  const mins = Math.floor((Date.now() - time) / 60_000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+
+function formatDuration(minutes: number): string {
+  return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes} minutes`
+}
+
+function recentFamilySummary(incidents: FamilyIncident[]): FamilySummary {
+  const cutoff = Date.now() - 30 * 86_400_000
+  const recent = incidents.filter((inc) => new Date(inc.startedAt).getTime() >= cutoff)
+  const resolved = recent.filter((inc) => inc.status === 'resolved' && inc.duration && inc.derived !== 'status_history')
+  const minutes = resolved.map((inc) => {
+    const hours = inc.duration!.match(/(\d+)h/)
+    const mins = inc.duration!.match(/(\d+)m/)
+    return (hours ? Number(hours[1]) * 60 : 0) + (mins ? Number(mins[1]) : 0)
+  }).filter((value) => value > 0)
+  return {
+    incidents: recent.length,
+    averageRecoveryMinutes: minutes.length > 0 ? Math.round(minutes.reduce((sum, value) => sum + value, 0) / minutes.length) : null,
+  }
+}
+
+function reportRelativeTime(timestamp: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000))
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  return `${Math.round(minutes / 60)}h ago`
 }
 
 /** Narrows an arbitrary Worker status string to the 4 values this page renders — anything else
@@ -152,6 +212,8 @@ function renderGroupPage(
   family: ServiceFamily,
   members: MemberStatus[],
   incidents: FamilyIncident[],
+  summary: FamilySummary,
+  communityReports: CommunityReport[],
   otherFamilies: Array<{ slug: string; name: string; status: MemberStatus['status'] }>,
   ogStatusHint?: string | null,
   ogIncidentToken?: string | null,
@@ -210,14 +272,64 @@ function renderGroupPage(
   // the social card pins.
   const ogTitle = pinnedHint ? `Is ${family.name} Down? ${STATUS_LABEL[ogStatus]} | AIWatch` : title
 
-  const rows = members.map((m) => `
+  const rows = members.map((m) => {
+    const showMeasurements = !m.incidentSourceStale && m.status !== 'unknown'
+    const uptime = showMeasurements && typeof m.uptime30d === 'number' && Number.isFinite(m.uptime30d)
+      ? `Uptime: ${m.uptime30d.toFixed(2)}%`
+      : ''
+    const score = showMeasurements && typeof m.aiwatchScore === 'number' && Number.isFinite(m.aiwatchScore)
+      ? `AIWatch Score: ${m.aiwatchScore}${m.scoreGrade ? ` (${m.scoreGrade.charAt(0).toUpperCase()}${m.scoreGrade.slice(1)})` : ''}`
+      : ''
+    const measurements = [uptime, score].filter(Boolean).join(' · ')
+    const checked = m.lastChecked ? `Last checked: ${timeAgo(m.lastChecked)}` : ''
+    const historyNotice = m.incidentSourceStale ? 'Incident history unavailable' : ''
+    return `
     <li class="member-row">
       <a href="/is-${esc(m.slug)}-down">
         <span class="member-emoji">${STATUS_EMOJI[m.status]}</span>
-        <span class="member-name">${esc(m.name)}</span>
+        <span class="member-details"><span class="member-name">${esc(m.name)}</span>${measurements ? `<span class="member-measurements">${esc(measurements)}</span>` : ''}${checked ? `<span class="member-checked">${esc(checked)}</span>` : ''}${historyNotice ? `<span class="member-history-unavailable">${historyNotice}</span>` : ''}</span>
         <span class="member-status">${STATUS_LABEL[m.status]}</span>
       </a>
-    </li>`).join('')
+    </li>`
+  }).join('')
+
+  const summarySection = `<section class="family-summary" aria-label="30-day family summary">
+  <strong>30-day family summary</strong>
+  <span>${summary.incidents} incident${summary.incidents === 1 ? '' : 's'} across monitored services${summary.averageRecoveryMinutes != null ? ` · average recovery: ${formatDuration(summary.averageRecoveryMinutes)}` : ''}</span>
+</section>`
+
+  // A family is a navigation and status-summary concept, not a reportable service. The worker accepts
+  // only real service ids so reports remain attributable and its per-service, per-day deduplication
+  // remains true. The picker deliberately makes that attribution explicit instead of inventing a
+  // family id or silently assigning a report to whichever member happens to be worst right now.
+  const reportServiceOptions = members.map((member) => `<option value="${esc(member.id)}">${esc(member.name)}</option>`).join('')
+  const reportSection = `<button type="button" class="report-fab" id="report-open" aria-haspopup="dialog" aria-controls="report-modal"><span aria-hidden="true">⚠️</span> Report an issue</button>
+<div id="report-modal" class="report-modal" hidden>
+  <div class="report-modal-card" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
+    <h2 id="report-modal-title">Report an Issue</h2>
+    <p class="report-help">Choose the affected service. Reports are stored for that service only.</p>
+    <label class="report-label" for="report-service">Affected service</label>
+    <select id="report-service" class="report-input">${reportServiceOptions}</select>
+    <label class="report-label" for="report-cat">Category</label>
+    <select id="report-cat" class="report-input">
+      <option value="outage">Outage</option>
+      <option value="degraded">Degraded performance</option>
+      <option value="errors">Errors</option>
+      <option value="login">Login / Auth</option>
+      <option value="other">Other</option>
+    </select>
+    <div class="report-label-row"><label class="report-label" for="report-desc">Description</label><span class="report-count"><span id="report-desc-n">0</span> / 80</span></div>
+    <textarea id="report-desc" class="report-input" maxlength="80" placeholder="Brief description, e.g. API 500 errors in EU"></textarea>
+    <div class="report-actions"><button type="button" class="btn btn-primary" id="report-submit">Submit</button><button type="button" class="btn" id="report-cancel">Cancel</button></div>
+    <p id="report-msg" class="report-msg" hidden></p>
+  </div>
+</div>`
+
+  const monthlyReportSection = `<section class="monthly-report" aria-label="Monthly AI reliability reports">
+  <strong>Monthly AI reliability reports</strong>
+  <span>Compare uptime, incidents, and reliability across AI services each month.</span>
+  <a href="/reports/" data-ga="click_reports" data-ga-loc="is_down_group_page" data-ga-source="family_summary">View monthly reports &rarr;</a>
+</section>`
 
   // #1164 review — a lightweight alternative-service nudge for an ONGOING incident's AI card: not the
   // individual is-down page's tiered fallback engine (~150 lines, worker/src/fallback.ts-synced, keyed
@@ -255,6 +367,14 @@ function renderGroupPage(
     </li>`).join('')}</ul>`
     : `<h2>Recent Incidents <span class="incidents-window">(last ${RECENT_INCIDENTS_DAYS} days)</span></h2>
 <p class="no-incidents">No incidents reported for any ${esc(family.name)} service in the last ${RECENT_INCIDENTS_DAYS} days.</p>`
+
+  // Community reports are shown only for a member whose official source independently indicates a
+  // problem (the handler applies that gate before fetching). Never turn visitor submissions alone
+  // into a public outage verdict, and retain the member name because a family report is attributable
+  // to exactly one surface.
+  const communityReportSection = communityReports.length === 0 ? '' : `<h2>Recent user reports <span class="incidents-window">(last 24h · community-submitted)</span></h2>
+<section class="community-reports"><p>Visitor-submitted and shown only because an independent signal also indicates a problem — not an official AIWatch verdict.</p>
+${communityReports.slice(0, 20).map((report) => `<div class="community-report"><strong>${esc(report.serviceName)} · ${esc(report.category)}</strong>${report.description ? `<span>${esc(report.description)}</span>` : ''}<time>${esc(reportRelativeTime(report.timestamp))}</time></div>`).join('')}</section>`
 
   // #1164 review — same "set up alerts" entry point the individual pages' secondary CTA links to
   // (https://ai-watch.dev/#settings?focus=alerts). No per-family feed exists (RSS/Slack subscribe is
@@ -307,7 +427,7 @@ function renderGroupPage(
   const otherFamiliesLinks = otherFamilies.length > 0
     ? `Also check: ${otherFamilies.map((f) => `<a href="/is-${esc(f.slug)}-down">${esc(f.name)}</a>`).join(' · ')} · `
     : ''
-  const otherFamiliesSection = `<p class="also-check">${otherFamiliesLinks}<a class="home" href="/">All AI services on AIWatch</a></p>`
+  const otherFamiliesSection = `<p class="also-check">${otherFamiliesLinks}<a class="home" href="/">All AI services on AIWatch</a> &middot; <a href="/reports/" data-ga="click_reports" data-ga-loc="is_down_group_page" data-ga-source="footer">Monthly reports</a></p>`
 
   // #837/#888 — the Chrome extension is Claude-ONLY, so it's gated to the Anthropic family page only
   // (an install CTA on /is-openai-down would be a mismatch — mirrors isClaudeSurface's gate on the
@@ -317,12 +437,33 @@ function renderGroupPage(
     ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_group_page', variant: 'is-down' })
     : ''
 
+  const latestChecked = members
+    .map((member) => member.lastChecked)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1)
   const jsonLd = {
     '@context': 'https://schema.org',
-    '@type': 'WebPage',
-    name: title,
-    url: canonical,
-    description: desc,
+    '@graph': [
+      {
+        '@type': 'WebPage', name: title, url: canonical, description: desc,
+        isPartOf: { '@type': 'WebApplication', name: 'AIWatch', url: 'https://ai-watch.dev/' },
+        ...(latestChecked ? { dateModified: latestChecked } : {}),
+      },
+      { '@type': 'WebApplication', name: 'AIWatch', url: 'https://ai-watch.dev/', applicationCategory: 'StatusMonitoringApplication' },
+      {
+        '@type': 'FAQPage', mainEntity: [{
+          '@type': 'Question', name: `Is ${family.name} down?`,
+          acceptedAnswer: { '@type': 'Answer', text: desc },
+        }],
+      },
+      {
+        '@type': 'BreadcrumbList', itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'AIWatch', item: 'https://ai-watch.dev/' },
+          { '@type': 'ListItem', position: 2, name: `Is ${family.name} Down?`, item: canonical },
+        ],
+      },
+    ],
   }
 
   return `<!DOCTYPE html>
@@ -343,7 +484,7 @@ function renderGroupPage(
 <meta name="twitter:description" content="${esc(desc)}">
 <meta name="twitter:image" content="${esc(ogImage)}">
 <link rel="icon" type="image/png" href="/favicon.png">
-<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>
+<script type="application/ld+json">${safeJsonLd(jsonLd)}</script>
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript()}
 <style>
@@ -354,7 +495,9 @@ ${consentInitScript()}
   .headline { font-size:1.1rem; margin-bottom:24px; }
   ul.member-list, ul.incident-list { list-style:none; padding:0; margin:0; }
   .member-row a { display:flex; align-items:center; gap:10px; padding:14px 16px; border:1px solid #1f2937; border-radius:8px; margin-bottom:8px; text-decoration:none; color:inherit; }
-  .member-name { flex:1; font-weight:600; }
+  .member-details { display:flex; flex:1; flex-direction:column; gap:2px; min-width:0; }
+  .member-name { font-weight:600; }
+  .member-measurements, .member-checked, .member-history-unavailable { color:#9ca3af; font-size:0.8rem; }
   .member-status { color:#9ca3af; font-size:0.9rem; }
   .incident-row { border:1px solid #1f2937; border-radius:8px; margin-bottom:8px; overflow:hidden; }
   .incident-header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 16px; }
@@ -364,6 +507,18 @@ ${consentInitScript()}
   .incident-title { flex:1; }
   .incident-meta { color:#9ca3af; font-size:0.85rem; width:100%; }
   .no-incidents { color:#9ca3af; }
+  .community-reports { padding:12px 16px; border:1px solid #1f2937; border-radius:8px; background:#161b22; }
+  .community-reports > p { margin:0 0 12px; color:#9ca3af; font-size:.8rem; line-height:1.5; }
+  .community-report { display:flex; flex-wrap:wrap; gap:4px 8px; padding:10px 0; border-top:1px solid #1f2937; font-size:.9rem; }
+  .community-report:first-of-type { border-top:0; }
+  .community-report strong { flex-basis:100%; }
+  .community-report span, .community-report time { color:#9ca3af; }
+  .community-report time { margin-left:auto; font-size:.8rem; }
+  .family-summary { display:flex; flex-wrap:wrap; gap:6px 10px; margin:16px 0 0; padding:12px 16px; border-left:3px solid #3fb950; border-radius:4px; background:#161b22; color:#c9d1d9; font-size:0.9rem; }
+  .family-summary span { color:#9ca3af; }
+  .monthly-report { display:flex; flex-wrap:wrap; gap:6px 10px; margin:12px 0 0; padding:12px 16px; border-left:3px solid #58a6ff; border-radius:4px; background:#161b22; color:#c9d1d9; font-size:0.9rem; }
+  .monthly-report span { color:#9ca3af; flex-basis:100%; }
+  .monthly-report a { color:#58a6ff; text-decoration:none; }
   .incident-ai { padding:12px 16px; border-top:1px solid #1f2937; background:#0d1420; }
   .incident-ai-badge { font-size:0.8rem; color:#9ca3af; }
   .incident-ai p { margin:6px 0 0; font-size:0.9rem; }
@@ -383,17 +538,37 @@ ${consentInitScript()}
   .share-btn { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px; border:1px solid #1f2937; border-radius:8px; background:#161b22; color:#e6edf3; text-decoration:none; cursor:pointer; font-size:0.9rem; }
   .share-x { background:#000; color:#fff; border-color:#333; }
   a.home { color:#58a6ff; }
+  .report-fab { position:fixed; right:20px; bottom:20px; z-index:40; display:inline-flex; align-items:center; gap:6px; padding:10px 16px; border:1px solid rgba(255,255,255,0.18); border-radius:999px; background:#161b22; color:#e6edf3; box-shadow:0 4px 12px rgba(0,0,0,0.4); cursor:pointer; font:500 13px inherit; }
+  .report-fab:hover { filter:brightness(1.15); }
+  .report-fab:disabled { cursor:default; color:#3fb950; border-color:#3fb950; }
+  .report-modal { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,0.6); }
+  .report-modal[hidden] { display:none; }
+  .report-modal-card { width:100%; max-width:460px; padding:24px; border:1px solid rgba(255,255,255,0.12); border-radius:10px; background:#161b22; text-align:left; }
+  .report-modal-card h2 { margin:0 0 10px; font-size:20px; }
+  .report-help, .report-count { color:#9ca3af; font-size:12px; line-height:1.5; }
+  .report-label { display:block; margin:14px 0 6px; color:#8b949e; font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+  .report-label-row { display:flex; align-items:baseline; justify-content:space-between; }
+  .report-input { box-sizing:border-box; width:100%; padding:10px 12px; border:1px solid rgba(255,255,255,0.14); border-radius:6px; background:#0d1117; color:#e6edf3; font:14px inherit; }
+  .report-input:is(select) { appearance:none; -webkit-appearance:none; padding-right:38px; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%238b949e' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 14px center; }
+  textarea.report-input { min-height:72px; resize:vertical; }
+  .report-actions { display:flex; gap:10px; margin-top:18px; }
+  .report-actions .btn { flex:1; }
+  .report-msg { margin:12px 0 0; color:#3fb950; font-size:13px; }
 </style>
 </head>
 <body>
 <h1>${STATUS_EMOJI[headline]} Is ${esc(family.name)} Down?</h1>
 <p class="headline">${esc(desc)}</p>
 <ul class="member-list">${rows}</ul>
+${summarySection}
+${monthlyReportSection}
 ${alertSection}
 ${extCtaSection}
 ${incidentSection}
+${communityReportSection}
 ${shareSection}
 ${otherFamiliesSection}
+${reportSection}
 <script>
 // #842-B / #1193 — consent-free outage-moment audience beacon, the same one the per-service is-down
 // pages fire (api/_shared/audience-beacon.ts). It has to be here because the operator Reddit block
@@ -442,6 +617,42 @@ if (copyBtn) copyBtn.addEventListener('click', function(){
   // Two-callback form, so fail() only ever sees a clipboard rejection and never a throw from done().
   navigator.clipboard.writeText(text).then(done, fail)
 })
+// The worker rate-limits reports by selected service and UTC day. Keep the client-side gate on the
+// same key so changing the selection never leaves a previously reported service writable, while a
+// different member remains reportable.
+;(function(){
+  function reportKey(svc){ return 'aiwatch-reported-' + svc }
+  function reportDay(){ return new Date().toISOString().slice(0, 10) }
+  function reportedToday(svc){ try { return localStorage.getItem(reportKey(svc)) === reportDay() } catch (err) { return false } }
+  function markReported(svc){ try { localStorage.setItem(reportKey(svc), reportDay()) } catch (err) {} }
+  var modal = document.getElementById('report-modal'), openBtn = document.getElementById('report-open')
+  var service = document.getElementById('report-service'), category = document.getElementById('report-cat')
+  var description = document.getElementById('report-desc'), descN = document.getElementById('report-desc-n')
+  var submit = document.getElementById('report-submit'), cancel = document.getElementById('report-cancel'), message = document.getElementById('report-msg')
+  if (!modal || !openBtn || !service || !category || !description || !submit || !cancel || !message) return
+  function selectedService(){ return service.value }
+  function resetMessage(){ message.hidden = true; message.textContent = ''; submit.disabled = false }
+  function syncReported(){
+    resetMessage()
+    if (reportedToday(selectedService())) { submit.disabled = true; message.hidden = false; message.textContent = '✓ Already reported for this service today — thanks' }
+  }
+  function close(){ modal.hidden = true }
+  openBtn.addEventListener('click', function(){ syncReported(); modal.hidden = false; service.focus(); try { if (typeof gtag === 'function') gtag('event', 'report_open', { location: 'is_down_group_page', service_id: selectedService() }) } catch (err) {} })
+  service.addEventListener('change', syncReported)
+  cancel.addEventListener('click', close)
+  modal.addEventListener('click', function(event){ if (event.target === modal) close() })
+  document.addEventListener('keydown', function(event){ if (event.key === 'Escape' && !modal.hidden) close() })
+  description.addEventListener('input', function(){ descN.textContent = String(description.value.length) })
+  submit.addEventListener('click', function(){
+    var svcId = selectedService()
+    if (reportedToday(svcId)) { syncReported(); return }
+    submit.disabled = true
+    fetch(${JSON.stringify(REPORT_ENDPOINT)}, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ svcId: svcId, category: category.value, description: description.value }) })
+      .then(function(response){ return response.ok ? response.json().catch(function(){ return {} }) : Promise.reject() })
+      .then(function(){ markReported(svcId); message.hidden = false; message.textContent = '✓ Thanks — we factor this into our monitoring'; try { if (typeof gtag === 'function') gtag('event', 'report_issue', { location: 'is_down_group_page', service_id: svcId, category: category.value }) } catch (err) {} setTimeout(close, 1400) })
+      .catch(function(){ message.hidden = false; message.textContent = 'Could not send — please try again later'; submit.disabled = false })
+  })
+})()
 // #482-style delegated GA4 hook — CSP-clean (no inline handlers). Maps the subset of data-ga-*
 // attributes this page emits; the individual pages' listener (html-template.ts) maps more, so an
 // attribute copied from there would be dropped here without one added below.
@@ -498,6 +709,8 @@ export default async function handler(req: Request) {
       return { id, name: resolvedName(id, slug), slug, status: 'unknown' as const }
     })
     let incidents: FamilyIncident[] = []
+    let communityReports: CommunityReport[] = []
+    let summary: FamilySummary = { incidents: 0, averageRecoveryMinutes: null }
     // #1243 — the NEWEST unresolved incident id across the family, taken from the RAW worker payload
     // rather than from `incidents` (which the display filters below prune). See the comment at the
     // assignment site. Stays null on a fetch failure: never fabricate a card identity.
@@ -509,7 +722,10 @@ export default async function handler(req: Request) {
       if (res.ok) {
         const data = await res.json() as {
           services: Array<{
-            id: string; name: string; status: string
+            id: string; name: string; status: string; lastChecked?: string
+            uptime30d?: number | null; aiwatchScore?: number | null; scoreGrade?: string | null
+            partialCount?: number
+            incidentSourceStale?: boolean
             incidents?: Array<{
               id: string; title: string; status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
               startedAt: string; resolvedAt?: string | null; duration: string | null
@@ -526,7 +742,11 @@ export default async function handler(req: Request) {
           const s = byId.get(id)
           const slug = SERVICE_ID_TO_SLUG[id] ?? id
           if (!s) return { id, name: resolvedName(id, slug), slug, status: 'unknown' as const }
-          return { id, name: s.name, slug, status: normalizeStatus(s.status) }
+          return {
+            id, name: s.name, slug, status: normalizeStatus(s.status), lastChecked: s.lastChecked,
+            uptime30d: s.uptime30d, aiwatchScore: s.aiwatchScore, scoreGrade: s.scoreGrade, partialCount: s.partialCount,
+            incidentSourceStale: s.incidentSourceStale,
+          }
         })
         // #1164 review — same /api/status/cached payload already carries EVERY monitored service (not
         // just this family's), so the sibling family's worst-of status is derived from the same `byId`
@@ -563,10 +783,12 @@ export default async function handler(req: Request) {
         }
         const cutoff = Date.now() - RECENT_INCIDENTS_DAYS * 86_400_000
         const byIncidentId = new Map<string, FamilyIncident>()
+        const allIncidentsById = new Map<string, FamilyIncident>()
         for (const id of family.members) {
           const s = byId.get(id)
           const slug = SERVICE_ID_TO_SLUG[id] ?? id
           const memberName = s ? s.name : resolvedName(id, slug)
+          if (s?.incidentSourceStale) continue
           for (const inc of s?.incidents ?? []) {
             // #1243 — the share card's `&i=` identity token: NEWEST unresolved, taken before the
             // display filters below so a long-running outage still gets one. Ranking by date rather
@@ -581,6 +803,16 @@ export default async function handler(req: Request) {
                 shareIncidentToken = inc.id
                 shareIncidentStartedMs = ms
               }
+            }
+            const summaryExisting = allIncidentsById.get(inc.id)
+            if (summaryExisting) {
+              summaryExisting.members.push({ name: memberName, slug })
+            } else {
+              allIncidentsById.set(inc.id, {
+                members: [{ name: memberName, slug }], title: inc.title, status: inc.status,
+                startedAt: inc.startedAt, resolvedAt: inc.resolvedAt, duration: inc.duration,
+                derived: inc.derived, derivedDay: inc.derivedDay,
+              })
             }
             // #1164 round-3 review (silent-failure-hunter) — `new Date(inc.startedAt).getTime()` is
             // NaN for a missing/malformed date, and `NaN < cutoff` is always false — the old bare
@@ -623,13 +855,34 @@ export default async function handler(req: Request) {
             return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
           })
           .slice(0, RECENT_INCIDENTS_MAX)
+        summary = recentFamilySummary(Array.from(allIncidentsById.values()))
+        // Same gate as api/is-down.ts: the report feed is read only when the provider reports a
+        // problem (or Better Stack exposes a sub-threshold partial). An operational family can still
+        // collect reports, but never publishes them as an implied outage.
+        const reportableMembers = members.filter((member) => !member.incidentSourceStale && (
+          member.status === 'degraded' || member.status === 'down' || (member.partialCount ?? 0) > 0
+        ))
+        const reportResults = await Promise.all(reportableMembers.map(async (member) => {
+          try {
+            const reportResponse = await fetch(`${WORKER_API}/api/report-feed?svc=${encodeURIComponent(member.id)}`, { signal: AbortSignal.timeout(2000) })
+            if (!reportResponse.ok) return []
+            const payload = await reportResponse.json() as { reports?: Array<{ cat?: string; desc?: string; ts?: number }> }
+            return (payload.reports ?? [])
+              .filter((report) => typeof report.ts === 'number' && typeof report.cat === 'string')
+              .map((report) => ({ serviceName: member.name, category: report.cat!, description: typeof report.desc === 'string' ? report.desc : '', timestamp: report.ts! }))
+          } catch (reportError) {
+            console.warn(`[is-down-group/${familyKey}] report feed fetch failed for ${member.id}:`, reportError instanceof Error ? reportError.message : reportError)
+            return []
+          }
+        }))
+        communityReports = reportResults.flat().sort((a, b) => b.timestamp - a.timestamp)
         isFallback = false
       }
     } catch (err) {
       console.warn(`[is-down-group/${familyKey}] status fetch failed:`, err instanceof Error ? err.message : err)
     }
 
-    const html = renderGroupPage(family, members, incidents, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken)
+    const html = renderGroupPage(family, members, incidents, summary, communityReports, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken)
     const csp = await cspForHtml(html, { enforce: true })
     // Mirrors is-down.ts's fallback semantics: a fetch failure renders "unknown" for every member
     // (never a fabricated status), and the 503 + no-store tells caches/crawlers not to trust or cache
