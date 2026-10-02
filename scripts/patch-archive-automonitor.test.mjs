@@ -119,7 +119,7 @@ describe('assertPatchable', () => {
 
 describe('planPatch', () => {
   test('touches only services carrying a flagged entry', () => {
-    const archive = { services: {
+    const archive = { period: '2026-07', services: {
       kimi: kimiStored(),
       claude: { incidents: 2, incidentList: [real(30, 0), real(20, 1)], totalDowntimeMin: 50, longestIncidentMin: 30, avgResolutionMin: 25 },
     } }
@@ -131,18 +131,24 @@ describe('planPatch', () => {
   })
 
   test('an archive with no flagged entries anywhere plans nothing', () => {
-    const archive = { services: { claude: { incidents: 1, incidentList: [real(30, 0)], totalDowntimeMin: 30, longestIncidentMin: 30, avgResolutionMin: 30 } } }
+    const archive = { period: '2026-07', services: { claude: { incidents: 1, incidentList: [real(30, 0)], totalDowntimeMin: 30, longestIncidentMin: 30, avgResolutionMin: 30 } } }
     const { changes, skips, refusals } = planPatch(archive)
     assert.deepEqual([changes.length, skips.length, refusals.length], [0, 0, 0])
   })
 
   test('a refusal is reported separately from a change, so the caller can stop the whole run', () => {
-    const archive = { services: {
+    const archive = { period: '2026-07', services: {
       kimi: kimiStored(),
       flappy: { ...kimiStored(), incidents: 260 },
     } }
     const { changes, refusals } = planPatch(archive)
     assert.equal(changes.length, 1)
+    assert.equal(refusals.length, 1)
+  })
+
+  test('#1505 — refuses any month but 2026-07', () => {
+    const { changes, refusals } = planPatch({ period: '2026-09', services: { kimi: kimiStored() } })
+    assert.deepEqual(changes, [])
     assert.equal(refusals.length, 1)
   })
 

@@ -106,40 +106,60 @@ describe('selectIncidentCandidates', () => {
     expect(out.map(c => c.id), 'only the provider-published incident is a candidate').toEqual(['real-1'])
   })
 
-  it('#1210 — skips autoMonitor entries so one provider\'s hourly paperwork cannot crowd out the month', () => {
-    // The real shape: an auto-monitor opens hourly through ONE outage and bulk-closes, leaving a
-    // descending staircase of 20-to-35h durations. Ranking is by durationMin desc, so without the skip
-    // these fill the candidate list and the genuine 45-min outage never reaches the draft — inside an
-    // archive whose own downtime aggregates say those entries are not downtime.
-    const staircase = [2084, 2024, 1964, 1904, 1844].map((durationMin, i) =>
-      mkIncident({ id: `auto-${i}`, title: 'Agentic model error alert', durationMin, autoMonitor: true }))
+  it('#1505 — a flagged entry is a candidate like any other row, whatever else the service merged or excluded', () => {
     const archive = mkArchive({
       services: {
-        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 6, countedIncidents: 1, avgResolutionMin: 45, totalDowntimeMin: 45, longestIncidentMin: 45, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
-          incidentList: [...staircase, mkIncident({ id: 'real-1', title: 'Elevated search request error rate', durationMin: 45 })] },
-        claude: { uptime: 99, score: 70, grade: 'fair', incidents: 1, avgResolutionMin: 30, totalDowntimeMin: 30, longestIncidentMin: 30, avgLatencyMs: 150, officialUptime: 99, p95LatencyMs: 240, latencySpikes: 1, p50LatencyMs: null, cvCombined: null,
-          incidentList: [mkIncident({ id: 'c1', title: 'API errors', durationMin: 30 })] },
+        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 4, countedIncidents: 3, avgResolutionMin: 377, totalDowntimeMin: 1130, longestIncidentMin: 600, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
+          incidentList: [
+            mkIncident({ id: 'a', title: 'Agentic model error alert', startedAt: '2026-05-04T10:00:00Z', durationMin: 600, autoMonitor: true }),
+            mkIncident({ id: 'b', title: 'Agentic model error alert', startedAt: '2026-05-10T10:00:00Z', durationMin: 500, autoMonitor: true }),
+            mkIncident({ id: 'h', title: 'API errors', durationMin: 30 }),
+            mkIncident({ id: 'x', title: 'Usage Limits Depleting Faster Than Expected', durationMin: 10 }),
+          ] },
       },
     })
-    const out = selectIncidentCandidates(archive, { kimi: 'Kimi', claude: 'Claude API' })
-    expect(out.map(c => c.id)).toEqual(['real-1', 'c1'])
-    expect(out.some(c => c.autoMonitor)).toBe(false)
+    expect(selectIncidentCandidates(archive, { kimi: 'Kimi' }).map((c) => c.id)).toEqual(['a', 'b', 'h', 'x'])
   })
 
-  it('#1210 — KEEPS flagged entries when the aggregates counted them (the truncated branch)', () => {
-    // The keep direction of the skip above. Without it, deleting the `&& filtered` gate leaves the whole
-    // suite green: on a truncated month the archive publishes an inflated total, so dropping the
-    // responsible entries from the draft recreates the contradiction from the other side.
-    const staircase = [2084, 2024].map((durationMin, i) =>
-      mkIncident({ id: `auto-${i}`, title: 'Agentic model error alert', durationMin, autoMonitor: true }))
+  it('#1505 — flagged rows re-published through one impact window are one candidate, the longest', () => {
+    const CLOSE = Date.parse('2026-07-12T05:05:00Z')
+    const staircase = [2084, 2024, 1964, 1904, 1844, 1784, 1724].map((durationMin, i) =>
+      mkIncident({ id: `auto-${i}`, title: 'Agentic model error alert', startedAt: new Date(CLOSE - durationMin * 60_000).toISOString(), durationMin, autoMonitor: true }))
     const archive = mkArchive({
       services: {
-        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 260, countedIncidents: 260, avgResolutionMin: 143, totalDowntimeMin: 37156, longestIncidentMin: 2084, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
-          incidentList: staircase },
+        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 8, countedIncidents: 2, avgResolutionMin: 1050, totalDowntimeMin: 2129, longestIncidentMin: 2084, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
+          incidentList: [...staircase, mkIncident({ id: 'real-1', title: 'Elevated search request error rate', startedAt: '2026-07-02T09:00:00Z', durationMin: 45 })] },
       },
     })
-    const out = selectIncidentCandidates(archive, { kimi: 'Kimi' })
-    expect(out.map(c => c.id)).toEqual(['auto-0', 'auto-1'])
+    expect(selectIncidentCandidates(archive, { kimi: 'Kimi' }).map((c) => c.id)).toEqual(['auto-0', 'real-1'])
+  })
+
+  it('#1505 — the representative is the longest row of the group, not the earliest', () => {
+    const archive = mkArchive({
+      services: {
+        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 2, countedIncidents: 1, avgResolutionMin: 150, totalDowntimeMin: 150, longestIncidentMin: 150, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
+          incidentList: [
+            mkIncident({ id: 'early', title: 'Agentic model error alert', startedAt: '2026-07-11T00:00:00Z', durationMin: 60, autoMonitor: true }),
+            mkIncident({ id: 'long', title: 'Agentic model error alert', startedAt: '2026-07-11T00:30:00Z', durationMin: 120, autoMonitor: true }),
+          ] },
+      },
+    })
+    expect(selectIncidentCandidates(archive, { kimi: 'Kimi' }).map((c) => c.id)).toEqual(['long'])
+  })
+
+  it('#1390 — warns EXCLUDED for an anchored row even when no day-bucket was excluded', () => {
+    const archive = mkArchive({
+      services: {
+        kimi: { uptime: 100, score: 80, grade: 'good', incidents: 1, countedIncidents: 0, avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: 200, officialUptime: 100, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
+          incidentList: [mkIncident({ id: 'u', durationMin: 0, startUnknown: true })] },
+      },
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    warn.mockClear()
+    selectIncidentCandidates(archive, { kimi: 'Kimi' })
+    const hits = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('#1390-EXCLUDED'))
+    warn.mockRestore()
+    expect(hits).toHaveLength(1)
   })
 
   it('#1210 — the prompt names the divisor instead of letting the model infer one', () => {

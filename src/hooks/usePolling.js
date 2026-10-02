@@ -302,7 +302,7 @@ export const MOCK_SERVICES = [
   {
     // #989 — Kimi (Moonshot AI). Badge = Open API (operational, ~100%); the recurring `Agentic model
     // error alert` rows are the provider auto-monitor's machine blips — titleMap-translated from Chinese,
-    // autoMonitor-tagged so the UI groups them and the Score ignores them.
+    // autoMonitor-tagged so the UI groups them.
     id: 'kimi', category: 'api', name: 'Kimi (Moonshot AI)', provider: 'Moonshot AI', status: 'operational',
     latency: 145, uptime30d: 99.98,
     history30d: hist([]),

@@ -580,9 +580,7 @@ claims the whole day. Names are matched longest-first and case-insensitively, si
   it (`parseRssIncidents` drops maintenance titles; `services.ts` drops `report_type: 'maintenance'`).
   The other two readers of this field, `parseBetterStackUptime` and `parseBetterStackDailyImpact`, do
   NOT exclude it. That divergence is inherited, not introduced here.
-- `impact: 'minor'` (matching what `mapBetterStackImpact` scored the RSS posts these replace) and **no
-  `autoMonitor` tag** — that flag would make `isReliabilityIncident` (#989) drop them from
-  affectedDays/MTTR, leaving the Score exactly as broken as before.
+- `impact: 'minor'` (matching what `mapBetterStackImpact` scored the RSS posts these replace).
 - **Never flap-grouped.** These wear the same `"<resource> — recovered"` suffix `groupIncidents` keys
   on, but grouping buckets on the VIEWER's local day, so a real feed item and a synthetic could share
   a bucket and the merged row would print the anchor at minute precision (group ranges carry no

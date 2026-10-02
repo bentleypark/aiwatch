@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * #1210 — one-time patch: recompute a FROZEN monthly archive's downtime display stats with the
- * autoMonitor exclusion that `aggregateIncidentDurations` applies from the next build onward.
+ * #1210 — one-time patch: recompute the FROZEN 2026-07 archive's downtime display stats with the
+ * autoMonitor exclusion `aggregateIncidentDurations` applied until #1505 removed it.
  *
  * Why a script and not `/api/admin/rebuild-archive`: that endpoint is NOT idempotent for a frozen
  * month — it re-snapshots `score`/`grade`/`scoreConfidence` from TODAY's `services:latest`
@@ -25,8 +25,8 @@ import { resolve } from 'node:path'
 
 export const NAMESPACE_ID = 'e49508d80bb144e9a7ff872f2be771a4' // STATUS_CACHE (worker/wrangler.toml)
 
-/** Sum/max/count the entries that COUNT toward downtime, excluding `autoMonitor`.
- *  Mirrors `aggregateIncidentDurations`' post-#1210 counted set. It deliberately does NOT re-implement
+/** Sum/max/count the entries that COUNT toward downtime, excluding `autoMonitor` (the #1210 rule,
+ *  removed by #1505). It deliberately does NOT re-implement
  *  `isNonReliabilityAdvisory` — `assertPatchable` refuses any service where that exclusion also fired,
  *  so a duplicated title classifier (which would drift from the worker's copy) is never needed. */
 export function recompute(list, { excludeAutoMonitor = true } = {}) {
@@ -103,8 +103,14 @@ export function assertPatchable(id, s) {
 
 /** Classify every service in an archive into changes / skips / refusals. Pure, so the whole decision
  *  layer is testable without touching KV. */
+export const PATCHABLE_PERIOD = '2026-07'
+
 export function planPatch(archive) {
   const changes = [], skips = [], refusals = []
+  if (archive.period !== PATCHABLE_PERIOD) {
+    refusals.push(`period "${archive.period}" is not ${PATCHABLE_PERIOD} — the #1210 exclusion this script applies was removed by #1505`)
+    return { changes, skips, refusals }
+  }
   for (const [id, s] of Object.entries(archive.services ?? {})) {
     const list = s.incidentList ?? []
     const flagged = list.filter((e) => e.autoMonitor).length
