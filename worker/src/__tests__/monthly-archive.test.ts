@@ -2801,12 +2801,13 @@ describe('prunePhantomIncidents (#975)', () => {
     },
   })
 
-  const liveSvc = (incidents: Array<{ id: string; startedAt: string; status?: string }>): ServiceStatus => ({
+  const liveSvc = (incidents: Array<{ id: string; startedAt: string; status?: string }>, opts: { activeOnly?: true } = {}): ServiceStatus => ({
     id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded',
     latency: null, uptime30d: null, lastChecked: '', incidents: incidents.map(i => ({
       id: i.id, title: `Incident ${i.id}`, status: (i.status ?? 'resolved') as any, impact: null,
       startedAt: i.startedAt, duration: null, timeline: [],
     })),
+    ...(opts.activeOnly ? { liveIncidentsActiveOnly: true as const } : {}),
   })
 
   // The real event: Pinecone published `xqp5fkvlyg6t` (started 13:34), then deleted it and
@@ -3001,6 +3002,32 @@ describe('prunePhantomIncidents (#975)', () => {
 
   it('tolerates a structurally-corrupt accumulator', () => {
     expect(prunePhantomIncidents({ lastUpdated: '', services: undefined as any }, [], [])).toEqual({ lastUpdated: '', services: undefined })
+  })
+
+  // #1510 — round 6 review finding (`grep -n liveIncidentsActiveOnly worker/src/types.ts`): Mistral's
+  // active-incident overlay only ever lists UNRESOLVED incidents, so a resolution reads the same as a
+  // deletion to this prune unless guarded.
+  it('never prunes off an active-only live list, however many consecutive misses — a resolution, not a deletion', () => {
+    // Same fixture as `prunes the phantom only after PHANTOM_PRUNE_AFTER_MISSED_RUNS…` above
+    // (`grep -n "prunes the phantom only after" worker/src/__tests__/monthly-archive.test.ts`) — only
+    // the overlay flag differs.
+    const activeOnlyLive = liveSvc([REPLACEMENT], { activeOnly: true })
+    let data = stored([PHANTOM])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) {
+      data = prunePhantomIncidents(data, [activeOnlyLive], [])
+    }
+    expect(data.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(data.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+
+    // Control: the IDENTICAL fixture without the flag DOES prune (it is the existing "prunes the
+    // phantom…" test, re-run here) — proves the flag, not anything else about this fixture, is what
+    // changed the outcome above.
+    const normalLive = liveSvc([REPLACEMENT])
+    let control = stored([PHANTOM])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) {
+      control = prunePhantomIncidents(control, [normalLive], [])
+    }
+    expect(control.services.pinecone.incidents).toEqual([])
   })
 })
 

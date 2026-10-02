@@ -3154,7 +3154,8 @@ export default {
           console.warn('[cron] mistral dispatch failed:', err instanceof Error ? err.message : err)
         )
       )
-      // #1510 Slice 1 — instrumentation only; waitUntil so it never delays the cycle.
+      // #1510 — also writes the active-incident overlay `services.ts` reads when the Mistral scrape
+      // feed is unreadable (Slice 2); waitUntil so it never delays the cycle.
       ctx.waitUntil(runMistralPublicApiProbe(env, scheduledNow.toISOString()))
 
       // Health check probing (Phase 2) — runs every cron cycle

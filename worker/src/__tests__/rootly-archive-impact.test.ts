@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { computeMonthlyScore, type MonthlyIncidentEntry } from '../monthly-archive'
+import { computeMonthlyScore, accumulateMonthlyIncidents, type MonthlyIncidentEntry } from '../monthly-archive'
 import { rootlyScoringImpact } from '../parsers/rootly'
 import { SERVICES } from '../services'
+import type { ServiceStatus } from '../types'
 import rows from './fixtures/mistral-archive-2026-09-incidents.json'
 
 // #1557 — the 2026-09 backfill path. `incidents:monthly:2026-09` is no longer accumulated after 10-01,
@@ -52,5 +53,42 @@ describe('rootlyScoringImpact (#1557)', () => {
 
   it('leaves an advisory title informational', () => {
     expect(rootlyScoringImpact({ impact: null, title: 'Usage limits depleting faster than expected' })).toBeNull()
+  })
+})
+
+// #1510 — pins what `accumulateMonthlyIncidents` actually does when the overlay's incident-level
+// `impact` (e.g. `critical`) is stored, and a LATER cycle for the same incident id reports `impact:
+// null` (`existingDetail.impact = inc.impact ?? existingDetail.impact ?? null`, #653 — pre-existing,
+// unchanged by this branch: `grep -n "snapshot/refresh impact" worker/src/monthly-archive.ts`): the
+// null never overwrites the stored value, so it stays `critical` and scores accordingly
+// (`rootlyScoringImpact`, #1557).
+describe('#1510 — the overlay\'s real impact can out-live the scrape feed in the frozen archive', () => {
+  const svc = (impact: 'minor' | 'major' | 'critical' | null, status: 'investigating' | 'resolved'): ServiceStatus => ({
+    id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', status: 'down',
+    latency: null, uptime30d: null, lastChecked: '', incidents: [{
+      id: 'fcc64184-7c9a-45d8-9fb4-e2c862f7e195',
+      title: 'Elevated error rate on some of our services',
+      status, impact,
+      startedAt: '2026-09-29T12:48:01.000Z',
+      resolvedAt: status === 'resolved' ? '2026-09-29T14:00:00.000Z' : null,
+      duration: status === 'resolved' ? '1h 12m' : null,
+      timeline: [],
+    }],
+  })
+
+  it('an overlay cycle (real impact) then a feed cycle (unattributed null) keeps the real impact', () => {
+    let data = accumulateMonthlyIncidents(null, [svc('critical', 'investigating')], '2026-09', [])
+    data = accumulateMonthlyIncidents(data, [svc(null, 'resolved')], '2026-09', [])
+    const row = data.services.mistral.incidents!.find((e) => e.id === 'fcc64184-7c9a-45d8-9fb4-e2c862f7e195')!
+    expect(row.impact).toBe('critical')
+    expect(rootlyScoringImpact(row)).toBe('critical')
+  })
+
+  it('control: a feed-only history for the SAME incident (never overlay-served) scores the #1557 default', () => {
+    let data = accumulateMonthlyIncidents(null, [svc(null, 'investigating')], '2026-09', [])
+    data = accumulateMonthlyIncidents(data, [svc(null, 'resolved')], '2026-09', [])
+    const row = data.services.mistral.incidents!.find((e) => e.id === 'fcc64184-7c9a-45d8-9fb4-e2c862f7e195')!
+    expect(row.impact).toBeNull()
+    expect(rootlyScoringImpact(row)).toBe('minor')
   })
 })

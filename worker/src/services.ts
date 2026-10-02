@@ -3,7 +3,8 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
-import { fetchInSlot, createConnectionLimiter, type ConnectionLimiter, formatDuration, markZeroLengthResolvedIncidentsUnknown, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
+import { fetchInSlot, createConnectionLimiter, type ConnectionLimiter, formatDuration, markZeroLengthResolvedIncidentsUnknown, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
+import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, isStorableOverlayIncident } from './mistral-public-api'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
@@ -2141,15 +2142,69 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
   // The flag is a CONFIG statement — "this service's source is unreadable, always" — and that is what
   // stopped being true. A per-cycle unreadable source is a different thing and is expressed
   // per-cycle: `isStorableRootlyFeed` refuses a feed it cannot fully read, this function returns
-  // null, and the caller publishes `unknown` with `withUnreadFeedFlag` stamping
-  // `incidentSourceStale` on that RESPONSE. So the is-down sentence still appears exactly when it is
-  // true, and stops appearing when it is not — which the config flag could not do.
+  // null, and the caller (#1510 Slice 2: after checking the active-incident overlay, which can
+  // publish `down`/`degraded` with NO flag — see `readMistralActiveOverlay` below) publishes
+  // `unknown` with `withUnreadFeedFlag` stamping `incidentSourceStale` on that RESPONSE when the
+  // overlay does not raise the status either (`grep -n "if (overlay) return overlay"
+  // worker/src/services.ts`) — which includes an overlay holding an in-scope incident whose `impact`
+  // is `null`/`none`, not only an overlay with nothing in scope at all.
   //
   // Precedent agrees: junie (#1004), langsmith (#1066) and fireworks (#1198) each migrated status
   // sources and none took this flag — and #1007's title is literally "stop rendering an unreadable
   // source as an outage". The flag's remaining users are the two DeepSeek services, whose Flashduty
   // mirror really is frozen.
   return result
+}
+
+// #1510 Slice 2 — whenever the scrape feed could not be read (`readRootlyStatus` returned null;
+// `grep -n "if (fed) return fed" worker/src/services.ts` — a readable feed is never this case),
+// overlay the status from Mistral's public Rootly JSON API's ACTIVE incidents instead of publishing
+// `unknown` outright.
+//
+// The mapping (critical/major → down, minor → degraded) mirrors `INCIDENT_IO_IMPACT_WEIGHTS`
+// (`grep -n INCIDENT_IO_IMPACT_WEIGHTS worker/src/parsers/impact-weights.ts`: critical and major
+// already share the full-outage weight) rather than inventing a new severity split for this one
+// source. `impact: none`/unrecognised incidents do not raise the status (#1233) — `worstUnresolvedImpact`
+// (`grep -n worstUnresolvedImpact worker/src/utils.ts`) only looks at each incident's own `impact`,
+// never at a page-wide word.
+//
+// KNOWN LIMIT (#1510's own text, `gh issue view 1510`): unlike the scrape path (whose badge comes
+// from COMPONENT status over `displayComponentIds`), this overlay has no component field to scope
+// on — Rootly's public incident schema carries none — so the badge itself is set from the worst
+// TITLE-filtered incident's impact. `filterIncidents` reads only `inc.title` here, never
+// `inc.timeline[].text` (the update body) — an
+// incident whose title names no excluded surface still raises the badge even when its body affects
+// only a non-API one, pinned against the real 2026-09-29 case (`grep -n "known limit, see
+// services.ts" worker/src/__tests__/mistral-active-overlay.test.ts`).
+async function readMistralActiveOverlay(kv: KVNamespace, config: ServiceConfig, base: ServiceStatus, now: string): Promise<ServiceStatus | null> {
+  let raw: string | null
+  try {
+    raw = await kv.get(MISTRAL_ACTIVE_OVERLAY_KV_KEY)
+  } catch (err) {
+    console.warn(`[fetchService] ${base.id} active-overlay KV read failed:`, err instanceof Error ? err.message : err)
+    return null
+  }
+  if (!raw) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return null
+  } catch (err) {
+    console.warn(`[fetchService] ${base.id} active-overlay JSON parse failed:`, err instanceof Error ? err.message : err)
+    return null
+  }
+  // Re-validated element-by-element, not just `Array.isArray`-trusted: a malformed element (hand
+  // edit, older/future writer) must not reach `filterIncidents`, which throws on a non-string
+  // `title` — a throw here is caught upstream as a transient fetch failure, which can publish a
+  // green `operational` pill instead of `unknown` for a feed-ONLY service.
+  const stored = parsed.filter(isStorableOverlayIncident)
+
+  const filtered = filterIncidents(stored, config)
+  const worst = worstUnresolvedImpact(filtered)
+  if (worst == null) return null // impact none/unrecognised, or nothing survived the exclude filter
+  const status: ServiceStatus['status'] = worst === 'minor' ? 'degraded' : 'down'
+  return { ...base, status, lastChecked: now, incidents: filtered, liveIncidentsActiveOnly: true }
 }
 
 /** #689 — Classify a non-OK status-page API response (a real HTTP status from `summaryRes.status`).
@@ -2341,6 +2396,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // says `operational`, which for a feed-ONLY service would publish a green pill for a service we
       // have no reading of at all — so expiry against the 3h TTL is a realistic state to handle,
       // rather than a corner (see `workflow-dispatch.ts` for how this feed is triggered).
+      // #1510 Slice 2 — before falling back to `unknown`, check whether the public API's cron-written
+      // active-incident overlay has something in-scope to say.
+      const overlay = await readMistralActiveOverlay(kv, config, base, now)
+      if (overlay) return overlay
       // #1233's `unknown` is what this is:
       // neither an outage nor an all-clear. Warned as well, because every OTHER failure on this path
       // warns and a silent one is indistinguishable in the logs from a healthy quiet page.

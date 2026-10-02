@@ -5,10 +5,15 @@ import {
   recordPublicApiSample,
   recordPublicApiObservation,
   runMistralPublicApiProbe,
+  mapPublicIncidentImpact,
+  parsePublicActiveIncidents,
+  recordActiveIncidentsOverlay,
+  isStorableOverlayIncident,
   MISTRAL_PUBLIC_API_BASE,
   MISTRAL_PUBLIC_API_INDEX,
   MISTRAL_PUBLIC_API_SOURCE,
   MISTRAL_PUBLIC_SAMPLE_KV_KEY,
+  MISTRAL_ACTIVE_OVERLAY_KV_KEY,
   type PublicApiFetch,
   type PublicApiResult,
 } from '../mistral-public-api'
@@ -136,6 +141,189 @@ describe('recordPublicApiSample — keep a real active-incident payload, write o
   })
 })
 
+// Captured 2026-09-29 via `npx wrangler kv key get --remote --namespace-id
+// e49508d80bb144e9a7ff872f2be771a4 mistral:public-sample`, used verbatim.
+const REAL_ACTIVE_INCIDENT = {
+  id: 'fcc64184-7c9a-45d8-9fb4-e2c862f7e195',
+  name: 'Elevated error rate on some of our services',
+  status: 'monitoring',
+  created_at: '2026-09-29T05:48:01-07:00',
+  updated_at: '2026-09-29T06:56:16-07:00',
+  monitoring_at: null,
+  resolved_at: null,
+  impact: 'critical',
+  shortlink: 'https://rootly.com/account/incidents/1730-lot-of-dashboard-errors',
+  started_at: '2026-09-29T05:48:01-07:00',
+  page_id: 'ae27f3c4-86a4-4290-a053-87252545d7f9',
+  incident_updates: [
+    { id: 'cf530c0d-060e-4c4e-9dcf-0efa2037b5a0', status: 'monitoring', body: 'Metrics are back to normal. We are still monitoring the services actively.', created_at: '2026-09-29T06:56:16-07:00', updated_at: '2026-09-29T06:56:16-07:00', display_at: '2026-09-29T06:56:16-07:00' },
+    { id: '5d0b3f4c-b230-4cf0-ab80-8fc190ae7c32', status: 'identified', body: 'Root cause has been identified. Services are coming back up.', created_at: '2026-09-29T06:21:47-07:00', updated_at: '2026-09-29T06:21:47-07:00', display_at: '2026-09-29T06:21:47-07:00' },
+    { id: '8521262c-b905-41eb-87ac-20c70082f66d', status: 'investigating', body: 'We identified an elevated error rate on some of our surfaces (Vibe, Studio, Settings page).\nInvestigations are ongoing', created_at: '2026-09-29T05:54:01-07:00', updated_at: '2026-09-29T05:54:01-07:00', display_at: '2026-09-29T05:54:01-07:00' },
+  ],
+}
+
+describe('mapPublicIncidentImpact — Rootly public API vocabulary', () => {
+  it('passes through the three severities', () => {
+    expect(mapPublicIncidentImpact('critical')).toBe('critical')
+    expect(mapPublicIncidentImpact('major')).toBe('major')
+    expect(mapPublicIncidentImpact('minor')).toBe('minor')
+  })
+
+  it('maps none and an unrecognised value both to null, warning only on the latter', () => {
+    expect(mapPublicIncidentImpact('none')).toBeNull()
+    expect(mapPublicIncidentImpact(undefined)).toBeNull()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(mapPublicIncidentImpact('wobbly')).toBeNull()
+    expect(console.warn).toHaveBeenCalledOnce()
+  })
+
+  it('is case- and whitespace-insensitive', () => {
+    expect(mapPublicIncidentImpact(' Critical ')).toBe('critical')
+  })
+})
+
+describe('parsePublicActiveIncidents — real captured payload (2026-09-29)', () => {
+  it('parses the real sample into our Incident shape', () => {
+    const { incidents, dropped } = parsePublicActiveIncidents(JSON.stringify({ incidents: [REAL_ACTIVE_INCIDENT] }))
+    expect(dropped).toBe(0)
+    expect(incidents).toHaveLength(1)
+    const [inc] = incidents
+    expect(inc.id).toBe(REAL_ACTIVE_INCIDENT.id)
+    expect(inc.title).toBe(REAL_ACTIVE_INCIDENT.name)
+    expect(inc.impact).toBe('critical')
+    expect(inc.status).toBe('monitoring')
+    expect(inc.resolvedAt).toBeNull()
+    expect(inc.duration).toBeNull()
+    expect(inc.startedAt).toBe(new Date(REAL_ACTIVE_INCIDENT.started_at).toISOString())
+    // Newest-first in the raw feed; our timeline is ascending.
+    expect(inc.timeline.map((t) => t.stage)).toEqual(['investigating', 'identified', 'monitoring'])
+  })
+
+  it('drops an entry missing an id or a parseable start, and counts it rather than crashing', () => {
+    const { incidents, dropped } = parsePublicActiveIncidents(JSON.stringify({
+      incidents: [
+        { ...REAL_ACTIVE_INCIDENT, id: undefined },
+        { ...REAL_ACTIVE_INCIDENT, started_at: 'not a date' },
+      ],
+    }))
+    expect(incidents).toHaveLength(0)
+    expect(dropped).toBe(2)
+  })
+
+  // #1510 round 8 review finding: Mistral has published untitled active incidents (#1471). Dropping
+  // every empty-name entry silently hid a real, impactful, in-scope incident. `rootlyIncidentTitle`
+  // (shared with the scrape path) derives a title from the first update's body instead.
+  it('falls back to a timeline-derived title when the raw name is empty, rather than dropping', () => {
+    const { incidents, dropped } = parsePublicActiveIncidents(JSON.stringify({
+      incidents: [{ ...REAL_ACTIVE_INCIDENT, name: '' }],
+    }))
+    expect(dropped).toBe(0)
+    expect(incidents).toHaveLength(1)
+    expect(incidents[0].title).not.toBe('')
+    expect(incidents[0].title.length).toBeGreaterThan(0)
+  })
+
+  it('drops an entry with an empty name AND no usable update text — nothing to fall back to', () => {
+    const { incidents, dropped } = parsePublicActiveIncidents(JSON.stringify({
+      incidents: [{ ...REAL_ACTIVE_INCIDENT, name: '', incident_updates: [] }],
+    }))
+    expect(incidents).toHaveLength(0)
+    expect(dropped).toBe(1)
+  })
+
+  it('a resolved incident keeps resolvedAt and gets a real duration', () => {
+    const resolved = { ...REAL_ACTIVE_INCIDENT, status: 'resolved', resolved_at: '2026-09-29T07:00:00-07:00' }
+    const { incidents } = parsePublicActiveIncidents(JSON.stringify({ incidents: [resolved] }))
+    expect(incidents[0].status).toBe('resolved')
+    expect(incidents[0].resolvedAt).not.toBeNull()
+    expect(incidents[0].duration).not.toBeNull()
+  })
+
+  it('null/unparseable text is a parse failure, distinct from valid JSON with no incidents field', () => {
+    expect(parsePublicActiveIncidents(null)).toEqual({ incidents: [], dropped: 0, parseFailed: true })
+    expect(parsePublicActiveIncidents('not json')).toEqual({ incidents: [], dropped: 0, parseFailed: true })
+    expect(parsePublicActiveIncidents(JSON.stringify({}))).toEqual({ incidents: [], dropped: 0, parseFailed: false })
+  })
+
+  it('a body truncated by readPublicApi\'s RAW_MAX_CHARS (still "ok") is a parse failure, not an empty list', () => {
+    // Mirrors what readPublicApi actually stores: `outcome: 'ok'` is decided off the FULL body, then
+    // `raw` is cut to 64 KiB (`grep -n RAW_MAX_CHARS worker/src/mistral-public-api.ts`) — so an
+    // over-sized real payload reaches here cut mid-structure, same as a genuinely large page would be.
+    const many = Array.from({ length: 400 }, () => REAL_ACTIVE_INCIDENT)
+    const oversized = JSON.stringify({ incidents: many })
+    expect(oversized.length).toBeGreaterThan(64 * 1024)
+    const truncated = oversized.slice(0, 64 * 1024)
+    const { incidents, parseFailed } = parsePublicActiveIncidents(truncated)
+    expect(parseFailed).toBe(true)
+    expect(incidents).toHaveLength(0)
+  })
+})
+
+describe('isStorableOverlayIncident — re-validates a value read back out of KV', () => {
+  const valid = () => parsePublicActiveIncidents(JSON.stringify({ incidents: [REAL_ACTIVE_INCIDENT] })).incidents[0]
+
+  it('accepts a well-formed Incident (our own writer\'s shape)', () => {
+    expect(isStorableOverlayIncident(valid())).toBe(true)
+  })
+
+  it('rejects an element missing a required field, or carrying the wrong type for one', () => {
+    expect(isStorableOverlayIncident({ ...valid(), id: undefined })).toBe(false)
+    expect(isStorableOverlayIncident({ ...valid(), title: '' })).toBe(false)
+    expect(isStorableOverlayIncident({ ...valid(), status: 'started' })).toBe(false)
+    expect(isStorableOverlayIncident({ ...valid(), impact: 'wobbly' })).toBe(false)
+    expect(isStorableOverlayIncident({ ...valid(), startedAt: 'not a date' })).toBe(false)
+    expect(isStorableOverlayIncident({ ...valid(), timeline: 'not an array' })).toBe(false)
+  })
+
+  it('rejects null, a non-object, and an empty object', () => {
+    expect(isStorableOverlayIncident(null)).toBe(false)
+    expect(isStorableOverlayIncident('a string')).toBe(false)
+    expect(isStorableOverlayIncident({})).toBe(false)
+  })
+})
+
+describe('recordActiveIncidentsOverlay', () => {
+  it('writes the parsed active list on a successful read, even when empty', async () => {
+    const kv = mockKV()
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: JSON.stringify({ incidents: [] }) }))
+    expect(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY]).toBe('[]')
+  })
+
+  it('writes the real incident through to the overlay key', async () => {
+    const kv = mockKV()
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: JSON.stringify({ incidents: [REAL_ACTIVE_INCIDENT] }) }))
+    expect(JSON.parse(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY])).toHaveLength(1)
+  })
+
+  it('does NOT overwrite on a failed/unreadable read — a transient fetch failure must not erase a real reading', async () => {
+    const kv = mockKV({ [MISTRAL_ACTIVE_OVERLAY_KV_KEY]: '[{"id":"prior"}]' })
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'challenged', raw: null }))
+    expect(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY]).toBe('[{"id":"prior"}]')
+  })
+
+  it('an "ok" outcome whose raw body is truncated/unparseable does NOT overwrite with an empty list either', async () => {
+    // Pins the `parseFailed` check (`grep -n parseFailed worker/src/mistral-public-api.ts`): gating
+    // the write on `outcome` alone erased a real prior reading with `[]` on a truncated-but-'ok' body.
+    const kv = mockKV({ [MISTRAL_ACTIVE_OVERLAY_KV_KEY]: '[{"id":"prior"}]' })
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: '{"incidents":[{"id":"a"' }))
+    expect(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY]).toBe('[{"id":"prior"}]')
+  })
+
+  it('no-op with no KV binding', async () => {
+    await expect(recordActiveIncidentsOverlay(undefined, result())).resolves.toBeUndefined()
+  })
+
+  it('warns when an entry is dropped, so the loss leaves a trace', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const kv = mockKV()
+    await recordActiveIncidentsOverlay(kv as never, result({
+      outcome: 'ok',
+      raw: JSON.stringify({ incidents: [{ ...REAL_ACTIVE_INCIDENT, id: undefined }] }),
+    }))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('dropped 1'))
+  })
+})
+
 describe('recordPublicApiObservation — one bounded WAE row per cycle', () => {
   it('carries the outcome per endpoint, the indicator, and the counts', () => {
     const writeDataPoint = vi.fn()
@@ -167,13 +355,30 @@ describe('recordPublicApiObservation — one bounded WAE row per cycle', () => {
 })
 
 describe('runMistralPublicApiProbe', () => {
-  it('records the row and the sample in one cycle', async () => {
+  it('records the row, the sample, and the active-incident overlay in one cycle', async () => {
     const kv = mockKV()
     const writeDataPoint = vi.fn()
     await runMistralPublicApiProbe({ STATUS_CACHE: kv as never, ANALYTICS: { writeDataPoint } as never }, 'now',
       route({ 'status.json': () => json(STATUS_ACTIVE), 'incidents.json': () => json(INCIDENTS_ACTIVE) }))
     expect(writeDataPoint).toHaveBeenCalledTimes(1)
-    expect(kv.put).toHaveBeenCalledTimes(1)
+    // The sample (unchanged-content dedup) and the overlay (fresh every cycle) are two separate writes.
+    expect(kv.put).toHaveBeenCalledTimes(2)
+    expect(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY]).toBeDefined()
+  })
+
+  // #1510 Slice 2's required pin, WRITER side (reader side: `grep -n "no page-wide indicator"
+  // worker/src/__tests__/mistral-active-overlay.test.ts`) — drives the real
+  // `runMistralPublicApiProbe` cron entry point, not just the pure parser.
+  it('writes only the per-incident impact to the overlay — a severe status.json indicator never leaks into it', async () => {
+    const kv = mockKV()
+    const noneImpact = { ...REAL_ACTIVE_INCIDENT, impact: 'none' }
+    await runMistralPublicApiProbe({ STATUS_CACHE: kv as never }, 'now', route({
+      'status.json': () => json(JSON.stringify({ status: { indicator: 'major' }, incidents: [noneImpact] })),
+      'incidents.json': () => json(JSON.stringify({ incidents: [noneImpact] })),
+    }))
+    const written = JSON.parse(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY])
+    expect(written).toHaveLength(1)
+    expect(written[0].impact).toBeNull()
   })
 
   it('binds each endpoint to its own columns of the row', async () => {
