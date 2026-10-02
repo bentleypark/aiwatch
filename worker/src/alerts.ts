@@ -1175,8 +1175,8 @@ export function familyMembersForAlert(alert: AlertCandidate, svcIds: string[], i
 
 // Headroom under X's 280-char limit. Literal .length is conservative: X counts any URL as 23 chars
 // (t.co) regardless of its literal length, so a cap on the literal string can never under-count.
-export const TWEET_MAX = 270
-export const X_INTENT_BASE = 'https://twitter.com/intent/tweet?text='
+const TWEET_MAX = 270
+const X_INTENT_BASE = 'https://twitter.com/intent/tweet?text='
 
 // #696 — UTM campaign on the is-down link the operator tweets. X mobile-app clicks strip the HTTP
 // referrer, so without this they bucket as GA4 (direct)/(none) and X-driven outage inflow is
@@ -1191,7 +1191,7 @@ const X_REPLY_UTM = `${X_UTM}&utm_content=reply`
 
 /** Single-line, tweet-safe text: drop backticks (would break the Discord blockquote preview AND
  *  read oddly on X) and collapse all whitespace/newlines to single spaces. */
-export function cleanForTweet(s: string): string {
+function cleanForTweet(s: string): string {
   return s.replace(/[`\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
