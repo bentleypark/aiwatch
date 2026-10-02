@@ -99,7 +99,7 @@ main (always deployable — protected branch, no direct push)
 
 ### Rules
 - **main**: PR merge only (no force push, no deletion)
-- **Branch naming**: `{type}/{issue#}-{description}` (e.g., `fix/123-mobile-padding`, `feat/456-ranking-page`)
+- **Branch naming**: `{type}/{issue#}-{description}` (e.g., `fix/123-mobile-padding`)
   - type: `fix`, `feat`, `refactor`, `docs`, `chore`, `test`
 - **Merge method**: squash merge (clean per-PR history)
 - **Deploy**: Vercel auto-deploys on main merge, Worker is manual (`npm run deploy:worker`)
@@ -280,7 +280,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   mistral-email.ts   # email() handler — Mistral notification mail triggers a scrape (#1510)
   kv-read-census.ts  # KV READ attribution (#1224) — every read bucketed by key
   growth-series.ts   # Durable daily series of the consent-free growth counters (#986) — the dataset #547's lift measurement reads
-  reddit.ts security-monitor.ts changelog.ts platform-monitor.ts  # External monitoring
+  reddit.ts security-monitor.ts changelog.ts provider-changes.ts platform-monitor.ts  # External monitoring
   alert-feed.ts ext-claude.ts indexnow.ts badge.ts og.ts og-render.ts  # Feeds, projections, SEO, images
   parsers/           # one module per status-page platform — `ls` it, or directory-map.md for what each does
 extension/           # Claude-only Chrome extension (MV3, #837) — consumes ?src=ext-claude only
