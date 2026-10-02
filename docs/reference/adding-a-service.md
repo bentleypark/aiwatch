@@ -120,7 +120,6 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 >   `characterai` — configured, but its status page is dead (#689/#800) — does not. `26 − 1 + 6 = 31`
 >   was a coincidence of the day, not a fact to publish.
 >
-> If a count is wanted back in either place, follow §3's sibling "Platform" bullet and NAME the services.
 > By contrast the READMEs' **OSV package count** (`24 AI SDK packages`) IS pinned — `OSV_PACKAGES` is a
 > static array, so that number is a config fact.
 >

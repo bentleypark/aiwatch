@@ -8,7 +8,7 @@ import type { Incident } from '../../types'
 // and is not even defined the same way page to page (OpenAI's excludes degraded/partial entirely). We
 // compute from the page's RAW `component_impacts` with the weights published on /methodology, so every
 // incident.io service is on the same window and formula as the other Official sources (#1110 — not
-// `platform_avg`, which ignores severity and uses only each resource's monitored days).
+// `platform_avg`, which uses only each resource's monitored days).
 describe('computeIncidentIoUptime (#1006)', () => {
   const NOW = Date.parse('2026-07-14T00:00:00Z')
   const day = 86_400_000

@@ -2,6 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel, ServiceComponent } from '../types'
 import { formatDuration, displayedMinutes } from '../utils'
+import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
 
 function decodeXmlEntities(text: string): string {
   return text
@@ -527,7 +528,8 @@ export function parseBetterStackReportedUptime(data: BetterStackIndex): number |
  *  publishes — and `parseBetterStackDailyImpact` has been reading it for the calendar all along. Uptime
  *  just never used it.
  *
- *  Per resource: 1 − Σ downtime_duration / (days × 86400) over the trailing `windowDays`.
+ *  Per resource: 1 − Σ weight × downtime_duration / (days × 86400) over the trailing `windowDays`, where
+ *  a `degraded` day weighs `MINOR_WEIGHT` and any other day `MAJOR_WEIGHT` (#1580).
  *  `maintenance_duration` is EXCLUDED — announced maintenance is not downtime, and penalising a provider
  *  for announcing its windows would invert the incentive (same rule as every other source, /methodology).
  *  `not_monitored` days are dropped from the denominator rather than scored as perfect.
@@ -544,7 +546,10 @@ export function parseBetterStackUptime(data: BetterStackIndex, windowDays = 30):
     // status_history is chronological (oldest first) — the trailing window is the tail.
     const days = resource.attributes!.status_history!.slice(-windowDays).filter((d) => d.status !== 'not_monitored')
     if (days.length === 0) continue
-    const downSec = days.reduce((acc, d) => acc + (d.downtime_duration ?? 0), 0)
+    const downSec = days.reduce(
+      (acc, d) => acc + (d.downtime_duration ?? 0) * (d.status === 'degraded' ? MINOR_WEIGHT : MAJOR_WEIGHT),
+      0,
+    )
     const pct = (1 - downSec / (days.length * 86_400)) * 100
     if (pct < 0 || pct > 100) {
       console.warn(`[parseBetterStackUptime] ${resource.attributes?.public_name}: computed ${pct}% — history shape may have changed`)

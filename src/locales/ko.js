@@ -208,8 +208,7 @@ const ko = {
   'uptime.sub.official.partial': 'AIWatch 산출 · 제공사 기록이 {d}일치뿐',
   'uptime.partialWindow.tooltip': '제공사가 이 구성요소의 기록을 {d}일치만 갖고 있습니다(상태 페이지를 옮긴 경우 등). 30일이 쌓이면 자동으로 정상 표시됩니다.',
   // #1110 — 이 라벨은 '근거만 다른 같은 계산'이 아니다. `parseBetterStackUptime`은 심각도를
-  // 반영하지 않는다: 측정된 `downtime_duration` 초는 `downtime`이든 `degraded`든 전부 가중 1.0
-  // (`status`는 `not_monitored` 일자를 빼는 데에만 쓴다). 리소스마다 '자기' 관측일수로 비율을 낸 뒤
+  // 하루 단위로 가중한다(#1580): 그날 `status`가 `degraded`면 `downtime_duration`에 0.3, 아니면 1.0. 리소스마다 '자기' 관측일수로 비율을 낸 뒤
   // 동등 평균하므로 한 페이지 값에 7일치 모니터와 30일치 모니터가 섞일 수 있고, `uptimeWindowDays`도
   // 내지 않는다. 그 '차이'를 서술하는 곳은 /methodology §3 Platform뿐이고, 이 라벨과 Uptime 페이지의
   // `avg` 범례는 근거가 다르다는 것만 알린다. 아래 `uptime.sub.platform_avg`는 아직
