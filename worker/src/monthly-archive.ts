@@ -831,6 +831,109 @@ export async function accumulateIncidentsOnlyIfChanged(
   return 'written'
 }
 
+/**
+ * Reconcile an archive candidate with recovery outcomes retained outside the
+ * short-lived monthly accumulator. Incidents stay in their start month: this
+ * only fills the final outcome for an already-attributed row.
+ */
+export function reconcileMonthlyIncidentResolutions(
+  existing: MonthlyIncidents,
+  historyByService: Record<string, IncidentHistoryRecord[]>,
+): MonthlyIncidents {
+  let changed = false
+  const services: Record<string, MonthlyIncidentServiceData> = {}
+
+  for (const [svcId, data] of Object.entries(existing.services)) {
+    const outcomes = new Map((historyByService[svcId] ?? []).map(record => [record.incId, record]))
+    const incidents = data.incidents?.map((entry) => {
+      if (entry.finalStatus === 'resolved') return entry
+      const outcome = outcomes.get(entry.id)
+      if (!outcome) return entry
+      changed = true
+      return {
+        ...entry,
+        finalStatus: 'resolved' as const,
+        resolvedAt: outcome.resolvedAt,
+        durationMin: outcome.durationMin,
+      }
+    })
+    if (!incidents || incidents.every((entry, index) => entry === data.incidents?.[index])) {
+      services[svcId] = data
+      continue
+    }
+    // Recompute from `durations`, matching the sibling transforms (filterSuppressedFromMonthly,
+    // applyDurationOverrides) — correct because `durations` is always the complete population for
+    // every input this function sees: the live accumulator's own dedup state (`incidentIds`/
+    // `durations`) is never capped, and monthlyIncidentsFromArchive skips recovering any service whose
+    // archived detail wasn't the full population to begin with.
+    const durations = { ...(data.durations ?? {}) }
+    for (const entry of incidents) durations[entry.id] = entry.durationMin
+    const durationValues = Object.values(durations)
+    services[svcId] = {
+      ...data,
+      incidents,
+      durations,
+      totalMinutes: durationValues.reduce((total, duration) => total + duration, 0),
+      longestMinutes: durationValues.reduce((longest, duration) => Math.max(longest, duration), 0),
+    }
+  }
+
+  return changed ? { ...existing, services } : existing
+}
+
+/** Rebuild input for an expired `incidents:monthly` key, recovered from the permanent archive's own
+ * per-incident rows. A service whose archived detail doesn't cover its full stored count is skipped
+ * entirely rather than recovered partially — see the comment at the skip below. */
+export function monthlyIncidentsFromArchive(archive: MonthlyArchive | null | undefined): MonthlyIncidents | null {
+  const source = archive?.services
+  if (!source) return null
+  const services: Record<string, MonthlyIncidentServiceData> = {}
+  for (const [svcId, svc] of Object.entries(source)) {
+    if (!svc.incidentList?.length) continue
+    const incidents = svc.incidentList.map(stripInternalFields)
+    // #1537 — the archive never stored the live accumulator's UNCAPPED `durations`/`incidentIds` map,
+    // only the capped `incidentList` (plus the three summary fields). `filterSuppressedFromMonthly` and
+    // `applyDurationOverrides` — shared with the live accumulator, where that map is always complete —
+    // have no way to tell a genuinely-complete `durations` apart from one that only covers what fit in
+    // the cap, and recompute totals from it unconditionally; handing them a service whose `count`
+    // exceeds what `durations` holds corrupts the published total the moment either one touches it
+    // (reproduced: a no-op override replaying the archive's own stored value collapsed totalDowntimeMin
+    // from 5000 to 15). Rather than trying to make a partial view safe for three different downstream
+    // readers, skip recovering this ONE service: no partial object is ever produced, so nothing
+    // downstream can read it inconsistently. A late rebuild of a month with such a service falls back
+    // to exactly the pre-#1537 behavior for that service alone: the #1260 census guard sees its incidents
+    // vanish and refuses (409) unless forced, same as before this function existed.
+    if (typeof svc.incidents === 'number' && svc.incidents > incidents.length) {
+      console.warn(`[monthly-archive] #1537 ${svcId}: rebuild input skipped — archive truncated to ${incidents.length}/${svc.incidents} incidents, recovering it would hand a later suppression/override/reconcile step an incomplete population`)
+      continue
+    }
+    const durations = Object.fromEntries(incidents.map(entry => [entry.id, entry.durationMin]))
+    const durationValues = Object.values(durations)
+    services[svcId] = {
+      count: incidents.length,
+      totalMinutes: durationValues.reduce((total, duration) => total + duration, 0),
+      longestMinutes: durationValues.reduce((longest, duration) => Math.max(longest, duration), 0),
+      dates: [],
+      incidentIds: incidents.map(entry => entry.id),
+      durations,
+      incidents,
+    }
+  }
+  return Object.keys(services).length > 0 ? { lastUpdated: archive.generatedAt, services } : null
+}
+
+async function reconcileWithDurableIncidentHistory(
+  kv: KVNamespace,
+  incidentData: MonthlyIncidents,
+): Promise<MonthlyIncidents> {
+  const unresolvedServiceIds = Object.entries(incidentData.services)
+    .filter(([, data]) => data.incidents?.some(entry => entry.finalStatus !== 'resolved'))
+    .map(([svcId]) => svcId)
+  if (unresolvedServiceIds.length === 0) return incidentData
+  const histories = await Promise.all(unresolvedServiceIds.map(async (svcId) => [svcId, await readIncidentHistory(kv, svcId)] as const))
+  return reconcileMonthlyIncidentResolutions(incidentData, Object.fromEntries(histories))
+}
+
 /** #587 mid-month — synthesize a PARTIAL archive (incidentList only) from the live
  *  `incidents:monthly:{month}` accumulator. Lets the dashboard 90-day filter show a CURRENT-month
  *  incident that already rolled out of the upstream live feed, BEFORE the real archive is built
@@ -1609,6 +1712,7 @@ export async function buildMonthlyArchive(
   // #1274 — same contract, for the override read below. That one's fault is the one the content
   // census is structurally unable to see; see `readOverridesFreshResult`.
   overridesOverride?: DurationOverride[],
+  priorArchive?: MonthlyArchive | null,
 ): Promise<MonthlyArchive> {
   const mm = String(month).padStart(2, '0')
   const period = `${year}-${mm}`
@@ -1687,6 +1791,12 @@ export async function buildMonthlyArchive(
       console.warn(`[monthly-archive] corrupt incident accumulation for ${period}:`, err instanceof Error ? err.message : err)
     }
   }
+
+  // `incidents:monthly` expires after 60 days, but a manual rebuild must still
+  // retain and reconcile the rows already frozen in the permanent archive.
+  if (!incidentData) incidentData = monthlyIncidentsFromArchive(priorArchive)
+
+  if (incidentData) incidentData = await reconcileWithDurableIncidentHistory(kv, incidentData)
 
   // #904 — build-time suppression filter. The already-stored accumulator may contain incidents an
   // operator has since suppressed (e.g. OpenAI FedRAMP), so a rebuild-archive of a past month drops
