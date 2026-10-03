@@ -52,6 +52,13 @@ describe('buildGrowthDailyRow', () => {
     statuslinePolls: { verdict: 'failed', counts: null },
   }
 
+  it('#1581 — carries the per-type subscriber split beside the unchanged total', () => {
+    const row = buildGrowthDailyRow({ ...base, subscribersByType: { discord: 10, slack: 2 } } as never)
+    expect(row.subscribers).toBe(12)
+    expect(row.subscribersByType).toEqual({ discord: 10, slack: 2 })
+    expect(buildGrowthDailyRow({ ...base, subscribersByType: null } as never).subscribersByType).toBeNull()
+  })
+
   it('carries the outage-day axis and every consent-free counter', () => {
     expect(buildGrowthDailyRow(base as never)).toEqual({
       date: '2026-07-10',

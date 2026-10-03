@@ -226,6 +226,18 @@ describe('buildDailySummary', () => {
     expect(result).not.toContain('Slack')
   })
 
+  it('#1581 — with a Slack count, shows the total and the per-type split', () => {
+    const result = buildDailySummary({
+      services: [makeSvc()],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      webhookCounts: { discord: 5, slack: 2, newToday: 1 },
+      redditCount: 0,
+    })
+    expect(result).toContain('🔗 **Active Alert Webhooks**: 7 (Discord 5 · Slack 2) (+1 today)')
+  })
+
   it('shows Active Discord Webhooks: 0 when no registrations', () => {
     const result = buildDailySummary({
       services: [makeSvc()],

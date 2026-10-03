@@ -49,6 +49,9 @@ export interface GrowthDailyRow {
   alertedResolved: number | null
   referralTotal: number | null // consent-free outbound clicks (#842). null = read failed; 0 = nobody clicked
   subscribers: number | null // consent-free completion SNAPSHOT. null = read failed
+  // #1581 — the same snapshot split by channel type. ABSENT on rows before the field existed (not 0);
+  // null when the listing failed. `subscribers` keeps its meaning: the total.
+  subscribersByType?: { discord: number; slack: number } | null
   subscriberNewToday: number | null // null on a first day or a corrupt baseline (#548 semantics)
   audienceTotal: number | null // is-down views, 24h (WAE)
   audienceActiveTotal: number | null // views during an active outage — the sponsor evidence
@@ -343,6 +346,7 @@ export interface GrowthDailyInputs {
   alertCounts: { incidents?: number; resolved?: number } | null | undefined
   referralTotal: number | null
   subscribers: number | null
+  subscribersByType: { discord: number; slack: number } | null
   subscriberNewToday: number | null
   audience: AudienceCounts | null | undefined
   // #1117 — null/undefined when the incident record could not be read; the fields are then left
@@ -380,6 +384,7 @@ export function buildGrowthDailyRow(i: GrowthDailyInputs): GrowthDailyRow {
     alertedResolved: i.alertCounts ? (i.alertCounts.resolved ?? 0) : 0,
     referralTotal: i.referralTotal,
     subscribers: i.subscribers,
+    subscribersByType: i.subscribersByType,
     subscriberNewToday: i.subscriberNewToday,
     audienceTotal: i.audience?.total ?? null,
     audienceActiveTotal: i.audience?.activeTotal ?? null,

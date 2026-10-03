@@ -92,9 +92,9 @@ export interface DailySummaryData {
   // #827 Feature 1 — AI recovery-prediction accuracy aggregated across the durable incident:history
   // corpus (predicted vs actual). Absent/empty until the corpus accumulates resolved incidents.
   accuracy?: AccuracyStats | null
-  // Discord-only since #467 — Slack moved to native /feed RSS (no per-user webhook registered or proxied).
+  // Confirmed per-user subscriptions by channel type; `slack` is set from #1581 on.
   // #548 — newToday is the signed day-over-day delta of confirmed subscribers (null = no prior baseline).
-  webhookCounts?: { discord: number; newToday?: number | null }
+  webhookCounts?: { discord: number; slack?: number; newToday?: number | null }
   deliveryCounts?: { discord: number; failed: number } | null
   redditCount: number
   // #820 — Reddit source health: a marker (blocked / partially blocked / unreachable streak),
@@ -284,7 +284,9 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)
   }
   if (webhookCounts) {
-    lines.push(`🔗 **Active Discord Webhooks**: ${webhookCounts.discord}${formatSubscriberDelta(webhookCounts.newToday)}`)
+    lines.push(webhookCounts.slack === undefined
+      ? `🔗 **Active Discord Webhooks**: ${webhookCounts.discord}${formatSubscriberDelta(webhookCounts.newToday)}`
+      : `🔗 **Active Alert Webhooks**: ${webhookCounts.discord + webhookCounts.slack} (Discord ${webhookCounts.discord} · Slack ${webhookCounts.slack})${formatSubscriberDelta(webhookCounts.newToday)}`)
   }
   // Health outranks the count. `reddit:seen:*` keys live 24h, so a source that dies at noon still
   // shows a real non-zero count — and printing it would read as health on the very day detection
