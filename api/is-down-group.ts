@@ -36,6 +36,8 @@ interface MemberStatus {
   scoreConfidence?: string | null
   partialCount?: number
   incidentSourceStale?: boolean
+  probeConfirmed?: boolean
+  probeContradicted?: boolean
 }
 
 interface FamilyIncident {
@@ -216,7 +218,7 @@ function renderGroupPage(
   const desc = headline === 'operational'
     ? `No — every ${family.name} service AIWatch monitors is currently operational.`
     : headline === 'unknown'
-      ? `Unknown — AIWatch could not read the official status source for ${family.name}, so it cannot confirm the status either way.`
+      ? `Unknown — AIWatch cannot confirm the status of ${members.filter((m) => m.status === 'unknown').map((m) => m.name).join(', ')}.`
       : `${STATUS_LABEL[headline]} — see which ${family.name} service is affected and its live status.`
   const canonical = `https://ai-watch.dev/is-${family.slug}-down`
   // #1164 follow-up — the group page originally used the static site-wide og-intro.png, unlike every
@@ -263,11 +265,12 @@ function renderGroupPage(
     const measurements = [uptime, score].filter(Boolean).join(' · ')
     const checked = m.lastChecked ? `Last checked: ${timeAgo(m.lastChecked)}` : ''
     const historyNotice = m.incidentSourceStale ? 'Incident history unavailable' : ''
+    const basisNotice = m.incidentSourceStale && (m.probeConfirmed || m.probeContradicted) ? "Status from AIWatch's own checks" : ''
     return `
     <li class="member-row">
       <a href="/is-${esc(m.slug)}-down">
         <span class="member-emoji">${STATUS_EMOJI[m.status]}</span>
-        <span class="member-details"><span class="member-name">${esc(m.name)}</span>${measurements ? `<span class="member-measurements">${esc(measurements)}</span>` : ''}${checked ? `<span class="member-checked">${esc(checked)}</span>` : ''}${historyNotice ? `<span class="member-history-unavailable">${historyNotice}</span>` : ''}</span>
+        <span class="member-details"><span class="member-name">${esc(m.name)}</span>${measurements ? `<span class="member-measurements">${esc(measurements)}</span>` : ''}${checked ? `<span class="member-checked">${esc(checked)}</span>` : ''}${basisNotice ? `<span class="member-history-unavailable">${basisNotice}</span>` : ''}${historyNotice ? `<span class="member-history-unavailable">${historyNotice}</span>` : ''}</span>
         <span class="member-status">${STATUS_LABEL[m.status]}</span>
       </a>
     </li>`
@@ -325,6 +328,13 @@ function renderGroupPage(
   // #1164 review — recent incidents give the "everything's operational" case actual content instead
   // of reading as empty (a clean status still has a history worth showing), and give a currently-bad
   // headline supporting evidence beyond the bare status word.
+  const unreadableMembers = members.filter((m) => m.incidentSourceStale || m.status === 'unknown')
+  const unreadableNote = unreadableMembers.length > 0
+    ? `<p class="incidents-unavailable">&#x26A0;&#xFE0F; Incident history unavailable for ${unreadableMembers.map((m) => esc(m.name)).join(', ')}.</p>`
+    : ''
+  const noIncidents = unreadableMembers.length === 0
+    ? `<p class="no-incidents">No incidents reported for any ${esc(family.name)} service in the last ${RECENT_INCIDENTS_DAYS} days.</p>`
+    : ''
   const incidentSection = incidents.length > 0
     ? `<h2>Recent Incidents <span class="incidents-window">(last ${RECENT_INCIDENTS_DAYS} days)</span></h2>
 <ul class="incident-list">${incidents.map((inc) => `
@@ -344,9 +354,9 @@ function renderGroupPage(
                  also moot post-recovery, so altRecommendation is withheld here too, not just the ETA. */
           : `${inc.aiEstimatedRecovery ? `<p class="incident-ai-eta">Estimated recovery: ${esc(inc.aiEstimatedRecovery)}</p>` : ''}${altRecommendation}`}
       </div>` : ''}
-    </li>`).join('')}</ul>`
+    </li>`).join('')}</ul>${unreadableNote}`
     : `<h2>Recent Incidents <span class="incidents-window">(last ${RECENT_INCIDENTS_DAYS} days)</span></h2>
-<p class="no-incidents">No incidents reported for any ${esc(family.name)} service in the last ${RECENT_INCIDENTS_DAYS} days.</p>`
+${noIncidents}${unreadableNote}`
 
   // Community reports are shown only for a member whose official source independently indicates a
   // problem (the handler applies that gate before fetching). Never turn visitor submissions alone
@@ -485,7 +495,8 @@ ${consentInitScript()}
   .member-row a { display:flex; align-items:center; gap:10px; padding:14px 16px; border:1px solid #1f2937; border-radius:8px; margin-bottom:8px; text-decoration:none; color:inherit; }
   .member-details { display:flex; flex:1; flex-direction:column; gap:2px; min-width:0; }
   .member-name { font-weight:600; }
-  .member-measurements, .member-checked, .member-history-unavailable { color:#9ca3af; font-size:0.8rem; }
+  .member-measurements, .member-checked { color:#9ca3af; font-size:0.8rem; }
+  .member-history-unavailable { color:#d29922; font-size:0.8rem; }
   .member-status { color:#9ca3af; font-size:0.9rem; }
   .incident-row { border:1px solid #1f2937; border-radius:8px; margin-bottom:8px; overflow:hidden; }
   .incident-header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 16px; }
@@ -495,6 +506,7 @@ ${consentInitScript()}
   .incident-title { flex:1; }
   .incident-meta { color:#9ca3af; font-size:0.85rem; width:100%; }
   .no-incidents { color:#9ca3af; }
+  .incidents-unavailable { color:#d29922; background:#0d1117; border-left:3px solid #d29922; border-radius:6px; padding:8px 12px; margin:8px 0; font-size:0.9rem; }
   .community-reports { padding:12px 16px; border:1px solid #1f2937; border-radius:8px; background:#161b22; }
   .community-reports > p { margin:0 0 12px; color:#9ca3af; font-size:.8rem; line-height:1.5; }
   .community-report { display:flex; flex-wrap:wrap; gap:4px 8px; padding:10px 0; border-top:1px solid #1f2937; font-size:.9rem; }
@@ -720,6 +732,8 @@ export default async function handler(req: Request) {
             scoreConfidence?: string | null
             partialCount?: number
             incidentSourceStale?: boolean
+            probeConfirmed?: boolean
+            probeContradicted?: boolean
             incidents?: Array<{
               id: string; title: string; status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
               startedAt: string; resolvedAt?: string | null; duration: string | null
@@ -740,6 +754,7 @@ export default async function handler(req: Request) {
             id, name: s.name, slug, status: normalizeStatus(s.status), lastChecked: s.lastChecked,
             uptime30d: s.uptime30d, aiwatchScore: s.aiwatchScore, scoreGrade: s.scoreGrade, scoreConfidence: s.scoreConfidence, partialCount: s.partialCount,
             incidentSourceStale: s.incidentSourceStale,
+            probeConfirmed: s.probeConfirmed, probeContradicted: s.probeContradicted,
           }
         })
         // #1164 review — same /api/status/cached payload already carries EVERY monitored service (not
