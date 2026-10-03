@@ -28,6 +28,7 @@ describe('classifyReferrer (#842-B)', () => {
     expect(classifyReferrer('rss', '')).toBe('feed')
     expect(classifyReferrer('feed', '')).toBe('feed')
     expect(classifyReferrer('discord', '')).toBe('feed') // #936 — Discord alert = our notification feed
+    expect(classifyReferrer('slack', '')).toBe('feed') // #1581 — Add-to-Slack alert, same notification feed
   })
   it('classifies our own client surfaces (extension/statusline) as owned (#936)', () => {
     expect(classifyReferrer('extension', '')).toBe('owned')

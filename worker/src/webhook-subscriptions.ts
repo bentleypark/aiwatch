@@ -17,6 +17,7 @@
 // removed the old browser relay in the same release so the two paths never double-send.
 
 import { kvPut, kvDel, isAllowedAlertWebhook, appendUtm } from './utils'
+import { postSlackAlert, classifySlackDelivery } from './slack-message'
 import { isDownUrl } from './rss'
 import { FAMILY_OF_SERVICE } from './alerts'
 import type { AlertFeedEntry, AlertKind } from './alert-feed'
@@ -43,12 +44,18 @@ export interface PendingSubscription {
 
 /** A confirmed subscription — permanent (no TTL); pruned only on user unsubscribe or dead-webhook
  *  detection. `failCount` tracks consecutive delivery failures for the prune rule. */
+export type SubscriptionType = 'discord' | 'slack'
+
 export interface ConfirmedSubscription {
   encUrl: string
   filters: SubscriptionFilters
-  type: 'discord'
+  type: SubscriptionType
   registeredAt: string
   failCount: number
+  /** #1581 — Slack only: SHA-256 of the channel-scoped manage token (index key `slack:manage:{this}`). */
+  manageTokenHash?: string
+  /** #1581 — Slack only: SHA-256 of `{teamId}:{channelId}` (index key `slack:chan:{this}`). */
+  channelKey?: string
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -57,6 +64,8 @@ export const PENDING_PREFIX = 'webhook:pending:'
 export const SUB_PREFIX = 'webhook:sub:'
 export const SENT_PREFIX = 'webhook:sent:' // webhook:sent:{hash}:{alertKey} — per-sub delivery dedup
 export const CONFIRM_BUDGET_PREFIX = 'webhook:confirm:budget:' // hourly global confirm-message cap
+export const SLACK_MANAGE_PREFIX = 'slack:manage:' // slack:manage:{sha256(token)} → sub hash (#1581)
+export const SLACK_CHANNEL_PREFIX = 'slack:chan:' // slack:chan:{sha256(teamId:channelId)} → sub hash (#1581)
 
 export const PENDING_TTL_S = 900 // 15 min — window to read the code in Discord and click confirm
 export const SENT_TTL_S = 7200 // 2h — per-sub dedup across overlapping crons (mirrors the 2h status-alert dedup TTL)
@@ -263,6 +272,14 @@ export async function deleteConfirmed(kv: KVNamespace, hash: string): Promise<vo
   await kvDel(kv, `${SUB_PREFIX}${hash}`)
 }
 
+/** Delete a confirmed sub together with its Slack index keys (#1581), so a removed subscription's
+ *  manage link stops resolving and its channel can be re-installed cleanly. */
+export async function deleteSubscription(kv: KVNamespace, hash: string, sub: ConfirmedSubscription | null): Promise<void> {
+  await deleteConfirmed(kv, hash)
+  if (sub?.manageTokenHash) await kvDel(kv, `${SLACK_MANAGE_PREFIX}${sub.manageTokenHash}`)
+  if (sub?.channelKey) await kvDel(kv, `${SLACK_CHANNEL_PREFIX}${sub.channelKey}`)
+}
+
 /** A real subscriber key is `webhook:sub:{sha256hex}` — 64 lowercase hex. Other keys that share the
  *  SUB_PREFIX — notably the daily `webhook:sub:count:{date}` snapshot (7d TTL) — must NOT be counted
  *  as subscribers (#1011): the prefix-only list swept them in, inflating the count to `real + ~7`
@@ -276,19 +293,32 @@ export function isSubscriberHash(hashPart: string): boolean {
  *  never assume a single call; #486 acceptance criterion). Returns the bare hashes (key minus prefix),
  *  filtered to real subscriber hashes so the `webhook:sub:count:{date}` snapshots don't leak in (#1011). */
 export async function listConfirmedHashes(kv: KVNamespace): Promise<string[]> {
-  const hashes: string[] = []
+  return (await listConfirmedSubs(kv)).map((s) => s.hash)
+}
+
+/** #1581 — the same listing with each sub's type, read from the KV list metadata `putConfirmed`
+ *  writes (no per-key read). Anything not typed `slack` is counted as Discord. */
+export async function listConfirmedSubs(kv: KVNamespace): Promise<{ hash: string; type: SubscriptionType }[]> {
+  const subs: { hash: string; type: SubscriptionType }[] = []
   let cursor: string | undefined
   for (;;) {
-    const res = await kv.list({ prefix: SUB_PREFIX, cursor })
+    const res = await kv.list<{ type?: string }>({ prefix: SUB_PREFIX, cursor })
     for (const k of res.keys) {
       const hash = k.name.slice(SUB_PREFIX.length)
-      if (isSubscriberHash(hash)) hashes.push(hash)
+      if (isSubscriberHash(hash)) subs.push({ hash, type: k.metadata?.type === 'slack' ? 'slack' : 'discord' })
     }
     if (res.list_complete) break
     cursor = res.cursor
     if (!cursor) break
   }
-  return hashes
+  return subs
+}
+
+/** #1581 — confirmed-subscription count per channel type, for the growth series. */
+export function countByType(subs: { type: SubscriptionType }[]): Record<SubscriptionType, number> {
+  const counts: Record<SubscriptionType, number> = { discord: 0, slack: 0 }
+  for (const s of subs) counts[s.type]++
+  return counts
 }
 
 // ── Subscribe / confirm / update / unsubscribe (pure-ish orchestration) ──────
@@ -395,7 +425,7 @@ export async function updateFilters(kv: KVNamespace, hash: string, rawFilters: u
 /** Unsubscribe = immediate complete deletion (the privacy deletion path). Also clears any pending. */
 export async function unsubscribe(kv: KVNamespace, hash: string): Promise<UpdateResult> {
   if (!/^[a-f0-9]{64}$/.test(hash)) return { ok: false, status: 400, error: 'Invalid request' }
-  await deleteConfirmed(kv, hash)
+  await deleteSubscription(kv, hash, await readConfirmed(kv, hash))
   await deletePending(kv, hash)
   return { ok: true }
 }
@@ -417,7 +447,7 @@ export interface DeliveryStats {
  *   - 410/404 → prune immediately (webhook deleted / gone — unrecoverable)
  *   - 2xx     → success (reset failCount)
  *   - else (429/5xx/network) → retry; increment failCount; prune at MAX_FAIL_COUNT */
-export type DeliveryOutcome = 'success' | 'prune' | 'retry'
+export type DeliveryOutcome = 'success' | 'prune' | 'retry' | 'payload-error'
 export function classifyDelivery(status: number | null): DeliveryOutcome {
   if (status === 410 || status === 404) return 'prune'
   if (status !== null && status >= 200 && status < 300) return 'success'
@@ -439,7 +469,7 @@ export function classifyDelivery(status: number | null): DeliveryOutcome {
 // #936 — the operator View link is now UTM-tagged with the query BEFORE the fragment
 // (`ai-watch.dev/?utm_source=discord…#claude`), so the pattern tolerates an optional query segment.
 const DASHBOARD_HASH_LINK_RE = /https:\/\/ai-watch\.dev\/(?:\?[^#\s)]*)?#([a-z0-9]+)/g
-export function toPerUserEntry(entry: AlertFeedEntry): AlertFeedEntry {
+export function toPerUserEntry(entry: AlertFeedEntry, source: 'discord' | 'slack' = 'discord'): AlertFeedEntry {
   const desc = entry.embed.description
   if (!desc) return entry
   // #1164 — a shared multi-surface incident (2+ of `entry.svcIds` in the SAME family — the exact
@@ -455,7 +485,7 @@ export function toPerUserEntry(entry: AlertFeedEntry): AlertFeedEntry {
   // Rewrite to the is-down (or group) page AND re-tag it (discord/notification) so per-user clicks
   // attribute the same as the operator's — linkFor()/isDownUrl() drop the operator's query, appendUtm
   // re-adds ours.
-  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => appendUtm(linkFor(id), 'discord'))
+  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => appendUtm(linkFor(id), source))
   return rewritten === desc ? entry : { ...entry, embed: { ...entry.embed, description: rewritten } }
 }
 
@@ -471,6 +501,7 @@ export async function deliverToSubscribers(
   feed: AlertFeedEntry[],
   postEmbed: (url: string, entry: AlertFeedEntry) => Promise<number | null>,
   now: number,
+  fetchFn: typeof fetch = fetch,
 ): Promise<DeliveryStats> {
   const stats: DeliveryStats = { attempted: 0, delivered: 0, pruned: 0, failed: 0, rejected: 0 }
   if (!isValidEncKey(encKey) || feed.length === 0) return stats
@@ -483,7 +514,7 @@ export async function deliverToSubscribers(
       const url = await decryptUrl(sub.encUrl, encKey)
       if (!url) {
         // Undecryptable row (key rotated away / corrupt) — prune so it can't wedge the loop forever.
-        await deleteConfirmed(kv, hash)
+        await deleteSubscription(kv, hash, sub)
         stats.pruned++
         return
       }
@@ -495,10 +526,20 @@ export async function deliverToSubscribers(
         if (already) continue
         stats.attempted++
         // #726 — general subscribers get the is-down link, not the operator dashboard link.
-        const status = await postEmbed(url, toPerUserEntry(entry)).catch(() => null)
-        const outcome = classifyDelivery(status)
+        let outcome: DeliveryOutcome
+        if (sub.type === 'slack') {
+          const res = await postSlackAlert(fetchFn, url, toPerUserEntry(entry, 'slack'))
+          outcome = classifySlackDelivery(res.status, res.body)
+          if (outcome === 'payload-error') {
+            stats.failed++
+            console.error(`[webhook-deliver] slack rejected our payload (${res.status} ${res.body}) for ${entry.key} — subscription kept`)
+            continue
+          }
+        } else {
+          outcome = classifyDelivery(await postEmbed(url, toPerUserEntry(entry)).catch(() => null))
+        }
         if (outcome === 'prune') {
-          await deleteConfirmed(kv, hash)
+          await deleteSubscription(kv, hash, sub)
           stats.pruned++
           return // webhook is gone — stop delivering to it this cycle
         }
@@ -514,7 +555,7 @@ export async function deliverToSubscribers(
       if (sawFailure) {
         const next = (sub.failCount ?? 0) + 1
         if (next >= MAX_FAIL_COUNT) {
-          await deleteConfirmed(kv, hash)
+          await deleteSubscription(kv, hash, sub)
           stats.pruned++
         } else {
           sub.failCount = next

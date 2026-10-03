@@ -34,7 +34,8 @@ import { buildUpstreamLinks } from './upstream-link'
 import type { UpstreamCandidate } from './upstream-feed'
 import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge, refreshStatusCacheAfterCronFetch, shouldPersistSnapshot } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
-import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
+import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedSubs, countByType, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
+import { handleSlackOAuthRoute, handleSlackManageRequest } from './slack'
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest, isStatuslinePreset, renderStatuslineBrief, buildStatuslineDownResponse, buildStatuslinePresetResponse, STATUSLINE_BRIEF_UNKNOWN } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
@@ -62,6 +63,13 @@ interface Env {
   // the production site when unset; override in worker/.dev.vars (e.g. http://localhost:3333) to run
   // the subscribe→confirm click-through end-to-end against `wrangler dev` + `vercel dev`.
   CONFIRM_BASE_URL?: string
+  // #1581: "Add to Slack" OAuth app credentials (`wrangler secret put`). Either absent → the install
+  // route redirects to the site's unavailable result instead of starting an OAuth flow.
+  SLACK_CLIENT_ID?: string
+  SLACK_CLIENT_SECRET?: string
+  // #1581: OAuth redirect URI registered on the Slack app. Defaults to this worker's own
+  // `/api/slack/oauth`; override in worker/.dev.vars with an HTTPS tunnel URL for local testing.
+  SLACK_REDIRECT_URI?: string
   // #299: operator-only shared secret for POST /api/admin/analyze. Set via
   // `wrangler secret put ADMIN_API_KEY`. Separate from ANTHROPIC_API_KEY so it
   // can be rotated independently; absent secret → endpoint always 401.
@@ -4174,14 +4182,18 @@ export default {
             // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
             // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
             // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
-            let webhookCounts: { discord: number; newToday: number | null } = { discord: 0, newToday: null }
+            let webhookCounts: { discord: number; slack?: number; newToday: number | null } = { discord: 0, newToday: null }
             // #986 — `webhookCounts.discord` stays 0 when the listing throws, which the Discord report can
             // live with but the growth series cannot: 0 subscribers and "we could not count" are different
             // days. Capture the snapshot separately so a failed read stays null in the series.
             let subscribersSnapshot: number | null = null
+            let subscribersByType: { discord: number; slack: number } | null = null
             try {
-              const hashes = await listConfirmedHashes(env.STATUS_CACHE)
-              webhookCounts.discord = hashes.length
+              const subs = await listConfirmedSubs(env.STATUS_CACHE)
+              const hashes = subs.map((sub) => sub.hash)
+              subscribersByType = countByType(subs)
+              webhookCounts.discord = subscribersByType.discord
+              webhookCounts.slack = subscribersByType.slack
               subscribersSnapshot = hashes.length
               // #548 — new-today delta: diff against yesterday's snapshot, then persist today's for
               // tomorrow's diff (7d TTL so a missed day still leaves a baseline). Consent-free signal.
@@ -4638,6 +4650,7 @@ export default {
                 alertCounts,
                 referralTotal: referralReadFailed ? null : (referralCounts?.total ?? 0),
                 subscribers: subscribersSnapshot,
+                subscribersByType,
                 subscriberNewToday: webhookCounts.newToday,
                 audience,
                 outage: outageWindow,
@@ -5033,6 +5046,31 @@ export default {
     // question months later.
     if (request.method === 'GET' && url.pathname === '/api/admin/withdrawals') {
       return handleAdminWithdrawals(request, env, cors)
+    }
+
+    // #1581 — "Add to Slack": GET /api/slack/install starts OAuth (signed state + installer cookie, no
+    // KV write), GET /api/slack/oauth stores the channel's webhook as a Slack subscription and posts the
+    // welcome message carrying the manage link, POST /api/slack/manage is that link's backend.
+    if (request.method === 'GET' && (url.pathname === '/api/slack/install' || url.pathname === '/api/slack/oauth')) {
+      return handleSlackOAuthRoute(request, {
+        kv: env.STATUS_CACHE,
+        encKey: env.WEBHOOK_ENC_KEY,
+        clientId: env.SLACK_CLIENT_ID,
+        clientSecret: env.SLACK_CLIENT_SECRET,
+        redirectUri: env.SLACK_REDIRECT_URI,
+        site: env.CONFIRM_BASE_URL || 'https://ai-watch.dev',
+        fetchFn: fetch,
+        nowMs: Date.now(),
+      })
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/slack/manage') {
+      const cors = corsHeaders(request.headers.get('Origin'), env.ALLOWED_ORIGIN)
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+      if (overRateLimit(webhookConfirmRate, ip, 20, Date.now())) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+      return handleSlackManageRequest(request, env.STATUS_CACHE, cors)
     }
 
     // #486 — server-side per-user Discord subscription endpoints. The browser POSTs the raw URL +

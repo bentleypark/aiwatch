@@ -190,7 +190,7 @@ export function classifyReferrer(utmSource: string | undefined, refHost: string 
   const utm = (utmSource || '').toLowerCase()
   const host = (refHost || '').toLowerCase()
   if (utm === 'x' || utm === 'twitter' || X_HOSTS.test(host)) return 'x'
-  if (utm === 'rss' || utm === 'feed' || utm === 'discord') return 'feed' // #936 — Discord alert = our notification feed
+  if (utm === 'rss' || utm === 'feed' || utm === 'discord' || utm === 'slack') return 'feed' // #936 — Discord alert = our notification feed; #1581 Slack too
   if (utm === 'extension' || utm === 'statusline') return 'owned' // #936 — our own client surfaces
   if (utm === 'claude-code') return 'plugin' // #920 — Claude Code plugin is-down links
   if (SELF_HOSTS.test(host)) return 'owned' // #1055 — our own cross-links are not inbound traffic

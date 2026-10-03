@@ -1218,13 +1218,14 @@ export function appendStatusHint(url: string, hint: string): string {
 // groups the outage-driven share/alert channels under one campaign; the always-on statusline nav link
 // carries no outage campaign (it's not incident-scoped). The Chrome extension tags its own links in
 // plain JS (extension/config.js) — it can't import worker code.
-type UtmSource = 'rss' | 'reddit' | 'bsky' | 'hn' | 'discord' | 'statusline'
+type UtmSource = 'rss' | 'reddit' | 'bsky' | 'hn' | 'discord' | 'statusline' | 'slack'
 const UTM_CONFIG: Record<UtmSource, { medium: string; campaign?: string }> = {
   rss: { medium: 'feed', campaign: 'outage' },
   reddit: { medium: 'social', campaign: 'outage' },
   bsky: { medium: 'social', campaign: 'outage' },
   hn: { medium: 'social', campaign: 'outage' },
   discord: { medium: 'notification', campaign: 'outage' },
+  slack: { medium: 'notification', campaign: 'outage' }, // #1581 — Add-to-Slack subscriber alerts
   statusline: { medium: 'referral' },
 }
 export function appendUtm(url: string, source: UtmSource): string {
