@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderDelegatedListeners, resolveBeaconSvcId, buildMetaDescription, renderPage, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
+import { renderDelegatedListeners, resolveBeaconSvcId, buildMetaDescription, renderPage, alertCtaTitle, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
 import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/utils/predictionAccuracy'
 import { getSEOContent } from '../_is-down/seo-content'
 import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
@@ -52,6 +52,22 @@ describe('renderDelegatedListeners integrity (#842-B)', () => {
     expect(renderDelegatedListeners('claude', true)).toContain('svc: "claude"')
     expect(renderDelegatedListeners('claude', true)).toContain('active: true')
     expect(renderDelegatedListeners('openai', false)).toContain('active: false')
+  })
+})
+
+describe('alertCtaTitle', () => {
+  it('keeps the whole-source wording for an unknown status when no members are named', () => {
+    expect(alertCtaTitle('Claude', 'unknown')).toBe("AIWatch can't read Claude's status page right now — get notified when it's readable again.")
+  })
+
+  it('names the unknown members for an unknown status', () => {
+    expect(alertCtaTitle('Claude', 'unknown', 'claude.ai')).toBe("AIWatch can't confirm the status of claude.ai right now — get notified when it's readable again.")
+  })
+
+  it('ignores the unknown members for any other status', () => {
+    expect(alertCtaTitle('Claude', 'down', 'claude.ai')).toBe(alertCtaTitle('Claude', 'down'))
+    expect(alertCtaTitle('Claude', 'degraded', 'claude.ai')).toBe(alertCtaTitle('Claude', 'degraded'))
+    expect(alertCtaTitle('Claude', 'operational', 'claude.ai')).toBe(alertCtaTitle('Claude', 'operational'))
   })
 })
 
@@ -269,6 +285,8 @@ describe('the whole is-down page agrees when the source is unreadable (#1004)', 
   // could be deleted with the whole suite green.
   it('...and the same holds for the raw `unknown` status the worker now publishes', () => {
     const html = render({ ...base, status: 'unknown', sourceUnknown: true })
+    const ctaTitle = (html.match(/<p class="cta-title">([\s\S]*?)<\/p>/)?.[1] ?? '').replace(/&#x27;|&#39;/g, "'")
+    expect(ctaTitle).toBe(`AIWatch can't read ${seo.displayName}'s status page right now — get notified when it's readable again.`)
     expect(html).toContain('Status Unknown')
     expect(html).toContain('status page right now')
     expect(html).not.toContain('is having problems right now')
