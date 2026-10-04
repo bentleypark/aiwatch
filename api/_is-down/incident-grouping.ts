@@ -41,12 +41,10 @@ export function isGenericTitle(title: string | null | undefined): boolean {
 
 // Latest-activity timestamp in ms for sort ordering — resolved incidents prefer
 // `resolvedAt` so a recently-resolved entry outranks an older resolved one,
-// matching `getLatestActivity` in `src/utils/incidentSort.js`. SSR's
-// `GroupingIncident` shape intentionally omits the `timeline` field, so the
-// active branch falls straight to `startedAt`. The SPA's timeline-based
-// promotion ("last timeline entry post-dates startedAt → use that") therefore
-// has no SSR analogue by design — do NOT add it here without also extending
-// the SSR payload contract. Used as the cross-row sort key in `groupIncidents`
+// matching `getLatestActivity` in `src/utils/incidentSort.js`, except that the
+// active branch uses `startedAt` only — the SPA's timeline-based promotion
+// ("last timeline entry post-dates startedAt → use that") is not mirrored here.
+// Used as the cross-row sort key in `groupIncidents`
 // so the visible Incidents / ServiceDetails / Is X Down order matches Overview
 // (#411 follow-up to #406).
 function getLatestActivityMs(inc: { status: string; startedAt: string; resolvedAt?: string | null }): number {
@@ -107,6 +105,7 @@ export interface GroupingIncident {
   // component-derived rather than a human severity call. Optional because only opted-in services
   // (ServiceConfig.autoMonitorTitles) emit it.
   autoMonitor?: boolean
+  timeline?: Array<{ stage: string; text: string | null; at: string }>
   // #1292 — worker-synthesized from a per-day `status_history` bucket. Declared, not merely present at
   // runtime: an undeclared optional makes TypeScript's weak-type check prove the guards below can never
   // fire. Kept in lockstep with `src/utils/incidentGrouping.js`.
