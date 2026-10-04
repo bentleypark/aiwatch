@@ -128,6 +128,17 @@ describe('is-down-group.ts', () => {
     expect(html).toContain('/is-claude-code-down')
   })
 
+  it('#1586 — keeps current canonical member labels when the Worker payload still carries a former name', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'xai', name: 'xAI API', status: 'operational' },
+      { id: 'grok', name: 'Grok', status: 'operational' },
+      { id: 'cursor', name: 'Cursor', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('xai'))).text()
+    expect(html).toContain('SpaceXAI API')
+    expect(html).not.toContain('>xAI API<')
+  })
+
   it('renders member measurements and a deduplicated 30-day family summary from the cached payload', async () => {
     const recent = new Date(Date.now() - 60 * 60_000).toISOString()
     const earlier = new Date(Date.now() - 14 * 86_400_000).toISOString()

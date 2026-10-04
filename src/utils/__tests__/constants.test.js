@@ -334,9 +334,9 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
     const services = [
       v('mistral', 'Mistral API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
-      v('xai', 'xAI API', 60, 'medium'),
+      v('xai', 'SpaceXAI API', 60, 'medium'),
     ]
-    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'xAI API'])
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'SpaceXAI API'])
   })
 
   it('a lone medium candidate is NOT guaranteed a slot once high outnumbers it 3-to-1 or more', () => {
@@ -344,7 +344,7 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
       v('mistral', 'Mistral API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
       v('groq', 'Groq Cloud', 85, 'high'),
-      v('xai', 'xAI API', 60, 'medium'),
+      v('xai', 'SpaceXAI API', 60, 'medium'),
     ]
     expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
   })

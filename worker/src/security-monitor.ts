@@ -33,7 +33,7 @@ export interface SecurityAlert {
 const HN_AI_KEYWORDS = [
   'openai', 'anthropic', 'claude', 'chatgpt', 'gemini', 'mistral',
   'cohere', 'deepseek', 'huggingface', 'hugging face', 'replicate',
-  'elevenlabs', 'cursor', 'copilot', 'windsurf', 'xai', 'grok',
+  'elevenlabs', 'cursor', 'copilot', 'windsurf', 'xai', 'x.ai', 'spacexai', 'grok',
 ]
 
 // Security concepts split by confidence (#892). STRONG signals are self-sufficient
@@ -482,7 +482,7 @@ export const NVD_FIRST_PARTY: Array<{
   { service: 'ChatGPT',        strong: ['chatgpt desktop', 'chatgpt atlas', 'chatgpt for windows', 'chatgpt for macos', 'chatgpt app'], weak: ['chatgpt'], context: ['openai'] },
   { service: 'Azure OpenAI',   strong: ['azure openai'], weak: [], context: [] },
   { service: 'Gemini',         strong: ['gemini cli', 'gemini code assist'], weak: ['gemini'], context: ['google'] },
-  { service: 'Grok',           strong: [], weak: ['grok'], context: ['xai', 'x.ai'] },
+  { service: 'Grok',           strong: [], weak: ['grok'], context: ['spacexai', 'xai', 'x.ai'] },
   { service: 'Perplexity',     strong: ['perplexity comet', 'comet browser'], weak: ['perplexity'], context: ['perplexity ai', 'perplexity.ai'] },
 ]
 

@@ -261,9 +261,9 @@ export const SERVICES: ServiceConfig[] = [
   // same regime every other incident.io service here already runs under — not a perplexity-specific
   // concession.
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: 'https://status.perplexity.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.perplexity.com/incidents', incidentIoComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6', '01M2R6E5FPASTEW3A3V8TSYHJ0'], displayComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6', '01M2R6E5FPASTEW3A3V8TSYHJ0'] },
-  // #1165 — renamed 'xAI (Grok)' → 'xAI API': now that Grok's consumer app is its own service
+  // #1165/#1586 — renamed 'xAI (Grok)' → 'SpaceXAI API': now that Grok's consumer app is its own service
   // ('grok', in the Apps section below), "(Grok)" on this card would misname the API surface.
-  { id: 'xai', name: 'xAI API', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
+  { id: 'xai', name: 'SpaceXAI API', provider: 'SpaceXAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from
   // the SAME IP succeeds where curl/fetch are reset, so it's a JA3/bot wall, NOT an IP block).
@@ -558,7 +558,7 @@ export const SERVICES: ServiceConfig[] = [
   // stripped title within a 30-min window, which is the narrower rule #1165's objection actually
   // pointed at. The `incidentKeywords` filter above is why its merged title must keep a `Grok (`
   // marker; see the title note in `mergeSurfaceGroup`.
-  { id: 'grok', name: 'Grok', provider: 'xAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok ('], addedAt: '2026-07-26' },
+  { id: 'grok', name: 'Grok', provider: 'SpaceXAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok ('], addedAt: '2026-07-26' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the

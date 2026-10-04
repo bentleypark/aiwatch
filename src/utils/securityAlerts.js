@@ -44,6 +44,18 @@ export function serviceIdForAlertLabel(label) {
   return OSV_SERVICE_MAP[label] ?? NVD_SERVICE_MAP[label] ?? null
 }
 
+// A company may update its public name while security reports continue to use the
+// former brand and its still-live domain. Keep this deliberately small and keyed
+// by the display `provider` value: it affects only provider-only HN matching.
+const PROVIDER_MATCH_TERMS = {
+  SpaceXAI: ['spacexai', 'xai', 'x.ai'],
+}
+
+function providerMentioned(titleLC, provider) {
+  const terms = PROVIDER_MATCH_TERMS[provider] ?? [provider]
+  return terms.some((term) => titleLC.includes(term.toLowerCase()))
+}
+
 // #949 — the card labels every finding by WHAT it is about, not by which feed it came from:
 // a CVE in the product itself (NVD) reads distinctly from a CVE in an SDK you install (OSV)
 // or from community news (HN). Naming the *source* ("NVD"/"first-party") was rejected — the
@@ -81,7 +93,7 @@ export function securityAlertMatchesService(alert, service, allServices) {
   const nameLC = service.name?.toLowerCase() ?? ''
   const providerLC = service.provider?.toLowerCase() ?? ''
   if (nameLC && titleLC.includes(nameLC)) return true
-  if (providerLC && titleLC.includes(providerLC)) {
+  if (providerLC && providerMentioned(titleLC, service.provider)) {
     return service.id === primaryServiceIdForProvider(service.provider, allServices)
   }
   return false
@@ -107,7 +119,7 @@ export function tagServiceForAlert(alert, allServices) {
   if (byName) return byName
   const byProvider = (allServices ?? []).find((s) => {
     const p = s.provider?.toLowerCase() ?? ''
-    return p && titleLC.includes(p)
+    return p && providerMentioned(titleLC, s.provider)
   })
   if (!byProvider) return null
   const primaryId = primaryServiceIdForProvider(byProvider.provider, allServices)

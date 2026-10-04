@@ -270,31 +270,31 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Perplexity status?', a: 'You can check Perplexity status on this page, on the official Perplexity status page at status.perplexity.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
-  // #1165 — key renamed 'xai' → 'xai-api' (id unchanged: 'xai'): /is-xai-down is now the xAI/Grok
+  // #1165 — key renamed 'xai' → 'xai-api' (id unchanged: 'xai'): /is-xai-down is now the SpaceXAI/Grok
   // family group page, mirroring #1164's claude/openai repurposing, now that Grok's consumer app
   // (iOS/Android/Web) is tracked separately at 'grok' below.
   'xai-api': {
-    displayName: 'xAI API',
-    description: 'xAI is the AI company founded by Elon Musk, providing the Grok family of language models via a developer API. This page tracks the API used by developers; the consumer Grok app (iOS/Android/Web) is monitored separately.',
-    insight: 'xAI publishes incidents via RSS feed rather than a typical Statuspage interface, so AIWatch parses a different format. xAI is a relatively new entrant — its incident history is shorter than established providers, and probe-based response times are tracked across multiple regions.',
-    whenDown: 'When the xAI API is down, applications and integrations using Grok models for real-time data analysis or chat will fail. The consumer Grok app may still be operational even during an API outage, since the two surfaces can fail independently.',
+    displayName: 'SpaceXAI API',
+    description: 'SpaceXAI provides the Grok family of language models through a developer API. This page tracks the API used by developers; the consumer Grok app (iOS/Android/Web) is monitored separately.',
+    insight: 'SpaceXAI publishes incidents through its status feed rather than a typical Statuspage interface, so AIWatch parses a different format. Probe-based response times are tracked across multiple regions.',
+    whenDown: 'When the SpaceXAI API is down, applications and integrations using Grok models for real-time data analysis or chat will fail. The consumer Grok app may still be operational even during an API outage, since the two surfaces can fail independently.',
     faqs: [
-      { q: 'Is the xAI Grok API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the xAI API every 5 minutes and shows real-time operational status.' },
+      { q: 'Is the SpaceXAI Grok API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the SpaceXAI API every 5 minutes and shows real-time operational status.' },
       { q: 'Is this the same as the Grok app?', a: 'No. This page tracks the developer API (api.x.ai). The consumer Grok app (iOS/Android/Web) has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
-      { q: 'How do I check xAI API status?', a: 'You can check xAI status on this page, on the official xAI status page at status.x.ai, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to the xAI API?', a: 'For general LLM API, OpenAI, Claude, or Gemini are mature alternatives. None match Grok\'s real-time X integration, but AIWatch shows current availability for each.' },
+      { q: 'How do I check SpaceXAI API status?', a: 'You can check SpaceXAI status on this page, on the official SpaceXAI status page at status.x.ai, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'What are alternatives to the SpaceXAI API?', a: 'For general LLM API, OpenAI, Claude, or Gemini are mature alternatives. None match Grok\'s real-time X integration, but AIWatch shows current availability for each.' },
     ],
   },
-  // Grok (#1165) — xAI's consumer app (iOS/Android/Web), the api-vs-app split mirror of DeepSeek
+  // Grok (#1165) — SpaceXAI's consumer app (iOS/Android/Web), the api-vs-app split mirror of DeepSeek
   // API↔DeepSeek App ('deepseek-app' below).
   grok: {
     displayName: 'Grok',
-    description: 'Grok is xAI\'s consumer AI assistant — the chat experience on grok.com and the "Grok" mobile apps on iOS and Android. It is distinct from the xAI developer API; AIWatch tracks the app surfaces here and the API separately.',
+    description: 'Grok is SpaceXAI\'s consumer AI assistant — the chat experience on grok.com and the "Grok" mobile apps on iOS and Android. It is distinct from the SpaceXAI developer API; AIWatch tracks the app surfaces here and the API separately.',
     insight: 'The official status page tags incidents by affected surface, and AIWatch scopes this page to the app surfaces — so an app-only incident shows here even when the developer API stays healthy, and vice versa.',
-    whenDown: 'When Grok is down, users cannot start or continue conversations in the app or on grok.com. The iOS, Android, and Web clients can fail independently or together depending on the cause; the xAI API may still be operational for developers.',
+    whenDown: 'When Grok is down, users cannot start or continue conversations in the app or on grok.com. The iOS, Android, and Web clients can fail independently or together depending on the cause; the SpaceXAI API may still be operational for developers.',
     faqs: [
       { q: 'Is Grok down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Grok\'s app surfaces and shows real-time operational status from the official status feed.' },
-      { q: 'Is this the same as the xAI API?', a: 'No. This page tracks Grok\'s app surfaces. The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
+      { q: 'Is this the same as the SpaceXAI API?', a: 'No. This page tracks Grok\'s app surfaces. The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
       { q: 'Why is Grok not responding?', a: 'Grok may be experiencing high traffic, a backend incident, or maintenance affecting one or more of its app surfaces. Check this page for current status and recent incident history.' },
       { q: 'What are alternatives to Grok?', a: 'When Grok is down, ChatGPT, claude.ai, or the DeepSeek App are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
     ],

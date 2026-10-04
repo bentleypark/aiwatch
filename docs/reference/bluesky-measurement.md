@@ -133,7 +133,7 @@ per-day join.
 
 ## Baseline — 2026-09-09
 
-Nine days spanning the 2026-09-03 multi-provider outage (Anthropic, xAI/Grok, Cursor, OpenAI). Kept
+Nine days spanning the 2026-09-03 multi-provider outage (Anthropic, SpaceXAI/Grok, Cursor, OpenAI). Kept
 here so a later reading has a control rather than a bare number.
 
 ```

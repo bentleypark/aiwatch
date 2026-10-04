@@ -48,7 +48,7 @@
 - **모바일 반응형** — 사이드바 오버레이, 모바일 액션 바
 - **AIWatch Score** — uptime, 인시던트, 복구 시간, probe 기반 응답성을 결합한 종합 신뢰도 점수 ([계산 방식](https://ai-watch.dev/methodology#score))
 - **RTT 저하 감지** — AIWatch의 직접 API probe가 공식 상태 페이지에 보고되지 않는 지연(latency) 저하를 포착 (대시보드 배지 + Discord 일일 요약). 공식 발표 대비 ~5분 폴링 주기 내 독립 감지(MTTD)
-- **리전별 가용성** — xAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
+- **리전별 가용성** — SpaceXAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
 - **Is X Down SEO 페이지** — 44개 서비스 (Bedrock/Azure OpenAI 제외한 모든 모니터링 대상), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위 (대시보드와 동일한 동률 표기), 대체 서비스 추천
@@ -81,7 +81,7 @@
 | Fireworks AI | Fireworks | incident.io (Atlassian 호환) |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
 | Perplexity | Perplexity AI | incident.io (Atlassian 호환) |
-| xAI API | xAI | RSS 피드 |
+| SpaceXAI API | SpaceXAI | RSS 피드 |
 | DeepSeek API | DeepSeek | Flashduty (브라우저 렌더 피드) |
 | Kimi (Moonshot AI) | Moonshot AI | Atlassian Statuspage (중국어 제목 → 영어) |
 | OpenRouter | OpenRouter | Datadog Status Page (`config.json`) |
@@ -151,7 +151,7 @@
 | ChatGPT | OpenAI |
 | Character.AI | Character AI |
 | DeepSeek App | DeepSeek |
-| Grok | xAI |
+| Grok | SpaceXAI |
 
 ## 기술 스택
 
@@ -339,7 +339,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `fireworks` | Fireworks AI | `turbopuffer` | turbopuffer |
 | `cerebras` | Cerebras Inference | `twelvelabs` | Twelve Labs |
 | `perplexity` | Perplexity | `langsmith` | LangChain (LangSmith) |
-| `xai` | xAI API | `helicone` | Helicone |
+| `xai` | SpaceXAI API | `helicone` | Helicone |
 | `deepseek` | DeepSeek API | `langfuse` | Langfuse |
 | `kimi` | Kimi (Moonshot AI) | `runway` | Runway |
 | `openrouter` | OpenRouter | `luma` | Luma (Dream Machine) |

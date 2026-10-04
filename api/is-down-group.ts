@@ -785,7 +785,9 @@ export default async function handler(req: Request) {
           const slug = SERVICE_ID_TO_SLUG[id] ?? id
           if (!s) return { id, name: resolvedName(id, slug), slug, status: 'unknown' as const }
           return {
-            id, name: s.name, slug, status: normalizeStatus(s.status), lastChecked: s.lastChecked,
+            // The Edge deploy can precede the Worker deploy. Use the canonical slug-map label so a
+            // stale Worker payload cannot regress a renamed member on the family page.
+            id, name: resolvedName(id, slug), slug, status: normalizeStatus(s.status), lastChecked: s.lastChecked,
             uptime30d: s.uptime30d, aiwatchScore: s.aiwatchScore, scoreGrade: s.scoreGrade, scoreConfidence: s.scoreConfidence, partialCount: s.partialCount,
             incidentSourceStale: s.incidentSourceStale,
             probeConfirmed: s.probeConfirmed, probeContradicted: s.probeContradicted,
@@ -830,7 +832,7 @@ export default async function handler(req: Request) {
         for (const id of family.members) {
           const s = byId.get(id)
           const slug = SERVICE_ID_TO_SLUG[id] ?? id
-          const memberName = s ? s.name : resolvedName(id, slug)
+          const memberName = resolvedName(id, slug)
           if (s?.incidentSourceStale) continue
           for (const inc of s?.incidents ?? []) {
             // #1243 — the share card's `&i=` identity token: NEWEST unresolved, taken before the
