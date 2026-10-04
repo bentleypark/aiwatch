@@ -42,6 +42,8 @@ interface MockService {
   scoreConfidence?: string | null
   partialCount?: number
   incidentSourceStale?: boolean
+  probeConfirmed?: boolean
+  probeContradicted?: boolean
   incidents?: MockIncident[]
 }
 
@@ -208,6 +210,117 @@ describe('is-down-group.ts', () => {
     expect(html).toContain('"BreadcrumbList"')
   })
 
+  it('does not publish the all-clear when a member whose source cannot be read leaves the family with no incidents', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).not.toContain('No incidents reported')
+    expect(html).toContain('Incident history unavailable for OpenAI API.')
+  })
+
+  it('claims no quiet window when the status fetch fails and no member was read at all', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('worker unreachable'))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('No incidents reported')
+    expect(html).toContain('Incident history unavailable for Claude API, claude.ai, Claude Code.')
+    expect(html).not.toContain("can't currently read")
+  })
+
+  it('does not extend the quiet window to a member the Worker response left out', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('No incidents reported')
+    expect(html).toContain('Incident history unavailable for claude.ai, Claude Code.')
+    expect(html).toContain('Unknown — AIWatch cannot confirm the status of claude.ai, Claude Code.')
+    expect(html).not.toContain('cannot confirm the status of Claude API')
+  })
+
+  it("says a green member's status is AIWatch's own measurement when its source is unreadable and its probe answers", async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true, probeConfirmed: true },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    const rows = html.match(/<li class="member-row">[\s\S]*?<\/li>/g) ?? []
+    expect(rows.filter((r) => r.includes("AIWatch's own checks"))).toHaveLength(1)
+    expect(rows.find((r) => r.includes('OpenAI API'))).toContain("AIWatch's own checks")
+    expect(html).toContain('Is OpenAI Down? Operational')
+    expect(html).not.toContain('No incidents reported')
+  })
+
+  it('says a degraded member is AIWatch\'s own measurement when a failing probe promoted it past an unreadable source', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'degraded', incidentSourceStale: true, probeContradicted: true },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    const rows = html.match(/<li class="member-row">[\s\S]*?<\/li>/g) ?? []
+    expect(rows.find((r) => r.includes('OpenAI API'))).toContain("AIWatch's own checks")
+    expect(html).toContain('Is OpenAI Down? Degraded Performance')
+    expect(html).not.toContain('No incidents reported')
+  })
+
+  it('does not credit AIWatch\'s own checks when an unreadable source has no probe behind it', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).not.toContain("AIWatch's own checks")
+  })
+
+  it('does not credit AIWatch\'s own checks for a status the provider\'s readable page reported', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'degraded', probeContradicted: true },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).not.toContain("AIWatch's own checks")
+  })
+
+  it('keeps another member\'s real outage as the headline when one member\'s source is unreadable', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'down' },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).toContain('Is OpenAI Down? Down')
+  })
+
+  it('names every unreadable member and claims no quiet window when all of them are unreadable', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational', incidentSourceStale: true },
+      { id: 'codex', name: 'Codex', status: 'operational', incidentSourceStale: true },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).not.toContain('No incidents reported')
+    expect(html).toContain('Incident history unavailable for OpenAI API, ChatGPT, Codex.')
+  })
+
+  it('keeps listing a readable member\'s incident and still says which member\'s history is missing', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'degraded', incidents: [
+        { id: 'inc-chat', title: 'Slow responses', status: 'investigating', startedAt: new Date().toISOString(), resolvedAt: null, duration: null },
+      ] },
+      { id: 'codex', name: 'Codex', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).toContain('Slow responses')
+    expect(html).toContain('Incident history unavailable for OpenAI API.')
+  })
+
   it('withholds the family summary when the status fetch fails', async () => {
     fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('worker unreachable'))
     const html = await (await handler(makeReq('claude'))).text()
@@ -371,7 +484,8 @@ describe('is-down-group.ts', () => {
     ]))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).not.toContain('service is affected and its live status')
-    expect(html).toContain('could not read the official status source')
+    expect(html).toContain('Unknown — AIWatch cannot confirm the status of Claude API, claude.ai, Claude Code.')
+    expect(html).not.toContain('could not read the official status source')
   })
 
   it('control: a real outage still says which service is affected', async () => {
@@ -651,12 +765,14 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
       { id: 'claude', name: 'Claude API', status: 'operational', incidents: [
         { id: 'inc-bad-date', title: 'Should be dropped', status: 'resolved', startedAt: 'not-a-date', resolvedAt: null, duration: null },
       ] },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
     ]))
     const res = await handler(makeReq('claude'))
     const html = await res.text()
     vi.useRealTimers()
     expect(html).not.toContain('Should be dropped')
-    expect(html).toContain('No incidents reported')
+    expect(html).toContain('No incidents reported for any Anthropic (Claude) service')
   })
 
   it('recommends a healthy sibling family inside an ongoing incident\'s AI card', async () => {
