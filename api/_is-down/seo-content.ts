@@ -31,7 +31,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is ChatGPT down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors ChatGPT every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
       { q: 'Why is ChatGPT not working?', a: 'ChatGPT may be experiencing server issues, high traffic, or a planned maintenance. Check the recent incidents section on this page for details on any ongoing issues.' },
-      { q: 'What are alternatives to ChatGPT?', a: 'When ChatGPT is down, you can use claude.ai by Anthropic or Google Gemini as alternatives. AIWatch shows which AI services are currently operational.' },
+      { q: 'What are alternatives to ChatGPT?', a: 'When ChatGPT is down, claude.ai, Grok, or the DeepSeek App are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
       { q: 'How long do ChatGPT outages usually last?', a: 'ChatGPT outage durations vary. Check the recent incidents section on this page for average resolution times and incident history.' },
     ],
   },
@@ -85,13 +85,13 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   'claude-ai': {
     displayName: 'claude.ai',
-    description: 'claude.ai is Anthropic\'s AI assistant, available on web, iOS, and Android. It provides direct access to Claude models for conversations, document analysis, coding assistance, and creative tasks — no API key required.',
+    description: 'claude.ai is Anthropic\'s AI assistant, available on the web, on iOS and Android, and as desktop apps. It provides direct access to Claude models for conversations, document analysis, coding assistance, and creative tasks — no API key required.',
     insight: 'claude.ai shares Anthropic\'s status page with Claude API and Claude Code, but is tracked as a separate component. An API-level outage will typically affect claude.ai as well. However, claude.ai can experience app-specific issues (login, file upload, rendering) independently of the API. AIWatch monitors the claude.ai component separately for accurate status reporting.',
     whenDown: 'When claude.ai is down, users cannot access conversations, file uploads, or artifact generation. Claude API and Claude Code may still function independently if the issue is client-specific.',
     faqs: [
       { q: 'Is claude.ai down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors claude.ai every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
       { q: 'Why is claude.ai not working?', a: 'claude.ai may be experiencing web server issues, authentication problems, or upstream Claude API outages. Check this page for current status and the AIWatch dashboard to see if Claude API is also affected.' },
-      { q: 'What can I use instead of claude.ai?', a: 'When claude.ai is down, ChatGPT (chat.openai.com) or Google Gemini (gemini.google.com) are alternative AI chatbots. AIWatch shows which web apps are currently operational.' },
+      { q: 'What can I use instead of claude.ai?', a: 'When claude.ai is down, ChatGPT, Grok, or the DeepSeek App are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
       { q: 'Is claude.ai down because of Claude API?', a: 'claude.ai depends on Claude API models but can also have web-specific issues. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
     ],
   },
@@ -233,14 +233,14 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   // API↔DeepSeek App ('deepseek-app' below).
   grok: {
     displayName: 'Grok',
-    description: 'Grok is xAI\'s consumer AI assistant — the chat experience on grok.com and the "Grok" mobile apps on iOS and Android, plus the Grok integration in X (Twitter). It is distinct from the xAI developer API; AIWatch tracks the consumer app surfaces here and the API separately.',
-    insight: 'xAI\'s official status page tags incidents by affected surface (Grok iOS / Grok Android / Grok Web), and AIWatch scopes this page to those three app tags — so an app-only incident shows here even when the developer API stays healthy, and vice versa. Some incidents affect only one platform (e.g. an Android-only outage); AIWatch does not merge per-platform incidents into one, since they are not always the same event.',
-    whenDown: 'When Grok is down, users cannot start or continue conversations in the app, on grok.com, or via the Grok integration in X. The iOS, Android, and Web clients can fail independently or together depending on the cause; the xAI API may still be operational for developers.',
+    description: 'Grok is xAI\'s consumer AI assistant — the chat experience on grok.com and the "Grok" mobile apps on iOS and Android. It is distinct from the xAI developer API; AIWatch tracks the app surfaces here and the API separately.',
+    insight: 'The official status page tags incidents by affected surface, and AIWatch scopes this page to the app surfaces — so an app-only incident shows here even when the developer API stays healthy, and vice versa.',
+    whenDown: 'When Grok is down, users cannot start or continue conversations in the app or on grok.com. The iOS, Android, and Web clients can fail independently or together depending on the cause; the xAI API may still be operational for developers.',
     faqs: [
-      { q: 'Is Grok down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Grok\'s iOS, Android, and Web app surfaces and shows real-time operational status from xAI\'s official status feed.' },
-      { q: 'Is this the same as the xAI API?', a: 'No. This page tracks the consumer app (grok.com and the mobile apps). The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
+      { q: 'Is Grok down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Grok\'s app surfaces and shows real-time operational status from the official status feed.' },
+      { q: 'Is this the same as the xAI API?', a: 'No. This page tracks Grok\'s app surfaces. The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
       { q: 'Why is Grok not responding?', a: 'Grok may be experiencing high traffic, a backend incident, or maintenance affecting one or more of its app surfaces. Check this page for current status and recent incident history.' },
-      { q: 'What are alternatives to Grok?', a: 'When Grok is down, ChatGPT, claude.ai, or Gemini are alternative AI chat apps. AIWatch shows which AI chat services are currently operational.' },
+      { q: 'What are alternatives to Grok?', a: 'When Grok is down, ChatGPT, claude.ai, or the DeepSeek App are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
     ],
   },
   deepseek: {
@@ -498,13 +498,13 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   // AI apps (#263)
   'character-ai': {
     displayName: 'Character.AI',
-    description: 'Character.AI is a consumer AI chatbot platform where users create and interact with custom AI characters. It is one of the most-used AI consumer apps with millions of daily active users.',
+    description: 'Character.AI is a consumer AI chatbot platform where users create and interact with custom AI characters.',
     whenDown: 'When Character.AI is down, users cannot start conversations, continue existing chats, or create new characters. The mobile and web interfaces both depend on the same backend, so an outage affects all access methods.',
     faqs: [
       { q: 'Is Character.AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Character.AI every 5 minutes and shows real-time operational status.' },
-      { q: 'Why is Character.AI not loading?', a: 'Character.AI may be experiencing high traffic, server issues, or maintenance. Check this page for current status and recent incident history.' },
-      { q: 'What are alternatives to Character.AI?', a: 'For roleplay-style chat, ChatGPT, claude.ai, or Gemini are alternatives. AIWatch shows which AI chat services are currently operational.' },
-      { q: 'How long do Character.AI outages usually last?', a: 'Character.AI outage durations vary by cause. Check the recent incidents section on this page for typical resolution times.' },
+      { q: 'Why is Character.AI not loading?', a: 'Character.AI may be experiencing high traffic, server issues, or maintenance. Check this page for current status.' },
+      { q: 'What are alternatives to Character.AI?', a: 'When Character.AI is down, ChatGPT, claude.ai, Grok, or the DeepSeek App are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
+      { q: 'How long do Character.AI outages usually last?', a: 'Character.AI outage durations vary by cause.' },
     ],
   },
   // DeepSeek App (#619) — the consumer chat app (chat.deepseek.com + the "DeepSeek - AI Assistant"
@@ -517,7 +517,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is the DeepSeek App down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the DeepSeek App every 5 minutes and shows real-time operational status from DeepSeek\'s official status feed.' },
       { q: 'Is this the same as the DeepSeek API?', a: 'No. This page tracks the consumer chat app (chat.deepseek.com and the mobile apps). The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
       { q: 'Why is the DeepSeek App not loading?', a: 'The DeepSeek App may be experiencing high traffic, a backend incident, or maintenance. Check this page for current status and recent incident history.' },
-      { q: 'What are alternatives to the DeepSeek App?', a: 'When the DeepSeek App is down, ChatGPT, claude.ai, or Gemini are alternative AI chat apps. AIWatch shows which AI chat services are currently operational.' },
+      { q: 'What are alternatives to the DeepSeek App?', a: 'When the DeepSeek App is down, ChatGPT, claude.ai, or Grok are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
     ],
   },
   // Coding agents (#294) — "OpenAI Codex" on this page means the current coding

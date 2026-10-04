@@ -54,3 +54,45 @@ describe('is-down insight contract', () => {
     expect(omitted).not.toContain('AIWatch Insight:')
   })
 })
+
+describe('is-down app copy (#1028 apps batch)', () => {
+  const APPS = ['claude-ai', 'chatgpt', 'grok', 'character-ai', 'deepseek-app']
+  const copyOf = (slug: string) => {
+    const seo = getSEOContent(slug)!
+    return [seo.description, seo.insight ?? '', seo.whenDown, ...seo.faqs.map((f) => f.a)].join('\n')
+  }
+
+  it('no app page recommends the Gemini API as a chat app or links the retired chat.openai.com domain', () => {
+    for (const slug of APPS) expect(copyOf(slug), slug).not.toMatch(/Gemini|chat\.openai\.com/)
+  })
+
+  it('Character.AI states no daily-active-user or most-used claim', () => {
+    expect(copyOf('character-ai')).not.toMatch(/daily active users|most-used/i)
+  })
+
+  it('Grok copy makes no claim about the integration in X, which this page does not track', () => {
+    expect(copyOf('grok')).not.toMatch(/integration in X|via X\b/)
+  })
+
+  it('Grok does not enumerate which surfaces the page tracks', () => {
+    expect(copyOf('grok')).not.toMatch(/grok\.com and the mobile apps|iOS, Android, and Web app surfaces|those three app tags|Grok iOS \/ Grok Android/)
+  })
+
+  it('Character.AI points readers to no incident history or resolution times its page cannot show', () => {
+    const answers = getSEOContent('character-ai')!.faqs.map((f) => f.a).join('\n')
+    expect(answers).not.toMatch(/incident history|incidents section|resolution times/i)
+  })
+
+  it('Character.AI names every eligible chat-app peer', () => {
+    const a = getSEOContent('character-ai')!.faqs.find((f) => /alternatives/i.test(f.q))!.a
+    for (const peer of ['ChatGPT', 'claude.ai', 'Grok', 'DeepSeek App']) expect(a).toContain(peer)
+  })
+
+  it('Grok says nothing about whether AIWatch merges per-platform incidents', () => {
+    expect(copyOf('grok')).not.toMatch(/merge/i)
+  })
+
+  it('claude.ai lists its desktop apps among the ways to use it', () => {
+    expect(getSEOContent('claude-ai')!.description).toMatch(/desktop/i)
+  })
+})
