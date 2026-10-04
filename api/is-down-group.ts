@@ -210,17 +210,24 @@ function renderGroupPage(
   // is always a status some member holds, so the `??` is belt-and-braces, not the all-operational
   // path — that case resolves to the first member through `find` like any other.
   const beaconSvcId = members.find((m) => m.status === headline)?.id ?? family.members[0]
-  const title = `Is ${family.name} Down? ${STATUS_LABEL[headline]} | AIWatch`
+  const operationalNames = members.filter((m) => m.status === 'operational').map((m) => m.name).join(', ')
+  const mixed = headline === 'unknown' && operationalNames !== ''
+  const headlineLabel = mixed ? 'Partly Unknown' : STATUS_LABEL[headline]
+  const title = `Is ${family.name} Down? ${headlineLabel} | AIWatch`
   // #1233 — three-way. The old two-valued form put `unknown` in the else branch, so the meta/og/twitter
   // descriptions AND the visible headline read "Unknown — see which service IS AFFECTED", asserting a
   // confirmed outage under a headline that says the status could not be confirmed. This page is served
   // 200 and cached, so that sentence is what crawlers and unfurls carry — and an unreadable Anthropic
   // source is #1233's originating scenario, i.e. the common path rather than an edge case.
+  const unknownNames = members.filter((m) => m.status === 'unknown').map((m) => m.name).join(', ')
   const desc = headline === 'operational'
     ? `No — every ${family.name} service AIWatch monitors is currently operational.`
     : headline === 'unknown'
-      ? `Unknown — AIWatch cannot confirm the status of ${members.filter((m) => m.status === 'unknown').map((m) => m.name).join(', ')}.`
+      ? `Unknown — AIWatch cannot confirm the status of ${unknownNames}.`
       : `${STATUS_LABEL[headline]} — see which ${family.name} service is affected and its live status.`
+  const pageDesc = mixed
+    ? `Partly unknown — AIWatch cannot confirm the status of ${unknownNames}. Operational: ${operationalNames}.`
+    : desc
   const canonical = `https://ai-watch.dev/is-${family.slug}-down`
   // #1164 follow-up — the group page originally used the static site-wide og-intro.png, unlike every
   // individual is-down page (which draws a live status card via the worker's /api/og). Reuses that
@@ -251,7 +258,7 @@ function renderGroupPage(
   // og:title pins to the hint too so the card headline matches the pinned IMAGE — otherwise the card
   // reads "Operational" (live) over a "Degraded" image. The page <title>/body/JSON-LD stay LIVE; only
   // the social card pins.
-  const ogTitle = pinnedHint ? `Is ${family.name} Down? ${STATUS_LABEL[ogStatus]} | AIWatch` : title
+  const ogTitle = `Is ${family.name} Down? ${STATUS_LABEL[ogStatus]} | AIWatch`
 
   const rows = members.map((m) => {
     const showMeasurements = !m.incidentSourceStale && m.status !== 'unknown'
@@ -371,7 +378,7 @@ ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><
   const alertOptions = members.map((member) => `<option value="${esc(member.id)}" data-slug="${esc(member.slug)}">${esc(member.name)}</option>`).join('')
   const firstMember = members[0]
   const alertSection = `<div class="cta">
-<p class="cta-title">${esc(alertCtaTitle(family.name, headline))}</p>
+<p class="cta-title">${esc(alertCtaTitle(family.name, headline, unknownNames))}</p>
 <label class="cta-member" for="alert-service">Alerts for <select id="alert-service" class="report-input">${alertOptions}</select></label>
 <div class="cta-buttons">
 <a class="btn btn-brand btn-slack" id="alert-slack-install" href="${esc(slackInstallUrl([firstMember.id]))}" data-ga="click_add_to_slack" data-ga-loc="is_down_group_page" data-ga-svc="${esc(firstMember.id)}">${slackLogoSvg()}<span>Add to Slack</span></a>
@@ -408,7 +415,7 @@ ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><
   // interpolating it into `text` instead would ship the pin as literal text. Unlike the individual
   // pages, which drop `url=` entirely on operational, this bar always sends one — the pre-#1243 bar
   // always put a link in the text, and `buildShareUrl` returns the untagged canonical there anyway.
-  const shareText = `${STATUS_EMOJI[headline]} Is ${family.name} down? ${STATUS_LABEL[headline]}. Live status →`
+  const shareText = `${STATUS_EMOJI[headline]} Is ${family.name} down? ${headlineLabel}. Live status →`
   // #1243 — Copy link put only the URL on the clipboard, while the individual pages copy a MESSAGE
   // (`data-text`, falling back to `data-url`). Same shape here, built from this page's own wording so
   // a pasted copy reads like the X share rather than a naked link.
@@ -445,14 +452,14 @@ ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><
     '@context': 'https://schema.org',
     '@graph': [
       {
-        '@type': 'WebPage', name: title, url: canonical, description: desc,
+        '@type': 'WebPage', name: title, url: canonical, description: pageDesc,
         isPartOf: { '@type': 'WebSite', name: 'AIWatch', url: 'https://ai-watch.dev/' },
         ...(latestChecked ? { dateModified: latestChecked } : {}),
       },
       {
         '@type': 'FAQPage', mainEntity: [{
           '@type': 'Question', name: `Is ${family.name} down?`,
-          acceptedAnswer: { '@type': 'Answer', text: desc },
+          acceptedAnswer: { '@type': 'Answer', text: pageDesc },
         }],
       },
       {
@@ -470,7 +477,7 @@ ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(title)}</title>
-<meta name="description" content="${esc(desc)}">
+<meta name="description" content="${esc(pageDesc)}">
 <link rel="canonical" href="${canonical}">
 <meta property="og:type" content="website">
 <meta property="og:url" content="${esc(ogUrl)}">
@@ -486,7 +493,8 @@ ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript()}
 <style>
-  body { background:#080c10; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; max-width:640px; margin:0 auto; padding:32px 20px; }
+  body { background:#080c10; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; max-width:720px; margin:0 auto; padding:24px 16px; box-sizing:border-box; }
+  @media (max-width:600px) { body { padding:16px 12px; } }
   h1 { font-size:1.5rem; text-align:center; }
   h2 { font-size:1.05rem; margin:28px 0 12px; }
   .incidents-window { color:#9ca3af; font-weight:400; font-size:0.85rem; }
@@ -559,7 +567,7 @@ ${ALERT_CTA_CSS}  .cta-member { display:flex; align-items:center; justify-conten
 </head>
 <body>
 <h1>${STATUS_EMOJI[headline]} Is ${esc(family.name)} Down?</h1>
-<p class="headline">${esc(desc)}</p>
+<p class="headline">${esc(pageDesc)}</p>
 <ul class="member-list">${rows}</ul>
 ${summarySection}
 ${monthlyReportSection}

@@ -241,6 +241,110 @@ describe('is-down-group.ts', () => {
     expect(html).not.toContain('cannot confirm the status of Claude API')
   })
 
+  it('names only the unknown members in the alert block, not the family status page', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    const title = html.match(/<p class="cta-title">([\s\S]*?)<\/p>/)?.[1] ?? ''
+    expect(title).toContain('claude.ai')
+    expect(title).not.toContain('Claude API')
+    expect(title).not.toContain('Claude Code')
+    expect(title).not.toContain('status page')
+  })
+
+  it('names every member in the alert block when every one of them is unknown', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'unknown' },
+      { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
+      { id: 'claudecode', name: 'Claude Code', status: 'unknown' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    const title = html.match(/<p class="cta-title">([\s\S]*?)<\/p>/)?.[1] ?? ''
+    expect(title).toContain('Claude API, claude.ai, Claude Code')
+    expect(title).not.toContain('status page')
+  })
+
+  it('keeps the outage wording in the alert block when a real outage outranks an unknown member', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational' },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'down' },
+      { id: 'codex', name: 'Codex', status: 'unknown' },
+    ]))
+    const html = await (await handler(makeReq('openai'))).text()
+    const title = html.match(/<p class="cta-title">([\s\S]*?)<\/p>/)?.[1] ?? ''
+    expect(html).toContain('Is OpenAI Down? Down')
+    expect(title).toContain('is down right now')
+    expect(title).not.toContain('confirm')
+  })
+
+  describe('a family with some operational and some unknown members', () => {
+    const meta = (html: string, attr: string, key: string) =>
+      html.match(new RegExp(`<meta ${attr}="${key}" content="([^"]*)"`))?.[1] ?? ''
+    const mixed = () => statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ])
+
+    it('names the mixed state on the page title, description, headline, JSON-LD and share text', async () => {
+      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mixed())
+      const html = await (await handler(makeReq('claude'))).text()
+      const sentence = 'Partly unknown — AIWatch cannot confirm the status of claude.ai. Operational: Claude API, Claude Code.'
+      expect(html).toContain('<title>Is Anthropic (Claude) Down? Partly Unknown | AIWatch</title>')
+      expect(meta(html, 'name', 'description')).toBe(sentence)
+      expect(html).toContain(`<p class="headline">${sentence}</p>`)
+      expect(html).toContain(`"@type":"WebPage","name":"Is Anthropic (Claude) Down? Partly Unknown | AIWatch","url":"https://ai-watch.dev/is-claude-down","description":"${sentence}"`)
+      expect(html.match(/"@type":"FAQPage"[\s\S]*?"text":"([^"]*)"/)?.[1]).toBe(sentence)
+      expect(html).toContain('Is Anthropic (Claude) down? Partly Unknown. Live status')
+    })
+
+    it('leaves the social card on the raw status', async () => {
+      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mixed())
+      const html = await (await handler(makeReq('claude'))).text()
+      expect(meta(html, 'property', 'og:title')).toBe('Is Anthropic (Claude) Down? Unknown | AIWatch')
+      expect(meta(html, 'name', 'twitter:title')).toBe('Is Anthropic (Claude) Down? Unknown | AIWatch')
+      expect(meta(html, 'property', 'og:description')).toBe('Unknown — AIWatch cannot confirm the status of claude.ai.')
+      expect(meta(html, 'name', 'twitter:description')).toBe('Unknown — AIWatch cannot confirm the status of claude.ai.')
+      expect(html).toContain('status=unknown')
+    })
+
+    it('keeps Unknown when no member is operational', async () => {
+      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+        { id: 'claude', name: 'Claude API', status: 'unknown' },
+        { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
+        { id: 'claudecode', name: 'Claude Code', status: 'unknown' },
+      ]))
+      const html = await (await handler(makeReq('claude'))).text()
+      expect(html).toContain('<title>Is Anthropic (Claude) Down? Unknown | AIWatch</title>')
+      expect(html).not.toContain('Partly')
+    })
+
+    it('lets a real outage win over the mixed state', async () => {
+      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+        { id: 'claude', name: 'Claude API', status: 'operational' },
+        { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
+        { id: 'claudecode', name: 'Claude Code', status: 'down' },
+      ]))
+      const html = await (await handler(makeReq('claude'))).text()
+      expect(html).toContain('<title>Is Anthropic (Claude) Down? Down | AIWatch</title>')
+      expect(html).not.toContain('Partly')
+    })
+
+    it('leaves an all-operational family unchanged', async () => {
+      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+        { id: 'claude', name: 'Claude API', status: 'operational' },
+        { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+        { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+      ]))
+      const html = await (await handler(makeReq('claude'))).text()
+      expect(html).toContain('<title>Is Anthropic (Claude) Down? Operational | AIWatch</title>')
+      expect(html).not.toContain('Partly')
+    })
+  })
+
   it("says a green member's status is AIWatch's own measurement when its source is unreadable and its probe answers", async () => {
     fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true, probeConfirmed: true },

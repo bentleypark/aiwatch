@@ -1335,13 +1335,15 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .link-btn:hover{color:#c9d1d9}
 `
 
-export function alertCtaTitle(displayName: string, status: string): string {
+export function alertCtaTitle(displayName: string, status: string, unknownNames?: string): string {
   const isDown = status === 'down' || status === 'degraded'
   const stateLead = status === 'down'
     ? `${displayName} is down right now.`
     : `${displayName} is having issues right now.`
   return status === 'unknown'
-    ? `AIWatch can't read ${displayName}'s status page right now — get notified when it's readable again.`
+    ? unknownNames
+      ? `AIWatch can't confirm the status of ${unknownNames} right now — get notified when it's readable again.`
+      : `AIWatch can't read ${displayName}'s status page right now — get notified when it's readable again.`
     : isDown
     ? `${stateLead} Stop refreshing — we'll ping you when it's back.`
     : `Get notified the next time ${displayName} goes down.`
