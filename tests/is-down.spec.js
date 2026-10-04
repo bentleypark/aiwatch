@@ -92,10 +92,11 @@ test.describe('Is X Down? SSR pages', () => {
       test(`has CTA alert banner`, async ({ page: p }) => {
         await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
         await expect(p.locator('.cta')).toBeVisible()
-        // #696: the PRIMARY CTA is the zero-config Slack /feed button (lowest-friction action for the
-        // dev/team audience); RSS is the secondary button; the Discord double-opt-in stays a
-        // de-emphasized secondary text link (.cta-alt) that still carries the focus=alerts href.
-        await expect(p.locator('.cta button.btn-primary[data-slack]')).toBeVisible()
+        // #1581: the PRIMARY CTA is Add to Slack, with the /feed copy kept as a fallback; RSS is the
+        // secondary button; the Discord double-opt-in stays a de-emphasized secondary text link
+        // (.cta-alt) that still carries the focus=alerts href.
+        await expect(p.locator('.cta a.btn-slack')).toBeVisible()
+        await expect(p.locator('.cta button.link-btn[data-slack]')).toBeVisible()
         await expect(p.locator('.cta button[data-rss]')).toBeVisible()
         await expect(p.locator('.cta a.btn-primary')).toHaveCount(0)
         await expect(p.locator('.cta .cta-alt a')).toHaveAttribute('href', 'https://ai-watch.dev/#settings?focus=alerts')
