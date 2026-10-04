@@ -59,7 +59,7 @@ describe('per-service structured data', () => {
   it('uses WebSite rather than a software application for the page parent', () => {
     const html = renderPage('claude-api', null as never, getSEOContent('claude-api')!, [], null)
     expect(html).toContain('"@type":"WebSite"')
-    expect(html).not.toContain('"@type":"WebApplication"')
+    expect(html).not.toMatch(/"(Software|Web|Mobile)Application"/)
   })
 })
 

@@ -204,7 +204,7 @@ describe('is-down-group.ts', () => {
     expect(html).toContain('Incident history unavailable')
     expect(html).not.toContain('30-day family summary')
     expect(html).toContain('"WebSite"')
-    expect(html).not.toContain('"WebApplication"')
+    expect(html).not.toMatch(/"(Software|Web|Mobile)Application"/)
     expect(html).toContain('"FAQPage"')
     expect(html).toContain('"BreadcrumbList"')
   })
