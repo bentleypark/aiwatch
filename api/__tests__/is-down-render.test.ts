@@ -55,6 +55,14 @@ describe('renderDelegatedListeners integrity (#842-B)', () => {
   })
 })
 
+describe('per-service structured data', () => {
+  it('uses WebSite rather than a software application for the page parent', () => {
+    const html = renderPage('claude-api', null as never, getSEOContent('claude-api')!, [], null)
+    expect(html).toContain('"@type":"WebSite"')
+    expect(html).not.toContain('"@type":"WebApplication"')
+  })
+})
+
 // #1287 — the beacon's service id on the path where the status read FAILED, which includes the paths
 // where the worker is under strain, i.e. the outage window this metric measures.
 describe('resolveBeaconSvcId (#1287 — the id survives a failed status read)', () => {

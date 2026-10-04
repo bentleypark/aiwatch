@@ -435,10 +435,9 @@ ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><
     '@graph': [
       {
         '@type': 'WebPage', name: title, url: canonical, description: desc,
-        isPartOf: { '@type': 'WebApplication', name: 'AIWatch', url: 'https://ai-watch.dev/' },
+        isPartOf: { '@type': 'WebSite', name: 'AIWatch', url: 'https://ai-watch.dev/' },
         ...(latestChecked ? { dateModified: latestChecked } : {}),
       },
-      { '@type': 'WebApplication', name: 'AIWatch', url: 'https://ai-watch.dev/', applicationCategory: 'StatusMonitoringApplication' },
       {
         '@type': 'FAQPage', mainEntity: [{
           '@type': 'Question', name: `Is ${family.name} down?`,
