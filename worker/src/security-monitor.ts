@@ -33,8 +33,9 @@ export interface SecurityAlert {
 const HN_AI_KEYWORDS = [
   'openai', 'anthropic', 'claude', 'chatgpt', 'gemini', 'mistral',
   'cohere', 'deepseek', 'huggingface', 'hugging face', 'replicate',
-  'elevenlabs', 'cursor', 'copilot', 'windsurf', 'xai', 'x.ai', 'spacexai', 'grok',
+  'elevenlabs', 'cursor', 'copilot', 'windsurf', 'xai', 'spacexai', 'grok',
 ]
+const HN_AI_MATCH_KEYWORDS = [...HN_AI_KEYWORDS, 'x.ai']
 
 // Security concepts split by confidence (#892). STRONG signals are self-sufficient
 // — a match is a security event on its own. WEAK signals ("leak", "unauthorized")
@@ -73,7 +74,7 @@ export function buildHNQuery(): string {
 // Build a single case-insensitive word-boundary matcher for a keyword set. Word
 // boundaries are essential: a substring filter matched "rce" inside "sou**rce**"
 // and "leak" inside "**leak**ed" (financial-loss stories), producing ~80% false
-// positives (#720). All keywords are alphanumeric/space, so `\b` behaves.
+// positives (#720).
 function buildKeywordMatcher(keywords: string[]): RegExp {
   const alternation = keywords
     .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
@@ -81,7 +82,7 @@ function buildKeywordMatcher(keywords: string[]): RegExp {
   return new RegExp(`\\b(?:${alternation})\\b`, 'i')
 }
 
-const AI_KEYWORD_RE = buildKeywordMatcher(HN_AI_KEYWORDS)
+const AI_KEYWORD_RE = buildKeywordMatcher(HN_AI_MATCH_KEYWORDS)
 const SEC_STRONG_RE = buildKeywordMatcher(HN_SECURITY_STRONG)
 const SEC_WEAK_RE = buildKeywordMatcher(HN_SECURITY_WEAK)
 const DATA_ACCESS_RE = buildKeywordMatcher(HN_DATA_ACCESS_CONTEXT)
@@ -482,7 +483,7 @@ export const NVD_FIRST_PARTY: Array<{
   { service: 'ChatGPT',        strong: ['chatgpt desktop', 'chatgpt atlas', 'chatgpt for windows', 'chatgpt for macos', 'chatgpt app'], weak: ['chatgpt'], context: ['openai'] },
   { service: 'Azure OpenAI',   strong: ['azure openai'], weak: [], context: [] },
   { service: 'Gemini',         strong: ['gemini cli', 'gemini code assist'], weak: ['gemini'], context: ['google'] },
-  { service: 'Grok',           strong: [], weak: ['grok'], context: ['spacexai', 'xai', 'x.ai'] },
+  { service: 'Grok',           strong: [], weak: ['grok'], context: ['xai', 'x.ai'] },
   { service: 'Perplexity',     strong: ['perplexity comet', 'comet browser'], weak: ['perplexity'], context: ['perplexity ai', 'perplexity.ai'] },
 ]
 

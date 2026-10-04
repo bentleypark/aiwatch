@@ -139,6 +139,18 @@ describe('is-down-group.ts', () => {
     expect(html).not.toContain('>xAI API<')
   })
 
+  it('#1586 — incident rows also use the canonical member label when the Worker payload carries a former name', async () => {
+    const recent = new Date(Date.now() - 60 * 60_000).toISOString()
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'xai', name: 'xAI API', status: 'operational', incidents: [{ id: 'x1', title: 'Elevated errors', status: 'resolved', startedAt: recent, duration: '20m' }] },
+      { id: 'grok', name: 'Grok', status: 'operational' },
+      { id: 'cursor', name: 'Cursor', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('xai'))).text()
+    expect(html).toContain('<a href="/is-xai-api-down">SpaceXAI API</a>')
+    expect(html).not.toContain('<a href="/is-xai-api-down">xAI API</a>')
+  })
+
   it('renders member measurements and a deduplicated 30-day family summary from the cached payload', async () => {
     const recent = new Date(Date.now() - 60 * 60_000).toISOString()
     const earlier = new Date(Date.now() - 14 * 86_400_000).toISOString()

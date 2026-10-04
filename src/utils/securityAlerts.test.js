@@ -216,6 +216,13 @@ describe('filterSecurityAlertsForService (#821)', () => {
       expect(matching.map((s) => s.id), title).toEqual(['xai'])
     }
   })
+
+  it('#1586 — another brand ending in ".ai" is not a SpaceXAI mention', () => {
+    const spaceXai = NVD_SERVICES.filter((s) => s.id === 'xai')
+    for (const title of ['Flux.ai vulnerability exposes Claude tokens', 'Onyx.ai leaked Claude API keys in a breach']) {
+      expect(securityAlertMatchesService({ title }, spaceXai[0], spaceXai), title).toBe(false)
+    }
+  })
 })
 
 describe('tagServiceForAlert — Overview banner tag (#821)', () => {

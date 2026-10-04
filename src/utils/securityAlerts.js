@@ -52,8 +52,9 @@ const PROVIDER_MATCH_TERMS = {
 }
 
 function providerMentioned(titleLC, provider) {
-  const terms = PROVIDER_MATCH_TERMS[provider] ?? [provider]
-  return terms.some((term) => titleLC.includes(term.toLowerCase()))
+  const terms = PROVIDER_MATCH_TERMS[provider]
+  if (!terms) return titleLC.includes(provider.toLowerCase())
+  return terms.some((term) => new RegExp(`(?:^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(titleLC))
 }
 
 // #949 — the card labels every finding by WHAT it is about, not by which feed it came from:
