@@ -6,6 +6,10 @@ export interface ServiceSEO {
   insight?: string
   whenDown: string
   faqs: Array<{ q: string; a: string }>
+  errors?: {
+    source: { label: string; url: string }
+    items: Array<{ message: string; side?: 'provider' | 'yours'; meaning: string; fix: string }>
+  }
 }
 
 const SEO_CONTENT: Record<string, ServiceSEO> = {
@@ -21,7 +25,22 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Claude API status?', a: 'You can check Claude API status on this page (updated every 5 minutes), on the official Anthropic status page at status.claude.com, or on the AIWatch dashboard at ai-watch.dev.' },
       { q: 'What should I do when Claude API is down?', a: 'Consider switching to an alternative LLM API such as OpenAI or Gemini. AIWatch provides real-time fallback recommendations based on which services are currently operational and reliable.' },
       { q: 'How often does Claude API go down?', a: 'Claude API uptime and incident history are tracked on this page. Check the recent incidents section and uptime percentage for current reliability data.' },
+      { q: 'What does Claude API error 529 overloaded_error mean?', a: 'A 529 overloaded_error means the API is temporarily overloaded. Anthropic\'s documentation says it can occur when the API has high traffic across all users, so it is not a rate limit on your account (that is a 429). Retry with exponential backoff, and check the live status at the top of this page.' },
     ],
+    errors: {
+      source: { label: 'Anthropic API error reference', url: 'https://platform.claude.com/docs/en/api/errors' },
+      items: [
+        { message: '529 overloaded_error', side: 'provider', meaning: 'The API is temporarily overloaded. Anthropic notes it can occur when the API has high traffic across all users.', fix: 'Retry with exponential backoff. The official SDKs retry it automatically, twice by default.' },
+        { message: '500 api_error', side: 'provider', meaning: 'An unexpected error inside Anthropic\'s systems.', fix: 'Retry with exponential backoff. If it persists, contact Anthropic support with the request ID.' },
+        { message: '504 timeout_error', side: 'provider', meaning: 'The request timed out while processing.', fix: 'Use the streaming Messages API for long-running requests.' },
+        { message: '429 rate_limit_error', side: 'yours', meaning: 'Your organization hit a rate limit, its usage tier\'s monthly spend cap, or a spend limit on the Claude Code workspace.', fix: 'Wait for the retry-after header. A spend-cap 429 has no retry-after header and keeps failing until access resumes.' },
+        { message: '400 invalid_request_error', side: 'yours', meaning: 'A problem with the format or content of your request. Also returned when usage reaches a spend limit you set.', fix: 'Read the error message and fix the request.' },
+        { message: '401 authentication_error', side: 'yours', meaning: 'The API key is malformed, revoked, or expired.', fix: 'Check which API key the request is using.' },
+        { message: '402 billing_error', side: 'yours', meaning: 'A problem with your billing or payment information.', fix: 'Check your payment details in the Claude Console.' },
+        { message: '403 permission_error', side: 'yours', meaning: 'Your API key does not have permission to use the resource.', fix: 'Check your organization\'s access and workspace settings in the Claude Console.' },
+        { message: '413 request_too_large', side: 'yours', meaning: 'The request exceeds the maximum size (32 MB for the Messages API).', fix: 'Send a smaller request.' },
+      ],
+    },
   },
   chatgpt: {
     displayName: 'ChatGPT',
@@ -33,7 +52,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Why is ChatGPT not working?', a: 'ChatGPT may be experiencing server issues, high traffic, or a planned maintenance. Check the recent incidents section on this page for details on any ongoing issues.' },
       { q: 'What are alternatives to ChatGPT?', a: 'When ChatGPT is down, claude.ai, Grok, or the DeepSeek App are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
       { q: 'How long do ChatGPT outages usually last?', a: 'ChatGPT outage durations vary. Check the recent incidents section on this page for average resolution times and incident history.' },
+      { q: 'What does "Something went wrong" mean in ChatGPT?', a: 'OpenAI describes it as a general error that may indicate a temporary server issue or a problem with your local setup. Refresh the page or start a new chat, and check the live status at the top of this page for a known outage.' },
     ],
+    errors: {
+      source: { label: 'OpenAI Help Center: Troubleshooting ChatGPT Error Messages', url: 'https://help.openai.com/en/articles/7996703-troubleshooting-chatgpt-error-messages' },
+      items: [
+        { message: 'Something went wrong.', meaning: 'A general error that may indicate a temporary server issue or a problem with your local setup.', fix: 'Refresh the page or start a new chat. If it repeats, clear your browser cache, try a private window, disable extensions, or turn off a VPN.' },
+        { message: 'There was an error generating a response.', meaning: 'ChatGPT was unable to produce an answer. It may be a one-time error.', fix: 'Click Regenerate. If it repeats, restart your browser or device, disable VPNs or proxies, or try another network.' },
+        { message: 'A network error occurred.', meaning: 'Your device is unable to establish a reliable connection to OpenAI\'s servers.', fix: 'Disable VPNs or proxies, try a different browser or a private window, or switch networks.' },
+        { message: 'There was a problem preparing your chat.', meaning: 'Usually a browser extension or URL blocker interfering with loading the page.', fix: 'Disable extensions that block scripts or modify page content, or open ChatGPT in a private window or another browser.' },
+        { message: 'Stuck on "Thinking…" or an endless spinner', meaning: 'ChatGPT is taking a long time to respond, seems stuck, or is unresponsive.', fix: 'Wait 30–60 seconds, then click Stop generating and Regenerate. If it persists, start a new chat or refresh the page.' },
+      ],
+    },
   },
   gemini: {
     displayName: 'Gemini',
@@ -81,7 +111,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Why is Claude Code not working?', a: 'Claude Code\'s default backend is Anthropic\'s Claude API, so a Claude API incident (model errors, rate limiting) can reach Claude Code too. Check this page for current status.' },
       { q: 'What can I use instead of Claude Code?', a: 'When Claude Code is down, GitHub Copilot, Cursor, or Windsurf (Devin Desktop) are alternative AI coding tools. AIWatch shows which are currently operational.' },
       { q: 'Is Claude Code down because of Claude API?', a: 'Not always — enterprise deployments can route inference through a cloud provider instead. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
+      { q: 'What does "API Error: Repeated 529 Overloaded errors" mean in Claude Code?', a: 'The API is temporarily at capacity across all users, and Claude Code has already retried several times. It is not your usage limit. Try again in a few minutes or switch models with /model, and check this page for an active incident.' },
+      { q: 'What does "API Error: 500 Internal server error" mean in Claude Code?', a: 'It is a server-side failure inside the API, not caused by your prompt, settings, or account, and it is usually temporary. Wait a minute and send your message again, and check this page for an active incident.' },
     ],
+    errors: {
+      source: { label: 'Claude Code error reference', url: 'https://code.claude.com/docs/en/errors' },
+      items: [
+        { message: 'API Error: Repeated 529 Overloaded errors', side: 'provider', meaning: 'The API is temporarily at capacity across all users. Claude Code has already retried several times. It is not your usage limit and does not count against your quota.', fix: 'Try again in a few minutes, or run /model and switch models — capacity is tracked per model.' },
+        { message: 'API Error: 500 Internal server error', side: 'provider', meaning: 'An unexpected failure inside the API. It is not caused by your prompt, settings, or account.', fix: 'Wait a minute, then send your message again. If it persists with no posted incident, run /feedback.' },
+        { message: 'API Error: Request rejected (429)', side: 'yours', meaning: 'You hit the rate limit configured for your API key, Amazon Bedrock project, or Google Cloud project.', fix: 'Run /status to confirm the active credential, check the limits in your provider console, or reduce concurrency.' },
+        { message: 'There\'s an issue with the selected model', side: 'yours', meaning: 'A problem with the currently selected model — for example, it is not recognized or not available to you.', fix: 'Run /model and select a different model, and confirm the model is available on your plan or credentials.' },
+      ],
+    },
   },
   'claude-ai': {
     displayName: 'claude.ai',
@@ -105,7 +146,22 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is this affecting ChatGPT too?', a: 'OpenAI API and ChatGPT are tracked separately. Check the AIWatch dashboard at ai-watch.dev to see if both are affected or just one.' },
       { q: 'What should I do when OpenAI API is down?', a: 'Consider switching to Claude API by Anthropic or Gemini API by Google as alternatives. AIWatch provides real-time fallback recommendations based on current availability.' },
       { q: 'How do I check OpenAI API status?', a: 'You can check OpenAI status on this page (updated every 5 minutes), on the official OpenAI status page at status.openai.com, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'What does OpenAI API error 503 "Model temporarily overloaded" mean?', a: 'OpenAI\'s documentation says the requested model is temporarily overloaded. Follow the Retry-After header when present, then retry the request, and check the live status at the top of this page.' },
     ],
+    errors: {
+      source: { label: 'OpenAI API error codes', url: 'https://developers.openai.com/api/docs/guides/error-codes' },
+      items: [
+        { message: '503 Model temporarily overloaded', side: 'provider', meaning: 'The requested model is temporarily overloaded.', fix: 'Follow the Retry-After header when present, then retry your request.' },
+        { message: '500 The server had an error while processing your request', side: 'provider', meaning: 'An issue on OpenAI\'s servers.', fix: 'Retry after a brief wait, and contact OpenAI if the issue persists.' },
+        { message: '429 Rate limit reached for requests', side: 'yours', meaning: 'You are sending requests too quickly.', fix: 'Pace your requests and follow the Retry-After header.' },
+        { message: '429 Slow down', side: 'yours', meaning: 'Your request rate increased too quickly.', fix: 'Follow the Retry-After header, reduce your request rate, then increase it gradually.' },
+        { message: '429 Credit balance exhausted', side: 'yours', meaning: 'Your organization has no prepaid credits remaining.', fix: 'Add credits to continue using the API.' },
+        { message: '429 Spend limit or usage limit reached', side: 'yours', meaning: 'Your organization or project reached its enforced spend limit, or your organization reached its OpenAI-assigned usage limit.', fix: 'Increase or remove the spend limit, or request a higher approved usage limit.' },
+        { message: '401 Invalid Authentication / Incorrect API key provided', side: 'yours', meaning: 'The API key or requesting organization is not correct.', fix: 'Check the API key and organization the request is using.' },
+        { message: '401 IP not authorized', side: 'yours', meaning: 'Your request IP does not match the IP allowlist for your project or organization.', fix: 'Send the request from an allowed IP, or update the allowlist.' },
+        { message: '403 Country, region, or territory not supported', side: 'yours', meaning: 'You are accessing the API from an unsupported country, region, or territory.', fix: 'See OpenAI\'s list of supported countries and territories.' },
+      ],
+    },
   },
   'devin-desktop': {
     displayName: 'Windsurf (Devin Desktop)',

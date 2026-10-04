@@ -18,7 +18,8 @@ import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-ct
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { cookieBannerHtml } from './_shared/cookie-banner'
-import { ALERT_CTA_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, formatRecoveryMinutes, renderIncidentTimeline, timeAgo } from './_is-down/html-template'
+import { getSEOContent } from './_is-down/seo-content'
+import { ALERT_CTA_CSS, ERRORS_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, formatRecoveryMinutes, renderErrorList, renderIncidentTimeline, timeAgo } from './_is-down/html-template'
 
 export const config = { runtime: 'edge' }
 
@@ -381,6 +382,14 @@ ${noIncidents}${unreadableNote}`
 <section class="community-reports"><p>Visitor-submitted and shown only because an independent signal also indicates a problem — not an official AIWatch verdict.</p>
 ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><strong>${esc(report.serviceName)} · ${esc(report.category)}</strong>${report.description ? `<span>${esc(report.description)}</span>` : ''}<time>${esc(reportRelativeTime(report.timestamp))}</time></div>`).join('')}</section>`
 
+  const memberErrors = members.flatMap((m) => {
+    const errors = getSEOContent(m.slug)?.errors
+    return errors && errors.items.length > 0 ? [{ member: m, errors }] : []
+  })
+  const errorsSection = memberErrors.length === 0 ? '' : `<h2>Common errors</h2>
+${memberErrors.map(({ member, errors }) => `<details class="err-group"${SLUG_TO_SERVICE[member.slug]?.category === 'api' ? ' open' : ''}><summary>${esc(member.name)} errors <span class="incidents-window">(${errors.items.length})</span></summary>
+<div class="err-body">${renderErrorList(errors)}</div></details>`).join('\n')}`
+
   const alertFeed = (slug: string) => `https://ai-watch.dev/feed/${esc(slug)}`
   const alertOptions = members.map((member) => `<option value="${esc(member.id)}" data-slug="${esc(member.slug)}">${esc(member.name)}</option>`).join('')
   const firstMember = members[0]
@@ -521,6 +530,10 @@ ${consentInitScript()}
   .incident-title { flex:1; }
   .incident-meta { color:#9ca3af; font-size:0.85rem; width:100%; }
   .incident-timeline { padding:0 16px 12px; }
+  .err-group { border:1px solid #1f2937; border-radius:8px; margin-bottom:8px; }
+  .err-group > summary { cursor:pointer; padding:12px 16px; font-weight:600; }
+  .err-body { padding:0 16px 12px; }
+${ERRORS_CSS}
 ${INCIDENT_TIMELINE_CSS}
   .no-incidents { color:#9ca3af; }
   .incidents-unavailable { color:#d29922; background:#0d1117; border-left:3px solid #d29922; border-radius:6px; padding:8px 12px; margin:8px 0; font-size:0.9rem; }
@@ -584,6 +597,7 @@ ${alertSection}
 ${extCtaSection}
 ${incidentSection}
 ${communityReportSection}
+${errorsSection}
 ${shareSection}
 ${otherFamiliesSection}
 ${reportSection}

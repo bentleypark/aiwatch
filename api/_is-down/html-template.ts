@@ -601,6 +601,7 @@ ${INCIDENT_TIMELINE_CSS}
 .faq-item{margin:16px 0}
 .faq-q{font-weight:600;font-size:15px;margin-bottom:6px}
 .faq-a{font-size:14px;color:#8b949e}
+${ERRORS_CSS}
 .fallback-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;background:#161b22;border-radius:6px;margin:8px 0}
 .fallback-info{display:flex;flex-direction:column;gap:3px;min-width:0}
 .fallback-name{font-weight:500;font-size:14px}
@@ -674,6 +675,7 @@ ${renderComponents(service)}
 ${renderIncidents(service)}
 ${renderReportFeed(reports, seo)}
 ${renderDescription(seo, service)}
+${renderErrors(seo)}
 ${renderFAQ(seo, fallbacks)}
 ${renderFallbacks(seo, fallbacks, service?.id, fallbackCapabilityLabel)}
 ${renderShareButtons(seo, service, canonical, ogImageUrl, aiInsight)}
@@ -1700,6 +1702,34 @@ ${seo.insight ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;b
 <p style="font-size:14px">${esc(seo.whenDown)}</p>
 <p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status and recent incident details; uptime history is shown only when the official source publishes sufficient comparable records &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
 </div>`
+}
+
+const ERROR_SIDE_LABEL = { provider: 'Provider side', yours: 'Your request or account' } as const
+
+export const ERRORS_CSS = `.err-item{padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.07)}
+.err-item:last-of-type{border-bottom:none}
+.err-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.err-msg{font-size:13px;color:#e6edf3;background:#161b22;padding:2px 6px;border-radius:4px;overflow-wrap:anywhere}
+.err-side{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.14);color:#8b949e}
+.err-provider{color:#e86235;border-color:rgba(232,98,53,0.4)}
+.err-meaning{font-size:14px;margin:6px 0 4px}
+.err-fix{font-size:13px;color:#8b949e}
+.err-source{font-size:12px;color:#8b949e;margin-top:10px}`
+
+export function renderErrorList(errors: NonNullable<ServiceSEO['errors']>): string {
+  const items = errors.items.map((e) => `<div class="err-item">
+<div class="err-head"><code class="err-msg">${esc(e.message)}</code>${e.side ? `<span class="err-side err-${e.side}">${ERROR_SIDE_LABEL[e.side]}</span>` : ''}</div>
+<p class="err-meaning">${esc(e.meaning)}</p>
+<p class="err-fix"><strong>What to do:</strong> ${esc(e.fix)}</p>
+</div>`).join('\n')
+  return `${items}
+<p class="err-source">Meanings from the <a href="${esc(errors.source.url)}" rel="noopener">${esc(errors.source.label)}</a>. AIWatch reads the official status page and cannot see the errors you get.</p>`
+}
+
+export function renderErrors(seo: ServiceSEO): string {
+  if (!seo.errors || seo.errors.items.length === 0) return ''
+  return `<h2>Common ${esc(seo.displayName)} errors</h2>
+<div class="card">${renderErrorList(seo.errors)}</div>`
 }
 
 function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[]): string {
