@@ -129,6 +129,7 @@ export interface ServiceData {
     impact: string | null
     startedAt: string
     duration: string | null
+    timeline?: Array<{ stage: string; text: string | null; at: string }>
     // #1292 — must be DECLARED, not merely present at runtime. Without it TypeScript's weak-type check
     // proves `isDailyRecordIncident` can never return true here, so all three Edge guards are dead code
     // by the type system's reckoning — and the moment anyone narrows these objects to their declared
@@ -577,6 +578,7 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .incident-group-meta{font-size:12px;color:#8b949e;white-space:nowrap}
 .incident-group-entries{margin:6px 0 0 20px;padding-left:10px;border-left:1px solid rgba(255,255,255,0.08)}
 .incident-group-entries .incident-item{padding:6px 0}
+${INCIDENT_TIMELINE_CSS}
 /* #756 — component group (e.g. "Models · 11 components"): native <details> marker hidden, replaced
    by a larger (13px) custom chevron rendered next to the count text (NOT floated to the far right —
    margin-left:auto was dropped per UX feedback so the toggle reads as part of the label). */
@@ -1487,7 +1489,45 @@ function renderIncidentSingle(inc: GroupingIncident): string {
   return `<div class="incident-item">
 <div class="incident-title">${esc(inc.title)}</div>
 <div class="incident-meta mono">${esc(formatDate(inc.startedAt, isDailyRecordIncident(inc), inc.derivedDay))} &middot; <span style="color:${statusColor}">${statusText}</span>${durationOrElapsed}${impactMeta}</div>
-</div>`
+${renderIncidentTimeline(inc)}</div>`
+}
+
+export const INCIDENT_TIMELINE_CSS = `.tl-latest{margin-top:8px;padding:8px 10px;background:#0d1117;border-left:3px solid #e86235;border-radius:0 4px 4px 0}
+.tl-latest-monitoring{border-left-color:#58a6ff}
+.tl-latest-label{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px}
+.tl{margin-top:6px}
+.tl>summary{list-style:none;cursor:pointer;font-size:12px;color:#8b949e;display:inline-block}
+.tl>summary::-webkit-details-marker{display:none}
+.tl>summary::before{content:"▸";display:inline-block;margin-right:6px;transition:transform 0.15s}
+.tl[open]>summary::before{transform:rotate(90deg)}
+.tl-steps{margin:6px 0 0 4px;padding-left:12px;border-left:1px solid rgba(255,255,255,0.1)}
+.tl-step{padding:4px 0}
+.tl-head{font-size:12px;color:#8b949e}
+.tl-stage{font-weight:600}
+.tl-investigating{color:#d29922}.tl-identified{color:#58a6ff}.tl-monitoring{color:#39c5cf}.tl-resolved{color:#3fb950}
+.tl-text{font-size:13px;color:#c9d1d9;line-height:1.55;margin-top:2px;overflow-wrap:anywhere}`
+
+const TIMELINE_STAGE_LABEL: Record<string, string> = {
+  investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring', resolved: 'Resolved',
+}
+
+function renderTimelineStep(step: { stage: string; text: string | null; at: string }): string {
+  const known = Object.hasOwn(TIMELINE_STAGE_LABEL, step.stage)
+  const label = known ? TIMELINE_STAGE_LABEL[step.stage] : 'Update'
+  const text = step.text ? `<div class="tl-text">${esc(step.text)}</div>` : ''
+  return `<div class="tl-step"><div class="tl-head mono"><span class="tl-stage${known ? ` tl-${step.stage}` : ''}">${label}</span> &middot; ${esc(formatDate(step.at))}</div>${text}</div>`
+}
+
+export function renderIncidentTimeline(inc: Pick<GroupingIncident, 'status' | 'timeline'>): string {
+  const timeline = Array.isArray(inc.timeline) ? inc.timeline : []
+  if (timeline.length === 0) return ''
+  const latest = inc.status !== 'resolved'
+    ? `<div class="tl-latest${inc.status === 'monitoring' ? ' tl-latest-monitoring' : ''}"><div class="tl-latest-label mono">Latest update</div>${renderTimelineStep(timeline[timeline.length - 1])}</div>`
+    : ''
+  const full = inc.status === 'resolved' || timeline.length > 1
+    ? `<details class="tl"><summary class="mono">Timeline &middot; ${timeline.length} update${timeline.length === 1 ? '' : 's'}</summary><div class="tl-steps">${timeline.map(renderTimelineStep).join('')}</div></details>`
+    : ''
+  return `${latest}${full}`
 }
 
 function renderIncidentGroup(g: GroupRow): string {
