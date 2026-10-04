@@ -25,6 +25,18 @@ export const GROUP_MEMBERS: Record<ServiceGroup, readonly string[]> = {
   apps: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok'],
 }
 
+/** The dashboard's English `filter.<group>` labels (src/locales/en.js), pinned by service-groups-sync.test.ts. */
+export const GROUP_LABEL: Record<ServiceGroup, string> = {
+  llm: 'LLM APIs',
+  agents: 'Coding Agents',
+  voice: 'Voice',
+  inference: 'Inference & Infra',
+  observability: 'Observability',
+  video: 'Video',
+  image: 'Image',
+  apps: 'AI Apps',
+}
+
 const ID_TO_GROUP: Record<string, ServiceGroup> = Object.fromEntries(
   (Object.entries(GROUP_MEMBERS) as [ServiceGroup, readonly string[]][])
     .flatMap(([group, ids]) => ids.map((id) => [id, group] as const)),

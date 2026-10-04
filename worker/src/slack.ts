@@ -8,6 +8,7 @@
 // Pure logic + Web Crypto + KV helpers; HTTP wiring lives in index.ts.
 
 import { SERVICES } from './services'
+import { GROUP_MEMBERS, GROUP_LABEL, type ServiceGroup } from './service-groups'
 import { kvPut, kvDel } from './utils'
 import { escapeSlack, SLACK_WEBHOOK_PREFIX } from './slack-message'
 import {
@@ -239,7 +240,7 @@ export async function resolveManageToken(kv: KVNamespace, token: string): Promis
 }
 
 export type ManageResult =
-  | { ok: true; filters?: SubscriptionFilters; services?: { id: string; name: string }[] }
+  | { ok: true; filters?: SubscriptionFilters; services?: { id: string; name: string; group: string }[] }
   | { ok: false; status: 400 | 404 | 500; error: string }
 
 export interface UnsubscribeNotice {
@@ -286,11 +287,17 @@ async function postGoodbye(sub: ConfirmedSubscription, notice: UnsubscribeNotice
   }
 }
 
+export function manageServiceList(): { id: string; name: string; group: string }[] {
+  const byId = new Map(SERVICES.map((s) => [s.id, s.name]))
+  return (Object.entries(GROUP_MEMBERS) as [ServiceGroup, readonly string[]][]).flatMap(([group, ids]) =>
+    ids.map((id) => ({ id, name: byId.get(id)!, group: GROUP_LABEL[group] })))
+}
+
 export async function manageSlack(kv: KVNamespace, token: string, action: unknown, rawFilters: unknown, notice: UnsubscribeNotice): Promise<ManageResult> {
   if (action !== 'get' && action !== 'update' && action !== 'unsubscribe') return { ok: false, status: 400, error: 'Invalid action' }
   const found = await resolveManageToken(kv, token)
   if (!found) return { ok: false, status: 404, error: 'Subscription not found' }
-  if (action === 'get') return { ok: true, filters: found.sub.filters, services: SERVICES.map((s) => ({ id: s.id, name: s.name })) }
+  if (action === 'get') return { ok: true, filters: found.sub.filters, services: manageServiceList() }
   if (action === 'unsubscribe') {
     await postGoodbye(found.sub, notice)
     await deleteSubscription(kv, found.hash, found.sub)
