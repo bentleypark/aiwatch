@@ -6,7 +6,8 @@
 
 import { describe, it, expect } from 'vitest'
 import workerModule from '../index'
-import { GROUP_MEMBERS, serviceGroupOf, type ServiceGroup } from '../service-groups'
+import { GROUP_MEMBERS, GROUP_LABEL, serviceGroupOf, type ServiceGroup } from '../service-groups'
+import en from '../../../src/locales/en'
 import { SERVICES } from '../services'
 import type { ServiceStatus } from '../types'
 // Data-only import across the frontend boundary — works because both `src/` trees share one repo /
@@ -31,6 +32,10 @@ describe('service-groups.ts ≡ SERVICE_CATEGORIES cross-mirror (#1068)', () => 
     })
   }
 
+  it('groups run in the dashboard\'s category order', () => {
+    expect(Object.keys(GROUP_MEMBERS)).toEqual(catGroups.map(([g]) => g))
+  })
+
   it('every monitored SERVICES id has a fine group (completeness)', () => {
     const missing = SERVICES.filter((s) => serviceGroupOf(s.id) === undefined).map((s) => s.id)
     expect(missing, `SERVICES ids with no group: ${missing.join(', ')}`).toEqual([])
@@ -40,6 +45,12 @@ describe('service-groups.ts ≡ SERVICE_CATEGORIES cross-mirror (#1068)', () => 
     const realIds = new Set(SERVICES.map((s) => s.id))
     const stale = Object.values(GROUP_MEMBERS).flat().filter((id) => !realIds.has(id))
     expect(stale, `GROUP_MEMBERS ids not in SERVICES: ${stale.join(', ')}`).toEqual([])
+  })
+
+  it('GROUP_LABEL is the dashboard\'s English filter label for every group', () => {
+    for (const group of Object.keys(GROUP_MEMBERS)) {
+      expect(GROUP_LABEL[group as ServiceGroup]).toBe((en as Record<string, string>)[`filter.${group}`])
+    }
   })
 
   it('serviceGroupOf returns undefined for an unknown id', () => {
