@@ -110,12 +110,24 @@ describe('/slack/manage', () => {
       expect(body.filters).toEqual({ alertTarget: 'custom', alertServices: ['openai'], alertCondition: 'all', alertIncidents: true })
     })
 
-    it('passing through every service and back keeps the picked services', async () => {
+    it('every service clears the picks, and going back to only these restores them', async () => {
+      boot(`#t=${TOKEN}`, [{ status: 200, body: { ok: true, filters, services } }])
+      await vi.waitFor(() => expect((document.getElementById('form') as HTMLFormElement).hidden).toBe(false))
+      const picked = () => [...document.querySelectorAll<HTMLInputElement>('#svcs input:checked')].map((b) => b.value)
+      ;(document.querySelector('input[value="openai"]') as HTMLInputElement).click()
+      ;(document.querySelector('input[name="target"][value="all"]') as HTMLInputElement).click()
+      expect(picked()).toEqual([])
+      ;(document.querySelector('input[name="target"][value="custom"]') as HTMLInputElement).click()
+      expect(picked()).toEqual(['claude', 'openai'])
+    })
+
+    it('a new pick after every service starts a fresh selection', async () => {
       boot(`#t=${TOKEN}`, [{ status: 200, body: { ok: true, filters, services } }])
       await vi.waitFor(() => expect((document.getElementById('form') as HTMLFormElement).hidden).toBe(false))
       ;(document.querySelector('input[name="target"][value="all"]') as HTMLInputElement).click()
-      ;(document.querySelector('input[name="target"][value="custom"]') as HTMLInputElement).click()
-      expect([...document.querySelectorAll<HTMLInputElement>('#svcs input:checked')].map((b) => b.value)).toEqual(['claude'])
+      ;(document.querySelector('input[value="bedrock"]') as HTMLInputElement).click()
+      expect((document.querySelector('input[name="target"][value="custom"]') as HTMLInputElement).checked).toBe(true)
+      expect([...document.querySelectorAll<HTMLInputElement>('#svcs input:checked')].map((b) => b.value)).toEqual(['bedrock'])
     })
 
     it('refuses to save "only these" with no service picked, and calls nothing', async () => {
