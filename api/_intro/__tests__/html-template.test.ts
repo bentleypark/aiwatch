@@ -15,6 +15,21 @@ describe('renderLandingPage — CSP-clean (#482)', () => {
     expect(renderLandingPage()).toContain('.stack-gh-link:hover')
   })
 
+  it('the alert section offers Slack once, as a channel badge, with /feed as the fallback (#1581)', () => {
+    const html = renderLandingPage({ nonce: 'n0' })
+    expect(html.match(/data-ga="click_add_to_slack" data-ga-loc="landing_alert"/g)).toHaveLength(1)
+    expect(html).toContain('<button type="button" class="alert-feed-alt" data-action="copy-slack">')
+    expect(html).toContain("'alert.slack.feedAlt'")
+  })
+
+  it('every Slack button on the landing page installs the app; only the fallback copies /feed (#1581)', () => {
+    const html = renderLandingPage({ nonce: 'n0' })
+    expect(html).toContain('<a class="ch-badge ch-slack" href="https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install" title="Add AIWatch to a Slack channel" data-ga="click_add_to_slack" data-ga-loc="landing_alert" data-ga-source="slack_badge">')
+    expect(html).toContain('<a class="btn-slack" href="https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install" style="padding:12px 24px;" data-ga="click_add_to_slack" data-ga-loc="landing_cta">')
+    expect(html.match(/<button[^>]*data-action="copy-slack"/g)).toHaveLength(1)
+    expect(html).not.toMatch(/class="btn-primary[^"]*"[^>]*api\/slack\/install/)
+  })
+
   it('rewires the removed handlers as delegated listeners + data-attributes', () => {
     const html = renderLandingPage({ nonce: 'n0' })
     // lang toggle

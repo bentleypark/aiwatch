@@ -217,9 +217,13 @@ describe('manage link', () => {
     return { kv, ...r! }
   }
 
-  it('get returns the stored filters', async () => {
+  it('get returns the stored filters and every monitored service, Bedrock and Azure OpenAI included', async () => {
     const { kv, manageToken } = await installed()
-    expect(await manageSlack(kv, manageToken, 'get', undefined)).toEqual({ ok: true, filters: FILTERS_ALL })
+    const r = await manageSlack(kv, manageToken, 'get', undefined)
+    expect(r).toMatchObject({ ok: true, filters: FILTERS_ALL })
+    const ids = (r as { services: { id: string; name: string }[] }).services.map((s) => s.id)
+    expect(ids).toEqual(expect.arrayContaining(['claude', 'bedrock', 'azureopenai']))
+    expect(new Set(ids).size).toBe(ids.length)
   })
 
   it('update normalizes the filters and drops unknown service ids', async () => {
@@ -509,6 +513,14 @@ describe('handleSlackManageRequest', () => {
     expect(((await res.json()) as { filters: SubscriptionFilters }).filters.alertServices).toEqual(['openai'])
     expect((await readConfirmed(kv, r!.hash))?.filters.alertServices).toEqual(['openai'])
   })
+  it('get answers with the service list the manage page renders', async () => {
+    const kv = makeKV()
+    const r = await completeInstall(kv, KEY, { webhookUrl: HOOK_A, teamId: 'T1', channelId: 'C1' }, FILTERS_ALL, NOW)
+    const res = await handleSlackManageRequest(req({ token: r!.manageToken, action: 'get' }), kv, {})
+    const body = await res.json() as { services: { id: string }[] }
+    expect(body.services.map((s) => s.id)).toContain('bedrock')
+  })
+
   it('a wrong token is 404, a non-string token is 404, and a bad body is 500', async () => {
     const kv = makeKV()
     expect((await handleSlackManageRequest(req({ token: randomToken(), action: 'get' }), kv, {})).status).toBe(404)

@@ -30,6 +30,7 @@ import { STATUS_URL } from '../utils/statusPageUrls'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
 import { showRecoveredChip } from '../utils/liveIncident'
+import SlackInstallLink from '../components/SlackInstallLink'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -858,6 +859,7 @@ export default function ServiceDetails({ serviceId }) {
                 ↗ {t(labelKey)}
               </a>
             ))}
+            {feedUrl && <SlackInstallLink location="service_details" serviceIds={[service.id]} size={11} muted label={<span className="mono text-[10px]">{t('slack.install.short')}</span>} />}
             {feedUrl && <RssLink feedUrl={feedUrl} serviceId={service.id} t={t} />}
           </div>
         </div>

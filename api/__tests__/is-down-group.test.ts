@@ -1330,15 +1330,17 @@ describe('is-down-group.ts — delegated [data-ga] listener, executed (#1243)', 
     ]))
     const html = await (await handler(makeReq('claude'))).text()
     const shareRow = html.match(/<div class="share-row">[\s\S]*?<\/div>/)
-    const alertCta = html.match(/<p class="cta-alt">[\s\S]*?<\/p>/)
+    const alertCta = html.match(/<p class="cta-alt"><a [\s\S]*?<\/p>/)
+    const installLink = html.match(/<a class="btn btn-brand btn-slack" id="alert-slack-install"[\s\S]*?<\/a>/)
     const monthly = html.match(/<section class="monthly-report"[\s\S]*?<\/section>/)
     const listener = html.match(/document\.addEventListener\('click', function\(e\)\{[\s\S]*?\n\}\)\n/)
     expect(shareRow, 'share bar markup not found — the harness selector needs updating').toBeTruthy()
     expect(alertCta, 'alerts CTA markup not found — the harness selector needs updating').toBeTruthy()
+    expect(installLink, 'Add to Slack link not found — the harness selector needs updating').toBeTruthy()
     expect(listener, 'delegated listener not found — the harness selector needs updating').toBeTruthy()
     expect(listener![0], 'the slice is not the whole listener').toContain("gtag('event', g.dataset.ga, p)")
     expect(monthly, 'monthly reports markup not found — the harness selector needs updating').toBeTruthy()
-    document.body.innerHTML = shareRow![0] + alertCta![0] + monthly![0]
+    document.body.innerHTML = shareRow![0] + alertCta![0] + installLink![0] + monthly![0]
     // Capture the registered handler so afterEach can unbind it; `new Function` gives us no reference.
     const realAdd = document.addEventListener.bind(document)
     const spy = vi.spyOn(document, 'addEventListener').mockImplementation((type, fn, opts) => {
@@ -1371,6 +1373,17 @@ describe('is-down-group.ts — delegated [data-ga] listener, executed (#1243)', 
 
     ;(document.querySelector('[data-ga="click_cta_alerts"]') as HTMLAnchorElement).click()
     expect(gtag).toHaveBeenCalledWith('event', 'click_cta_alerts', { location: 'is_down_group_page', source: 'status_banner_secondary' })
+  })
+
+  it('forwards the Add to Slack link\'s location and service (#1581)', async () => {
+    const gtag = vi.fn()
+    vi.stubGlobal('gtag', gtag)
+    await mountListener()
+
+    const link = document.querySelector('#alert-slack-install') as HTMLAnchorElement
+    link.addEventListener('click', (e) => e.preventDefault())
+    link.click()
+    expect(gtag).toHaveBeenCalledWith('event', 'click_add_to_slack', { location: 'is_down_group_page', service_id: 'claude' })
   })
 
   it('forwards the monthly reports link\'s source', async () => {
@@ -1681,7 +1694,7 @@ describe('is-down-group.ts — the alert block matches the per-service page, per
 
   async function bootAlerts() {
     const html = await render()
-    const block = html.match(/<div class="cta">[\s\S]*?\n<\/div>/)
+    const block = html.match(/<div class="cta">[\s\S]*?Prefer Discord push alerts\?[\s\S]*?<\/p>\n<\/div>/)
     expect(block, 'alert block not found — the harness selector needs updating').toBeTruthy()
     const start = html.indexOf('function copyRss(b){')
     expect(start, 'alert copy script not found — the harness selector needs updating').toBeGreaterThan(-1)
@@ -1733,7 +1746,7 @@ describe('is-down-group.ts — the alert block matches the per-service page, per
     vi.stubGlobal('gtag', vi.fn())
     vi.stubGlobal('navigator', { clipboard: { writeText } })
     const html = await render()
-    const block = html.match(/<div class="cta">[\s\S]*?\n<\/div>/)
+    const block = html.match(/<div class="cta">[\s\S]*?Prefer Discord push alerts\?[\s\S]*?<\/p>\n<\/div>/)
     const start = html.indexOf('function copyRss(b){')
     const script = html.slice(start, html.indexOf('\n})()\n', start) + '\n})()\n'.length)
     document.body.innerHTML = block![0]
@@ -1741,6 +1754,16 @@ describe('is-down-group.ts — the alert block matches the per-service page, per
     new Function(script)()
     ;(document.getElementById('alert-slack') as HTMLButtonElement).click()
     expect(writeText).toHaveBeenCalledWith('/feed subscribe https://ai-watch.dev/feed/claude-code')
+  })
+
+  it('points Add to Slack at the selected member (#1581)', async () => {
+    const { picker } = await bootAlerts()
+    const link = document.getElementById('alert-slack-install') as HTMLAnchorElement
+    expect(link.getAttribute('href')).toBe('https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install?services=claude')
+    picker.value = 'claudecode'
+    picker.dispatchEvent(new Event('change'))
+    expect(link.getAttribute('href')).toBe('https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install?services=claudecode')
+    expect(link.dataset.gaSvc).toBe('claudecode')
   })
 
   it('copies the selected member RSS link', async () => {
@@ -1754,5 +1777,7 @@ describe('is-down-group.ts — the alert block matches the per-service page, per
     rss.click()
     expect(writeText).toHaveBeenCalledWith('https://ai-watch.dev/feed/claude-ai')
     await vi.waitFor(() => expect(gtag).toHaveBeenCalledWith('event', 'copy_rss', { location: 'is_down_group_page', service_id: 'claudeai' }))
+    expect(rss.querySelector('.btn-label')!.textContent).toBe('Copied! Paste into your RSS reader')
+    expect(rss.querySelector('svg'), 'the copied state keeps the RSS icon').not.toBeNull()
   })
 })

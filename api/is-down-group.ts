@@ -15,9 +15,10 @@ import { buildShareUrl } from './_is-down/share-url'
 import { audienceBeaconScript } from './_shared/audience-beacon'
 import { cspForHtml } from './_shared/csp-hash'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
+import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { cookieBannerHtml } from './_shared/cookie-banner'
-import { ALERT_CTA_CSS, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, formatRecoveryMinutes, timeAgo } from './_is-down/html-template'
+import { ALERT_CTA_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, formatRecoveryMinutes, timeAgo } from './_is-down/html-template'
 
 export const config = { runtime: 'edge' }
 
@@ -373,10 +374,10 @@ ${communityReports.slice(0, 20).map((report) => `<div class="community-report"><
 <p class="cta-title">${esc(alertCtaTitle(family.name, headline))}</p>
 <label class="cta-member" for="alert-service">Alerts for <select id="alert-service" class="report-input">${alertOptions}</select></label>
 <div class="cta-buttons">
-<button type="button" class="btn btn-primary" id="alert-slack" data-slack="/feed subscribe ${alertFeed(firstMember.slug)}" data-svc="${esc(firstMember.id)}">💬 Get alerts in Slack</button>
-<button type="button" class="btn" id="alert-rss" data-rss="${alertFeed(firstMember.slug)}" data-svc="${esc(firstMember.id)}">🔗 Copy alert link (RSS)</button>
+<a class="btn btn-brand btn-slack" id="alert-slack-install" href="${esc(slackInstallUrl([firstMember.id]))}" data-ga="click_add_to_slack" data-ga-loc="is_down_group_page" data-ga-svc="${esc(firstMember.id)}">${slackLogoSvg()}<span>Add to Slack</span></a>
+<button type="button" class="btn btn-brand" id="alert-rss" data-rss="${alertFeed(firstMember.slug)}" data-svc="${esc(firstMember.id)}">${RSS_ICON_SVG}<span class="btn-label">Copy RSS feed</span></button>
 </div>
-<p class="cta-help">💬 Slack: paste the command into any channel — done. &middot; 🔗 RSS: paste the link into Slack, Teams, or any reader.</p>
+<p class="cta-alt">Can't install Slack apps? <button type="button" class="link-btn" id="alert-slack" data-slack="/feed subscribe ${alertFeed(firstMember.slug)}" data-svc="${esc(firstMember.id)}">Copy the /feed command</button></p>
 <p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts" data-ga="click_cta_alerts" data-ga-loc="is_down_group_page" data-ga-source="status_banner_secondary">Prefer Discord push alerts? Set up here &rarr;</a></p>
 </div>`
 
@@ -619,8 +620,9 @@ if (copyBtn) copyBtn.addEventListener('click', function(){
   navigator.clipboard.writeText(text).then(done, fail)
 })
 ${alertCopyClientJs('is_down_group_page')};(function(){
-  var picker = document.getElementById('alert-service'), slackBtn = document.getElementById('alert-slack'), rssBtn = document.getElementById('alert-rss')
-  if (!picker || !slackBtn || !rssBtn) return
+  var picker = document.getElementById('alert-service'), slackBtn = document.getElementById('alert-slack'), rssBtn = document.getElementById('alert-rss'), installLink = document.getElementById('alert-slack-install')
+  if (!picker || !slackBtn || !rssBtn || !installLink) return
+  picker.addEventListener('change', function(){ installLink.href = ${JSON.stringify(slackInstallUrl())} + '?services=' + encodeURIComponent(picker.value); installLink.dataset.gaSvc = picker.value })
   function selectedFeed(){ return 'https://ai-watch.dev/feed/' + picker.options[picker.selectedIndex].getAttribute('data-slug') }
   slackBtn.addEventListener('click', function(){ slackBtn.dataset.slack = '/feed subscribe ' + selectedFeed(); slackBtn.dataset.svc = picker.value; copySlackFeed(slackBtn) })
   rssBtn.addEventListener('click', function(){ rssBtn.dataset.rss = selectedFeed(); rssBtn.dataset.svc = picker.value; copyRss(rssBtn) })
@@ -666,6 +668,7 @@ document.addEventListener('click', function(e){
   var p = {}
   if (g.dataset.gaLoc) p.location = g.dataset.gaLoc
   if (g.dataset.gaSource) p.source = g.dataset.gaSource
+  if (g.dataset.gaSvc) p.service_id = g.dataset.gaSvc
   // #1243 — the X Post link carried no data-ga, so its clicks were never counted. item_id is the
   // family name. The copy button deliberately has no data-ga: it reports from its own success path
   // instead, since a click that fails to copy is not a share (two would also double-count).

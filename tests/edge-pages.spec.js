@@ -65,6 +65,21 @@ test.describe('/plugin serves install commands that resolve (#920)', () => {
   })
 })
 
+test.describe('/slack install result + manage pages (#1581)', () => {
+  test('/slack renders a result page with an enforced CSP and noindex', async ({ page, request }) => {
+    const res = await request.get('/slack?result=installed', { maxRedirects: 0 })
+    expect(res.status()).toBe(200)
+    expect(res.headers()['content-security-policy']).toBeTruthy()
+    await page.goto('/slack?result=denied', { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('h1')).toHaveText('Slack install cancelled')
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex')
+  })
+  test('/slack/manage without a token says the link is incomplete', async ({ page }) => {
+    await page.goto('/slack/manage', { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('#status')).toContainText('This link is incomplete')
+  })
+})
+
 test.describe('/confirm token gate (#486)', () => {
   // A VALID token needs the worker's signing secret, so the happy path isn't reachable from e2e
   // (confirm.test.ts unit-tests it). What e2e can prove: the deployed function rejects a bad token

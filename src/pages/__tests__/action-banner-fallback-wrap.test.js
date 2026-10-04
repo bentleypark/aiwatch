@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 // LangProvider context we don't set up here. Stub it — it's irrelevant to the
 // fallback-line structure under test.
 vi.mock('../../components/RssCopyIcon', () => ({ default: () => null }))
+vi.mock('../../components/SlackInstallLink', () => ({ default: () => null }))
 
 // #903 — the mobile ActionBanner "Suggested fallback" line clipped the trailing
 // "Open ↗" pill on narrow widths because the inter-item separator ", " was rendered

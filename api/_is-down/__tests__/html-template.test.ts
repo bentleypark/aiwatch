@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
+import { RSS_ICON_SVG, buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl, SERVICE_SITE_URL } from '../slug-map'
 import { getSEOContent } from '../seo-content'
 import type { RegionStatusResult } from '../region-status'
+import { slackLogoSvg } from '../../_shared/slack-install'
 
 // Incidents are filtered to a rolling 30-day window (the `Date.now() - 30 * 86_400_000`
 // cutoff in buildMetaDescription / renderIncidents), so test fixtures MUST use relative
@@ -1269,12 +1270,17 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     }
   })
 
-  it('renders the PRIMARY Slack-feed button (#696 — zero-config action is primary)', () => {
+  it('renders Add to Slack as the PRIMARY link, scoped to this service (#1581)', () => {
     const html = renderPage('claude', mkService(), mkSeo(), [])
-    // #696: Slack /feed (paste a command into any channel) is the lowest-friction ACTION for the
-    // dev/team audience, so it owns btn-primary. Lock the exact primary markup + label.
     expect(html).toContain(
-      '<button type="button" class="btn btn-primary" data-slack="/feed subscribe https://ai-watch.dev/feed/claude" data-svc="claude" data-action="copy-slack">💬 Get alerts in Slack</button>',
+      `<a class="btn btn-brand btn-slack" href="https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install?services=claude" data-ga="click_add_to_slack" data-ga-loc="is_down_page" data-ga-svc="claude">${slackLogoSvg()}<span>Add to Slack</span></a>`,
+    )
+  })
+
+  it('keeps the /feed command as a secondary copy action for workspaces that block app installs (#696 → #1581)', () => {
+    const html = renderPage('claude', mkService(), mkSeo(), [])
+    expect(html).toContain(
+      '<p class="cta-alt">Can\'t install Slack apps? <button type="button" class="link-btn" data-slack="/feed subscribe https://ai-watch.dev/feed/claude" data-svc="claude" data-action="copy-slack">Copy the /feed command</button></p>',
     )
     expect(html).toContain('function copySlackFeed(b)')
     expect(html).toContain("gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})")
@@ -1282,19 +1288,15 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     expect(html).toContain("prompt('Copy Slack command:',c)")
   })
 
-  it('renders the SECONDARY RSS button + the action-explicit helper line (#696)', () => {
+  it('renders the secondary RSS button labelled with what it does, and no helper line (#696 → #1581)', () => {
     const html = renderPage('claude', mkService(), mkSeo(), [])
-    // RSS is demoted to a secondary (.btn, not .btn-primary) and relabeled away from jargon —
-    // "Copy alert link (RSS)" + a helper line spelling out where to paste it (the #696 fix for the
-    // 9-sessions→0-conversions leak: "Notify me via RSS" copied a URL panic visitors couldn't use).
     expect(html).toContain(
-      '<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" data-action="copy-rss">🔗 Copy alert link (RSS)</button>',
+      `<button type="button" class="btn btn-brand" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" data-action="copy-rss">${RSS_ICON_SVG}<span class="btn-label">Copy RSS feed</span></button>`,
     )
     expect(html).toContain('function copyRss(b)')
     expect(html).toContain('navigator.clipboard.writeText(u)')
     expect(html).toContain("prompt('Copy RSS URL:',u)")
-    // helper line makes each action's destination explicit
-    expect(html).toMatch(/<p class="cta-help">.*Slack.*paste the command.*RSS.*paste the link/)
+    expect(html).not.toContain('class="cta-help"')
   })
 
   it('demotes the Discord double-opt-in to a de-emphasized secondary text link (#547/#696)', () => {
@@ -1307,8 +1309,8 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     // No "email" channel exists yet — the link must not advertise one.
     expect(html).toContain('Prefer Discord push alerts?')
     expect(html).not.toContain('email push')
-    // The Discord path must NOT be a btn-primary anchor (the Slack button owns btn-primary, #696).
-    expect(html).not.toMatch(/<a[^>]*class="btn btn-primary"/)
+    // The Discord path must NOT be a btn-primary anchor.
+    expect(html).not.toMatch(/<a[^>]*class="btn btn-primary"[^>]*#settings/)
   })
 
   it('keys data-svc on the service ID, not the page slug, so copy_rss matches other per-service events', () => {
