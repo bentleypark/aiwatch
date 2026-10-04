@@ -3,7 +3,7 @@
   "ignoreCommand": "bash scripts/vercel-should-build.sh",
   "headers": [
     {
-      "source": "/((?!is-[^/]+-down(?:/|$)|(?:intro|badges|methodology|plugin|plugin-privacy|extension-privacy|reports|confirm|api)(?:/|$)|feed(?:[./]|$)).*)",
+      "source": "/((?!is-[^/]+-down(?:/|$)|(?:intro|badges|methodology|plugin|plugin-privacy|extension-privacy|reports|confirm|slack|api)(?:/|$)|feed(?:[./]|$)).*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
@@ -79,6 +79,8 @@
     { "source": "/extension-privacy", "destination": "/api/extension-privacy" },
     { "source": "/plugin-privacy", "destination": "/api/plugin-privacy" },
     { "source": "/confirm", "destination": "/api/confirm" },
+    { "source": "/slack", "destination": "/api/slack-alerts" },
+    { "source": "/slack/manage", "destination": "/api/slack-alerts?view=manage" },
     { "source": "/reports", "destination": "/api/reports" },
     { "source": "/reports/", "destination": "/api/reports" },
     { "source": "/reports/:rest*", "destination": "/api/reports" },

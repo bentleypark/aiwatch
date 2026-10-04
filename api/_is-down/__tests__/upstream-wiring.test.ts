@@ -68,7 +68,7 @@ describe('upstreamNote → renderPage wiring (#1053)', () => {
     const insight = { summary: 'Anthropic models degraded.', estimatedRecovery: '~1h', affectedScope: ['API'], analyzedAt: '2026-07-17T07:30:00Z' }
     const withComponents = { ...(SERVICE as object), components: [{ id: 'c1', name: 'API', status: 'degraded' }] } as Parameters<typeof renderPage>[1]
     const html = renderPage('cursor', withComponents, seo, [], insight, null, [], null, null, null, null, note)
-    const cta = html.indexOf('cta-help')
+    const cta = html.indexOf('data-action="copy-rss"')
     const ai = html.indexOf('Anthropic models degraded.')
     const card = html.indexOf('Related Upstream Incident')
     const components = html.indexOf('Component Status')

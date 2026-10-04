@@ -238,14 +238,14 @@ export async function resolveManageToken(kv: KVNamespace, token: string): Promis
 }
 
 export type ManageResult =
-  | { ok: true; filters?: SubscriptionFilters }
+  | { ok: true; filters?: SubscriptionFilters; services?: { id: string; name: string }[] }
   | { ok: false; status: 400 | 404 | 500; error: string }
 
 export async function manageSlack(kv: KVNamespace, token: string, action: unknown, rawFilters: unknown): Promise<ManageResult> {
   if (action !== 'get' && action !== 'update' && action !== 'unsubscribe') return { ok: false, status: 400, error: 'Invalid action' }
   const found = await resolveManageToken(kv, token)
   if (!found) return { ok: false, status: 404, error: 'Subscription not found' }
-  if (action === 'get') return { ok: true, filters: found.sub.filters }
+  if (action === 'get') return { ok: true, filters: found.sub.filters, services: SERVICES.map((s) => ({ id: s.id, name: s.name })) }
   if (action === 'unsubscribe') {
     await deleteSubscription(kv, found.hash, found.sub)
     return { ok: true }
@@ -340,7 +340,7 @@ export async function handleSlackManageRequest(request: Request, kv: KVNamespace
     const body = await request.json() as { token?: unknown; action?: unknown; filters?: unknown }
     const result = await manageSlack(kv, typeof body.token === 'string' ? body.token : '', body.action, body.filters)
     if (!result.ok) return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers })
-    return new Response(JSON.stringify({ ok: true, filters: result.filters }), { headers })
+    return new Response(JSON.stringify({ ok: true, filters: result.filters, services: result.services }), { headers })
   } catch (err) {
     console.error('[slack/manage] error:', err instanceof Error ? err.message : err)
     return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers })

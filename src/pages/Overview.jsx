@@ -14,6 +14,7 @@ import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliabilit
 import { buildRecoveredRows, recoveredDetailText } from '../utils/recoveredGrouping'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL, outboundReferralUrl, sendReferralBeacon } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
+import SlackInstallLink from '../components/SlackInstallLink'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText } from '../utils/incidentSort'
@@ -599,9 +600,10 @@ export function ActionBanner({ services, setPage, t }) {
         </div>
       )}
       {/* Subscribe CTA at the visitor's peak-intent moment (#433) — an incident
-          is active, so motivation is highest. A labeled orange link (not a bare
-          corner glyph, which got lost) in the action row; copies /feed.xml. */}
-      <div className="mono text-[11px]" style={{ marginTop: '4px' }}>
+          is active, so motivation is highest. Labeled links (not bare corner glyphs,
+          which got lost) in the action row: Add to Slack (#1581), then the RSS copy. */}
+      <div className="mono text-[11px] flex items-center flex-wrap" style={{ marginTop: '4px', gap: '12px' }}>
+        <SlackInstallLink location="action_banner" label={t('slack.install.cta')} />
         <RssCopyIcon url={ALL_SERVICES_FEED_URL} location="action_banner" label={t('rss.copy.subscribe')} />
       </div>
       {/* Region-switch recommendation line (refs #422 Phase 1). Renders before

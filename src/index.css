@@ -36,6 +36,11 @@
   --teal: #39c5c8;
   --purple: #7C3AED;
   --rss: #f26522; /* RSS brand orange — universal "subscribe" signal (#432) */
+  /* Slack brand mark (#1581) — the four logo colours */
+  --slack-red: #E01E5A;
+  --slack-blue: #36C5F0;
+  --slack-green: #2EB67D;
+  --slack-yellow: #ECB22E;
 
   /* Text */
   --text0: #e6edf3;

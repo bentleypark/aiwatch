@@ -578,7 +578,10 @@ test.describe('RSS subscribe affordances (#433)', () => {
     await page.goto('/')
     await expect(page.locator('main').getByText(/Degraded|성능 저하/).first()).toBeVisible({ timeout: 15000 })
     // Labeled CTA (not a bare glyph) so it's noticeable at peak intent
-    const rssBtn = page.locator('main').getByRole('button', { name: /Subscribe via RSS|RSS로 구독/ })
+    const slackLink = page.locator('main').getByRole('link', { name: /Add to Slack|Slack에 추가/ })
+    await expect(slackLink).toBeVisible()
+    expect(await slackLink.getAttribute('href')).toBe('https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install')
+    const rssBtn = page.locator('main').getByRole('button', { name: /Copy RSS feed|RSS 피드 복사/ })
     await expect(rssBtn).toBeVisible()
     await rssBtn.click()
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed.xml')

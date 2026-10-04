@@ -352,14 +352,17 @@ test.describe('Is X Down? SSR pages', () => {
       if (aiIdx >= 0) expect(aiIdx).toBeGreaterThan(ctaIdx)
     })
 
-    test('primary CTA is the Slack-feed button; RSS secondary; Discord demoted to a text link (#547/#696)', async ({ page }) => {
+    test('primary CTA is Add to Slack; /feed copy and RSS secondary; Discord demoted to a text link (#547/#696/#1581)', async ({ page }) => {
       await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
-      // #696 Primary = zero-config Slack /feed button → copy_slack_feed (success proxy).
-      // #482: the click fires from the delegated [data-action] dispatcher (no inline onclick).
-      const primary = page.locator('.cta button.btn-primary[data-slack]')
+      const primary = page.locator('.cta a.btn-slack')
       await expect(primary).toBeVisible()
-      expect(await primary.getAttribute('data-action')).toBe('copy-slack')
-      expect(await primary.getAttribute('onclick')).toBeNull()
+      expect(await primary.getAttribute('href')).toBe('https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install?services=claude')
+      expect(await primary.getAttribute('data-ga')).toBe('click_add_to_slack')
+      // #482: the /feed copy fires from the delegated [data-action] dispatcher (no inline onclick).
+      const feedCopy = page.locator('.cta button.link-btn[data-slack]')
+      await expect(feedCopy).toBeVisible()
+      expect(await feedCopy.getAttribute('data-action')).toBe('copy-slack')
+      expect(await feedCopy.getAttribute('onclick')).toBeNull()
       // RSS is the secondary button now (.btn, not .btn-primary).
       const rss = page.locator('.cta button[data-rss]')
       await expect(rss).toBeVisible()
@@ -368,7 +371,7 @@ test.describe('Is X Down? SSR pages', () => {
       // Heavy Discord path is a de-emphasized text link, tagged source=status_banner_secondary
       // (GA4 on the delegated [data-ga] listener) so the funnel comparison can tell post-reorder
       // clicks apart from the old primary placement.
-      const alt = page.locator('.cta .cta-alt a')
+      const alt = page.locator('.cta .cta-alt a[data-ga="click_cta_alerts"]')
       expect(await alt.getAttribute('data-ga')).toBe('click_cta_alerts')
       expect(await alt.getAttribute('data-ga-source')).toBe('status_banner_secondary')
       expect(await alt.getAttribute('data-ga-loc')).toBe('is_down_page')
@@ -386,9 +389,9 @@ test.describe('Is X Down? SSR pages', () => {
       const isOperationalCopy = /Get notified the next time .* goes down/i.test(ctaText || '')
       expect(isDownCopy || isOperationalCopy).toBe(true)
 
-      // #696: the primary button is the zero-config Slack-feed button (both states).
-      const btnText = (await page.locator('.cta button.btn-primary').textContent()) || ''
-      expect(btnText).toMatch(/Get alerts in Slack/i)
+      // #1581: the primary is Add to Slack (both states).
+      const btnText = (await page.locator('.cta a.btn-slack').textContent()) || ''
+      expect(btnText).toMatch(/Add to Slack/i)
     })
   })
 

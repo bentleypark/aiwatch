@@ -10,6 +10,7 @@ import { SERVICE_CATEGORIES, ALL_SERVICES_FEED_URL, categoryRankOf } from '../ut
 import { isUnreliableUptime } from '../utils/serviceReliability'
 import { displayStatusOf, isDisplayAffected } from '../utils/statusDisplay'
 import RssCopyIcon from './RssCopyIcon'
+import SlackInstallLink from './SlackInstallLink'
 
 const EMPTY = []
 
@@ -380,6 +381,7 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
           <div className="text-[var(--text2)] flex items-center" style={{ padding: '6px 8px', letterSpacing: '0.06em', fontSize: '9px', gap: '7px' }}>
             <span>aiwatch.dev · v{__APP_VERSION__}</span>
             {/* Passive always-visible subscribe affordance (#433) */}
+            <SlackInstallLink location="sidebar" size={11} />
             <RssCopyIcon url={ALL_SERVICES_FEED_URL} location="sidebar" size={11} />
           </div>
         </div>

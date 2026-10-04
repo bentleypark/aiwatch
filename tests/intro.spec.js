@@ -122,14 +122,14 @@ test.describe('Landing page (/intro)', () => {
 
     // EN i18n wiring + copy + restore
     await page.locator('.lang-toggle button').filter({ hasText: 'EN' }).click()
-    await expect(label).toHaveText('Subscribe via RSS')
+    await expect(label).toHaveText('Copy RSS feed')
     await ctaRss.click()
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed.xml')
     await expect(label).toHaveText('Copied ✓')
-    await expect(label).toHaveText('Subscribe via RSS', { timeout: 4000 }) // restores after the timeout
+    await expect(label).toHaveText('Copy RSS feed', { timeout: 4000 }) // restores after the timeout
 
     // KO i18n wiring (pins the cta.rss key in both locales)
     await page.locator('.lang-toggle button').filter({ hasText: 'KO' }).click()
-    await expect(label).toHaveText('RSS로 구독')
+    await expect(label).toHaveText('RSS 피드 복사')
   })
 })

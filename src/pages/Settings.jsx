@@ -8,6 +8,8 @@ import { useSettings } from '../hooks/useSettings'
 import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
+import { slackInstallUrl } from '../../api/_shared/slack-install'
+import { SlackLogo } from '../components/SlackInstallLink'
 import { subscribeWebhook, updateWebhookFilters, unsubscribeWebhook, getLocalSubStatus, reconcileSubscription } from '../utils/webhookSubscription'
 
 // ── Styles matching design mockup ────────────────────────
@@ -544,6 +546,19 @@ export default function Settings({ focus } = {}) {
         <div style={{ padding: '13px 0', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', marginBottom: '2px' }}>{t('settings.slack')}</div>
           <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '8px' }}>{t('settings.slack.desc')}</div>
+          <a
+            href={slackInstallUrl(alertTarget === 'custom' ? alertServices : [])}
+            onClick={() => trackEvent('click_add_to_slack', { location: 'settings' })}
+            className="mono inline-flex items-center bg-[var(--bg2)] hover:bg-[var(--bg3)]"
+            style={{
+              gap: '6px', fontSize: '11px', padding: '5px 14px', borderRadius: '5px', marginBottom: '10px',
+              border: '1px solid var(--border-hi)', color: 'var(--text0)', fontWeight: 600, textDecoration: 'none',
+            }}
+          >
+            <SlackLogo size={13} />
+            {t('settings.slack.install')}
+          </a>
+          <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '6px' }}>{t('settings.slack.feedAlt')}</div>
           <div className="flex items-center gap-2">
             <input
               type="text"

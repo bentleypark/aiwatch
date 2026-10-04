@@ -13,6 +13,7 @@ import { audienceBeaconScript } from '../_shared/audience-beacon'
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { EXTENSION_STORE_URL, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
+import { slackInstallUrl, slackLogoSvg } from '../_shared/slack-install'
 import type { RegionStatusResult } from './region-status'
 // #1053 — the note shape is owned by upstream-note.ts (where the claim is built); importing it keeps
 // one definition of the contract instead of a second copy that can drift.
@@ -1315,18 +1316,23 @@ function renderReportFeed(reports: Array<{ cat: string; desc: string; ts: number
 <div class="card"><p class="report-feed-note">Visitor-submitted and shown only because an independent signal also indicates a problem &mdash; not an official AIWatch verdict.</p><div id="report-feed-list">${preview}${more}</div></div>`
 }
 
+export const RSS_ICON_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" style="fill:#f26522;flex-shrink:0"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>'
+
 export const ALERT_CTA_CSS = `.btn{display:inline-block;padding:8px 20px;background:#161b22;border:1px solid rgba(255,255,255,0.14);border-radius:6px;color:#e6edf3;font-size:13px;font-weight:500;transition:background 0.2s}
 .btn:hover{background:#1c2230;text-decoration:none}
 .btn-primary{background:#1a3d22;border-color:#3fb950;color:#3fb950}
 .btn-primary:hover{background:#224a2a}
+.btn-brand{display:inline-flex;align-items:center;gap:7px}
+.btn-slack{border-color:rgba(255,255,255,0.28);font-weight:600}
 button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta{background:#0d1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:16px 20px;text-align:center;margin:16px 0}
 .cta-title{font-size:14px;font-weight:600;margin-bottom:10px}
 .cta-buttons{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-.cta-help{font-size:11.5px;margin-top:8px;color:#8b949e;line-height:1.5}
 .cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
 .cta-alt a{color:#8b949e;text-decoration:underline}
 .cta-alt a:hover{color:#c9d1d9}
+.link-btn{background:none;border:none;padding:0;font:inherit;color:#8b949e;text-decoration:underline;cursor:pointer}
+.link-btn:hover{color:#c9d1d9}
 `
 
 export function alertCtaTitle(displayName: string, status: string): string {
@@ -1343,8 +1349,8 @@ export function alertCtaTitle(displayName: string, status: string): string {
 
 export function alertCopyClientJs(location: string): string {
   return `function copyRss(b){
-  var u=b.dataset.rss, orig=b.textContent;
-  function done(){b.textContent='Copied! Paste into your RSS reader';setTimeout(function(){b.textContent=orig},2200);typeof gtag==='function'&&gtag('event','copy_rss',{location:'${location}',service_id:b.dataset.svc})}
+  var u=b.dataset.rss, l=b.querySelector('.btn-label')||b, orig=l.textContent;
+  function done(){l.textContent='Copied! Paste into your RSS reader';setTimeout(function(){l.textContent=orig},2200);typeof gtag==='function'&&gtag('event','copy_rss',{location:'${location}',service_id:b.dataset.svc})}
   if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(u).then(done).catch(function(){prompt('Copy RSS URL:',u)})}
   else{prompt('Copy RSS URL:',u)}
 }
@@ -1383,11 +1389,10 @@ export function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: 
   return `<div class="cta">
 <p class="cta-title">${esc(message)}</p>
 <div class="cta-buttons">
-<!-- Slack subscribes via its native /feed RSS app (#467) — paste into any channel, zero webhook setup. -->
-<button type="button" class="btn btn-primary" data-slack="/feed subscribe https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" data-action="copy-slack">💬 Get alerts in Slack</button>
-<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" data-action="copy-rss">🔗 Copy alert link (RSS)</button>
+<a class="btn btn-brand btn-slack" href="${esc(slackInstallUrl([svcId]))}" data-ga="click_add_to_slack" data-ga-loc="is_down_page" data-ga-svc="${esc(svcId)}">${slackLogoSvg()}<span>Add to Slack</span></a>
+<button type="button" class="btn btn-brand" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" data-action="copy-rss">${RSS_ICON_SVG}<span class="btn-label">Copy RSS feed</span></button>
 </div>
-<p class="cta-help">💬 Slack: paste the command into any channel — done. &middot; 🔗 RSS: paste the link into Slack, Teams, or any reader.</p>
+<p class="cta-alt">Can't install Slack apps? <button type="button" class="link-btn" data-slack="/feed subscribe https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" data-action="copy-slack">Copy the /feed command</button></p>
 <p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts" data-ga="click_cta_alerts" data-ga-loc="is_down_page" data-ga-source="status_banner_secondary">Prefer Discord push alerts? Set up here &rarr;</a></p>
 <!-- #575: 1st-party crowd report (category + short description). We COLLECT it; the recent-report
      list is shown ONLY on a gated surface (when an independent signal already shows a problem) — we

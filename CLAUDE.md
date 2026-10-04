@@ -239,7 +239,7 @@ api/                 # Vercel Edge Functions (SSR pages + proxies). `_`-prefixed
   plugin-privacy.ts  # Plugin privacy policy — the marketplace policy URL (#920)
   extension-privacy.ts # Chrome-extension privacy policy — the Web Store policy URL (#837)
   badges.ts          # "AI Status Badges" gallery (/badges, #805)
-  confirm.ts         # Per-user Discord webhook double-opt-in confirmation page (#486)
+  confirm.ts slack-alerts.ts  # Alert opt-in pages: Discord confirm (#486), Slack install result + manage (#1581)
   csp-report.ts      # CSP violation sink (#482)
   _is-down/ _intro/ _methodology/ _plugin/ _badges/ _shared/   # SSR templates + shared helpers (incl. _is-down/upstream-note.ts — the #1053 card's per-service claim)
 src/                 # React 19 SPA (Vite, no router — hash routing in App.jsx)

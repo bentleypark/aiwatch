@@ -45,6 +45,8 @@ export const NON_PAGE_ENDPOINTS = new Map([
 export const PAGE_PATH_OVERRIDES = new Map([
   // vercel.json rewrites /is-{slug}-down → /api/is-down?slug={slug}; no spec ever says "/is-down".
   ['is-down', /\/is-[a-z0-9-]+-down(?![a-z0-9-])/],
+  // vercel.json rewrites /slack and /slack/manage → /api/slack-alerts (#1581).
+  ['slack-alerts', /\/slack(?:\/manage)?(?=[?'"`])/],
 ])
 
 export function pagePathToken(stem) {

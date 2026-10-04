@@ -172,4 +172,13 @@ test.describe('Settings — RSS feed (#433)', () => {
     await expect(copyBtn).toHaveText(/Copied ✓|복사됨 ✓/)
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shownCmd)
   })
+
+  test('Alerts section leads Slack with Add to Slack (#1581)', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByRole('link', { name: 'AIWatch' }).first()).toBeVisible({ timeout: 15000 })
+    await navigateToSettings(page)
+    const install = page.locator('main').getByRole('link', { name: /Add to Slack|Slack에 추가/ })
+    await expect(install).toBeVisible({ timeout: 20000 })
+    expect(await install.getAttribute('href')).toMatch(/^https:\/\/aiwatch-worker\.p2c2kbf\.workers\.dev\/api\/slack\/install/)
+  })
 })
