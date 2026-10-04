@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { RSS_ICON_SVG, buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
+import { RSS_ICON_SVG, buildMetaDescription, renderIncidents, renderErrors, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl, SERVICE_SITE_URL } from '../slug-map'
 import { getSEOContent } from '../seo-content'
@@ -1939,5 +1939,55 @@ describe('renderIncidents — provider timeline (#1596)', () => {
 
   it('renderPage ships the timeline styles', () => {
     expect(renderPage('claude', mkService(), mkSeo(), [])).toContain('.tl-latest{')
+  })
+})
+
+describe('renderErrors — #887 error-message section', () => {
+  const errors: NonNullable<ServiceSEO['errors']> = {
+    source: { label: 'Vendor error reference', url: 'https://example.com/errors' },
+    items: [
+      { message: '529 <overloaded>', side: 'provider', meaning: 'Busy & full.', fix: 'Retry.' },
+      { message: '429 rate_limit_error', side: 'yours', meaning: 'Rate limited.', fix: 'Wait.' },
+    ],
+  }
+
+  it('renders nothing for a service without an error list', () => {
+    expect(renderErrors(mkSeo())).toBe('')
+    expect(renderErrors(mkSeo({ errors: { ...errors, items: [] } }))).toBe('')
+  })
+
+  it('renders each message escaped with its side label, meaning, fix and the cited source', () => {
+    const html = renderErrors(mkSeo({ errors }))
+    expect(html).toContain('<h2>Common Claude errors</h2>')
+    expect(html).toContain('<code class="err-msg">529 &lt;overloaded&gt;</code><span class="err-side err-provider">Provider side</span>')
+    expect(html).toContain('<span class="err-side err-yours">Your request or account</span>')
+    expect(html).toContain('Busy &amp; full.')
+    expect(html).toContain('<strong>What to do:</strong> Wait.')
+    expect(html).toContain('<a href="https://example.com/errors" rel="noopener">Vendor error reference</a>')
+  })
+
+  it('an item with no side renders no side tag', () => {
+    const html = renderErrors(mkSeo({ errors: { ...errors, items: [{ message: 'Something went wrong.', meaning: 'm', fix: 'f' }] } }))
+    expect(html).toContain('<code class="err-msg">Something went wrong.</code></div>')
+    expect(html).not.toContain('err-side')
+  })
+
+  it('renderPage places the section between About and the FAQ', () => {
+    const html = renderPage('claude-api', mkService(), getSEOContent('claude-api')!, [])
+    const about = html.indexOf('<h2>About ')
+    const errs = html.indexOf('<h2>Common Claude errors</h2>')
+    const faq = html.indexOf('<h2>Frequently Asked Questions</h2>')
+    expect(about).toBeGreaterThan(-1)
+    expect(errs).toBeGreaterThan(about)
+    expect(faq).toBeGreaterThan(errs)
+  })
+
+  it('pages with a first-party error reference carry a cited, https error list; claude.ai has none', () => {
+    for (const slug of ['claude-api', 'claude-code', 'openai-api', 'chatgpt']) {
+      const e = getSEOContent(slug)?.errors
+      expect(e?.items.length).toBeGreaterThan(0)
+      expect(e?.source.url).toMatch(/^https:\/\//)
+    }
+    expect(getSEOContent('claude-ai')?.errors).toBeUndefined()
   })
 })

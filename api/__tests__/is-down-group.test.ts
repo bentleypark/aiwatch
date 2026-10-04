@@ -758,6 +758,21 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
     expect((html.match(/class="incident-row"/g) ?? []).length).toBe(2)
   })
 
+  it('#887 — lists each member\'s error reference in its own disclosure (API open), and skips members without one', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('<h2>Common errors</h2>')
+    expect((html.match(/<details class="err-group"/g) ?? []).length).toBe(2)
+    expect(html).toContain('<details class="err-group" open><summary>Claude API errors')
+    expect(html).toContain('<details class="err-group"><summary>Claude Code errors')
+    expect(html).not.toContain('<summary>claude.ai errors')
+    expect(html).toContain('.err-item{')
+  })
+
   it('#1596 — shows the provider timeline under an incident row, and nothing for a row without one', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
     fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
