@@ -761,7 +761,7 @@ function renderJsonLd(slug: string, seo: ServiceSEO, service: ServiceData | null
     'name': `Is ${seo.displayName} Down?`,
     'url': `https://ai-watch.dev/is-${slug}-down`,
     'description': seo.description,
-    'isPartOf': { '@type': 'WebApplication', 'name': 'AIWatch', 'url': 'https://ai-watch.dev' },
+    'isPartOf': { '@type': 'WebSite', 'name': 'AIWatch', 'url': 'https://ai-watch.dev' },
   }
   if (service) {
     data['dateModified'] = service.lastChecked
