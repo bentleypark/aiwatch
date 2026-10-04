@@ -7,6 +7,9 @@ tags: [worker, status, parsers]
 
 # Service Status Determination
 
+> **Naming compatibility (#1586):** reader-facing copy calls the provider **SpaceXAI**. This technical
+> record preserves `xai` in stable service IDs, URLs, function names, and quoted historical upstream labels.
+
 > **Public mirror — keep in sync (#937):** the user-facing `/methodology` page §2 "STATUS DETERMINATION" cards (`api/_methodology/html-template.ts`, KO+EN i18n) restate these rules for visitors. When a rule below changes *user-visibly*, update those cards in the SAME commit. The `git-mutation-gate.sh` hook nudges when this file is staged without the page (the #934 drift this backstops).
 
 Per-service status is resolved in `worker/src/services.ts` with this priority:

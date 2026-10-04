@@ -41,11 +41,12 @@ describe('FAMILY_GROUPS (#1164)', () => {
     }
   })
 
-  // #1165 — xai family added (xAI API + Grok consumer app + Cursor, per SpaceX/Anysphere deal).
+  // #1165/#1586 — xai family added (SpaceXAI API + Grok consumer app + Cursor, per SpaceX/Anysphere deal).
   it('covers exactly the agreed Anthropic/OpenAI/xAI families (3 groups, 9 services)', () => {
     expect(Object.keys(FAMILY_GROUPS).sort()).toEqual(['claude', 'openai', 'xai'])
     expect(FAMILY_GROUPS.claude.members.slice().sort()).toEqual(['claude', 'claudeai', 'claudecode'])
     expect(FAMILY_GROUPS.openai.members.slice().sort()).toEqual(['chatgpt', 'codex', 'openai'])
     expect(FAMILY_GROUPS.xai.members.slice().sort()).toEqual(['cursor', 'grok', 'xai'])
+    expect(FAMILY_GROUPS.xai.name).toBe('SpaceXAI (Grok, Cursor)')
   })
 })

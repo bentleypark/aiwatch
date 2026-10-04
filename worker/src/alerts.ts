@@ -930,18 +930,18 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
 // region prefix off the alert description (= the incident title) to derive a grouping key, so the SAME
 // event across regions merges. Distinct events with the SAME title do not stay separate by that key
 // alone — #1349 — which is what the per-region rule inside `collapse` below is for. The regex lives
-// in xai-regions.ts (#703) so the two surfaces agree on what a region IS. xAI-only by design.
+// in xai-regions.ts (#703) so the two surfaces agree on what a region IS. SpaceXAI-only by design.
 
 /**
- * Merge concurrent xAI API per-region incident alerts (same event, different region) into one
+ * Merge concurrent SpaceXAI API per-region incident alerts (same event, different region) into one
  * grouped alert. New + resolved handled independently (a staggered resolve fires individually — same
- * limitation as mergeTogetherAlerts). Non-region-tagged xAI alerts and all non-xAI alerts pass through.
+ * limitation as mergeTogetherAlerts). Non-region-tagged SpaceXAI alerts and all other alerts pass through.
  * Sets `_mergedKeys` so every collapsed incidentId lands in the `alerted:new:` roster (no re-fire) and
  * the daily count still tallies each region (index.ts). svcIds stays `['xai']` so tweets/feed are unaffected.
  */
 export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate[] {
   const isXai = (a: AlertCandidate) =>
-    a.title.startsWith('🔴 xAI API — New Incident') || a.title.startsWith('🟢 xAI API — Incident Resolved')
+    a.title.startsWith('🔴 SpaceXAI API — New Incident') || a.title.startsWith('🟢 SpaceXAI API — Incident Resolved')
   const xai = alerts.filter(isXai)
   if (xai.length <= 1) return alerts
   const rest = alerts.filter((a) => !isXai(a))
@@ -977,7 +977,7 @@ export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate
       const regions = arr.map((a) => XAI_REGION_RE.exec(a.description)?.[1]).filter(Boolean)
       const merged: AlertCandidate = {
         key: arr[0].key,
-        title: `${kind === 'new' ? '🔴' : '🟢'} xAI API — ${kind === 'new' ? 'New Incident' : 'Incident Resolved'} (${regions.join(', ')})`,
+        title: `${kind === 'new' ? '🔴' : '🟢'} SpaceXAI API — ${kind === 'new' ? 'New Incident' : 'Incident Resolved'} (${regions.join(', ')})`,
         description: arr.map((a) => a.description).join('\n'), // preserve each region's original title
         color: kind === 'new' ? 0xED4245 : 0x57F287,
         url: 'https://ai-watch.dev/#xai',

@@ -77,6 +77,17 @@ describe('buildHNQuery (#720)', () => {
     expect(q).toContain('anthropic')
     expect(q).toContain('claude')
   })
+
+  it('#1586 — leaves "x.ai" out of the Algolia query (it tokenizes to "ai" and floods the 50-hit pull) but still matches it in titles', () => {
+    expect(buildHNQuery().split(' ')).not.toContain('x.ai')
+    expect(titleMatchesAiSecurity('x.ai API vulnerability disclosed')).toBe(true)
+    expect(titleMatchesAiSecurity('Flux.ai vulnerability disclosed')).toBe(false)
+  })
+
+  it('#1586 — matches the current SpaceXAI name, which "xai" alone does not cover', () => {
+    expect(buildHNQuery().split(' ')).toContain('spacexai')
+    expect(titleMatchesAiSecurity('SpaceXAI breach disclosed')).toBe(true)
+  })
 })
 
 describe('titleMatchesAiSecurity (#720)', () => {

@@ -162,7 +162,7 @@ const FEED_SLUG_OVERRIDE = {
   // single-service pages moved to '-api' slugs.
   claude:      'claude-api',
   openai:      'openai-api',
-  // #1165 — /is-xai-down became the xAI/Grok family group page; the single-service xAI API page
+  // #1165/#1586 — /is-xai-down became the SpaceXAI/Grok family group page; the single-service SpaceXAI API page
   // moved to 'xai-api'. 'grok' (the new consumer-app id) needs no override — its slug == id.
   xai:         'xai-api',
   windsurf:    'devin-desktop', // #1430 — Windsurf was renamed Devin Desktop

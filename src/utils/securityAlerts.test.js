@@ -124,7 +124,7 @@ const NVD_SERVICES = [
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app' },
   { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api' },
-  { id: 'xai', name: 'xAI API', provider: 'xAI', category: 'api' },
+  { id: 'xai', name: 'SpaceXAI API', provider: 'SpaceXAI', category: 'api' },
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api' },
 ]
 const nvdSvc = (id) => NVD_SERVICES.find((s) => s.id === id)
@@ -207,6 +207,21 @@ describe('filterSecurityAlertsForService (#821)', () => {
   it('tolerates null/empty alert lists', () => {
     expect(filterSecurityAlertsForService(null, svc('openai'), SERVICES)).toEqual([])
     expect(filterSecurityAlertsForService([], svc('openai'), SERVICES)).toEqual([])
+  })
+
+  it('#1586 — routes current and legacy SpaceXAI provider-only reports to the API card', () => {
+    const spaceXai = NVD_SERVICES.filter((s) => s.id === 'xai' || s.id === 'perplexity')
+    for (const title of ['SpaceXAI breach disclosed', 'xAI security issue disclosed', 'x.ai API vulnerability disclosed']) {
+      const matching = spaceXai.filter((s) => securityAlertMatchesService({ title }, s, spaceXai))
+      expect(matching.map((s) => s.id), title).toEqual(['xai'])
+    }
+  })
+
+  it('#1586 — another brand ending in ".ai" is not a SpaceXAI mention', () => {
+    const spaceXai = NVD_SERVICES.filter((s) => s.id === 'xai')
+    for (const title of ['Flux.ai vulnerability exposes Claude tokens', 'Onyx.ai leaked Claude API keys in a breach']) {
+      expect(securityAlertMatchesService({ title }, spaceXai[0], spaceXai), title).toBe(false)
+    }
   })
 })
 
