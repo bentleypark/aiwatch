@@ -35,6 +35,8 @@ import {
   type SubscriptionFilters,
 } from '../webhook-subscriptions'
 import type { AlertFeedEntry } from '../alert-feed'
+import { SERVICES } from '../services'
+import { GROUP_LABEL } from '../service-groups'
 
 // A fetch stand-in for Slack's webhook endpoint. It builds a real Request, so a request the runtime
 // would refuse (a GET with a body) throws here too, and it throws when called bound, as the Workers
@@ -518,8 +520,11 @@ describe('handleSlackManageRequest', () => {
     const kv = makeKV()
     const r = await completeInstall(kv, KEY, { webhookUrl: HOOK_A, teamId: 'T1', channelId: 'C1' }, FILTERS_ALL, NOW)
     const res = await handleSlackManageRequest(req({ token: r!.manageToken, action: 'get' }), kv, {}, NO_NOTICE)
-    const body = await res.json() as { services: { id: string }[] }
-    expect(body.services.map((s) => s.id)).toContain('bedrock')
+    const body = await res.json() as { services: { id: string; group: string }[] }
+    expect(body.services.map((s) => s.id).sort()).toEqual(SERVICES.map((s) => s.id).sort())
+    const groups = body.services.map((s) => s.group).filter((g, i, a) => g !== a[i - 1])
+    expect(groups).toEqual(Object.values(GROUP_LABEL))
+    expect(body.services.find((s) => s.id === 'cursor')?.group).toBe('Coding Agents')
   })
 
   it('a wrong token is 404, a non-string token is 404, and a bad body is 500', async () => {

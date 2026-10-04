@@ -65,6 +65,7 @@ describe('/slack/manage', () => {
       expect((document.querySelector('input[name="condition"][value="down"]') as HTMLInputElement).checked).toBe(true)
       expect((document.getElementById('incidents') as HTMLInputElement).checked).toBe(false)
       expect([...document.querySelectorAll('#svcs label')].map((l) => l.textContent!.trim())).toEqual(['Claude API', 'OpenAI API', 'Amazon Bedrock'])
+      expect(document.querySelectorAll('#svcs h3')).toHaveLength(0)
     })
 
     it('saves the edited filters', async () => {
@@ -75,6 +76,58 @@ describe('/slack/manage', () => {
       await vi.waitFor(() => expect(document.getElementById('msg')!.textContent).toBe('✓ Saved.'))
       const body = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body))
       expect(body).toEqual({ token: TOKEN, action: 'update', filters: { alertTarget: 'custom', alertServices: ['claude', 'openai'], alertCondition: 'down', alertIncidents: false } })
+    })
+
+    it('groups the services under their category headings', async () => {
+      const grouped = [
+        { id: 'claude', name: 'Claude API', group: 'LLM APIs' },
+        { id: 'openai', name: 'OpenAI API', group: 'LLM APIs' },
+        { id: 'cursor', name: 'Cursor', group: 'Coding Agents' },
+      ]
+      boot(`#t=${TOKEN}`, [{ status: 200, body: { ok: true, filters, services: grouped } }])
+      await vi.waitFor(() => expect((document.getElementById('form') as HTMLFormElement).hidden).toBe(false))
+      expect([...document.getElementById('svcs')!.children].map((el) => `${el.tagName}:${el.textContent!.trim()}`))
+        .toEqual(['H3:LLM APIs', 'LABEL:Claude API', 'LABEL:OpenAI API', 'H3:Coding Agents', 'LABEL:Cursor'])
+    })
+
+    it('a stored service that is no longer listed sits under its own heading', async () => {
+      const grouped = [{ id: 'claude', name: 'Claude API', group: 'LLM APIs' }, { id: 'chatgpt', name: 'ChatGPT', group: 'AI Apps' }]
+      boot(`#t=${TOKEN}`, [{ status: 200, body: { ok: true, filters: { ...filters, alertServices: ['claude', 'retiredsvc'] }, services: grouped } }])
+      await vi.waitFor(() => expect((document.getElementById('form') as HTMLFormElement).hidden).toBe(false))
+      expect([...document.getElementById('svcs')!.children].map((el) => `${el.tagName}:${el.textContent!.trim()}`))
+        .toEqual(['H3:LLM APIs', 'LABEL:Claude API', 'H3:AI Apps', 'LABEL:ChatGPT', 'H3:Other', 'LABEL:retiredsvc'])
+    })
+
+    it('picking a service on an every-service channel saves just that service', async () => {
+      const all = { alertTarget: 'all', alertServices: [], alertCondition: 'all', alertIncidents: true }
+      const fetchMock = boot(`#t=${TOKEN}`, [{ status: 200, body: { ok: true, filters: all, services } }, { status: 200, body: { ok: true } }])
+      await vi.waitFor(() => expect((document.getElementById('form') as HTMLFormElement).hidden).toBe(false))
+      ;(document.querySelector('input[value="openai"]') as HTMLInputElement).click()
+      expect((document.querySelector('input[name="target"][value="custom"]') as HTMLInputElement).checked).toBe(true)
+      ;(document.getElementById('form') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
+      await vi.waitFor(() => expect(document.getElementById('msg')!.textContent).toBe('✓ Saved.'))
+      const body = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body))
+      expect(body.filters).toEqual({ alertTarget: 'custom', alertServices: ['openai'], alertCondition: 'all', alertIncidents: true })
+    })
+
+    it('every service clears the picks, and going back to only these restores them', async () => {
+      boot(`#t=${TOKEN}`, [{ status: 200, body: { ok: true, filters, services } }])
+      await vi.waitFor(() => expect((document.getElementById('form') as HTMLFormElement).hidden).toBe(false))
+      const picked = () => [...document.querySelectorAll<HTMLInputElement>('#svcs input:checked')].map((b) => b.value)
+      ;(document.querySelector('input[value="openai"]') as HTMLInputElement).click()
+      ;(document.querySelector('input[name="target"][value="all"]') as HTMLInputElement).click()
+      expect(picked()).toEqual([])
+      ;(document.querySelector('input[name="target"][value="custom"]') as HTMLInputElement).click()
+      expect(picked()).toEqual(['claude', 'openai'])
+    })
+
+    it('a new pick after every service starts a fresh selection', async () => {
+      boot(`#t=${TOKEN}`, [{ status: 200, body: { ok: true, filters, services } }])
+      await vi.waitFor(() => expect((document.getElementById('form') as HTMLFormElement).hidden).toBe(false))
+      ;(document.querySelector('input[name="target"][value="all"]') as HTMLInputElement).click()
+      ;(document.querySelector('input[value="bedrock"]') as HTMLInputElement).click()
+      expect((document.querySelector('input[name="target"][value="custom"]') as HTMLInputElement).checked).toBe(true)
+      expect([...document.querySelectorAll<HTMLInputElement>('#svcs input:checked')].map((b) => b.value)).toEqual(['bedrock'])
     })
 
     it('refuses to save "only these" with no service picked, and calls nothing', async () => {

@@ -29,6 +29,7 @@ interface MockIncident {
   startedAt: string
   resolvedAt?: string | null
   duration: string | null
+  timeline?: Array<{ stage: string; text: string | null; at: string }>
 }
 
 interface MockService {
@@ -755,6 +756,30 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
     const html = await res.text()
     vi.useRealTimers()
     expect((html.match(/class="incident-row"/g) ?? []).length).toBe(2)
+  })
+
+  it('#1596 — shows the provider timeline under an incident row, and nothing for a row without one', async () => {
+    vi.useFakeTimers().setSystemTime(NOW)
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'down', incidents: [
+        { id: 'inc-a', title: 'Elevated errors', status: 'identified', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null, timeline: [
+          { stage: 'investigating', text: 'Looking into errors', at: '2026-07-26T05:00:00Z' },
+          { stage: 'identified', text: 'Sign-in still affected', at: '2026-07-26T05:30:00Z' },
+        ] },
+      ] },
+      { id: 'claudeai', name: 'claude.ai', status: 'down', incidents: [
+        { id: 'inc-b', title: 'Login failures', status: 'investigating', startedAt: '2026-07-26T04:00:00Z', resolvedAt: null, duration: null },
+      ] },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const res = await handler(makeReq('claude'))
+    const html = await res.text()
+    vi.useRealTimers()
+    expect((html.match(/class="incident-timeline"/g) ?? []).length).toBe(1)
+    expect(html).toContain('Latest update')
+    expect(html).toContain('Sign-in still affected')
+    expect(html).toContain('Timeline &middot; 2 updates')
+    expect(html).toContain('.tl-latest{')
   })
 
   it('does NOT attach an AI analysis meant for a different, unrelated incident on the same service', async () => {

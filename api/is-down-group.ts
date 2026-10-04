@@ -18,7 +18,7 @@ import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-ct
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { cookieBannerHtml } from './_shared/cookie-banner'
-import { ALERT_CTA_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, formatRecoveryMinutes, timeAgo } from './_is-down/html-template'
+import { ALERT_CTA_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, formatRecoveryMinutes, renderIncidentTimeline, timeAgo } from './_is-down/html-template'
 
 export const config = { runtime: 'edge' }
 
@@ -70,6 +70,7 @@ interface FamilyIncident {
    *  split. */
   aiProgress?: string
   aiEstimatedRecovery?: string
+  timeline?: Array<{ stage: string; text: string | null; at: string }>
 }
 
 interface FamilySummary {
@@ -179,6 +180,12 @@ export function incidentMeta(inc: FamilyIncident): string {
   if (inc.derived === 'status_history') return inc.duration ? `${dateStr} · down ${inc.duration} that day` : dateStr
   if (inc.status === 'resolved') return inc.duration ? `${dateStr} · resolved after ${inc.duration}` : `${dateStr} · resolved`
   return `${dateStr} · ongoing`
+}
+
+function renderFamilyIncidentTimeline(inc: FamilyIncident): string {
+  const html = renderIncidentTimeline(inc)
+  return html ? `
+      <div class="incident-timeline">${html}</div>` : ''
 }
 
 // Same vocabulary + mapping as api/_is-down/html-template.ts's HINT_TO_OG_STATUS — kept as a hand-copied
@@ -351,7 +358,7 @@ function renderGroupPage(
         <span class="incident-service">${inc.members.map((m) => `<a href="/is-${esc(m.slug)}-down">${esc(m.name)}</a>`).join(', ')}</span>
         <span class="incident-title">${esc(inc.title)}</span>
         <span class="incident-meta">${esc(incidentMeta(inc))}</span>
-      </div>${inc.aiSummary ? `
+      </div>${renderFamilyIncidentTimeline(inc)}${inc.aiSummary ? `
       <div class="incident-ai">
         <span class="incident-ai-badge">${inc.status === 'resolved' ? '🤖 Post-Incident Analysis' : '🤖 AI Analysis'}</span>
         <p>${esc(inc.aiSummary)}${inc.status !== 'resolved' && inc.aiProgress ? ' ' + esc(inc.aiProgress) : ''}</p>
@@ -513,6 +520,8 @@ ${consentInitScript()}
   .incident-service a:hover { text-decoration:underline; }
   .incident-title { flex:1; }
   .incident-meta { color:#9ca3af; font-size:0.85rem; width:100%; }
+  .incident-timeline { padding:0 16px 12px; }
+${INCIDENT_TIMELINE_CSS}
   .no-incidents { color:#9ca3af; }
   .incidents-unavailable { color:#d29922; background:#0d1117; border-left:3px solid #d29922; border-radius:6px; padding:8px 12px; margin:8px 0; font-size:0.9rem; }
   .community-reports { padding:12px 16px; border:1px solid #1f2937; border-radius:8px; background:#161b22; }
@@ -750,6 +759,7 @@ export default async function handler(req: Request) {
               // #1292 — read them if the upstream carries them, so the row's guard is wired rather
               // than latent. Absent on every other source.
               derived?: 'status_history'; derivedDay?: string
+              timeline?: Array<{ stage: string; text: string | null; at: string }>
             }>
           }>
           // #926 — one entry per active incident, keyed by service id (same shape is-down.ts reads).
@@ -858,7 +868,7 @@ export default async function handler(req: Request) {
             byIncidentId.set(inc.id, {
               members: [{ name: memberName, slug }], title: inc.title, status: inc.status,
               startedAt: inc.startedAt, resolvedAt: inc.resolvedAt, duration: inc.duration,
-              derived: inc.derived, derivedDay: inc.derivedDay,
+              derived: inc.derived, derivedDay: inc.derivedDay, timeline: inc.timeline,
               aiSummary: analysis?.summary, aiProgress: analysis?.progress, aiEstimatedRecovery: analysis?.estimatedRecovery,
             })
           }

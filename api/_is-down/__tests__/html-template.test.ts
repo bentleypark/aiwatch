@@ -1843,3 +1843,101 @@ describe('renderPage — pinned og:image URL is stable over time (#1103)', () =>
     expect(renderAt(T0, 'down', { uptime30d: 99.10 })).not.toBe(base)
   })
 })
+
+describe('renderIncidents — provider timeline (#1596)', () => {
+  const tl = (stage: string, text: string | null, at: string) => ({ stage, text, at })
+
+  it('an ongoing incident shows its LAST timeline entry as the latest update, and the full timeline in order', () => {
+    const html = renderIncidents(mkService({ incidents: [{
+      ...mkInc({ status: 'investigating', startedAt: daysAgo(0) }),
+      timeline: [tl('investigating', 'First look', daysAgo(0)), tl('identified', 'Root cause found', daysAgo(0))],
+    }] }))
+    const latest = html.slice(html.indexOf('tl-latest'), html.indexOf('<details class="tl">'))
+    expect(latest).toContain('Root cause found')
+    expect(latest).not.toContain('First look')
+    expect(html).toContain('Timeline &middot; 2 updates')
+    const steps = html.slice(html.indexOf('<details class="tl">'))
+    expect(steps.indexOf('First look')).toBeLessThan(steps.indexOf('Root cause found'))
+  })
+
+  it('a resolved incident gets the collapsed timeline but no latest-update block', () => {
+    const html = renderIncidents(mkService({ incidents: [{
+      ...mkInc({ status: 'resolved', duration: '42m' }),
+      timeline: [tl('resolved', 'Fixed', daysAgo(5))],
+    }] }))
+    expect(html).not.toContain('tl-latest')
+    expect(html).toContain('<details class="tl">')
+    expect(html).toContain('Timeline &middot; 1 update<')
+  })
+
+  it('an ongoing incident with a single update shows it once, with no disclosure repeating it', () => {
+    const html = renderIncidents(mkService({ incidents: [{
+      ...mkInc({ status: 'investigating', startedAt: daysAgo(0) }),
+      timeline: [tl('investigating', 'Looking into it', daysAgo(0))],
+    }] }))
+    expect(html.match(/Looking into it/g)?.length).toBe(1)
+    expect(html).not.toContain('<details class="tl">')
+  })
+
+  it('a monitoring incident marks its latest-update block as monitoring', () => {
+    const html = renderIncidents(mkService({ incidents: [{
+      ...mkInc({ status: 'monitoring', startedAt: daysAgo(0) }),
+      timeline: [tl('monitoring', 'Fix deployed', daysAgo(0))],
+    }] }))
+    expect(html).toContain('class="tl-latest tl-latest-monitoring"')
+  })
+
+  it('an incident with no timeline renders no timeline markup', () => {
+    const html = renderIncidents(mkService({ incidents: [
+      { ...mkInc({ status: 'resolved', duration: '1h' }), timeline: [] },
+      mkInc({ id: 'y', title: 'Other', status: 'resolved', duration: '2h' }),
+    ] }))
+    expect(html).not.toMatch(/class="tl/)
+  })
+
+  it('escapes provider text and does not turn an unknown stage into a class name', () => {
+    const html = renderIncidents(mkService({ incidents: [{
+      ...mkInc({ status: 'resolved', duration: '5m' }),
+      timeline: [tl('x" onclick="y', '<img src=x onerror=alert(1)>', daysAgo(5))],
+    }] }))
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(html).not.toContain('<img src=x')
+    expect(html).not.toContain('onclick')
+    expect(html).toContain('<span class="tl-stage">Update</span>')
+  })
+
+  it('labels each known stage with its own name, stage class and UTC time', () => {
+    const at = `${dayAgo(1)}14:36:00.000Z`
+    const shown = new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    const html = renderIncidents(mkService({ incidents: [{
+      ...mkInc({ status: 'resolved', startedAt: daysAgo(1), duration: '1h' }),
+      timeline: ['investigating', 'identified', 'monitoring', 'resolved'].map((s) => tl(s, null, at)),
+    }] }))
+    for (const [stage, label] of [['investigating', 'Investigating'], ['identified', 'Identified'], ['monitoring', 'Monitoring'], ['resolved', 'Resolved']]) {
+      expect(html).toContain(`<span class="tl-stage tl-${stage}">${label}</span> &middot; ${shown}, 14:36 UTC`)
+    }
+  })
+
+  it('an inherited object key as a stage is treated as unknown', () => {
+    const html = renderIncidents(mkService({ incidents: [{
+      ...mkInc({ status: 'resolved', duration: '5m' }),
+      timeline: [tl('constructor', 'x', daysAgo(5))],
+    }] }))
+    expect(html).toContain('<span class="tl-stage">Update</span>')
+    expect(html).not.toContain('tl-constructor')
+  })
+
+  it('renders the timeline on each entry of a grouped ×N row too', () => {
+    const html = renderIncidents(mkService({ incidents: [0, 1].map((i) => ({
+      ...mkInc({ id: `g${i}`, title: 'Elevated errors', status: 'resolved', startedAt: `${dayAgo(1)}0${i + 1}:00:00.000Z`, duration: '10m' }),
+      timeline: [tl('resolved', `Group entry ${i}`, `${dayAgo(1)}0${i + 1}:10:00.000Z`)],
+    })) }))
+    expect(html).toContain('class="incident-group"')
+    expect(html).toContain('Group entry 0')
+    expect(html).toContain('Group entry 1')
+  })
+
+  it('renderPage ships the timeline styles', () => {
+    expect(renderPage('claude', mkService(), mkSeo(), [])).toContain('.tl-latest{')
+  })
+})

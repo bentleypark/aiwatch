@@ -54,6 +54,8 @@ function page(title: string, body: string, nonce: string, script = ''): string {
   .btn:disabled { opacity: 0.55; cursor: default; }
   fieldset { border: none; }
   .svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; }
+  .svc-group { grid-column: 1 / -1; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #8b949e; margin: 10px 0 2px; }
+  .svc-group:first-child { margin-top: 0; }
   label { font-size: 13px; color: #e6edf3; display: flex; align-items: center; gap: 8px; padding: 3px 0; }
   .opt { margin-bottom: 4px; }
 </style>
@@ -116,9 +118,14 @@ export function renderManage(nonce: string): string {
   function render(f, services){
     var chosen = {}; (f.alertServices || []).forEach(function(id){ chosen[id] = true; });
     var list = (services || []).slice();
-    (f.alertServices || []).forEach(function(id){ if (!list.some(function(s){ return s.id === id; })) list.push({ id: id, name: id }); });
+    (f.alertServices || []).forEach(function(id){ if (!list.some(function(s){ return s.id === id; })) list.push({ id: id, name: id, group: 'Other' }); });
     svcs.textContent = '';
+    var group;
     list.forEach(function(s){
+      if (s.group !== group) {
+        group = s.group;
+        var h = document.createElement('h3'); h.className = 'svc-group'; h.textContent = group; svcs.appendChild(h);
+      }
       var label = document.createElement('label'), box = document.createElement('input');
       box.type = 'checkbox'; box.value = s.id; box.checked = !!chosen[s.id];
       label.appendChild(box); label.appendChild(document.createTextNode(' ' + s.name)); svcs.appendChild(label);
@@ -129,6 +136,16 @@ export function renderManage(nonce: string): string {
     status.className = 'muted'; status.textContent = 'Changes apply to the Slack channel this link was posted in.';
     form.hidden = false;
   }
+  svcs.addEventListener('change', function(e){ if (e.target.checked) radio('target', 'custom'); });
+  var remembered = [];
+  form.querySelector('input[name="target"][value="all"]').addEventListener('change', function(){
+    var boxes = svcs.querySelectorAll('input:checked');
+    if (boxes.length) remembered = Array.prototype.map.call(boxes, function(b){ b.checked = false; return b.value; });
+  });
+  form.querySelector('input[name="target"][value="custom"]').addEventListener('change', function(){
+    if (svcs.querySelector('input:checked')) return;
+    remembered.forEach(function(id){ var b = svcs.querySelector('input[value="' + id + '"]'); if (b) b.checked = true; });
+  });
   if (!token) { fail('This link is incomplete. Open it again from the AIWatch welcome message in your Slack channel.'); return; }
   call('get').then(function(r){
     if (r.status === 200 && r.body.filters) render(r.body.filters, r.body.services);
