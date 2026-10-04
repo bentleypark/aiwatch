@@ -15,6 +15,7 @@ import {
   SLACK_MANAGE_PREFIX,
   deleteConfirmed,
   deleteSubscription,
+  decryptUrl,
   encryptUrl,
   isSubscriberHash,
   isValidEncKey,
@@ -241,12 +242,57 @@ export type ManageResult =
   | { ok: true; filters?: SubscriptionFilters; services?: { id: string; name: string }[] }
   | { ok: false; status: 400 | 404 | 500; error: string }
 
-export async function manageSlack(kv: KVNamespace, token: string, action: unknown, rawFilters: unknown): Promise<ManageResult> {
+export interface UnsubscribeNotice {
+  encKey: string | undefined
+  fetchFn: typeof fetch
+  site: string
+  /** This worker's `/api/slack/install` URL, for the one-click re-add link. */
+  installUrl: string
+}
+
+/** The re-add link keeps the channel's previous service selection, so one click restores it. */
+export function buildGoodbyeMessage(site: string, installUrl: string, filters: SubscriptionFilters): { text: string } {
+  const settings = `${site.replace(/\/$/, '')}/#settings?focus=alerts`
+  const services = filters.alertTarget === 'custom' ? filters.alertServices.filter((id) => KNOWN_SERVICE_IDS.has(id)) : []
+  const params = [
+    ...(services.length > 0 ? [`services=${services.join(',')}`] : []),
+    ...(filters.alertCondition === 'down' ? ['condition=down'] : []),
+    ...(filters.alertIncidents === false ? ['incidents=0'] : []),
+  ]
+  const reinstall = params.length > 0 ? `${installUrl}?${params.join('&')}` : installUrl
+  return {
+    text: [
+      ':no_bell: *AIWatch alerts are turned off for this channel.*',
+      `To get them again: <${reinstall}|Add to Slack> (one click, same settings) or <${settings}|AIWatch settings>.`,
+      'You can also remove the AIWatch app from this workspace under Manage apps.',
+    ].join('\n'),
+  }
+}
+
+export function slackManageNotice(env: { WEBHOOK_ENC_KEY?: string; CONFIRM_BASE_URL?: string }, workerOrigin: string, fetchFn: typeof fetch): UnsubscribeNotice {
+  return { encKey: env.WEBHOOK_ENC_KEY, fetchFn, site: env.CONFIRM_BASE_URL || 'https://ai-watch.dev', installUrl: `${workerOrigin}/api/slack/install` }
+}
+
+async function postGoodbye(sub: ConfirmedSubscription, notice: UnsubscribeNotice): Promise<void> {
+  const { encKey, fetchFn, site, installUrl } = notice
+  if (!encKey) return
+  const url = await decryptUrl(sub.encUrl, encKey)
+  if (!url || !url.startsWith(SLACK_WEBHOOK_PREFIX)) return
+  try {
+    const resp = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildGoodbyeMessage(site, installUrl, sub.filters)) })
+    resp.body?.cancel()
+  } catch (err) {
+    console.warn('[slack/manage] unsubscribe notice failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+export async function manageSlack(kv: KVNamespace, token: string, action: unknown, rawFilters: unknown, notice: UnsubscribeNotice): Promise<ManageResult> {
   if (action !== 'get' && action !== 'update' && action !== 'unsubscribe') return { ok: false, status: 400, error: 'Invalid action' }
   const found = await resolveManageToken(kv, token)
   if (!found) return { ok: false, status: 404, error: 'Subscription not found' }
   if (action === 'get') return { ok: true, filters: found.sub.filters, services: SERVICES.map((s) => ({ id: s.id, name: s.name })) }
   if (action === 'unsubscribe') {
+    await postGoodbye(found.sub, notice)
     await deleteSubscription(kv, found.hash, found.sub)
     return { ok: true }
   }
@@ -334,11 +380,11 @@ export async function handleSlackOAuthRoute(request: Request, env: SlackRouteEnv
 // ── HTTP: manage link backend ────────────────────────────────────────────────
 
 /** POST /api/slack/manage `{token, action, filters}` (CORS and the rate limit are the caller's). */
-export async function handleSlackManageRequest(request: Request, kv: KVNamespace, cors: Record<string, string>): Promise<Response> {
+export async function handleSlackManageRequest(request: Request, kv: KVNamespace, cors: Record<string, string>, notice: UnsubscribeNotice): Promise<Response> {
   const headers = { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   try {
     const body = await request.json() as { token?: unknown; action?: unknown; filters?: unknown }
-    const result = await manageSlack(kv, typeof body.token === 'string' ? body.token : '', body.action, body.filters)
+    const result = await manageSlack(kv, typeof body.token === 'string' ? body.token : '', body.action, body.filters, notice)
     if (!result.ok) return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers })
     return new Response(JSON.stringify({ ok: true, filters: result.filters, services: result.services }), { headers })
   } catch (err) {

@@ -34,8 +34,8 @@ import { buildUpstreamLinks } from './upstream-link'
 import type { UpstreamCandidate } from './upstream-feed'
 import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge, refreshStatusCacheAfterCronFetch, shouldPersistSnapshot } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
-import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedSubs, countByType, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
-import { handleSlackOAuthRoute, handleSlackManageRequest } from './slack'
+import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedSubs, countByType, isValidEncKey, computeSubscriberDelta, readSubscriberReport } from './webhook-subscriptions'
+import { handleSlackOAuthRoute, handleSlackManageRequest, slackManageNotice } from './slack'
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest, isStatuslinePreset, renderStatuslineBrief, buildStatuslineDownResponse, buildStatuslinePresetResponse, STATUSLINE_BRIEF_UNKNOWN } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
@@ -4182,12 +4182,13 @@ export default {
             // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
             // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
             // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
-            let webhookCounts: { discord: number; slack?: number; newToday: number | null } = { discord: 0, newToday: null }
+            let webhookCounts: { discord: number; slack?: number; newToday: number | null; newTodayByType?: { discord: number; slack: number } | null } = { discord: 0, newToday: null }
             // #986 — `webhookCounts.discord` stays 0 when the listing throws, which the Discord report can
             // live with but the growth series cannot: 0 subscribers and "we could not count" are different
             // days. Capture the snapshot separately so a failed read stays null in the series.
             let subscribersSnapshot: number | null = null
             let subscribersByType: { discord: number; slack: number } | null = null
+            const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
             try {
               const subs = await listConfirmedSubs(env.STATUS_CACHE)
               const hashes = subs.map((sub) => sub.hash)
@@ -4197,7 +4198,6 @@ export default {
               subscribersSnapshot = hashes.length
               // #548 — new-today delta: diff against yesterday's snapshot, then persist today's for
               // tomorrow's diff (7d TTL so a missed day still leaves a baseline). Consent-free signal.
-              const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
               const prevRaw = await env.STATUS_CACHE.get(`webhook:sub:count:${yesterday}`).catch(() => null)
               webhookCounts.newToday = computeSubscriberDelta(hashes.length, prevRaw)
               // #548 — a CORRUPT baseline (present but non-numeric) collapses to null like a clean
@@ -4213,6 +4213,9 @@ export default {
             } catch (err) {
               console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
             }
+
+            const { newTodayByType, fanoutCounts } = await readSubscriberReport(env.STATUS_CACHE, subscribersByType, today, yesterday)
+            webhookCounts.newTodayByType = newTodayByType
 
             // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
             let deliveryCounts: { discord: number; failed: number } | null = null
@@ -4491,6 +4494,7 @@ export default {
               referralCounts,
               accuracy,
               webhookCounts,
+              fanoutCounts,
               deliveryCounts,
               redditCount,
               redditSourceDead,
@@ -5070,7 +5074,7 @@ export default {
       if (overRateLimit(webhookConfirmRate, ip, 20, Date.now())) {
         return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { ...cors, 'Content-Type': 'application/json' } })
       }
-      return handleSlackManageRequest(request, env.STATUS_CACHE, cors)
+      return handleSlackManageRequest(request, env.STATUS_CACHE, cors, slackManageNotice(env, url.origin, fetch))
     }
 
     // #486 — server-side per-user Discord subscription endpoints. The browser POSTs the raw URL +

@@ -441,6 +441,8 @@ export interface DeliveryStats {
    *  fetch errors). A non-zero count means an un-guarded await slipped in; surfaced so the cron can
    *  log it rather than have allSettled swallow it invisibly. */
   rejected: number
+  /** #1590 — delivered / failed per channel type, for the daily report. */
+  byType: Record<SubscriptionType, { delivered: number; failed: number }>
 }
 
 /** Classify a Discord delivery HTTP status into the prune/retry decision (#486):
@@ -503,7 +505,7 @@ export async function deliverToSubscribers(
   now: number,
   fetchFn: typeof fetch = fetch,
 ): Promise<DeliveryStats> {
-  const stats: DeliveryStats = { attempted: 0, delivered: 0, pruned: 0, failed: 0, rejected: 0 }
+  const stats: DeliveryStats = { attempted: 0, delivered: 0, pruned: 0, failed: 0, rejected: 0, byType: { discord: { delivered: 0, failed: 0 }, slack: { delivered: 0, failed: 0 } } }
   if (!isValidEncKey(encKey) || feed.length === 0) return stats
 
   const hashes = await listConfirmedHashes(kv)
@@ -525,6 +527,7 @@ export async function deliverToSubscribers(
         const already = await kv.get(sentKey).catch(() => null)
         if (already) continue
         stats.attempted++
+        const typeStats = stats.byType[sub.type === 'slack' ? 'slack' : 'discord']
         // #726 — general subscribers get the is-down link, not the operator dashboard link.
         let outcome: DeliveryOutcome
         if (sub.type === 'slack') {
@@ -532,6 +535,7 @@ export async function deliverToSubscribers(
           outcome = classifySlackDelivery(res.status, res.body)
           if (outcome === 'payload-error') {
             stats.failed++
+            typeStats.failed++
             console.error(`[webhook-deliver] slack rejected our payload (${res.status} ${res.body}) for ${entry.key} — subscription kept`)
             continue
           }
@@ -545,10 +549,12 @@ export async function deliverToSubscribers(
         }
         if (outcome === 'success') {
           stats.delivered++
+          typeStats.delivered++
           await kvPut(kv, sentKey, '1', { expirationTtl: SENT_TTL_S })
         } else {
           sawFailure = true
           stats.failed++
+          typeStats.failed++
         }
       }
       // Update failCount once per sub per cycle: reset on a clean cycle, bump (and maybe prune) on failure.
@@ -575,6 +581,7 @@ export async function deliverToSubscribers(
     stats.rejected = rejected.length
     console.error('[webhook-deliver] unexpected per-sub rejections:', rejected.length, rejected.slice(0, 3).map((r) => r.reason instanceof Error ? r.reason.message : r.reason))
   }
+  await recordFanout(kv, stats, now)
   return stats
 }
 
@@ -589,4 +596,94 @@ export function computeSubscriberDelta(todayCount: number, prevSnapshotRaw: stri
   const prev = Number(prevSnapshotRaw)
   if (!Number.isFinite(prev)) return null
   return todayCount - prev
+}
+
+// ── #1590 — daily report figures ─────────────────────────────────────────────
+
+export const FANOUT_PREFIX = 'webhook:fanout:'
+export const FANOUT_TTL_S = 3 * 86400
+export const TYPECOUNT_PREFIX = 'webhook:typecount:'
+
+export type FanoutCounts = Record<SubscriptionType, { delivered: number; failed: number }>
+
+/** The daily report runs at 09:00 UTC on date D and covers the 24h before it, so a delivery at time
+ *  t counts toward the report dated `date(t + 15h)`. */
+export function fanoutDay(nowMs: number): string {
+  return new Date(nowMs + 15 * 3600_000).toISOString().slice(0, 10)
+}
+
+function emptyFanout(): FanoutCounts {
+  return { discord: { delivered: 0, failed: 0 }, slack: { delivered: 0, failed: 0 } }
+}
+
+export function parseFanout(raw: string | null): FanoutCounts | null {
+  if (raw == null) return null
+  try {
+    const v = JSON.parse(raw) as Partial<FanoutCounts>
+    const out = emptyFanout()
+    for (const t of ['discord', 'slack'] as const) {
+      const d = v?.[t]?.delivered
+      const f = v?.[t]?.failed
+      if (typeof d === 'number') out[t].delivered = d
+      if (typeof f === 'number') out[t].failed = f
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
+export function addFanout(prev: FanoutCounts | null, byType: FanoutCounts): FanoutCounts {
+  const out = prev ?? emptyFanout()
+  for (const t of ['discord', 'slack'] as const) {
+    out[t].delivered += byType[t].delivered
+    out[t].failed += byType[t].failed
+  }
+  return out
+}
+
+/** Accumulate one cron cycle's per-type delivery into its report day. Writes only when the cycle
+ *  attempted a delivery, so the write count follows alerts, not traffic. */
+export async function recordFanout(kv: KVNamespace, stats: DeliveryStats, nowMs: number): Promise<void> {
+  if (stats.attempted === 0) return
+  const key = `${FANOUT_PREFIX}${fanoutDay(nowMs)}`
+  let prevRaw: string | null
+  try {
+    prevRaw = await kv.get(key)
+  } catch (err) {
+    console.warn('[webhook-deliver] fan-out count read failed, skipping this cycle:', err instanceof Error ? err.message : err)
+    return
+  }
+  await kvPut(kv, key, JSON.stringify(addFanout(parseFanout(prevRaw), stats.byType)), { expirationTtl: FANOUT_TTL_S })
+}
+
+/** The daily summary's #1590 figures for report day `today`: the per-type change against yesterday's
+ *  snapshot (then today's snapshot is stored), and what the fan-out sent into that day. */
+export async function readSubscriberReport(
+  kv: KVNamespace,
+  byType: Record<SubscriptionType, number> | null,
+  today: string,
+  yesterday: string,
+): Promise<{ newTodayByType: Record<SubscriptionType, number> | null; fanoutCounts: FanoutCounts | null }> {
+  let newTodayByType: Record<SubscriptionType, number> | null = null
+  if (byType) {
+    newTodayByType = computeTypeDelta(byType, await kv.get(`${TYPECOUNT_PREFIX}${yesterday}`).catch(() => null))
+    await kv.put(`${TYPECOUNT_PREFIX}${today}`, JSON.stringify(byType), { expirationTtl: 7 * 86400 })
+      .catch((err) => console.warn('[daily-summary] per-type snapshot write failed:', err instanceof Error ? err.message : err))
+  }
+  const fanoutCounts = parseFanout(await kv.get(`${FANOUT_PREFIX}${today}`).catch(() => null))
+  return { newTodayByType, fanoutCounts }
+}
+
+/** Per-type day-over-day change against yesterday's `webhook:typecount:` snapshot; null when there is
+ *  no usable baseline (same rule as computeSubscriberDelta). */
+export function computeTypeDelta(today: Record<SubscriptionType, number>, prevRaw: string | null): Record<SubscriptionType, number> | null {
+  if (prevRaw == null) return null
+  try {
+    const prev = JSON.parse(prevRaw) as Partial<Record<SubscriptionType, unknown>>
+    if (typeof prev.discord !== 'number' || typeof prev.slack !== 'number') return null
+    return { discord: today.discord - prev.discord, slack: today.slack - prev.slack }
+  } catch {
+    return null
+  }
 }

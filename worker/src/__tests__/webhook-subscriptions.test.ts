@@ -508,7 +508,7 @@ describe('deliverToSubscribers', () => {
     await seedSub(kv, URL_OK, FILTERS_ALL)
     const post = vi.fn(async () => 204)
     const stats = await deliverToSubscribers(kv, undefined, [feedEntry({})], post, 1)
-    expect(stats).toEqual({ attempted: 0, delivered: 0, pruned: 0, failed: 0, rejected: 0 })
+    expect(stats).toMatchObject({ attempted: 0, delivered: 0, pruned: 0, failed: 0, rejected: 0 })
     expect(post).not.toHaveBeenCalled()
   })
   it('no-ops on an empty feed', async () => {
@@ -516,7 +516,7 @@ describe('deliverToSubscribers', () => {
     await seedSub(kv, URL_OK, FILTERS_ALL)
     const post = vi.fn(async () => 204)
     const stats = await deliverToSubscribers(kv, KEY, [], post, 1)
-    expect(stats).toEqual({ attempted: 0, delivered: 0, pruned: 0, failed: 0, rejected: 0 })
+    expect(stats).toMatchObject({ attempted: 0, delivered: 0, pruned: 0, failed: 0, rejected: 0 })
     expect(post).not.toHaveBeenCalled()
   })
   it('prunes an undecryptable row (corrupt/rotated-away encUrl) without delivering', async () => {

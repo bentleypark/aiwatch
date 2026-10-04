@@ -94,7 +94,9 @@ export interface DailySummaryData {
   accuracy?: AccuracyStats | null
   // Confirmed per-user subscriptions by channel type; `slack` is set from #1581 on.
   // #548 — newToday is the signed day-over-day delta of confirmed subscribers (null = no prior baseline).
-  webhookCounts?: { discord: number; slack?: number; newToday?: number | null }
+  webhookCounts?: { discord: number; slack?: number; newToday?: number | null; newTodayByType?: { discord: number; slack: number } | null }
+  // #1590 — per-user fan-out delivered/failed per channel type over the report's 24h window.
+  fanoutCounts?: { discord: { delivered: number; failed: number }; slack: { delivered: number; failed: number } } | null
   deliveryCounts?: { discord: number; failed: number } | null
   redditCount: number
   // #820 — Reddit source health: a marker (blocked / partially blocked / unreachable streak),
@@ -286,8 +288,10 @@ export function buildDailySummary(data: DailySummaryData): string {
   if (webhookCounts) {
     lines.push(webhookCounts.slack === undefined
       ? `🔗 **Active Discord Webhooks**: ${webhookCounts.discord}${formatSubscriberDelta(webhookCounts.newToday)}`
-      : `🔗 **Active Alert Webhooks**: ${webhookCounts.discord + webhookCounts.slack} (Discord ${webhookCounts.discord} · Slack ${webhookCounts.slack})${formatSubscriberDelta(webhookCounts.newToday)}`)
+      : `🔗 **Active Alert Webhooks**: ${webhookCounts.discord + webhookCounts.slack} (Discord ${webhookCounts.discord} · Slack ${webhookCounts.slack})${webhookCounts.newTodayByType ? formatTypeDelta(webhookCounts.newTodayByType) : formatSubscriberDelta(webhookCounts.newToday)}`)
   }
+  const fanoutLine = formatFanoutLine(data.fanoutCounts)
+  if (fanoutLine) lines.push(fanoutLine)
   // Health outranks the count. `reddit:seen:*` keys live 24h, so a source that dies at noon still
   // shows a real non-zero count — and printing it would read as health on the very day detection
   // went dark. The reason is carried through because the remediations differ: `block` is the
@@ -392,6 +396,24 @@ export function buildDailySummary(data: DailySummaryData): string {
   }
 
   return lines.join('\n')
+}
+
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : '±0'
+}
+
+/** #1590 — the per-type day-over-day change; empty when neither type moved. */
+export function formatTypeDelta(d: { discord: number; slack: number }): string {
+  if (d.discord === 0 && d.slack === 0) return ''
+  return ` (today: Discord ${signed(d.discord)} · Slack ${signed(d.slack)})`
+}
+
+/** #1590 — what the per-user fan-out sent in the report window; empty on a day it sent nothing. */
+export function formatFanoutLine(f: DailySummaryData['fanoutCounts']): string {
+  if (!f) return ''
+  const failed = f.discord.failed + f.slack.failed
+  if (f.discord.delivered + f.slack.delivered + failed === 0) return ''
+  return `📬 **Subscriber Alerts Sent**: Discord ${f.discord.delivered} · Slack ${f.slack.delivered}${failed > 0 ? ` (${failed} failed)` : ''}`
 }
 
 // #548 — render the signed day-over-day subscriber delta as a compact suffix on the webhook line.

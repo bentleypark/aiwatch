@@ -71,6 +71,7 @@ function makeKV() {
 }
 
 const KEY = 'b'.repeat(64)
+const NO_NOTICE = { encKey: undefined, fetchFn: (() => { throw new Error('no post expected') }) as unknown as typeof fetch, site: '', installUrl: '' }
 const SECRET = 'slack-client-secret'
 const HOOK_A = 'https://hooks.slack.com/services/T0001/B0001/aaaaaaaaaaaaaaaaaaaaaaaa'
 const HOOK_B = 'https://hooks.slack.com/services/T0001/B0002/bbbbbbbbbbbbbbbbbbbbbbbb'
@@ -219,7 +220,7 @@ describe('manage link', () => {
 
   it('get returns the stored filters and every monitored service, Bedrock and Azure OpenAI included', async () => {
     const { kv, manageToken } = await installed()
-    const r = await manageSlack(kv, manageToken, 'get', undefined)
+    const r = await manageSlack(kv, manageToken, 'get', undefined, NO_NOTICE)
     expect(r).toMatchObject({ ok: true, filters: FILTERS_ALL })
     const ids = (r as { services: { id: string; name: string }[] }).services.map((s) => s.id)
     expect(ids).toEqual(expect.arrayContaining(['claude', 'bedrock', 'azureopenai']))
@@ -228,7 +229,7 @@ describe('manage link', () => {
 
   it('update normalizes the filters and drops unknown service ids', async () => {
     const { kv, manageToken, hash } = await installed()
-    const r = await manageSlack(kv, manageToken, 'update', { alertTarget: 'custom', alertServices: ['claude', 'bogus'], alertCondition: 'down', alertIncidents: false })
+    const r = await manageSlack(kv, manageToken, 'update', { alertTarget: 'custom', alertServices: ['claude', 'bogus'], alertCondition: 'down', alertIncidents: false }, NO_NOTICE)
     expect(r).toEqual({ ok: true, filters: { alertTarget: 'custom', alertServices: ['claude'], alertCondition: 'down', alertIncidents: false } })
     expect((await readConfirmed(kv, hash))?.filters.alertServices).toEqual(['claude'])
     expect((await readConfirmed(kv, hash))?.type).toBe('slack')
@@ -236,17 +237,17 @@ describe('manage link', () => {
 
   it('unsubscribe deletes the sub and both index keys, after which the token is dead', async () => {
     const { kv, manageToken, hash } = await installed()
-    expect(await manageSlack(kv, manageToken, 'unsubscribe', undefined)).toEqual({ ok: true })
+    expect(await manageSlack(kv, manageToken, 'unsubscribe', undefined, NO_NOTICE)).toEqual({ ok: true })
     expect(await readConfirmed(kv, hash)).toBeNull()
     expect([...kv._store.keys()].filter((k) => k.startsWith('slack:'))).toEqual([])
-    expect(await manageSlack(kv, manageToken, 'get', undefined)).toMatchObject({ ok: false, status: 404 })
+    expect(await manageSlack(kv, manageToken, 'get', undefined, NO_NOTICE)).toMatchObject({ ok: false, status: 404 })
   })
 
   it('rejects an unknown action, a malformed token and a wrong token', async () => {
     const { kv, manageToken } = await installed()
-    expect(await manageSlack(kv, manageToken, 'drop-table', undefined)).toMatchObject({ ok: false, status: 400 })
-    expect(await manageSlack(kv, 'short', 'get', undefined)).toMatchObject({ ok: false, status: 404 })
-    expect(await manageSlack(kv, randomToken(), 'get', undefined)).toMatchObject({ ok: false, status: 404 })
+    expect(await manageSlack(kv, manageToken, 'drop-table', undefined, NO_NOTICE)).toMatchObject({ ok: false, status: 400 })
+    expect(await manageSlack(kv, 'short', 'get', undefined, NO_NOTICE)).toMatchObject({ ok: false, status: 404 })
+    expect(await manageSlack(kv, randomToken(), 'get', undefined, NO_NOTICE)).toMatchObject({ ok: false, status: 404 })
   })
 
   it('the webhook URL hash is not a manage token', async () => {
@@ -466,7 +467,7 @@ describe('guards without other coverage (#1581 review round 1)', () => {
     for (let i = 0; i < MAX_FAIL_COUNT; i++) {
       await deliverToSubscribers(kv, KEY, [feedEntry({ key: `alerted:new:r${i}` })], async () => 200, 0, slackFetch(500, 'rollup_error'))
     }
-    expect([...kv._store.keys()]).toEqual([])
+    expect([...kv._store.keys()].filter((k) => !k.startsWith('webhook:fanout:'))).toEqual([])
   })
 
   it('the undecryptable-row prune clears the Slack index keys', async () => {
@@ -506,7 +507,7 @@ describe('handleSlackManageRequest', () => {
   it('passes the token, action and filters through and answers with the stored filters', async () => {
     const kv = makeKV()
     const r = await completeInstall(kv, KEY, { webhookUrl: HOOK_A, teamId: 'T1', channelId: 'C1' }, FILTERS_ALL, NOW)
-    const res = await handleSlackManageRequest(req({ token: r!.manageToken, action: 'update', filters: { alertTarget: 'custom', alertServices: ['openai'] } }), kv, { 'Access-Control-Allow-Origin': 'https://ai-watch.dev' })
+    const res = await handleSlackManageRequest(req({ token: r!.manageToken, action: 'update', filters: { alertTarget: 'custom', alertServices: ['openai'] } }), kv, { 'Access-Control-Allow-Origin': 'https://ai-watch.dev' }, NO_NOTICE)
     expect(res.status).toBe(200)
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://ai-watch.dev')
     expect(res.headers.get('Cache-Control')).toBe('no-store')
@@ -516,16 +517,16 @@ describe('handleSlackManageRequest', () => {
   it('get answers with the service list the manage page renders', async () => {
     const kv = makeKV()
     const r = await completeInstall(kv, KEY, { webhookUrl: HOOK_A, teamId: 'T1', channelId: 'C1' }, FILTERS_ALL, NOW)
-    const res = await handleSlackManageRequest(req({ token: r!.manageToken, action: 'get' }), kv, {})
+    const res = await handleSlackManageRequest(req({ token: r!.manageToken, action: 'get' }), kv, {}, NO_NOTICE)
     const body = await res.json() as { services: { id: string }[] }
     expect(body.services.map((s) => s.id)).toContain('bedrock')
   })
 
   it('a wrong token is 404, a non-string token is 404, and a bad body is 500', async () => {
     const kv = makeKV()
-    expect((await handleSlackManageRequest(req({ token: randomToken(), action: 'get' }), kv, {})).status).toBe(404)
-    expect((await handleSlackManageRequest(req({ token: 42, action: 'get' }), kv, {})).status).toBe(404)
-    expect((await handleSlackManageRequest(req('not json'), kv, {})).status).toBe(500)
+    expect((await handleSlackManageRequest(req({ token: randomToken(), action: 'get' }), kv, {}, NO_NOTICE)).status).toBe(404)
+    expect((await handleSlackManageRequest(req({ token: 42, action: 'get' }), kv, {}, NO_NOTICE)).status).toBe(404)
+    expect((await handleSlackManageRequest(req('not json'), kv, {}, NO_NOTICE)).status).toBe(500)
   })
 })
 
