@@ -12,7 +12,7 @@ tags: [worker, alerts, discord]
 ## Two Discord alert paths (#467, #475, #486)
 
 1. **Operator** — the `*/5` cron posts to the single `env.DISCORD_WEBHOOK_URL` secret (always on for the operator).
-2. **Per-user** — a visitor's own Discord webhook (Settings → Alerts), delivered **server-side** by the same cron via `deliverToSubscribers` (`worker/src/webhook-subscriptions.ts`) — tab-independent (#486 PR3 replaced the old browser relay). A Slack channel added through "Add to Slack" (#1581) is a `type: 'slack'` row in the same store: `deliverToSubscribers` converts the entry and posts it itself (`worker/src/slack-message.ts`), and the channel's welcome message carries the manage link (`/slack/manage`).
+2. **Per-user** — a visitor's own Discord webhook (Settings → Alerts), delivered **server-side** by the same cron via `deliverToSubscribers` (`worker/src/webhook-subscriptions.ts`) — tab-independent (#486 PR3 replaced the old browser relay). A Slack channel added through "Add to Slack" (#1581) is a `type: 'slack'` row in the same store: `deliverToSubscribers` converts the entry and posts it itself (`worker/src/slack-message.ts`), and the channel's welcome message carries the manage link (`/slack/manage`). Unsubscribing there posts one goodbye message to the channel before the subscription is deleted (#1590); a failed post does not block the unsubscribe.
 
 ### Provider change alerts (#1570)
 
