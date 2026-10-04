@@ -137,6 +137,15 @@ export function renderManage(nonce: string): string {
     form.hidden = false;
   }
   svcs.addEventListener('change', function(e){ if (e.target.checked) radio('target', 'custom'); });
+  var remembered = [];
+  form.querySelector('input[name="target"][value="all"]').addEventListener('change', function(){
+    var boxes = svcs.querySelectorAll('input:checked');
+    if (boxes.length) remembered = Array.prototype.map.call(boxes, function(b){ b.checked = false; return b.value; });
+  });
+  form.querySelector('input[name="target"][value="custom"]').addEventListener('change', function(){
+    if (svcs.querySelector('input:checked')) return;
+    remembered.forEach(function(id){ var b = svcs.querySelector('input[value="' + id + '"]'); if (b) b.checked = true; });
+  });
   if (!token) { fail('This link is incomplete. Open it again from the AIWatch welcome message in your Slack channel.'); return; }
   call('get').then(function(r){
     if (r.status === 200 && r.body.filters) render(r.body.filters, r.body.services);
