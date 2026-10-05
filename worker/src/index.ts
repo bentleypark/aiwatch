@@ -2207,7 +2207,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -4208,6 +4208,8 @@ export default {
             const { newTodayByType, fanoutCounts } = await readSubscriberReport(env.STATUS_CACHE, subscribersByType, today, yesterday)
             webhookCounts.newTodayByType = newTodayByType
 
+            const guardSkips = await readGuardSkipCount(env.STATUS_CACHE, today)
+
             // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
             let deliveryCounts: { discord: number; failed: number } | null = null
             try {
@@ -4486,6 +4488,7 @@ export default {
               accuracy,
               webhookCounts,
               fanoutCounts,
+              guardSkips,
               deliveryCounts,
               redditCount,
               redditSourceDead,

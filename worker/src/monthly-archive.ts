@@ -635,6 +635,7 @@ export function accumulateMonthlyIncidents(
   services: ServiceStatus[],
   period: string, // YYYY-MM
   suppressions: SuppressionEntry[] | null,
+  onGuardSkip?: (svcId: string, inc: Incident) => void,
 ): MonthlyIncidents {
   const base: MonthlyIncidents = existing
     ? { lastUpdated: new Date().toISOString(), services: structuredClone(existing.services) }
@@ -717,6 +718,7 @@ export function accumulateMonthlyIncidents(
         // confirm in production that the guard fires at all — #1295 exists because a duplicate shipped
         // with no signal.
         console.log(`[monthly-archive] #1295 ${svc.id}: skipping synthesized ${inc.id} (day ${inc.derivedDay}) — the accumulator already holds a feed row for that resource on that day`)
+        onGuardSkip?.(svc.id, inc)
         continue
       }
 
@@ -757,6 +759,82 @@ export function accumulateMonthlyIncidents(
   }
 
   return result
+}
+
+/** A synthesized day the #1295 guard declined to bank, kept so the firing outlives the 7-day logs. */
+export interface GuardSkipRecord { svc: string; id: string; day: string; firstSeen: string }
+
+export const guardSkipKey = (period: string): string => `incidents:monthly-guard:${period}`
+export const GUARD_SKIP_TTL_SECONDS = 90 * 86400
+export const GUARD_SKIP_MAX = 200
+
+/** Pure. Adds the skips not already recorded (keyed by service + incident id), up to `GUARD_SKIP_MAX`. */
+export function mergeGuardSkips(
+  existing: GuardSkipRecord[] | null,
+  skips: ReadonlyArray<{ svc: string; id: string; day: string }>,
+  nowIso: string,
+): { list: GuardSkipRecord[]; added: number } {
+  const list = existing ? [...existing] : []
+  const seen = new Set(list.map((r) => `${r.svc}|${r.id}`))
+  let added = 0
+  for (const s of skips) {
+    const k = `${s.svc}|${s.id}`
+    if (seen.has(k) || list.length >= GUARD_SKIP_MAX) continue
+    seen.add(k)
+    list.push({ svc: s.svc, id: s.id, day: s.day, firstSeen: nowIso })
+    added++
+  }
+  return { list, added }
+}
+
+/** Pure. How many skips a stored record holds; anything unreadable counts as none. */
+export function countGuardSkips(raw: string | null): number {
+  if (!raw) return 0
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
+}
+
+/** The daily summary's count: this month's record plus last month's, for `today` (YYYY-MM-DD).
+ *  null when either read throws. */
+export async function readGuardSkipCount(kv: KVNamespace, today: string): Promise<number | null> {
+  const lastMonth = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 2, 1)).toISOString().slice(0, 7)
+  try {
+    const [thisRaw, lastRaw] = await Promise.all([kv.get(guardSkipKey(today.slice(0, 7))), kv.get(guardSkipKey(lastMonth))])
+    return countGuardSkips(thisRaw) + countGuardSkips(lastRaw)
+  } catch (err) {
+    console.warn('[daily-summary] guard-skip read failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+/** Best-effort: a failure here must never affect the accumulation that called it. Reads once per
+ *  cycle that skipped something, writes only when a skip is new. */
+async function recordGuardSkips(
+  kv: KVNamespace,
+  period: string,
+  skips: ReadonlyArray<{ svc: string; id: string; day: string }>,
+  now: Date,
+): Promise<void> {
+  if (skips.length === 0) return
+  const key = guardSkipKey(period)
+  try {
+    const raw = await kv.get(key)
+    let existing: GuardSkipRecord[] | null = null
+    if (raw) {
+      try {
+        const parsed: unknown = JSON.parse(raw)
+        if (Array.isArray(parsed)) existing = parsed as GuardSkipRecord[]
+      } catch { /* unreadable → start the record over */ }
+    }
+    const { list, added } = mergeGuardSkips(existing, skips, now.toISOString())
+    if (added > 0) await kvPut(kv, key, JSON.stringify(list), { expirationTtl: GUARD_SKIP_TTL_SECONDS })
+  } catch (err) {
+    console.warn(`[monthly-archive] #1295 guard-skip record failed for ${period}:`, err instanceof Error ? err.message : String(err))
+  }
 }
 
 /** #587 — read `incidents:monthly:{month}`, accumulate the current services onto it, and write
@@ -801,7 +879,12 @@ export async function accumulateIncidentsOnlyIfChanged(
   // collapse a KV read/parse failure to `[]` (or a stale cache), i.e. to "nothing is hidden". A
   // destructive caller must be able to tell that apart, and `null` disables the prune for this run.
   const suppressions = await readSuppressionsFreshOrNull(kv)
-  const updated = accumulateMonthlyIncidents(existing, services, month, suppressions)
+  const guardSkips: Array<{ svc: string; id: string; day: string }> = []
+  const updated = accumulateMonthlyIncidents(existing, services, month, suppressions, (svc, inc) => {
+    guardSkips.push({ svc, id: inc.id, day: inc.derivedDay ?? '' })
+  })
+  // A skip by itself changes nothing, so this must run before the `unchanged` return.
+  await recordGuardSkips(kv, month, guardSkips, now)
   // Compare incident payload only — `lastUpdated` is bumped every call, so a whole-object compare
   // would always differ. No service-payload change → nothing to persist → skip the write.
   const existingServices = existing ? JSON.stringify(existing.services) : null
