@@ -85,7 +85,7 @@ function resolvePage(page) {
   switch (page.name) {
     case 'overview':  return <Overview />
     case 'latency':   return <Suspense fallback={<LatencySkeleton />}><Latency /></Suspense>
-    case 'incidents': return <Suspense fallback={<IncidentsSkeleton />}><Incidents /></Suspense>
+    case 'incidents': return <Suspense fallback={<IncidentsSkeleton />}><Incidents key={JSON.stringify(page.filters ?? null)} filters={page.filters} /></Suspense>
     case 'uptime':    return <Suspense fallback={<UptimeSkeleton />}><Uptime /></Suspense>
     case 'service':   return <Suspense fallback={<ServiceDetailsSkeleton />}><ServiceDetails serviceId={page.serviceId} /></Suspense>
     case 'settings':  return <Suspense fallback={<SkeletonUI />}><Settings focus={page.focus} /></Suspense>

@@ -1297,6 +1297,12 @@ describe('formatAudienceLine (#842-B)', () => {
     // and it exercises the formatter's early return through the assembly path.
     expect(buildDailySummary({ ...minimal, audience: counts({ total: 0 }) })).not.toContain('is-down Audience')
   })
+
+  it('#1612 — the 30-day history click line reaches the assembled summary', () => {
+    const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    expect(buildDailySummary({ ...minimal, historyClicks: { active: { clicks: 0, views: 3 }, clear: { clicks: 2, views: 50 } } }))
+      .toContain('📜 **30-day History Link** (24h): during outages 0 clicks / 3 views · clear 2 clicks / 50 views')
+  })
 })
 
 describe('formatAudienceScreenRow (#1280 — which screen the views landed on)', () => {

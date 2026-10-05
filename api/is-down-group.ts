@@ -13,6 +13,7 @@
 import { FAMILY_GROUPS, SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, type ServiceFamily } from './_is-down/slug-map'
 import { buildShareUrl } from './_is-down/share-url'
 import { audienceBeaconScript } from './_shared/audience-beacon'
+import { historyLinkAttrs, historyClickBeacon } from './_shared/history-link'
 import { cspForHtml } from './_shared/csp-hash'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
@@ -351,6 +352,10 @@ function renderGroupPage(
   const noIncidents = unreadableMembers.length === 0
     ? `<p class="no-incidents">No incidents reported for any ${esc(family.name)} service in the last ${RECENT_INCIDENTS_DAYS} days.</p>`
     : ''
+  // #1612 — one link per member: the dashboard Incidents page filters to a single service.
+  const historyMembers = members.filter((m) => !m.incidentSourceStale)
+  const historyLinks = historyMembers.length === 0 ? '' : `
+<p class="ih-history">30-day history: ${historyMembers.map((m) => `<a ${historyLinkAttrs(esc(m.id), 'is_down_group_page')}>${esc(m.name)}</a>`).join(' &middot; ')}</p>`
   const incidentSection = incidents.length > 0
     ? `<h2>Recent Incidents <span class="incidents-window">(last ${RECENT_INCIDENTS_DAYS} days)</span></h2>
 <ul class="incident-list">${incidents.map((inc) => `
@@ -370,9 +375,9 @@ function renderGroupPage(
                  also moot post-recovery, so altRecommendation is withheld here too, not just the ETA. */
           : `${inc.aiEstimatedRecovery ? `<p class="incident-ai-eta">Estimated recovery: ${esc(inc.aiEstimatedRecovery)}</p>` : ''}${altRecommendation}`}
       </div>` : ''}
-    </li>`).join('')}</ul>${unreadableNote}`
+    </li>`).join('')}</ul>${unreadableNote}${historyLinks}`
     : `<h2>Recent Incidents <span class="incidents-window">(last ${RECENT_INCIDENTS_DAYS} days)</span></h2>
-${noIncidents}${unreadableNote}`
+${noIncidents}${unreadableNote}${historyLinks}`
 
   // Community reports are shown only for a member whose official source independently indicates a
   // problem (the handler applies that gate before fetching). Never turn visitor submissions alone
@@ -514,6 +519,7 @@ ${consentInitScript()}
   h1 { font-size:1.5rem; text-align:center; }
   h2 { font-size:1.05rem; margin:28px 0 12px; }
   .incidents-window { color:#9ca3af; font-weight:400; font-size:0.85rem; }
+  .ih-history { font-size:0.85rem; margin:8px 0 0; }
   .headline { font-size:1.1rem; margin-bottom:24px; }
   ul.member-list, ul.incident-list { list-style:none; padding:0; margin:0; }
   .member-row a { display:flex; align-items:center; gap:10px; padding:14px 16px; border:1px solid #1f2937; border-radius:8px; margin-bottom:8px; text-decoration:none; color:inherit; }
@@ -694,7 +700,10 @@ ${REPORT_GUARD_CLIENT_JS}  var modal = document.getElementById('report-modal'), 
 // attribute copied from there would be dropped here without one added below.
 document.addEventListener('click', function(e){
   var g = e.target.closest('[data-ga]')
-  if (!g || typeof gtag !== 'function') return
+  if (!g) return
+  var d = g.dataset
+  ${historyClickBeacon(headline === 'down' || headline === 'degraded', 'group')}
+  if (typeof gtag !== 'function') return
   var p = {}
   if (g.dataset.gaLoc) p.location = g.dataset.gaLoc
   if (g.dataset.gaSource) p.source = g.dataset.gaSource

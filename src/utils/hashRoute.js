@@ -13,6 +13,22 @@ export function hashToFocus(hash) {
   return q ? new URLSearchParams(q).get('focus') : null
 }
 
+// #1612: `#incidents?service=<id>&period=<7|30|90>` seeds the Incidents page filters, so the is-down
+// "View 30-day history" link lands on that service's 30-day list. An unknown value is dropped.
+export const INCIDENT_PERIODS = [7, 30, 90]
+
+function hashToIncidentFilters(hash) {
+  const q = hash.split('?')[1]
+  if (!q) return null
+  const params = new URLSearchParams(q)
+  const filters = {}
+  const service = params.get('service')
+  if (service && ALL_SERVICE_IDS.includes(service)) filters.service = service
+  const period = Number(params.get('period'))
+  if (INCIDENT_PERIODS.includes(period)) filters.period = period
+  return Object.keys(filters).length > 0 ? filters : null
+}
+
 export function hashToPage(hash) {
   const id = hash.replace(/^#/, '').split(/[?&#]/)[0]
   if (!id) return { name: 'overview' }
@@ -28,6 +44,10 @@ export function hashToPage(hash) {
     if (id === 'settings') {
       const focus = hashToFocus(hash)
       if (focus) page.focus = focus
+    }
+    if (id === 'incidents') {
+      const filters = hashToIncidentFilters(hash)
+      if (filters) page.filters = filters
     }
     return page
   }

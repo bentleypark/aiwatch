@@ -10,6 +10,7 @@ import { buildShareUrl } from './share-url'
 // random nonce). So the no-nonce static script forms are used here; the inline handlers are still
 // refactored to delegated listeners (CSP can't admit inline on*= via hashes cleanly).
 import { audienceBeaconScript } from '../_shared/audience-beacon'
+import { historyLinkAttrs, historyClickBeacon } from '../_shared/history-link'
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { EXTENSION_STORE_URL, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
@@ -592,6 +593,7 @@ ${INCIDENT_TIMELINE_CSS}
 .ih-toggle:checked~.ih-rest{display:block}
 .ih-more-label{display:inline-block;cursor:pointer;font-size:12px;color:#8b949e;padding:10px 0 2px;user-select:none}
 .ih-more-label:hover{color:#c9d1d9}
+.ih-history{font-size:13px;margin:8px 0 0;text-align:right}
 .ih-more-label::before{content:"▾";display:inline-block;color:#8b949e;margin-right:6px;transition:transform 0.15s}
 .ih-toggle:checked~.ih-more-label::before{transform:rotate(180deg)}
 .ih-more-close{display:none}
@@ -730,6 +732,8 @@ document.addEventListener('click', function (e) {
     if (d.ga === 'outbound_fallback_click' && d.gaTo) {
       try { fetch('https://aiwatch-worker.p2c2kbf.workers.dev/api/referral', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: d.gaFrom || '', to: d.gaTo }) }).catch(function () {}); } catch (e2) {}
     }
+    // #1612 — consent-free count of the 30-day history link (GA below is the consent-gated floor).
+    ${historyClickBeacon(active, 'service')}
     if (typeof gtag === 'function') {
       var p = {};
       if (d.gaLoc) p.location = d.gaLoc;
@@ -1626,9 +1630,14 @@ export function renderIncidents(service: ServiceData | null): string {
 <div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">Incident history unavailable &mdash; AIWatch can't currently read ${esc(service.name)}'s status source, so recent incidents can't be retrieved.</p></div>`
   }
 
+  // #1612 — the dashboard Incidents page fills its 30-day window from the monthly archive; this page's
+  // live array does not reach 30 days for every service.
+  const historyLink = `<p class="ih-history"><a ${historyLinkAttrs(esc(service.id), 'is_down_page')}>View 30-day history &rarr;</a></p>`
+
   if (recent.length === 0) {
     return `${heading}
-<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">No incidents in the last 7 days</p></div>`
+<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">No incidents in the last 7 days</p></div>
+${historyLink}`
   }
 
   // Re-sort groupIncidents() output so ongoing/monitoring rows survive the
@@ -1655,7 +1664,8 @@ export function renderIncidents(service: ServiceData | null): string {
 <label for="ih-more" class="ih-more-label mono"><span class="ih-more-open">Show ${rest.length} more</span><span class="ih-more-close">Show less</span></label>`
     : ''
   return `${heading}
-<div class="card">${preview}${moreSection}</div>`
+<div class="card">${preview}${moreSection}</div>
+${historyLink}`
 }
 
 function buildDataSummary(service: ServiceData | null, displayName: string): string {

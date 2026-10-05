@@ -2205,6 +2205,7 @@ import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from '
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
 import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOutageWindows, nominalWindowEnd, previousPeriod, periodsCoveringWindow, type GrowthDailyRow } from './growth-series'
 import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
+import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
@@ -4354,6 +4355,7 @@ export default {
             } catch (err) {
               console.warn('[daily-summary] outage audience read failed:', err instanceof Error ? err.message : err)
             }
+            const historyClicks = await queryHistoryClicks(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
 
             // #837 — Chrome-extension activity (consent-free): last-24h poll volume (WAE `ext-claude`
             // tag) + today's extension-sourced report count (KV). Both best-effort/null-tolerant.
@@ -4504,6 +4506,7 @@ export default {
               feedTraffic,
               badgeTraffic,
               audience,
+              historyClicks,
               extActivity,
               statuslineTraffic,
               pluginTraffic,
@@ -4805,6 +4808,28 @@ export default {
         } catch (err) {
           if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
           console.error('[pageview] ingest error:', err instanceof Error ? err.message : err)
+          return new Response(null, { status: 500, headers: cors })
+        }
+      }
+    }
+
+    // #1612 — consent-free click on the is-down "View 30-day history" link → WAE.
+    if (url.pathname === '/api/history-click') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
+      if (request.method === 'POST') {
+        if (!matchOrigin(origin, env.ALLOWED_ORIGIN)) return new Response(null, { status: 403, headers: cors })
+        try {
+          const parsed = parseHistoryClickBody(await request.json(), new Set(SERVICES.map(s => s.id)))
+          if (!parsed) return new Response(null, { status: 400, headers: cors })
+          const agent = classifyAgent(
+            (request.cf as { verifiedBotCategory?: unknown } | undefined)?.verifiedBotCategory,
+            request.headers.get('User-Agent'),
+          )
+          recordHistoryClick(env.ANALYTICS, parsed.svc, parsed.active, parsed.surface, agent)
+          return new Response(null, { status: 204, headers: cors })
+        } catch (err) {
+          if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
+          console.error('[history-click] ingest error:', err instanceof Error ? err.message : err)
           return new Response(null, { status: 500, headers: cors })
         }
       }

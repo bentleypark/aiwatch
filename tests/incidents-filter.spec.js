@@ -132,3 +132,22 @@ test.describe('Incidents filtering', () => {
     }
   })
 })
+
+// #1612 — the is-down "View 30-day history" link opens a service-scoped 30-day view.
+test.describe('Incidents deep link', () => {
+  test('#incidents?service=&period= seeds the service and period filters', async ({ page }) => {
+    await page.goto('/#incidents?service=claude&period=30')
+    const selects = page.locator('main select')
+    await selects.first().waitFor({ state: 'visible', timeout: 20000 })
+    await expect(selects.first()).toHaveValue('claude', { timeout: 20000 })
+    await expect(selects.nth(2)).toHaveValue('30')
+  })
+
+  test('an unknown value falls back to the defaults', async ({ page }) => {
+    await page.goto('/#incidents?service=nope&period=14')
+    const selects = page.locator('main select')
+    await selects.first().waitFor({ state: 'visible', timeout: 20000 })
+    await expect(selects.first()).toHaveValue('all')
+    await expect(selects.nth(2)).toHaveValue('7')
+  })
+})

@@ -16,6 +16,7 @@ import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
 import { trackEvent } from '../utils/analytics'
+import { INCIDENT_PERIODS } from '../utils/hashRoute'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -33,9 +34,6 @@ const STAGE_CLASS = {
   monitoring:    { dot: 'bg-[var(--teal)]',   text: 'text-[var(--teal)]'  },
   resolved:      { dot: 'bg-[var(--green)]',  text: 'text-[var(--green)]' },
 }
-
-// Period filter options in days; null = all time
-const PERIODS = [7, 30, 90]
 
 const TABLE_COLS = ['col.time', 'col.title', 'col.service', 'col.duration', 'col.status']
 
@@ -85,11 +83,15 @@ function FilterBar({ services, serviceFilter, setServiceFilter, statusFilter, se
 
       <select
         value={period}
-        onChange={(e) => setPeriod(Number(e.target.value))}
+        onChange={(e) => {
+          const next = Number(e.target.value)
+          setPeriod(next)
+          trackEvent('change_incident_period', { period: next })
+        }}
         style={selectStyle}
         aria-label={t('incidents.filter.period')}
       >
-        {PERIODS.map((p) => (
+        {INCIDENT_PERIODS.map((p) => (
           <option key={p} value={p}>
             {t(`incidents.period.${p}d`)}
           </option>
@@ -314,14 +316,14 @@ function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSelect, on
 
 // ── Main Component ───────────────────────────────────────────
 
-export default function Incidents() {
+export default function Incidents({ filters } = {}) {
   const { t, lang } = useLang()
   const { services: rawServices, loading, error, refresh } = usePolling()
   const services = rawServices ?? []
 
-  const [serviceFilter, setServiceFilter] = useState('all')
+  const [serviceFilter, setServiceFilter] = useState(filters?.service ?? 'all')
   const [statusFilter,  setStatusFilter]  = useState('all')
-  const [period,        setPeriod]        = useState(7)
+  const [period,        setPeriod]        = useState(filters?.period ?? 7)
   const [selectedId,    setSelectedId]    = useState(null)
   const [expandedGroups, setExpandedGroups] = useState(() => new Set())
 
