@@ -247,10 +247,10 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     const services = [
       { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
-      { id: 'xai', category: 'api', name: 'xAI API', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
+      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
     ]
     const result = getFallbacks('together', 'api', services)
-    expect(result.map(f => f.name)).toEqual(['Mistral API', 'xAI API'])
+    expect(result.map(f => f.name)).toEqual(['Mistral API', 'SpaceXAI API'])
   })
 
   it('a lone medium candidate is NOT guaranteed a slot once high outnumbers it 3-to-1 or more', () => {
@@ -262,7 +262,7 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
       { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
       { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 85, scoreConfidence: 'high' as const },
-      { id: 'xai', category: 'api', name: 'xAI API', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
+      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
     ]
     const result = getFallbacks('together', 'api', services)
     expect(result.map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
@@ -275,11 +275,11 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     // [B(95)] at position 0.5 → merged [A, B, C].
     const services = [
       { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const }, // A
-      { id: 'xai', category: 'api', name: 'xAI API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'medium' as const },       // B
+      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'medium' as const },       // B
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 70, scoreConfidence: 'high' as const },   // C
     ]
     const result = getFallbacks('together', 'api', services)
-    expect(result.map(f => f.name)).toEqual(['Mistral API', 'xAI API'])
+    expect(result.map(f => f.name)).toEqual(['Mistral API', 'SpaceXAI API'])
   })
 
   it('#402/#1027 guard restored: a low-confidence (score-withheld) candidate never displaces a real-scored peer', () => {

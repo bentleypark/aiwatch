@@ -229,6 +229,7 @@ describe('matchNvdFirstParty (attribution gate)', () => {
   })
   it('matches weak tokens once the vendor context co-occurs', () => {
     expect(matchNvdFirstParty('xAI Grok chatbot exposed conversation history')).toBe('Grok')
+    expect(matchNvdFirstParty('SpaceXAI Grok chatbot exposed conversation history')).toBe('Grok')
     expect(matchNvdFirstParty("Google's Gemini assistant mishandled input")).toBe('Gemini')
   })
   it('returns null for unrelated CVEs', () => {

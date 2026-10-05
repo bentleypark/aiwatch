@@ -380,7 +380,7 @@ interface SurfaceGroup {
  * `parseXaiRssIncidents`): a per-surface merge would be cycle-local and leak duplicates across cron
  * cycles.
  *
- * Non-surface-tagged incidents pass through untouched, so this is a safe no-op on the xAI API feed
+ * Non-surface-tagged incidents pass through untouched, so this is a safe no-op on the SpaceXAI API feed
  * (no `[API …]` title can match `XAI_GROK_SURFACE_RE`, which is `^`-anchored on `[Grok (`) and on
  * every non-xAI service.
  *
@@ -409,7 +409,7 @@ interface SurfaceGroup {
  * `xai-grok:` namespaces the axis. Since #1349 both axes hash `<key>|<startedAt>`, and the keys
  * differ only in normalization — this one lowercases, the region merge keeps the provider's casing —
  * so the prefix is what guarantees they cannot collide however either normalization changes. A shared
- * id would have joined the xAI API and Grok cards into one row by accident, whichever service is
+ * id would have joined the SpaceXAI API and Grok cards into one row by accident, whichever service is
  * processed first silently winning the title; joining those two cards is a separate, deliberate
  * change (#1338).
  *

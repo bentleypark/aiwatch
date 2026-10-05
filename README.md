@@ -49,7 +49,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Mobile responsive** — Sidebar overlay, mobile action bar
 - **AIWatch Score** — Composite reliability score combining uptime, incidents, recovery time, and probe-based responsiveness ([how it works](https://ai-watch.dev/methodology#score))
 - **RTT degradation detection** — AIWatch's direct API probes flag latency degradation that official status pages often never report (dashboard badge + Discord daily summary). Independent detection within the ~5-min polling cycle of the official report (MTTD)
-- **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
+- **Regional availability** — Per-region incident status for SpaceXAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
 - **Is X Down SEO pages** — 44 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
@@ -82,7 +82,7 @@ Grouped by the dashboard's category taxonomy (46 total — sidebar filters / Ove
 | Fireworks AI | Fireworks | incident.io (Atlassian compat) |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
 | Perplexity | Perplexity AI | incident.io (Atlassian compat) |
-| xAI API | xAI | RSS feed |
+| SpaceXAI API | SpaceXAI | RSS feed |
 | DeepSeek API | DeepSeek | Flashduty (browser-rendered feed) |
 | Kimi (Moonshot AI) | Moonshot AI | Atlassian Statuspage (Chinese titles → English) |
 | OpenRouter | OpenRouter | Datadog Status Page (`config.json`) |
@@ -152,7 +152,7 @@ Grouped by the dashboard's category taxonomy (46 total — sidebar filters / Ove
 | ChatGPT | OpenAI |
 | Character.AI | Character AI |
 | DeepSeek App | DeepSeek |
-| Grok | xAI |
+| Grok | SpaceXAI |
 
 ## Tech Stack
 
@@ -340,7 +340,7 @@ Every monitored service — the same ids `/api/v1/status` returns.
 | `fireworks` | Fireworks AI | `turbopuffer` | turbopuffer |
 | `cerebras` | Cerebras Inference | `twelvelabs` | Twelve Labs |
 | `perplexity` | Perplexity | `langsmith` | LangChain (LangSmith) |
-| `xai` | xAI API | `helicone` | Helicone |
+| `xai` | SpaceXAI API | `helicone` | Helicone |
 | `deepseek` | DeepSeek API | `langfuse` | Langfuse |
 | `kimi` | Kimi (Moonshot AI) | `runway` | Runway |
 | `openrouter` | OpenRouter | `luma` | Luma (Dream Machine) |

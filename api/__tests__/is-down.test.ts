@@ -259,7 +259,7 @@ describe('is-down.ts — rank is scoped to the target\'s own confidence tier (#1
     const payload = new Response(JSON.stringify({
       services: [
         svc({ id: 'gemini', name: 'Gemini API', aiwatchScore: 86, scoreConfidence: 'medium' }),
-        svc({ id: 'xai', name: 'xAI API', aiwatchScore: 70, scoreConfidence: 'medium' }),
+        svc({ id: 'xai', name: 'SpaceXAI API', aiwatchScore: 70, scoreConfidence: 'medium' }),
         // Two high-confidence services with scores that would change gemini's rank/total if merged in.
         svc({ id: 'claude', name: 'Claude API', aiwatchScore: 99, uptime30d: 99.99, scoreConfidence: 'high' }),
         svc({ id: 'openai', name: 'OpenAI API', aiwatchScore: 95, uptime30d: 99.9, scoreConfidence: 'high' }),

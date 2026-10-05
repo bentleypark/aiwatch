@@ -30,11 +30,11 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'fireworks':       { id: 'fireworks',  name: 'Fireworks AI',     provider: 'Fireworks',   category: 'api', group: 'llm' },
   'cerebras':        { id: 'cerebras',   name: 'Cerebras Inference', provider: 'Cerebras',  category: 'api', group: 'llm' },
   'perplexity':      { id: 'perplexity', name: 'Perplexity',       provider: 'Perplexity AI', category: 'api', group: 'llm' },
-  // #1165 — 'xai' moved to 'xai-api': /is-xai-down is now the xAI/Grok family group page (same
+  // #1165/#1586 — 'xai' moved to 'xai-api': /is-xai-down is now the SpaceXAI/Grok family group page (same
   // repurposing #1164 did for claude/openai), now that Grok's consumer app (iOS/Android/Web) is its
   // own monitored service. `id`/`name` UPDATED (was 'xAI (Grok)') — "(Grok)" is now misleading on the
   // API-only page since Grok also names the separate app; the combined label moved to FAMILY_GROUPS.xai.
-  'xai-api':         { id: 'xai',        name: 'xAI API',          provider: 'xAI',         category: 'api', group: 'llm' },
+  'xai-api':         { id: 'xai',        name: 'SpaceXAI API',     provider: 'SpaceXAI',    category: 'api', group: 'llm' },
   'deepseek':        { id: 'deepseek',   name: 'DeepSeek API',     provider: 'DeepSeek',    category: 'api', group: 'llm' },
   'kimi':            { id: 'kimi',       name: 'Kimi (Moonshot AI)', provider: 'Moonshot AI', category: 'api', group: 'llm' },
   'openrouter':      { id: 'openrouter', name: 'OpenRouter',       provider: 'OpenRouter',  category: 'api', group: 'llm' },
@@ -80,9 +80,9 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE + src/utils/constants.js
   // FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
   'deepseek-app':    { id: 'deepseekapp', name: 'DeepSeek App',    provider: 'DeepSeek',     category: 'app', group: 'apps' },
-  // Grok (#1165) — xAI's consumer app (iOS/Android/Web), the api-vs-app split mirror of DeepSeek
+  // Grok (#1165/#1586) — SpaceXAI's consumer app (iOS/Android/Web), the api-vs-app split mirror of DeepSeek
   // API↔DeepSeek App above. Slug == worker id ('grok'), no override needed.
-  'grok':            { id: 'grok',        name: 'Grok',            provider: 'xAI',          category: 'app', group: 'apps' },
+  'grok':            { id: 'grok',        name: 'Grok',            provider: 'SpaceXAI',     category: 'app', group: 'apps' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
   // distinct from the deprecated 2023 Codex code-generation API.
   'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent', group: 'agents' },
@@ -164,7 +164,7 @@ export interface ServiceFamily {
 export const FAMILY_GROUPS: Record<string, ServiceFamily> = {
   claude: { slug: 'claude', name: 'Anthropic (Claude)', members: ['claude', 'claudeai', 'claudecode'] },
   openai: { slug: 'openai', name: 'OpenAI', members: ['openai', 'chatgpt', 'codex'] },
-  // #1165 — xAI API + Grok consumer app (iOS/Android/Web), same reasoning as the original two
+  // #1165/#1586 — SpaceXAI API + Grok consumer app (iOS/Android/Web), same reasoning as the original two
   // families ("is xai down" / "is grok down" both plausibly mean either surface).
   // Cursor added per explicit product decision after SpaceX's June 2026 agreement to acquire
   // Anysphere (Cursor's parent) — mirrors claude/openai already grouping their coding-agent surface
@@ -173,7 +173,7 @@ export const FAMILY_GROUPS: Record<string, ServiceFamily> = {
   // approval) — Cursor's own infra (status.cursor.com) stays fully independent of status.x.ai
   // regardless; `provider` below is intentionally left as 'Anysphere' (slug-map line ~18) since that
   // remains factually accurate even after this grouping change.
-  xai: { slug: 'xai', name: 'xAI (Grok, Cursor)', members: ['xai', 'grok', 'cursor'] },
+  xai: { slug: 'xai', name: 'SpaceXAI (Grok, Cursor)', members: ['xai', 'grok', 'cursor'] },
 }
 
 // #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a

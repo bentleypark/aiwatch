@@ -116,7 +116,7 @@ describe('renderMethodologyPage', () => {
     // the no-uptime-records services must be named with the honest "Not provided" treatment.
     // Mistral + Perplexity were removed once their Instatus pages were read (#1006); OpenRouter followed
     // once AIWatch computed its uptime from openrouter's own incident records (#1006).
-    for (const svc of ['Bedrock', 'Azure', 'Gemini', 'xAI', 'Deepgram', 'Replicate', 'Character']) {
+    for (const svc of ['Bedrock', 'Azure', 'Gemini', 'SpaceXAI', 'Deepgram', 'Replicate', 'Character']) {
       expect(html, `limits table should name ${svc}`).toContain(svc)
     }
     expect(html).toMatch(/Not provided|not provided|미제공|제공.*않/)
@@ -183,7 +183,7 @@ describe('renderMethodologyPage', () => {
     for (const src of [
       'Atlassian Statuspage', 'incident.io', 'Cloudflare Status v3', 'Google Cloud Status', 'AI Studio',
       'Better Stack', 'Instatus', 'Rootly', 'Datadog Status Page', 'Flashduty', 'AWS Health Dashboard',
-      'Azure Status', 'xAI', 'Direct RTT probes',
+      'Azure Status', 'SpaceXAI', 'Direct RTT probes',
     ]) {
       expect(html, `data sources should name ${src}`).toContain(src)
     }
