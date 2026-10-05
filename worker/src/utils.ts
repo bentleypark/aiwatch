@@ -102,6 +102,36 @@ export function markZeroLengthResolvedIncidentsUnknown(incidents: Incident[]): I
   return changed ? marked : incidents
 }
 
+const OFFSET_SUFFIX_RE = /[+-]\d{2}:?\d{2}$/
+
+/**
+ * #1602 — an incident timestamp with an explicit UTC offset (`…+08:00`), rewritten as the same
+ * instant in `Z` form. Every other string is returned unchanged, so a value that is already `Z`, or
+ * not a timestamp at all, keeps its exact text.
+ */
+export function toUtcIso(value: string): string {
+  if (!OFFSET_SUFFIX_RE.test(value)) return value
+  const ms = Date.parse(value)
+  return Number.isNaN(ms) ? value : new Date(ms).toISOString()
+}
+
+/**
+ * #1602 — `startedAt`/`resolvedAt` in `Z` form, so the text comparisons and `slice(0, 10)` day reads
+ * downstream see the UTC instant rather than a provider-local wall clock. Returns the input array
+ * when nothing changed.
+ */
+export function normalizeIncidentTimes<T extends { startedAt: string; resolvedAt?: string | null }>(incidents: T[]): T[] {
+  let changed = false
+  const out = incidents.map((inc) => {
+    const startedAt = toUtcIso(inc.startedAt)
+    const resolvedAt = inc.resolvedAt ? toUtcIso(inc.resolvedAt) : inc.resolvedAt
+    if (startedAt === inc.startedAt && resolvedAt === inc.resolvedAt) return inc
+    changed = true
+    return { ...inc, startedAt, resolvedAt }
+  })
+  return changed ? out : incidents
+}
+
 export function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
   const totalMin = displayedMinutes(diffMs)
@@ -1339,7 +1369,9 @@ export function fetchInSlot(
  * #1292 — the calendar day an incident belongs to, as `YYYY-MM-DD`.
  *
  * For a provider-published incident that is the UTC day of `startedAt`, which is what every
- * day-bucketing consumer read before. A `status_history`-derived incident, though, has no start
+ * day-bucketing consumer read before. The slice reads the UTC day only because `startedAt` is in `Z`
+ * form: `fetchService`, `mergeRetainedIncidentHistory` and `accumulateMonthlyIncidents` rewrite
+ * offset timestamps with `normalizeIncidentTimes` (#1602). A `status_history`-derived incident, though, has no start
  * INSTANT to read: its source is one day's downtime-seconds bucket on the provider's status page,
  * stated in that page's own timezone, and `startedAt` is only an anchor placed inside that day so
  * ordering and windowing work. Reading the day back off that anchor re-derives a fact we already

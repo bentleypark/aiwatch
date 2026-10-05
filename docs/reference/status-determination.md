@@ -485,6 +485,10 @@ Unlike Instatus/BetterStack — where the fix was to widen a **title heuristic**
 
 **General rule**: when adding a parser for a new status-page platform, confirm it maps the platform's severity/impact vocabulary onto `'minor' | 'major' | 'critical'` (reserve `null` for genuinely informational/maintenance entries) — otherwise the service's incidents won't count toward its score.
 
+## Incident timestamps are `Z` form (#1602)
+
+Statuspage pages outside UTC publish offset strings (kimi `+08:00`, twelvelabs `-07:00`), and the day reads (`incidentDay`, `incidentDays`) and the 30-day window compare the text. `normalizeIncidentTimes` (`worker/src/utils.ts`) rewrites `startedAt`/`resolvedAt` to the same instant in `Z` form in `fetchService`, in `mergeRetainedIncidentHistory`, and on the in-progress month's stored rows in `accumulateMonthlyIncidents`.
+
 ## BetterStack incidents synthesized from `status_history` (#1292)
 
 BetterStack incident ingestion was **RSS-only**. In August 2026 BetterStack stopped publishing its
