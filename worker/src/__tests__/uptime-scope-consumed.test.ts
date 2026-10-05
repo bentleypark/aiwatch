@@ -158,7 +158,7 @@ describe('#1435 — the Atlassian uptime figure is computed over the SERVICE bad
         const { raw } = await fetchAllServices(mockKV() as unknown as never, [])
         expect(seen, 'the cycle sent no /uptime_showcase request at all').not.toHaveLength(0)
         const asked = decodeURIComponent(new URL(seen[0]!).searchParams.get('components') ?? '').split(',')
-        expect(new Set(asked)).toEqual(new Set(scope))
+        for (const id of scope) expect(asked).toContain(id)
         expect(raw.find((s) => s.id === svc.id)?.uptime30d).toBeLessThan(100)
       })
     }

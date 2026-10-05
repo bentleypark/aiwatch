@@ -173,6 +173,27 @@ describe('filterIncidents', () => {
 // #683 — exact-component-name incident scoping (Junie on the shared JetBrains status page; the page
 // moved to status.jetbrains.cloud in #1004, still shared with the sibling products).
 // Uses the REAL junie config from SERVICES so a regression that drops `incidentComponents` fails here.
+describe('filterIncidents — Claude Cowork attribution on status.claude.com', () => {
+  // Real 2026-09-10 incident, tagged onto the Claude Cowork component alone.
+  const coworkOnly = mockIncident({ title: 'Degraded functionality for Claude Cowork on Windows', componentNames: ['Claude Cowork'] })
+  const real = (id: string) => SERVICES.find((s) => s.id === id)!
+
+  it('claudeai keeps a Cowork-only incident (Cowork is in its badge worst-of)', () => {
+    expect(filterIncidents([coworkOnly], real('claudeai'))).toHaveLength(1)
+  })
+
+  it('includeUntaggedIncidents opens on a badge member other than statusComponent (only Cowork degraded)', () => {
+    const untagged = mockIncident({ id: 'untagged1', title: 'Elevated errors', impact: 'minor', componentNames: [] })
+    const comps = [
+      { id: 'rwppv331jlwc', name: 'claude.ai', status: 'operational' },
+      { id: 'bpp5gb3hpjcl', name: 'Claude Cowork', status: 'partial_outage' },
+    ]
+    expect(includeUntaggedIncidents([], [untagged], real('claudeai'), comps, 'minor').map((i) => i.id)).toEqual(['untagged1'])
+    const allUp = comps.map((c) => ({ ...c, status: 'operational' }))
+    expect(includeUntaggedIncidents([], [untagged], real('claudeai'), allUp, 'minor')).toEqual([])
+  })
+})
+
 describe('filterIncidents — incidentComponents exact-name scoping (#683)', () => {
   const junie = (): ServiceConfig => {
     const c = SERVICES.find((s) => s.id === 'junie')
