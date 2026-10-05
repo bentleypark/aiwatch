@@ -784,6 +784,12 @@ export default async function handler(req: Request) {
               derived?: 'status_history'; derivedDay?: string
               timeline?: Array<{ stage: string; text: string | null; at: string }>
             }>
+            // #1614 — records older than the live feed reaches; the 30-day summary only.
+            incidentsBeyondFeed?: Array<{
+              id: string; title: string; status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
+              startedAt: string; resolvedAt?: string | null; duration: string | null
+              derived?: 'status_history'; derivedDay?: string
+            }>
           }>
           // #926 — one entry per active incident, keyed by service id (same shape is-down.ts reads).
           aiAnalysis?: Record<string, Array<{ incidentId: string; summary: string; progress?: string; estimatedRecovery: string }>>
@@ -843,6 +849,15 @@ export default async function handler(req: Request) {
           const slug = SERVICE_ID_TO_SLUG[id] ?? id
           const memberName = resolvedName(id, slug)
           if (s?.incidentSourceStale) continue
+          for (const inc of s?.incidentsBeyondFeed ?? []) {
+            const summaryExisting = allIncidentsById.get(inc.id)
+            if (summaryExisting) summaryExisting.members.push({ name: memberName, slug })
+            else allIncidentsById.set(inc.id, {
+              members: [{ name: memberName, slug }], title: inc.title, status: inc.status,
+              startedAt: inc.startedAt, resolvedAt: inc.resolvedAt, duration: inc.duration,
+              derived: inc.derived, derivedDay: inc.derivedDay,
+            })
+          }
           for (const inc of s?.incidents ?? []) {
             // #1243 — the share card's `&i=` identity token: NEWEST unresolved, taken before the
             // display filters below so a long-running outage still gets one. Ranking by date rather

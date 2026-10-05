@@ -145,6 +145,8 @@ export interface ServiceData {
      *  TypeScript's weak-type check prove the guards that read it can never fire. */
     startUnknown?: boolean
   }>
+  // #1614 — AIWatch's own records older than the live feed reaches (worker `incidentsBeyondFeed`).
+  incidentsBeyondFeed?: ServiceData['incidents']
   aiwatchScore: number | null
   scoreGrade: string | null
   scoreConfidence?: string
@@ -1570,9 +1572,7 @@ export function buildMetaDescription(
   if (!service) {
     return `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
   }
-  const thirtyDayIncidentCount = Array.isArray(service.incidents)
-    ? service.incidents.filter((i) => new Date(i.startedAt).getTime() >= Date.now() - 30 * 86_400_000).length
-    : 0
+  const thirtyDayIncidentCount = incidentsWithin30d(service).length
   // #591 — don't surface a stale-source service's frozen uptime in the SERP snippet.
   const uptimeStr = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) && !service.incidentSourceStale
     ? `${service.uptime30d.toFixed(2)}%`
@@ -1668,12 +1668,18 @@ ${historyLink}`
 ${historyLink}`
 }
 
+/** #1614 — the trailing 30 days the live Score reads: the live array plus the records older than the
+ *  capped feed reaches. */
+export function incidentsWithin30d(service: ServiceData): ServiceData['incidents'] {
+  const cutoff = Date.now() - 30 * 86_400_000
+  const all = [...(Array.isArray(service.incidents) ? service.incidents : []), ...(service.incidentsBeyondFeed ?? [])]
+  return all.filter((i) => new Date(i.startedAt).getTime() >= cutoff)
+}
+
 function buildDataSummary(service: ServiceData | null, displayName: string): string {
   if (!service) return ''
   if (service.incidentSourceStale || isStatusUnknown(service)) return ''
-  const incidents = Array.isArray(service.incidents) ? service.incidents : []
-  const cutoff = Date.now() - 30 * 86_400_000
-  const recent = incidents.filter((i) => new Date(i.startedAt).getTime() >= cutoff)
+  const recent = incidentsWithin30d(service)
   const count = recent.length
   // #591 — don't surface a stale-source service's frozen uptime in the narrative either (mirrors the
   // same gate in buildMetaDescription; exposed by #654's "30-day uptime" → "Uptime" wording unification).

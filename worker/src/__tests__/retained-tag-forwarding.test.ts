@@ -37,7 +37,7 @@ function declaredTags(): string[] {
   expect(internal.size, 'stripInternalFields named nothing — its shape changed and this scan is guessing').toBeGreaterThan(0)
 
   const fwd = readFileSync(SERVICES_SRC, 'utf-8')
-  const merge = fwd.slice(fwd.indexOf('export function mergeRetainedIncidentHistory'))
+  const merge = fwd.slice(fwd.indexOf('function recordedEntryToIncident'))
   const mergeBody = merge.slice(0, merge.indexOf('\n}\n'))
   const explicit = new Set(declared.filter((f) => new RegExp(`^\\s*${f}:\\s*entry\\.${f}\\b`, 'm').test(mergeBody)))
 

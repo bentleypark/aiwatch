@@ -1977,3 +1977,21 @@ describe('is-down-group.ts — 30-day history links (#1612)', () => {
     expect(html.indexOf('/api/history-click')).toBeLessThan(html.indexOf("if (typeof gtag !== 'function') return"))
   })
 })
+
+// #1614 — the family 30-day summary reads the same window the members' Scores do.
+describe('is-down-group.ts — 30-day summary includes records past the feed depth (#1614)', () => {
+  it('counts a member incident that only incidentsBeyondFeed carries', async () => {
+    const ago = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ services: [
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidents: [
+        { id: 'live', title: 'Live', status: 'resolved', startedAt: ago(2), resolvedAt: ago(1.9), duration: '30m' },
+      ], incidentsBeyondFeed: [
+        { id: 'gap', title: 'Older', status: 'resolved', startedAt: ago(25), resolvedAt: ago(24.9), duration: '1h 30m' },
+      ] },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational', incidents: [] },
+      { id: 'codex', name: 'Codex', status: 'operational', incidents: [] },
+    ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html).toContain('2 incidents across monitored services · average recovery: 1h 0m')
+  })
+})
