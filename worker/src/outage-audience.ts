@@ -127,7 +127,7 @@ export function classifyAgent(verifiedBotCategory: unknown, userAgent: string | 
   return 'unflagged'
 }
 
-const ISDOWN_INDEX = 'isdown-view'
+export const ISDOWN_INDEX = 'isdown-view'
 
 // Host patterns for referrer-based classification (utm is the primary signal; host is the fallback
 // for organic arrivals that DON'T strip the referrer — mainly search).

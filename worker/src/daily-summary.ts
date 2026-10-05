@@ -13,6 +13,7 @@ import type { AiUsageCounters } from './ai-analysis'
 import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth } from './monthly-archive'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
 import { FAMILY_OF_SERVICE } from './alerts'
+import type { HistoryClickCounts } from './history-click'
 import { clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from './api-traffic'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts, FeedTrafficCounts, FeedPollsByTarget } from './api-traffic'
 import { BADGE_UNKNOWN_SERVICE, FEED_UNKNOWN_TARGET, rollupByClient, subscriberFeeds, type AllFeedState } from './api-traffic'
@@ -133,6 +134,8 @@ export interface DailySummaryData {
   // inbound source (x/search/feed/direct), split by whether the service was in an active outage. The
   // sponsor-evidence "outage-spike audience" (#637/#803). Absent (null) when the AE SQL isn't configured.
   audience?: AudienceCounts | null
+  // #1612 — last-24h is-down "30-day history" clicks and views by phase (WAE). null when unconfigured.
+  historyClicks?: HistoryClickCounts | null
   // #837 — Chrome-extension activity (consent-free engagement proxy): last-24h poll volume (WAE
   // `ext-claude` tag; null when the SQL API isn't configured) + today's extension-sourced report
   // count (KV). Absent when neither signal exists → section omitted.
@@ -283,6 +286,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   // #842-B — outage-moment audience by source (is-down views, consent-free). 근거 ① for the sponsor.
   const audienceLine = formatAudienceLine(data.audience)
   if (audienceLine) lines.push(audienceLine)
+  const historyClickLine = formatHistoryClickLine(data.historyClicks)
+  if (historyClickLine) lines.push(historyClickLine)
   if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.failed > 0)) {
     const failText = deliveryCounts.failed > 0 ? ` (${deliveryCounts.failed} failed)` : ''
     lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)
@@ -496,6 +501,15 @@ export function formatAudienceLine(audience: AudienceCounts | null | undefined):
     formatAudienceScreenRow(audience.byScreen) +
     formatAudienceAgentRow(audience)
   )
+}
+
+/** #1612 — is-down "30-day history" link clicks over views of the pages that carry it, split by
+ *  outage phase, flagged bots excluded. Rendered at 0 clicks too, so every day of the measurement
+ *  window leaves a line. */
+export function formatHistoryClickLine(counts: HistoryClickCounts | null | undefined): string {
+  if (!counts) return ''
+  const part = (label: string, c: { clicks: number; views: number }) => `${label} ${c.clicks} clicks / ${c.views} views`
+  return `📜 **30-day History Link** (24h): ${part('during outages', counts.active)} · ${part('clear', counts.clear)}`
 }
 
 /** #1083 — flagged-bot views as a share of each number above. `''` until a tagged row exists. */

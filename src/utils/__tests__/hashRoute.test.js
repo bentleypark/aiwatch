@@ -44,6 +44,16 @@ describe('hashToPage', () => {
     expect(hashToPage('#settings')).toEqual({ name: 'settings' })
   })
 
+  it('carries ?service= and ?period= onto the incidents page (#1612)', () => {
+    expect(hashToPage('#incidents?service=openai&period=30')).toEqual({ name: 'incidents', filters: { service: 'openai', period: 30 } })
+    expect(hashToPage('#incidents?period=90')).toEqual({ name: 'incidents', filters: { period: 90 } })
+  })
+
+  it('drops an unknown incidents filter value instead of applying it (#1612)', () => {
+    expect(hashToPage('#incidents?service=not-a-service&period=14')).toEqual({ name: 'incidents' })
+    expect(hashToPage('#incidents?service=claude&period=abc')).toEqual({ name: 'incidents', filters: { service: 'claude' } })
+  })
+
   it('resolves a service id to a service page', () => {
     expect(hashToPage('#claude')).toEqual({ name: 'service', serviceId: 'claude' })
   })

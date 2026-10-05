@@ -1949,3 +1949,31 @@ describe('is-down-group.ts — the alert block matches the per-service page, per
     expect(rss.querySelector('svg'), 'the copied state keeps the RSS icon').not.toBeNull()
   })
 })
+
+// #1612 — one "30-day history" link per member whose incident source is readable, plus the
+// consent-free click beacon in the page's delegated listener.
+describe('is-down-group.ts — 30-day history links (#1612)', () => {
+  it('links each readable member to its own 30-day Incidents view', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational', incidentSourceStale: true },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('href="https://ai-watch.dev/#incidents?service=claude&amp;period=30" data-ga="click_incident_history" data-ga-loc="is_down_group_page" data-ga-svc="claude"')
+    expect(html).toContain('data-ga-svc="claudecode">Claude Code</a>')
+    expect(html).not.toContain('service=claudeai&amp;period=30')
+  })
+
+  it('posts the clicked member and the family headline phase, tagged as the group surface', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'degraded' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(`/api/history-click', { method: 'POST', keepalive: true, body: JSON.stringify({ svc: d.gaSvc, active: true, surface: "group" })`)
+    // The beacon must run whether or not GA is loaded: it sits before the gtag guard.
+    expect(html.indexOf('/api/history-click')).toBeLessThan(html.indexOf("if (typeof gtag !== 'function') return"))
+  })
+})
