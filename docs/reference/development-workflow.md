@@ -38,7 +38,7 @@ the engineering gates below remain the same.
    | Dashboard | `npm run dev` | `http://localhost:5173` |
    | Landing / Is X Down | `npx vercel dev --listen 3333 --yes` | `http://localhost:3333/intro` or `http://localhost:3333/is-claude-down` |
    | Worker API | `npx wrangler dev --config worker/wrangler.toml --port 8788` | `http://localhost:8788/api/status` |
-   | Monthly Reports | `cd ~/Desktop/bentely/aiwatch/aiwatch-reports && PATH="/opt/homebrew/opt/ruby/bin:$PATH" GEM_HOME="$HOME/.gem/ruby/4.0.0" bundle exec jekyll serve --port 4000 --unpublished` | `http://localhost:4000/reports/2026-03/` |
+   | Monthly Reports | `cd "$(git rev-parse --path-format=absolute --git-common-dir)/../../aiwatch-reports" && PATH="$(brew --prefix ruby)/bin:$PATH" bundle exec jekyll serve --port 4000 --unpublished` | `http://localhost:4000/reports/2026-03/` |
 
    For dashboard verification, set `ALLOWED_ORIGIN=*` in `worker/.dev.vars` and run the local
    Worker alongside Vite. When running multiple worktrees, offset each port by `+100` per slot and
@@ -55,6 +55,29 @@ the engineering gates below remain the same.
    - Documentation: `npm run lint:okf`, `npm run lint:docs`, and `npm run lint:budget`; also run
      `npm run lint:korean` for Korean-copy changes and `npm run test:scripts` when scripts or
      workflow invariants are affected
+
+## Monthly reports one-time setup
+
+The report site is the separate `aiwatch-reports` repo, cloned next to the main checkout. The
+commands reach it as `"$(git rev-parse --path-format=absolute --git-common-dir)/../../aiwatch-reports"`, which resolves to that sibling from the main
+checkout and from any worktree (#1610). Per machine, once:
+
+1. `git clone https://github.com/bentleypark/aiwatch-reports.git "$(git rev-parse --path-format=absolute --git-common-dir)/../../aiwatch-reports"`.
+2. `brew install ruby`. The commands put `$(brew --prefix ruby)/bin` first on `PATH`, so macOS's
+   system Ruby is never used.
+3. Check the C compiler: `echo '#include <stdckdint.h>' | cc -xc -fsyntax-only -` must exit
+   without an error. Homebrew Ruby's headers include `stdckdint.h`, so native gems (`bigdecimal`,
+   `eventmachine`) fail to build with "The compiler failed to generate an executable file" under a
+   compiler that lacks it. Xcode 15.4 (Apple clang 15) lacks it; Command Line Tools for Xcode 27.0
+   (Apple clang 21) has it. If the check fails:
+   - `softwareupdate --list` names the newest Command Line Tools label; install it with
+     `sudo softwareupdate --install "<label>"`.
+   - `xcode-select -p` names the toolchain `cc` uses. If it points at an Xcode.app, run
+     `sudo xcode-select --switch /Library/Developer/CommandLineTools`.
+   - Re-run the check.
+4. `cd "$(git rev-parse --path-format=absolute --git-common-dir)/../../aiwatch-reports" && PATH="$(brew --prefix ruby)/bin:$PATH" bundle install`.
+
+Then run the Monthly Reports command from the table above.
 
 ## Review and handoff
 
