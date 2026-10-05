@@ -5984,16 +5984,6 @@ export default {
         if (cached) {
           let latency24h: Array<{ t: string; data: Record<string, number> }> = []
           let probe24h: ProbeSnapshot[] = []
-          const [latRaw, probeRaw] = withSeries ? await Promise.all([
-            env.STATUS_CACHE!.get('latency:24h').catch(() => null),
-            env.STATUS_CACHE!.get('probe:24h').catch(() => null),
-          ]) : [null, null]
-          if (latRaw) {
-            try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
-          }
-          if (probeRaw) {
-            try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
-          }
 
           // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
           // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly.
@@ -6001,63 +5991,84 @@ export default {
           // Read AI analysis (per-incident keys) — uses live incident list
           const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
           const recentlyRecovered: Record<string, string[]> = {}
-          // Active incidents: read ai:analysis:{svcId}:{incId} for each
-          // monitoring = "recovery confirmed" — exclude from active analysis display
-          const withActiveInc = cached.services.filter(s =>
-            (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
-          )
-          await Promise.all(withActiveInc.flatMap(svc =>
-            (svc.incidents ?? []).filter(i => i.status !== 'resolved' && i.status !== 'monitoring').map(async (inc) => {
-              const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
-              if (!raw) return
-              try {
-                const parsed = JSON.parse(raw) as AIAnalysisResult
-                if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
-                aiAnalysis[svc.id].push(parsed)
-              } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
-            })
-          ))
-          // Recently recovered: operational services with recovered:{svcId}:{incId} KV (independent of AI analysis)
-          // Also check ai:analysis keys for enrichment (resolved analysis data for modal display)
-          const recoveryCutoff = Date.now() - 3 * 3600_000
-          const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
-          await Promise.all(operationalCached.flatMap(svc =>
-            // #1292 — a synthesized incident can never have a `recovered:` marker (isMarkableOnStatusEdge
-            // refuses it, and it never alerts), so probing for one is a guaranteed miss. It would fire for
-            // ~3h/day per day-bucket, since a full-day bucket "resolves" at the next day's local noon.
-            // Same skip the /feed handler applies for the same reason.
-            (svc.incidents ?? []).filter(i => i.derived !== 'status_history' && i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
-              // Check independent recovery marker first
-              const recoveredRaw = await env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null)
-              if (recoveredRaw) {
-                if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
-                if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
-              }
-              // Also check AI analysis for enrichment (optional — banner shows regardless)
-              const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
-              if (!raw) return
-              try {
-                const parsed = JSON.parse(raw) as AIAnalysisResult
-                if (parsed.resolvedAt) {
+          const readAnalyses = async () => {
+            // Active incidents: read ai:analysis:{svcId}:{incId} for each
+            // monitoring = "recovery confirmed" — exclude from active analysis display
+            const withActiveInc = cached.services.filter(s =>
+              (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
+            )
+            await Promise.all(withActiveInc.flatMap(svc =>
+              (svc.incidents ?? []).filter(i => i.status !== 'resolved' && i.status !== 'monitoring').map(async (inc) => {
+                const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
+                if (!raw) return
+                try {
+                  const parsed = JSON.parse(raw) as AIAnalysisResult
                   if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
                   aiAnalysis[svc.id].push(parsed)
+                } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
+              })
+            ))
+            // Recently recovered: operational services with recovered:{svcId}:{incId} KV (independent of AI analysis)
+            // Also check ai:analysis keys for enrichment (resolved analysis data for modal display)
+            const recoveryCutoff = Date.now() - 3 * 3600_000
+            const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
+            await Promise.all(operationalCached.flatMap(svc =>
+              // #1292 — a synthesized incident can never have a `recovered:` marker (isMarkableOnStatusEdge
+              // refuses it, and it never alerts), so probing for one is a guaranteed miss. It would fire for
+              // ~3h/day per day-bucket, since a full-day bucket "resolves" at the next day's local noon.
+              // Same skip the /feed handler applies for the same reason.
+              (svc.incidents ?? []).filter(i => i.derived !== 'status_history' && i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
+                // Independent recovery marker, plus the AI analysis for enrichment (optional — banner shows regardless)
+                const [recoveredRaw, raw] = await Promise.all([
+                  env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null),
+                  env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null),
+                ])
+                if (recoveredRaw) {
                   if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
                   if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
                 }
-              } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
-            })
-          ))
+                if (!raw) return
+                try {
+                  const parsed = JSON.parse(raw) as AIAnalysisResult
+                  if (parsed.resolvedAt) {
+                    if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
+                    aiAnalysis[svc.id].push(parsed)
+                    if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
+                    if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
+                  }
+                } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
+              })
+            ))
+          }
 
+          // #1531 part 3 — each reader below needs only the snapshot, so they run concurrently.
+          const seriesRead = withSeries ? Promise.all([
+            env.STATUS_CACHE!.get('latency:24h').catch(() => null),
+            env.STATUS_CACHE!.get('probe:24h').catch(() => null),
+          ]) : Promise.resolve([null, null])
+          const analysesRead = readAnalyses()
           // See readRecentSecurityAlerts — both endpoints must emit this field.
-          const securityAlerts = await readRecentSecurityAlerts(env.STATUS_CACHE!)
-
+          const securityAlertsRead = readRecentSecurityAlerts(env.STATUS_CACHE!)
           // #475 — canonical per-user alert feed (see /api/status). Both endpoints emit it.
-          const alertFeed = await readAlertFeed(env.STATUS_CACHE!)
+          const alertFeedRead = readAlertFeed(env.STATUS_CACHE!)
           // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
-          const reportFeed = await buildReportFeedMap(env.STATUS_CACHE!, cached.services)
+          const reportFeedRead = buildReportFeedMap(env.STATUS_CACHE!, cached.services)
+          const probeSummariesRead = readProbeSummaries(env.STATUS_CACHE, 'status-cached')
+
+          const [latRaw, probeRaw] = await seriesRead
+          await analysesRead
+          const securityAlerts = await securityAlertsRead
+          const alertFeed = await alertFeedRead
+          const reportFeed = await reportFeedRead
+          const cachedProbeSummaries = await probeSummariesRead
+          if (latRaw) {
+            try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
+          }
+          if (probeRaw) {
+            try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
+          }
 
           // Calculate scores for cached services (same as /api/status)
-          const cachedProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-cached')
           const scoredCached = cached.services.map((svc) => {
             const s = scoreFor(svc, cachedProbeSummaries)
             return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}) }
