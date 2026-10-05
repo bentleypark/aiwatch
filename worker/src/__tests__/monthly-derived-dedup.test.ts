@@ -8,7 +8,8 @@
 //
 // Fixtures are real rows read off `incidents:monthly:2026-08`.
 import { describe, it, expect } from 'vitest'
-import { accumulateMonthlyIncidents, derivedDayAlreadyBankedFromFeed } from '../monthly-archive'
+import { accumulateMonthlyIncidents, derivedDayAlreadyBankedFromFeed, accumulateIncidentsOnlyIfChanged, mergeGuardSkips, countGuardSkips, readGuardSkipCount, guardSkipKey, GUARD_SKIP_MAX, GUARD_SKIP_TTL_SECONDS } from '../monthly-archive'
+import { buildDailySummary, formatGuardSkipLine } from '../daily-summary'
 import type { MonthlyIncidents, MonthlyIncidentEntry } from '../monthly-archive'
 import type { Incident, ServiceStatus } from '../types'
 
@@ -204,5 +205,101 @@ describe('#1295 — accumulateMonthlyIncidents does not double-bank', () => {
     }
     const out = accumulateMonthlyIncidents(existingWith(banked), [svc([rss])], '2026-08', null)
     expect(out.services.together.count).toBe(2)
+  })
+})
+
+describe('#1295 — the guard leaves a durable trace when it fires', () => {
+  const banked = [feedRow(`${RESOURCE} — down`, '2026-08-04T13:00:00.000Z')]
+  const NOW = new Date('2026-08-30T12:00:00.000Z')
+  const makeKV = (seed: Record<string, string>, failKey?: string) => {
+    const store: Record<string, string> = { ...seed }
+    const puts: Array<{ key: string; opts?: { expirationTtl?: number } }> = []
+    const gets: string[] = []
+    return {
+      kv: {
+        get: async (k: string) => { gets.push(k); if (k === failKey) throw new Error('kv down'); return store[k] ?? null },
+        put: async (k: string, v: string, opts?: { expirationTtl?: number }) => { store[k] = v; puts.push({ key: k, opts }) },
+      } as unknown as KVNamespace,
+      store,
+      puts,
+      gets,
+    }
+  }
+
+  it('reports each skip to the caller, and only skips', () => {
+    const seen: string[] = []
+    accumulateMonthlyIncidents(existingWith(banked), [svc([synthesized(), synthesized(RESOURCE, '2026-08-02T19:00:00.000Z', '2026-08-02')])], '2026-08', null,
+      (svcId, inc) => seen.push(`${svcId}|${inc.id}`))
+    expect(seen).toEqual(['together|bs-hist:r-1:2026-08-04'])
+  })
+
+  it('records the skip although the accumulator itself is unchanged', async () => {
+    const { kv, store, puts } = makeKV({ 'incidents:monthly:2026-08': JSON.stringify(existingWith(banked)) })
+    expect(await accumulateIncidentsOnlyIfChanged(kv, [svc([synthesized()])], '2026-08', NOW)).toBe('unchanged')
+    expect(JSON.parse(store[guardSkipKey('2026-08')])).toEqual([
+      { svc: 'together', id: 'bs-hist:r-1:2026-08-04', day: '2026-08-04', firstSeen: NOW.toISOString() },
+    ])
+    expect(puts.find((p) => p.key === guardSkipKey('2026-08'))?.opts?.expirationTtl).toBe(GUARD_SKIP_TTL_SECONDS)
+  })
+
+  it('does not rewrite the record when the same skip recurs next cycle', async () => {
+    const { kv, puts } = makeKV({ 'incidents:monthly:2026-08': JSON.stringify(existingWith(banked)) })
+    await accumulateIncidentsOnlyIfChanged(kv, [svc([synthesized()])], '2026-08', NOW)
+    await accumulateIncidentsOnlyIfChanged(kv, [svc([synthesized()])], '2026-08', NOW)
+    expect(puts.filter((p) => p.key === guardSkipKey('2026-08'))).toHaveLength(1)
+  })
+
+  it('a failing record read does not change the accumulation result', async () => {
+    const { kv, store } = makeKV({ 'incidents:monthly:2026-08': JSON.stringify(existingWith(banked)) }, guardSkipKey('2026-08'))
+    expect(await accumulateIncidentsOnlyIfChanged(kv, [svc([synthesized()])], '2026-08', NOW)).toBe('unchanged')
+    expect(store[guardSkipKey('2026-08')]).toBeUndefined()
+  })
+
+  it('does not read the record on a cycle that skipped nothing', async () => {
+    const { kv, gets } = makeKV({})
+    await accumulateIncidentsOnlyIfChanged(kv, [svc([synthesized()])], '2026-08', NOW)
+    expect(gets).not.toContain(guardSkipKey('2026-08'))
+  })
+
+  it('starts the record over when the stored one is unreadable', async () => {
+    const { kv, store } = makeKV({ 'incidents:monthly:2026-08': JSON.stringify(existingWith(banked)), [guardSkipKey('2026-08')]: 'not json' })
+    await accumulateIncidentsOnlyIfChanged(kv, [svc([synthesized()])], '2026-08', NOW)
+    expect(JSON.parse(store[guardSkipKey('2026-08')])).toHaveLength(1)
+  })
+
+  it('the daily count sums this month and the previous one, across a year boundary', async () => {
+    const { kv } = makeKV({ [guardSkipKey('2027-01')]: '[{}]', [guardSkipKey('2026-12')]: '[{},{}]', [guardSkipKey('2026-11')]: '[{}]' })
+    expect(await readGuardSkipCount(kv, '2027-01-01')).toBe(3)
+    expect(await readGuardSkipCount(kv, '2026-12-31')).toBe(3)
+  })
+
+  it('the daily count is null, not zero, when a read fails', async () => {
+    const { kv } = makeKV({}, guardSkipKey('2026-07'))
+    expect(await readGuardSkipCount(kv, '2026-08-05')).toBeNull()
+  })
+
+  it('merges by service + id and stops at the cap', () => {
+    const one = { svc: 'together', id: 'a', day: '2026-08-04' }
+    expect(mergeGuardSkips(null, [one, one], 't')).toEqual({ list: [{ ...one, firstSeen: 't' }], added: 1 })
+    expect(mergeGuardSkips([{ ...one, firstSeen: 'old' }], [one], 't').added).toBe(0)
+    const full = Array.from({ length: GUARD_SKIP_MAX }, (_, i) => ({ svc: 's', id: String(i), day: 'd', firstSeen: 't' }))
+    expect(mergeGuardSkips(full, [one], 't')).toEqual({ list: full, added: 0 })
+  })
+
+  it('counts a stored record, and reads anything unreadable as none', () => {
+    expect(countGuardSkips(null)).toBe(0)
+    expect(countGuardSkips('not json')).toBe(0)
+    expect(countGuardSkips('{"a":1}')).toBe(0)
+    expect(countGuardSkips('[{},{}]')).toBe(2)
+  })
+
+  it('the daily summary shows the guard line only when something was skipped', () => {
+    expect(formatGuardSkipLine(undefined)).toBe('')
+    expect(formatGuardSkipLine(0)).toBe('')
+    expect(formatGuardSkipLine(null)).toBe('🛡️ **Monthly dedup guard**: record unreadable')
+    expect(formatGuardSkipLine(1)).toBe('🛡️ **Monthly dedup guard**: 1 synthesized day skipped (this month and last)')
+    const base = { services: [], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    expect(buildDailySummary({ ...base, guardSkips: 3 } as never)).toContain('3 synthesized days skipped')
+    expect(buildDailySummary({ ...base, guardSkips: 0 } as never)).not.toContain('Monthly dedup guard')
   })
 })

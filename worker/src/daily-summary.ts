@@ -97,6 +97,8 @@ export interface DailySummaryData {
   webhookCounts?: { discord: number; slack?: number; newToday?: number | null; newTodayByType?: { discord: number; slack: number } | null }
   // #1590 — per-user fan-out delivered/failed per channel type over the report's 24h window.
   fanoutCounts?: { discord: { delivered: number; failed: number }; slack: { delivered: number; failed: number } } | null
+  // #1295 — synthesized day-totals the monthly dedup guard declined to bank, this month and last (null = unread).
+  guardSkips?: number | null
   deliveryCounts?: { discord: number; failed: number } | null
   redditCount: number
   // #820 — Reddit source health: a marker (blocked / partially blocked / unreachable streak),
@@ -292,6 +294,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   }
   const fanoutLine = formatFanoutLine(data.fanoutCounts)
   if (fanoutLine) lines.push(fanoutLine)
+  const guardLine = formatGuardSkipLine(data.guardSkips)
+  if (guardLine) lines.push(guardLine)
   // Health outranks the count. `reddit:seen:*` keys live 24h, so a source that dies at noon still
   // shows a real non-zero count — and printing it would read as health on the very day detection
   // went dark. The reason is carried through because the remediations differ: `block` is the
@@ -406,6 +410,13 @@ function signed(n: number): string {
 export function formatTypeDelta(d: { discord: number; slack: number }): string {
   if (d.discord === 0 && d.slack === 0) return ''
   return ` (today: Discord ${signed(d.discord)} · Slack ${signed(d.slack)})`
+}
+
+/** #1295 — empty when the guard skipped nothing; a skip is the cue to run the prune check. */
+export function formatGuardSkipLine(n: number | null | undefined): string {
+  if (n === undefined || n === 0) return ''
+  if (n === null) return '🛡️ **Monthly dedup guard**: record unreadable'
+  return `🛡️ **Monthly dedup guard**: ${n} synthesized day${n === 1 ? '' : 's'} skipped (this month and last)`
 }
 
 /** #1590 — what the per-user fan-out sent in the report window; empty on a day it sent nothing. */
