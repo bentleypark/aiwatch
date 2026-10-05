@@ -375,7 +375,7 @@ export function parseBetterStackComponents(
       id: r.id ?? name,
       name,
       status: normalizeBetterStackComponentStatus(r.attributes?.status),
-      ...(group ? { group } : {}),
+      ...(group && !/^current status\b/i.test(group) ? { group } : {}),
     })
   }
   // A section with a single member needn't be a collapsible group — demote it to an
@@ -383,7 +383,9 @@ export function parseBetterStackComponents(
   const groupCounts = new Map<string, number>()
   for (const c of out) if (c.group) groupCounts.set(c.group, (groupCounts.get(c.group) ?? 0) + 1)
   for (const c of out) if (c.group && (groupCounts.get(c.group) ?? 0) < 2) delete c.group
-  return out.length >= 2 ? out : []
+  const groups = new Set(out.map((c) => c.group).filter(Boolean))
+  const kept = out.filter((c) => c.group || !groups.has(c.name))
+  return kept.length >= 2 ? kept : []
 }
 
 /**
