@@ -473,9 +473,7 @@ export interface ServiceConfig {
   // allowlist meant to grow (fireworks/turbopuffer). Skips the (b) aged-in-out-of-scope check for the
   // WHOLE page: `rosterAuditExclude` cannot express this — the excluded set would need a new entry for
   // every model the page could ever add, exactly the hand-maintained-roster trap #992's
-  // `displayAllComponents` already avoids for the breakdown. On the incident.io branch, (a)
-  // young-in-scope is unaffected — it only ever reads the one/few anchor id(s); Atlassian never runs
-  // (a) at all, regardless of this flag.
+  // `displayAllComponents` already avoids for the breakdown.
   rosterAuditFixedScope?: boolean
   betterStackUrl?: string
   // #677 — AWS Health Dashboard public events JSON API (start+end+typeCode per incident). Replaced

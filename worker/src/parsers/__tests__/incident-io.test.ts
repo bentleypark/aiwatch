@@ -82,6 +82,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
     // The #713 rule, enforced structurally: no `data_available_since` → we withhold, never invent 100%.
     expect(computeIncidentIoUptime(html([], [{ id: 'other', since: '2024-01-01T00:00:00Z' }]), 'c1', NOW)).toBeNull()
     expect(computeIncidentIoUptime(html([], [{ id: 'c1', since: null }]), 'c1', NOW)).toBeNull()
+    expect(computeIncidentIoUptime(html([], [{ id: 'c1', since: at(-6) }]), 'c1', NOW)).toBeNull()
     expect(computeIncidentIoUptime('<html>not a status page</html>', 'c1', NOW)).toBeNull()
   })
 
@@ -98,7 +99,7 @@ describe('computeIncidentIoUptime (#1006)', () => {
     expect(out).toEqual({ pct: 83.33, days: 6, todayWeightedOutageSec: 0, missing: [] })
   })
 
-  it('a LIST of ids reports the window of its worst percentage (turbopuffer regions, #857)', () => {
+  it('a young component\'s outage is measured over the oldest component\'s window, not its own (#1601)', () => {
     const out = computeIncidentIoUptime(
       html(
         [{ id: 'r2', start: at(5), end: at(4), status: 'full_outage' }],
@@ -106,7 +107,22 @@ describe('computeIncidentIoUptime (#1006)', () => {
       ),
       ['r1', 'r2'], NOW,
     )
-    expect(out).toEqual({ pct: 95, days: 20, todayWeightedOutageSec: 0, missing: [] }) // r2: 24h of 20 days = 95.00 (worse than r1's 100)
+    expect(out).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0, missing: [] }) // r2: 24h of 30 days, not "95.00 over r2's 20d"
+  })
+
+  it('an all-young scope (whole-page migration) still discloses the short window of its oldest component (#1601)', () => {
+    const out = computeIncidentIoUptime(
+      html(
+        [{ id: 'r2', start: at(5), end: at(4), status: 'full_outage' }],
+        [{ id: 'r1', since: at(20) }, { id: 'r2', since: at(10) }],
+      ),
+      ['r1', 'r2'], NOW,
+    )
+    expect(out).toEqual({ pct: 95, days: 20, todayWeightedOutageSec: 0, missing: [] }) // r2: 24h of r1's 20 days
+  })
+
+  it('discloses the common window in whole days (#1601)', () => {
+    expect(computeIncidentIoUptime(html([], [{ id: 'c1', since: at(6, -12) }]), 'c1', NOW)!.days).toBe(6)
   })
 
   it('a young clean component does not relabel the worst percentage of an established one (#1448)', () => {

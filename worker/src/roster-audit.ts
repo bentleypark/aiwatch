@@ -1,19 +1,14 @@
 // #1518 — uptime-roster audit (incident.io and Atlassian): reads the LIVE page, not a recorded
 // snapshot, so a config drift is caught the same day it happens rather than waiting for a human to
-// re-check its age by hand. Two independent checks, over a common `{id, dataAvailableSince}` shape each
-// platform's own reader produces (`component_uptimes` for incident.io, `created_at` for Atlassian):
+// re-check its age by hand. Over a common `{id, dataAvailableSince}` shape each platform's own reader
+// produces (`component_uptimes` for incident.io, `created_at` for Atlassian), it reports an AGED-IN id
+// still OUT of scope — a component left out of the uptime scope contributes nothing to the worst-of, so
+// an outage on it is invisible in the reported percentage. Nothing previously alerted when such an id
+// crossed 30 days; #992's new-component alert fires once, on first sight, and for a
+// `displayAllComponents` page says "Action: none" regardless of age.
 //
-//   (a) a YOUNG id already IN scope — incident.io ONLY (`computeIncidentIoUptime` pairs its worst
-//       percentage with the WINDOW of the component that produced it, shorter window wins a tie, so one
-//       young component in an all-100% scope shortens the whole service's disclosed window — #1266's
-//       original gap). Not run for Atlassian on this branch.
-//   (b) an AGED-IN id still OUT of scope — a component omitted for being too young contributes nothing
-//       to the uptime worst-of, so an outage on it is invisible in the reported percentage. Nothing
-//       previously alerted when such an id crossed 30 days; #992's new-component alert fires once, on
-//       first sight, and for a `displayAllComponents` page says "Action: none" regardless of age.
-//
-// A REMOVED id (one the page no longer serves at all) is neither check's job — it is absent from the
-// page's `component_uptimes` entirely, so it never appears in the `entries` list either function reads,
+// A REMOVED id (one the page no longer serves at all) is not this check's job — it is absent from the
+// page's `component_uptimes` entirely, so it never appears in the `entries` list this check reads,
 // and the existing "Component ID Mismatch" (#135) / "Partial Component Resolve" (#957) alerts already
 // own that case. Duplicating it here would double the notification and let two checks disagree.
 
@@ -23,33 +18,8 @@ export interface RosterAuditEntry {
   id: string
   /** `null` = the page carries an entry for this id but no usable `data_available_since` (absent,
    *  empty, or unparseable) — the same "cannot prove an age" case `computeIncidentIoUptime` withholds
-   *  uptime for. Treated as unproven, not as clean, by both checks below. */
+   *  uptime for. Treated as unproven, not as clean, below. */
   dataAvailableSince: string | null
-}
-
-/**
- * #1518(a) — ids CONFIGURED into a service's uptime scope (`statusComponentIds ?? incidentIoComponentId`,
- * the same expression `services.ts` computes uptime over) whose `data_available_since` is under the
- * 30-day window. An id the page does not carry an entry for at all (absent from `entries`), or carries
- * one with no usable `data_available_since`, is NOT reported here — both are the #957 partial-resolve
- * alert's case (it is exactly what `computeIncidentIoUptime` puts in `missing`), not this one's; this
- * check only has something to say once an age is provably UNDER the window, not merely unproven.
- */
-export function auditYoungIdsInScope(
-  entries: RosterAuditEntry[],
-  scopeIds: string[],
-  nowMs: number,
-  windowDays: number = ROSTER_AUDIT_WINDOW_DAYS,
-): string[] {
-  const byId = new Map(entries.map((e) => [e.id, e.dataAvailableSince]))
-  const young: string[] = []
-  for (const id of scopeIds) {
-    const since = byId.get(id)
-    if (!since) continue // absent, or present with no usable date — #957's case, not this one's
-    const ageDays = (nowMs - Date.parse(since)) / 86_400_000
-    if (ageDays < windowDays) young.push(id)
-  }
-  return young
 }
 
 /**
@@ -120,27 +90,15 @@ export function rosterAgedInFindings(
  *  `nextRosterFindingSeen`) are rendered — a finding still true from a prior cycle stays silent. */
 export function formatRosterAuditAlert(
   serviceNames: string[],
-  young: string[],
   agedIn: string[],
   names: Map<string, string>,
 ): string {
   const who = serviceNames.length > 0 ? serviceNames.join(', ') : '(no AIWatch service)'
   const line = (id: string) => `• \`${names.get(id) ?? id}\` (\`${id}\`)`
-  const sections: string[] = []
-  if (young.length > 0) {
-    sections.push(
-      `**Young in scope** (under the 30-day window; pairs its percentage with its own short window, so one young id in an all-100% scope shortens the whole page's disclosed \`uptimeWindowDays\`):\n${young.map(line).join('\n')}`,
-    )
-  }
-  if (agedIn.length > 0) {
-    sections.push(
-      `**Aged in, out of scope** (30+ days old, not tracked — an outage on it is invisible in the reported uptime):\n${agedIn.map(line).join('\n')}`,
-    )
-  }
   return (
-    `Roster audit for **${who}**:\n\n${sections.join('\n\n')}\n\n` +
+    `Roster audit for **${who}**:\n\n` +
+    `**Aged in, out of scope** (30+ days old, not tracked — an outage on it is invisible in the reported uptime):\n${agedIn.map(line).join('\n')}\n\n` +
     `**Action**: reconcile \`worker/src/services.ts\` — add an aged-in id to the uptime scope, or to ` +
-    `\`rosterAuditExclude\` if it should never be tracked; a young id in scope needs no code change, just ` +
-    `awareness that the page's disclosed window is currently shorter than 30 days.`
+    `\`rosterAuditExclude\` if it should never be tracked.`
   )
 }

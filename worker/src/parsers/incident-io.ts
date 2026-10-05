@@ -33,7 +33,8 @@ import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from '.
 export interface IncidentIoUptime {
   /** Uptime % over the window below, floor-rounded to 2dp (never overstate). */
   pct: number
-  /** Days the computation actually covers — `windowDays` unless the component is younger than that.
+  /** Days the computation actually covers — `windowDays` unless the OLDEST tracked component is younger
+   *  than that (#1601).
    *  A status-page migration creates a NEW component, so this can drop to a handful of days (#1004):
    *  the figure is then honest for the days it has, and the UI says which. */
   days: number
@@ -201,24 +202,19 @@ export function parseIncidentIoAllComponentUptimes(html: string): { id: string; 
   return [...byId.entries()].map(([id, dataAvailableSince]) => ({ id, dataAvailableSince }))
 }
 
-/** Uptime for ONE component over the trailing window, from its impact records.
- *  null when the page doesn't track the component (no `data_available_since`) — absence of impacts is
- *  NOT evidence of absence of downtime, so we withhold rather than invent a 100%.
+/** Uptime for ONE component over the service's common trailing window (`coveredDays`), from its impact
+ *  records — divided by the whole common window even when the component is younger than it: before a
+ *  component existed, it could not take the service down.
  *  `missing` is a `computeIncidentIoUptime`-level (multi-id) concept, not a per-component one — this
  *  internal helper's result excludes it rather than always populating an empty array. */
 function componentUptime(
   impacts: IncidentIoImpact[],
   componentId: string,
-  since: string,
   nowMs: number,
-  windowDays: number,
-): Omit<IncidentIoUptime, 'missing'> | null {
-  const sinceMs = Date.parse(since)
-  if (Number.isNaN(sinceMs)) return null
-  const covered = Math.min(windowDays, (nowMs - sinceMs) / 86_400_000)
-  if (covered <= 0) return null
-  const windowStart = nowMs - covered * 86_400_000
-  const windowSec = covered * 86_400
+  coveredDays: number,
+): Omit<IncidentIoUptime, 'missing' | 'days'> {
+  const windowStart = nowMs - coveredDays * 86_400_000
+  const windowSec = coveredDays * 86_400
 
   const intervals: OutageInterval[] = []
   for (const impact of impacts) {
@@ -241,16 +237,17 @@ function componentUptime(
   const pct = Math.max(0, Math.floor((1 - weightedSec / windowSec) * 10000) / 100)
   // #1017 — cheap second call over the SAME intervals, today's window instead of 30d.
   const todayWeightedOutageSec = weightedDowntimeSeconds(intervals, startOfTodayUTC(nowMs), nowMs)
-  return { pct, days: Math.floor(covered), todayWeightedOutageSec }
+  return { pct, todayWeightedOutageSec }
 }
 
 /** #1006 — the trailing-30-day uptime for a service, computed from the provider's impact records.
  *
  *  A LIST of ids is a WORST-OF (the badge convention for a multi-component service, #379/#857 —
  *  turbopuffer's per-region components have no group aggregate, so the honest headline is the worst
- *  region, not an arbitrary one). The reported `days` comes from the component that produced the
- *  worst percentage, so the disclosed window always describes that percentage. Equal percentages use
- *  the shorter window as the conservative tie-breaker.
+ *  region, not an arbitrary one). #1601 — every component is measured over ONE common window, the
+ *  OLDEST resolved component's (capped at `windowDays`), so a component created days ago neither
+ *  shortens the service's window nor has its outage divided by only its own few days. An all-young
+ *  scope (a whole-page migration) still yields the short window, disclosed as `days`.
  *
  *  null when NO configured id is tracked by the page. Warns when only some resolve: an incident.io ULID
  *  rotation silently stops matching on a 200-OK page, and a shrinking worst-of could then report a
@@ -269,21 +266,22 @@ export function computeIncidentIoUptime(
     return null
   }
   let worstPct = Infinity
-  let worstDays = Infinity
   let worstTodaySec = 0
-  let resolved = 0
   const missing: string[] = []
+  const tracked: { id: string; sinceMs: number }[] = []
 
   for (const id of ids) {
-    const since = parseIncidentIoDataAvailableSince(html, id)
-    if (!since) { missing.push(id); continue } // the page doesn't track this component — withhold, don't assume 100%
-    const result = componentUptime(impacts, id, since, nowMs, windowDays)
-    if (!result) { missing.push(id); continue }
-    resolved++
-    if (result.pct < worstPct || (result.pct === worstPct && result.days < worstDays)) {
-      worstPct = result.pct
-      worstDays = result.days
-    }
+    // the page doesn't track this component — withhold, don't assume 100%
+    const sinceMs = Date.parse(parseIncidentIoDataAvailableSince(html, id) ?? '')
+    if (Number.isNaN(sinceMs) || sinceMs >= nowMs) { missing.push(id); continue }
+    tracked.push({ id, sinceMs })
+  }
+  const resolved = tracked.length
+  const coveredDays = Math.min(windowDays, (nowMs - Math.min(...tracked.map((t) => t.sinceMs))) / 86_400_000)
+
+  for (const { id } of tracked) {
+    const result = componentUptime(impacts, id, nowMs, coveredDays)
+    worstPct = Math.min(worstPct, result.pct)
     // #1017 — worst-of: the most-affected component's TODAY figure, not a sum
     // (a sum across components would double-count a shared outage worst-of'd elsewhere in this file).
     worstTodaySec = Math.max(worstTodaySec, result.todayWeightedOutageSec)
@@ -310,7 +308,7 @@ export function computeIncidentIoUptime(
       `component_uptimes (upstream id rotation?) — uptime is a worst-of over the ${resolved} that resolved`,
     )
   }
-  return { pct: worstPct, days: worstDays, todayWeightedOutageSec: worstTodaySec, missing }
+  return { pct: worstPct, days: Math.floor(coveredDays), todayWeightedOutageSec: worstTodaySec, missing }
 }
 
 

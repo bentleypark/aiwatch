@@ -548,11 +548,11 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
     expect(svc.uptime30d).toBe(96.66)
   })
 
-  it('a short record wins an equal-percentage tie for the disclosed window', async () => {
+  it('a young badge component does not shorten the disclosed window (#1601)', async () => {
     const html = rsc([], CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, id === COMPLIANCE ? 20 : 400)))
-    expect(computeIncidentIoUptime(html, PRIMARY, now)!.days).toBe(30) // control: the primary alone is whole
+    expect(computeIncidentIoUptime(html, COMPLIANCE, now)!.days).toBe(20) // control: the young component alone is short
     const svc = await fetchService(CHATGPT, withUptimeHtml(html), undefined, {})
-    expect(svc.uptimeWindowDays).toBe(20)
+    expect(svc.uptimeWindowDays).toBeUndefined()
   })
 
   // chatgpt cannot catch a swap to `displayComponentIds`: its two id lists are identical by design,

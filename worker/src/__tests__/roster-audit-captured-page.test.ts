@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseIncidentIoAllComponentUptimes } from '../parsers/incident-io'
-import { auditYoungIdsInScope, auditAgedInOutOfScope } from '../roster-audit'
+import { auditAgedInOutOfScope } from '../roster-audit'
 
-// #1518 — both audit checks over a captured page instead of hand-built entries.
+// #1518 — the audit check over a captured page instead of hand-built entries.
 // status.fireworks.ai, 2026-09-28: the day the audit reported the two Nemotron ids.
 const ENTRIES = parseIncidentIoAllComponentUptimes(
   readFileSync(join(__dirname, '..', 'parsers', '__tests__', 'fixtures', 'fireworks-page-2026-09-28.html'), 'utf8'),
@@ -13,8 +13,6 @@ const NOW = Date.parse('2026-09-28T00:00:00Z')
 
 const NEMOTRON_ULTRA = '01M0VEYRP3Q4KM0RDEFG6EBBZC'
 const NEMOTRON_LIGHTNING = '01M0VEYRP3YY99KM87D9CNZ7MG'
-const GLM_53_FLASH = '01M1DFY7G1JXWQQQ852G0PAQCP' // data_available_since 2026-09-01 — 27 days old at NOW
-const REMOVED = '01ZZZZZZZZZZZZZZZZZZZZZZZZ' // not on the page
 
 // fireworks' uptime scope before #1523, and after it added the two Nemotron ids.
 const SCOPE_BEFORE = [
@@ -40,17 +38,5 @@ describe('roster audit over the captured Fireworks page (#1518)', () => {
 
   it('(b) reports nothing when they are excluded instead', () => {
     expect(auditAgedInOutOfScope(ENTRIES, SCOPE_BEFORE, [NEMOTRON_ULTRA, NEMOTRON_LIGHTNING], NOW)).toEqual([])
-  })
-
-  it('(a) reports nothing for a scope of components all 30+ days old', () => {
-    expect(auditYoungIdsInScope(ENTRIES, SCOPE_AFTER, NOW)).toEqual([])
-  })
-
-  it('(a) reports a young page component put into scope', () => {
-    expect(auditYoungIdsInScope(ENTRIES, [...SCOPE_AFTER, GLM_53_FLASH], NOW)).toEqual([GLM_53_FLASH])
-  })
-
-  it('(a) does not report a scoped id the page no longer lists', () => {
-    expect(auditYoungIdsInScope(ENTRIES, [...SCOPE_AFTER, REMOVED], NOW)).toEqual([])
   })
 })
