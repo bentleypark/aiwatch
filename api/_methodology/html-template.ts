@@ -391,7 +391,7 @@ ${consentInitScript(nonce)}
   <h2 data-i18n="s6.title">인시던트 · MTTR · 탐지</h2>
 
   <h3 data-i18n="s6.counting.title">인시던트 집계</h3>
-  <p data-i18n="s6.counting.body">인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — Anthropic은 모델별(Opus/Sonnet/Haiku)로 따로 보고해, 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.</p>
+  <p data-i18n="s6.counting.body">인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — 한 장애를 컴포넌트나 플랫폼별로 따로 올리는 곳(예: Mistral, Grok)은 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.</p>
 
   <p data-i18n="s6.counting.reconstructed">Better Stack을 쓰는 상태 페이지는 모니터가 자동으로 만들던 인시던트를 더 이상 게시하지 않기도 합니다. 그래서 피드가 다루지 않은 다운타임 날짜는 같은 페이지에 공개된 일별 가동 기록으로 채웁니다. 이때는 인시던트 하나를 1건으로 세지 않고, 컴포넌트마다 다운타임이 있었던 날짜를 하루에 1건씩 셉니다. 최근 30일까지만 채우고, 피드에 남은 가장 오래된 항목보다 이전 날짜는 채우지 않습니다. 하루 다운타임이 10분 미만인 날과 아직 끝나지 않은 당일도 제외합니다. 이렇게 채운 기록은 하루 합계라서 인시던트 하나의 길이가 아니므로 MTTR 계산에서 뺍니다.</p>
 
@@ -455,7 +455,7 @@ ${consentInitScript(nonce)}
       </table>
     </div>
     <p class="note" data-i18n="s4.inc.note">표의 값은 critical/major 영향(가중치 1.0)을 기준으로 합니다. minor만 발생한 날은 가중치 0.3입니다 — 예: minor 5일 ≈ 가중 1.5일 ≈ 21.5점.</p>
-    <p data-i18n="s4.inc.why"><strong>영향 일수를 쓰는 이유:</strong> 일부 서비스(Anthropic 등)는 모델별(Opus/Sonnet/Haiku)로 인시던트를 따로 보고해 같은 장애가 여러 건으로 집계됩니다. 그래서 건수가 아닌 영향 일수를 쓰고, 각 날짜를 그날의 가장 심각한 영향도로 가중합니다 — critical/major = 1.0, minor = 0.3, 정보성/null = 제외.</p>
+    <p data-i18n="s4.inc.why"><strong>영향 일수를 쓰는 이유:</strong> 일부 서비스는 하나의 장애를 모델·컴포넌트별로 여러 인시던트로 나눠 보고해 같은 장애가 여러 건으로 집계됩니다. 그래서 건수가 아닌 영향 일수를 쓰고, 각 날짜를 그날의 가장 심각한 영향도로 가중합니다 — critical/major = 1.0, minor = 0.3, 정보성/null = 제외. 인시던트는 시작한 기간에 속하며, 해결된 인시던트는 시작한 날부터 해결된 날까지 걸친 모든 날을 셉니다.</p>
   </div>
 
   <!-- Recovery sub -->
@@ -602,7 +602,7 @@ const i18n = {
     's4.uptime.title': 'Uptime Score (0~40)',
     's4.inc.title': 'Incident Score (0~25)',
     's4.inc.note': '표의 값은 critical/major 영향(가중치 1.0)을 기준으로 합니다. minor만 발생한 날은 가중치 0.3입니다 — 예: minor 5일 ≈ 가중 1.5일 ≈ 21.5점.',
-    's4.inc.why': '<strong>영향 일수를 쓰는 이유:</strong> 일부 서비스(Anthropic 등)는 모델별(Opus/Sonnet/Haiku)로 인시던트를 따로 보고해 같은 장애가 여러 건으로 집계됩니다. 그래서 건수가 아닌 영향 일수를 쓰고, 각 날짜를 그날의 가장 심각한 영향도로 가중합니다 — critical/major = 1.0, minor = 0.3, 정보성/null = 제외.',
+    's4.inc.why': '<strong>영향 일수를 쓰는 이유:</strong> 일부 서비스는 하나의 장애를 모델·컴포넌트별로 여러 인시던트로 나눠 보고해 같은 장애가 여러 건으로 집계됩니다. 그래서 건수가 아닌 영향 일수를 쓰고, 각 날짜를 그날의 가장 심각한 영향도로 가중합니다 — critical/major = 1.0, minor = 0.3, 정보성/null = 제외. 인시던트는 시작한 기간에 속하며, 해결된 인시던트는 시작한 날부터 해결된 날까지 걸친 모든 날을 셉니다.',
     's4.rec.title': 'Recovery Score (0~15)',
     's4.rec.note': 'MTTR은 해결된 인시던트의 장애 구간 길이로 구한 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록). 시간이 겹치는 인시던트는 하나의 구간으로 합칩니다.',
     's4.resp.title': 'Responsiveness Score (0~20)',
@@ -626,7 +626,7 @@ const i18n = {
     's5.limit.probe': '<strong>Probe 미적용:</strong> 레이턴시 랭킹은 직접 probe하는 API 서비스와 자체 API를 가진 코딩 에이전트(예: Cursor)를 대상으로 합니다 — 앱(Character.AI는 probe하되 상세 페이지에만 표시), 자체 API가 없는 코딩 에이전트, probe하지 않는 나머지 3개 AI 서비스는 제외됩니다.',
     's6.title': '인시던트 · MTTR · 탐지',
     's6.counting.title': '인시던트 집계',
-    's6.counting.body': '인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — Anthropic은 모델별(Opus/Sonnet/Haiku)로 따로 보고해, 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.',
+    's6.counting.body': '인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — 한 장애를 컴포넌트나 플랫폼별로 따로 올리는 곳(예: Mistral, Grok)은 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.',
     's6.counting.reconstructed': 'Better Stack을 쓰는 상태 페이지는 모니터가 자동으로 만들던 인시던트를 더 이상 게시하지 않기도 합니다. 그래서 피드가 다루지 않은 다운타임 날짜는 같은 페이지에 공개된 일별 가동 기록으로 채웁니다. 이때는 인시던트 하나를 1건으로 세지 않고, 컴포넌트마다 다운타임이 있었던 날짜를 하루에 1건씩 셉니다. 최근 30일까지만 채우고, 피드에 남은 가장 오래된 항목보다 이전 날짜는 채우지 않습니다. 하루 다운타임이 10분 미만인 날과 아직 끝나지 않은 당일도 제외합니다. 이렇게 채운 기록은 하루 합계라서 인시던트 하나의 길이가 아니므로 MTTR 계산에서 뺍니다.',
     's6.mttr.title': '복구 시간 (MTTR)',
     's6.mttr.body': 'Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 서로 다를 수 있으며, 이는 정상입니다.',
@@ -693,7 +693,7 @@ const i18n = {
     's4.uptime.title': 'Uptime Score (0–40)',
     's4.inc.title': 'Incident Score (0–25)',
     's4.inc.note': 'Table values assume critical/major impact days (weight 1.0). Minor-only days are weighted 0.3 — e.g. 5 minor days ≈ 1.5 weighted days ≈ 21.5 points.',
-    's4.inc.why': '<strong>Why affected days:</strong> some services (e.g. Anthropic) report incidents per model (Opus/Sonnet/Haiku), so one outage gets counted multiple times. We use affected days instead of raw count, each day weighted by its worst impact — critical/major = 1.0, minor = 0.3, informational/null = excluded.',
+    's4.inc.why': '<strong>Why affected days:</strong> some services split one outage into several incidents, per model or per component, so it gets counted multiple times. We use affected days instead of raw count, each day weighted by its worst impact — critical/major = 1.0, minor = 0.3, informational/null = excluded. An incident belongs to the period it started in, and a resolved one counts every day from the one it started to the one it resolved.',
     's4.rec.title': 'Recovery Score (0–15)',
     's4.rec.note': 'MTTR is the 30-day median of resolved-incident impact windows (for a small sample of fewer than 3, an unusually long value is eased toward a 1-hour baseline so a single long incident cannot over-penalize a low-incident service). Incidents that overlap in time are merged into one window.',
     's4.resp.title': 'Responsiveness Score (0–20)',
@@ -717,7 +717,7 @@ const i18n = {
     's5.limit.probe': '<strong>No probe:</strong> The latency ranking covers directly-probed API services and coding agents with their own API (e.g. Cursor) — apps (Character.AI is probed but shown on its detail page only), API-less coding agents, and 3 other non-probed AI services (Bedrock, Azure OpenAI, Modal) are excluded.',
     's6.title': 'Incidents · MTTR · Detection',
     's6.counting.title': 'Incident counting',
-    's6.counting.body': 'Incident counts reflect all affected components per service. Providers differ in reporting granularity — Anthropic reports per-model (Opus/Sonnet/Haiku counted separately), inflating its totals versus service-level reporters. A higher count does not mean lower reliability; adjust for granularity before comparing across providers.',
+    's6.counting.body': 'Incident counts reflect all affected components per service. Providers differ in reporting granularity — those that file one outage per component or platform (e.g. Mistral, Grok) inflate their totals versus service-level reporters. A higher count does not mean lower reliability; adjust for granularity before comparing across providers.',
     's6.counting.reconstructed': 'A Better Stack status page may stop publishing the incidents its monitors used to create. AIWatch then fills the downtime days the feed does not cover from the daily availability record published on the same page. One incident is not one entry there: each component contributes one entry for every day it had downtime. Only the last 30 days are filled, and nothing older than the oldest item still in the feed. A day with under 10 minutes of downtime and the current, unfinished day are left out too. An entry built this way is a daily total rather than the length of one incident, so it is excluded from MTTR.',
     's6.mttr.title': 'Recovery time (MTTR)',
     's6.mttr.body': 'The Score\\\'s Recovery component uses a 30-day median. The ServiceDetails "Recovery" card is a separate display — a 7-day median + worst ("typical 15m · worst 29h34m"). The figures can legitimately differ.',

@@ -2,7 +2,7 @@
 
 import type { Incident, ProbeSummary, ServiceStatus } from './types'
 import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
-import { incidentDay, statedDay } from './utils'
+import { incidentDays, statedDay } from './utils'
 
 export interface AIWatchScore {
   // #713 — null for a 'low'-confidence service (no official uptime AND no probe): scored on only
@@ -272,11 +272,9 @@ export function calculateAIWatchScore(
   // Affected days — only count incidents with measurable impact (#261, isReliabilityIncident). null-impact entries are informational (component
   // renames, post-mortems) — including them in affected_days inflates services like cohere/groq whose
   // feeds mix info posts with real incidents, producing scores ~10pts lower than reality.
+  const lastDay = new Date().toISOString().slice(0, 10)
   const impactfulDays = new Set(
-    // #1292 — `derivedDay` when present: a synthesized incident's own anchor is an arbitrary instant
-    // inside the page's local day, so slicing its UTC date buckets it under the wrong date for any
-    // page far enough from UTC. Parsed incidents keep the UTC slice they have always used.
-    windowIncidents.filter(isReliabilityIncident).map(incidentDay),
+    windowIncidents.filter(isReliabilityIncident).flatMap((i) => incidentDays(i, lastDay)),
   )
   const affectedDays = impactfulDays.size
 
@@ -295,9 +293,10 @@ export function calculateAIWatchScore(
       unknownImpacts.add(String(inc.impact))
       continue
     }
-    const day = incidentDay(inc) // #1292 — the derived day when it carries one
-    const existing = dailyMaxWeight.get(day) ?? 0
-    if (weight > existing) dailyMaxWeight.set(day, weight)
+    for (const day of incidentDays(inc, lastDay)) {
+      const existing = dailyMaxWeight.get(day) ?? 0
+      if (weight > existing) dailyMaxWeight.set(day, weight)
+    }
   }
   if (unknownImpacts.size > 0) {
     console.warn(`[calculateAIWatchScore] ${service.id}: unknown impact level(s): ${[...unknownImpacts].join(', ')} — update INCIDENT_IO_IMPACT_WEIGHTS`)

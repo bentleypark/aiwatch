@@ -28,7 +28,8 @@
 //   3. the weekly briefing — reads the raw accumulator directly.
 // The live `/api/status` Score is intentionally NOT overridden here: MTTR is median-based for services
 // with ≥3 resolved incidents (robust to one outlier), and the going-forward scoring robustness is
-// tracked separately (#1019 Part B).
+// tracked separately (#1019 Part B). Its Incidents component, though, counts the days up to the stored
+// `resolvedAt` (#1487), so an overridden incident can cover more days live than in the archive.
 
 import type { MonthlyIncidents, MonthlyIncidentServiceData } from './monthly-archive'
 import { classifyOperatorList, type OperatorListRead } from './suppression'
