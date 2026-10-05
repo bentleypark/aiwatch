@@ -38,8 +38,7 @@ export async function sha256Base64(s: string): Promise<string> {
 
 /**
  * Build the CSP header (key + value) whose `script-src` allows exactly the given script hashes.
- * Mirrors the vercel.json / csp-nonce policy (keep in sync) but with `'sha256-…'` tokens instead of
- * a nonce. `enforce` picks Report-Only (Phase 2) vs enforcing `Content-Security-Policy` (Phase 3).
+ * `enforce` picks Report-Only (Phase 2) vs enforcing `Content-Security-Policy` (Phase 3).
  */
 export function buildCspWithHashes(hashes: string[], opts: { enforce?: boolean } = {}): { key: string; value: string } {
   const scriptHashes = hashes.map((h) => `'sha256-${h}'`).join(' ')
@@ -48,7 +47,7 @@ export function buildCspWithHashes(hashes: string[], opts: { enforce?: boolean }
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
-    "form-action 'self'",
+    "form-action 'self' https://*.kakao.com",
     `script-src 'self' ${scriptHashes} https://www.googletagmanager.com https://t1.kakaocdn.net`,
     "connect-src 'self' https://aiwatch-worker.p2c2kbf.workers.dev https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com",
     "img-src 'self' data: https://ai-watch.dev https://aiwatch-worker.p2c2kbf.workers.dev",

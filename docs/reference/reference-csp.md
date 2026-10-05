@@ -54,7 +54,9 @@ report-uri /api/csp-report; report-to csp
   and are low XSS risk; CSP3 `'unsafe-hashes'` for style attributes is brittle. Kept indefinitely.
 - **Allowlisted origins** (browser-loaded only): GA4 `googletagmanager.com` (gtag.js) in script+connect;
   `google-analytics.com` + `region1.google-analytics.com` (GA4 beacons) in connect; Kakao
-  `t1.kakaocdn.net` (share SDK, injected on is-down) in script; the **Worker origin** in connect (`/api/*`
+  `t1.kakaocdn.net` (share SDK, injected on is-down) in script, and `*.kakao.com` in **form-action** on the
+  hash-CSP pages only (`csp-hash.ts`) — the SDK form-POSTs to `sharer.kakao.com`, which redirects a
+  logged-out viewer to `accounts.kakao.com`, and form-action is checked on every redirect (#1619); the **Worker origin** in connect (`/api/*`
   fetches) AND img (the status/uptime **badges** on ServiceDetails load from `<worker>/badge/<id>` — #482
   review); Google Fonts `fonts.googleapis.com` (stylesheet) in style, `fonts.gstatic.com` (files) in font;
   `ai-watch.dev` (OG images, icons) + `data:` in img. The many `status.*` provider origins are *server-side
@@ -67,8 +69,6 @@ script/handler** → refactor in Phase 2.
 
 ### Known expected reports (not bugs to chase)
 - Every inline `<script>` + `onclick`/`onerror` handler (the Phase 2 refactor list).
-- Kakao share (`connect-src`): clicking KakaoTalk share on an is-down page hits `*.kakao.com` API hosts
-  not yet in `connect-src` — left to be surfaced here, then allowlisted once the exact host is confirmed.
 
 ## Roadmap
 
