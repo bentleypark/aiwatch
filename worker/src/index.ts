@@ -17,7 +17,7 @@ import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDe
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, omitsTimeSeries } from './utils'
 import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
-import { auditYoungIdsInScope, rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
+import { rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
 import { recordRestoreObservations, type RestoreObservation } from './uptime-archive-trace'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
@@ -3552,10 +3552,9 @@ export default {
       }
 
       // #1518 — incident.io roster audit, daily UTC 06:00-06:04. Reads each incident.io page's LIVE
-      // `component_uptimes`, not a recorded snapshot, so a young id already in scope (shortens the
-      // whole page's disclosed uptime window, #1266) and an aged-in id still out of scope (an outage on
-      // it is invisible in the reported uptime) are both caught the day they happen rather than on a
-      // human's next manual reconciliation. A REMOVED id is neither check's job — the existing
+      // `component_uptimes`, not a recorded snapshot, so an aged-in id still out of scope (an outage on
+      // it is invisible in the reported uptime) is caught the day it happens rather than on a human's
+      // next manual reconciliation. A REMOVED id is not this check's job — the existing
       // "Component ID Mismatch"/"Partial Component Resolve" alerts own that case.
       if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCHours() === 6 && now.getUTCMinutes() < 5) {
         for (const page of rosterAuditPages()) {
@@ -3599,33 +3598,26 @@ export default {
               apiRes?.body?.cancel()
             }
 
-            const young = auditYoungIdsInScope(entries, page.scopeIds, Date.now())
             const agedIn = rosterAgedInFindings(entries, page.scopeIds, page.excludeIds, page.fixedScope, Date.now())
 
-            const youngKey = `roster-audit-seen:${page.statusUrl}:young`
             const agedInKey = `roster-audit-seen:${page.statusUrl}:agedin`
-            const [youngSeenRaw, agedInSeenRaw] = await Promise.all([
-              env.STATUS_CACHE.get(youngKey).catch(() => null),
-              env.STATUS_CACHE.get(agedInKey).catch(() => null),
-            ])
+            const agedInSeenRaw = await env.STATUS_CACHE.get(agedInKey).catch(() => null)
             const parseSeen = (raw: string | null): string[] | null => {
               if (raw === null) return null
               try { const p = JSON.parse(raw); return Array.isArray(p) ? p : null } catch { return null }
             }
-            const youngDiff = nextRosterFindingSeen(parseSeen(youngSeenRaw), young)
             const agedInDiff = nextRosterFindingSeen(parseSeen(agedInSeenRaw), agedIn)
 
-            if (youngDiff.toAlert.length > 0 || agedInDiff.toAlert.length > 0) {
+            if (agedInDiff.toAlert.length > 0) {
               const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
                 title: `📋 Roster audit: ${page.services.map((s) => s.name).join(', ') || page.statusUrl}`,
-                description: formatRosterAuditAlert(page.services.map((s) => s.name), youngDiff.toAlert, agedInDiff.toAlert, names),
+                description: formatRosterAuditAlert(page.services.map((s) => s.name), agedInDiff.toAlert, names),
                 color: 0x3B82F6,
               })
               // Dedup writes only on a confirmed send, same posture as #957/#992's sibling checks — a
               // webhook hiccup must retry at the NEXT DAILY run (this check is gated to once a day, not
               // every cron tick), not silently mark the finding as already alerted.
               if (sent) {
-                await kvPut(env.STATUS_CACHE, youngKey, JSON.stringify(youngDiff.nextSeen))
                 await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(agedInDiff.nextSeen))
               } else {
                 console.error(`[cron] roster audit alert for ${page.statusUrl} was NOT delivered — not deduped, retries at tomorrow's run`)
@@ -3633,7 +3625,6 @@ export default {
             } else {
               // Nothing NEW to alert, but the seen set can still have shrunk (a finding cleared) — persist
               // that so a later regression is recognized as new again rather than staying silently suppressed.
-              if (youngDiff.nextSeen.length !== (parseSeen(youngSeenRaw) ?? []).length) await kvPut(env.STATUS_CACHE, youngKey, JSON.stringify(youngDiff.nextSeen))
               if (agedInDiff.nextSeen.length !== (parseSeen(agedInSeenRaw) ?? []).length) await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(agedInDiff.nextSeen))
             }
           } catch (err) {
@@ -3679,7 +3670,7 @@ export default {
             if (diff.toAlert.length > 0) {
               const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
                 title: `📋 Roster audit: ${config.name}`,
-                description: formatRosterAuditAlert([config.name], [], diff.toAlert, names),
+                description: formatRosterAuditAlert([config.name], diff.toAlert, names),
                 color: 0x3B82F6,
               })
               if (sent) await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(diff.nextSeen))

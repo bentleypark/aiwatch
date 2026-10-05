@@ -722,7 +722,7 @@ describe('displayComponentIds config sanity (#606)', () => {
   // #1008: "Codex in ChatGPT Desktop" moved from codex (5→4) to its official ChatGPT group (11→12).
   // #1010: `Compliance API` joined chatgpt's badge scope (12→13), then `Sites` + `ChatGPT Work` once
   // their `data_available_since` cleared 30 days (13→15). One retired component later left the scope (15→14).
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 11, chatgpt: 14, codex: 4 }
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 13, chatgpt: 16, codex: 4 }
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
@@ -829,7 +829,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(11 + 14 + 4)
+    expect(all.length).toBe(13 + 16 + 4)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
@@ -941,6 +941,14 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(has('codex', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'Codex in ChatGPT Desktop NOT in codex').toBe(false)
     // The two Logins are distinct ids (ChatGPT login vs API login) — both present, no collision.
     expect(has('chatgpt', '01JMXBNJXG1S2D9V65P1ZZTD94'), 'ChatGPT Login → chatgpt').toBe(true)
+    // #1601 — `Agents`/`Decisions` sit in the APIs group (beside the ChatGPT-group `Agent` above),
+    // `dots`/`Space` in the ChatGPT group.
+    for (const [svcId, name, id] of [
+      ['openai', 'Agents', '01M3Q6W0264T1RJS1YEM47CAQJ'], ['openai', 'Decisions', '01M3Q6W0262E8VW5DE1MJMMN0T'],
+      ['chatgpt', 'dots', '01M3Q6NERHVE2WPPAQRHBAC6XB'], ['chatgpt', 'Space', '01M3Q6NERHS4BG0HQ85VAR1SRH'],
+    ] as const) {
+      expect(has(svcId, id), `${name} → ${svcId}`).toBe(true)
+    }
   })
 })
 

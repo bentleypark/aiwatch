@@ -81,25 +81,24 @@ Pinned by: `worker/src/__tests__/incident-io-component-partial-resolve.test.ts` 
 
 The fourth member of the component-drift family, and the one none of the other three could see: a
 config drift that isn't a mismatch, a partial resolve, or a new component — it's the SAME id list,
-just wrong for its age. Two checks, both against the page's live `component_uptimes`, not a recorded
+just wrong for its age. One check, against the page's live `component_uptimes`, not a recorded
 snapshot:
 
-- **Young in scope** (#1266's original gap) — a configured uptime-scope id whose `data_available_since`
-  is under 30 days. `computeIncidentIoUptime` pairs its worst percentage with the WINDOW of the
-  component that produced it, so one young id in an all-100% scope shortens the whole page's disclosed
-  `uptimeWindowDays` — silently, because a short window is not itself an error.
 - **Aged in, out of scope** — a page component that has now cleared 30 days and was never added. It
   contributes nothing to the uptime worst-of, so an outage on it is invisible in the reported
   percentage. #992's new-component alert cannot catch this: it fires once, on first sight, regardless of
   age, and for a `displayAllComponents` page says "Action: none" — neither is "has this now aged in".
 
-**A removed id is neither check's job.** It is absent from `component_uptimes` entirely, so it never
-reaches either list — the #135 component-mismatch and #957 partial-resolve alerts above already own
+**A young id IN scope is not a finding (#1601).** `computeIncidentIoUptime` measures every component
+over the oldest one's window, so a young one no longer shortens the disclosed window; the check that
+reported it (#1518(a)) was removed.
+
+**A removed id is not this check's job.** It is absent from `component_uptimes` entirely, so it never
+reaches its list — the #135 component-mismatch and #957 partial-resolve alerts above already own
 that case, and duplicating it here would double the notification and let two checks disagree.
 
-**Extended to Atlassian — (b) only.** The same aged-in-out-of-scope check runs against the 5 Atlassian
-services with a multi-id `statusComponentIds` (bfl, runway, cursor, copilot, windsurf). (a) is not
-implemented on this branch. Datadog is excluded on principle, not by oversight: its scope follows the
+**Extended to Atlassian.** The same aged-in-out-of-scope check runs against the 5 Atlassian
+services with a multi-id `statusComponentIds` (bfl, runway, cursor, copilot, windsurf). Datadog is excluded on principle, not by oversight: its scope follows the
 PROVIDER'S OWN component group rather than a hand-maintained id list, so there is no roster to drift
 (`datadog.ts`'s own docblock: "this path has none of the machinery... a member list... fails in BOTH
 directions").
@@ -152,7 +151,7 @@ set, not a durable union — a finding is a live fact about today's config and t
 legitimately resolve (an id gets added to scope, ages past the window, or gains an exclusion) and later
 RECUR (a later config edit reverts it). `component-seen`'s "once per component, ever" semantics would
 silently swallow that regression. So there is no separate `alerted:` dedup key here: the seen-set diff
-itself is the dedup, stored in `roster-audit-seen:{statusUrl}:young` / `:agedin`, written after a
+itself is the dedup, stored in `roster-audit-seen:{statusUrl}:agedin`, written after a
 confirmed alert send OR when the set's size changed on a cycle with nothing new to alert (a finding
 cleared) — an unchanged set writes nothing. A cycle whose fetch succeeds but yields zero entries is
 treated as unreadable, not as a clean page, and never touches this key — a real incident.io page always
@@ -164,11 +163,10 @@ and writing `[]` from it would re-alert every standing finding in full once pars
 plus `apiUrl` summary.json for names — cosmetic only: a name lookup failure falls back to the bare id,
 never to an empty alert). Each Atlassian service costs ONE — the same `componentsUrl`/`apiUrl` fetch it
 would make anyway for names, since `created_at` lives on that same payload. `formatRosterAuditAlert`
-renders only the ids that are NEW this cycle, split into the two sections above (empty for every
-Atlassian send, which reports (b) only); the dedup write happens only after a confirmed send, matching
+renders only the ids that are NEW this cycle; the dedup write happens only after a confirmed send, matching
 #500/#992/#957.
 
-Pure `auditYoungIdsInScope` / `auditAgedInOutOfScope` / `nextRosterFindingSeen` / `rosterAgedInFindings`
+Pure `auditAgedInOutOfScope` / `nextRosterFindingSeen` / `rosterAgedInFindings`
 unit- and mutation-tested in `roster-audit.test.ts` / `roster-agedin-findings.test.ts`; the incident.io
 multi-id page parser (`parseIncidentIoAllComponentUptimes`) in `incident-io-all-component-uptimes.test.ts`;
 `rosterAuditPages`' grouping/union (real config + synthetic shared-page cases) in

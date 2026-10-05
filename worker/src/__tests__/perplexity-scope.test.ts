@@ -299,7 +299,7 @@ describe('#1390 wiring — the incident.io payload reaches incidents, uptime and
     expect(svc.uptime30d).toBeNull()
   })
 
-  it('keeps the worst percentage paired with its own full window when another scoped component is young', async () => {
+  it('keeps a full window when another scoped component is young', async () => {
     // #1449: `API_ID`'s live `data_available_since` (2026-05-16) predates the component's
     // own 2026-09-18 page debut by months — the provider backdates it, and Computer's real impact
     // records (from 2026-06-30, before Computer's own 2026-08-24 debut) corroborate that this page does
