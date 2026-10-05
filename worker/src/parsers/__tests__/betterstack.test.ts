@@ -72,6 +72,65 @@ describe('parseBetterStackComponents (#606 Cat C)', () => {
       { id: '3', name: 'B', status: 'operational' },
     ])
   })
+
+  it('#1615 — the default "Current status" section is not a group; a real section keeps its group', () => {
+    const fish = {
+      included: [
+        { type: 'status_page_section', id: '231970', attributes: { name: 'Current Status' } },
+        { type: 'status_page_section', id: '282372', attributes: { name: 'Text-to-Speech API' } },
+        { type: 'status_page_resource', id: '1', attributes: { public_name: 'Platform API', status: 'operational', status_page_section_id: 231970 } },
+        { type: 'status_page_resource', id: '2', attributes: { public_name: 'Text-to-Speech API', status: 'operational', status_page_section_id: 231970 } },
+        { type: 'status_page_resource', id: '3', attributes: { public_name: 'S1', status: 'operational', status_page_section_id: 282372 } },
+        { type: 'status_page_resource', id: '4', attributes: { public_name: 'S2 Pro', status: 'operational', status_page_section_id: 282372 } },
+      ],
+    }
+    expect(parseBetterStackComponents(fish)).toEqual([
+      { id: '1', name: 'Platform API', status: 'operational' },
+      { id: '3', name: 'S1', status: 'operational', group: 'Text-to-Speech API' },
+      { id: '4', name: 'S2 Pro', status: 'operational', group: 'Text-to-Speech API' },
+    ])
+
+    const hf = {
+      included: [
+        { type: 'status_page_section', id: '10', attributes: { name: 'Current status by service' } },
+        { type: 'status_page_section', id: '11', attributes: { name: 'CDN' } },
+        { type: 'status_page_resource', id: '1', attributes: { public_name: 'Hub', status: 'operational', status_page_section_id: '10' } },
+        { type: 'status_page_resource', id: '2', attributes: { public_name: 'Git', status: 'operational', status_page_section_id: '10' } },
+        { type: 'status_page_resource', id: '3', attributes: { public_name: 'Files', status: 'operational', status_page_section_id: '11' } },
+        { type: 'status_page_resource', id: '4', attributes: { public_name: 'Assets', status: 'operational', status_page_section_id: '11' } },
+      ],
+    }
+    expect(parseBetterStackComponents(hf).map((c) => c.group)).toEqual([undefined, undefined, 'CDN', 'CDN'])
+  })
+
+  it('#1615 — an ungrouped resource named like a group is always dropped, so its presence never depends on status', () => {
+    const page = (ttsStatus: string, s1Status: string) => ({
+      included: [
+        { type: 'status_page_section', id: '1', attributes: { name: 'Current Status' } },
+        { type: 'status_page_section', id: '2', attributes: { name: 'Text-to-Speech API' } },
+        { type: 'status_page_resource', id: 'p', attributes: { public_name: 'Platform API', status: 'operational', status_page_section_id: '1' } },
+        { type: 'status_page_resource', id: 't', attributes: { public_name: 'Text-to-Speech API', status: ttsStatus, status_page_section_id: '1' } },
+        { type: 'status_page_resource', id: 's1', attributes: { public_name: 'S1', status: s1Status, status_page_section_id: '2' } },
+        { type: 'status_page_resource', id: 's2', attributes: { public_name: 'S2 Pro', status: 'operational', status_page_section_id: '2' } },
+      ],
+    })
+    expect(parseBetterStackComponents(page('operational', 'operational')).map((c) => c.id)).toEqual(['p', 's1', 's2'])
+    expect(parseBetterStackComponents(page('degraded', 'downtime')).map((c) => c.id)).toEqual(['p', 's1', 's2'])
+    expect(parseBetterStackComponents(page('downtime', 'degraded')).map((c) => c.id)).toEqual(['p', 's1', 's2'])
+    expect(parseBetterStackComponents(page('degraded', 'operational')).map((c) => c.id)).toEqual(['p', 's1', 's2'])
+  })
+
+  it('#1615 — a denylisted default section still drops its resources', () => {
+    const data = {
+      included: [
+        { type: 'status_page_section', id: '1', attributes: { name: 'Current Status' } },
+        { type: 'status_page_resource', id: '1', attributes: { public_name: 'A', status: 'operational', status_page_section_id: '1' } },
+        { type: 'status_page_resource', id: '2', attributes: { public_name: 'B', status: 'operational' } },
+        { type: 'status_page_resource', id: '3', attributes: { public_name: 'C', status: 'operational' } },
+      ],
+    }
+    expect(parseBetterStackComponents(data, { denylist: ['current status'] }).map((c) => c.name)).toEqual(['B', 'C'])
+  })
 })
 
 describe('parseRssIncidents', () => {
