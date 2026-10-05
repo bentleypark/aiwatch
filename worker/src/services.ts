@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
-import { fetchInSlot, createConnectionLimiter, type ConnectionLimiter, formatDuration, markZeroLengthResolvedIncidentsUnknown, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
+import { fetchInSlot, createConnectionLimiter, type ConnectionLimiter, formatDuration, markZeroLengthResolvedIncidentsUnknown, normalizeIncidentTimes, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, isStorableOverlayIncident } from './mistral-public-api'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
@@ -2343,7 +2343,7 @@ export async function fetchService(config: ServiceConfig, prefetched: Prefetched
   // — the only ones that produce `uptime30d` for an Atlassian service — can fail on their own without
   // setting either. Whether an absence is worth reporting is `checkUptimeLiveness`'s call, at alert time.
   trackUptimeReading(trackingStore, config.id, svc.uptime30d != null)
-  const durationUnknown = markZeroLengthResolvedIncidentsUnknown(svc.incidents)
+  const durationUnknown = markZeroLengthResolvedIncidentsUnknown(normalizeIncidentTimes(svc.incidents))
   const tagged = tagAutoMonitorIncidents(durationUnknown, config)  // matches ORIGINAL (e.g. Chinese) titles
   const incidents = applyTitleMap(tagged, config)                // THEN rewrite to English
   // #1268 — the unread-feed invariant rides the same choke point, for the same reason the tagging does:
@@ -4186,7 +4186,7 @@ export function carriedIncidentTags(entry: MonthlyIncidentEntry): Partial<Incide
 
 export function mergeRetainedIncidentHistory(live: Incident[], retained: MonthlyIncidentEntry[], cutoffISO: string): Incident[] {
   const byId = new Map(live.map((incident) => [incident.id, incident]))
-  for (const entry of retained) {
+  for (const entry of normalizeIncidentTimes(retained)) {
     if (entry.startedAt < cutoffISO || byId.has(entry.id)) continue
     byId.set(entry.id, {
       id: entry.id,

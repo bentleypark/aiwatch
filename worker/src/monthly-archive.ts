@@ -17,7 +17,7 @@ import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
-import { incidentDay } from './utils'
+import { incidentDay, normalizeIncidentTimes } from './utils'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
@@ -640,6 +640,9 @@ export function accumulateMonthlyIncidents(
   const base: MonthlyIncidents = existing
     ? { lastUpdated: new Date().toISOString(), services: structuredClone(existing.services) }
     : { lastUpdated: new Date().toISOString(), services: {} }
+  for (const data of Object.values(base.services)) {
+    if (data.incidents) data.incidents = normalizeIncidentTimes(data.incidents)
+  }
 
   // #975 — reconcile BEFORE accumulating, and outside the per-service `continue` below: a phantom must
   // still be prunable on a cycle where the service reports no incident *for this period* (its only
