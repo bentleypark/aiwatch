@@ -76,6 +76,10 @@ checkout and from any worktree (#1610). Per machine, once:
      `sudo xcode-select --switch /Library/Developer/CommandLineTools`.
    - Re-run the check.
 4. `cd "$(git rev-parse --path-format=absolute --git-common-dir)/../../aiwatch-reports" && PATH="$(brew --prefix ruby)/bin:$PATH" bundle install`.
+   If the Monthly Reports command then fails with `command not found: jekyll`, run
+   `cd "$(git rev-parse --path-format=absolute --git-common-dir)/../../aiwatch-reports" && export PATH="$(brew --prefix ruby)/bin:$PATH" && bundle info --path jekyll && gem env user_gemhome`.
+   When the first path starts with the second, move that directory aside with
+   `mv "$(PATH="$(brew --prefix ruby)/bin:$PATH" gem env user_gemhome)"{,.bak}` and re-run this step.
 
 Then run the Monthly Reports command from the table above.
 
