@@ -560,8 +560,9 @@ claims the whole day. Names are matched longest-first and case-insensitively, si
   `status_history` row. Two adjacent partial days were never disambiguable anyway — helicone's Jul 23
   (4.97h) + Jul 24 (16.30h) *was* one incident while together's Gemma Jul 27–30 was four separate
   blips, and the daily totals do not separate those shapes.
-- **`affectedDays` counts one day per incident** (`score.ts`, via `incidentDay`), so a multi-day
-  outage now contributes one affected day per downtime day. Total downtime is unchanged.
+- **`affectedDays` counts the days a resolved incident spans** (`score.ts`, via `incidentDays`). An
+  unresolved, `startUnknown` or synthesized incident counts a single day, so a multi-day outage
+  from a per-day source still contributes one affected day per downtime day. Total downtime is unchanged.
 - **The current local day is excluded** — still accruing, so its seconds are a partial read and an
   incident there would have to invent a start time. Everything emitted is closed, which also keeps
   synthesis off the alert path: the new-incident branch never sees a resolved incident, and the

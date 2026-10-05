@@ -1369,6 +1369,26 @@ export function statedDay(inc: { derived?: string; derivedDay?: string }): strin
   return inc.derived === 'status_history' && inc.derivedDay ? inc.derivedDay : null
 }
 
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+const DAY_MS = 86_400_000
+
+export function incidentDays(
+  inc: { startedAt: string; resolvedAt?: string | null; startUnknown?: boolean; derived?: string; derivedDay?: string },
+  lastDay: string,
+): string[] {
+  const first = incidentDay(inc)
+  if (statedDay(inc) || inc.startUnknown || !inc.resolvedAt || !DAY_RE.test(first)) return [first]
+  const end = inc.resolvedAt.slice(0, 10)
+  if (!DAY_RE.test(end)) return [first]
+  const last = end > lastDay ? lastDay : end
+  if (last <= first) return [first]
+  const days: string[] = []
+  for (let t = Date.parse(`${first}T00:00:00Z`); t <= Date.parse(`${last}T00:00:00Z`); t += DAY_MS) {
+    days.push(new Date(t).toISOString().slice(0, 10))
+  }
+  return days
+}
+
 // #1531 — `/api/status/cached?series=0` omits the probe + latency time series.
 export function omitsTimeSeries(searchParams: URLSearchParams): boolean {
   return searchParams.get('series') === '0'
