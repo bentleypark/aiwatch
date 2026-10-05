@@ -1991,3 +1991,24 @@ describe('renderErrors — #887 error-message section', () => {
     expect(getSEOContent('claude-ai')?.errors).toBeUndefined()
   })
 })
+
+// #1614 — the live feed can stop short of 30 days (a capped incidents.json); the 30-day figures read
+// the same window the Score does: the live array plus `incidentsBeyondFeed`.
+describe('30-day figures include the records past the feed depth (#1614)', () => {
+  const svc = mkService({
+    incidents: [mkInc({ id: 'live', startedAt: daysAgo(2), status: 'resolved', duration: '30m' })],
+    incidentsBeyondFeed: [
+      mkInc({ id: 'gap-1', startedAt: daysAgo(22), status: 'resolved', duration: '1h 30m' }),
+      mkInc({ id: 'gap-2', startedAt: daysAgo(26), status: 'resolved', duration: '1h' }),
+    ],
+  })
+
+  it('the meta description counts them', () => {
+    expect(buildMetaDescription(mkSeo(), svc, null)).toContain('3 incidents tracked (30d).')
+  })
+
+  it('the AIWatch Data sentence counts them and averages their recovery', () => {
+    const html = renderPage('claude', svc, mkSeo(), [])
+    expect(html).toContain('Based on AIWatch data from the last 30 days, it experienced 3 incidents with an average recovery time of 1h 0m.')
+  })
+})

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseCloudflareStatusSummary } from '../parsers/cloudflare-status'
-import { fetchService, mergeRetainedIncidentHistory, retainMigratedIncidentHistory, SERVICES } from '../services'
+import { fetchService, mergeRetainedIncidentHistory, attachRecordedIncidentHistory, SERVICES } from '../services'
 import { calculateAIWatchScore } from '../score'
 import { PROBE_TARGETS } from '../probe'
 import { prunePhantomIncidents, PHANTOM_PRUNE_AFTER_MISSED_RUNS } from '../monthly-archive'
@@ -277,7 +277,7 @@ describe('#1384 Cloudflare Status v3 Worker wiring', () => {
       latency: null, uptime30d: null, lastChecked: '2026-09-11T00:00:00.000Z', incidents: [],
     }]
 
-    await retainMigratedIncidentHistory(services, kv as unknown as KVNamespace, new Date('2026-09-11T00:00:00.000Z'))
+    await attachRecordedIncidentHistory(services, kv as unknown as KVNamespace, new Date('2026-09-11T00:00:00.000Z'))
 
     expect(kv.get).toHaveBeenCalledWith('archive:monthly:2026-08')
     expect(kv.get).toHaveBeenCalledWith('incidents:monthly:2026-09')

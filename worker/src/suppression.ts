@@ -78,7 +78,10 @@ export function applySuppressions(services: ServiceStatus[], list: SuppressionEn
   return services.map((svc) => {
     const incidents = svc.incidents ?? []
     const kept = incidents.filter((inc) => !isSuppressed(inc, svc.id, list))
-    return kept.length === incidents.length ? svc : { ...svc, incidents: kept }
+    const beyond = svc.incidentsBeyondFeed
+    const keptBeyond = beyond?.filter((inc) => !isSuppressed(inc, svc.id, list))
+    if (kept.length === incidents.length && keptBeyond?.length === beyond?.length) return svc
+    return { ...svc, incidents: kept, ...(keptBeyond ? { incidentsBeyondFeed: keptBeyond } : {}) }
   })
 }
 

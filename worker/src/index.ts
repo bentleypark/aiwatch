@@ -480,9 +480,11 @@ export function scoreFor(svc: ServiceStatus, summaries: Map<string, ProbeSummary
   // its Responsiveness comes from the parent's already-measured endpoint instead of the probe-less
   // rescale. resolveProbeId is identity for everyone else (incl. the directly-probed cursor).
   const probeId = resolveProbeId(svc.id)
+  // #1614 — the 30-day window reaches past the live feed's depth through AIWatch's own record.
+  const windowed = svc.incidentsBeyondFeed?.length ? [...svc.incidents, ...svc.incidentsBeyondFeed] : svc.incidents
   const scored = ROOTLY_SERVICE_IDS.has(svc.id)
-    ? { ...svc, incidents: svc.incidents.map((i) => ({ ...i, impact: rootlyScoringImpact(i) })) }
-    : svc
+    ? { ...svc, incidents: windowed.map((i) => ({ ...i, impact: rootlyScoringImpact(i) })) }
+    : { ...svc, incidents: windowed }
   return calculateAIWatchScore(scored, 30, classifyProbe(probeId, PROBED_SERVICE_IDS.has(probeId), summaries))
 }
 

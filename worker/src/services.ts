@@ -2678,9 +2678,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
 
       // incidents.json has full history; summary.json only has active ones
       let incidents: Incident[] = []
+      let feedDepthStart: string | undefined
       const pageUrls = new Map<string, string>()
       if (rawIncData) {
         incidents = parseIncidents(rawIncData)
+        feedDepthStart = cappedFeedDepthStart(rawIncData.incidents ?? [])
         // Build shortlink map: incidentId → detail page URL (used by enrichIncidentIoText)
         for (const inc of rawIncData.incidents ?? []) {
           if (inc.shortlink) pageUrls.set(inc.id, inc.shortlink)
@@ -3097,6 +3099,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         status: svcStatus,
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
+        ...(feedDepthStart ? { feedDepthStart } : {}),
         ...(components.length > 0 ? { components } : {}),
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete } : {}),
         calendarDays: config.statusComponentId ? 30 : 14,
@@ -4037,13 +4040,15 @@ export async function recordProbeSuppression(kv: KVNamespace, svcId: string, dat
  * fault is never hidden (the false-positive that would HIDE an outage is the dangerous direction).
  */
 export function downclassifyAdvisoryIncidents(services: ServiceStatus[]): ServiceStatus[] {
+  const isAdvisory = (i: Incident) => i.impact != null && isNonReliabilityAdvisory(i.title ?? '')
+  const downclassify = (list: Incident[]) => list.map((i) => (isAdvisory(i) ? { ...i, impact: null } : i))
   return services.map((svc) => {
-    if (!svc.incidents.some((i) => i.impact != null && isNonReliabilityAdvisory(i.title ?? ''))) return svc
+    const beyond = svc.incidentsBeyondFeed
+    if (!svc.incidents.some(isAdvisory) && !beyond?.some(isAdvisory)) return svc
     return {
       ...svc,
-      incidents: svc.incidents.map((i) =>
-        i.impact != null && isNonReliabilityAdvisory(i.title ?? '') ? { ...i, impact: null } : i,
-      ),
+      incidents: downclassify(svc.incidents),
+      ...(beyond ? { incidentsBeyondFeed: downclassify(beyond) } : {}),
     }
   })
 }
@@ -4184,26 +4189,58 @@ export function carriedIncidentTags(entry: MonthlyIncidentEntry): Partial<Incide
   }
 }
 
+function recordedEntryToIncident(entry: MonthlyIncidentEntry): Incident {
+  return {
+    id: entry.id,
+    title: entry.title,
+    status: entry.finalStatus,
+    impact: entry.impact ?? null,
+    startedAt: entry.startedAt,
+    resolvedAt: entry.resolvedAt,
+    duration: archivedDuration(entry.durationMin),
+    timeline: [],
+    // Every qualifying tag on the stored entry, from ONE place. Listing them inline here is what let
+    // #1390's `startUnknown` be forgotten: the row round-tripped through the bridge with the flag
+    // silently gone, and the accumulator's `else delete` then erased it from the permanent archive.
+    // A tag that qualifies a measured field and is not carried here stops every guard keyed on it.
+    ...carriedIncidentTags(entry),
+  }
+}
+
 export function mergeRetainedIncidentHistory(live: Incident[], retained: MonthlyIncidentEntry[], cutoffISO: string): Incident[] {
   const byId = new Map(live.map((incident) => [incident.id, incident]))
   for (const entry of normalizeIncidentTimes(retained)) {
     if (entry.startedAt < cutoffISO || byId.has(entry.id)) continue
-    byId.set(entry.id, {
-      id: entry.id,
-      title: entry.title,
-      status: entry.finalStatus,
-      impact: entry.impact ?? null,
-      startedAt: entry.startedAt,
-      resolvedAt: entry.resolvedAt,
-      duration: archivedDuration(entry.durationMin),
-      timeline: [],
-      retainedBridge: true,
-      // Every qualifying tag on the stored entry, from ONE place. Listing them inline here is what let
-      // #1390's `startUnknown` be forgotten: the row round-tripped through the bridge with the flag
-      // silently gone, and the accumulator's `else delete` then erased it from the permanent archive.
-      // A tag that qualifies a measured field and is not carried here stops every guard keyed on it.
-      ...carriedIncidentTags(entry),
-    })
+    byId.set(entry.id, { ...recordedEntryToIncident(entry), retainedBridge: true })
+  }
+  return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+}
+
+/** #1614 — the smallest page-wide row count a Statuspage-compatible `incidents.json` was seen to stop
+ *  at (incident.io pages 25, Atlassian 50; measured 2026-10-05). A shorter list is the whole history. */
+export const STATUSPAGE_INCIDENTS_MIN_CAP = 25
+
+/** #1614 — how far back a capped `incidents.json` reaches, page-wide (before any per-service filter).
+ *  undefined when the list is below the cap, so nothing past it is missing. */
+export function cappedFeedDepthStart(rows: ReadonlyArray<{ created_at?: string }>): string | undefined {
+  if (rows.length < STATUSPAGE_INCIDENTS_MIN_CAP) return undefined
+  const times = rows.map((r) => Date.parse(r.created_at ?? '')).filter((t) => Number.isFinite(t))
+  return times.length > 0 ? new Date(Math.min(...times)).toISOString() : undefined
+}
+
+/** #1614 — AIWatch's own resolved records older than the capped feed reaches, inside the 30-day window.
+ *  Within the span the feed covers, the live array stays the authority. */
+export function incidentsBeyondFeedDepth(feedDepthStart: string | undefined, live: Incident[], recorded: MonthlyIncidentEntry[], cutoffISO: string): Incident[] {
+  if (!feedDepthStart) return []
+  const depthMs = Date.parse(feedDepthStart)
+  const cutoffMs = Date.parse(cutoffISO)
+  const liveIds = new Set(live.map((i) => i.id))
+  const byId = new Map<string, Incident>()
+  for (const entry of normalizeIncidentTimes(recorded)) {
+    const startMs = Date.parse(entry.startedAt)
+    if (entry.resolvedAt == null || !(startMs >= cutoffMs && startMs < depthMs)) continue
+    if (liveIds.has(entry.id)) continue
+    byId.set(entry.id, recordedEntryToIncident(entry))
   }
   return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
 }
@@ -4216,40 +4253,57 @@ function parseRetainedJson<T>(raw: string | null, key: string): T | null {
   }
 }
 
-/** Preserve a retiring source's recent AIWatch records until its last possible 30-day contribution
- * has expired. The current-month accumulator is still mutable; the preceding permanent archive
- * completes the rolling window across a month boundary. */
-export async function retainMigratedIncidentHistory(services: ServiceStatus[], kv: KVNamespace | undefined, now: Date): Promise<void> {
-  if (!kv) return
-  const configs = SERVICES.filter((config) =>
-    config.retainIncidentHistoryUntil != null && Date.parse(config.retainIncidentHistoryUntil) > now.getTime(),
-  )
-  if (configs.length === 0) return
-
+/** The previous month's permanent archive and accumulator + the current month's accumulator — AIWatch's
+ *  own incident record across the trailing 30 days. The previous accumulator (60d TTL) covers the hours
+ *  after a rollover before that month's archive is built. */
+async function readRecordedIncidents(kv: KVNamespace, now: Date): Promise<{ previous: MonthlyArchive | null; previousAcc: MonthlyIncidents | null; current: MonthlyIncidents | null }> {
   const currentMonth = now.toISOString().slice(0, 7)
   const previousMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7)
-  const [previousRaw, currentRaw] = await Promise.all([
-    kv.get(`archive:monthly:${previousMonth}`).catch((err) => {
-      console.warn(`[fetchAllServices] retained incident archive read failed for ${previousMonth}:`, err instanceof Error ? err.message : err)
-      return null
-    }),
-    kv.get(`incidents:monthly:${currentMonth}`).catch((err) => {
-      console.warn(`[fetchAllServices] retained incident accumulator read failed for ${currentMonth}:`, err instanceof Error ? err.message : err)
-      return null
-    }),
+  const read = (key: string) => kv.get(key).catch((err) => {
+    console.warn(`[fetchAllServices] retained incident history read failed for ${key}:`, err instanceof Error ? err.message : err)
+    return null
+  })
+  const [previousRaw, previousAccRaw, currentRaw] = await Promise.all([
+    read(`archive:monthly:${previousMonth}`),
+    read(`incidents:monthly:${previousMonth}`),
+    read(`incidents:monthly:${currentMonth}`),
   ])
-  const previous = parseRetainedJson<MonthlyArchive>(previousRaw, `archive:monthly:${previousMonth}`)
-  const current = parseRetainedJson<MonthlyIncidents>(currentRaw, `incidents:monthly:${currentMonth}`)
-  const cutoffISO = new Date(now.getTime() - 30 * 86_400_000).toISOString()
+  return {
+    previous: parseRetainedJson<MonthlyArchive>(previousRaw, `archive:monthly:${previousMonth}`),
+    previousAcc: parseRetainedJson<MonthlyIncidents>(previousAccRaw, `incidents:monthly:${previousMonth}`),
+    current: parseRetainedJson<MonthlyIncidents>(currentRaw, `incidents:monthly:${currentMonth}`),
+  }
+}
 
-  for (const config of configs) {
-    const service = services.find((candidate) => candidate.id === config.id)
-    if (!service) continue
-    const retained = [
-      ...(previous?.services[config.id]?.incidentList ?? []),
-      ...(current?.services[config.id]?.incidents ?? []),
-    ]
-    if (retained.length > 0) service.incidents = mergeRetainedIncidentHistory(service.incidents, retained, cutoffISO)
+function recordedFor(record: Awaited<ReturnType<typeof readRecordedIncidents>>, id: string): MonthlyIncidentEntry[] {
+  return [
+    ...(record.previous?.services[id]?.incidentList ?? []),
+    ...(record.previousAcc?.services[id]?.incidents ?? []),
+    ...(record.current?.services[id]?.incidents ?? []),
+  ]
+}
+
+/** #1384 — preserve a retiring source's recent AIWatch records until its last possible 30-day
+ *  contribution has expired, by merging them into the live list (the migration bridge). #1614 — for
+ *  every other service, attach the records older than its capped feed reaches as `incidentsBeyondFeed`,
+ *  kept OUT of `incidents`. */
+export async function attachRecordedIncidentHistory(services: ServiceStatus[], kv: KVNamespace | undefined, now: Date): Promise<void> {
+  if (!kv) return
+  const record = await readRecordedIncidents(kv, now)
+  const cutoffISO = new Date(now.getTime() - 30 * 86_400_000).toISOString()
+  const bridged = new Set(SERVICES.filter((config) =>
+    config.retainIncidentHistoryUntil != null && Date.parse(config.retainIncidentHistoryUntil) > now.getTime(),
+  ).map((config) => config.id))
+
+  for (const service of services) {
+    const recorded = recordedFor(record, service.id)
+    if (recorded.length === 0) continue
+    if (bridged.has(service.id)) {
+      service.incidents = mergeRetainedIncidentHistory(service.incidents, recorded, cutoffISO)
+      continue
+    }
+    const beyond = incidentsBeyondFeedDepth(service.feedDepthStart, service.incidents, recorded, cutoffISO)
+    if (beyond.length > 0) service.incidentsBeyondFeed = beyond
   }
 }
 
@@ -4561,10 +4615,9 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     }
   }
 
-  // #1384 — retain recent Replicate incidents AIWatch collected before Cloudflare Status replaced
-  // the provider feed. This runs before scoring/cache consumers receive `raw`; it is a finite bridge
-  // (configured through retainIncidentHistoryUntil), not an archive-backed source for new incidents.
-  await retainMigratedIncidentHistory(raw, kv, new Date())
+  // #1384 — the finite Replicate/Windsurf migration bridges, and #1614 — the records past a capped
+  // feed's depth. Runs before scoring/cache consumers receive `raw`.
+  await attachRecordedIncidentHistory(raw, kv, new Date())
 
   // Read cached snapshot for fallback (only if needed)
   let cachedServices: ServiceStatus[] | null = null
