@@ -33,6 +33,12 @@ describe('buildCspWithHashes (#482)', () => {
     expect(scriptSrc).toContain('https://www.googletagmanager.com')
   })
 
+  it('form-action lets the Kakao share SDK submit to its sharer and follow its login redirect (#1619)', () => {
+    const { value } = buildCspWithHashes([])
+    const formAction = value.split(';').map((d) => d.trim()).find((d) => d.startsWith('form-action'))!
+    expect(formAction.split(/\s+/).slice(1)).toEqual(["'self'", 'https://*.kakao.com'])
+  })
+
   it('defaults to Report-Only; enforce:true switches the header name', () => {
     expect(buildCspWithHashes([]).key).toBe('Content-Security-Policy-Report-Only')
     expect(buildCspWithHashes([], { enforce: true }).key).toBe('Content-Security-Policy')
