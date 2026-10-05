@@ -97,16 +97,16 @@ reported it (#1518(a)) was removed.
 reaches its list — the #135 component-mismatch and #957 partial-resolve alerts above already own
 that case, and duplicating it here would double the notification and let two checks disagree.
 
-**Extended to Atlassian.** The same aged-in-out-of-scope check runs against the 5 Atlassian
-services with a multi-id `statusComponentIds` (bfl, runway, cursor, copilot, windsurf). Datadog is excluded on principle, not by oversight: its scope follows the
+**Extended to Atlassian.** The same aged-in-out-of-scope check runs against every Atlassian
+service with a multi-id `statusComponentIds`. Datadog is excluded on principle, not by oversight: its scope follows the
 PROVIDER'S OWN component group rather than a hand-maintained id list, so there is no roster to drift
 (`datadog.ts`'s own docblock: "this path has none of the machinery... a member list... fails in BOTH
 directions").
 
 `atlassianRosterAuditServices` (services.ts) is the `rosterAuditPages` counterpart for this branch —
 every service with `statusComponentIds.length > 1` and no `incidentIoComponentId` (the two branches
-never compute uptime for the same service). Each of today's 5 is single-tenant on its own page, so no
-cross-service union is needed. The reader (`atlassianRosterEntries`, statuspage.ts) reads each
+never compute uptime for the same service). No two of them share a page — pinned in `atlassian-roster-audit-services.test.ts`,
+because the seen-key is per `statusUrl` — so no cross-service union is needed. The reader (`atlassianRosterEntries`, statuspage.ts) reads each
 component's `created_at` directly off the SAME `componentsUrl`/`apiUrl` payload already fetched for
 names — ONE fetch per service, no second request. It does NOT read `/uptime_showcase`'s day-by-day
 timeline: that endpoint pads every requested component to a FIXED 90-day window regardless of real age
@@ -114,7 +114,7 @@ timeline: that endpoint pads every requested component to a FIXED 90-day window 
 pre-creation days carrying `outages: {}` — a defined-but-empty object indistinguishable from a
 genuinely clean real day), so a component's age was not decidable from it at all — this was a Critical
 finding on an earlier round of this diff, fixed by dropping the showcase reader entirely rather than
-patching it. `rosterAuditFixedScope` (bfl only, of today's 5) is the same opt-out as cohere/groq below —
+patching it. `rosterAuditFixedScope` (bfl only) is the same opt-out as cohere/groq below —
 its uptime anchor never expands and its `displayAllComponents` catalog is unbounded, so the check is
 skipped for the whole service rather than demanding a `rosterAuditExclude` entry per FLUX model shipped.
 

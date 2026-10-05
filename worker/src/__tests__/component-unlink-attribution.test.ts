@@ -240,23 +240,23 @@ describe('#1047 includeUntaggedIncidents — the other emptiness-keyed valve', (
     // incident recovery touches on live data is resolved, so this has no live instance. Reachable in
     // principle via an incident whose components were NEVER linked.
     //
-    // Pre-fix the valve saw `componentNames: []` and re-added this Cowork-only incident to claude.ai's
+    // Pre-fix the valve saw `componentNames: []` and re-added this Claude-Code-only incident to claude.ai's
     // card as an "explanation" for its degraded badge — a leak. Recovery makes it judgeable, so
-    // filterIncidents drops it (Cowork matches no claudeai keyword) AND the valve now skips it.
-    const coworkOnly = {
+    // filterIncidents drops it (Claude Code matches no claudeai keyword) AND the valve now skips it.
+    const codeOnly = {
       ...unlinkedAtResolve(),
-      id: 'coworkonly1',
+      id: 'codeonly2',
       name: 'Elevated errors for multiple models',
       status: 'investigating',
       resolved_at: null,
       incident_updates: [{
         status: 'investigating', created_at: '2026-07-16T18:36:58.889Z', body: 'Investigating.',
-        affected_components: affected([CLAUDE_COWORK], 'partial_outage'),
+        affected_components: affected([CLAUDE_CODE], 'partial_outage'),
       }],
     }
-    const all = parseOne(coworkOnly)
+    const all = parseOne(codeOnly)
     const filtered = filterIncidents(all, cfg('claudeai'))
-    expect(filtered).toEqual([]) // Cowork is not a claudeai keyword
+    expect(filtered).toEqual([]) // Claude Code is not a claudeai keyword
     // claude.ai's own component is degraded, which is what opens the valve at all.
     const degraded = ANTHROPIC_COMPONENTS.map((c) => c.id === CLAUDEAI ? { ...c, status: 'partial_outage' } : c)
     expect(includeUntaggedIncidents(filtered, all, cfg('claudeai'), degraded, 'minor')).toEqual([])

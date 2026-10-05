@@ -492,7 +492,11 @@ export const SERVICES: ServiceConfig[] = [
   // component scoping needed. is-down slug == id ('luma'). Probed since #678 (dream-machine/v1/generations → 403).
   { id: 'luma', name: 'Luma (Dream Machine)', provider: 'Luma', category: 'api', statusUrl: 'https://status.lumalabs.ai', apiUrl: null, rssFeedUrl: 'https://status.lumalabs.ai/feed', betterStackUrl: 'https://status.lumalabs.ai', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-06-12' }, // #802
   // AI Apps
-  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
+  // Badge/uptime worst-of over claude.ai + Claude Cowork (bpp5gb3hpjcl): Cowork is a mode of the Claude
+  // desktop app this card already covers via 'claude desktop'. 'cowork' keeps a Cowork-only incident
+  // visible on the card whose badge it now moves (the #379 trade-off noted on claudecode).
+  // rosterAuditExclude: Console, API, Code, Government — sibling cards' or out of scope on this page.
+  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop', 'cowork'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc', statusComponentIds: ['rwppv331jlwc', 'bpp5gb3hpjcl'], rosterAuditExclude: ['0qbwn08sd68x', 'k8w3r06qmzrp', 'yyzkbfz2thpt', '0scnb50nvy53'] },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'], statusSourceDeactivated: true }, // #800 — status source dead since ~2026-06-18 (#689), no replacement; suppresses recurring dead-source alerts. ALERT SUPPRESSION ONLY — nothing published to readers may key off this flag (#1268): it is a hand-written claim that goes stale the moment the page comes back, and what we tell readers about a status source has to come from tracking that source. REMOVE when the page comes back. FYI the response shape has already moved once — 401 "page inactive" when #800 shipped, 302 → characteraistatus.statuspage.io/page-deleted → 200 HTML as of 2026-08-20.
   // #1006 — uptime is now COMPUTED from the impact records of the ChatGPT badge scope (the full
@@ -1143,9 +1147,9 @@ export function rosterAuditPages(services: ServiceConfig[] = SERVICES): RosterAu
  * #1518 — Atlassian services whose BADGE/uptime scope is a multi-id list (`statusComponentIds.length >
  * 1`), the roster-audit equivalent of `rosterAuditPages` for the incident.io branch. Excludes any
  * service that ALSO sets `incidentIoComponentId` via this function's own `!s.incidentIoComponentId`
- * filter — those go through the incident.io roster (`rosterAuditPages`) instead. Each of today's 5 (bfl, runway, cursor,
- * copilot, windsurf) is alone on its own status page — no cross-service union like the incident.io
- * openai/chatgpt/codex case, so this returns configs directly rather than a grouped page type.
+ * filter — those go through the incident.io roster (`rosterAuditPages`) instead. Returns configs, not a
+ * grouped page type: the cron's seen-key is per `statusUrl`, so two multi-id services sharing one page
+ * would collide on it — pinned in this function's test.
  */
 export function atlassianRosterAuditServices(services: ServiceConfig[] = SERVICES): ServiceConfig[] {
   return services.filter((s) => Array.isArray(s.statusComponentIds) && s.statusComponentIds.length > 1 && !s.incidentIoComponentId)
@@ -1838,9 +1842,14 @@ export function includeUntaggedIncidents(
     : config.statusComponentId
       ? components?.find((c) => c.id === config.statusComponentId)
       : null
-  const svcStatus = comp
-    ? normalizeStatus(comp.status)
-    : normalizeStatus(overallIndicator)
+  const badge = (config.statusComponentIds?.length ?? 0) > 1
+    ? (components ?? []).filter((c) => config.statusComponentIds!.includes(c.id))
+    : []
+  const svcStatus = badge.length > 0
+    ? (badge.every((c) => normalizeStatus(c.status) === 'operational') ? 'operational' : 'degraded')
+    : comp
+      ? normalizeStatus(comp.status)
+      : normalizeStatus(overallIndicator)
   if (svcStatus === 'operational') return filtered
 
   const untagged = allIncidents.filter((inc) =>
