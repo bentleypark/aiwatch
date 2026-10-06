@@ -207,6 +207,11 @@ describe('#1295 — resourceOfDerivedEntry', () => {
     // unanchored match would hand the guard a resource name the synthesizer never wrote.
     expect(resourceOfDerivedEntry({ title: 'api — recovered after maintenance' })).toBeNull()
   })
+
+  it('#1622 — reads both the pre-#1622 frozen title and the current one', () => {
+    expect(resourceOfDerivedEntry({ title: `${RESOURCE} — recovered` })).toBe(RESOURCE)
+    expect(resourceOfDerivedEntry({ title: `${RESOURCE} — downtime` })).toBe(RESOURCE)
+  })
 })
 
 describe('#1295 — the reproduction gate', () => {

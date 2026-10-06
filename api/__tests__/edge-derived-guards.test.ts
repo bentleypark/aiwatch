@@ -30,6 +30,15 @@ describe('is-down-group incidentMeta', () => {
     expect(meta).not.toContain('2026-07-23')
   })
 
+  it('#1622 — drops a zero minutes part on both phrasings', () => {
+    const day = incidentMeta({ ...base, duration: '24h 0m', startedAt: '2026-07-24T12:00:00.000Z',
+      derived: 'status_history', derivedDay: '2026-07-24' })
+    expect(day).toContain('down 24h that day')
+    const published = incidentMeta({ ...base, duration: '3h 0m', startedAt: '2026-07-24T12:00:00.000Z' })
+    expect(published).toContain('resolved after 3h')
+    expect(published).not.toContain('3h 0m')
+  })
+
   it('CONTROL — a provider-published incident still reads "resolved after"', () => {
     const meta = incidentMeta({ ...base, startedAt: '2026-07-24T12:00:00.000Z' })
     expect(meta).toContain('resolved after 17h 18m')

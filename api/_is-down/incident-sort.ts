@@ -41,8 +41,13 @@ function dominantGroupStatus(group: { uniformStatus?: boolean; statusCounts: Rec
  * therefore pass `groupIncidents()` output (already newest-first); sorting
  * an unsorted list will not yield newest-first within tiers.
  */
+/** #1622 — mirror of the SPA `tierStatus`: a continuing day row sits with the ongoing ones. */
+function tierStatus(inc: { status: string; derived?: string; continuing?: true }): string {
+  return inc.derived === 'status_history' && inc.continuing ? 'ongoing' : inc.status
+}
+
 export function compareGroupedRows(a: GroupedRow, b: GroupedRow): number {
-  const aStatus = a.kind === 'single' ? a.incident.status : dominantGroupStatus(a)
-  const bStatus = b.kind === 'single' ? b.incident.status : dominantGroupStatus(b)
+  const aStatus = a.kind === 'single' ? tierStatus(a.incident) : dominantGroupStatus(a)
+  const bStatus = b.kind === 'single' ? tierStatus(b.incident) : dominantGroupStatus(b)
   return (STATUS_PRIORITY[aStatus] ?? 2) - (STATUS_PRIORITY[bStatus] ?? 2)
 }

@@ -149,6 +149,7 @@ const SAFE = {
 
   // Guarded at the render layer, pinned separately by derived-date-precision-wiring.test.js.
   'src/pages/Incidents.jsx': 'passes dayOnly + the derived note; pinned by the precision-wiring scan',
+  'src/utils/incidentFilter.js': 'the Incidents list filter (#1622, moved out of Incidents.jsx): service id, `tierStatus`, and a period cutoff on `startedAt` — a derived anchor sits inside its own day, so the cutoff is at most a day off and never publishes the anchor',
   'src/pages/ServiceDetails.jsx': 'passes dayOnly + the derived note; pinned by the precision-wiring scan',
   'src/pages/Overview.jsx': 'passes dayOnly; pinned by the precision-wiring scan',
 }
@@ -233,6 +234,7 @@ const RB_SAFE = {
   'api/_is-down/incident-grouping.ts': 'same-day-order precision logic keys on derived === status_history only — a real timestamp needs no such handling',
   'api/is-down-group.ts': 'day-bucket formatting keys on derived === status_history only — a real timestamp needs no such handling',
   'src/pages/Incidents.jsx': 'passes dayOnly, computed from derived === status_history only — moot for a real timestamp',
+  'src/utils/incidentFilter.js': 'filters by service id, status and period; it branches on no freshness flag — a bridged incident is filtered exactly as it was inside Incidents.jsx before #1622 moved this out',
   'src/pages/ServiceDetails.jsx': 'passes dayOnly, computed from derived === status_history only — moot for a real timestamp',
   'src/pages/Overview.jsx': 'passes dayOnly, computed from derived === status_history only — moot for a real timestamp',
 
@@ -310,6 +312,7 @@ const SU_SAFE = {
   'worker/src/parsers/rootly.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/types.ts': 'declares the Incident shape, including the startUnknown flag itself',
   'src/pages/Incidents.jsx': 'renders whatever note incidentNote() picks; it branches on no flag of its own',
+  'src/utils/incidentFilter.js': 'reads `startedAt` only to compare with the period cutoff; it derives no elapsed time and states no start instant',
   'src/pages/ServiceDetails.jsx': 'same — the note choice moved to incidentNote(), which is the SU_APPLIER',
   'worker/src/xai-regions.ts': 'mergeXaiRegionalIncidents runs inside the parser leg, before #1480\'s step in fetchService stamps anything — so the duration it recomputes from a pair is never one this flag has blanked',
 
@@ -401,7 +404,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // so it is the SU_APPLIER and the two pages became SU_SAFE in the same diff.
     // 75 → 76: #1510 added worker/src/mistral-public-api.ts, which counts a public API's listed
     // incidents and is SAFE on all three axes.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(76)
+    // 76 → 77: #1622 moved the Incidents list filter into src/utils/incidentFilter.js, SAFE on all three.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(77)
   })
 
   it('leaves none unclassified', () => {
@@ -455,7 +459,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(76)
+    expect(all.length).toBe(77)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -501,7 +505,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(76)
+    expect(all.length).toBe(77)
   })
 
   it('leaves none unclassified for startUnknown', () => {

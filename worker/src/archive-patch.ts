@@ -91,7 +91,7 @@ const ASSUMED_VALID_DAYS = 30
 
 /** The resource a synthesized row names, from the title `parseBetterStackDowntimeIncidents` writes. */
 export function resourceOfDerivedEntry(entry: { title?: string }): string | null {
-  const m = /^(.*) — recovered$/.exec(entry.title ?? '')
+  const m = /^(.*) — (?:recovered|downtime)$/.exec(entry.title ?? '')
   return m ? m[1] : null
 }
 

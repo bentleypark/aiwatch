@@ -488,7 +488,8 @@ describe('is-down-group.ts', () => {
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
     ]))
     const html = await (await handler(makeReq('claude'))).text()
-    expect(html).toContain('2 incidents across monitored services · average recovery: 1h 0m')
+    expect(html).toContain('2 incidents across monitored services · average recovery: 1h')
+    expect(html).not.toContain('average recovery: 1h 0m')
   })
 
   it('marks a medium-confidence score, like the per-service page', async () => {
@@ -1992,6 +1993,7 @@ describe('is-down-group.ts — 30-day summary includes records past the feed dep
       { id: 'codex', name: 'Codex', status: 'operational', incidents: [] },
     ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const html = await (await handler(makeReq('openai'))).text()
-    expect(html).toContain('2 incidents across monitored services · average recovery: 1h 0m')
+    expect(html).toContain('2 incidents across monitored services · average recovery: 1h')
+    expect(html).not.toContain('average recovery: 1h 0m')
   })
 })

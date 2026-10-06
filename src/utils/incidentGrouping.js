@@ -191,8 +191,8 @@ export function groupIncidents(incidents, options = {}) {
   const ungroupable = []
   incidents.forEach((inc, idx) => {
     const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
-    // #1292 — a `status_history`-derived incident is never grouped. It wears the same
-    // "<resource> — recovered" suffix `isFlapTitle` keys on, but it is not a flap: it is one whole
+    // #1292 — a `status_history`-derived incident is never grouped. A pre-#1622 one wears
+    // the "<resource> — recovered" suffix `isFlapTitle` keys on, but it is not a flap: it is one whole
     // DAY of downtime. Grouping buckets on the VIEWER's local day, so a real feed item late on the
     // page's day D and a synthetic anchored on D+1 could share a viewer-day bucket for the same
     // resource — and the merged row would then print the reconstructed anchor at minute precision

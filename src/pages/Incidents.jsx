@@ -10,8 +10,9 @@ import { useMonthlyArchives } from '../hooks/useMonthlyArchives'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { incidentNote } from '../utils/incidentNote'
-import { getResolvedTime, getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText } from '../utils/incidentSort'
-import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService, isWithinPeriod } from '../utils/archiveMerge'
+import { getResolvedTime, getContextualTime, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
+import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService } from '../utils/archiveMerge'
+import { filterIncidentList } from '../utils/incidentFilter'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
@@ -24,6 +25,7 @@ const STATUS_BADGE_CLASS = {
   ongoing:    'bg-[var(--status-bg-red)]   text-[var(--red)]',
   monitoring: 'bg-[var(--status-bg-amber)] text-[var(--amber)]',
   resolved:   'bg-[var(--status-bg-green)] text-[var(--green)]',
+  continuing: 'bg-[var(--status-bg-red)]   text-[var(--red)]',
 }
 
 // Timeline stage colors: amber=investigating, blue=identified, teal=monitoring, green=resolved.
@@ -118,8 +120,9 @@ export function DetailPanel({ incident, onClose, hideHeader, t, lang }) {
 
 // Desktop table row — grid layout matching design mockup: title+badge | time | service | duration | status
 // Accordion: detail panel renders inline below the selected row
-function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
-  const statusCls = STATUS_BADGE_CLASS[incident.status] ?? STATUS_BADGE_CLASS.resolved
+export function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
+  const shownStatus = incidentDisplayStatus(incident)
+  const statusCls = STATUS_BADGE_CLASS[shownStatus] ?? STATUS_BADGE_CLASS.resolved
   const ctx = getContextualTime(incident, t)
   return (
     <>
@@ -137,14 +140,14 @@ function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
         <div role="cell" className="flex items-center gap-2 min-w-0">
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{incident.title}</span>
           <span className={`shrink-0 mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}>
-            {t(`incidents.status.${incident.status}`)}
+            {t(`incidents.status.${shownStatus}`)}
           </span>
         </div>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>
           {incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName}
         </span>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{incidentDurationText(incident, t, t('incidents.duration.ongoing'))}</span>
-        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{t(`incidents.status.${incident.status}`)}</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{t(`incidents.status.${shownStatus}`)}</span>
       </div>
       {isSelected && <DetailPanel incident={incident} onClose={onClose} t={t} lang={lang} />}
     </>
@@ -152,7 +155,7 @@ function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
 }
 
 // Mobile card — accordion detail inline
-function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
+export function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
   const ctx = getContextualTime(incident, t)
   return (
     <div>
@@ -168,7 +171,7 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
           <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', flex: 1 }}>
             {incident.title}
           </span>
-          <StatusBadge status={incident.status} t={t} />
+          <StatusBadge status={incidentDisplayStatus(incident)} t={t} />
         </div>
         <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
           <span>{ctx.label} {formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day })}</span>
@@ -405,13 +408,7 @@ export default function Incidents({ filters } = {}) {
   // Apply service, status, and period filters; sort newest first
   const filtered = useMemo(() => {
     const cutoff = period ? Date.now() - period * 86_400_000 : null
-    return allIncidents
-      .filter((inc) => serviceFilter === 'all' || inc.serviceId === serviceFilter)
-      .filter((inc) => statusFilter  === 'all' || inc.status    === statusFilter)
-      // #587 — age out a stale archive-sourced 'ongoing' (frozen finalStatus) by startedAt; only a
-      // genuinely LIVE non-resolved incident gets the always-show exemption. See isWithinPeriod.
-      .filter((inc) => isWithinPeriod(inc, cutoff))
-      .sort(compareIncidents)
+    return filterIncidentList(allIncidents, { serviceFilter, statusFilter, cutoff })
   }, [allIncidents, serviceFilter, statusFilter, period])
 
   // groupIncidents re-sorts purely by date; compareGroupedRows lifts ongoing

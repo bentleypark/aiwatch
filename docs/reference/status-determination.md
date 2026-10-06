@@ -589,8 +589,15 @@ claims the whole day. Names are matched longest-first and case-insensitively, si
   The other two readers of this field, `parseBetterStackUptime` and `parseBetterStackDailyImpact`, do
   NOT exclude it. That divergence is inherited, not introduced here.
 - `impact: 'minor'` (matching what `mapBetterStackImpact` scored the RSS posts these replace).
-- **Never flap-grouped.** These wear the same `"<resource> — recovered"` suffix `groupIncidents` keys
-  on, but grouping buckets on the VIEWER's local day, so a real feed item and a synthetic could share
+- **Titled `"<resource> — downtime"` (#1622)**, not `— recovered`: a day total is no evidence of a
+  recovery. Rows banked before #1622 keep the old title in `incidents:monthly`, so the two readers that
+  take the resource name off the title (`archive-patch.ts`, `scripts/prune-monthly-derived-dupes.mjs`)
+  accept both. The row for the last closed day can carry **`continuing: true`** (the condition lives in
+  `parseBetterStackDowntimeIncidents` and its tests); the dashboard and is-down render it as still down
+  instead of Resolved. Display only — `status` stays `resolved`. An outage that continues has no unresolved
+  incident at all; that is #1623.
+- **Never flap-grouped.** Pre-#1622 rows wear the `"<resource> — recovered"` suffix `groupIncidents`
+  keys on, but grouping buckets on the VIEWER's local day, so a real feed item and a synthetic could share
   a bucket and the merged row would print the anchor at minute precision (group ranges carry no
   `dayOnly`). Excluded at the source so the invariant is structural.
 - **Timezone**: days are cut on the page's own timezone, published as a Rails zone NAME. ICU rejects a

@@ -609,6 +609,56 @@ describe('#1292 — a reconstructed timestamp is not published at minute precisi
   })
 })
 
+describe('#1622 — a status_history day row on the is-down page', () => {
+  const seo = getSEOContent('helicone')!
+  const startedAt = new Date(Date.now() - 2 * 86_400_000)
+  const base = {
+    id: 'helicone', name: 'Helicone', provider: 'Helicone', category: 'api', status: 'degraded',
+    latency: null, uptime30d: 97, lastChecked: new Date().toISOString(),
+    incidents: [], aiwatchScore: null, scoreGrade: null,
+  }
+  const day = {
+    id: 'bs-hist:7615061:day', title: 'api.hconeai.com — downtime', status: 'resolved', impact: 'minor',
+    startedAt: startedAt.toISOString(), resolvedAt: new Date(startedAt.getTime() + 86_400_000).toISOString(),
+    duration: '24h 0m', timeline: [], derived: 'status_history', derivedDay: startedAt.toISOString().slice(0, 10),
+  }
+  const render = (incident: object) => renderPage('helicone', { ...base, incidents: [incident] } as never, seo, [], null)
+  const card = (html: string) => html.slice(html.indexOf('<div class="incident-item">'))
+
+  it('states the day total without a zero minutes part, on the header and the card', () => {
+    const html = render(day)
+    expect(html).toContain('&mdash; api.hconeai.com — downtime (24h that day)')
+    expect(card(html)).toContain('&middot; 24h that day')
+    expect(html).not.toContain('24h 0m')
+  })
+
+  it('shows a continuing row as still down, not resolved', () => {
+    const html = render({ ...day, continuing: true })
+    expect(html).toContain('(24h that day, still down)')
+    expect(card(html)).toContain('>Still down</span>')
+    expect(card(html)).not.toContain('>Resolved</span>')
+  })
+
+  it('lists a continuing row above a NEWER resolved incident', () => {
+    const newer = { id: 'p1', title: 'API errors', status: 'resolved', impact: 'minor', timeline: [], duration: '1h 0m',
+      startedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), resolvedAt: new Date(Date.now() - 2 * 3_600_000).toISOString() }
+    const html = renderPage('helicone', { ...base, incidents: [newer, { ...day, continuing: true }] } as never, seo, [], null)
+    const rows = card(html)
+    expect(rows.indexOf('Still down')).toBeGreaterThan(-1)
+    expect(rows.indexOf('Still down')).toBeLessThan(rows.indexOf('API errors'))
+  })
+
+  it('CONTROL — a provider-published incident gets no qualifier and keeps its own status', () => {
+    const { derived: _d, derivedDay: _dd, ...published } = day
+    const html = render({ ...published, title: 'API errors', duration: '3h 0m', continuing: true })
+    expect(card(html)).toContain('&middot; 3h')
+    expect(card(html)).not.toContain('3h 0m')
+    expect(html).not.toContain('that day')
+    expect(card(html)).toContain('>Resolved</span>')
+    expect(html).not.toContain('still down')
+  })
+})
+
 // #1328 - the is-down AI card renders the same analysis prose the dashboard modal does, and shares
 // its defect: nothing rewrites it at resolution, so a resolved card carried the status sentence
 // written while the incident was still being investigated. The card already gates its "Recovered"

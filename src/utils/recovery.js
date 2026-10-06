@@ -1,3 +1,4 @@
+import { displayDuration } from './incidentSort'
 // #557 — recovery-time stats for the ServiceDetails "Recovery" card.
 //
 // The card used to show a plain MEAN of every resolved incident's duration over 7 days. On status
@@ -22,6 +23,11 @@ export function parseDurationToMin(s) {
 /** Format minutes → "29h 34m" / "43m". */
 export function formatRecoveryMin(min) {
   return min >= 60 ? `${Math.floor(min / 60)}h ${min % 60}m` : `${min}m`
+}
+
+/** #1622 — `formatRecoveryMin` as shown on screen: "1h 0m" reads "1h". */
+export function formatRecoveryMinShown(min) {
+  return displayDuration(formatRecoveryMin(min))
 }
 
 /**

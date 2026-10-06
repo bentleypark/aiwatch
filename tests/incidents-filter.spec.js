@@ -55,7 +55,7 @@ test.describe('Incidents filtering', () => {
     // entries (▸/▾) instead of opening the single-incident timeline accordion; flap/auto-monitor
     // grouping (#597/#599) grew, so the first row may now be a group. :not([aria-expanded])
     // selects the single rows this assertion is about.
-    const rows = main.locator('[role="rowgroup"] [role="row"]:not([aria-expanded])')
+    const rows = main.locator('[role="rowgroup"] [role="row"]:not([aria-expanded])').filter({ hasNotText: 'that day' })
     const count = await rows.count()
     if (count === 0) return // only grouped rows present — nothing single to expand here
     // Click first single incident row
@@ -84,6 +84,7 @@ test.describe('Incidents filtering', () => {
     // Check first row — if there are ongoing incidents, they should be first
     const firstRowText = await rows.first().textContent()
     const hasOngoing = firstRowText?.toLowerCase().includes('ongoing') || firstRowText?.toLowerCase().includes('monitoring')
+      || firstRowText?.toLowerCase().includes('still down')
     // If no ongoing, all should be resolved — which is also valid
     if (!hasOngoing) {
       const allText = await rows.allTextContents()
@@ -101,7 +102,7 @@ test.describe('Incidents filtering', () => {
     const statuses = []
     for (let i = 0; i < count; i++) {
       const text = (await rows.nth(i).textContent())?.toLowerCase() ?? ''
-      if (text.includes('ongoing')) statuses.push(0)
+      if (text.includes('ongoing') || text.includes('still down')) statuses.push(0)
       else if (text.includes('monitoring')) statuses.push(1)
       else statuses.push(2)
     }

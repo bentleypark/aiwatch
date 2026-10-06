@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDurationToMin, formatRecoveryMin, computeRecoveryStats } from '../recovery'
+import { parseDurationToMin, formatRecoveryMin, formatRecoveryMinShown, computeRecoveryStats } from '../recovery'
 
 const NOW = Date.parse('2026-06-03T09:00:00Z')
 const ago = (days, h = 0) => new Date(NOW - days * 86_400_000 - h * 3_600_000).toISOString()
@@ -111,5 +111,19 @@ describe('#1292 — a status_history-derived duration is not a recovery time', (
 
   it('CONTROL — an ordinary resolved incident still counts', () => {
     expect(computeRecoveryStats([real], NOW).medianMin).toBe(30)
+  })
+})
+
+describe('#1622 — formatRecoveryMinShown', () => {
+  it('drops a zero minutes part for display, and only that', () => {
+    expect(formatRecoveryMinShown(60)).toBe('1h')
+    expect(formatRecoveryMinShown(1440)).toBe('24h')
+    expect(formatRecoveryMinShown(90)).toBe('1h 30m')
+    expect(formatRecoveryMinShown(43)).toBe('43m')
+  })
+
+  it('leaves the stored-format formatter alone — archiveMerge feeds its output to parseDurationToMin', () => {
+    expect(formatRecoveryMin(60)).toBe('1h 0m')
+    expect(parseDurationToMin(formatRecoveryMin(60))).toBe(60)
   })
 })

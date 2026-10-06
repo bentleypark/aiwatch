@@ -88,6 +88,9 @@ export interface Incident {
   // date somewhere; carrying the day removes the arithmetic instead of relocating its error. Absent on
   // every parsed incident — those have a real timestamp and no such ambiguity.
   derivedDay?: string
+  // #1622 — on a `derived` row for the last closed day: the resource is still down now, so the
+  // displayed row is an outage in progress, not a finished one. Display only; `status` stays resolved.
+  continuing?: true
   // #1384 — this incident was forwarded into the live list by the finite migration bridge
   // (`mergeRetainedIncidentHistory` in services.ts), not read from the CURRENT status source this
   // cycle. Its timestamps are real (unlike `derived: 'status_history'`, this is not a synthesized

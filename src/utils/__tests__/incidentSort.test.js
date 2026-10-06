@@ -13,6 +13,8 @@ import {
   dominantGroupStatus,
   formatDurationMs,
   sumGroupDuration,
+  displayDuration,
+  incidentDisplayStatus,
 } from '../incidentSort'
 import { groupIncidents } from '../incidentGrouping'
 
@@ -393,7 +395,7 @@ describe('formatDurationMs', () => {
   })
 
   it('renders hours-and-minutes for durations >= 1h', () => {
-    expect(formatDurationMs(60 * 60_000)).toBe('1h 0m')
+    expect(formatDurationMs(60 * 60_000)).toBe('1h')
     expect(formatDurationMs(125 * 60_000)).toBe('2h 5m')
   })
 
@@ -416,7 +418,7 @@ describe('formatDurationMs', () => {
     for (const ms of fixtures) {
       const epoch0 = new Date(0)
       const later = new Date(ms)
-      expect(formatDurationMs(ms)).toBe(formatDuration(epoch0, later))
+      expect(formatDurationMs(ms)).toBe(displayDuration(formatDuration(epoch0, later)))
     }
   })
 })
@@ -673,7 +675,7 @@ describe('formatMttrHours (#1292 — the Recovery component gets a column)', () 
   it('renders hours in the same shape as every other duration on screen', () => {
     expect(formatMttrHours(2.7)).toBe('2h 42m')
     expect(formatMttrHours(0.4)).toBe('24m')
-    expect(formatMttrHours(24)).toBe('24h 0m')
+    expect(formatMttrHours(24)).toBe('24h')
   })
 
   it('rounds a sub-minute sample up rather than showing 0m', () => {
@@ -777,5 +779,44 @@ describe('#1390 getContextualTime — an anchored instant keeps minute precision
     const ctx = getContextualTime({ status: 'resolved', startedAt: '2025-12-14T21:28:00Z', resolvedAt: '2025-12-14T21:28:00Z', duration: null, startUnknown: true, timeline: [] }, t)
     expect(ctx.dayOnly).toBe(false)
     expect(ctx.day, 'and there is no day to anchor it with').toBeUndefined()
+  })
+})
+
+describe('#1622 — a status_history day row as displayed', () => {
+  const t = (k) => ({
+    'incidents.derived.dayTotal': '(that day)',
+    'incidents.time.down': 'Down',
+    'incidents.time.resolved': 'Resolved',
+  })[k] ?? k
+  const row = (extra = {}) => ({
+    id: 'bs-hist:7615061:2026-10-04', title: 'api.hconeai.com — downtime', status: 'resolved',
+    startedAt: '2026-10-04T12:00:00.000Z', resolvedAt: '2026-10-05T12:00:00.000Z', duration: '24h 0m',
+    derived: 'status_history', derivedDay: '2026-10-04', ...extra,
+  })
+
+  it('drops a zero minutes part and nothing else', () => {
+    expect(displayDuration('24h 0m')).toBe('24h')
+    expect(displayDuration('3h 0m')).toBe('3h')
+    expect(displayDuration('1h 30m')).toBe('1h 30m')
+    expect(displayDuration('10h 0m 0s')).toBe('10h 0m 0s')
+    expect(displayDuration('0m')).toBe('0m')
+    expect(displayDuration('40m')).toBe('40m')
+  })
+
+  it('shows the stored 24h 0m as "24h (that day)"', () => {
+    expect(incidentDurationText(row(), t, 'ongoing')).toBe('24h (that day)')
+    expect(incidentDurationText({ status: 'resolved', duration: '3h 0m' }, t, 'ongoing')).toBe('3h')
+  })
+
+  it('shows a continuing row as still down, everything else by its own status', () => {
+    expect(incidentDisplayStatus(row({ continuing: true }))).toBe('continuing')
+    expect(incidentDisplayStatus(row())).toBe('resolved')
+    // The flag means nothing off a derived row — a feed incident is never relabelled by it.
+    expect(incidentDisplayStatus({ status: 'resolved', continuing: true })).toBe('resolved')
+  })
+
+  it('labels a continuing row\'s date as the downtime day, not a resolution', () => {
+    expect(getContextualTime(row({ continuing: true }), t)).toMatchObject({ label: 'Down', date: '2026-10-04T12:00:00.000Z', dayOnly: true, day: '2026-10-04' })
+    expect(getContextualTime(row(), t).label).toBe('Resolved')
   })
 })
