@@ -466,7 +466,7 @@ describe('parseBetterStackDowntimeIncidents — same-day order (duration desc, t
   it('puts the LONGER outage first within a day', () => {
     const out = parseBetterStackDowntimeIncidents(twoOnOneDay, { now: NOW })
     expect(out.map((i) => i.title)).toEqual([
-      'eu.api.helicone.ai — recovered', 'api.hconeai.com — recovered',
+      'eu.api.helicone.ai — downtime', 'api.hconeai.com — downtime',
     ])
   })
 
@@ -480,7 +480,7 @@ describe('parseBetterStackDowntimeIncidents — same-day order (duration desc, t
     const out = parseBetterStackDowntimeIncidents(tie, { now: NOW })
     expect(out.map((i) => i.duration)).toEqual([out[1].duration, out[1].duration]) // identical on screen
     expect(out.map((i) => i.title)).toEqual([
-      'api.hconeai.com — recovered', 'eu.api.helicone.ai — recovered',
+      'api.hconeai.com — downtime', 'eu.api.helicone.ai — downtime',
     ])
   })
 
@@ -490,5 +490,64 @@ describe('parseBetterStackDowntimeIncidents — same-day order (duration desc, t
     ])
     const out = parseBetterStackDowntimeIncidents(twoDays, { now: NOW })
     expect(out.map((i) => i.derivedDay)).toEqual(['2026-08-16', '2026-08-14'])
+  })
+})
+
+describe('#1622 — the synthesized row as published', () => {
+  const H = 3600
+  // NOW is 2026-08-28T13:00Z on a UTC page: 2026-08-27 is the last closed day, and 13h of today elapsed.
+  const SINCE_MIDNIGHT = 13 * H
+  it('titles the row as downtime, not a recovery', () => {
+    const out = parseBetterStackDowntimeIncidents(
+      page('UTC', [{ id: 'r', name: 'api.hconeai.com', days: [['2026-08-26', 2 * H]] }]), { now: NOW })
+    expect(out.map((i) => i.title)).toEqual(['api.hconeai.com — downtime'])
+  })
+
+  const flags = (status: string, days: Array<[string, number]>) =>
+    parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api.hconeai.com', status, days }]), { now: NOW })
+      .map((i) => [i.derivedDay, i.continuing])
+
+  it('flags ONLY the last closed day of an outage that has run since local midnight', () => {
+    expect(flags('downtime', [['2026-08-25', 2 * H], ['2026-08-26', 24 * H], ['2026-08-27', 24 * H], ['2026-08-28', SINCE_MIDNIGHT - 60]])).toEqual([
+      ['2026-08-27', true], ['2026-08-26', undefined], ['2026-08-25', undefined],
+    ])
+  })
+
+  it('does not flag yesterday when today\'s outage is a NEW one (down now, but not since midnight)', () => {
+    expect(flags('downtime', [['2026-08-27', 600], ['2026-08-28', H]])).toEqual([['2026-08-27', undefined]])
+  })
+
+  it('does not flag yesterday when today carries no row at all', () => {
+    expect(flags('downtime', [['2026-08-27', 24 * H]])).toEqual([['2026-08-27', undefined]])
+  })
+
+  it.each([['operational'], ['maintenance'], ['degraded']])('does not flag anything while the resource is %s', (status) => {
+    expect(flags(status, [['2026-08-27', 24 * H], ['2026-08-28', SINCE_MIDNIGHT]])).toEqual([['2026-08-27', undefined]])
+  })
+
+  it('measures "since midnight" on the PAGE\'s day, not the UTC one', () => {
+    // America/Adak is UTC-9 in August, so at 13:00Z the local day began 4h ago (13h ago in UTC).
+    const adak = (todaySec: number) => parseBetterStackDowntimeIncidents(page('America/Adak', [{
+      id: 'r', name: 'api.hconeai.com', status: 'downtime', days: [['2026-08-27', 24 * H], ['2026-08-28', todaySec]],
+    }]), { now: NOW }).map((i) => [i.derivedDay, i.continuing])
+    expect(adak(4 * H - 60)).toEqual([['2026-08-27', true]])
+    expect(adak(3 * H)).toEqual([['2026-08-27', undefined]])
+  })
+
+  it('allows today\'s total to trail the elapsed time by at most CONTINUING_SLACK_SEC', () => {
+    expect(flags('downtime', [['2026-08-27', 24 * H], ['2026-08-28', SINCE_MIDNIGHT - 290]])).toEqual([['2026-08-27', true]])
+    expect(flags('downtime', [['2026-08-27', 24 * H], ['2026-08-28', SINCE_MIDNIGHT - 310]])).toEqual([['2026-08-27', undefined]])
+  })
+
+  it('does not flag yesterday in the first minutes after midnight while today records no downtime', () => {
+    const justAfter = Date.parse('2026-08-28T00:02:00Z')
+    const out = parseBetterStackDowntimeIncidents(page('UTC', [{
+      id: 'r', name: 'api.hconeai.com', status: 'downtime', days: [['2026-08-27', 24 * H], ['2026-08-28', 0]],
+    }]), { now: justAfter })
+    expect(out.map((i) => [i.derivedDay, i.continuing])).toEqual([['2026-08-27', undefined]])
+  })
+
+  it('does not flag an OLDER day when the resource is down but yesterday carried no row', () => {
+    expect(flags('downtime', [['2026-08-25', 24 * H], ['2026-08-27', 0], ['2026-08-28', SINCE_MIDNIGHT]])).toEqual([['2026-08-25', undefined]])
   })
 })

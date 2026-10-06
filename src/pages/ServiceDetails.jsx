@@ -15,9 +15,9 @@ import { incidentNote } from '../utils/incidentNote'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { buildBadgeMarkdown } from '../utils/badge'
-import { compareGroupedRows, dominantGroupStatus, incidentDurationText } from '../utils/incidentSort'
+import { compareGroupedRows, dominantGroupStatus, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
-import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
+import { computeRecoveryStats, formatRecoveryMinShown } from '../utils/recovery'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
 import { latencyCardState } from '../utils/latencyCard'
 import { filterSecurityAlertsForService, securitySourceLabel } from '../utils/securityAlerts'
@@ -215,9 +215,12 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
     ongoing:       'text-[var(--red)]',
     monitoring:    'text-[var(--amber)]',
     resolved:      'text-[var(--text2)]',
+    continuing:    'text-[var(--red)]',
   }
-  const dotCls = STATUS_CLS[incident.status] ?? STATUS_CLS.resolved
-  const displayStatus = incident.status === 'resolved' ? 'resolved'
+  const shownStatus = incidentDisplayStatus(incident)
+  const dotCls = STATUS_CLS[shownStatus] ?? STATUS_CLS.resolved
+  const displayStatus = shownStatus === 'continuing' ? 'continuing'
+    : incident.status === 'resolved' ? 'resolved'
     : incident.status === 'monitoring' ? 'monitoring'
     : 'ongoing'
   // #1292 — a status_history-derived incident carries an empty timeline (the provider published no
@@ -988,12 +991,12 @@ export default function ServiceDetails({ serviceId }) {
         />
         <MetricCard
           label={t('svc.mttr')}
-          value={incidentsBlanked ? '—' : (recovery ? formatRecoveryMin(recovery.medianMin) : '—')}
+          value={incidentsBlanked ? '—' : (recovery ? formatRecoveryMinShown(recovery.medianMin) : '—')}
           // #557 — headline is the median (typical) recovery; when a longer outage exists in the
           // window, surface it as "worst Xh Ym" so a 29h outage is never hidden by short blips.
           sub={incidentsBlanked ? t('uptime.unavailable')
             : !recovery ? (hasOngoingIncident ? t('svc.mttr.ongoing') : t('svc.mttr.none'))
-            : recovery.maxMin > recovery.medianMin ? t('svc.recovery.worst').replace('{d}', formatRecoveryMin(recovery.maxMin))
+            : recovery.maxMin > recovery.medianMin ? t('svc.recovery.worst').replace('{d}', formatRecoveryMinShown(recovery.maxMin))
             : t('svc.incidents.sub')}
           colorClass={incidentsBlanked ? 'text-[var(--text2)]' : recovery ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
         />

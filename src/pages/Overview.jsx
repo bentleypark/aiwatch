@@ -17,7 +17,7 @@ import RssCopyIcon from '../components/RssCopyIcon'
 import SlackInstallLink from '../components/SlackInstallLink'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
-import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText } from '../utils/incidentSort'
+import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
@@ -44,6 +44,7 @@ const INC_BAR_CLASS = {
   identified:     'bg-[var(--red)]',
   monitoring:     'bg-[var(--amber)]',
   resolved:       'bg-[var(--green)]',
+  continuing:     'bg-[var(--red)]',
 }
 
 // ── Sub-components ───────────────────────────────────────────
@@ -372,9 +373,9 @@ export function GroupIncidentItem({ group, lang, t }) {
 }
 
 // Incident item with time + bar + content + accordion timeline
-function IncidentItem({ incident, lang, t }) {
+export function IncidentItem({ incident, lang, t }) {
   const [expanded, setExpanded] = useState(false)
-  const barCls = INC_BAR_CLASS[incident.status] ?? INC_BAR_CLASS.resolved
+  const barCls = INC_BAR_CLASS[incidentDisplayStatus(incident)] ?? INC_BAR_CLASS.resolved
   // #1292 — a status_history-derived incident has an empty timeline, so this row is inert and the
   // full `incidents.derived.note` explanation is NOT reachable here; the Incidents page, whose rows
   // are unconditionally clickable, is where it renders. Not wired as a dead prop, which would read as

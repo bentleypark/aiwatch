@@ -20,7 +20,7 @@ import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { cookieBannerHtml } from './_shared/cookie-banner'
 import { getSEOContent } from './_is-down/seo-content'
-import { ALERT_CTA_CSS, ERRORS_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, formatRecoveryMinutes, renderErrorList, renderIncidentTimeline, timeAgo } from './_is-down/html-template'
+import { ALERT_CTA_CSS, ERRORS_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, displayDuration, formatRecoveryMinutes, renderErrorList, renderIncidentTimeline, timeAgo } from './_is-down/html-template'
 
 export const config = { runtime: 'edge' }
 
@@ -179,8 +179,8 @@ export function incidentMeta(inc: FamilyIncident): string {
   const dateStr = Number.isNaN(started.getTime()) ? '' : started.toISOString().slice(0, 10)
   // #1292 — a synthesized incident's `duration` is one DAY'S downtime, not a time to recover, and its
   // start is our own anchor: "resolved after 17h 18m" would assert both. State the day's downtime.
-  if (inc.derived === 'status_history') return inc.duration ? `${dateStr} · down ${inc.duration} that day` : dateStr
-  if (inc.status === 'resolved') return inc.duration ? `${dateStr} · resolved after ${inc.duration}` : `${dateStr} · resolved`
+  if (inc.derived === 'status_history') return inc.duration ? `${dateStr} · down ${displayDuration(inc.duration)} that day` : dateStr
+  if (inc.status === 'resolved') return inc.duration ? `${dateStr} · resolved after ${displayDuration(inc.duration)}` : `${dateStr} · resolved`
   return `${dateStr} · ongoing`
 }
 

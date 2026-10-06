@@ -2009,6 +2009,6 @@ describe('30-day figures include the records past the feed depth (#1614)', () =>
 
   it('the AIWatch Data sentence counts them and averages their recovery', () => {
     const html = renderPage('claude', svc, mkSeo(), [])
-    expect(html).toContain('Based on AIWatch data from the last 30 days, it experienced 3 incidents with an average recovery time of 1h 0m.')
+    expect(html).toContain('Based on AIWatch data from the last 30 days, it experienced 3 incidents with an average recovery time of 1h.')
   })
 })

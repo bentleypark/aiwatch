@@ -790,6 +790,8 @@ export const BS_HISTORY_MIN_DOWNTIME_SEC = 600
  *  first and would let synthesized history evict real incidents. */
 export const BS_HISTORY_WINDOW_DAYS = 30
 
+const CONTINUING_SLACK_SEC = 300
+
 /** Row-level BACKSTOP, not the working bound — the window is. Deliberately set where real data does
  *  not reach it, because the previous value (20, taken by analogy to `parseRssIncidents`' per-service
  *  feed cap) was dimensioned in the wrong unit and quietly defeated the fix.
@@ -870,6 +872,7 @@ export function parseBetterStackDowntimeIncidents(
   const deny = new Set((opts.denylist ?? []).map((n) => n.toLowerCase()))
   const today = zonedDayOf(now, tz)
   const windowFrom = addDays(today, -windowDays)
+  const yesterday = addDays(today, -1)
   const out: Incident[] = []
 
   for (const resource of data.included ?? []) {
@@ -878,6 +881,9 @@ export function parseBetterStackDowntimeIncidents(
     if (!name || isDeniedBetterStackResource(resource, sections, deny)) continue
     const history = resource.attributes?.status_history
     if (!Array.isArray(history)) continue
+    const todayDownSec = history.find((d) => d.day === today)?.downtime_duration ?? 0
+    const stillDown = resource.attributes?.status === 'downtime' && todayDownSec > 0
+      && todayDownSec >= (now - zonedDayStartMs(today, tz)) / 1000 - CONTINUING_SLACK_SEC
 
     for (const d of history) {
       if (!DAY_RE.test(d.day ?? '')) {
@@ -927,7 +933,7 @@ export function parseBetterStackDowntimeIncidents(
         // window, the RSS claim set, or a run's extent can move it. See the doc comment for why that
         // matters — `incidents:monthly` accumulates by id, and a vanished id reads as a withdrawal.
         id: `bs-hist:${resource.id ?? name}:${d.day}`,
-        title: `${name} — recovered`,
+        title: `${name} — downtime`,
         status: 'resolved',
         // The RSS monitor posts these replace carried no severity wording either, so
         // `mapBetterStackImpact` scored every one of them `minor`. Matching that keeps the monthly
@@ -940,6 +946,7 @@ export function parseBetterStackDowntimeIncidents(
         timeline: [],
         derived: 'status_history',
         derivedDay: d.day,
+        ...(d.day === yesterday && stillDown ? { continuing: true as const } : {}),
       })
     }
   }

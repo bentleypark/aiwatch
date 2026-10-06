@@ -91,7 +91,30 @@ export function formatDurationMs(ms) {
   const totalMin = displayedMinutes(ms)
   const hours = Math.floor(totalMin / 60)
   const minutes = totalMin % 60
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
+  return hours > 0 ? displayDuration(`${hours}h ${minutes}m`) : `${minutes}m`
+}
+
+/**
+ * #1622 — a duration as shown: `24h 0m` reads `24h`. Display only — the worker's stored string keeps
+ * its format, because `parseDurationToMin` (recovery.js) requires the minutes part.
+ * @param {string} duration
+ */
+export function displayDuration(duration) {
+  return duration.replace(/^(\d+h) 0m$/, '$1')
+}
+
+/**
+ * #1622 — the status a row shows. A `status_history` row flagged `continuing` stays `resolved` for every
+ * consumer that counts or filters, but its resource is still down now, so it must not read "Resolved".
+ * @param {{ status: string, derived?: string, continuing?: boolean }} inc
+ */
+export function incidentDisplayStatus(inc) {
+  return inc.derived === 'status_history' && inc.continuing ? 'continuing' : inc.status
+}
+
+/** #1622 — the status a row is tiered and filtered by: a continuing row sits with the ongoing ones. */
+export function tierStatus(inc) {
+  return incidentDisplayStatus(inc) === 'continuing' ? 'ongoing' : inc.status
 }
 
 /**
@@ -249,6 +272,9 @@ export function getContextualTime(inc, t) {
   const day = inc.derivedDay
   const tl = inc.timeline ?? []
   const lastTimeline = tl.length > 0 ? tl[tl.length - 1] : undefined
+  if (incidentDisplayStatus(inc) === 'continuing') {
+    return { label: t('incidents.time.down'), date: inc.startedAt, dayOnly, day }
+  }
   if (inc.status === 'resolved') {
     const resolved = getResolvedTime(inc)
     if (resolved) return { label: t('incidents.time.resolved'), date: resolved, dayOnly, day }
@@ -335,8 +361,8 @@ function displayedSpanMinutes(inc) {
  * @returns {number}
  */
 export function compareIncidents(a, b) {
-  const aPri = STATUS_PRIORITY[a.status] ?? 2
-  const bPri = STATUS_PRIORITY[b.status] ?? 2
+  const aPri = STATUS_PRIORITY[tierStatus(a)] ?? 2
+  const bPri = STATUS_PRIORITY[tierStatus(b)] ?? 2
   if (aPri !== bPri) return aPri - bPri
   return getLatestActivity(b) - getLatestActivity(a)
 }
@@ -359,8 +385,8 @@ export function compareIncidents(a, b) {
  * @returns {number}
  */
 export function compareGroupedRows(a, b) {
-  const aStatus = a.kind === 'single' ? a.incident.status : dominantGroupStatus(a)
-  const bStatus = b.kind === 'single' ? b.incident.status : dominantGroupStatus(b)
+  const aStatus = a.kind === 'single' ? tierStatus(a.incident) : dominantGroupStatus(a)
+  const bStatus = b.kind === 'single' ? tierStatus(b.incident) : dominantGroupStatus(b)
   return (STATUS_PRIORITY[aStatus] ?? 2) - (STATUS_PRIORITY[bStatus] ?? 2)
 }
 
@@ -386,6 +412,6 @@ export function compareGroupedRows(a, b) {
 export function incidentDurationText(inc, t, fallback) {
   if (!inc.duration) return inc.status === 'resolved' ? t('incidents.duration.unknown') : fallback
   return inc.derived === 'status_history'
-    ? `${inc.duration} ${t('incidents.derived.dayTotal')}`
-    : inc.duration
+    ? `${displayDuration(inc.duration)} ${t('incidents.derived.dayTotal')}`
+    : displayDuration(inc.duration)
 }

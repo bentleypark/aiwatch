@@ -132,6 +132,11 @@ test('running the script through a SYMLINKED path still runs main', () => {
   }
 })
 
+test('#1622 — resourceOfDerived reads both the pre-#1622 and the current synthesized title', () => {
+  assert.equal(resourceOfDerived({ title: `${RESOURCE} — recovered` }), RESOURCE)
+  assert.equal(resourceOfDerived({ title: `${RESOURCE} — downtime` }), RESOURCE)
+})
+
 test('resourceOfDerived reads the resource off a synthesized title', () => {
   assert.equal(resourceOfDerived(derived()), RESOURCE)
   assert.equal(resourceOfDerived(feed(`${RESOURCE} — down`, ANCHOR)), null)

@@ -112,6 +112,8 @@ export interface GroupingIncident {
   derived?: 'status_history'
   /** #1292 — the page-local day; see `worker/src/types.ts`. */
   derivedDay?: string
+  /** #1622 — a `derived` row whose resource is still down now; see `worker/src/types.ts`. */
+  continuing?: true
   /** #1390 — `startedAt` is an ANCHOR on this incident's own `resolvedAt`; no elapsed time is
    *  derivable. Declared for the same reason `derived` above is: an undeclared optional lets
    *  TypeScript's weak-type check prove the guards that read it can never fire. */
@@ -193,7 +195,7 @@ export function groupIncidents(
     // Lockstep with src/utils/incidentGrouping.js.
     const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
     // #1292 — never group a synthesized incident. Kept in lockstep with the SPA copy in
-    // `src/utils/incidentGrouping.js`: it wears the same "<resource> — recovered" suffix `isFlapTitle`
+    // `src/utils/incidentGrouping.js`: a pre-#1622 one wears the "<resource> — recovered" suffix `isFlapTitle`
     // keys on but is one whole DAY of downtime, and grouping buckets on the VIEWER's local day, so it
     // could merge with a real feed item and print the reconstructed anchor at minute precision (a
     // group range carries no `dayOnly`).
