@@ -9,7 +9,7 @@
 //      different source with its own 30-day reach, so they would claim visibility the feed never had,
 //      and an entry that merely fell off the feed window would read as confidently absent.
 // `withdrawalHold` does not save it either: its incident-running clause needs a non-resolved live
-// incident, and every synthesized incident is resolved by construction.
+// incident, and every synthesized incident here is a resolved one.
 import { describe, it, expect } from 'vitest'
 import { prunePhantomIncidents, PHANTOM_PRUNE_AFTER_MISSED_RUNS } from '../monthly-archive'
 import type { ServiceStatus } from '../types'

@@ -190,7 +190,9 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
       if (inc.status === 'resolved' || !inc.startedAt) return
       const start = new Date(inc.startedAt)
       if (isNaN(start.getTime())) return // skip a malformed startedAt explicitly (don't rely on key ordering)
-      const status = impactToCellStatus(inc.impact)
+      // #1623 — a synthesized row's impact is a fixed 'minor'; its day's official record is the level.
+      const recorded = inc.derived === 'status_history' ? dailyImpact?.[inc.derivedDay] : undefined
+      const status = impactToCellStatus(recorded ?? inc.impact)
       if (dailyImpact) {
         escalate(dayStatus, todayKey, status) // today only — defer past days to the official record
       } else {

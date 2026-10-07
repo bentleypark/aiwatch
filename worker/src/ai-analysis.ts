@@ -1265,7 +1265,7 @@ export async function refreshOrReanalyze(
     // either. Without this exclusion, EITHER path falls through to a full re-analysis API call every
     // 2 hours for the entire life of the bridge.
     const activeIncs = collapseXaiRegionalIncidents(
-      (svc.incidents ?? []).filter(i => i.status !== 'resolved' && !heldIncIds.has(i.id) && !i.retainedBridge),
+      (svc.incidents ?? []).filter(i => i.status !== 'resolved' && !heldIncIds.has(i.id) && !i.retainedBridge && i.derived !== 'status_history'),
     )
     if (activeIncs.length === 0) continue
 

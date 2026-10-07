@@ -153,6 +153,10 @@ export function formatMttrHours(hours) {
  * @returns {{ totalMs: number, hasOngoing: boolean, resolvedCount: number, unknownCount: number }}
  */
 export function sumGroupDuration(group) {
+  // #1623 — a multi-day outage's closed-day downtime is the worker's, measured over the whole run.
+  if (group.run) {
+    return { totalMs: (group.downSec ?? 0) * 1000, hasOngoing: !!group.ongoing, resolvedCount: group.downSec ? 1 : 0, unknownCount: 0 }
+  }
   let totalMs = 0
   let hasOngoing = false
   let resolvedCount = 0
@@ -300,7 +304,8 @@ export function getContextualTime(inc, t) {
  * @returns {number}
  */
 export function getLatestActivity(inc) {
-  if (inc.status === 'resolved') {
+  // #1623 — a continuing day row has not resolved; its `resolvedAt` is only its day total's end.
+  if (incidentDisplayStatus(inc) === 'resolved') {
     const resolved = getResolvedTime(inc)
     if (resolved) return new Date(resolved).getTime()
   }

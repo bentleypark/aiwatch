@@ -91,6 +91,11 @@ export interface Incident {
   // #1622 — on a `derived` row for the last closed day: the resource is still down now, so the
   // displayed row is an outage in progress, not a finished one. Display only; `status` stays resolved.
   continuing?: true
+  // #1623 — the outage this day row belongs to, when consecutive rows provably form one (`outageRuns`).
+  // Display only: never an id, never archived, never read by an alert.
+  outageRun?: OutageRun
+  // #1623 — the still-accruing local day; `incidents:monthly` banks it only once the day has closed.
+  accruing?: true
   // #1384 — this incident was forwarded into the live list by the finite migration bridge
   // (`mergeRetainedIncidentHistory` in services.ts), not read from the CURRENT status source this
   // cycle. Its timestamps are real (unlike `derived: 'status_history'`, this is not a synthesized
@@ -576,3 +581,14 @@ export interface ProbeSummary {
   cvCombined: number
   validDays: number // how many days contributed to this summary
 }
+
+/** #1623 — one multi-day Better Stack outage, over the day rows `describeRuns` is given. */
+export interface OutageRun {
+  id: string
+  startDay: string
+  endDay: string
+  days: number
+  downSec: number
+  ongoing: boolean
+}
+

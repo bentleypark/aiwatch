@@ -1287,7 +1287,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     if (verdict.affected) {
       const detectKey = `detected:${svc.id}`
       const existingRaw = await env.STATUS_CACHE.get(detectKey).catch(() => null)
-      const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
+      const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved' && i.derived !== 'status_history')
       const activeIncId = activeInc?.id ?? null
       const existing = parseDetectionEntry(existingRaw)
       const update = resolveDetectionUpdate(existing, activeIncId, new Date().toISOString())
@@ -5326,7 +5326,7 @@ export default {
         const nowIso = new Date().toISOString()
         await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
           (svc.incidents ?? [])
-            .filter((i) => i.status !== 'resolved')
+            .filter((i) => i.status !== 'resolved' && i.derived !== 'status_history')
             .map(async (inc) => {
               const fsKey = `feed:firstseen:${inc.id}`
               // get THREW (KV hiccup) → skip entirely: do NOT stamp (would risk clobbering an existing
@@ -5388,7 +5388,7 @@ export default {
         // langfuse-feed subscribers still get an orphan).
         await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
           (svc.incidents ?? [])
-            .filter((i) => i.status !== 'resolved')
+            .filter((i) => i.status !== 'resolved' && i.derived !== 'status_history')
             .map(async (inc) => {
               const a = (analysis[svc.id] ?? []).find((x) => x.incidentId === inc.id)
               if (isActiveItemHeld(inc, a, firstSeen[inc.id], feedNow)) return // held → not served yet

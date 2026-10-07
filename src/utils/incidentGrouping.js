@@ -133,6 +133,11 @@ export function isAutoMonitorTitle(title) {
  * @property {Record<string, number>} statusCounts
  * @property {boolean} uniformStatus - true if all entries share the same status
  * @property {Incident[]} entries - in original input order
+ * @property {true} [run] - #1623: one multi-day outage (the entries share `outageRun`), not a flap burst
+ * @property {string} [startDay] - #1623 run only: its first page-local day
+ * @property {string} [endDay] - #1623 run only: its last page-local day
+ * @property {boolean} [ongoing] - #1623 run only: the outage is still running
+ * @property {number} [downSec] - #1623 run only: the closed days' downtime
  */
 
 /**
@@ -189,10 +194,19 @@ export function groupIncidents(incidents, options = {}) {
   // does not self-heal (see #934/#975).
   const buckets = new Map()
   const ungroupable = []
+  const runs = new Map()
   incidents.forEach((inc, idx) => {
+    // #1623 — consecutive day rows the worker proved to be ONE outage group on that run, across days.
+    const info = inc.derived === 'status_history' ? inc.outageRun : undefined
+    if (info) {
+      const run = runs.get(info.id) ?? { info, entries: [], firstIdx: idx }
+      run.entries.push(inc)
+      runs.set(info.id, run)
+      return
+    }
     const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
-    // #1292 — a `status_history`-derived incident is never grouped. A pre-#1622 one wears
-    // the "<resource> — recovered" suffix `isFlapTitle` keys on, but it is not a flap: it is one whole
+    // #1292 — a `status_history`-derived incident is never grouped. It wears the "<resource> — down"
+    // suffix `isFlapTitle` keys on (`— recovered` before #1622), but it is not a flap: it is one whole
     // DAY of downtime. Grouping buckets on the VIEWER's local day, so a real feed item late on the
     // page's day D and a synthetic anchored on D+1 could share a viewer-day bucket for the same
     // resource — and the merged row would then print the reconstructed anchor at minute precision
@@ -255,6 +269,32 @@ export function groupIncidents(incidents, options = {}) {
 
   for (const { idx, inc } of ungroupable) {
     rows.push({ row: { kind: 'single', incident: inc }, sortKey: getLatestActivity(inc), idx })
+  }
+
+  // #1623 — the header is the worker's measure of the whole run, not of the rows that reached this list.
+  for (const { info, entries, firstIdx } of runs.values()) {
+    const status = info.ongoing ? 'ongoing' : 'resolved'
+    const newestFirst = [...entries].sort((a, b) => b.derivedDay.localeCompare(a.derivedDay))
+    rows.push({
+      row: {
+        kind: 'group',
+        run: true,
+        dayKey: info.startDay,
+        startDay: info.startDay,
+        endDay: info.endDay,
+        ongoing: info.ongoing,
+        downSec: info.downSec,
+        normalizedTitle: `${normalizeTitle(entries[0].title)} — down`,
+        count: info.days,
+        rangeStart: newestFirst[newestFirst.length - 1].startedAt,
+        rangeEnd: newestFirst[0].startedAt,
+        statusCounts: { [status]: entries.length },
+        uniformStatus: true,
+        entries: newestFirst,
+      },
+      sortKey: entries.reduce((m, e) => Math.max(m, getLatestActivity(e)), 0),
+      idx: firstIdx,
+    })
   }
 
   // Newest first by sortKey (ms epoch); tiebreak by original input index for stable ordering.

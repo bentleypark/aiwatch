@@ -3635,7 +3635,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
               isClaimed: (resource, day) =>
                 claimedDays.has(`${resource}\u0000${day}`) || claimedDays.has(`${ANY_RESOURCE}\u0000${day}`),
             })
-            if (synthesized.length === 0 && incidents.length > 0 && feedFloor) {
+            if (!synthesized.some((i) => !i.accruing) && incidents.length > 0 && feedFloor) {
               // The transition, not the steady state. `feedFloor` is the day of the OLDEST surviving feed
               // item, so ONE hand-written incident published today sets the floor to today and every
               // history day is then either accruing or out of reach — the whole 30-day gap-fill vanishes

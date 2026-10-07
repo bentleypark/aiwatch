@@ -17,6 +17,7 @@ import RssCopyIcon from '../components/RssCopyIcon'
 import SlackInstallLink from '../components/SlackInstallLink'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
+import { groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { formatTime, formatDate } from '../utils/time'
@@ -305,7 +306,9 @@ export function GroupIncidentItem({ group, lang, t }) {
   // entries[0] is newest because Overview pre-sorts input by compareIncidents before groupIncidents()
   const representative = group.entries[0]
   const serviceName = representative.serviceName ?? representative.affectedNames?.[0] ?? ''
-  const dateStr = formatDate(group.rangeEnd, lang).split(' ').slice(0, 2).join(' ')
+  const dateStr = group.run
+    ? formatDate(group.startDay, lang, { dayOnly: true, day: group.startDay })
+    : formatDate(group.rangeEnd, lang).split(' ').slice(0, 2).join(' ')
   // Show the SUM of all grouped flips' downtime (labeled "총"/"total"), not just
   // the newest entry's duration — a "×N" group's impact is every flip combined.
   // Reuses the canonical sumGroupDuration/formatDurationMs shared with Incidents.jsx;
@@ -346,7 +349,7 @@ export function GroupIncidentItem({ group, lang, t }) {
               className="shrink-0 mono bg-[var(--bg3)] text-[var(--text2)]"
               style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', letterSpacing: '0.04em' }}
             >
-              ×{group.count}
+              {group.run ? groupBadgeText(group, t) : `×${group.count}`}
             </span>
             <span className="shrink-0 text-[9px] text-[var(--text2)]" aria-hidden="true">
               {expanded ? '▾' : '▸'}
@@ -364,7 +367,7 @@ export function GroupIncidentItem({ group, lang, t }) {
           style={{ marginLeft: '6px', paddingLeft: '8px', paddingTop: '4px', background: 'var(--bg0)', borderRadius: '0 4px 4px 0' }}
         >
           {group.entries.map(inc => (
-            <IncidentItem key={inc.id} incident={{ ...inc, serviceName: inc.serviceName ?? serviceName, affectedNames: inc.affectedNames ?? [serviceName] }} lang={lang} t={t} />
+            <IncidentItem key={inc.id} incident={{ ...inc, serviceName: inc.serviceName ?? serviceName, affectedNames: inc.affectedNames ?? [serviceName] }} hideStatus={hidesEntryStatus(group, inc)} lang={lang} t={t} />
           ))}
         </div>
       )}
@@ -373,9 +376,9 @@ export function GroupIncidentItem({ group, lang, t }) {
 }
 
 // Incident item with time + bar + content + accordion timeline
-export function IncidentItem({ incident, lang, t }) {
+export function IncidentItem({ incident, lang, t, hideStatus = false }) {
   const [expanded, setExpanded] = useState(false)
-  const barCls = INC_BAR_CLASS[incidentDisplayStatus(incident)] ?? INC_BAR_CLASS.resolved
+  const barCls = hideStatus ? 'bg-[var(--border-hi)]' : INC_BAR_CLASS[incidentDisplayStatus(incident)] ?? INC_BAR_CLASS.resolved
   // #1292 — a status_history-derived incident has an empty timeline, so this row is inert and the
   // full `incidents.derived.note` explanation is NOT reachable here; the Incidents page, whose rows
   // are unconditionally clickable, is where it renders. Not wired as a dead prop, which would read as

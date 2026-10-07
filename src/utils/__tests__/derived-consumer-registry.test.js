@@ -105,20 +105,21 @@ const SAFE = {
   'worker/src/services.ts': 'the orchestrator that CREATES them and computes the claim set',
   'worker/src/types.ts': 'declares the Incident shape, including the derived tag itself',
 
-  // Active-only — every synthesized incident is `resolved` by construction (today is excluded).
-  'worker/src/daily-summary.ts': 'reads only the first non-resolved incident',
-  'worker/src/ext-claude.ts': 'projects ACTIVE incidents only',
-  'worker/src/statusline.ts': 'reads the first non-resolved incident',
-  'worker/src/fallback.ts': 'gates on non-resolved incidents',
-  'worker/src/incident-text.ts': 'skips resolved — a cause must be live',
-  'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved',
-  'worker/src/platform-monitor.ts': 'active incidents only',
-  'worker/src/report.ts': 'active incidents only',
-  'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate',
-  'src/utils/regionStatus.js': 'active incidents only',
-  'src/utils/constants.js': 'active incidents only',
-  'api/_is-down/region-status.ts': 'active incidents only',
-  'api/is-down.ts': 'active-only for the verdict; the AI card joins incidents BY ID and a synthesized one is never analyzed, so it never matches',
+  // Active-only. #1623 — one synthesized row IS unresolved: today's, while its resource is down. Each
+  // file below either skips it explicitly or reads it only as "a live outage exists", never its start.
+  'worker/src/daily-summary.ts': 'reads the first non-resolved incident for an elapsed time, and skips a derived one (#1623) — its start is an estimate',
+  'worker/src/ext-claude.ts': 'projects ACTIVE incidents for Claude ids only; no Better Stack service is one',
+  'worker/src/statusline.ts': 'quotes the first non-resolved incident, and skips a derived one (#1623) — its title is ours',
+  'worker/src/fallback.ts': 'gates on non-resolved incidents: a #1623 today-row correctly marks the service as carrying an outage; no time or text is read',
+  'worker/src/incident-text.ts': 'skips resolved and derived (#1623) — a cause must be the provider\'s own live text',
+  'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved and derived',
+  'worker/src/platform-monitor.ts': 'active incidents only, from non-Better-Stack sources',
+  'worker/src/report.ts': 'floors the crowd-report window at the earliest active start; a #1623 today-row\'s start is clamped inside its own local day',
+  'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — a #1623 today-row is one, and no time is read',
+  'src/utils/regionStatus.js': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
+  'src/utils/constants.js': 'active incidents only, as a fallback exclusion — same reading as fallback.ts',
+  'api/_is-down/region-status.ts': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
+  'api/is-down.ts': 'active-only for the verdict and fallback; the AI card joins incidents BY ID and a synthesized one is never analyzed (refreshOrReanalyze and the alert path skip it, #1623)',
 
   // Read a count, an id or a title — never a duration-as-recovery or a minute-precise timestamp.
   'worker/src/suppression.ts': 'matches by id/title to hide an entry',
@@ -149,6 +150,7 @@ const SAFE = {
 
   // Guarded at the render layer, pinned separately by derived-date-precision-wiring.test.js.
   'src/pages/Incidents.jsx': 'passes dayOnly + the derived note; pinned by the precision-wiring scan',
+  'src/utils/groupLabels.js': 'formats a group row\'s range and badge (#1623); a multi-day outage group states days only, from the day each row carries',
   'src/utils/incidentFilter.js': 'the Incidents list filter (#1622, moved out of Incidents.jsx): service id, `tierStatus`, and a period cutoff on `startedAt` — a derived anchor sits inside its own day, so the cutoff is at most a day off and never publishes the anchor',
   'src/pages/ServiceDetails.jsx': 'passes dayOnly + the derived note; pinned by the precision-wiring scan',
   'src/pages/Overview.jsx': 'passes dayOnly; pinned by the precision-wiring scan',
@@ -234,6 +236,7 @@ const RB_SAFE = {
   'api/_is-down/incident-grouping.ts': 'same-day-order precision logic keys on derived === status_history only — a real timestamp needs no such handling',
   'api/is-down-group.ts': 'day-bucket formatting keys on derived === status_history only — a real timestamp needs no such handling',
   'src/pages/Incidents.jsx': 'passes dayOnly, computed from derived === status_history only — moot for a real timestamp',
+  'src/utils/groupLabels.js': 'formats a group row; branches on no freshness flag',
   'src/utils/incidentFilter.js': 'filters by service id, status and period; it branches on no freshness flag — a bridged incident is filtered exactly as it was inside Incidents.jsx before #1622 moved this out',
   'src/pages/ServiceDetails.jsx': 'passes dayOnly, computed from derived === status_history only — moot for a real timestamp',
   'src/pages/Overview.jsx': 'passes dayOnly, computed from derived === status_history only — moot for a real timestamp',
@@ -312,6 +315,7 @@ const SU_SAFE = {
   'worker/src/parsers/rootly.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/types.ts': 'declares the Incident shape, including the startUnknown flag itself',
   'src/pages/Incidents.jsx': 'renders whatever note incidentNote() picks; it branches on no flag of its own',
+  'src/utils/groupLabels.js': 'formats a group row\'s range; it derives no elapsed time',
   'src/utils/incidentFilter.js': 'reads `startedAt` only to compare with the period cutoff; it derives no elapsed time and states no start instant',
   'src/pages/ServiceDetails.jsx': 'same — the note choice moved to incidentNote(), which is the SU_APPLIER',
   'worker/src/xai-regions.ts': 'mergeXaiRegionalIncidents runs inside the parser leg, before #1480\'s step in fetchService stamps anything — so the duration it recomputes from a pair is never one this flag has blanked',
@@ -405,7 +409,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 75 → 76: #1510 added worker/src/mistral-public-api.ts, which counts a public API's listed
     // incidents and is SAFE on all three axes.
     // 76 → 77: #1622 moved the Incidents list filter into src/utils/incidentFilter.js, SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(77)
+    // 77 → 78: #1623 added src/utils/groupLabels.js, SAFE on all three.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(78)
   })
 
   it('leaves none unclassified', () => {
@@ -459,7 +464,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(77)
+    expect(all.length).toBe(78)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -505,7 +510,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(77)
+    expect(all.length).toBe(78)
   })
 
   it('leaves none unclassified for startUnknown', () => {

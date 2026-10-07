@@ -1,6 +1,6 @@
 // Better Stack RSS Feed Parser — for HuggingFace, Together, Modal, xAI (fireworks left this group in #1198)
 
-import type { TimelineEntry, Incident, DailyImpactLevel, ServiceComponent } from '../types'
+import type { TimelineEntry, Incident, DailyImpactLevel, ServiceComponent, OutageRun } from '../types'
 import { formatDuration, displayedMinutes } from '../utils'
 import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
 
@@ -783,7 +783,7 @@ function addDays(day: string, n: number): string {
 export const BS_HISTORY_MIN_DOWNTIME_SEC = 600
 
 /** Default window, in `status_history` ROWS. The live pages serve one row per day ending with today,
- *  and today is then dropped as still-accruing — so this is ~29 completed days in practice, matching
+ *  and today is emitted as the accruing day (#1623) — so this is 30 completed days plus today, matching
  *  the Score's own trailing window closely enough for its purpose, rather than the 90 the page
  *  serves: `together` exposes a per-model resource each, so a 90-day sweep can add hundreds of rows to
  *  `svc.incidents` → `services:latest` → `incidents:monthly`, whose per-service cap truncates OLDEST
@@ -811,10 +811,11 @@ const CONTINUING_SLACK_SEC = 300
  *  binds it is logged, never silent. */
 const MAX_SYNTHESIZED_INCIDENTS = 1000
 
-/** The bound that actually matters, in the unit that matters. Equal to the window by construction —
- *  every emitted day is already inside it — so this cannot bind today; it exists so the truncation is
- *  expressed in DAYS and a future window change cannot silently re-introduce the row-cap defect. */
-const MAX_SYNTHESIZED_DAYS = BS_HISTORY_WINDOW_DAYS
+/** The bound that actually matters, in the unit that matters. The window's closed days plus today by
+ *  construction — every emitted day is already inside it — so this cannot bind today; it exists so the
+ *  truncation is expressed in DAYS and a future window change cannot silently re-introduce the row-cap
+ *  defect. */
+const MAX_SYNTHESIZED_DAYS = BS_HISTORY_WINDOW_DAYS + 1
 
 /** #1292 — one incident per DOWNTIME DAY, synthesized from each resource's `status_history`.
  *
@@ -843,11 +844,97 @@ const MAX_SYNTHESIZED_DAYS = BS_HISTORY_WINDOW_DAYS
  *  daily totals do not separate those shapes — so the join was always guessing on exactly the input it
  *  was least able to read.
  *
- *  **The current local day is excluded** — still accruing, so its seconds are a partial read and its
- *  incident would have to invent a start time. Everything emitted is closed and immutable, which also
- *  keeps synthesis off the alert path: the new-incident branch never sees a resolved incident, and the
- *  resolved branch is gated on the `alertedNewMap` marker a new alert would have written.
+ *  **The current local day is emitted under the same id it will close with (#1623)** — unresolved while
+ *  the resource is in `downtime`, otherwise that day's total so far. `incidents:monthly` banks it only
+ *  once the day has closed, and it never alerts: `canIncidentStillAlert` refuses every `derived` row.
  */
+/** A day the incident path does not count: announced maintenance, or downtime no longer than it. */
+function isMaintenanceDay(d: BetterStackStatusHistory): boolean {
+  if (d.status === 'maintenance' || d.status === 'under_maintenance') return true
+  return (d.maintenance_duration ?? 0) > 0 && (d.downtime_duration ?? 0) <= (d.maintenance_duration ?? 0)
+}
+
+/** #1623 — consecutive downtime days that are provably ONE outage, as day → the run's first day, for
+ *  runs of two days or more. Two days join only where the boundary between them was down: the earlier
+ *  day was down all day, or the later one was (today counts once it has been down since midnight). A
+ *  partial day can open a run or close one, not both — down at both ends with a gap is two outages.
+ *  Display only: no id, no archive field, no alert reads it. */
+export function outageRuns(history: BetterStackStatusHistory[], today: string, todayDownSinceMidnight: boolean, downNow: boolean): Map<string, string> {
+  const full = (sec: number) => sec >= 86_400 - CONTINUING_SLACK_SEC
+  const days = history.filter((d) => (d.downtime_duration ?? 0) > 0 && d.day <= today && !isMaintenanceDay(d))
+    .sort((a, b) => a.day.localeCompare(b.day))
+  const runs: string[][] = []
+  let open = false, lastFull = false
+  for (const d of days) {
+    const sec = d.downtime_duration ?? 0
+    const downAtStart = full(sec) || (d.day === today && todayDownSinceMidnight)
+    const run = runs.at(-1)
+    // Down now without having been down since midnight: today holds a new outage, whatever it closed.
+    const freshToday = d.day === today && downNow && !todayDownSinceMidnight
+    if (run && open && !freshToday && run.at(-1) === addDays(d.day, -1) && (lastFull || downAtStart)) {
+      run.push(d.day)
+      open = full(sec) || d.day === today
+    } else {
+      runs.push([d.day])
+      open = true
+    }
+    lastFull = full(sec)
+  }
+  const out = new Map<string, string>()
+  for (const run of runs) if (run.length > 1) for (const day of run) out.set(day, run[0])
+  return out
+}
+
+/** #1623 — each run's extent over the rows given. `downSec` is the closed days' downtime; the running
+ *  day is excluded while the outage is ongoing. */
+export function describeRuns(history: BetterStackStatusHistory[], runOf: Map<string, string>, resourceKey: string, today: string, downNow: boolean): Map<string, OutageRun> {
+  const secByDay = new Map(history.map((d) => [d.day, d.downtime_duration ?? 0]))
+  const out = new Map<string, OutageRun>()
+  for (const [day, first] of [...runOf].sort(([a], [b]) => a.localeCompare(b))) {
+    const run = out.get(first) ?? { id: `bs-run:${resourceKey}:${first}`, startDay: first, endDay: first, days: 0, downSec: 0, ongoing: false }
+    const ongoingDay = day === today && downNow
+    run.endDay = day
+    run.days += 1
+    if (!ongoingDay) run.downSec += secByDay.get(day) ?? 0
+    out.set(first, run)
+  }
+  return out
+}
+
+/** #1623 — the still-accruing local day. While the resource is in `downtime` it is the service's
+ *  unresolved incident; once it recovers it is that day's total so far. Same id either way, and the same
+ *  id the closed row carries tomorrow. */
+function todayIncident(resourceId: string, name: string, day: string, sec: number, dayStartMs: number, now: number, down: boolean): Incident {
+  const base = {
+    id: `bs-hist:${resourceId}:${day}`,
+    impact: 'minor' as const,
+    componentNames: [name],
+    timeline: [],
+    derived: 'status_history' as const,
+    derivedDay: day,
+    accruing: true as const,
+  }
+  if (down) {
+    return {
+      ...base,
+      title: `${name} — down`,
+      status: 'investigating',
+      startedAt: new Date(Math.max(dayStartMs, now - sec * 1000)).toISOString(),
+      resolvedAt: null,
+      duration: null,
+    }
+  }
+  const anchorMs = dayStartMs + 12 * 3_600_000 // the closed rows' anchor, which the #1295 guard windows on
+  return {
+    ...base,
+    title: `${name} — down`,
+    status: 'resolved',
+    startedAt: new Date(anchorMs).toISOString(),
+    resolvedAt: new Date(anchorMs + sec * 1000).toISOString(),
+    duration: formatDuration(new Date(0), new Date(sec * 1000)),
+  }
+}
+
 export function parseBetterStackDowntimeIncidents(
   data: BetterStackIndex,
   opts: {
@@ -872,7 +959,6 @@ export function parseBetterStackDowntimeIncidents(
   const deny = new Set((opts.denylist ?? []).map((n) => n.toLowerCase()))
   const today = zonedDayOf(now, tz)
   const windowFrom = addDays(today, -windowDays)
-  const yesterday = addDays(today, -1)
   const out: Incident[] = []
 
   for (const resource of data.included ?? []) {
@@ -884,13 +970,15 @@ export function parseBetterStackDowntimeIncidents(
     const todayDownSec = history.find((d) => d.day === today)?.downtime_duration ?? 0
     const stillDown = resource.attributes?.status === 'downtime' && todayDownSec > 0
       && todayDownSec >= (now - zonedDayStartMs(today, tz)) / 1000 - CONTINUING_SLACK_SEC
+    const downNow = resource.attributes?.status === 'downtime'
+    const emitted: BetterStackStatusHistory[] = []
 
     for (const d of history) {
       if (!DAY_RE.test(d.day ?? '')) {
         console.warn(`[betterstack] #1292 ${name}: unusable status_history day "${d.day}" — skipping the row`)
         continue
       }
-      if (d.day >= today) continue                 // still accruing — see the doc comment
+      if (d.day > today) continue
       if (d.day < windowFrom) continue
       // The feed's reach is NOT the synthesis window. `parseRssIncidents` caps at 20 groups, drops
       // maintenance titles and sub-60s blips, and only sees whatever `/feed` still serves — so for a
@@ -906,8 +994,7 @@ export function parseBetterStackDowntimeIncidents(
       // to a `downtime` day in `parseBetterStackUptime` (91.66 either way). So a maintenance day counts
       // against uptime while carrying no incident — a deliberate divergence inherited from the incident
       // path, not an oversight, and NOT something this parser is making consistent.
-      if (d.status === 'maintenance' || d.status === 'under_maintenance') continue
-      if ((d.maintenance_duration ?? 0) > 0 && (d.downtime_duration ?? 0) <= (d.maintenance_duration ?? 0)) continue
+      if (isMaintenanceDay(d)) continue
       const sec = d.downtime_duration ?? 0
       // A row that DECLARES downtime but reports none is self-contradictory — a schema signal, not a
       // quiet day, and it must not fall through the same floor as a genuine 3-minute blip. This is the
@@ -919,21 +1006,48 @@ export function parseBetterStackDowntimeIncidents(
         console.warn(`[betterstack] #1292 ${name}: status="${d.status}" on ${d.day} but downtime_duration is ${d.downtime_duration === undefined ? 'absent' : '0'} — status_history shape may have changed`)
         continue
       }
-      if (sec < minDowntimeSec) continue
+      // #1623 — today, down since midnight, is the running outage however few seconds it holds yet.
+      if (sec < minDowntimeSec && !(d.day === today && stillDown)) continue
       if (isClaimed?.(name, d.day)) continue
+      emitted.push(d)
+    }
+
+    // #1623 — runs are measured over the rows actually emitted, so a group never counts a day that is
+    // not one of its own rows: a claimed, held-back, maintenance or sub-floor day breaks the run.
+    const runOf = outageRuns(emitted, today, stillDown, downNow)
+    // Down since midnight: the outage running now includes yesterday's run, whether or not today is one of
+    // its rows (a feed item can claim today).
+    // Yesterday's run carries on only through a day down all day; a partial yesterday closed it.
+    const yesterday = addDays(today, -1)
+    const yesterdayFull = (emitted.find((d) => d.day === yesterday)?.downtime_duration ?? 0) >= 86_400 - CONTINUING_SLACK_SEC
+    const liveRun = stillDown ? runOf.get(today) ?? (yesterdayFull ? runOf.get(yesterday) : undefined) : undefined
+    const runs = describeRuns(emitted, runOf, resource.id ?? name, today, downNow)
+    if (liveRun) runs.get(liveRun)!.ongoing = true
+    const continuingDay = (day: string) => day !== today && !!liveRun && runOf.get(day) === liveRun
+
+    for (const d of emitted) {
+      const sec = d.downtime_duration ?? 0
 
       // An anchor INSIDE the day, not a claim about the time of day — which `status_history` does not
       // state. The day itself travels as `derivedDay` (see `types.ts`), because no instant can encode
       // it for consumers that slice in different zones: local noon reads back as the previous UTC day
       // on a page past UTC+12 (`Auckland` in NZDT, aliased here), and as the next one for a viewer far
       // enough east of the page. Noon is chosen only so the anchor sits inside its own local day.
+      if (d.day === today) {
+        out.push({
+          ...todayIncident(resource.id ?? name, name, d.day, sec, zonedDayStartMs(today, tz), now,
+            resource.attributes?.status === 'downtime'),
+          ...(runOf.has(d.day) ? { outageRun: runs.get(runOf.get(d.day)!) } : {}),
+        })
+        continue
+      }
       const startMs = zonedDayStartMs(d.day, tz) + 12 * 3_600_000
       out.push({
         // A function of ONE closed `status_history` row: the resource and the day. Nothing about the
         // window, the RSS claim set, or a run's extent can move it. See the doc comment for why that
         // matters — `incidents:monthly` accumulates by id, and a vanished id reads as a withdrawal.
         id: `bs-hist:${resource.id ?? name}:${d.day}`,
-        title: `${name} — downtime`,
+        title: `${name} — down`,
         status: 'resolved',
         // The RSS monitor posts these replace carried no severity wording either, so
         // `mapBetterStackImpact` scored every one of them `minor`. Matching that keeps the monthly
@@ -946,7 +1060,8 @@ export function parseBetterStackDowntimeIncidents(
         timeline: [],
         derived: 'status_history',
         derivedDay: d.day,
-        ...(d.day === yesterday && stillDown ? { continuing: true as const } : {}),
+        ...(continuingDay(d.day) ? { continuing: true as const } : {}),
+        ...(runOf.has(d.day) ? { outageRun: runs.get(runOf.get(d.day)!) } : {}),
       })
     }
   }

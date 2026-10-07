@@ -47,8 +47,9 @@ export function isGenericTitle(title: string | null | undefined): boolean {
 // Used as the cross-row sort key in `groupIncidents`
 // so the visible Incidents / ServiceDetails / Is X Down order matches Overview
 // (#411 follow-up to #406).
-function getLatestActivityMs(inc: { status: string; startedAt: string; resolvedAt?: string | null }): number {
-  if (inc.status === 'resolved' && inc.resolvedAt) {
+function getLatestActivityMs(inc: { status: string; startedAt: string; resolvedAt?: string | null; derived?: string; continuing?: true }): number {
+  // #1623 — a continuing day row has not resolved; its `resolvedAt` is only its day total's end.
+  if (inc.status === 'resolved' && inc.resolvedAt && !(inc.derived === 'status_history' && inc.continuing)) {
     return new Date(inc.resolvedAt).getTime()
   }
   return new Date(inc.startedAt).getTime()
@@ -114,6 +115,8 @@ export interface GroupingIncident {
   derivedDay?: string
   /** #1622 — a `derived` row whose resource is still down now; see `worker/src/types.ts`. */
   continuing?: true
+  /** #1623 — the multi-day outage this day row belongs to; see `OutageRun` in `worker/src/types.ts`. */
+  outageRun?: { id: string; startDay: string; endDay: string; days: number; downSec: number; ongoing: boolean }
   /** #1390 — `startedAt` is an ANCHOR on this incident's own `resolvedAt`; no elapsed time is
    *  derivable. Declared for the same reason `derived` above is: an undeclared optional lets
    *  TypeScript's weak-type check prove the guards that read it can never fire. */
@@ -130,6 +133,12 @@ export interface GroupRow {
   statusCounts: Record<string, number>
   uniformStatus: boolean
   entries: GroupingIncident[]
+  /** #1623 — one multi-day outage (entries share `outageRun`); mirror of the SPA row. */
+  run?: true
+  startDay?: string
+  endDay?: string
+  ongoing?: boolean
+  downSec?: number
 }
 
 export interface SingleRow {
@@ -183,6 +192,7 @@ export function groupIncidents(
 
   const buckets = new Map<string, { dayKey: string; normalizedTitle: string; entries: GroupingIncident[]; firstIdx: number }>()
   const ungroupable: Array<{ idx: number; inc: GroupingIncident }> = []
+  const runs = new Map<string, { info: NonNullable<GroupingIncident['outageRun']>; entries: GroupingIncident[]; firstIdx: number }>()
 
   incidents.forEach((inc, idx) => {
     // Real human-curated incidents (impact != null) skip clustering — EXCEPT
@@ -194,8 +204,16 @@ export function groupIncidents(
     // All cluster because the impact is boilerplate, not curation.
     // Lockstep with src/utils/incidentGrouping.js.
     const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
+    // #1623 — consecutive day rows the worker proved to be ONE outage group on that key, across days.
+    const info = inc.derived === 'status_history' ? inc.outageRun : undefined
+    if (info) {
+      const run = runs.get(info.id) ?? { info, entries: [], firstIdx: idx }
+      run.entries.push(inc)
+      runs.set(info.id, run)
+      return
+    }
     // #1292 — never group a synthesized incident. Kept in lockstep with the SPA copy in
-    // `src/utils/incidentGrouping.js`: a pre-#1622 one wears the "<resource> — recovered" suffix `isFlapTitle`
+    // `src/utils/incidentGrouping.js`: it wears the "<resource> — down" suffix `isFlapTitle`
     // keys on but is one whole DAY of downtime, and grouping buckets on the VIEWER's local day, so it
     // could merge with a real feed item and print the reconstructed anchor at minute precision (a
     // group range carries no `dayOnly`).
@@ -254,6 +272,31 @@ export function groupIncidents(
 
   for (const { idx, inc } of ungroupable) {
     rows.push({ row: { kind: 'single', incident: inc }, sortKey: getLatestActivityMs(inc), idx })
+  }
+
+  for (const { info, entries, firstIdx } of runs.values()) {
+    const status = info.ongoing ? 'ongoing' : 'resolved'
+    const newestFirst = [...entries].sort((a, b) => (b.derivedDay ?? '').localeCompare(a.derivedDay ?? ''))
+    rows.push({
+      row: {
+        kind: 'group',
+        run: true,
+        dayKey: info.startDay,
+        startDay: info.startDay,
+        endDay: info.endDay,
+        ongoing: info.ongoing,
+        downSec: info.downSec,
+        normalizedTitle: `${normalizeTitle(entries[0].title)} — down`,
+        count: info.days,
+        rangeStart: newestFirst[newestFirst.length - 1].startedAt,
+        rangeEnd: newestFirst[0].startedAt,
+        statusCounts: { [status]: entries.length },
+        uniformStatus: true,
+        entries: newestFirst,
+      },
+      sortKey: entries.reduce((m, e) => Math.max(m, getLatestActivityMs(e)), 0),
+      idx: firstIdx,
+    })
   }
 
   rows.sort((a, b) => {

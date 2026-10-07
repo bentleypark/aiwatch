@@ -196,7 +196,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   const activeIssues = services.filter(s => isAffectedStatus(s.status))
   if (activeIssues.length > 0) {
     const issueList = activeIssues.map(s => {
-      const activeInc = (s.incidents ?? []).find(i => i.status !== 'resolved')
+      // #1623 — a synthesized today-row's start is an estimate, so no elapsed time is quoted from it.
+      const activeInc = (s.incidents ?? []).find(i => i.status !== 'resolved' && i.derived !== 'status_history')
       const status = activeInc ? activeInc.status : s.status
       const duration = activeInc ? formatDurationFromStart(activeInc.startedAt) : ''
       return `${s.status === 'down' ? '🔴' : '🟡'} ${s.name} (${status}${duration ? `, ${duration}` : ''})`

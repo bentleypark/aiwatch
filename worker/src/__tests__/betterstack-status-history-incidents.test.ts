@@ -13,6 +13,8 @@ import {
   parseBetterStackUptime,
   parseBetterStackDailyImpact,
   BS_HISTORY_MIN_DOWNTIME_SEC,
+  outageRuns,
+  describeRuns,
   type BetterStackIndex,
 } from '../parsers/betterstack'
 
@@ -171,10 +173,10 @@ describe('parseBetterStackDowntimeIncidents — id invariance', () => {
   })
 
   it('is unmoved by a day closing on the next cron day', () => {
-    // 08-10 is still accruing on the 10th and closed on the 11th. The days already published keep
-    // their ids; only a new one appears.
+    // 08-10 is still accruing on the 10th and closed on the 11th. #1623 — it is published while it
+    // accrues, under the id it keeps once closed.
     expect(idsWith({ now: Date.parse('2026-08-10T18:00:00Z') }))
-      .toEqual(['bs-hist:7:2026-08-08', 'bs-hist:7:2026-08-09'])
+      .toEqual(['bs-hist:7:2026-08-08', 'bs-hist:7:2026-08-09', 'bs-hist:7:2026-08-10'])
     expect(idsWith({ now: Date.parse('2026-08-11T18:00:00Z') }))
       .toEqual(['bs-hist:7:2026-08-08', 'bs-hist:7:2026-08-09', 'bs-hist:7:2026-08-10'])
   })
@@ -271,7 +273,7 @@ describe('parseBetterStackDowntimeIncidents — behaviour', () => {
       page('UTC', [{ id: '1', name: 'api', days }]), { now: Date.parse('2026-07-25T12:00:00Z'), windowDays: 30 })
 
     expect(incidents.every((i) => i.derivedDay! >= '2026-06-25'), 'nothing older than the window').toBe(true)
-    expect(incidents.every((i) => i.derivedDay! < '2026-07-25'), 'nothing from the accruing day on').toBe(true)
+    expect(incidents.every((i) => i.derivedDay! <= '2026-07-25'), 'nothing past the accruing day').toBe(true)
   })
 
   it.each([
@@ -402,13 +404,14 @@ describe('parseBetterStackDowntimeIncidents — behaviour', () => {
     // incident breaks the invariant the per-day id rests on: its `duration` would change next cron.
     const now = Date.parse('2026-08-20T04:00:00Z') // = 2026-08-19 21:00 Pacific
     const incidents = parseBetterStackDowntimeIncidents(
-      page('Pacific Time (US & Canada)', [{ id: '1', name: 'api', days: [
+      page('Pacific Time (US & Canada)', [{ id: '1', name: 'api', status: 'downtime', days: [
         ['2026-08-18', 7200],
         ['2026-08-19', 7200], // still accruing in the PAGE's zone, already past in UTC
       ] }]), { now })
 
-    expect(incidents.map((i) => i.derivedDay), 'the page-local today must not be emitted')
-      .toEqual(['2026-08-18'])
+    // #1623 — the page-local today is the accruing one: while its resource is down it is unresolved.
+    expect(incidents.map((i) => [i.derivedDay, i.status]), 'the page-local today is the accruing one')
+      .toEqual([['2026-08-19', 'investigating'], ['2026-08-18', 'resolved']])
   })
 
   it('drops a day whose downtime is fully accounted for by announced maintenance', () => {
@@ -466,7 +469,7 @@ describe('parseBetterStackDowntimeIncidents — same-day order (duration desc, t
   it('puts the LONGER outage first within a day', () => {
     const out = parseBetterStackDowntimeIncidents(twoOnOneDay, { now: NOW })
     expect(out.map((i) => i.title)).toEqual([
-      'eu.api.helicone.ai — downtime', 'api.hconeai.com — downtime',
+      'eu.api.helicone.ai — down', 'api.hconeai.com — down',
     ])
   })
 
@@ -480,7 +483,7 @@ describe('parseBetterStackDowntimeIncidents — same-day order (duration desc, t
     const out = parseBetterStackDowntimeIncidents(tie, { now: NOW })
     expect(out.map((i) => i.duration)).toEqual([out[1].duration, out[1].duration]) // identical on screen
     expect(out.map((i) => i.title)).toEqual([
-      'api.hconeai.com — downtime', 'eu.api.helicone.ai — downtime',
+      'api.hconeai.com — down', 'eu.api.helicone.ai — down',
     ])
   })
 
@@ -497,19 +500,31 @@ describe('#1622 — the synthesized row as published', () => {
   const H = 3600
   // NOW is 2026-08-28T13:00Z on a UTC page: 2026-08-27 is the last closed day, and 13h of today elapsed.
   const SINCE_MIDNIGHT = 13 * H
-  it('titles the row as downtime, not a recovery', () => {
+  it('titles the row as down, not a recovery', () => {
     const out = parseBetterStackDowntimeIncidents(
       page('UTC', [{ id: 'r', name: 'api.hconeai.com', days: [['2026-08-26', 2 * H]] }]), { now: NOW })
-    expect(out.map((i) => i.title)).toEqual(['api.hconeai.com — downtime'])
+    expect(out.map((i) => i.title)).toEqual(['api.hconeai.com — down'])
   })
 
   const flags = (status: string, days: Array<[string, number]>) =>
     parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api.hconeai.com', status, days }]), { now: NOW })
-      .map((i) => [i.derivedDay, i.continuing])
+      .filter((i) => i.derivedDay !== '2026-08-28').map((i) => [i.derivedDay, i.continuing])
 
-  it('flags ONLY the last closed day of an outage that has run since local midnight', () => {
-    expect(flags('downtime', [['2026-08-25', 2 * H], ['2026-08-26', 24 * H], ['2026-08-27', 24 * H], ['2026-08-28', SINCE_MIDNIGHT - 60]])).toEqual([
-      ['2026-08-27', true], ['2026-08-26', undefined], ['2026-08-25', undefined],
+  it('flags every closed day of an outage that has run since local midnight, back to the day it began', () => {
+    expect(flags('downtime', [['2026-08-24', H], ['2026-08-25', 2 * H], ['2026-08-26', 24 * H], ['2026-08-27', 24 * H], ['2026-08-28', SINCE_MIDNIGHT - 60]])).toEqual([
+      ['2026-08-27', true], ['2026-08-26', true], ['2026-08-25', true], ['2026-08-24', undefined],
+    ])
+  })
+
+  it('stops at a day that was not down all day — the outage began there', () => {
+    expect(flags('downtime', [['2026-08-25', 2 * H], ['2026-08-26', 20 * H], ['2026-08-27', 24 * H], ['2026-08-28', SINCE_MIDNIGHT]])).toEqual([
+      ['2026-08-27', true], ['2026-08-26', true], ['2026-08-25', undefined],
+    ])
+  })
+
+  it('stops at a day with no downtime', () => {
+    expect(flags('downtime', [['2026-08-25', 24 * H], ['2026-08-26', 0], ['2026-08-27', 24 * H], ['2026-08-28', SINCE_MIDNIGHT]])).toEqual([
+      ['2026-08-27', true], ['2026-08-25', undefined],
     ])
   })
 
@@ -529,7 +544,7 @@ describe('#1622 — the synthesized row as published', () => {
     // America/Adak is UTC-9 in August, so at 13:00Z the local day began 4h ago (13h ago in UTC).
     const adak = (todaySec: number) => parseBetterStackDowntimeIncidents(page('America/Adak', [{
       id: 'r', name: 'api.hconeai.com', status: 'downtime', days: [['2026-08-27', 24 * H], ['2026-08-28', todaySec]],
-    }]), { now: NOW }).map((i) => [i.derivedDay, i.continuing])
+    }]), { now: NOW }).filter((i) => i.derivedDay !== '2026-08-28').map((i) => [i.derivedDay, i.continuing])
     expect(adak(4 * H - 60)).toEqual([['2026-08-27', true]])
     expect(adak(3 * H)).toEqual([['2026-08-27', undefined]])
   })
@@ -551,3 +566,150 @@ describe('#1622 — the synthesized row as published', () => {
     expect(flags('downtime', [['2026-08-25', 24 * H], ['2026-08-27', 0], ['2026-08-28', SINCE_MIDNIGHT]])).toEqual([['2026-08-25', undefined]])
   })
 })
+
+describe('#1623 — outageRuns: which consecutive days are provably one outage', () => {
+  const H = 3600
+  const hist = (rows: Array<[string, number]>) => rows.map(([day, sec]) => ({ day, status: sec > 0 ? 'downtime' : 'operational', downtime_duration: sec, maintenance_duration: 0 }))
+  const runs = (rows: Array<[string, number]>, today = '2026-10-05', downSinceMidnight = false, downNow = downSinceMidnight) =>
+    Object.fromEntries(outageRuns(hist(rows), today, downSinceMidnight, downNow))
+
+  it('joins a partial start, full days and today down since midnight — helicone 2026-10-02..05', () => {
+    expect(runs([['2026-10-01', 0], ['2026-10-02', 5369], ['2026-10-03', 24 * H], ['2026-10-04', 24 * H], ['2026-10-05', 20 * H]], '2026-10-05', true))
+      .toEqual({ '2026-10-02': '2026-10-02', '2026-10-03': '2026-10-02', '2026-10-04': '2026-10-02', '2026-10-05': '2026-10-02' })
+  })
+
+  it('keeps a finished outage joined: partial start, full day, partial end', () => {
+    expect(runs([['2026-09-10', 3 * H], ['2026-09-11', 24 * H], ['2026-09-12', 2 * H]]))
+      .toEqual({ '2026-09-10': '2026-09-10', '2026-09-11': '2026-09-10', '2026-09-12': '2026-09-10' })
+  })
+
+  it('does not join two adjacent partial days — the boundary is not known to be down', () => {
+    expect(runs([['2026-07-23', 17894], ['2026-07-24', 58690]]))
+      .toEqual({})
+  })
+
+  it('does not let a partial day both close one outage and open the next', () => {
+    // 09-11 was down at its start (09-10 full) and at its end (09-12 full) but not all day: two outages.
+    expect(runs([['2026-09-10', 24 * H], ['2026-09-11', 5 * H], ['2026-09-12', 24 * H], ['2026-09-13', H]]))
+      .toEqual({ '2026-09-10': '2026-09-10', '2026-09-11': '2026-09-10', '2026-09-12': '2026-09-12', '2026-09-13': '2026-09-12' })
+  })
+
+  it('does not join today unless it has been down since midnight', () => {
+    expect(runs([['2026-10-04', 3 * H], ['2026-10-05', H]], '2026-10-05', false)).toEqual({})
+    expect(runs([['2026-10-04', 3 * H], ['2026-10-05', H]], '2026-10-05', true))
+      .toEqual({ '2026-10-04': '2026-10-04', '2026-10-05': '2026-10-04' })
+  })
+
+  it('does not join a NEW outage today onto yesterday\'s, even after a full day', () => {
+    // Down all of 10-04, so down at 10-05 00:00 — but 2h by 13:00 while down now means it recovered and
+    // went down again: the running outage began today.
+    expect(runs([['2026-10-04', 24 * H], ['2026-10-05', 2 * H]], '2026-10-05', false, true)).toEqual({})
+    // Recovered today: today's partial closes yesterday's outage.
+    expect(runs([['2026-10-04', 24 * H], ['2026-10-05', 2 * H]], '2026-10-05', false, false))
+      .toEqual({ '2026-10-04': '2026-10-04', '2026-10-05': '2026-10-04' })
+  })
+
+  it('breaks on a day the incident path treats as maintenance', () => {
+    const rows = [
+      { day: '2026-10-02', status: 'downtime', downtime_duration: 24 * H, maintenance_duration: 0 },
+      { day: '2026-10-03', status: 'maintenance', downtime_duration: 24 * H, maintenance_duration: 24 * H },
+      { day: '2026-10-04', status: 'downtime', downtime_duration: 24 * H, maintenance_duration: 0 },
+      { day: '2026-10-05', status: 'downtime', downtime_duration: 2 * H, maintenance_duration: 3 * H },
+    ]
+    expect(Object.fromEntries(outageRuns(rows, '2026-10-06', false, false))).toEqual({})
+  })
+
+  it('breaks on a day with no downtime', () => {
+    expect(runs([['2026-09-01', 24 * H], ['2026-09-02', 0], ['2026-09-03', 24 * H]])).toEqual({})
+  })
+})
+
+describe('#1623 — today is a day inside the cap, not one that pushes the oldest out', () => {
+  it('keeps every closed day of the window when today is down too', () => {
+    const days: Array<[string, number]> = Array.from({ length: 31 }, (_, i) => [
+      new Date(Date.UTC(2026, 7, 1) + i * 86_400_000).toISOString().slice(0, 10), i === 30 ? 13 * 3600 : 86_400,
+    ])
+    const out = parseBetterStackDowntimeIncidents(
+      page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days }]), { now: Date.parse('2026-08-31T13:00:00Z') })
+    expect(out.map((i) => i.derivedDay).sort()[0]).toBe('2026-08-01')
+    expect(out).toHaveLength(31)
+  })
+})
+
+describe('#1623 — each run row carries the whole run, measured over the full history', () => {
+  const H = 3600
+  const days = (rows: Array<[string, number]>) => rows
+  const NOW_RUN = Date.parse('2026-10-05T13:00:00Z')
+  const helicone = days([['2026-10-01', 0], ['2026-10-02', 5369], ['2026-10-03', 24 * H], ['2026-10-04', 24 * H], ['2026-10-05', 13 * H]])
+
+  it('states the true start, end, day count and closed-day downtime of a running outage', () => {
+    const out = parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days: helicone }]), { now: NOW_RUN })
+    const runs = new Set(out.map((i) => JSON.stringify(i.outageRun)))
+    expect(runs.size).toBe(1)
+    expect(out[0].outageRun).toEqual({ id: 'bs-run:r:2026-10-02', startDay: '2026-10-02', endDay: '2026-10-05', days: 4, downSec: 5369 + 48 * H, ongoing: true })
+  })
+
+  it('never counts a day it does not emit — the feed floor starts the run where the rows start', () => {
+    const out = parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days: helicone }]), { now: NOW_RUN, notBefore: '2026-10-04' })
+    expect(out.map((i) => i.derivedDay)).toEqual(['2026-10-05', '2026-10-04'])
+    expect(out.map((i) => i.outageRun)).toEqual([
+      { id: 'bs-run:r:2026-10-04', startDay: '2026-10-04', endDay: '2026-10-05', days: 2, downSec: 24 * H, ongoing: true },
+      { id: 'bs-run:r:2026-10-04', startDay: '2026-10-04', endDay: '2026-10-05', days: 2, downSec: 24 * H, ongoing: true },
+    ])
+  })
+
+  it('breaks a run at a day the feed claims, so the feed\'s own row is never also counted in the group', () => {
+    const out = parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days: helicone }]),
+      { now: NOW_RUN, isClaimed: (_n, d) => d === '2026-10-03' })
+    expect(out.map((i) => [i.derivedDay, i.outageRun?.startDay, i.outageRun?.days])).toEqual([
+      ['2026-10-05', '2026-10-04', 2], ['2026-10-04', '2026-10-04', 2], ['2026-10-02', undefined, undefined],
+    ])
+  })
+
+  it('keeps the run ongoing when the feed claims today but the resource is still down since midnight', () => {
+    const out = parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days: helicone }]),
+      { now: NOW_RUN, isClaimed: (_n, d) => d === '2026-10-05' })
+    expect(out.map((i) => [i.derivedDay, i.continuing, i.outageRun?.ongoing, i.outageRun?.endDay])).toEqual([
+      ['2026-10-04', true, true, '2026-10-04'], ['2026-10-03', true, true, '2026-10-04'], ['2026-10-02', true, true, '2026-10-04'],
+    ])
+  })
+
+  it('does not revive a run that yesterday\'s partial day closed — today\'s outage is a new one', () => {
+    const rows: Array<[string, number]> = [['2026-10-03', 24 * H], ['2026-10-04', 6 * H], ['2026-10-05', 13 * H]]
+    for (const isClaimed of [undefined, (_n: string, d: string) => d === '2026-10-05']) {
+      const out = parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days: rows }]), { now: NOW_RUN, isClaimed })
+      const closed = out.filter((i) => i.derivedDay !== '2026-10-05')
+      expect(closed.map((i) => [i.derivedDay, i.outageRun?.ongoing])).toEqual([['2026-10-04', false], ['2026-10-03', false]])
+      expect(closed.find((i) => i.derivedDay === '2026-10-03')?.continuing).toBeUndefined()
+    }
+  })
+
+  it('marks a day continuing only as part of the running outage\'s run — a lone day is never marked', () => {
+    const rows: Array<[string, number]> = [['2026-10-04', 3 * H], ['2026-10-05', 13 * H]]
+    const out = parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days: rows }]),
+      { now: NOW_RUN, isClaimed: (_n, d) => d === '2026-10-05' })
+    expect(out.map((i) => [i.derivedDay, i.continuing, i.outageRun])).toEqual([['2026-10-04', undefined, undefined]])
+  })
+
+  it('never marks a day continuing whose run is not ongoing', () => {
+    const rows: Array<[string, number]> = [['2026-10-03', 24 * H], ['2026-10-04', 6 * H], ['2026-10-05', 13 * H]]
+    for (const isClaimed of [undefined, (_n: string, d: string) => d === '2026-10-05']) {
+      const out = parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days: rows }]), { now: NOW_RUN, isClaimed })
+      expect(out.filter((i) => i.continuing && !i.outageRun?.ongoing)).toEqual([])
+    }
+  })
+
+  it('emits today below the downtime floor while it has been down since midnight', () => {
+    const justAfter = Date.parse('2026-10-05T00:04:00Z')
+    const rows = helicone.slice(0, 4).concat([['2026-10-05', 230]])
+    const out = parseBetterStackDowntimeIncidents(page('UTC', [{ id: 'r', name: 'api', status: 'downtime', days: rows }]), { now: justAfter })
+    expect(out[0]).toMatchObject({ derivedDay: '2026-10-05', status: 'investigating', outageRun: { startDay: '2026-10-02', ongoing: true } })
+  })
+
+  it('counts every day of a finished run, the closing partial included', () => {
+    const hist = [['2026-10-03', 24 * H], ['2026-10-04', 2 * H]].map(([day, sec]) => ({ day: day as string, status: 'downtime', downtime_duration: sec as number, maintenance_duration: 0 }))
+    const runs = describeRuns(hist, outageRuns(hist, '2026-10-04', false, false), 'r', '2026-10-04', false)
+    expect([...runs.values()]).toEqual([{ id: 'bs-run:r:2026-10-03', startDay: '2026-10-03', endDay: '2026-10-04', days: 2, downSec: 26 * H, ongoing: false }])
+  })
+})
+
