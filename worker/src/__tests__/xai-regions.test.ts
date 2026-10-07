@@ -429,12 +429,10 @@ describe('xai Grok surface merge (#1337)', () => {
     it('extracts the surface label', () => {
       expect(xaiGrokSurfaceOf('[Grok (iOS)] Models outage')).toBe('iOS')
       expect(xaiGrokSurfaceOf('[Grok (Office/Workspace Plugins)] Models outage')).toBe('Office/Workspace Plugins')
-    })
-    it('returns null for the page\'s other Grok-prefixed tags — the paren is the whole rule', () => {
-      // `[Grok in X]` and `[Grok Build]` are real tags on status.x.ai and are the genuine near-misses:
-      // both start with "Grok " and are excluded only by the required `(`.
-      expect(xaiGrokSurfaceOf('[Grok in X] Something')).toBeNull()
       expect(xaiGrokSurfaceOf('[Grok (Build)] Something')).toBe('Build')
+      expect(xaiGrokSurfaceOf('[Grok in X] Something')).toBe('X')
+    })
+    it('returns null for the page\'s other Grok-prefixed tags', () => {
       expect(xaiGrokSurfaceOf('[Grok Build] Grok Build 0.1 high error rate')).toBeNull()
       expect(xaiGrokSurfaceOf('[API (us-east-1.api.x.ai)] Models outage')).toBeNull()
       expect(xaiGrokSurfaceOf('[API Console] Console not loading')).toBeNull()
@@ -623,6 +621,18 @@ describe('xai Grok surface merge (#1337)', () => {
         fullInc({ id: 'build', title: '[Grok Build] Grok Build is Temporarily Unavailable' }),
       ]
       expect(filterIncidents(scoped, GROK_CONFIG).map(i => i.id)).toEqual(['x', 'office', 'build-paren'])
+    })
+
+    it('#1585 — merges Grok in X with the same-event Grok surface group (live 2026-09-03 shape)', () => {
+      const merged = mergeXaiGrokSurfaceIncidents([
+        fullInc({ id: 'android', title: '[Grok (Android)] Models outage' }),
+        fullInc({ id: 'build', title: '[Grok (Build)] Models outage' }),
+        fullInc({ id: 'x', title: '[Grok in X] Models outage' }),
+        fullInc({ id: 'ios', title: '[Grok (iOS)] Models outage' }),
+      ])
+      expect(merged).toHaveLength(1)
+      expect(merged[0].title).toBe('[Grok (Android, Build, X, iOS)] Models outage')
+      expect(filterIncidents(merged, GROK_CONFIG).map(i => i.id)).toEqual([merged[0].id])
     })
 
     it('#1585 — merges Grok Build with other same-event Grok surfaces', () => {

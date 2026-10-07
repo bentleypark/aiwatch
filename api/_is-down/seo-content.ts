@@ -289,9 +289,9 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   // API↔DeepSeek App ('deepseek-app' below).
   grok: {
     displayName: 'Grok',
-    description: 'Grok is SpaceXAI\'s AI assistant — available on grok.com, iOS, Android, X, Office/Workspace plugins, and Grok Build. It is distinct from the SpaceXAI developer API; AIWatch tracks these Grok surfaces here and the API separately.',
-    insight: 'The official status page tags incidents by affected surface, and AIWatch scopes this page to Grok on the web, mobile, X, Office/Workspace plugins, and Build — so a Grok-only incident shows here even when the developer API stays healthy, and vice versa.',
-    whenDown: 'When Grok is down, users cannot start or continue conversations on grok.com, its mobile apps, X, Office/Workspace plugins, or Grok Build. These surfaces can fail independently or together depending on the cause; the SpaceXAI API may still be operational for developers.',
+    description: 'Grok is SpaceXAI\'s AI assistant — available on iOS, Android, X, Office/Workspace plugins, and Grok Build. It is distinct from the SpaceXAI developer API; AIWatch tracks these Grok surfaces here and the API separately.',
+    insight: 'The official status page tags incidents by affected surface, and AIWatch scopes this page to Grok on mobile, X, Office/Workspace plugins, and Build — so a Grok-only incident shows here even when the developer API stays healthy, and vice versa.',
+    whenDown: 'When Grok is down, users cannot start or continue conversations in its mobile apps, X, Office/Workspace plugins, or Grok Build. These surfaces can fail independently or together depending on the cause; the SpaceXAI API may still be operational for developers.',
     faqs: [
       { q: 'Is Grok down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Grok\'s app surfaces and shows real-time operational status from the official status feed.' },
       { q: 'Is this the same as the SpaceXAI API?', a: 'No. This page tracks Grok\'s app surfaces. The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
