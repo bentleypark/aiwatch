@@ -228,7 +228,7 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(`\n📈 **Uptime**\n   Best: ${best}\n   Worst: ${worst}`)
   }
 
-  // Section 5: Probe RTT (24h) — replaces status page latency with direct API endpoint measurement
+  // Section 5: Probe RTT (24h)
   const probeSnaps = data.probeSnapshots ?? []
   if (probeSnaps.length > 0) {
     // TODO(#132): pass incident windows to exclude RTT during outages — see probe-archival.ts:202
@@ -246,7 +246,7 @@ export function buildDailySummary(data: DailySummaryData): string {
       lines.push(`\n⚡ **API Response Time (p75)**\n   Fastest: ${fastest}\n   Slowest: ${slowest}${spikeLine}`)
     }
   } else {
-    // Fallback to status page latency if no probe data
+    // Fallback to the latency:24h series (also probe RTT since #1633) if no probe data
     const latencyAvg = computeLatencyAvg(latencySnapshots)
     const latencyEntries = Object.entries(latencyAvg).filter(([, v]) => v > 0)
     if (latencyEntries.length >= 3) {

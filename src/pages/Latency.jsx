@@ -8,6 +8,7 @@ import { LatencySkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
+import { rankedByLatency } from '../utils/latencyRanking'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -260,17 +261,11 @@ export default function Latency() {
   if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
-  // Split services: probe RTT (ranked) vs status page only (separate section)
-  // When no probe data (mock/dev mode), show all services in ranked list
-  const hasProbeData = probeServiceIds.length > 0
-  const withLatency = services.filter((s) => s.latency != null)
-  const probeServices = hasProbeData ? withLatency.filter((s) => probeServiceIds.includes(s.id) && s.category !== 'app') : withLatency // #921 — app-category probes (Character.AI) show on their detail card only, not in this ranking
-  const statusPageOnly = hasProbeData ? withLatency.filter((s) => !probeServiceIds.includes(s.id)) : []
-  const sorted = [...probeServices].sort((a, b) => a.latency - b.latency)
+  const sorted = rankedByLatency(services, probeServiceIds)
   const fastest = sorted[0]
   const slowest = sorted[sorted.length - 1]
-  const avg = probeServices.length
-    ? Math.round(probeServices.reduce((s, v) => s + v.latency, 0) / probeServices.length)
+  const avg = sorted.length
+    ? Math.round(sorted.reduce((s, v) => s + v.latency, 0) / sorted.length)
     : 0
   const maxLatency = slowest?.latency ?? 1
 
@@ -292,7 +287,7 @@ export default function Latency() {
       {/* ── Summary Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: '10px' }}>
         <SummaryCard label={t('latency.fastest')} value={fastest?.latency ?? '—'} sub={fastest?.name ?? ''} colorClass="text-[var(--green)]" />
-        <SummaryCard label={t('latency.average')} value={avg}                      sub={`${probeServices.length} ${t('latency.avg.services')}`}  colorClass="text-[var(--blue)]" />
+        <SummaryCard label={t('latency.average')} value={avg}                      sub={`${sorted.length} ${t('latency.avg.services')}`}  colorClass="text-[var(--blue)]" />
         <SummaryCard label={t('latency.slowest')} value={slowest?.latency ?? '—'} sub={slowest?.name ?? ''} colorClass="text-[var(--red)]" />
       </div>
 
@@ -312,16 +307,6 @@ export default function Latency() {
             {sorted.map((svc, i) => (
               <RankingBar key={svc.id} service={svc} maxLatency={maxLatency} rank={i + 1} />
             ))}
-            {statusPageOnly.length > 0 && (
-              <>
-                <div className="mono text-[9px] text-[var(--text2)] uppercase" style={{ marginTop: '8px', letterSpacing: '0.08em' }}>
-                  {t('svc.latency.statusPage')}
-                </div>
-                {[...statusPageOnly].sort((a, b) => a.latency - b.latency).map((svc) => (
-                  <RankingBar key={svc.id} service={svc} maxLatency={maxLatency} rank="—" />
-                ))}
-              </>
-            )}
             <p className="text-[10px] text-[var(--text2)] mono" style={{ marginTop: '12px' }}>
               {t('latency.excludeNote')}
             </p>

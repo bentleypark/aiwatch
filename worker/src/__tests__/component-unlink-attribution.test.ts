@@ -278,7 +278,6 @@ describe('#1047 fetchService — the REAL production call path', () => {
     return fetchService(cfg(id), {
       summary: summary as never,
       incidents: { incidents: [unlinkedAtResolve()] } as never,
-      latency: 120,
     } as never, undefined, {})
   }
 
@@ -351,7 +350,6 @@ describe('#1090 fetchService — sibling-component incident while OUR component 
     return fetchService(cfg(id), {
       summary: summary as never,
       incidents: { incidents: [fable5Incident, opusIncident] } as never,
-      latency: 120,
     } as never, undefined, {})
   }
 
@@ -540,7 +538,7 @@ describe('#1104 fetchService — the REAL production call path, with a CLOSED im
 
   const fetchOpenai = (uptimeHtml?: string) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
-    return fetchService(cfg('openai'), { summary: summary as never, incidents: null, latency: 120, uptimeHtml } as never, undefined, {})
+    return fetchService(cfg('openai'), { summary: summary as never, incidents: null, uptimeHtml } as never, undefined, {})
   }
 
   it('openai keeps the incident while its own badge reads operational — the #1104 bug, end to end', async () => {

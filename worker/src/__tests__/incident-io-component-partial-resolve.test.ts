@@ -70,7 +70,7 @@ describe('fetchService reports a partial uptime-scope resolve to trackPartialRes
 
     await fetchService(
       config,
-      { summary: summary(['id-a', 'id-b', 'id-c']) as never, incidents: null, latency: 100, uptimeHtml: ioPageHtml(['id-a']) } as never,
+      { summary: summary(['id-a', 'id-b', 'id-c']) as never, incidents: null, uptimeHtml: ioPageHtml(['id-a']) } as never,
       kv as never,
       {},
     )
@@ -92,7 +92,7 @@ describe('fetchService reports a partial uptime-scope resolve to trackPartialRes
 
     await fetchService(
       config,
-      { summary: summary(['id-a', 'id-b', 'id-c']) as never, incidents: null, latency: 100, uptimeHtml: ioPageHtml(['id-a', 'id-b', 'id-c']) } as never,
+      { summary: summary(['id-a', 'id-b', 'id-c']) as never, incidents: null, uptimeHtml: ioPageHtml(['id-a', 'id-b', 'id-c']) } as never,
       kv as never,
       {},
     )
@@ -118,7 +118,7 @@ describe('fetchService reports a partial uptime-scope resolve to trackPartialRes
       // breakdownComponents (summary.json) sees BOTH ids — the badge-side block finds no drift.
       // The incident.io HTML only carries id-a's data_available_since — id-b is missing THERE, a real
       // uptime-side drift the badge-side block cannot see.
-      { summary: summary(['id-a', 'id-b']) as never, incidents: null, latency: 100, uptimeHtml: ioPageHtml(['id-a']) } as never,
+      { summary: summary(['id-a', 'id-b']) as never, incidents: null, uptimeHtml: ioPageHtml(['id-a']) } as never,
       kv as never,
       {},
     )

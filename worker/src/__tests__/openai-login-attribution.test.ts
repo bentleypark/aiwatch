@@ -370,7 +370,7 @@ describe('fetchService applies the id-tag on the real call path (#1032)', () => 
 
   const fetchOpenai = (uptimeHtml?: string) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
-    return fetchService(cfg('openai'), { summary: summary as never, incidents: null, latency: 120, uptimeHtml } as never, undefined, {})
+    return fetchService(cfg('openai'), { summary: summary as never, incidents: null, uptimeHtml } as never, undefined, {})
   }
 
   it('openai surfaces the SSO Login incident — the exact #1032 bug, end to end', async () => {
@@ -394,7 +394,7 @@ describe('fetchService applies the id-tag on the real call path (#1032)', () => 
     // prefetch-failure path) but it fails CLOSED and silently, which is exactly what needs a pin.
     vi.stubGlobal('fetch', vi.fn(async (u: unknown) =>
       new Response(String(u).includes('status.openai.com') && !String(u).includes('/api/') ? html : '', { status: 200 })))
-    const svc = await fetchService(cfg('openai'), { summary: summary as never, incidents: null, latency: 1, uptimeHtml: undefined } as never, undefined, {})
+    const svc = await fetchService(cfg('openai'), { summary: summary as never, incidents: null, uptimeHtml: undefined } as never, undefined, {})
     expect(svc.incidents.map((i) => i.title)).toContain('Elevated Error Rates For SSO Login')
   })
 

@@ -24,8 +24,7 @@ test.describe('ServiceDetails page', () => {
     const main = page.locator('main')
     // Uptime card should show percentage
     await expect(main.getByText(/%/).first()).toBeVisible()
-    // Latency card should exist (probe: "API Response Time", non-probe: "Status Page Latency")
-    await expect(main.getByText(/API Response Time|Status Page Latency|API 응답 시간|상태 페이지 레이턴시/).first()).toBeVisible()
+    await expect(main.getByText(/API Response Time|API 응답 시간/).first()).toBeVisible()
   })
 
   test('renders status calendar with legend', async ({ page }) => {
@@ -526,23 +525,25 @@ test.describe('Incident accordion in ServiceDetails', () => {
 })
 
 test.describe('Non-probe service latency card', () => {
-  test('shows "Not provided" latency for non-probe API service', async ({ page }) => {
+  test('a non-probe API service shows no latency, even when a value is present (#1633)', async ({ page }) => {
     await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 92 },
-          { id: 'modal', category: 'api', name: 'Modal', provider: 'Modal', status: 'operational', latency: null, uptime30d: 99.99, uptimeSource: 'platform_avg', calendarDays: 30, incidents: [{ id: 'm1', title: 'Test', startedAt: new Date().toISOString(), duration: '10m', status: 'resolved', impact: 'minor', timeline: [] }] },
+          // 316 = a status-page fetch time a pre-#1633 Worker or cache snapshot still carries.
+          { id: 'modal', category: 'api', name: 'Modal', provider: 'Modal', status: 'operational', latency: 316, uptime30d: 99.99, uptimeSource: 'platform_avg', calendarDays: 30, incidents: [{ id: 'm1', title: 'Test', startedAt: new Date().toISOString(), duration: '10m', status: 'resolved', impact: 'minor', timeline: [] }] },
         ],
         lastUpdated: new Date().toISOString(),
+        probe24h: [{ t: new Date().toISOString(), data: { claude: { rtt: 120, status: 200 } } }],
       } })
     })
-    // Modal: non-probe → latency card shows "—" + "Not provided"
     await page.goto('/#modal')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
     const main = page.locator('main')
-    await expect(main.getByText(/Status Page Latency|상태 페이지 레이턴시/)).toBeVisible()
-    // Should show "Not provided" under latency (not a ms value)
-    await expect(main.getByText(/Not provided|공식 데이터 미제공/).first()).toBeVisible()
+    await expect(main.getByText(/API Response Time|API 응답 시간/).first()).toBeVisible()
+    await expect(main.getByText(/No endpoint we can probe|probe할 수 있는 엔드포인트 없음/)).toBeVisible()
+    await expect(main.getByText(/316 ms/)).toHaveCount(0)
+    await expect(main.getByText(/Status Page Latency|상태 페이지 레이턴시/)).toHaveCount(0)
     // Should NOT show 24h Trend chart
     await expect(main.getByText(/24h Trend|24시간 추이/)).not.toBeVisible()
   })
@@ -560,7 +561,6 @@ test.describe('Non-probe service latency card', () => {
     await page.goto('/#claude')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
     const main = page.locator('main')
-    // Should show "API Response Time" label (not "Status Page Latency")
     await expect(main.getByText(/API Response Time|API 응답 시간/).first()).toBeVisible()
     // Should show ms value
     await expect(main.getByText(/142 ms/)).toBeVisible()

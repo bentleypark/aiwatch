@@ -312,7 +312,7 @@ describe('fetchService reuses the prefetched components (#1125)', () => {
 
   it('does NOT re-fetch components.json when the prefetch already read it', async () => {
     const spy = stubFetch()
-    const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, latency: 100, componentsFetch: ok(COMPONENTS_SUPERSET) }, undefined, {})
+    const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, componentsFetch: ok(COMPONENTS_SUPERSET) }, undefined, {})
     expect(componentsCalls(spy)).toHaveLength(0)
     // …and the breakdown still resolves off the superset, so the saved fetch cost nothing.
     expect(svc.components?.map((c) => c.id)).toContain(EMBEDDINGS)
@@ -320,7 +320,7 @@ describe('fetchService reuses the prefetched components (#1125)', () => {
 
   it('re-fetches when the prefetch could not read it — the badge must never ride the narrow list', async () => {
     const spy = stubFetch(COMPONENTS_SUPERSET)
-    const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, latency: 100, componentsFetch: { ok: false } }, undefined, {})
+    const svc = await fetchService(OPENAI, { summary: summary as never, incidents: null, componentsFetch: { ok: false } }, undefined, {})
     expect(componentsCalls(spy)).toHaveLength(1)
     expect(svc.components?.map((c) => c.id)).toContain(EMBEDDINGS)
   })
@@ -351,7 +351,7 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
   const SUPERSET = CHATGPT.statusComponentIds!.map((id) => comp(id, id, id === VOICE ? 'major_outage' : 'operational'))
   const WINDOW = SUPERSET.filter((c) => !OUT_OF_WINDOW.has(c.id))
   const summary = { status: { indicator: 'none', description: 'All Systems Operational' }, components: WINDOW, incidents: [] }
-  const prefetched = () => ({ summary: summary as never, incidents: null, latency: 100, componentsFetch: ok(SUPERSET) })
+  const prefetched = () => ({ summary: summary as never, incidents: null, componentsFetch: ok(SUPERSET) })
 
   let fetchSpy: ReturnType<typeof vi.fn>
   beforeEach(() => {
@@ -463,7 +463,6 @@ describe('an official ChatGPT-group component absent from the config (#1010)', (
   const prefetched = (components: ReturnType<typeof page>) => ({
     summary: { status: { indicator: 'major', description: 'Partial outage' }, components, incidents: [] } as never,
     incidents: null,
-    latency: 100,
     componentsFetch: ok(components),
   })
 
@@ -523,7 +522,6 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
   const withUptimeHtml = (uptimeHtml: string) => ({
     summary: { status: { indicator: 'none', description: 'All Systems Operational' }, components: allOperational(), incidents: [] } as never,
     incidents: null,
-    latency: 100,
     componentsFetch: ok(allOperational()),
     uptimeHtml,
   })
@@ -570,7 +568,6 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
     const svc = await fetchService(LANGFUSE, {
       summary: { status: { indicator: 'none', description: 'All Systems Operational' }, components, incidents: [] } as never,
       incidents: null,
-      latency: 100,
       uptimeHtml: html,
     }, undefined, {})
     expect(svc.uptime30d).toBe(96.66)
@@ -595,7 +592,6 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
       const svc = await fetchService(cfg, {
         summary: { status: { indicator: 'none', description: 'All Systems Operational' }, components: ids.map((id) => comp(id, id)), incidents: [] } as never,
         incidents: null,
-        latency: 100,
         uptimeHtml: html,
       }, undefined, {})
       expect(svc.uptime30d).toBe(100)
@@ -624,9 +620,8 @@ describe('prefetch + alert wiring (#1125)', () => {
     expect(SERVICES_SRC).toMatch(/prefetchMap\.get\(config\.apiUrl\)/)
   })
 
-  it('starts that fetch OUTSIDE the summary/incidents Promise.all — latency must stay the page\'s own', () => {
-    // Inside it, a slow components.json would inflate the published response time for every service
-    // on the page; after it, it would serialize onto the prefetch every service waits on.
+  it('starts that fetch before the summary/incidents Promise.all', () => {
+    // After it, it would serialize onto the prefetch every service waits on.
     const prefetchBody = SERVICES_SRC.slice(SERVICES_SRC.indexOf('const prefetchMap = new Map'))
     const started = prefetchBody.indexOf('fetchPageComponents(componentsUrl, tracker)')
     const awaited = prefetchBody.indexOf('const [summaryRes, incidentsRes] = await Promise.all')
@@ -636,14 +631,6 @@ describe('prefetch + alert wiring (#1125)', () => {
     expect(started, 'components fetch not started in the prefetch').toBeGreaterThan(-1)
     expect(awaited, 'summary/incidents Promise.all not found in the prefetch').toBeGreaterThan(-1)
     expect(started).toBeLessThan(awaited)
-    // The other half, and the one that actually protects the number: `latency` is computed before the
-    // components fetch is awaited. Move that await up and a slow components.json inflates the published
-    // response time for every service on the page, without either anchor above moving.
-    const measured = prefetchBody.indexOf('const latency = Date.now() - start')
-    const consumed = prefetchBody.indexOf('await componentsFetch')
-    expect(measured, 'latency measurement not found in the prefetch').toBeGreaterThan(-1)
-    expect(consumed, 'components fetch never awaited in the prefetch').toBeGreaterThan(-1)
-    expect(measured).toBeLessThan(consumed)
   })
 
   it('the cron filters the alert through partitionFirstSeen and places it against this cycle\'s breakdown before sending', () => {

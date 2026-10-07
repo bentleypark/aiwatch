@@ -26,6 +26,7 @@ import StatusPill from '../components/StatusPill'
 import { resolveStatusDisplay, sourceFlagsOf, displayStatusOf, isDisplayAffected, isDisplayOperational } from '../utils/statusDisplay'
 import EmptyState from '../components/EmptyState'
 import { showRecoveredChip } from '../utils/liveIncident'
+import { rankedByLatency } from '../utils/latencyRanking'
 
 // ── Status color maps ────────────────────────────────────────
 
@@ -109,9 +110,10 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
   const incidentsBlanked = !!service.incidentSourceStale
   const hasUptime = service.uptime30d != null && !isUnreliable
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
-  const latencyColor = service.latency == null ? 'text-[var(--text2)]'
-    : service.latency < 500 ? 'text-[var(--green)]'
-    : service.latency < 800 ? 'text-[var(--amber)]'
+  const latency = isProbed ? service.latency : null
+  const latencyColor = latency == null ? 'text-[var(--text2)]'
+    : latency < 500 ? 'text-[var(--green)]'
+    : latency < 800 ? 'text-[var(--amber)]'
     : 'text-[var(--red)]'
   const uptimeStr = hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')
   const scoreStr = service.aiwatchScore != null ? `${service.aiwatchScore} ${service.scoreGrade}` : null
@@ -178,10 +180,8 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
 
         <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
           <div>
-            <div className={`mono text-[13px] font-medium ${latencyColor}`}>{service.latency != null ? `${service.latency}ms` : '—'}</div>
-            {/* #658 — probed services (24 API services, #678) show direct API RTT; label must say so, not
-                "status page" (matches ServiceDetails svc.latency vs svc.latency.statusPage). */}
-            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t(isProbed ? 'overview.card.latency.api' : 'overview.card.latency')}</div>
+            <div className={`mono text-[13px] font-medium ${latencyColor}`}>{latency != null ? `${latency}ms` : '—'}</div>
+            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency.api')}</div>
           </div>
           <div>
             <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t(noOfficialUptime(service) ? 'uptime.noOfficial.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
@@ -825,9 +825,8 @@ export default function Overview() {
       .sort(compareIncidents)
   ).sort(compareGroupedRows).slice(0, 5)
 
-  const withLatency = services.filter((s) => s.latency != null) // #798 — all services, not catServices (cross-category like Recent Incidents)
-  const sortedByLatency = [...withLatency].sort((a, b) => a.latency - b.latency)
-  const maxLatency = withLatency.length ? Math.max(...withLatency.map((s) => s.latency)) : 1
+  const sortedByLatency = rankedByLatency(services, probeServiceIds) // #798 — all services, not catServices (cross-category like Recent Incidents)
+  const maxLatency = sortedByLatency.length ? sortedByLatency[sortedByLatency.length - 1].latency : 1
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>

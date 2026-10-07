@@ -74,7 +74,6 @@ describe('#1420 Cursor badge scope — the 2026-09-03 17:02Z state through fetch
         incidents: [OPEN_INCIDENT],
       } as never,
       incidents: { incidents: [OPEN_INCIDENT] } as never,
-      latency: 120,
     } as never, undefined, {})
   }
 

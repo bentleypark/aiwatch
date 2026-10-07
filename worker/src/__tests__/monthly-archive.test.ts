@@ -400,9 +400,9 @@ describe('resolveArchiveProbeSummary (#1002 / aiwatch-reports#76)', () => {
   })
 
   it('withholds for a service with no probe at all (Score has no Responsiveness component)', () => {
-    // bedrock is not a PROBE_TARGET → classifyProbe 'unsupported'. A stray summary under its id must
+    // azureopenai is not a PROBE_TARGET → classifyProbe 'unsupported'. A stray summary under its id must
     // not be published as if it scored.
-    expect(resolveArchiveProbeSummary('bedrock', new Map([['bedrock', summary(500, 0.2)]]))).toBeNull()
+    expect(resolveArchiveProbeSummary('azureopenai', new Map([['azureopenai', summary(500, 0.2)]]))).toBeNull()
   })
 
   it("withholds when the probe is 'insufficient' — probed, but the Score scored NO Responsiveness", () => {

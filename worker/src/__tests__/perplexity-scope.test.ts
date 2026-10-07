@@ -248,7 +248,7 @@ const fetchPerplexity = (summaryData: unknown, uptimeHtml: string) => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response('<html></html>', { status: 200 })))
   return fetchService(
     perplexity,
-    { summary: summaryData as never, incidents: null, latency: 120, uptimeHtml } as never,
+    { summary: summaryData as never, incidents: null, uptimeHtml } as never,
     undefined,
     {},
   )

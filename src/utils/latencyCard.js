@@ -7,7 +7,7 @@
 //                  probe, but its Score's Responsiveness inherits the parent's — so show the PARENT's
 //                  current RTT, labeled, instead of a contradictory "Not provided". Stays OUT of the
 //                  Latency ranking (not in probeServiceIds) — the distinction lives on the detail card.
-//   'statusPage' — neither: fall back to status-page fetch timing (may be null).
+//   'none'       — neither: not measured (#1633 — status-page fetch timing is never shown as latency).
 //
 // Pure + presentation-free (returns kind/rtt/parentName; the component maps those to label/color).
 
@@ -16,7 +16,7 @@
  * @param {string[]} probeServiceIds  ids with a direct probe snapshot this cycle
  * @param {object}   latestProbe      latest probe snapshot `data` map: { id: { rtt } }
  * @param {object[]} services         all services (to resolve the parent's display name)
- * @returns {{ kind: 'probe'|'inherited'|'statusPage', rtt: number|null, parentName: string|null }}
+ * @returns {{ kind: 'probe'|'inherited'|'none', rtt: number|null, parentName: string|null }}
  */
 export function latencyCardState(service, probeServiceIds, latestProbe, services) {
   const isDirectProbe = (probeServiceIds ?? []).includes(service.id)
@@ -30,5 +30,5 @@ export function latencyCardState(service, probeServiceIds, latestProbe, services
   if (isDirectProbe) {
     return { kind: 'probe', rtt: service.latency ?? null, parentName: null }
   }
-  return { kind: 'statusPage', rtt: service.latency ?? null, parentName: null }
+  return { kind: 'none', rtt: null, parentName: null }
 }

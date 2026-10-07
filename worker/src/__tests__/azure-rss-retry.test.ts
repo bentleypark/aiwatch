@@ -8,7 +8,7 @@ import type { KVLike, TrackingStateBlob } from '../utils'
 // nothing downstream can contradict it.
 //
 // These drive the real `fetchService` entry point rather than a hand-assembled imitation, because the
-// bug is in the WIRING (which fetch helper this branch calls, and what latency it publishes), not in
+// bug is in the WIRING (which fetch helper this branch calls), not in
 // any parser — a parser-level test stays green through the entire failure.
 
 const azure = SERVICES.find((s) => s.id === 'azureopenai')!
@@ -120,9 +120,6 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
     // #1233 invariant — an unreadable source carries NO incident. Several modules omit an `unknown`
     // branch because of this (the X drafts, the feed's fallback line, the region/calendar fallbacks).
     expect(svc.incidents).toEqual([])
-    // No response was measured, so no response time may be published — reporting the elapsed abort
-    // budget would put our own timeout into /api/v1/status and the latency:24h series as Azure's.
-    expect(svc.latency, 'a poll that got nothing publishes no latency').toBeNull()
   })
 
   it('does not retry a successful first attempt — one subrequest on the happy path', async () => {
@@ -170,7 +167,6 @@ describe('#1211 — a stalled Azure RSS connection must not publish a false stat
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(trackingStore.azureopenai?.failCount).toBe(3)
     expect(svc.status).toBe('unknown')
-    expect(svc.latency, 'an HTTP error still measured a real round trip — that one is kept').toBeTypeOf('number')
   })
 
   it('clears the #500 persistent-failure marker too, once a retry recovers the source', async () => {
@@ -198,14 +194,7 @@ describe('#1211 — the timing the fix is actually about', () => {
   // Fake timers so these assert the real budget without paying it. Everything here is driven by the
   // AbortController inside `fetchWithTimeout` and the 1s backoff inside `fetchWithRetry`.
 
-  it('abandons the first attempt at 4s — not the 8s default — and publishes the RETRY\'s latency', async () => {
-    // Two claims in one run, because they share a timeline.
-    //
-    // (a) The first attempt is abandoned at 4s, not the 8s default.
-    // (b) The latency. `start` is reset before the retry, so the served response's own RTT is what
-    //     gets published. Measuring across the whole helper would charge the abandoned attempt and the
-    //     backoff to the response that arrived, into `/api/v1/status` and the `latency:24h` series,
-    //     where it reads as a measurement of Azure.
+  it('abandons the first attempt at 4s — not the 8s default', async () => {
     vi.useFakeTimers()
     let calls = 0
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
@@ -225,9 +214,6 @@ describe('#1211 — the timing the fix is actually about', () => {
 
     expect(calls, 'the retry fires once the abandoned attempt is cut loose').toBe(2)
     expect(svc.status).toBe('operational')
-    expect(svc.latency, 'an api-category service must still publish a number').toBeTypeOf('number')
-    expect(svc.latency, 'the abandoned 4s attempt and the 1s backoff must not be charged to the response')
-      .toBeLessThan(1_000)
   })
 
   it('caps the retry at 3s', async () => {

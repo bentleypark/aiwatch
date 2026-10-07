@@ -43,15 +43,11 @@ describe('latencyCardState (#883)', () => {
     expect(r.rtt).toBeNull()
   })
 
-  it('non-probed, non-inheriting service → statusPage state with status-page timing', () => {
+  it('non-probed, non-inheriting service → none, and a stray latency value is NOT shown (#1633)', () => {
+    // 88 = a status-page fetch time an older Worker (or a pre-#1633 cache snapshot) still carries.
     const svc = { ...byId('chatgpt'), latency: 88 }
     const r = latencyCardState(svc, ['claude'], { claude: { rtt: 100 } }, services)
-    expect(r).toEqual({ kind: 'statusPage', rtt: 88, parentName: null })
-  })
-
-  it('statusPage with no timing → rtt null (card shows "—")', () => {
-    const svc = { ...byId('chatgpt'), latency: null }
-    expect(latencyCardState(svc, [], {}, services).rtt).toBeNull()
+    expect(r).toEqual({ kind: 'none', rtt: null, parentName: null })
   })
 
   it('direct probe wins over an inheritance flag (a service that is somehow both)', () => {
@@ -68,6 +64,6 @@ describe('latencyCardState (#883)', () => {
 
   it('tolerates missing probeServiceIds / services args', () => {
     const svc = { id: 'chatgpt', latency: 5 }
-    expect(latencyCardState(svc, undefined, undefined, undefined)).toEqual({ kind: 'statusPage', rtt: 5, parentName: null })
+    expect(latencyCardState(svc, undefined, undefined, undefined)).toEqual({ kind: 'none', rtt: null, parentName: null })
   })
 })

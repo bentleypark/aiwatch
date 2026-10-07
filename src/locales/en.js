@@ -68,7 +68,6 @@ const en = {
   'filter.image': 'Image',
   'overview.incidents.title': 'Recent Incidents',
   'overview.latency.title': 'Latency Rankings',
-  'overview.card.latency': 'status page',
   'overview.card.latency.api': 'API response',
   'overview.card.uptime': 'uptime',
   'overview.card.incidents': 'incidents',
@@ -118,13 +117,13 @@ const en = {
 
   // Latency
   'latency.rankings': 'Current Rankings',
-  'latency.disclaimer': 'Measures direct API endpoint response time (RTT). Services without a public endpoint show status page timing.',
+  'latency.disclaimer': 'Measures direct API endpoint response time (RTT). Services with no endpoint we can probe show no latency.',
   'latency.fastest': 'Fastest',
   'latency.average': 'Average',
   'latency.slowest': 'Slowest',
   'latency.trend': '24h Trend',
   'latency.top8': 'Top 8 by Score',
-  'latency.excludeNote': '* Ranking covers API services and coding agents with their own API (e.g. Cursor). AI apps are not ranked — most have no measurable endpoint; Character.AI is probed on its backend health endpoint and shown on its detail page only.',
+  'latency.excludeNote': '* Ranking covers services we probe directly, in every category except apps. Services with no endpoint we can probe (most AI apps, some coding agents) are excluded; Character.AI is probed on its backend health endpoint but, as an app, shown on its detail page only.',
   'latency.dummy': 'Collecting data (switches to real data after 24h)',
   'latency.avg.services': 'services',
 
@@ -191,8 +190,7 @@ const en = {
 
   // Service Details
   'svc.latency': 'API Response Time',
-  'svc.latency.statusPage': 'Status Page Latency',
-  'svc.latency.statusPage.sub': 'Status page response time',
+  'svc.latency.notMeasured': 'No endpoint we can probe',
   'svc.latency.inherited': 'API Response Time · via {p}',
   'svc.latency.inherited.sub': 'Shared endpoint with {p}',
   'svc.uptime30d': 'Uptime',
