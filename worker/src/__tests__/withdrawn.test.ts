@@ -804,7 +804,7 @@ describe('#1106 index.ts wiring', () => {
     })
 
     it('reads the roster AFTER the accumulator wrote it, so a prune notifies in the same cron run', () => {
-      const accumulate = src.indexOf('accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE')
+      const accumulate = src.indexOf('accumulateCurrentAndPreviousMonth(env.STATUS_CACHE')
       const read = src.indexOf('readWithdrawn(env.STATUS_CACHE', src.indexOf('const withdrawalAlerts'))
       expect(accumulate).toBeGreaterThan(-1)
       expect(read).toBeGreaterThan(accumulate)

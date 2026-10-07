@@ -718,7 +718,7 @@ describe('#1106 Part 5 index.ts wiring', () => {
   })
 
   it('the prune records BEFORE the cron reads the roster, so a row exists for the same-run notice', () => {
-    const accumulate = src.indexOf('accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE')
+    const accumulate = src.indexOf('accumulateCurrentAndPreviousMonth(env.STATUS_CACHE')
     const stamp = src.indexOf('markWithdrawalsAnnounced(env.STATUS_CACHE')
     expect(accumulate).toBeGreaterThan(-1)
     expect(stamp).toBeGreaterThan(accumulate)

@@ -12,7 +12,7 @@ const DAY_MS = 86_400_000
  * Months to fetch for a given period filter, INCLUDING the current month (#587).
  *
  * UTC math is load-bearing here: archive:monthly:{YYYY-MM} keys are written by the
- * Worker cron at UTC 00:00 on the 1st of each month, and the Playwright test asserts
+ * Worker cron at UTC 12:00 on the 1st of each month, and the Playwright test asserts
  * via `new Date().toISOString().slice(0,7)` which is also UTC. Using local-TZ accessors
  * caused a 9-hour mismatch on UTC+9 runners around month-edge.
  *

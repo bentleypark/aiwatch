@@ -543,28 +543,24 @@ describe('computeMonthlyLatencyStats (#17 — p95 + spikes)', () => {
 // ── isInMonthlyArchiveWindow ─────────────────────────────────────────
 
 describe('isInMonthlyArchiveWindow', () => {
-  it('returns true on 1st at UTC 00:00', () => {
-    expect(isInMonthlyArchiveWindow(1, 0, 0)).toEqual({ inWindow: true, isCatchUp: false })
+  // #1627 — 12:00Z: every page zone down to UTC−12 has closed the month's last local day by then.
+  it.each([[0, 0], [1, 0], [11, 59]])('is closed on the 1st at %i:%i UTC, before every page-local month has ended', (h, m) => {
+    expect(isInMonthlyArchiveWindow(1, h, m)).toEqual({ inWindow: false, isCatchUp: false })
   })
 
-  it('returns true on 1st at UTC 00:14', () => {
-    expect(isInMonthlyArchiveWindow(1, 0, 14)).toEqual({ inWindow: true, isCatchUp: false })
+  it('opens on the 1st at 12:00 UTC and closes at 12:15', () => {
+    expect(isInMonthlyArchiveWindow(1, 12, 0)).toEqual({ inWindow: true, isCatchUp: false })
+    expect(isInMonthlyArchiveWindow(1, 12, 14)).toEqual({ inWindow: true, isCatchUp: false })
+    expect(isInMonthlyArchiveWindow(1, 12, 15)).toEqual({ inWindow: false, isCatchUp: false })
   })
 
-  it('returns false on 1st at UTC 00:15', () => {
-    expect(isInMonthlyArchiveWindow(1, 0, 15)).toEqual({ inWindow: false, isCatchUp: false })
+  it('returns catch-up on the 1st at 13:00 UTC', () => {
+    expect(isInMonthlyArchiveWindow(1, 13, 0)).toEqual({ inWindow: true, isCatchUp: true })
+    expect(isInMonthlyArchiveWindow(1, 14, 0)).toEqual({ inWindow: false, isCatchUp: false })
   })
 
-  it('returns catch-up on 1st at UTC 01:00', () => {
-    expect(isInMonthlyArchiveWindow(1, 1, 0)).toEqual({ inWindow: true, isCatchUp: true })
-  })
-
-  it('returns false on 2nd', () => {
-    expect(isInMonthlyArchiveWindow(2, 0, 0)).toEqual({ inWindow: false, isCatchUp: false })
-  })
-
-  it('returns false on 1st at UTC 02:00', () => {
-    expect(isInMonthlyArchiveWindow(1, 2, 0)).toEqual({ inWindow: false, isCatchUp: false })
+  it('returns false on the 2nd', () => {
+    expect(isInMonthlyArchiveWindow(2, 12, 0)).toEqual({ inWindow: false, isCatchUp: false })
   })
 })
 
