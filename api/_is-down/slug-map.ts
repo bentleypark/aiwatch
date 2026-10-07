@@ -31,7 +31,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'cerebras':        { id: 'cerebras',   name: 'Cerebras Inference', provider: 'Cerebras',  category: 'api', group: 'llm' },
   'perplexity':      { id: 'perplexity', name: 'Perplexity',       provider: 'Perplexity AI', category: 'api', group: 'llm' },
   // #1165/#1586 — 'xai' moved to 'xai-api': /is-xai-down is now the SpaceXAI/Grok family group page (same
-  // repurposing #1164 did for claude/openai), now that Grok's consumer app (iOS/Android/Web) is its
+  // repurposing #1164 did for claude/openai), now that Grok's consumer surfaces are its
   // own monitored service. `id`/`name` UPDATED (was 'xAI (Grok)') — "(Grok)" is now misleading on the
   // API-only page since Grok also names the separate app; the combined label moved to FAMILY_GROUPS.xai.
   'xai-api':         { id: 'xai',        name: 'SpaceXAI API',     provider: 'SpaceXAI',    category: 'api', group: 'llm' },
@@ -80,7 +80,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE + src/utils/constants.js
   // FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
   'deepseek-app':    { id: 'deepseekapp', name: 'DeepSeek App',    provider: 'DeepSeek',     category: 'app', group: 'apps' },
-  // Grok (#1165/#1586) — SpaceXAI's consumer app (iOS/Android/Web), the api-vs-app split mirror of DeepSeek
+  // Grok (#1165/#1586/#1585) — SpaceXAI's consumer surfaces, the api-vs-app split mirror of DeepSeek
   // API↔DeepSeek App above. Slug == worker id ('grok'), no override needed.
   'grok':            { id: 'grok',        name: 'Grok',            provider: 'SpaceXAI',     category: 'app', group: 'apps' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
@@ -164,7 +164,7 @@ export interface ServiceFamily {
 export const FAMILY_GROUPS: Record<string, ServiceFamily> = {
   claude: { slug: 'claude', name: 'Anthropic (Claude)', members: ['claude', 'claudeai', 'claudecode'] },
   openai: { slug: 'openai', name: 'OpenAI', members: ['openai', 'chatgpt', 'codex'] },
-  // #1165/#1586 — SpaceXAI API + Grok consumer app (iOS/Android/Web), same reasoning as the original two
+  // #1165/#1586/#1585 — SpaceXAI API + Grok consumer surfaces, same reasoning as the original two
   // families ("is xai down" / "is grok down" both plausibly mean either surface).
   // Cursor added per explicit product decision after SpaceX's June 2026 agreement to acquire
   // Anysphere (Cursor's parent) — mirrors claude/openai already grouping their coding-agent surface

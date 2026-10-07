@@ -545,11 +545,9 @@ export const SERVICES: ServiceConfig[] = [
   // this feed through parseXaiRssIncidents, so no new parser code was needed, only this config entry.
   // parseXaiRssIncidents never sets componentNames (unlike a Statuspage/incident.io JSON source), so
   // filterIncidents' incidentKeywords match is TITLE-substring-only here — same as xai's own
-  // `['api']`. status.x.ai tags every incident title `[<Component>] ...`, and 'grok (' — with the open
-  // paren — is what separates the Grok APP surfaces from the page's other Grok-prefixed tags. The
-  // paren is the whole rule: it admits the `[Grok (<surface>)]` app tags and excludes every other
-  // `[Grok …]` tag. The set of tags is the provider's and rotates, so it is not enumerated here — the
-  // shape is the contract.
+  // `['api']`. status.x.ai tags every incident title `[<Component>] ...`. This card covers the
+  // `[Grok (<surface>)]` tags (including Grok Build) plus `[Grok in X]`, which xAI publishes as a
+  // Grok surface.
   // mergeXaiRegionalIncidents (xai's per-region dedup) is a safe no-op here: its regex only matches the
   // `[API (<region>.api.x.ai)]` tag shape, never `[Grok (...)]`.
   // #1337 — the surface axis IS now merged, by `mergeXaiGrokSurfaceIncidents`. #1165 declined to,
@@ -560,7 +558,7 @@ export const SERVICES: ServiceConfig[] = [
   // stripped title within a 30-min window, which is the narrower rule #1165's objection actually
   // pointed at. The `incidentKeywords` filter above is why its merged title must keep a `Grok (`
   // marker; see the title note in `mergeSurfaceGroup`.
-  { id: 'grok', name: 'Grok', provider: 'SpaceXAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok ('], addedAt: '2026-07-26' },
+  { id: 'grok', name: 'Grok', provider: 'SpaceXAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok (', 'grok in x'], addedAt: '2026-07-26' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the

@@ -434,6 +434,7 @@ describe('xai Grok surface merge (#1337)', () => {
       // `[Grok in X]` and `[Grok Build]` are real tags on status.x.ai and are the genuine near-misses:
       // both start with "Grok " and are excluded only by the required `(`.
       expect(xaiGrokSurfaceOf('[Grok in X] Something')).toBeNull()
+      expect(xaiGrokSurfaceOf('[Grok (Build)] Something')).toBe('Build')
       expect(xaiGrokSurfaceOf('[Grok Build] Grok Build 0.1 high error rate')).toBeNull()
       expect(xaiGrokSurfaceOf('[API (us-east-1.api.x.ai)] Models outage')).toBeNull()
       expect(xaiGrokSurfaceOf('[API Console] Console not loading')).toBeNull()
@@ -612,6 +613,26 @@ describe('xai Grok surface merge (#1337)', () => {
     it('a single-surface incident SURVIVES the real grok config', () => {
       const merged = mergeXaiGrokSurfaceIncidents([QUARTET_2026_09_03[0]])
       expect(filterIncidents(merged, GROK_CONFIG)).toHaveLength(1)
+    })
+
+    it('#1585 — keeps Grok in X and every official parenthesized Grok surface, including Build', () => {
+      const scoped = [
+        fullInc({ id: 'x', title: '[Grok in X] Grok is Temporarily Unavailable' }),
+        fullInc({ id: 'office', title: '[Grok (Office/Workspace Plugins)] Models outage' }),
+        fullInc({ id: 'build-paren', title: '[Grok (Build)] Models outage' }),
+        fullInc({ id: 'build', title: '[Grok Build] Grok Build is Temporarily Unavailable' }),
+      ]
+      expect(filterIncidents(scoped, GROK_CONFIG).map(i => i.id)).toEqual(['x', 'office', 'build-paren'])
+    })
+
+    it('#1585 — merges Grok Build with other same-event Grok surfaces', () => {
+      const merged = mergeXaiGrokSurfaceIncidents([
+        fullInc({ id: 'ios', title: '[Grok (iOS)] Models outage' }),
+        fullInc({ id: 'build', title: '[Grok (Build)] Models outage' }),
+      ])
+      expect(merged).toHaveLength(1)
+      expect(merged[0].title).toBe('[Grok (iOS, Build)] Models outage')
+      expect(filterIncidents(merged, GROK_CONFIG).map(i => i.id)).toEqual([merged[0].id])
     })
 
     it('the assertion has teeth — a merged title WITHOUT the `Grok (` marker is dropped', () => {
