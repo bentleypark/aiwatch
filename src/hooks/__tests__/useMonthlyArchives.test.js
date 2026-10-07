@@ -29,6 +29,13 @@ describe('fetchArchive (#375)', () => {
     expect(result).toEqual(payload)
   })
 
+  it('#1630 — asks for a partial, so a month whose archive is not built yet comes back as one', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ period: '2026-09', partial: true }) })
+    globalThis.fetch = fetchSpy
+    await fetchArchive('2026-09')
+    expect(new URL(fetchSpy.mock.calls[0][0], 'https://x.invalid').searchParams.get('partial')).toBe('1')
+  })
+
   it('treats 404 as "archive does not exist" — returns null without throwing', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 })
     const result = await fetchArchive('2025-01-not-archived')

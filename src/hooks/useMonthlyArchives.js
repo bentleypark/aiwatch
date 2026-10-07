@@ -26,7 +26,7 @@ export function _resetArchiveCacheForTests() { promiseCache.clear() }
 export function fetchArchive(month) {
   const cached = promiseCache.get(month)
   if (cached) return cached
-  const promise = fetch(`${API_BASE}/api/report?month=${month}`)
+  const promise = fetch(`${API_BASE}/api/report?month=${month}&partial=1`)
     .then(r => {
       // 404 is a real signal — that month was never archived (deploy started later).
       // Treat it as "no data" rather than throwing, so other months still resolve.
@@ -35,10 +35,10 @@ export function fetchArchive(month) {
       return r.json()
     })
     .then(archive => {
-      // #587 — the CURRENT month is served as a `partial: true` archive synthesized from the live
-      // `incidents:monthly` accumulator, which mutates every */5 cron. Evict it after resolving so a
-      // later-accumulated incident appears without a full page reload (the Worker's max-age=60 edge
-      // cache keeps the re-fetch cheap). Finished months are immutable → stay cached.
+      // #587 — a `partial: true` archive is synthesized from the live `incidents:monthly`
+      // accumulator, which mutates every */5 cron. Evict it after resolving so a later-accumulated
+      // incident appears without a full page reload (the Worker's max-age=60 edge cache keeps the
+      // re-fetch cheap). A built archive is immutable → stays cached.
       if (archive?.partial) promiseCache.delete(month)
       return archive
     })
