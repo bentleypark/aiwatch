@@ -785,7 +785,7 @@ export default function ServiceDetails({ serviceId }) {
   // (bedrock / azureopenai) that have no /is-*-down page or feed.
   const feedUrl = feedUrlOf(service.id)
 
-  // #883 — latency card is one of three states (direct probe / inherited-from-parent / status-page).
+  // #883 — latency card is one of three states (direct probe / inherited-from-parent / not measured).
   // See src/utils/latencyCard.js for the rationale. Inherited services (Claude Code/Codex) show their
   // parent API's current RTT, labeled, instead of a contradictory "Not provided".
   const latestProbe = probe24h.length > 0 ? (probe24h[probe24h.length - 1].data ?? {}) : {}
@@ -946,15 +946,13 @@ export default function ServiceDetails({ serviceId }) {
       {/* ── Metric Cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <MetricCard
-          label={latencyCard.kind === 'probe' ? t('svc.latency')
-            : latencyCard.kind === 'inherited' ? t('svc.latency.inherited').replace('{p}', latencyCard.parentName)
-            : t('svc.latency.statusPage')}
+          label={latencyCard.kind === 'inherited' ? t('svc.latency.inherited').replace('{p}', latencyCard.parentName) : t('svc.latency')}
           value={latencyCard.rtt != null ? `${latencyCard.rtt} ms` : '—'}
           sub={latencyCard.kind === 'probe'
             ? (latencyCard.rtt != null ? t('svc.latency.sub') : t('uptime.collecting'))
             : latencyCard.kind === 'inherited'
               ? (latencyCard.rtt != null ? t('svc.latency.inherited.sub').replace('{p}', latencyCard.parentName) : t('uptime.collecting'))
-              : (latencyCard.rtt != null ? t('svc.latency.statusPage.sub') : t('uptime.unavailable'))}
+              : t('svc.latency.notMeasured')}
           colorClass={latencyCard.kind === 'probe' ? 'text-[var(--blue)]' : latencyCard.kind === 'inherited' ? 'text-[var(--teal)]' : 'text-[var(--text2)]'}
         />
         <MetricCard

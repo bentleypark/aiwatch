@@ -815,18 +815,9 @@ function usePollingInternal() {
       const elapsed = Date.now() - loadStart
       if ((isInitial || isRefresh) && elapsed < 500) await new Promise((r) => setTimeout(r, 500 - elapsed))
 
-      // Overlay probe RTT onto service.latency (replaces status page timing with real API RTT)
-      // Non-probe API services keep status page latency with different label in UI
+      // #1633 — service.latency already IS the probe RTT (the Worker writes it); this only lists ids.
       const probeSnapshots = data.probe24h ?? []
-      let probeServiceIds = []
-      if (probeSnapshots.length > 0) {
-        const latestProbe = probeSnapshots[probeSnapshots.length - 1].data ?? {}
-        probeServiceIds = Object.keys(latestProbe)
-        merged.forEach((svc) => {
-          const p = latestProbe[svc.id]
-          if (p?.rtt > 0) svc.latency = p.rtt
-        })
-      }
+      const probeServiceIds = probeSnapshots.length > 0 ? Object.keys(probeSnapshots[probeSnapshots.length - 1].data ?? {}) : []
 
       hasDataRef.current = true
       refreshingRef.current = false

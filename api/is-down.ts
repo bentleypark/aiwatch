@@ -160,7 +160,7 @@ export default async function handler(req: Request) {
         // Calculate rank by AIWatch Score — match dashboard logic (src/pages/Ranking.jsx):
         // 1. A service is score-rankable when its feed is live AND `scoreConfidence !== 'low'` — EXACT
         //    mirror of serviceReliability.js:hasReliableScoreData (#713). `low` confidence means the
-        //    worker found NEITHER an official uptime % NOR a real probe (e.g. Bedrock/Azure — scored on
+        //    worker found NEITHER an official uptime % NOR a real probe (e.g. Azure OpenAI — scored on
         //    only incidents+recovery, which over-scores under the rescale), so it's excluded from the
         //    rank; a `high`/`medium` service (has official uptime, or a probe) is ranked.
         // 2. #1186 — ranked WITHIN the target's own confidence TIER only, never across tiers. A

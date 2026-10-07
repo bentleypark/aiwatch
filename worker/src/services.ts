@@ -5,7 +5,7 @@ export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
 import { fetchTracked, createFetchTracker, type FetchTracker, type FetchRunStats, formatDuration, markZeroLengthResolvedIncidentsUnknown, normalizeIncidentTimes, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, isStorableOverlayIncident } from './mistral-public-api'
-import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
+import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, applyProbeLatency, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
@@ -1891,16 +1891,12 @@ function statusSourceTransportErrorKind(error: unknown): StatusSourceReadFailure
 // Retry once on failure to reduce false-positive 'down' from transient network issues
 // The retry uses a shorter timeout (3 s).
 //
-// `onRetry` fires immediately before the second attempt (#1211), so a caller can restart whatever
-// clock it publishes. Only the Azure RSS leg passes one; the Atlassian callers below time both legs
-// together and have the same inflation on their own retry path, unaddressed.
-//
 // `svcId` prefixes both log lines (#1212). Without it these were the only fetch logs in the file keyed
 // on the URL alone, so filtering Workers Logs by a service id showed the caller's outcome line but not
 // the attempt reasons above it — which is the half that says whether the source stalled or refused.
 async function fetchWithRetry(
   url: string,
-  { timeoutMs = 8000, onRetry, svcId, tracker }: { timeoutMs?: number; onRetry?: () => void; svcId?: string; tracker: FetchTracker },
+  { timeoutMs = 8000, svcId, tracker }: { timeoutMs?: number; svcId?: string; tracker: FetchTracker },
 ): Promise<Response> {
   const who = svcId ? `${svcId} ${url}` : url
   try {
@@ -1910,7 +1906,6 @@ async function fetchWithRetry(
     // reset in 200ms" (a block) call for different fixes, and attempt 1's reason is otherwise lost.
     console.warn(`[fetchWithRetry] first attempt failed for ${who}, retrying:`, err instanceof Error ? `${err.name}: ${err.message}` : err)
     await new Promise((r) => setTimeout(r, 1000))
-    onRetry?.()
     try {
       return await fetchTracked(url, Math.min(timeoutMs, 3000), undefined, tracker)
     } catch (retryErr) {
@@ -1929,7 +1924,6 @@ async function fetchWithRetry(
 interface PrefetchedData {
   summary: StatuspageResponse
   incidents: StatuspageResponse | null
-  latency: number
   uptimeHtml?: string  // Status page HTML for uptimeData parsing
   // #1389 — per-component uptime timelines fetched from `/uptime_showcase`, for an Atlassian page that
   // has moved them off the status document (`hasLazyUptimeShowcase`). ABSENT on a page still carrying
@@ -1949,8 +1943,6 @@ interface PrefetchedData {
 export type PageComponentsFetch = { ok: true; components: unknown } | { ok: false }
 
 // ── Fetch Single Service ──
-// NOTE: `latency` measures status page response time, not actual AI API latency.
-// This is a known v1 limitation — real API latency measurement is planned for a future phase.
 // For services without `apiUrl`, status is based on HTTP reachability of the status page (200 = operational).
 // This may not reflect actual service outages if the status page itself remains up.
 
@@ -2421,19 +2413,17 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
     }
 
     if (config.cloudflareStatusComponentIds) {
-      const start = Date.now()
       const summaryRes = await fetchWithRetry('https://www.cloudflarestatus.com/api/v3/summary', { svcId: config.id, tracker })
-      const latency = Date.now() - start
       if (!summaryRes.ok) {
         console.error(`[fetchService] ${config.id} Cloudflare Status summary returned HTTP ${summaryRes.status}`)
         summaryRes.body?.cancel()
         // The v3 API is a machine endpoint, but 403/429 can still be an egress restriction rather
         // than a retired source. Only unambiguous gone/auth statuses become a dead-source verdict.
         if (GONE_STATUSES.has(summaryRes.status)) {
-          return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency }
+          return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true }
         }
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
       }
       const raw = await summaryRes.json().catch(() => null)
       const parsed = parseCloudflareStatusSummary(raw, config.cloudflareStatusComponentIds)
@@ -2441,10 +2431,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         console.warn(`[fetchService] ${config.id} Cloudflare Status summary unreadable (${parsed.reason})`)
         await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
       }
       resetFetchFailure(trackingStore, config.id)
-      return { ...base, status: parsed.summary.status, latency, incidents: parsed.summary.incidents }
+      return { ...base, status: parsed.summary.status, incidents: parsed.summary.incidents }
     }
 
     // #1403 — Datadog Status Page. The hosted page is a client-rendered shell, but its whole state
@@ -2464,7 +2454,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // Same split the Cloudflare arm makes: this is a static machine document, so an unambiguous
         // gone/auth 4xx is a retired source, while 403/429 can still be an egress restriction.
         if (GONE_STATUSES.has(configRes.status)) {
-          return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency }
+          return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true }
         }
         // Booked, not just logged. The retired parser carried a caller-set `fetch-unreadable` for
         // exactly this, and it is the likeliest failure on THIS host — a 403 here is most often a
@@ -2473,7 +2463,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // is walled, and `fetch-fail:daily` cannot substitute: 48h TTL, rising edge only.
         await recordParseFailure(kv, Date.now(), config.id, 'dd-fetch-unreadable')
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
-        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
       }
       // `.text()` then parse, not `.json()`: a 200 carrying HTML (a bot interstitial, or the app shell
       // this endpoint sits behind) is not a transiently-unreadable document, and letting the
@@ -2485,20 +2475,19 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         const sourceReadFailure: StatusSourceReadFailure = { source: 'datadog-config', phase: 'transport', httpStatus: configRes.status, errorKind: statusSourceTransportErrorKind(err) }
         logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
-        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
       }
       const parsed = parseDatadogStatusPage(safeJsonParse(configText), config.datadogComponentGroupId ?? '')
       if (!parsed.ok) {
         console.warn(`[fetchService] ${config.id} Datadog config.json unreadable (${parsed.reason}) content-type=${configRes.headers.get('content-type') ?? 'none'} body[0..120]=${JSON.stringify(configText.slice(0, 120))}`)
         await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true, latency }
+        return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
       }
       resetFetchFailure(trackingStore, config.id)
       return {
         ...base,
         status: parsed.page.status,
-        latency,
         incidents: parsed.page.incidents,
         // #1006 — the PROVIDER's own published records, computed by us over a trailing 30 days with
         // the /methodology weights. Not a copy of a figure on their page: they publish none.
@@ -2522,17 +2511,14 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
     if (config.apiUrl) {
       // Atlassian Statuspage API — use pre-fetched data when available, else fetch directly
       let summaryData: StatuspageResponse
-      let latency: number
       let rawIncData: StatuspageResponse | null
       let incidentsLegFailure: StatuspageParseFailure | null = null
 
       if (prefetched) {
         summaryData = prefetched.summary
-        latency = prefetched.latency
         rawIncData = prefetched.incidents
       } else {
         const baseUrl = config.apiUrl.replace('/summary.json', '')
-        const start = Date.now()
         const [summaryRes, incidentsRes] = await Promise.all([
           fetchWithRetry(config.apiUrl, { svcId: config.id, tracker }).catch(async (err) => {
             await recordParseFailure(kv, Date.now(), config.id, 'statuspage-fetch-unreadable')
@@ -2545,7 +2531,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
             return null
           }),
         ])
-        latency = Date.now() - start
         if (!summaryRes.ok) {
           console.error(`[fetchService] ${config.id} summary.json returned HTTP ${summaryRes.status}`)
           summaryRes.body?.cancel()
@@ -3095,7 +3080,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       return {
         ...base,
         status: svcStatus,
-        latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         ...(feedDepthStart ? { feedDepthStart } : {}),
         ...(components.length > 0 ? { components } : {}),
@@ -3139,14 +3123,13 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           //
           // Everything else — 403/429 above all, this being an undocumented endpoint fetched with a
           // spoofed UA from Worker egress — falls through to the transient path so the streak advances
-          // and the #500 persistent-failure alert stays armed. Neither of these two services is probed,
-          // so `probeConfirmed` can never correct a wrong `sourceDead` here the way it can elsewhere.
+          // and the #500 persistent-failure alert stays armed.
           if (res && GONE_STATUSES.has(res.status)) {
-            return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
+            return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true }
           }
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
           // A failed read is not a verdict about the provider.
-          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true }
         }
         // Decode the utf-16 (BOM-detected) JSON. A 200 with an unparseable body means the endpoint's
         // shape/encoding drifted \u2014 treat that like a fetch failure (degrade + trip the persistent-failure
@@ -3163,7 +3146,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           const sourceReadFailure: StatusSourceReadFailure = { source: 'aws-health', phase: 'transport', httpStatus: res.status, errorKind: statusSourceTransportErrorKind(err) }
           logStatusSourceReadFailure({ event: 'status_source_read_failure', serviceId: config.id, ...sourceReadFailure, latencyMs: latency })
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
-          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true }
         }
         let json: unknown = DECODE_FAILED
         try {
@@ -3182,7 +3165,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
           // `sourceUnknown` is what says "our read failed" on the badge and to the withdrawal hold,
           // rather than only in the counter.
-          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true }
         }
         resetFetchFailure(trackingStore, config.id)
         // #1212 — same split as the Azure leg: status from the unsliced list, display capped.
@@ -3197,7 +3180,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         return {
           ...base,
           status: deriveAwsStatus(oursHealth),
-          latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
           ...(awsRegionHealth && Object.keys(awsRegionHealth).length > 0 ? { awsRegionHealth } : {}),
@@ -3210,15 +3192,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // aborts on its own timeout, and three such polls cross `trackFetchFailure`'s threshold into a
         // `degraded` that describes our connection rather than Azure. Nothing else catches it: one
         // source, no probe target, no cross-validation phase it qualifies for.
-        //
-        // `start` is reset before the retry so the published latency is the served response's own RTT
-        // rather than the abandoned attempt plus the backoff.
-        let start = Date.now()
-        const rssRes = await fetchWithRetry(config.azureRssUrl, { timeoutMs: 4000, onRetry: () => { start = Date.now() }, svcId: config.id, tracker }).catch((err) => {
+        const rssRes = await fetchWithRetry(config.azureRssUrl, { timeoutMs: 4000, svcId: config.id, tracker }).catch((err) => {
           console.warn(`[fetchService] ${config.id} Azure RSS failed:`, err instanceof Error ? err.message : err)
           return null
         })
-        const latency = Date.now() - start
         if (!rssRes || !rssRes.ok) {
           if (rssRes) { console.warn(`[fetchService] ${config.id} Azure RSS HTTP ${rssRes.status}`); rssRes.body?.cancel() }
           // #1212 — an unambiguous gone/auth 4xx is the source being GONE, not an indeterminate read,
@@ -3227,16 +3204,13 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // rather than a permanent amber badge nobody is told about. Everything else falls through to the
           // transient path — see the AWS Health leg above.
           if (rssRes && GONE_STATUSES.has(rssRes.status)) {
-            return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true, latency: config.category === 'api' ? latency : null }
+            return { ...base, status: 'unknown', incidentSourceStale: true, sourceDead: true }
           }
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-          // An HTTP error still measured a response time (kept, as on the AWS Health leg above); a
-          // stall measured nothing, so publishing the elapsed abort budget would put our own timeout
-          // into `/api/v1/status` and `latency:24h` as though it were Azure's.
           // #1212 — `sourceUnknown`: this is our read failing, not a verdict about Azure. It drives the
           // #1004 `unknown` badge instead of a bare amber one, and holds the #1106 withdrawal notice
           // that an empty incident list would otherwise look like grounds for.
-          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: rssRes && config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true }
         }
         // #1212 — a 200 is not a read. The body has to be a feed before its emptiness means anything;
         // otherwise "no incidents" is our own misreading and clearing the streak publishes a recovery
@@ -3247,7 +3221,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           console.warn(`[fetchService] ${config.id} Azure RSS unreadable (${parsed.reason}, http=${rssRes.status}, ct=${rssRes.headers.get('content-type')}, chars=${body.length})`)
           await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
           const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id)
-          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true, latency: config.category === 'api' ? latency : null }
+          return { ...base, status: shouldDegrade ? 'unknown' : 'operational', incidents: [], sourceUnknown: true }
         }
         resetFetchFailure(trackingStore, config.id)
         // #1212 — cap AFTER the keyword filter, not inside the parser. This is the whole-Azure
@@ -3266,7 +3240,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         return {
           ...base,
           status: deriveAwsStatus(ours),
-          latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
         }
@@ -3719,10 +3692,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           sourceUnknown: true,
           // Carry what WAS measured successfully. The main-page fetch is independent of the scrape, so
           // uptime + components usually survive a scrape/parse failure — dropping them would turn one
-          // unreadable list into a wholesale data loss. `latency` mirrors the four sibling early
-          // returns in this function; `uptimeSource` must travel WITH `uptime30d` or the figure ships
+          // unreadable list into a wholesale data loss. `uptimeSource` must travel WITH `uptime30d` or the figure ships
           // without provenance and the UI/archive treat it as unavailable.
-          latency: config.category === 'api' ? latency : null,
           uptime30d: instatusUptime ?? base.uptime30d,
           ...(instatusUptime != null ? { uptimeSource: 'official' as const } : {}),
           ...(instatusTodayWeightedOutageSec != null ? { todayWeightedOutageSec: instatusTodayWeightedOutageSec } : {}), // #1017
@@ -3815,7 +3786,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // often does this happen" on paths where the badge says nothing about it.
         status: legFalseGreen && legShouldDegrade ? 'unknown' : derivedStatus,
         ...(legFalseGreen ? { sourceUnknown: true } : {}),
-        latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         calendarDays: has30dCalendar ? 30 : 14,
         // Better Stack / AI Studio publish their own per-day record, the same class as Atlassian's
@@ -4331,14 +4301,11 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   const prefetchMap = new Map<string, PrefetchedData>()
   await Promise.all(uniqueApiUrls.map(async (apiUrl) => {
     const baseUrl = apiUrl.replace('/summary.json', '')
-    const start = Date.now()
     try {
       // #1125 — components.json (the superset) for any page that configures a componentsUrl, started
       // HERE so it runs alongside summary/incidents rather than adding a serial round-trip. It is still
       // awaited inside this page's prefetch entry, so if it is the slowest leg it delays that entry —
-      // concurrently, not serially. Deliberately NOT inside the Promise.all below: `latency` is
-      // measured off that pair and is the page's published response time, which a slow components.json
-      // must not inflate. `fetchPageComponents` never rejects, so this can't produce an unhandled
+      // concurrently, not serially. `fetchPageComponents` never rejects, so this can't produce an unhandled
       // rejection on the early-return path below.
       const componentsUrl = SERVICES.find((s) => s.apiUrl === apiUrl && s.componentsUrl)?.componentsUrl
       const componentsFetch = componentsUrl ? fetchPageComponents(componentsUrl, tracker) : Promise.resolve(undefined)
@@ -4351,7 +4318,6 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
           return null
         }),
       ])
-      const latency = Date.now() - start
       if (!summaryRes.ok) {
         console.warn(`[prefetch] ${apiUrl} returned HTTP ${summaryRes.status} — skipping; fetchService will fetch directly`)
         summaryRes.body?.cancel()
@@ -4421,7 +4387,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       const uptimeTimelines = (uptimeHtml && scope.length > 0 && hasLazyUptimeShowcase(uptimeHtml))
         ? await fetchUptimeShowcase(statusUrl, scope, 3000, tracker)
         : undefined
-      prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml, uptimeTimelines: uptimeTimelines ?? undefined, componentsFetch: await componentsFetch })
+      prefetchMap.set(apiUrl, { summary, incidents, uptimeHtml, uptimeTimelines: uptimeTimelines ?? undefined, componentsFetch: await componentsFetch })
     } catch (err) {
       const isJsonErr = err instanceof SyntaxError
       console.warn(`[prefetch] ${isJsonErr ? 'JSON parse' : 'network'} failure for ${baseUrl}:`, err instanceof Error ? err.message : err)
@@ -4482,6 +4448,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       incidentSourceStale: true,
     }
   })
+  applyProbeLatency(raw, probeSnapshots)
 
   // Cross-validate: override false-positive degraded status when probe RTT confirms service is healthy.
   // Order: Phase 3 (metastatuspage) → Phase 2 (quorum) → Phase 1 (probe)
@@ -4647,7 +4614,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     if (svc.status === 'degraded' && cachedServices) {
       const prev = cachedServices.find((s) => s.id === svc.id)
       if (prev && prev.status === 'operational') {
-        return { ...prev, lastChecked: svc.lastChecked }
+        return { ...prev, latency: svc.latency, lastChecked: svc.lastChecked }
       }
     }
     return svc

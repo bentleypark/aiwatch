@@ -106,7 +106,7 @@ describe('fetchService follows the page structure in a displayAllComponents inci
   const components = API_ORDER.map(([id, name]) => ({ id, name, status: 'operational' }))
   const summary = { status: { indicator: 'none', description: 'All Systems Operational' }, components, incidents: [] }
   const prefetched = (uptimeHtml?: string) => ({
-    summary: summary as never, incidents: null, latency: 100, componentsFetch: { ok: true as const, components }, uptimeHtml,
+    summary: summary as never, incidents: null, componentsFetch: { ok: true as const, components }, uptimeHtml,
   })
 
   beforeEach(() => {
@@ -138,7 +138,7 @@ describe('fetchService: groq breakdown follows the page groups (#1528)', () => {
   const nameFor = (id: string) => (id === ids[0] ? 'API' : id === ids[ids.length - 1] ? 'Website' : id)
   const components = [...ids].reverse().map((id, i) => ({ id, name: nameFor(id), status: 'operational', position: i + 1 }))
   const summary = { status: { indicator: 'none', description: 'All Systems Operational' }, components, incidents: [] }
-  const prefetched = { summary: summary as never, incidents: null, latency: 100, componentsFetch: { ok: true as const, components }, uptimeHtml: GROQ_PAGE }
+  const prefetched = { summary: summary as never, incidents: null, componentsFetch: { ok: true as const, components }, uptimeHtml: GROQ_PAGE }
 
   beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})

@@ -278,11 +278,20 @@ describe('renderMethodologyPage', () => {
     const n = PROBE_TARGETS.length // derived, so no number here can go stale
     expect(html).toContain(`${n} AI service`)  // EN
     expect(html).toContain(`${n}개 AI 서비스`)   // KO
-    // the 3 remaining non-probed API services must be named...
-    for (const svc of ['Bedrock', 'Azure OpenAI', 'Modal']) {
-      expect(html, `non-probed list should name ${svc}`).toContain(svc)
+    // #1633 — the non-probed list is asserted inside the two paragraphs that carry it, in every copy:
+    // a page-wide toContain was met by unrelated copy (s1.src.rss names "Azure OpenAI").
+    const probed = new Set(PROBE_TARGETS.map((t) => t.id))
+    const nonProbedApi = SERVICES.filter((s) => s.category === 'api' && !probed.has(s.id)).map((s) => s.name)
+    expect(nonProbedApi).toEqual(['Azure OpenAI', 'Modal'])
+    const lists = [
+      ['s4.resp.na1 KO inline', inline('s4.resp.na1', 'p')], ['s4.resp.na1 KO', entry(koBlock, 's4.resp.na1')], ['s4.resp.na1 EN', entry(enBlock, 's4.resp.na1')],
+      ['s5.limit.probe KO inline', inline('s5.limit.probe', 'p')], ['s5.limit.probe KO', entry(koBlock, 's5.limit.probe')], ['s5.limit.probe EN', entry(enBlock, 's5.limit.probe')],
+    ] as const
+    for (const [where, text] of lists) {
+      for (const svc of nonProbedApi) expect(text, `${where} should name ${svc}`).toContain(svc)
+      expect(text, `${where} — Bedrock is probed (#1633)`).not.toContain('Bedrock')
     }
-    // ...and the now-probed ones must NOT appear in the doc (Runway/Pinecone/LangSmith appear
+    // Formerly unprobed services must NOT appear in the doc (Runway/Pinecone/LangSmith appear
     // nowhere else; Luma is also a Platform-uptime example so it's intentionally not asserted here).
     for (const svc of ['Runway', 'Pinecone', 'LangSmith']) {
       expect(html, `${svc} is now probed — must not be listed as non-probed`).not.toContain(svc)

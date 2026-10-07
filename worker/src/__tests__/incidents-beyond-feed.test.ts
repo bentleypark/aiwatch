@@ -156,7 +156,6 @@ describe('fetchService publishes the capped feed depth', () => {
     return fetchService(windsurf, {
       summary: { status: { indicator: 'none', description: 'All Systems Operational' }, components: [], incidents: [] } as never,
       incidents: { incidents: rows(n) } as never,
-      latency: 100,
     } as never, undefined, {})
   }
 

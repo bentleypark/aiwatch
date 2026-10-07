@@ -365,7 +365,6 @@ describe('the signal is produced by the real fetch path', () => {
         incidents: [],
       },
       incidents: null,
-      latency: 10,
       ...(withUptime ? { uptimeTimelines: { [CLAUDE_API]: { days: ninetyDays(today()) } } } : {}),
     }
   }

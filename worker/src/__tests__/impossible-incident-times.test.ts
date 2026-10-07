@@ -304,7 +304,7 @@ describe('#1390 wiring — the repair reaches a service with no incidentIoBaseUr
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html></html>', { status: 200 })))
     const svc = await fetchService(
       turbopuffer,
-      { summary: summary as never, incidents: null, latency: 120, uptimeHtml: html } as never,
+      { summary: summary as never, incidents: null, uptimeHtml: html } as never,
       undefined,
       {},
     )
@@ -341,7 +341,7 @@ describe('#1390 wiring — the repair reaches a service with no incidentIoBaseUr
 
     const svc = await fetchService(
       turbopuffer,
-      { summary: summary as never, incidents: null, latency: 120, uptimeHtml: html } as never,
+      { summary: summary as never, incidents: null, uptimeHtml: html } as never,
       undefined,
       {},
     )
@@ -492,7 +492,7 @@ describe('#1480 zero-length resolved incidents', () => {
       }],
     }
 
-    const svc = await fetchService(cerebras, { summary: summary as never, incidents: null, latency: 100 } as never, undefined, {})
+    const svc = await fetchService(cerebras, { summary: summary as never, incidents: null } as never, undefined, {})
     const [published] = svc.incidents
 
     expect(published).toMatchObject({ id: 'zero-length-atlassian', startUnknown: true, duration: null })
@@ -522,7 +522,7 @@ describe('#1390 dailyImpactComplete — the complete side is pinned too', () => 
     const days = `"days":[{"date":"${day(4)}","outages":{"p":0,"m":0}},{"date":"${day(3)}","outages":{"p":864,"m":0}}]`
     const html = `<script>window.uptimeData = {"${id}":{"component":{"code":"${id}","name":"Claude API"},${days}}};</script>`
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html></html>', { status: 200 })))
-    const svc = await fetchService(claude, { summary: summary as never, incidents: null, latency: 100, uptimeHtml: html } as never, undefined, {})
+    const svc = await fetchService(claude, { summary: summary as never, incidents: null, uptimeHtml: html } as never, undefined, {})
     if (svc.dailyImpact && Object.keys(svc.dailyImpact).length > 0) {
       expect(svc.dailyImpactComplete, 'an Atlassian bucket record owns every day').toBe(true)
     } else {

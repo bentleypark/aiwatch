@@ -24,9 +24,8 @@ Browser (React SPA, 60s polling)
     → metastatuspage preemptive signal: platform:status:atlassian KV non-operational → hold all Atlassian services operational
     → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
     → probe cross-validation: individual probe RTT normal → hold operational (prevents false positives during status page failures)
+    → service.latency = the latest probe snapshot's own RTT, else null (#1633 — applyProbeLatency; status-page timing is never published)
   → React state (usePolling hook via PollingContext)
-    → overlay probe RTT onto service.latency (34 probe services)
-    → non-probe services (bedrock, azureopenai, modal) keep status page latency
   → all pages read from context
 
 Cron Trigger (*/5 min)

@@ -173,15 +173,6 @@ describe('#1089 review — the scrape FETCH failures, not just the parse', () =>
     expect(trackingStore).toEqual({ fal: { failCount: 2, failCountAt: expect.any(String) } })
   })
 
-  it('carries the measured latency through the guard', async () => {
-    // Review round 1 (Important 3): the early return dropped `latency` — all three Instatus services
-    // are category:'api', so this was real data loss on every parse failure.
-    stubFetch('<html><body>redesigned</body></html>')
-    const svc = await fetchService(instatusSvc, undefined, undefined, {})
-    expect(svc.sourceUnknown).toBe(true)
-    expect(svc.latency, 'latency is measured independently of the scrape').not.toBeNull()
-  })
-
   it('carries the uptime provenance with the uptime figure', async () => {
     // Review round 1 (Important 4): `uptime30d` shipped with no `uptimeSource`, which ServiceDetails,
     // the Uptime page and monthly-archive all read as "unavailable".

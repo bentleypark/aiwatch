@@ -68,7 +68,6 @@ const ko = {
   'filter.image': '이미지',
   'overview.incidents.title': '최근 인시던트',
   'overview.latency.title': '레이턴시 순위',
-  'overview.card.latency': '상태 페이지',
   'overview.card.latency.api': 'API 응답',
   'overview.card.uptime': 'uptime',
   'overview.card.incidents': 'incidents',
@@ -117,13 +116,13 @@ const ko = {
 
   // Latency
   'latency.rankings': '현재 순위',
-  'latency.disclaimer': 'API 엔드포인트 응답 시간(RTT)을 직접 측정합니다. 공개 엔드포인트가 없는 서비스는 상태 페이지 응답 시간을 표시합니다.',
+  'latency.disclaimer': 'API 엔드포인트 응답 시간(RTT)을 직접 측정합니다. probe할 수 있는 엔드포인트가 없는 서비스는 레이턴시를 표시하지 않습니다.',
   'latency.fastest': '가장 빠름',
   'latency.average': '평균',
   'latency.slowest': '가장 느림',
   'latency.trend': '24시간 추세',
   'latency.top8': 'Score 상위 8개',
-  'latency.excludeNote': '* 랭킹은 API 서비스와 자체 API가 있는 코딩 에이전트(예: Cursor)를 포함합니다. AI 앱은 랭킹에 없습니다 — 대부분 측정할 엔드포인트가 없고, Character.AI는 백엔드 health 엔드포인트로 probe하여 상세 페이지에만 표시됩니다.',
+  'latency.excludeNote': '* 랭킹은 앱을 제외한 모든 분야에서 직접 probe하는 서비스를 대상으로 합니다. probe할 수 있는 엔드포인트가 없는 서비스(대부분의 AI 앱, 일부 코딩 에이전트)는 제외되며, Character.AI는 백엔드 health 엔드포인트로 probe하지만 앱이라 상세 페이지에만 표시합니다.',
   'latency.dummy': '데이터 수집 중 (24시간 후 실데이터로 전환)',
   'latency.avg.services': '개 서비스',
 
@@ -190,8 +189,7 @@ const ko = {
 
   // Service Details
   'svc.latency': 'API 응답 시간',
-  'svc.latency.statusPage': '상태 페이지 레이턴시',
-  'svc.latency.statusPage.sub': '상태 페이지 응답 시간',
+  'svc.latency.notMeasured': 'probe할 수 있는 엔드포인트 없음',
   'svc.latency.inherited': 'API 응답 시간 · {p} 기반',
   'svc.latency.inherited.sub': '{p}와 동일 엔드포인트 (상속)',
   'svc.uptime30d': '업타임',

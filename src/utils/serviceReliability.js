@@ -34,7 +34,7 @@ export const hasSufficientCoverage = (s) => s.coverageDays == null || s.coverage
 /** The AIWatch Score is trustworthy enough to RANK this service (#713). Needs a live (non-stale) feed
  *  AND `scoreConfidence !== 'low'` — i.e. at least one SUBSTANTIAL measured signal beyond incidents+
  *  recovery. score.ts sets confidence `high` (official uptime), `medium` (no uptime but a real probe),
- *  `low` (NEITHER uptime nor probe — e.g. Bedrock/Azure, scored on only 2 components → over-scores
+ *  `low` (NEITHER uptime nor probe — e.g. Azure OpenAI, scored on only 2 components → over-scores
  *  under the rescale). A `low` service is shown on its detail page but kept OUT of the ranking. #802 —
  *  ALSO requires ≥30d of coverage (a recently-added service is shown on its detail page but kept out of
  *  the ranking until it accrues a full window). Mirror of api/is-down.ts:hasReliableData. */
@@ -63,7 +63,7 @@ export const splitByConfidence = (scored) => ({
 /** #870 — the service HAS a probe target but hasn't accrued ≥7d of samples yet, so score.ts marks its
  *  Responsiveness `insufficient` and confidence falls to `low`. `scoreBreakdown.responsivenessStatus`
  *  (score.ts `ProbeContext.kind`) distinguishes this WARMING state from `unsupported` (no probe target
- *  ever — Bedrock/Azure/apps/agents). It's the signal that a low-confidence service will become
+ *  ever — Azure OpenAI/apps/agents). It's the signal that a low-confidence service will become
  *  rankable once its probe warms, so the ranking page treats it as "recently added", not "no data". */
 export const isProbeWarming = (s) => s.scoreBreakdown?.responsivenessStatus === 'insufficient'
 
@@ -72,7 +72,7 @@ export const isProbeWarming = (s) => s.scoreBreakdown?.responsivenessStatus === 
  *  (a) it is ALREADY scorable (non-null score, non-low confidence) and only the 30d coverage gate holds
  *  it out, OR (b) its only disqualifier is a WARMING probe (a new probe target, e.g. turbopuffer days
  *  1-7): it has no official uptime yet by design + a probe that will reach `available` at ~7d, so it WILL
- *  rank — it must not be lumped with Bedrock/Azure (unsupported, no probe) or a stale feed. */
+ *  rank — it must not be lumped with Azure OpenAI (unsupported, no probe) or a stale feed. */
 export const isRecentlyAdded = (s) =>
   !s.incidentSourceStale && s.coverageDays != null && s.coverageDays < MIN_COVERAGE_DAYS
   && ((s.aiwatchScore != null && s.scoreConfidence !== 'low') || isProbeWarming(s))

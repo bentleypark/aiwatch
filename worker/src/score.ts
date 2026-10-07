@@ -395,13 +395,13 @@ export function calculateAIWatchScore(
   let scoreNum = (sumScores / availableMax) * TOTAL_SCORE_MAX * probePenalty
 
   // Confidence by data completeness — official uptime is the strongest signal; a service scored on
-  // only incidents + recovery (no official uptime, no probe — e.g. Bedrock/Azure) is 'low'.
+  // only incidents + recovery (no official uptime, no probe — e.g. Azure OpenAI) is 'low'.
   const confidence: 'high' | 'medium' | 'low' = hasUptime ? 'high' : probeAvailable ? 'medium' : 'low'
 
   scoreNum = Math.round(Math.max(0, Math.min(100, scoreNum)))
   if (scoreNum < 1) scoreNum = 0
 
-  // #713 — a 'low'-confidence service (NEITHER official uptime NOR a probe — e.g. Bedrock/Azure) is
+  // #713 — a 'low'-confidence service (NEITHER official uptime NOR a probe — e.g. Azure OpenAI) is
   // scored on only incidents + recovery (2 of 4 components), which over-scores under the rescale. We do
   // NOT surface that figure: emit a null score/grade (the breakdown + confidence stay so consumers see
   // WHY). This keeps it out of the ranking AND the detail-page score card — no hidden/misleading number.

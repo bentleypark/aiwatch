@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeMedianRtt, detectConsecutiveSpikes, isProbeHealthy, isProbeFailing, PROBE_FAILING_FLOOR_MS } from '../probe'
+import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeMedianRtt, detectConsecutiveSpikes, isProbeHealthy, isProbeFailing, PROBE_FAILING_FLOOR_MS, applyProbeLatency } from '../probe'
 import type { ProbeSnapshot } from '../probe'
 
 describe('computeProbeSlot', () => {
@@ -79,8 +79,8 @@ describe('PROBE_TARGETS', () => {
     'fishaudio', // #1549
   ]
 
-  it('has all 34 probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(34)
+  it('has all 35 probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(35)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)
@@ -577,3 +577,44 @@ describe('isProbeFailing — the absolute floor under the slow-sample bar', () =
 // `isMistralProbedEndpoint` describe block was removed in #373 alongside the function itself.
 // The Mistral-only endpoint allow/deny list is no longer needed: same-title incident grouping
 // in `src/utils/incidentGrouping.js` consolidates noise uniformly across all services.
+
+describe('applyProbeLatency (#1633)', () => {
+  const snap = (t: string, data: ProbeSnapshot['data']): ProbeSnapshot => ({ t, data })
+  const svcs = () => [
+    { id: 'claude', latency: 412 as number | null },  // 412 = a status-page fetch time it must replace
+    { id: 'azureopenai', latency: 316 as number | null },
+    { id: 'groq', latency: 50 as number | null },
+  ]
+
+  it('publishes the own RTT from the LATEST snapshot and nulls every unprobed service', () => {
+    const s = svcs()
+    applyProbeLatency(s, [
+      snap('2026-10-07T00:00', { claude: { status: 401, rtt: 900 }, groq: { status: 401, rtt: 700 } }),
+      snap('2026-10-07T00:05', { claude: { status: 401, rtt: 180 }, groq: { status: 401, rtt: 95 } }),
+    ])
+    expect(s.map((x) => x.latency)).toEqual([180, null, 95])
+  })
+
+  it('a failed probe (rtt 0) and a service missing from the latest snapshot publish null', () => {
+    const s = svcs()
+    applyProbeLatency(s, [
+      snap('2026-10-07T00:00', { groq: { status: 401, rtt: 95 } }),
+      snap('2026-10-07T00:05', { claude: { status: 0, rtt: 0 } }),
+    ])
+    expect(s.map((x) => x.latency)).toEqual([null, null, null])
+  })
+
+  it('no snapshots at all → every latency is null', () => {
+    const s = svcs()
+    applyProbeLatency(s, [])
+    expect(s.map((x) => x.latency)).toEqual([null, null, null])
+    const u = svcs()
+    applyProbeLatency(u, undefined)
+    expect(u.map((x) => x.latency)).toEqual([null, null, null])
+  })
+
+  it('probes bedrock on the control-plane model list, not bedrock-runtime', () => {
+    expect(PROBE_TARGETS.find((t) => t.id === 'bedrock')?.url).toBe('https://bedrock.us-east-1.amazonaws.com/foundation-models')
+    expect(PROBE_TARGETS.some((t) => t.id === 'azureopenai' || t.id === 'modal')).toBe(false)
+  })
+})

@@ -67,7 +67,7 @@ describe('fetchService normalizes Statuspage offset timestamps (#1602)', () => {
       })),
     }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
-    return fetchService(config, { summary: summary as never, incidents: null, latency: 120 }, undefined, {})
+    return fetchService(config, { summary: summary as never, incidents: null }, undefined, {})
   }
 
   it('files a +08:00 incident under its UTC day', async () => {

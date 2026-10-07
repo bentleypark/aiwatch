@@ -32,7 +32,6 @@ const run = async (config: ServiceConfig, prefetchExtra: Record<string, unknown>
   return fetchService(config, {
     summary: { status: { indicator: 'none', description: 'All Systems Operational' }, components: [], incidents: [] },
     incidents: { incidents: [] },
-    latency: 100,
     ...prefetchExtra,
   } as never, undefined, {} as never)
 }

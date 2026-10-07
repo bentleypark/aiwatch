@@ -35,7 +35,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 - **Real-time status** — Operational / Degraded / Down for 46 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
-- **Latency monitoring** — Direct endpoint response time (RTT) for 34 probe-capable services, status page timing as fallback
+- **Latency monitoring** — Direct endpoint response time (RTT) for 35 probe-capable services; no latency is shown for a service without one
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
 - **Uptime** — 30-day uptime **computed by AIWatch** from each provider's own published records, rather than copied from the % they display (weighted: full outage 1.0, partial/degraded 0.3, announced maintenance excluded). Sources that don't fit that formula carry their own label instead — so our figure can differ from a provider's own, by design ([how it works](https://ai-watch.dev/methodology))
@@ -53,7 +53,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
 - **Is X Down SEO pages** — 44 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
-- **Health check probing** — Direct RTT measurement to service endpoints (34 probe targets) with early outage detection via consecutive spike alerts and RTT degradation tracking
+- **Health check probing** — Direct RTT measurement to service endpoints (35 probe targets) with early outage detection via consecutive spike alerts and RTT degradation tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, optional `?banner=` campaign slot, and GA4 tracking
@@ -194,7 +194,7 @@ Cloudflare KV
   ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
-  ├── probe:24h            (health check probes, max 2016, TTL 7d, 34 probe targets)
+  ├── probe:24h            (health check probes, max 2016, TTL 7d, 35 probe targets)
   ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL scaled by failure type — #955)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 30d)
@@ -295,7 +295,7 @@ curl https://aiwatch-worker.p2c2kbf.workers.dev/api/v1/status
 curl https://aiwatch-worker.p2c2kbf.workers.dev/api/v1/status/claude
 ```
 
-Response includes: `id`, `name`, `provider`, `category`, `group` (fine taxonomy — llm / voice / inference / …), `status`, `latency`, `uptime30d`, `uptimeSource`, `lastChecked`, and up to 5 recent incidents (single service only).
+Response includes: `id`, `name`, `provider`, `category`, `group` (fine taxonomy — llm / voice / inference / …), `status`, `latency` (the service's latest direct-probe RTT in ms; `null` when it is not probed — never status-page timing, #1633), `uptime30d`, `uptimeSource`, `lastChecked`, and up to 5 recent incidents (single service only).
 
 ## Status Badges
 

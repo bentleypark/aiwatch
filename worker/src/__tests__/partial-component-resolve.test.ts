@@ -617,7 +617,6 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
   ) => ({
     summary: { status: { indicator, description: 'x' }, components: components ?? undefined, incidents: [] } as never,
     incidents: null,
-    latency: 100,
     componentsFetch,
   })
   const stored = (kv: ReturnType<typeof mockKV>, id = 'chatgpt') => parsePartialResolve(kv.store[`component-partial:${id}`] ?? null)
@@ -664,7 +663,7 @@ describe('wiring — fetchService reports the partial resolve (#1179)', () => {
     const kv = mockKV()
     await fetchService(CURSOR, {
       summary: { status: { indicator: 'none', description: 'x' }, components: kept, incidents: [] } as never,
-      incidents: null, latency: 100,
+      incidents: null,
     }, kv as never, {})
     const e = stored(kv, 'cursor')
     expect(e!.missing).toEqual(CURSOR.statusComponentIds!.slice(2).sort())

@@ -60,10 +60,12 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   // operational (probe-backed) despite the dead source. CAVEAT: it's a BACKEND health proxy — the
   // user-facing app could be down while /health is UP; it does NOT restore incidents/uptime.
   { id: 'characterai', url: 'https://neo.character.ai/health' },                    // 200 {"redis":"UP"}, app-category detail-card only (not Latency-ranked)
-  // Not probed (#678): bedrock (region-specific runtime endpoint, estimate-only — incident-derived
-  // reliability is enough), azureopenai (tenant-specific {resource}.openai.azure.com — no generic
-  // endpoint), modal (api.modal.com returns a catch-all 200 on every path — not a representative
-  // API-path RTT)
+  // #1633 — control-plane model list (the /v1/models analogue), 403 without auth. Not bedrock-runtime:
+  // it answers the same 404 UnknownOperationException for any path.
+  { id: 'bedrock', url: 'https://bedrock.us-east-1.amazonaws.com/foundation-models' },
+  // Not probed: azureopenai ({resource}.openai.azure.com resolves to a different regional gateway per
+  // resource — no neutral endpoint), modal (api.modal.com is a gRPC server: HTTP 200 + grpc-status on
+  // every path, so the `status < 500` health bar can never fail)
 ]
 
 // #883 — Parent-probe inheritance for the Score's Responsiveness component. Some ranked services run
@@ -298,4 +300,14 @@ export function isProbeHealthy(
     return probe.rtt > 0 && probe.rtt <= threshold && probe.status < 500
   }).length
   return healthyCount >= Math.ceil(recent.length * 2 / 3)
+}
+
+/** #1633 — the one writer of `ServiceStatus.latency`: the service's own RTT from the latest probe
+ *  snapshot, else null. A service with no probe has no latency — nothing else is published under it. */
+export function applyProbeLatency(services: Array<{ id: string; latency: number | null }>, snapshots?: ProbeSnapshot[]): void {
+  const latest: Record<string, ProbeResult> = snapshots?.[snapshots.length - 1]?.data ?? {}
+  for (const svc of services) {
+    const rtt = latest[svc.id]?.rtt
+    svc.latency = rtt != null && rtt > 0 ? rtt : null
+  }
 }

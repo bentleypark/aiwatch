@@ -57,7 +57,6 @@ const svcFor = async (outageOn: string | null, opts: { degradedId?: string; inci
   return fetchService(el, {
     summary: summaryFor(opts),
     incidents: { incidents: opts.incidents ?? [] },
-    latency: 100,
     uptimeHtml: ioPageHtml(outageOn),
   } as never, undefined, {} as never)
 }
@@ -163,7 +162,6 @@ describe('#1434 — ElevenLabs uptime covers every component its card shows', ()
         incidents: [],
       },
       incidents: { incidents: [] },
-      latency: 100,
       uptimeHtml: ioPageHtml(null),
     } as never, undefined, store as never)
     expect(JSON.stringify(store)).toContain('componentMiss')
@@ -181,7 +179,6 @@ describe('#1434 — ElevenLabs uptime covers every component its card shows', ()
         incidents: [],
       },
       incidents: { incidents: [] },
-      latency: 100,
       uptimeHtml: ioPageHtml(null),
     } as never, kv as never, {} as never)
     expect(Object.keys(kv.store).some((k) => k.includes('partial'))).toBe(true)

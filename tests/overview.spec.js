@@ -146,13 +146,12 @@ test.describe('Overview page', () => {
     await expect(page.locator('main button').filter({ hasText: 'Claude Code' }).first()).toBeVisible()
   })
 
-  test('card latency label reflects probe status — "API response" for probed, "status page" otherwise (#658)', async ({ page }) => {
-    // The card's latency value is the direct probe RTT for probed services and status-page timing
-    // otherwise; the label must say which (matches ServiceDetails svc.latency vs svc.latency.statusPage).
+  test('card shows latency only for a probed service — never a status-page value (#658, #1633)', async ({ page }) => {
     // probeServiceIds is derived by usePolling from the response's probe24h snapshot, so seed one.
-    const svc = (id, name, category) => ({ id, category, name, provider: 'x', status: 'operational', latency: 150, uptime30d: 99.9, calendarDays: 30, incidents: [] })
+    // bedrock carries 304 — a status-page fetch time a pre-#1633 Worker or cache snapshot still holds.
+    const svc = (id, name, category, latency) => ({ id, category, name, provider: 'x', status: 'operational', latency, uptime30d: 99.9, calendarDays: 30, incidents: [] })
     const mockData = { json: {
-      services: [svc('claude', 'Claude API', 'api'), svc('claudeai', 'claude.ai', 'app')],
+      services: [svc('claude', 'Claude API', 'api', 150), svc('bedrock', 'Amazon Bedrock', 'api', 304)],
       probe24h: [{ data: { claude: { rtt: 150 } } }], // → probeServiceIds = ['claude']
       lastUpdated: new Date().toISOString(),
     } }
@@ -160,13 +159,13 @@ test.describe('Overview page', () => {
     await page.route('**/api/status/cached', (route) => route.fulfill(mockData))
     await page.goto('/')
     const claudeCard = page.locator('main button').filter({ hasText: 'Claude API' }).first()
-    const claudeaiCard = page.locator('main button').filter({ hasText: 'claude.ai' }).first()
+    const bedrockCard = page.locator('main button').filter({ hasText: 'Amazon Bedrock' }).first()
     await claudeCard.waitFor({ state: 'visible', timeout: 20000 })
-    // Probed → "API response" / "API 응답"; not "status page".
-    await expect(claudeCard.getByText(/API response|API 응답/)).toBeVisible()
-    await expect(claudeCard.getByText(/^status page$|^상태 페이지$/)).toHaveCount(0)
-    // Non-probed app → "status page" / "상태 페이지".
-    await expect(claudeaiCard.getByText(/status page|상태 페이지/)).toBeVisible()
+    await expect(claudeCard.getByText('150ms')).toBeVisible()
+    await expect(bedrockCard.getByText('304ms')).toHaveCount(0)
+    await expect(page.locator('main').getByText(/^status page$|^상태 페이지$/)).toHaveCount(0)
+    // The Latency Rankings panel lists the probed service only.
+    await expect(page.locator('main').getByText('304ms')).toHaveCount(0)
   })
 
   test('Analyze button shows Coming Soon or Beta based on analysis data', async ({ page }) => {
@@ -240,26 +239,26 @@ test.describe('Overview page', () => {
 
   test('Latency Rankings spans all categories — a category filter does not hide other-category latency (#798)', async ({ page }) => {
     // Mirror of #676 for the Latency Rankings panel: it ranks fastest/slowest across EVERYTHING, so a
-    // category filter must not drop an app/agent's latency bar. Pre-#798 it iterated the category-filtered
-    // catServices, so an LLM filter hid the ChatGPT (app) bar from the rankings.
+    // category filter must not drop another category's latency bar. Pre-#798 it iterated the
+    // category-filtered catServices, so an LLM filter hid a non-LLM bar from the rankings.
     const mock = { json: { services: [
       { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.9, calendarDays: 30, incidents: [] },
-      { id: 'chatgpt', category: 'app', name: 'ChatGPT', provider: 'OpenAI', status: 'operational', latency: 150, uptime30d: 99.5, calendarDays: 30, incidents: [] },
-    ], lastUpdated: new Date().toISOString() } }
+      { id: 'cursor', category: 'agent', name: 'Cursor', provider: 'Anysphere', status: 'operational', latency: 150, uptime30d: 99.5, calendarDays: 30, incidents: [] },
+    ], probe24h: [{ data: { claude: { rtt: 120 }, cursor: { rtt: 150 } } }], lastUpdated: new Date().toISOString() } }
     await page.route('**/api/status**', (route) => route.fulfill(mock))
     await page.route('**/api/status/cached', (route) => route.fulfill(mock))
     await page.goto('/')
     await waitForDataLoad(page)
-    // Under 'all', the ChatGPT card is in the grid (a <button>).
-    await expect(page.locator('main button').filter({ hasText: 'ChatGPT' }).first()).toBeVisible({ timeout: 10000 })
-    // Filter to LLM → the ChatGPT CARD leaves the grid (it's an app)…
+    // Under 'all', the Cursor card is in the grid (a <button>).
+    await expect(page.locator('main button').filter({ hasText: 'Cursor' }).first()).toBeVisible({ timeout: 10000 })
+    // Filter to LLM → the Cursor CARD leaves the grid (it's a coding agent)…
     const tablist = page.getByRole('tablist', { name: /Services|서비스/ })
     await tablist.getByRole('tab', { name: /LLM/ }).click()
     await page.waitForTimeout(200)
-    await expect(page.locator('main button').filter({ hasText: 'ChatGPT' })).toHaveCount(0)
+    await expect(page.locator('main button').filter({ hasText: 'Cursor' })).toHaveCount(0)
     // …but its latency bar (a non-button <span> name) is STILL in the Latency Rankings panel (#798).
-    // With the card gone, the only remaining ChatGPT text in main is the latency-bar label.
-    await expect(page.locator('main').getByText('ChatGPT', { exact: true }).first()).toBeVisible()
+    // With the card gone, the only remaining Cursor text in main is the latency-bar label.
+    await expect(page.locator('main').getByText('Cursor', { exact: true }).first()).toBeVisible()
   })
 
   test('Recent Incidents date label exposes contextual label via tooltip (#406)', async ({ page }) => {
