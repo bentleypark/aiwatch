@@ -27,6 +27,12 @@ describe('xai-regions (#686/#703)', () => {
       expect(xaiRegionOf('[API (us-east-1.api.x.ai)] Increased Error rate')).toBe('us-east-1')
       expect(xaiRegionOf('[API (eu-west-1.api.x.ai)] Increased Error rate')).toBe('eu-west-1')
     })
+    it('#1634 — extracts the label from the 2026-10 `[<Region> (<host>)]` shape', () => {
+      expect(xaiRegionOf('[Global (api.x.ai)] Models outage')).toBe('Global')
+      expect(xaiRegionOf('[US (us.api.x.ai)] Models outage')).toBe('US')
+      expect(xaiRegionOf('[Voice] Enterprise Voice Degraded')).toBeNull()
+      expect(xaiRegionOf('[grok.com] Models outage')).toBeNull()
+    })
     it('returns null for a non-region-tagged title', () => {
       expect(xaiRegionOf('Whole-service degradation')).toBeNull()
       expect(xaiRegionOf('[API Console] Console not loading')).toBeNull() // not the region shape
@@ -401,6 +407,15 @@ describe('xai-regions (#686/#703)', () => {
     })
   })
 
+  it('#1634 — the xAI API card drops Grok-tagged items whose title text names the API', () => {
+    const scoped = [
+      fullInc({ id: 'build', title: '[Grok (Build)] Outages across API, Grok.com, and Grok Build' }),
+      fullInc({ id: 'web', title: '[grok.com] Outages across API, Grok.com, and Grok Build' }),
+      fullInc({ id: 'global', title: '[Global (api.x.ai)] Outages across API, Grok.com, and Grok Build' }),
+    ]
+    expect(filterIncidents(scoped, XAI_CONFIG).map(i => i.id)).toEqual(['global'])
+  })
+
   it('XAI_REGION_RE matches only the region shape (not [API Console])', () => {
     expect(XAI_REGION_RE.test('[API (us-east-1.api.x.ai)] x')).toBe(true)
     expect(XAI_REGION_RE.test('[API Console] x')).toBe(false)
@@ -431,6 +446,7 @@ describe('xai Grok surface merge (#1337)', () => {
       expect(xaiGrokSurfaceOf('[Grok (Office/Workspace Plugins)] Models outage')).toBe('Office/Workspace Plugins')
       expect(xaiGrokSurfaceOf('[Grok (Build)] Something')).toBe('Build')
       expect(xaiGrokSurfaceOf('[Grok in X] Something')).toBe('X')
+      expect(xaiGrokSurfaceOf('[grok.com] Models outage')).toBe('grok.com')
     })
     it('returns null for the page\'s other Grok-prefixed tags', () => {
       expect(xaiGrokSurfaceOf('[Grok Build] Grok Build 0.1 high error rate')).toBeNull()

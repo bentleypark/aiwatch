@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>SpaceXAI System Status</title>
+    <link>https://status.x.ai</link>
+    <atom:link href="https://status.x.ai/feed.xml" rel="self" type="application/rss+xml" />
+    <description>Incident history for xAI services.</description>
+    <item>
+      <title>[grok.com] grok.com</title>
+      <link>https://status.x.ai/grok-com/ps_d022a635bce02f4a</link>
+      <guid isPermaLink="false">ps_d022a635bce02f4a</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Wed, 07 Oct 2026 00:30:19 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Wed, 07 Oct 2026 00:30:19 GMT</strong></p><h3>Resolved</h3><p>Issue has been resolved.</p></div><div><p><strong>Wed, 07 Oct 2026 00:24:33 GMT</strong></p><h3>Investigating</h3><p>We are investigating an outage on the web grok.com surface</p></div>]]></description>
+      <pubDate>Wed, 07 Oct 2026 00:24:33 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Voice] Enterprise Voice Degraded</title>
+      <link>https://status.x.ai/voice/ps_f64984fa7d669b08</link>
+      <guid isPermaLink="false">ps_f64984fa7d669b08</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: disruption</p><p>Resolved: Tue, 06 Oct 2026 20:03:29 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Tue, 06 Oct 2026 20:03:29 GMT</strong></p><h3>Resolved</h3><p>The incident has now been fully resolved and all services are now operating normally.</p></div><div><p><strong>Tue, 06 Oct 2026 20:03:18 GMT</strong></p><h3>Investigating</h3><p>We identified an issue with Enterprise Voice that affected some users from 12:03 PT to 12:31 PT.</p></div>]]></description>
+      <pubDate>Tue, 06 Oct 2026 20:03:18 GMT</pubDate>
+      <category>disruption</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Global (api.x.ai)] Outages across API, Grok.com, and Grok Build</title>
+      <link>https://status.x.ai/api-global/INC578e0bc8</link>
+      <guid isPermaLink="false">INC578e0bc8</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Tue, 22 Sep 2026 01:28:30 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Tue, 22 Sep 2026 01:28:43 GMT</strong></p><h3>Resolved</h3><p>This incident has been resolved. All services are operating normally.</p></div><div><p><strong>Tue, 22 Sep 2026 01:20:08 GMT</strong></p><h3>Investigating</h3><p>Traffic has almost fully recovered, seeing slight hiccups</p></div><div><p><strong>Tue, 22 Sep 2026 01:03:07 GMT</strong></p><h3>Investigating</h3><p>We are investigating a datacenter issue</p></div>]]></description>
+      <pubDate>Tue, 22 Sep 2026 01:02:42 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[US (us.api.x.ai)] Outages across API, Grok.com, and Grok Build</title>
+      <link>https://status.x.ai/api-us/INC578e0bc8</link>
+      <guid isPermaLink="false">INC578e0bc8</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Tue, 22 Sep 2026 01:28:30 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Tue, 22 Sep 2026 01:28:43 GMT</strong></p><h3>Resolved</h3><p>This incident has been resolved. All services are operating normally.</p></div><div><p><strong>Tue, 22 Sep 2026 01:20:08 GMT</strong></p><h3>Investigating</h3><p>Traffic has almost fully recovered, seeing slight hiccups</p></div><div><p><strong>Tue, 22 Sep 2026 01:03:07 GMT</strong></p><h3>Investigating</h3><p>We are investigating a datacenter issue</p></div>]]></description>
+      <pubDate>Tue, 22 Sep 2026 01:02:42 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Grok (Build)] Outages across API, Grok.com, and Grok Build</title>
+      <link>https://status.x.ai/grok-build/INC578e0bc8</link>
+      <guid isPermaLink="false">INC578e0bc8</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Tue, 22 Sep 2026 01:28:30 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Tue, 22 Sep 2026 01:28:43 GMT</strong></p><h3>Resolved</h3><p>This incident has been resolved. All services are operating normally.</p></div><div><p><strong>Tue, 22 Sep 2026 01:20:08 GMT</strong></p><h3>Investigating</h3><p>Traffic has almost fully recovered, seeing slight hiccups</p></div><div><p><strong>Tue, 22 Sep 2026 01:03:07 GMT</strong></p><h3>Investigating</h3><p>We are investigating a datacenter issue</p></div>]]></description>
+      <pubDate>Tue, 22 Sep 2026 01:02:42 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[grok.com] Outages across API, Grok.com, and Grok Build</title>
+      <link>https://status.x.ai/grok-com/INC578e0bc8</link>
+      <guid isPermaLink="false">INC578e0bc8</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Tue, 22 Sep 2026 01:28:30 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Tue, 22 Sep 2026 01:28:43 GMT</strong></p><h3>Resolved</h3><p>This incident has been resolved. All services are operating normally.</p></div><div><p><strong>Tue, 22 Sep 2026 01:20:08 GMT</strong></p><h3>Investigating</h3><p>Traffic has almost fully recovered, seeing slight hiccups</p></div><div><p><strong>Tue, 22 Sep 2026 01:03:07 GMT</strong></p><h3>Investigating</h3><p>We are investigating a datacenter issue</p></div>]]></description>
+      <pubDate>Tue, 22 Sep 2026 01:02:42 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Global (api.x.ai)] Enterprise Voice Degraded</title>
+      <link>https://status.x.ai/api-global/INC698e276c</link>
+      <guid isPermaLink="false">INC698e276c</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: disruption</p><p>Resolved: Thu, 10 Sep 2026 07:15:52 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 10 Sep 2026 07:15:52 GMT</strong></p><h3>Resolved</h3><p>The incident has been fully resolved. All services are now operating normally.</p></div><div><p><strong>Thu, 10 Sep 2026 07:10:41 GMT</strong></p><h3>Investigating</h3><p>We have identified the root cause and deployed a fix. Services are gradually recovering and we are monitoring stability.</p></div><div><p><strong>Thu, 10 Sep 2026 07:03:52 GMT</strong></p><h3>Investigating</h3><p>We are investigating an issue with Enterprise Voice that is affecting some users.</p></div>]]></description>
+      <pubDate>Thu, 10 Sep 2026 07:03:52 GMT</pubDate>
+      <category>disruption</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[US (us.api.x.ai)] Enterprise Voice Degraded</title>
+      <link>https://status.x.ai/api-us/INC698e276c</link>
+      <guid isPermaLink="false">INC698e276c</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: disruption</p><p>Resolved: Thu, 10 Sep 2026 07:15:52 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 10 Sep 2026 07:15:52 GMT</strong></p><h3>Resolved</h3><p>The incident has been fully resolved. All services are now operating normally.</p></div><div><p><strong>Thu, 10 Sep 2026 07:10:41 GMT</strong></p><h3>Investigating</h3><p>We have identified the root cause and deployed a fix. Services are gradually recovering and we are monitoring stability.</p></div><div><p><strong>Thu, 10 Sep 2026 07:03:52 GMT</strong></p><h3>Investigating</h3><p>We are investigating an issue with Enterprise Voice that is affecting some users.</p></div>]]></description>
+      <pubDate>Thu, 10 Sep 2026 07:03:52 GMT</pubDate>
+      <category>disruption</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Voice] Enterprise Voice Degraded</title>
+      <link>https://status.x.ai/voice/INC698e276c</link>
+      <guid isPermaLink="false">INC698e276c</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: disruption</p><p>Resolved: Thu, 10 Sep 2026 07:15:52 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 10 Sep 2026 07:15:52 GMT</strong></p><h3>Resolved</h3><p>The incident has been fully resolved. All services are now operating normally.</p></div><div><p><strong>Thu, 10 Sep 2026 07:10:41 GMT</strong></p><h3>Investigating</h3><p>We have identified the root cause and deployed a fix. Services are gradually recovering and we are monitoring stability.</p></div><div><p><strong>Thu, 10 Sep 2026 07:03:52 GMT</strong></p><h3>Investigating</h3><p>We are investigating an issue with Enterprise Voice that is affecting some users.</p></div>]]></description>
+      <pubDate>Thu, 10 Sep 2026 07:03:52 GMT</pubDate>
+      <category>disruption</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Grok (Android)] Models outage</title>
+      <link>https://status.x.ai/android-app/INC72f6dd00</link>
+      <guid isPermaLink="false">INC72f6dd00</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Thu, 03 Sep 2026 17:09:14 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 03 Sep 2026 17:09:14 GMT</strong></p><h3>Resolved</h3><p>We have resolved the situation, and traffic is healthy again.</p></div><div><p><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong></p><h3>Investigating</h3><p>Grok is experiencing issues. We are working on restoring service as quickly as possible.</p></div>]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:30:00 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Global (api.x.ai)] Models outage</title>
+      <link>https://status.x.ai/api-global/INC72f6dd00</link>
+      <guid isPermaLink="false">INC72f6dd00</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Thu, 03 Sep 2026 17:09:14 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 03 Sep 2026 17:09:14 GMT</strong></p><h3>Resolved</h3><p>We have resolved the situation, and traffic is healthy again.</p></div><div><p><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong></p><h3>Investigating</h3><p>Grok is experiencing issues. We are working on restoring service as quickly as possible.</p></div>]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:30:00 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[US (us.api.x.ai)] Models outage</title>
+      <link>https://status.x.ai/api-us/INC72f6dd00</link>
+      <guid isPermaLink="false">INC72f6dd00</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Thu, 03 Sep 2026 17:09:14 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 03 Sep 2026 17:09:14 GMT</strong></p><h3>Resolved</h3><p>We have resolved the situation, and traffic is healthy again.</p></div><div><p><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong></p><h3>Investigating</h3><p>Grok is experiencing issues. We are working on restoring service as quickly as possible.</p></div>]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:30:00 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Grok (Build)] Models outage</title>
+      <link>https://status.x.ai/grok-build/INC72f6dd00</link>
+      <guid isPermaLink="false">INC72f6dd00</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Thu, 03 Sep 2026 17:09:14 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 03 Sep 2026 17:09:14 GMT</strong></p><h3>Resolved</h3><p>We have resolved the situation, and traffic is healthy again.</p></div><div><p><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong></p><h3>Investigating</h3><p>Grok is experiencing issues. We are working on restoring service as quickly as possible.</p></div>]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:30:00 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[grok.com] Models outage</title>
+      <link>https://status.x.ai/grok-com/INC72f6dd00</link>
+      <guid isPermaLink="false">INC72f6dd00</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Thu, 03 Sep 2026 17:09:14 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 03 Sep 2026 17:09:14 GMT</strong></p><h3>Resolved</h3><p>We have resolved the situation, and traffic is healthy again.</p></div><div><p><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong></p><h3>Investigating</h3><p>Grok is experiencing issues. We are working on restoring service as quickly as possible.</p></div>]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:30:00 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Grok in X] Models outage</title>
+      <link>https://status.x.ai/grok-in-x/INC72f6dd00</link>
+      <guid isPermaLink="false">INC72f6dd00</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Thu, 03 Sep 2026 17:09:14 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 03 Sep 2026 17:09:14 GMT</strong></p><h3>Resolved</h3><p>We have resolved the situation, and traffic is healthy again.</p></div><div><p><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong></p><h3>Investigating</h3><p>Grok is experiencing issues. We are working on restoring service as quickly as possible.</p></div>]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:30:00 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Grok (iOS)] Models outage</title>
+      <link>https://status.x.ai/ios-app/INC72f6dd00</link>
+      <guid isPermaLink="false">INC72f6dd00</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Thu, 03 Sep 2026 17:09:14 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 03 Sep 2026 17:09:14 GMT</strong></p><h3>Resolved</h3><p>We have resolved the situation, and traffic is healthy again.</p></div><div><p><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong></p><h3>Investigating</h3><p>Grok is experiencing issues. We are working on restoring service as quickly as possible.</p></div>]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:30:00 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Grok (Office/Workspace Plugins)] Models outage</title>
+      <link>https://status.x.ai/office-workspace-plugins/INC72f6dd00</link>
+      <guid isPermaLink="false">INC72f6dd00</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: outage</p><p>Resolved: Thu, 03 Sep 2026 17:09:14 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Thu, 03 Sep 2026 17:09:14 GMT</strong></p><h3>Resolved</h3><p>We have resolved the situation, and traffic is healthy again.</p></div><div><p><strong>Thu, 03 Sep 2026 13:30:00 GMT</strong></p><h3>Investigating</h3><p>Grok is experiencing issues. We are working on restoring service as quickly as possible.</p></div>]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:30:00 GMT</pubDate>
+      <category>outage</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[Global (api.x.ai)] grok-4.6 and grok-4.5 high error rate</title>
+      <link>https://status.x.ai/api-global/INC5a3245c3</link>
+      <guid isPermaLink="false">INC5a3245c3</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: disruption</p><p>Resolved: Mon, 17 Aug 2026 23:28:05 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Mon, 17 Aug 2026 23:28:05 GMT</strong></p><h3>Resolved</h3><p>The incident has been fully resolved.</p></div><div><p><strong>Mon, 17 Aug 2026 22:39:21 GMT</strong></p><h3>Investigating</h3><p>Some customers will still see some elevated TTFT on grok-4.6</p></div><div><p><strong>Mon, 17 Aug 2026 21:57:42 GMT</strong></p><h3>Investigating</h3><p>We are investigating an issue with one of our GPU clusters</p></div>]]></description>
+      <pubDate>Mon, 17 Aug 2026 21:57:27 GMT</pubDate>
+      <category>disruption</category>
+      <category>resolved</category>
+    </item>
+    <item>
+      <title>[US (us.api.x.ai)] grok-4.6 and grok-4.5 high error rate</title>
+      <link>https://status.x.ai/api-us/INC5a3245c3</link>
+      <guid isPermaLink="false">INC5a3245c3</guid>
+      <description><![CDATA[<h3>Status: RESOLVED</h3><p>Severity: disruption</p><p>Resolved: Mon, 17 Aug 2026 23:28:05 GMT</p><hr /><h4>Updates:</h4><div><p><strong>Mon, 17 Aug 2026 23:28:05 GMT</strong></p><h3>Resolved</h3><p>The incident has been fully resolved.</p></div><div><p><strong>Mon, 17 Aug 2026 22:39:21 GMT</strong></p><h3>Investigating</h3><p>Some customers will still see some elevated TTFT on grok-4.6</p></div><div><p><strong>Mon, 17 Aug 2026 21:57:42 GMT</strong></p><h3>Investigating</h3><p>We are investigating an issue with one of our GPU clusters</p></div>]]></description>
+      <pubDate>Mon, 17 Aug 2026 21:57:27 GMT</pubDate>
+      <category>disruption</category>
+      <category>resolved</category>
+    </item>
+  </channel>
+</rss>

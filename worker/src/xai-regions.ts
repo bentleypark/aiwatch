@@ -1,8 +1,7 @@
 // Shared xAI per-region incident helpers (#686 alert merge + #703 AI-analysis dedup + #940 source merge).
 //
-// xAI publishes the SAME event in multiple regions as SEPARATE incidents with distinct guids but
-// near-identical titles differing only by a `[API (<region>.api.x.ai)] ` prefix (live: us-east-1 +
-// eu-west-1). Two surfaces must collapse these to one:
+// xAI publishes the SAME event in multiple regions as SEPARATE incidents with near-identical titles
+// differing only by an `XAI_REGION_RE` region prefix. Two surfaces must collapse these to one:
 //   • #686 — the Discord/Slack alert merge (mergeXaiRegionalAlerts in alerts.ts).
 //   • #703 — the AI analysis: refreshOrReanalyze otherwise analyzes each region separately, so the
 //     Analyze modal shows one xAI card with two region-duplicate analysis entries + burns a 2nd
@@ -22,11 +21,12 @@
 import type { Incident, TimelineEntry } from './types'
 import { formatDuration } from './utils'
 
-export const XAI_REGION_RE = /^\[API \(([a-z0-9-]+)\.api\.x\.ai\)\]\s*/i
+export const XAI_REGION_RE = /^\[(?:API \(([a-z0-9-]+)\.api\.x\.ai\)|([A-Za-z][\w -]*?) \((?:[a-z0-9-]+\.)?api\.x\.ai\))\]\s*/i
 
-/** The region label (e.g. 'us-east-1') from an xAI incident title, or null when not region-tagged. */
+/** The region label (e.g. 'us-east-1', 'Global') from an xAI incident title, or null when not region-tagged. */
 export function xaiRegionOf(title: string): string | null {
-  return XAI_REGION_RE.exec(title)?.[1] ?? null
+  const m = XAI_REGION_RE.exec(title)
+  return m ? (m[1] ?? m[2]) : null
 }
 
 /** The region-tag-stripped event key used to group same-event-different-region incidents. A
@@ -38,7 +38,7 @@ export function xaiEventKey(title: string): string {
 /**
  * Collapse xAI per-region incidents of the SAME EVENT to ONE — keeping the first occurrence per
  * group. Non-region-tagged incidents (and every incident of a non-xAI service, since only xAI titles
- * carry the `[API (<region>.api.x.ai)]` prefix) pass through untouched, so this is a safe no-op on
+ * carry an `XAI_REGION_RE` region tag) pass through untouched, so this is a safe no-op on
  * any other service's incident list. Used by the AI-analysis path (#703) so a 2-region xAI event is
  * analyzed once.
  *
@@ -194,7 +194,7 @@ function earliestStartedAt(members: Incident[]): string {
  * different cycles leaked as duplicate messages/cards. This is the single, source-level fix.
  *
  * Non-region-tagged incidents (and every incident of any non-xAI service, since only xAI titles carry
- * the `[API (<region>.api.x.ai)]` prefix) pass through untouched → safe no-op elsewhere.
+ * an `XAI_REGION_RE` region tag) pass through untouched → safe no-op elsewhere.
  *
  * Per-field merge semantics are `mergeXaiEventGroup`'s, shared with the surface merge. This function
  * owns only the GROUPING and the IDENTITY:
@@ -206,7 +206,7 @@ function earliestStartedAt(members: Incident[]): string {
  *    earlier start, or the anchor ageing out of the feed window — because a pure snapshot merge has no
  *    durable first-seen identity; that would need KV. Bounded (one duplicate Discord alert, one extra
  *    additive `incidents:monthly` row), and preferable to fusing distinct outages.
- *  - **title**: single region keeps its original `[API (<region>)] …`; multi-region →
+ *  - **title**: single region keeps its original title; multi-region →
  *    `[API] <eventKey> (regions: a, b, …)` — see the `[API]` marker note at the title itself.
  */
 export function mergeXaiRegionalIncidents(incidents: Incident[]): Incident[] {
@@ -235,7 +235,7 @@ export function mergeXaiRegionalIncidents(incidents: Incident[]): Incident[] {
     // names the same instant `mergeXaiEventGroup` will emit as `startedAt`, without re-deriving it.
     out.push(mergeXaiEventGroup(members, {
       id: uniqueId(`xai-evt:${fnv1aHex(`${group.key}|${new Date(group.anchorMs).toISOString()}`)}`),
-      // A single-region event keeps its original `[API (<region>.api.x.ai)] …` title; a multi-region
+      // A single-region event keeps its original title; a multi-region
       // event drops the per-region prefixes for `<eventKey> (regions: …)` — but MUST retain an `[API]`
       // marker so it still passes `filterIncidents`, which keeps an xAI incident only when its title
       // carries the `api` keyword (xAI incidents have no componentNames to match on). Without it a real
@@ -324,14 +324,14 @@ function mergeXaiEventGroup(members: Incident[], identity: { id: string; title: 
 // `incidents:monthly` (which the monthly report counts).
 
 /** The surface tag shape. Matched by SHAPE, not by a list of known surfaces: #1165 enumerated three
- *  (iOS / Android / Web) and 2026-09-03 introduced a fourth, `Office/Workspace Plugins`. The one
- *  paren-less form admitted is `[Grok in X]`, whose surface is `X`. */
-export const XAI_GROK_SURFACE_RE = /^\[Grok (?:\(([^)]+)\)|in (X))\]\s*/i
+ *  (iOS / Android / Web) and 2026-09-03 introduced a fourth, `Office/Workspace Plugins`. The
+ *  paren-less forms admitted are `[Grok in X]` (surface `X`) and `[grok.com]`. */
+export const XAI_GROK_SURFACE_RE = /^\[(?:Grok (?:\(([^)]+)\)|in (X))|(grok\.com))\]\s*/i
 
 /** The surface label (e.g. 'iOS') from a Grok incident title, or null when not surface-tagged. */
 export function xaiGrokSurfaceOf(title: string): string | null {
   const m = XAI_GROK_SURFACE_RE.exec(title)
-  return m ? (m[1] ?? m[2]) : null
+  return m ? (m[1] ?? m[2] ?? m[3]) : null
 }
 
 /** The surface-tag-stripped grouping key. Lowercased and whitespace/trailing-punctuation normalized
@@ -536,7 +536,7 @@ function mergeSurfaceGroup(group: SurfaceGroup): Incident {
     id: `xai-grok:${fnv1aHex(`${group.key}|${startedAt}`)}`,
     // A single-surface event keeps its original title untouched. A merged one
     // names every affected surface — and MUST keep the `Grok (` marker, because `filterIncidents`
-    // matches Grok's `incidentKeywords: ['grok (', 'grok in x']` as a lowercased TITLE substring (xAI incidents
+    // matches Grok's `incidentKeywords` as a lowercased TITLE substring (xAI incidents
     // carry no componentNames). Lose it and a real multi-surface outage is filtered out entirely and
     // the card reads operational — the #940 review's finding, on this axis.
     title: members.length === 1

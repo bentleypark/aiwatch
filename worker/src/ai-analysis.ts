@@ -1252,7 +1252,7 @@ export async function refreshOrReanalyze(
   for (const svc of activeServices) {
     // #703 — collapse xAI per-region incidents (same event, different region) to ONE, so a 2-region
     // xAI event is analyzed once (not twice) and the Analyze modal shows a single entry. No-op for
-    // every non-xAI service (only xAI titles carry the `[API (<region>.api.x.ai)]` prefix).
+    // every non-xAI service (only xAI titles carry an `XAI_REGION_RE` region tag).
     //
     // #1384 — `retainedBridge` entries (services.ts `mergeRetainedIncidentHistory`) are excluded too.
     // An unresolved one is a frozen migration-time snapshot with no fresh timeline ever coming — the

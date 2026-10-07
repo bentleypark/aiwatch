@@ -6,7 +6,7 @@ import { CRON_CADENCE_MS } from './cache-ttl'
 import { isAffectedStatus } from './status-verdict'
 import { sanitize, formatDuration, appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
-import { XAI_REGION_RE } from './xai-regions'
+import { xaiRegionOf, xaiEventKey } from './xai-regions'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
 // Edge TS port rather than adding a third copy of SERVICE_REGIONS: the Worker
 // bundler (esbuild via wrangler) can import across dirs (unlike Vercel Edge,
@@ -924,9 +924,8 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
   return [...rest, ...merged]
 }
 
-// #686 — xAI publishes the SAME event in multiple regions as separate incidents with distinct guids
-// but near-identical titles differing only by a `[API (<region>.api.x.ai)] ` prefix (live: us-east-1 +
-// eu-west-1). buildIncidentAlerts groups by incidentId, so each region fires its own alert. Strip the
+// #686 — xAI publishes the SAME event in multiple regions as separate incidents with near-identical
+// titles differing only by an `XAI_REGION_RE` region prefix. buildIncidentAlerts groups by incidentId, so each region fires its own alert. Strip the
 // region prefix off the alert description (= the incident title) to derive a grouping key, so the SAME
 // event across regions merges. Distinct events with the SAME title do not stay separate by that key
 // alone — #1349 — which is what the per-region rule inside `collapse` below is for. The regex lives
@@ -961,9 +960,9 @@ export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate
     const buckets: { event: string; regions: Set<string>; members: AlertCandidate[] }[] = []
     const out: AlertCandidate[] = []
     for (const a of group) {
-      if (!XAI_REGION_RE.test(a.description)) { out.push(a); continue } // not region-tagged → never merge
-      const event = a.description.replace(XAI_REGION_RE, '').trim()
-      const region = XAI_REGION_RE.exec(a.description)?.[1] ?? ''
+      const region = xaiRegionOf(a.description)
+      if (!region) { out.push(a); continue } // not region-tagged → never merge
+      const event = xaiEventKey(a.description)
       const bucket = buckets.find((b) => b.event === event && !b.regions.has(region))
       if (bucket) {
         bucket.regions.add(region)
@@ -974,7 +973,7 @@ export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate
     }
     for (const { members: arr } of buckets) {
       if (arr.length <= 1) { out.push(...arr); continue }
-      const regions = arr.map((a) => XAI_REGION_RE.exec(a.description)?.[1]).filter(Boolean)
+      const regions = arr.map((a) => xaiRegionOf(a.description))
       const merged: AlertCandidate = {
         key: arr[0].key,
         title: `${kind === 'new' ? '🔴' : '🟢'} SpaceXAI API — ${kind === 'new' ? 'New Incident' : 'Incident Resolved'} (${regions.join(', ')})`,
