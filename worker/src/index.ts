@@ -6173,10 +6173,13 @@ export default {
         // so serve a partial archive (incidentList only) synthesized from the live
         // `incidents:monthly:{month}` accumulator. This lets the dashboard 90-day filter show a
         // current-month incident that already rolled out of the upstream live feed (short-window
-        // RSS sources like Azure/Bedrock) before the archive exists. Past months with no archive
-        // stay 404. Short edge cache — the accumulator updates every */5 cron.
+        // RSS sources like Azure/Bedrock) before the archive exists. Short edge cache — the
+        // accumulator updates every */5 cron.
         const currentMonth = todayUTC().slice(0, 7)
-        if (month === currentMonth) {
+        const reportNow = new Date()
+        const previousMonth = new Date(Date.UTC(reportNow.getUTCFullYear(), reportNow.getUTCMonth() - 1, 1)).toISOString().slice(0, 7)
+        const pendingPrevious = url.searchParams.get('partial') === '1' && month === previousMonth && previousMonthArchivePending(reportNow)
+        if (month === currentMonth || pendingPrevious) {
           // Read/parse failures must NOT masquerade as "no incidents" (a 200 empty would hide an
           // accumulated incident, and the frontend caches it session-wide). Surface them as 502
           // like the sibling archive read above, so the client degrades to live-only + retries
