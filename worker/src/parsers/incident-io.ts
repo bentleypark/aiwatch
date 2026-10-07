@@ -2,7 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import type { StatuspageResponse } from './statuspage'
-import { fetchInSlot, formatDuration, isTimeOrderImpossible, type ConnectionLimiter } from '../utils'
+import { fetchTracked, formatDuration, isTimeOrderImpossible, type FetchTracker } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
@@ -1040,7 +1040,7 @@ export function buildTextCache(inc: Incident): IncidentTextCache {
 // pageUrls: incidentId → direct detail page URL (from Atlassian API shortlink).
 // Constructing URLs from inc.id is unreliable because incident.io Atlassian-compat IDs
 // may differ from the native ULID used in detail page URLs.
-export async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>, kv: KVNamespace | undefined, limiter: ConnectionLimiter | undefined): Promise<Incident[]> {
+export async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>, kv: KVNamespace | undefined, tracker: FetchTracker): Promise<Incident[]> {
   // Phase 1: Apply cached text from KV for all incidents that have null-text entries.
   // KV reads do not count against the per-invocation subrequest cap, so we read for all candidates freely.
   let workingIncidents = incidents
@@ -1075,7 +1075,7 @@ export async function enrichIncidentIoText(incidents: Incident[], baseUrl: strin
   await Promise.all(toEnrich.map(async (inc) => {
     try {
       const url = pageUrls.get(inc.id) ?? `${baseUrl}/${inc.id}`
-      const res = await fetchInSlot(url, 5000, undefined, limiter)
+      const res = await fetchTracked(url, 5000, undefined, tracker)
       if (!res.ok) {
         console.warn(`[enrichIncidentIoText] ${inc.id} returned HTTP ${res.status}`)
         res.body?.cancel()

@@ -3,6 +3,7 @@ import workerModule from '../index'
 import { recordStatusFetchRun, STATUS_FETCH_RUN_INDEX } from '../status-fetch-run'
 import type { ServiceStatus } from '../types'
 
+const NO_FAILURES = { maxInFlight: 0, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, waitingAtStartAnswered: 0, waitingAtStartTimeouts: 0 }
 const svc = (id: string, uptime30d: number | null) => ({ id, uptime30d }) as unknown as ServiceStatus
 
 function kv() {
@@ -37,12 +38,13 @@ function runRows(writeDataPoint: ReturnType<typeof vi.fn>) {
 describe('#1489 status-fetch-run metric', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('records the route, wall time and how many services came back without uptime', () => {
+  it('records the route, wall time, which services came back without uptime and how fetches failed', () => {
     const writeDataPoint = vi.fn()
-    recordStatusFetchRun({ writeDataPoint }, 'live', 1234, [svc('a', 99.9), svc('b', null), svc('c', null)])
+    const fetchStats = { maxInFlight: 9, answered: 8, timeouts: 3, httpErrors: 4, otherErrors: 5, waitingAtStartAnswered: 20, waitingAtStartTimeouts: 21 }
+    recordStatusFetchRun({ writeDataPoint }, 'live', 1234, [svc('c', null), svc('a', 99.9), svc('b', null)], fetchStats)
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['live'],
-      doubles: [1, 1234, 2, 3],
+      blobs: ['live', 'b,c'],
+      doubles: [1, 1234, 2, 3, 9, 8, 3, 4, 5, 20, 21],
       indexes: [STATUS_FETCH_RUN_INDEX],
     })
   })
@@ -50,7 +52,7 @@ describe('#1489 status-fetch-run metric', () => {
   it('never throws out of a failed write', () => {
     const writeDataPoint = vi.fn(() => { throw new Error('binding gone') })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(() => recordStatusFetchRun({ writeDataPoint }, 'cron', 1, [])).not.toThrow()
+    expect(() => recordStatusFetchRun({ writeDataPoint }, 'cron', 1, [], NO_FAILURES)).not.toThrow()
     warn.mockRestore()
   })
 
@@ -63,7 +65,11 @@ describe('#1489 status-fetch-run metric', () => {
     expect(res.status).toBe(200)
     const rows = runRows(writeDataPoint)
     expect(rows).toHaveLength(1)
-    expect(rows[0].blobs).toEqual(['live'])
+    expect(rows[0].blobs[0]).toBe('live')
+    expect(rows[0].blobs[1].split(',')).toHaveLength(rows[0].doubles[2])
+    expect(rows[0].doubles[4]).toBeGreaterThan(0)
+    expect(rows[0].doubles[5]).toBeGreaterThan(0)
+    expect(rows[0].doubles[7]).toBeGreaterThan(0)
     expect(rows[0].doubles[1]).toBeGreaterThanOrEqual(UPSTREAM_MS)
     expect(rows[0].doubles[1]).toBeLessThanOrEqual(elapsed)
     expect(rows[0].doubles[3]).toBeGreaterThan(0)
@@ -78,7 +84,11 @@ describe('#1489 status-fetch-run metric', () => {
     const elapsed = Date.now() - startedAt
     const rows = runRows(writeDataPoint)
     expect(rows).toHaveLength(1)
-    expect(rows[0].blobs).toEqual(['cron'])
+    expect(rows[0].blobs[0]).toBe('cron')
+    expect(rows[0].blobs[1].split(',')).toHaveLength(rows[0].doubles[2])
+    expect(rows[0].doubles[4]).toBeGreaterThan(0)
+    expect(rows[0].doubles[5]).toBeGreaterThan(0)
+    expect(rows[0].doubles[7]).toBeGreaterThan(0)
     expect(rows[0].doubles[1]).toBeGreaterThanOrEqual(UPSTREAM_MS)
     expect(rows[0].doubles[1]).toBeLessThanOrEqual(elapsed)
     expect(rows[0].doubles[3]).toBeGreaterThan(0)

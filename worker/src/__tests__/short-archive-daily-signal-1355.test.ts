@@ -174,7 +174,7 @@ function makeKv(expectedPeriod: string, state: ArchiveState) {
 }
 
 async function runCron(kv: KVNamespace, runAt: string) {
-  vi.mocked(fetchAllServices).mockResolvedValue({ raw: OPERATIONAL, enriched: OPERATIONAL, pageComponents: {}, upstreamFeeds: [] })
+  vi.mocked(fetchAllServices).mockResolvedValue({ raw: OPERATIONAL, enriched: OPERATIONAL, pageComponents: {}, upstreamFeeds: [], fetchStats: { maxInFlight: 0, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, waitingAtStartAnswered: 0, waitingAtStartTimeouts: 0 } })
   const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}', { status: 200 }))
   await workerModule.scheduled({ scheduledTime: Date.parse(runAt), cron: '*/5 * * * *' } as ScheduledEvent, {
     STATUS_CACHE: kv,

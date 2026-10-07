@@ -21,7 +21,7 @@
 // HTTP 200 with `timelines: {}`, NOT a 404.
 
 import { parseUptimeShowcase, type UptimeTimelines } from './parsers/statuspage'
-import { fetchInSlot, type ConnectionLimiter } from './utils'
+import { fetchTracked, type FetchTracker } from './utils'
 
 export function showcaseUrl(statusUrl: string, codes: string[]): string {
   return `${statusUrl.replace(/\/$/, '')}/uptime_showcase?components=${encodeURIComponent(codes.join(','))}`
@@ -50,14 +50,14 @@ export async function fetchUptimeShowcase(
   statusUrl: string,
   codes: string[],
   timeoutMs: number,
-  limiter: ConnectionLimiter | undefined,
+  tracker: FetchTracker,
 ): Promise<UptimeTimelines | null> {
   if (codes.length === 0) return null
   let payload: unknown
   try {
-    const res = await fetchInSlot(showcaseUrl(statusUrl, codes), timeoutMs, {
+    const res = await fetchTracked(showcaseUrl(statusUrl, codes), timeoutMs, {
       headers: { Accept: 'application/json' },
-    }, limiter)
+    }, tracker)
     if (!res.ok) {
       // Unexpected by construction — the caller only reaches here for a page that advertised lazy
       // placeholders — so it is worth a line. A page that has NOT rolled out the showcase answers 404,
