@@ -15,7 +15,7 @@
 // incidentIds per region).
 //
 // #1337 adds the SECOND axis on the same page: xAI files one Grok app outage as a separate incident per
-// SURFACE, tagged `[Grok (<surface>)] `. Same failure, different prefix — see `mergeXaiGrokSurfaceIncidents`
+// SURFACE. Same failure, different prefix — see `mergeXaiGrokSurfaceIncidents`
 // for why it needs a time window. #1349 later applied the same bounded grouping discipline to the
 // region axis after xAI reused an API title for separate outages.
 
@@ -315,7 +315,7 @@ function mergeXaiEventGroup(members: Incident[], identity: { id: string; title: 
 
 // ─── #1337 — the SURFACE axis ────────────────────────────────────────────────────────────────────
 //
-// status.x.ai tags every Grok app incident `[Grok (<surface>)] ` and files ONE outage once PER
+// status.x.ai files ONE Grok app outage once PER
 // SURFACE. Observed 2026-09-03: four incidents (`INCc33a8af` iOS / `INC3b127ff3` Android /
 // `INC25664c15` Web / `INC4d558447` Office/Workspace Plugins), all titled `Models outage`, all
 // `startedAt` 13:30:00.000Z, alongside the API side's already-merged
@@ -324,13 +324,14 @@ function mergeXaiEventGroup(members: Incident[], identity: { id: string; title: 
 // `incidents:monthly` (which the monthly report counts).
 
 /** The surface tag shape. Matched by SHAPE, not by a list of known surfaces: #1165 enumerated three
- *  (iOS / Android / Web) and 2026-09-03 introduced a fourth, `Office/Workspace Plugins`. `[^)]+` also
- *  keeps this from matching xAI's paren-less `[Grok in X]` tag. */
-export const XAI_GROK_SURFACE_RE = /^\[Grok \(([^)]+)\)\]\s*/i
+ *  (iOS / Android / Web) and 2026-09-03 introduced a fourth, `Office/Workspace Plugins`. The one
+ *  paren-less form admitted is `[Grok in X]`, whose surface is `X`. */
+export const XAI_GROK_SURFACE_RE = /^\[Grok (?:\(([^)]+)\)|in (X))\]\s*/i
 
 /** The surface label (e.g. 'iOS') from a Grok incident title, or null when not surface-tagged. */
 export function xaiGrokSurfaceOf(title: string): string | null {
-  return XAI_GROK_SURFACE_RE.exec(title)?.[1] ?? null
+  const m = XAI_GROK_SURFACE_RE.exec(title)
+  return m ? (m[1] ?? m[2]) : null
 }
 
 /** The surface-tag-stripped grouping key. Lowercased and whitespace/trailing-punctuation normalized
@@ -381,7 +382,7 @@ interface SurfaceGroup {
  * cycles.
  *
  * Non-surface-tagged incidents pass through untouched, so this is a safe no-op on the SpaceXAI API feed
- * (no `[API …]` title can match `XAI_GROK_SURFACE_RE`, which is `^`-anchored on `[Grok (`) and on
+ * (no `[API …]` title can match `XAI_GROK_SURFACE_RE`) and on
  * every non-xAI service.
  *
  * Grouping — all three conditions:
@@ -533,9 +534,9 @@ function mergeSurfaceGroup(group: SurfaceGroup): Incident {
   const startedAt = earliestStartedAt(members)
   return mergeXaiEventGroup(members, {
     id: `xai-grok:${fnv1aHex(`${group.key}|${startedAt}`)}`,
-    // A single-surface event keeps its original `[Grok (<surface>)] …` title untouched. A merged one
+    // A single-surface event keeps its original title untouched. A merged one
     // names every affected surface — and MUST keep the `Grok (` marker, because `filterIncidents`
-    // matches Grok's `incidentKeywords: ['grok (']` as a lowercased TITLE substring (xAI incidents
+    // matches Grok's `incidentKeywords: ['grok (', 'grok in x']` as a lowercased TITLE substring (xAI incidents
     // carry no componentNames). Lose it and a real multi-surface outage is filtered out entirely and
     // the card reads operational — the #940 review's finding, on this axis.
     title: members.length === 1
