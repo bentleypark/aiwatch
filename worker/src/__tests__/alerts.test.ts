@@ -1146,6 +1146,17 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
     expect(result[0].fallbackText).toContain('Suggested fallback')
   })
 
+  it('#1634 — merges the 2026-10 `[Global (api.x.ai)]` / `[US (us.api.x.ai)]` shape', () => {
+    const tagged = (a: AlertCandidate, tag: string, event: string): AlertCandidate => ({ ...a, description: `${tag} ${event}` })
+    const result = mergeXaiRegionalAlerts([
+      tagged(xaiNew('g', 'x', ''), '[Global (api.x.ai)]', 'Models outage'),
+      tagged(xaiNew('u', 'x', ''), '[US (us.api.x.ai)]', 'Models outage'),
+    ])
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('🔴 SpaceXAI API — New Incident (Global, US)')
+    expect(result[0]._mergedKeys).toEqual(['alerted:new:g', 'alerted:new:u'])
+  })
+
   // #1349 — this merge keys on the stripped title with no time bound, which was safe only while the
   // #940 source merge guaranteed one xAI incident per title. #1349 removed that guarantee on purpose
   // (two same-title outages more than REGION_WINDOW_MS apart are two incidents), so if both alert in
