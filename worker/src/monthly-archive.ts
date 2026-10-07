@@ -842,6 +842,32 @@ async function recordGuardSkips(
   }
 }
 
+/** #1627 — on the first UTC day of a month, the previous month and each service's synthesized rows
+ *  only: a west-of-UTC page closes its last local day after the UTC month has turned, so that row
+ *  can only be banked by a pass over the month it belongs to. Feed rows are left out, so the pass
+ *  gives `prunePhantomIncidents` no live evidence and it prunes nothing. */
+export function previousMonthDerivedPass(services: ServiceStatus[], now: Date): { month: string; services: ServiceStatus[] } | null {
+  if (now.getUTCDate() !== 1) return null
+  const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7)
+  const derivedOnly = services
+    .map((s) => ({ ...s, incidents: (s.incidents ?? []).filter((i) => i.derived === 'status_history') }))
+    .filter((s) => s.incidents.length > 0)
+  return derivedOnly.length > 0 ? { month, services: derivedOnly } : null
+}
+
+/** #1627 — the 5-minute cron's accumulation: the current UTC month, then `previousMonthDerivedPass`. */
+export async function accumulateCurrentAndPreviousMonth(kv: KVNamespace, services: ServiceStatus[], now: Date): Promise<void> {
+  await accumulateIncidentsOnlyIfChanged(kv, services, now.toISOString().slice(0, 7), now)
+  const prev = previousMonthDerivedPass(services, now)
+  if (prev) await accumulateIncidentsOnlyIfChanged(kv, prev.services, prev.month, now)
+}
+
+/** #1627 — true while the previous month's `archive:monthly` is not built yet: the 1st, until the
+ *  12:00Z build and its 13:00Z catch-up have both had their window. */
+export function previousMonthArchivePending(now: Date): boolean {
+  return now.getUTCDate() === 1 && now.getUTCHours() < 14
+}
+
 /** #587 — read `incidents:monthly:{month}`, accumulate the current services onto it, and write
  *  back ONLY when the incident data actually changed.
  *
@@ -1813,7 +1839,7 @@ export async function buildMonthlyArchive(
   })
   // #1355 — `history:{date}` is written lazily by the traffic-dependent /api/status request path
   // (index.ts cacheWrite), not by cron, so the month's final day(s) can still be missing here when
-  // this build runs at 00:00-00:14 UTC on the 1st. `daily:{date}` (2-day TTL) is written directly
+  // this build runs at 12:00-12:14 UTC on the 1st. `daily:{date}` (2-day TTL) is written directly
   // by every request throughout that day and is very likely still live at that point, so fall back
   // to it for whichever dates `history:` missed rather than let an un-archived day silently shrink
   // `daysCollected`. Scoped to only the missing dates, not every date — `daily:`'s 2-day TTL means
@@ -2313,15 +2339,17 @@ export function censusRegressions(
   return out
 }
 
-/** Check if we should run monthly archive (1st of month, UTC 00:00-00:14 or catch-up 01:00-01:14) */
+/** Check if we should run monthly archive (1st of month, UTC 12:00-12:14 or catch-up 13:00-13:14) */
 export function isInMonthlyArchiveWindow(
   utcDate: number,
   utcHours: number,
   utcMinutes: number,
 ): { inWindow: boolean; isCatchUp: boolean } {
   if (utcDate !== 1) return { inWindow: false, isCatchUp: false }
-  const isNormal = utcHours === 0 && utcMinutes < 15
-  const isCatchUp = utcHours === 1 && utcMinutes < 15
+  // #1627 — not 00:00Z: a status page west of UTC is still on the month's last LOCAL day then (to
+  // 12:00Z for UTC−12), and that day's synthesized row is banked only once it closes.
+  const isNormal = utcHours === 12 && utcMinutes < 15
+  const isCatchUp = utcHours === 13 && utcMinutes < 15
   if (!isNormal && !isCatchUp) return { inWindow: false, isCatchUp: false }
   return { inWindow: true, isCatchUp: !isNormal }
 }

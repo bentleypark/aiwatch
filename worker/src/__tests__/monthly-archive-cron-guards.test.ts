@@ -13,7 +13,7 @@ import workerModule from '../index'
 import { SERVICES, fetchAllServices } from '../services'
 
 const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
-const EVENT = { scheduledTime: Date.parse('2026-08-01T00:07:00.000Z'), cron: '*/5 * * * *' } as ScheduledEvent
+const EVENT = { scheduledTime: Date.parse('2026-08-01T12:07:00.000Z'), cron: '*/5 * * * *' } as ScheduledEvent
 const ARCHIVE_KEY = 'archive:monthly:2026-07'
 const OPERATIONAL: ServiceStatus[] = SERVICES.map(s => (
   { id: s.id, name: s.name, status: 'operational', incidents: [] } as unknown as ServiceStatus

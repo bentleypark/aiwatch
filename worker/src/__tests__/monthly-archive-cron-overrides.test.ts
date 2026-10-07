@@ -23,9 +23,9 @@ import { SERVICES, fetchAllServices } from '../services'
 
 const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
 
-// 1st of the month, 00:07 UTC → inside the archive window, and NOT the 01:00 catch-up. Deliberately
+// 1st of the month, 12:07 UTC → inside the archive window, and NOT the 13:00 catch-up. Deliberately
 // outside the daily-summary window so no unmocked Analytics read is entered.
-const ARCHIVE_EVENT = { scheduledTime: Date.parse('2026-08-01T00:07:00.000Z'), cron: '*/5 * * * *' } as ScheduledEvent
+const ARCHIVE_EVENT = { scheduledTime: Date.parse('2026-08-01T12:07:00.000Z'), cron: '*/5 * * * *' } as ScheduledEvent
 
 const OPERATIONAL: ServiceStatus[] = SERVICES.map(s => (
   { id: s.id, name: s.name, status: 'operational', incidents: [] } as unknown as ServiceStatus
@@ -93,7 +93,7 @@ function archiveWrite(puts: Array<{ key: string; value: string }>) {
   const rows = puts.filter(p => p.key.startsWith('archive:monthly:'))
   expect(rows, 'exactly one permanent archive write per cycle').toHaveLength(1)
   const parsed = JSON.parse(rows[0].value)
-  // The event is 2026-08-01T00:07Z, so the archive must be the UTC previous month. Checking only
+  // The event is 2026-08-01T12:07Z, so the archive must be the UTC previous month. Checking only
   // key/value self-consistency would let a `getMonth()` mutation select the current month.
   expect(rows[0].key).toBe('archive:monthly:2026-07')
   expect(parsed.period).toBe('2026-07')

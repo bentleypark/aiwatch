@@ -218,6 +218,15 @@ describe('daily summary re-asserts a bad archive (#1355 wiring)', () => {
     expect(body).toContain('2026-08')
   })
 
+  it('#1627 — does not call the previous month missing on the 1st, before its 12:00Z build', async () => {
+    const first = await runCron(makeKv('2026-09', 'absent'), '2026-10-01T09:02:00.000Z')
+    expect(first).toBeDefined()
+    expect(first).not.toContain('Monthly archive MISSING')
+    vi.restoreAllMocks()
+    const second = await runCron(makeKv('2026-09', 'absent'), '2026-10-02T09:02:00.000Z')
+    expect(second).toContain('Monthly archive MISSING')
+  })
+
   it('makes no claim when the archive cannot be read or parsed', async () => {
     // A read fault is not evidence of absence, and a present-but-unparseable value is not evidence of
     // either state. Both must stay silent WITHOUT taking the daily report down with them.

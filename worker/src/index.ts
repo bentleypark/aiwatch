@@ -794,7 +794,7 @@ async function alertWorkerError(env: Env, error: string) {
 }
 
 // Dedup marker is written only after the Discord send returns true. A 5xx / network
-// failure on the 00:00 cycle leaves the marker unset so the 01:00 catch-up cycle retries.
+// failure on the 12:00 cycle leaves the marker unset so the 13:00 catch-up cycle retries.
 // Corrupt archive JSON bails without sending so operators don't get a misleading
 // "Services: 0" ping that also locks out retries for 60 days.
 async function maybeNotifyArchiveReady(env: Env, archiveKey: string, period: string): Promise<void> {
@@ -1005,7 +1005,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // leaving the dashboard 90-day filter + monthly archive blind to an incident AIWatch alerted on.
   // Writes only when the incident data changed (idempotent dedup-by-id), so it's budget-safe.
   try {
-    await accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE, services, todayUTC().slice(0, 7))
+    await accumulateCurrentAndPreviousMonth(env.STATUS_CACHE, services, new Date())
   } catch (err) {
     console.error('[cron] incident accumulation failed:', err instanceof Error ? err.message : err)
   }
@@ -2210,7 +2210,7 @@ import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent
 import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -3935,7 +3935,7 @@ export default {
         }
       }
 
-      // Monthly archive on 1st of each month (UTC 00:00-00:14, catch-up 01:00-01:14)
+      // Monthly archive on 1st of each month (UTC 12:00-12:14, catch-up 13:00-13:14 — #1627)
       // Aggregates previous month's daily data into permanent archive:monthly:{YYYY-MM} KV key
       const { inWindow: inArchiveWindow, isCatchUp: isArchiveCatchUp } = isInMonthlyArchiveWindow(now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes())
       if (inArchiveWindow && env.STATUS_CACHE) {
@@ -4059,8 +4059,8 @@ export default {
           }
         }
 
-        // Sits outside the `if (!existing)` archive-build branch so the 01:00 catch-up
-        // cycle can still ping if the 00:00 cycle built the archive but the Discord send
+        // Sits outside the `if (!existing)` archive-build branch so the 13:00 catch-up
+        // cycle can still ping if the 12:00 cycle built the archive but the Discord send
         // failed. Dedup via archive:notified:{period}.
         if (env.DISCORD_WEBHOOK_URL) {
           await maybeNotifyArchiveReady(env, archiveKey, `${prevYear}-${String(prevMon).padStart(2, '0')}`).catch((err) => {
@@ -4455,15 +4455,15 @@ export default {
             let archiveHealth: ArchiveHealth | null = null
             const shortArchiveMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
             const shortArchivePeriod = `${shortArchiveMonth.getUTCFullYear()}-${String(shortArchiveMonth.getUTCMonth() + 1).padStart(2, '0')}`
-            try {
+            if (!previousMonthArchivePending(now)) try {
               const raw = await env.STATUS_CACHE.get(`archive:monthly:${shortArchivePeriod}`)
               if (raw === null) {
                 // ABSENT is reported, not skipped. The build path can fail silently: `kvPut` returns
                 // `false` instead of throwing, so the `catch` that writes `archive:failed:` and pings
                 // Discord is never entered; a read fault on the archive key skips the build with only a
                 // `console.error`; and a cron that misses both windows never revisits the month. Any of
-                // those leaves no archive AND no alert. This runs at 09:0x UTC, after both archive
-                // windows, so on the 1st it cannot fire merely because the build has not happened yet.
+                // those leaves no archive AND no alert. On the 1st the build is still ahead (12:00Z,
+                // #1627), so the check waits for the 2nd.
                 archiveHealth = { state: 'missing', period: shortArchivePeriod }
               } else {
                 const parsed = JSON.parse(raw)
