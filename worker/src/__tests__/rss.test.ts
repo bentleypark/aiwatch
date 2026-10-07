@@ -1349,9 +1349,8 @@ describe('#1292 — status_history-derived incidents never reach /feed', () => {
 })
 
 describe('#1384 — a retainedBridge ghost is never emitted as an active item', () => {
-  // Unlike a `status_history` entry (always already-resolved by construction, so it never reaches the
-  // active branch), an unresolved `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`)
-  // DOES reach here every cron cycle for the life of the migration bridge. Without this exclusion,
+  // An unresolved `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`)
+  // reaches here every cron cycle for the life of the migration bridge. Without this exclusion,
   // `feed:firstseen:`'s 7-day TTL would eventually lapse and re-stamp a weeks-old ghost as freshly
   // seen, repeatedly re-announcing it as a brand-new incident (round-6 review finding).
   const ghost = incident({

@@ -245,6 +245,7 @@ export const INCIDENT_ALERT_MAX_AGE_MS = 86_400_000
  * through.
  */
 export function canIncidentStillAlert(inc: Incident, nowMs: number): boolean {
+  if (inc.derived === 'status_history') return false // #1623 — a synthesized day row never alerts
   const startedMs = Date.parse(inc.startedAt)
   if (!Number.isFinite(startedMs)) return true
   return nowMs - startedMs <= INCIDENT_ALERT_MAX_AGE_MS
@@ -622,10 +623,9 @@ export function buildIncidentAlerts(
   for (const svc of services) {
     for (const inc of svc.incidents ?? []) {
       if (suppressedIncIds.has(inc.id)) continue // #283 flap suppression — skip both new + resolved
-      const incAge = now - new Date(inc.startedAt).getTime()
-      // #1224 — the cron's per-incident loop gates its marker reads + hold on this SAME constant
-      // (`canIncidentStillAlert`). Widening it here widens that gate too, by construction.
-      if (incAge > INCIDENT_ALERT_MAX_AGE_MS) continue
+      // #1224 — the cron's per-incident loop gates its marker reads + hold on this SAME function, so
+      // widening it here widens that gate too, by construction.
+      if (!canIncidentStillAlert(inc, now)) continue
 
       // #545: per-service (not per-incident) — only services NOT yet alerted for this incident.
       // A service joining an already-alerted incident later still produces its own alert.
@@ -644,7 +644,7 @@ export function buildIncidentAlerts(
       // this one is a judgement.
       //
       // Describes a STATE, not an event: this fn is stateless and a withheld alert is never rostered, so
-      // the condition holds every cycle the incident sits in `monitoring` (bounded by the 24h `incAge`
+      // the condition holds every cycle the incident sits in `monitoring` (bounded by the 24h `canIncidentStillAlert`
       // cap). Same cadence as the #283/#983 flap line at index.ts — which is why it must not say "first
       // sight", which would be false from cycle 2 on. For the same reason line COUNT is not a frequency:
       // it is withheld-incidents × cycles-in-monitoring. Count distinct incident ids to measure how often

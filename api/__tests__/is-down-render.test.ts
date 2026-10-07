@@ -632,10 +632,10 @@ describe('#1622 — a status_history day row on the is-down page', () => {
     expect(html).not.toContain('24h 0m')
   })
 
-  it('shows a continuing row as still down, not resolved', () => {
+  it('shows a continuing row as ongoing, not resolved', () => {
     const html = render({ ...day, continuing: true })
-    expect(html).toContain('(24h that day, still down)')
-    expect(card(html)).toContain('>Still down</span>')
+    expect(html).toContain('(24h that day, ongoing)')
+    expect(card(html)).toContain('>Ongoing</span>')
     expect(card(html)).not.toContain('>Resolved</span>')
   })
 
@@ -644,8 +644,80 @@ describe('#1622 — a status_history day row on the is-down page', () => {
       startedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), resolvedAt: new Date(Date.now() - 2 * 3_600_000).toISOString() }
     const html = renderPage('helicone', { ...base, incidents: [newer, { ...day, continuing: true }] } as never, seo, [], null)
     const rows = card(html)
-    expect(rows.indexOf('Still down')).toBeGreaterThan(-1)
-    expect(rows.indexOf('Still down')).toBeLessThan(rows.indexOf('API errors'))
+    expect(rows.indexOf('>Ongoing<')).toBeGreaterThan(-1)
+    expect(rows.indexOf('>Ongoing<')).toBeLessThan(rows.indexOf('API errors'))
+  })
+
+  it('#1623 — an ongoing today-row reads ongoing, with no elapsed time off its estimated start', () => {
+    const today = { ...day, id: 'bs-hist:7615061:today', title: 'api.hconeai.com — down', status: 'investigating',
+      startedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), resolvedAt: null, duration: null,
+      derivedDay: new Date().toISOString().slice(0, 10) }
+    const html = render(today)
+    expect(card(html)).toContain('>Ongoing</span>')
+    expect(card(html)).not.toContain('Investigating')
+    expect(card(html)).not.toContain(' ago')
+    expect(html).toContain('api.hconeai.com — down (ongoing)')
+  })
+
+  it('#1623 — folds a running multi-day outage into one row with its days and downtime so far', () => {
+    const d = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10)
+    const run = { id: 'bs-run:7615061:start', startDay: d(2), endDay: d(0), days: 3, downSec: 91_800, ongoing: true }
+    const rows = [
+      { ...day, id: 'r0', title: 'api.hconeai.com — down', status: 'investigating', derivedDay: d(0), outageRun: run,
+        componentNames: ['api.hconeai.com'], startedAt: new Date(Date.now() - 3_600_000).toISOString(), resolvedAt: null, duration: null },
+      { ...day, id: 'r1', derivedDay: d(1), outageRun: run, continuing: true, componentNames: ['api.hconeai.com'],
+        startedAt: `${d(1)}T00:00:00.000Z`, resolvedAt: `${d(1)}T23:59:59.000Z`, duration: '24h 0m' },
+      { ...day, id: 'r2', derivedDay: d(2), outageRun: run, continuing: true, componentNames: ['api.hconeai.com'],
+        startedAt: `${d(2)}T22:00:00.000Z`, resolvedAt: `${d(2)}T23:30:00.000Z`, duration: '1h 30m' },
+    ]
+    const html = renderPage('helicone', { ...base, incidents: rows } as never, seo, [], null)
+    expect(html).toContain('api.hconeai.com — down <span class="mono" style="color:#8b949e">&middot; 3 days</span>')
+    // The closed days' totals, then the running day stated as running — not a partial sum called "so far".
+    expect(html).toContain('ongoing</span> &middot; 25h 30m down + ongoing')
+    const group = html.slice(html.indexOf('<details open class="incident-group">'))
+    expect(group.match(/>Ongoing</g)).toHaveLength(1)
+    expect(group).not.toContain('Resolved')
+  })
+
+  it('#1623 — a run longer than the 7-day list keeps its true start and day count', () => {
+    const d = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10)
+    const run = { id: 'bs-run:7615061:long', startDay: d(10), endDay: d(0), days: 11, downSec: 864_000, ongoing: true }
+    const rows = Array.from({ length: 11 }, (_, n) => n === 0
+      ? { ...day, id: 'r0', title: 'api.hconeai.com — down', status: 'investigating', derivedDay: d(0), outageRun: run,
+          startedAt: new Date(Date.now() - 3_600_000).toISOString(), resolvedAt: null, duration: null }
+      : { ...day, id: `r${n}`, derivedDay: d(n), outageRun: run, continuing: true,
+          startedAt: `${d(n)}T12:00:00.000Z`, resolvedAt: `${d(n - 1)}T12:00:00.000Z`, duration: '24h 0m' })
+    const html = renderPage('helicone', { ...base, incidents: rows } as never, seo, [], null)
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    const start = new Date(`${d(10)}T12:00:00Z`)
+    expect(html).toContain('&middot; 11 days</span>')
+    expect(html).toContain(`${MONTHS[start.getUTCMonth()]} ${start.getUTCDate()} &rarr; <span style="color:#e86235">ongoing</span>`)
+  })
+
+  it('#1623 — a finished run states its last day', () => {
+    const d = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10)
+    const run = { id: 'bs-run:7615061:done', startDay: d(2), endDay: d(1), days: 2, downSec: 14_400, ongoing: false }
+    const rows = [1, 2].map((n) => ({ ...day, id: `f${n}`, derivedDay: d(n), outageRun: run,
+      startedAt: `${d(n)}T12:00:00.000Z`, resolvedAt: `${d(n)}T14:00:00.000Z`, duration: '2h 0m' }))
+    const html = renderPage('helicone', { ...base, incidents: rows } as never, seo, [], null)
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    const [a, b] = [d(2), d(1)].map((x) => new Date(`${x}T12:00:00Z`)).map((x) => `${MONTHS[x.getUTCMonth()]} ${x.getUTCDate()}`)
+    expect(html).toContain(`${a} &rarr; ${b} &middot; 4h down`)
+  })
+
+  it('#1623 — lists today\'s ongoing row above yesterday\'s continuing one', () => {
+    const today = { ...day, id: 'bs-hist:7615061:today', title: 'api.hconeai.com — down', status: 'investigating',
+      startedAt: new Date(Date.now() - 3_600_000).toISOString(), resolvedAt: null, duration: null,
+      derivedDay: new Date().toISOString().slice(0, 10) }
+    const prior = { ...day, continuing: true, resolvedAt: new Date(Date.now() + 3_600_000).toISOString() }
+    const rows = card(renderPage('helicone', { ...base, incidents: [prior, today] } as never, seo, [], null))
+    expect(rows.indexOf('api.hconeai.com — down<')).toBeLessThan(rows.indexOf('api.hconeai.com — downtime<'))
+  })
+
+  it('#1623 — the operational-but-open note never calls a today-row the provider\'s incident', () => {
+    const today = { ...day, id: 'bs-hist:7615061:today', status: 'investigating', resolvedAt: null, duration: null }
+    const html = renderPage('helicone', { ...base, status: 'operational', incidents: [today] } as never, seo, [], null)
+    expect(html).not.toContain("the provider's incident below is still open")
   })
 
   it('CONTROL — a provider-published incident gets no qualifier and keeps its own status', () => {
@@ -655,7 +727,7 @@ describe('#1622 — a status_history day row on the is-down page', () => {
     expect(card(html)).not.toContain('3h 0m')
     expect(html).not.toContain('that day')
     expect(card(html)).toContain('>Resolved</span>')
-    expect(html).not.toContain('still down')
+    expect(html).not.toContain(', ongoing)')
   })
 })
 

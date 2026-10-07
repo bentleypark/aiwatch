@@ -13,6 +13,7 @@ import { incidentNote } from '../utils/incidentNote'
 import { getResolvedTime, getContextualTime, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService } from '../utils/archiveMerge'
 import { filterIncidentList } from '../utils/incidentFilter'
+import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
@@ -120,7 +121,7 @@ export function DetailPanel({ incident, onClose, hideHeader, t, lang }) {
 
 // Desktop table row — grid layout matching design mockup: title+badge | time | service | duration | status
 // Accordion: detail panel renders inline below the selected row
-export function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
+export function IncidentRow({ incident, isSelected, onClick, onClose, t, lang, hideStatus = false }) {
   const shownStatus = incidentDisplayStatus(incident)
   const statusCls = STATUS_BADGE_CLASS[shownStatus] ?? STATUS_BADGE_CLASS.resolved
   const ctx = getContextualTime(incident, t)
@@ -139,15 +140,17 @@ export function IncidentRow({ incident, isSelected, onClick, onClose, t, lang })
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}><span style={{ color: 'var(--text2)', opacity: 0.7 }}>{ctx.label}</span> {formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day })}</span>
         <div role="cell" className="flex items-center gap-2 min-w-0">
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{incident.title}</span>
-          <span className={`shrink-0 mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}>
-            {t(`incidents.status.${shownStatus}`)}
-          </span>
+          {!hideStatus && (
+            <span className={`shrink-0 mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}>
+              {t(`incidents.status.${shownStatus}`)}
+            </span>
+          )}
         </div>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>
           {incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName}
         </span>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{incidentDurationText(incident, t, t('incidents.duration.ongoing'))}</span>
-        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{t(`incidents.status.${shownStatus}`)}</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{hideStatus ? '' : t(`incidents.status.${shownStatus}`)}</span>
       </div>
       {isSelected && <DetailPanel incident={incident} onClose={onClose} t={t} lang={lang} />}
     </>
@@ -155,7 +158,7 @@ export function IncidentRow({ incident, isSelected, onClick, onClose, t, lang })
 }
 
 // Mobile card — accordion detail inline
-export function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
+export function IncidentCard({ incident, isSelected, onClick, onClose, t, lang, hideStatus = false }) {
   const ctx = getContextualTime(incident, t)
   return (
     <div>
@@ -171,7 +174,7 @@ export function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }
           <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', flex: 1 }}>
             {incident.title}
           </span>
-          <StatusBadge status={incidentDisplayStatus(incident)} t={t} />
+          {!hideStatus && <StatusBadge status={incidentDisplayStatus(incident)} t={t} />}
         </div>
         <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
           <span>{ctx.label} {formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day })}</span>
@@ -188,7 +191,7 @@ export function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }
 
 // Desktop group row (collapsed): single grid row with [×N flaps] badge; click toggles entries.
 // Entries render as ordinary IncidentRows below in their own rowgroup.
-function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onClose, t, lang }) {
+export function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onClose, t, lang }) {
   const dominantStatus = dominantGroupStatus(group)
   const statusCls = STATUS_BADGE_CLASS[dominantStatus] ?? STATUS_BADGE_CLASS.resolved
   const statusLabel = group.uniformStatus
@@ -211,7 +214,7 @@ function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onC
         style={{ display: 'grid', gridTemplateColumns: '190px 1fr 100px 80px 80px', gap: '12px', padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}
       >
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>
-          {formatDate(group.rangeStart, lang)} → {formatDate(group.rangeEnd, lang)}
+          {groupRangeText(group, lang, t)}
         </span>
         <div role="cell" className="flex items-center gap-2 min-w-0">
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{group.normalizedTitle}</span>
@@ -219,14 +222,14 @@ function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onC
             className="shrink-0 mono text-[var(--text2)] bg-[var(--bg2)]"
             style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}
           >
-            {t('incidents.group.flaps').replace('{n}', String(group.count))}
+            {groupBadgeText(group, t)}
           </span>
           <span className="shrink-0 text-[var(--text2)]" style={{ fontSize: '11px' }} aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         </div>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>{serviceLabel}</span>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{durationLabel}</span>
         <span role="cell" className={`mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px', justifySelf: 'start' }}>
-          {statusLabel}
+          {group.run ? t(`incidents.status.${dominantStatus}`) : statusLabel}
         </span>
       </div>
       {expanded && (
@@ -238,6 +241,7 @@ function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onC
             <IncidentRow
               key={inc.id}
               incident={inc}
+              hideStatus={hidesEntryStatus(group, inc)}
               isSelected={inc.id === selectedId}
               onClick={() => onSelect(inc.id)}
               onClose={onClose}
@@ -251,7 +255,7 @@ function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onC
   )
 }
 
-function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSelect, onClose, t, lang }) {
+export function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSelect, onClose, t, lang }) {
   const dominantStatus = dominantGroupStatus(group)
   const statusLabel = group.uniformStatus
     ? t('incidents.group.statusUniform').replace('{status}', t(`incidents.status.${dominantStatus}`).toLowerCase())
@@ -279,17 +283,17 @@ function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSelect, on
             className="shrink-0 mono text-[var(--text2)] bg-[var(--bg2)]"
             style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '3px' }}
           >
-            {t('incidents.group.flaps').replace('{n}', String(group.count))}
+            {groupBadgeText(group, t)}
           </span>
         </div>
         <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
-          <span>{formatDate(group.rangeStart, lang)} → {formatDate(group.rangeEnd, lang)}</span>
+          <span>{groupRangeText(group, lang, t)}</span>
           <span>·</span>
           <span>{serviceLabel}</span>
           <span>·</span>
           <span>{durationLabel}</span>
-          <span>·</span>
-          <span>{statusLabel}</span>
+          {!group.run && <span>·</span>}
+          {!group.run && <span>{statusLabel}</span>}
           <span className="text-[var(--text2)]" style={{ marginLeft: 'auto' }} aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         </div>
       </button>
@@ -304,6 +308,7 @@ function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSelect, on
             <IncidentCard
               key={inc.id}
               incident={inc}
+              hideStatus={hidesEntryStatus(group, inc)}
               isSelected={inc.id === selectedId}
               onClick={() => onSelect(inc.id)}
               onClose={onClose}

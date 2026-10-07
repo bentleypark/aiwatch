@@ -18,6 +18,7 @@ import { buildBadgeMarkdown } from '../utils/badge'
 import { compareGroupedRows, dominantGroupStatus, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMinShown } from '../utils/recovery'
+import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
 import { latencyCardState } from '../utils/latencyCard'
 import { filterSecurityAlertsForService, securitySourceLabel } from '../utils/securityAlerts'
@@ -207,7 +208,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
 
 // Exported for the render test that pins which rows are expandable (same reason `ComponentBreakdown`
 // below is): the #1292 defect was a row that silently did nothing on click.
-export function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
+export function IncidentRow({ incident, isRecentlyRecovered, t, lang, hideStatus = false }) {
   const [expanded, setExpanded] = useState(false)
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
@@ -218,7 +219,7 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
     continuing:    'text-[var(--red)]',
   }
   const shownStatus = incidentDisplayStatus(incident)
-  const dotCls = STATUS_CLS[shownStatus] ?? STATUS_CLS.resolved
+  const dotCls = hideStatus ? STATUS_CLS.resolved : STATUS_CLS[shownStatus] ?? STATUS_CLS.resolved
   const displayStatus = shownStatus === 'continuing' ? 'continuing'
     : incident.status === 'resolved' ? 'resolved'
     : incident.status === 'monitoring' ? 'monitoring'
@@ -251,7 +252,7 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
             {incident.duration ? ` · ${incidentDurationText(incident, t, '')}` : ''}
           </p>
         </div>
-        {isRecentlyRecovered ? (
+        {hideStatus ? null : isRecentlyRecovered ? (
           <span className="shrink-0 mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '1px 5px' }}>
             {t('overview.recovered')}
           </span>
@@ -279,12 +280,13 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
   )
 }
 
-function IncidentGroupRow({ group, t, lang }) {
+export function IncidentGroupRow({ group, t, lang }) {
   const [expanded, setExpanded] = useState(false)
   const dominantStatus = dominantGroupStatus(group)
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
     identified:    'text-[var(--red)]',
+    ongoing:       'text-[var(--red)]',
     monitoring:    'text-[var(--amber)]',
     resolved:      'text-[var(--text2)]',
   }
@@ -311,12 +313,12 @@ function IncidentGroupRow({ group, t, lang }) {
               className="shrink-0 mono text-[9px] text-[var(--text2)] bg-[var(--bg2)] rounded"
               style={{ padding: '1px 5px' }}
             >
-              {t('incidents.group.flaps').replace('{n}', String(group.count))}
+              {groupBadgeText(group, t)}
             </span>
             <span className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>
           </div>
           <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
-            {formatDate(group.rangeStart, lang)} → {formatDate(group.rangeEnd, lang)} · {statusLabel}
+            {groupRangeText(group, lang, t)}{group.run ? '' : ` · ${statusLabel}`}
           </p>
         </div>
       </button>
@@ -336,7 +338,7 @@ function IncidentGroupRow({ group, t, lang }) {
           }}
         >
           {group.entries.map((inc) => (
-            <IncidentRow key={inc.id} incident={inc} isRecentlyRecovered={false} t={t} lang={lang} />
+            <IncidentRow key={inc.id} incident={inc} isRecentlyRecovered={false} hideStatus={hidesEntryStatus(group, inc)} t={t} lang={lang} />
           ))}
         </div>
       )}

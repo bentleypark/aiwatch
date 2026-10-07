@@ -183,3 +183,28 @@ describe('buildCalendarFromIncidents — prefer an incident\'s own precise local
     expect(m[utcDay]).toBe('minor')
   })
 })
+
+describe('#1623 — today\'s cell for a running Better Stack outage', () => {
+  const day = (n) => localKey(new Date(Date.now() - n * 86_400_000))
+  const ongoing = (derivedDay) => ({
+    id: `bs-hist:r:${derivedDay}`, title: 'api — down', status: 'investigating', impact: 'minor',
+    startedAt: new Date(Date.now() - 3_600_000).toISOString(), derived: 'status_history', derivedDay,
+  })
+
+  it('takes the level the official day record gives the outage, not the synthesized row\'s fixed minor', () => {
+    const dailyImpact = { [day(2)]: 'critical', [day(1)]: 'critical' }
+    const m = calMap(buildCalendarFromIncidents([ongoing(day(1))], dailyImpact, 30, 'degraded', true), 30)
+    expect(m[day(0)]).toBe('critical')
+  })
+
+  it('keeps minor when that day has no record yet', () => {
+    const m = calMap(buildCalendarFromIncidents([ongoing(day(0))], { [day(2)]: 'critical' }, 30, 'degraded', true), 30)
+    expect(m[day(0)]).toBe('minor')
+  })
+
+  it('CONTROL — a provider incident keeps its own impact', () => {
+    const published = { ...ongoing(day(1)), derived: undefined, derivedDay: undefined }
+    const m = calMap(buildCalendarFromIncidents([published], { [day(1)]: 'critical' }, 30, 'degraded', true), 30)
+    expect(m[day(0)]).toBe('minor')
+  })
+})

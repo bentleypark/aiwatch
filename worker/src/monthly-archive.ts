@@ -652,7 +652,9 @@ export function accumulateMonthlyIncidents(
 
   for (const svc of services) {
     const incidents = (svc.incidents ?? []).filter(
-      i => incidentDay(i).startsWith(period), // #1292 — a derived incident's month comes from its day
+      i => incidentDay(i).startsWith(period) // #1292 — a derived incident's month comes from its day
+        // #1623 — today's synthesized row is live state until its day closes.
+        && !(i.derived === 'status_history' && i.accruing),
     )
     if (incidents.length === 0) continue
 

@@ -405,6 +405,31 @@ describe('#1292 — an emptied BetterStack feed must not read as "no incidents"'
     expect(synth, 'only the day inside the feed\'s reach may be synthesized').toEqual(['2026-08-20'])
   })
 
+  it('#1623 — warns that the gap-fill was fully suppressed even when today\'s accruing row is emitted', async () => {
+    // A feed item from today sets the floor at today, so every closed day is held back; resource B is
+    // down today, so its accruing row is emitted. The warning is about the closed days.
+    const idx = JSON.stringify({
+      data: { attributes: { aggregate_state: 'operational', timezone: 'UTC' } },
+      included: [
+        { type: 'status_page_resource', id: '7615061', attributes: { public_name: 'api.hconeai.com', status: 'operational',
+          status_history: [['2026-08-20', 20000], ['2026-08-29', 600]].map(([day, sec]) => ({ day, status: 'downtime', downtime_duration: sec, maintenance_duration: 0 })) } },
+        { type: 'status_page_resource', id: '8603734', attributes: { public_name: 'eu.api.helicone.ai', status: 'downtime',
+          status_history: [['2026-08-21', 20000], ['2026-08-29', 7000]].map(([day, sec]) => ({ day, status: 'downtime', downtime_duration: sec, maintenance_duration: 0 })) } },
+      ],
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(typeof input === 'string' || input instanceof URL ? input : input.url)
+      if (url.endsWith('/index.json')) return new Response(idx, { status: 200 })
+      if (url.endsWith('/feed')) return new Response(
+        feedNaming('api.hconeai.com', 'Sat, 29 Aug 2026 00:10:00 -0000', 'Sat, 29 Aug 2026 00:20:00 -0000'), { status: 200 })
+      return new Response('<html>ok</html>', { status: 200 })
+    }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const svc = await fetchService(helicone, undefined, undefined, {})
+    expect(svc.incidents.filter((i) => i.derived === 'status_history').map((i) => i.derivedDay)).toEqual(['2026-08-29'])
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('gap-fill fully suppressed'))).toBe(true)
+  })
+
   it('an EMPTY feed sets no floor — that is the #1292 case', async () => {
     // Nothing can have aged out of a feed with no items, so silence across the whole window is real.
     stubFetch(EMPTY_FEED)

@@ -135,11 +135,11 @@ test('running the script through a SYMLINKED path still runs main', () => {
 test('#1622 — resourceOfDerived reads both the pre-#1622 and the current synthesized title', () => {
   assert.equal(resourceOfDerived({ title: `${RESOURCE} — recovered` }), RESOURCE)
   assert.equal(resourceOfDerived({ title: `${RESOURCE} — downtime` }), RESOURCE)
+  assert.equal(resourceOfDerived({ title: `${RESOURCE} — down` }), RESOURCE)
 })
 
 test('resourceOfDerived reads the resource off a synthesized title', () => {
   assert.equal(resourceOfDerived(derived()), RESOURCE)
-  assert.equal(resourceOfDerived(feed(`${RESOURCE} — down`, ANCHOR)), null)
 })
 
 test('collision: the real production shape', () => {
@@ -218,6 +218,15 @@ test('assertPrunable refuses when the aggregates do not reproduce', () => {
 
 // I1 — the refusal must be wired into planPrune, not merely correct as a pure function. Deleting the
 // `assertPrunable` call, its `continue`, or its count check all left both suites green.
+// #1623 — a synthesized row is now titled `<resource> — down`, the same shape as a feed item, so the
+// title regex no longer tells them apart: the `derived` check is what keeps a real outage banked.
+test('planPrune never removes a feed row, even one titled exactly like a synthesized row', () => {
+  const doc = svcDoc([feed(`${RESOURCE} — down`, '2026-08-04T10:00:00.000Z'), feed(`${RESOURCE} — down`, '2026-08-04T14:00:00.000Z')])
+  const { changes, refusals } = planPrune(doc)
+  assert.deepEqual(changes, [])
+  assert.deepEqual(refusals, [])
+})
+
 test('planPrune REFUSES a truncated service instead of planning a deletion', () => {
   const doc = svcDoc([feed(`${RESOURCE} — down`, '2026-08-04T13:11:00.000Z'), derived()])
   doc.services.together.incidents = doc.services.together.incidents.slice(0) // keep the collision

@@ -45,6 +45,8 @@ export function causalIncidents(svc: Pick<ServiceStatus, 'incidents'>): CausalIn
     // upstream-attribution claim about what is happening RIGHT NOW — the same "stale reads as current"
     // shape found on six other consumers already (round-9 structural pass, #1384).
     if (inc.retainedBridge) continue
+    // #1623 — a synthesized today-row's title is ours, not the provider's; it names no cause.
+    if (inc.derived === 'status_history') continue
     out.push({ inc, text: incidentText(inc) })
   }
   return out

@@ -1193,21 +1193,22 @@ ${/* #1268 — a stale source with NOTHING behind it asserts neither branch. "No
       while still serving a live badge AND live incidents — `readFlashdutyStatus` preserves them
       deliberately. Withholding on bare `stale` deleted the only surviving description of what was wrong
       from a page answering "Yes — down": `renderIncidents` is stale-gated too, and the #1104 note is
-      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt, isDailyRecordIncident(lastIncident), lastIncident.derivedDay))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(incidentDurationEn(lastIncident)!)}${isDailyRecordIncident(lastIncident) && lastIncident.continuing ? ', still down' : ''})` : lastIncident.status === 'resolved' ? ' (duration unknown)' : ' (ongoing)'}${isDailyRecordIncident(lastIncident) ? ' &mdash; start time not published by the provider' : lastIncident.startUnknown ? ' &mdash; no usable time range for this incident' : ''}</p>` : '<p class="meta">No recent incidents</p>'}
+      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt, isDailyRecordIncident(lastIncident), lastIncident.derivedDay))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(incidentDurationEn(lastIncident)!)}${isDailyRecordIncident(lastIncident) && lastIncident.continuing ? ', ongoing' : ''})` : lastIncident.status === 'resolved' ? ' (duration unknown)' : ' (ongoing)'}${isDailyRecordIncident(lastIncident) ? ' &mdash; start time not published by the provider' : lastIncident.startUnknown ? ' &mdash; no usable time range for this incident' : ''}</p>` : '<p class="meta">No recent incidents</p>'}
 ${/* #1104 — withholding the "Resolved" label stopped the false claim but left the page answering
       "Operational" directly above an Investigating row with nothing reconciling the two. The AI card
       cannot do that job: it renders '' whenever no analysis exists, which is the state right after a
       new incident and whenever the cron's 15s budget ran out. Hence a header line that does not
       depend on the analysis.
-      Wording is "are operational", NOT "have recovered": `hasLiveIncident` is also true for the #970
+      Wording is "are operational", NOT "have recovered": a live incident is also present for the #970
       `impact: none` keep and the `unjudgeable` fail-open, where our component never left operational
       and there was no recovery to report. The current reading is true in every keep path.
-      Three exclusions, each because the note's claim would otherwise be FALSE, not merely noisy:
+      Four exclusions, each because the note's claim would otherwise be FALSE, not merely noisy:
       `asserted` (not raw `status`) because an unreadable source publishes no verdict at all (#1004),
       so "our components have recovered" is exactly what we cannot say; `!isPartial` because that
       header answers "N components affected" and the note would deny the line above it; `!stale`
       because a frozen array's open incident is frozen too, and asserting it is CURRENTLY open is the
-      same #591 false-currency `renderIncidents` refuses a few hundred lines below. */''}${asserted === 'operational' && !isPartial && !stale && hasLiveIncident(service) ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; The components AIWatch tracks for ${esc(seo.displayName)} are operational, but the provider's incident below is still open.</p>` : ''}
+      same #591 false-currency `renderIncidents` refuses a few hundred lines below; and a #1623 daily
+      record row, because the provider published no incident to call "the provider's". */''}${asserted === 'operational' && !isPartial && !stale && (Array.isArray(service?.incidents) ? service.incidents : []).some((i) => i?.status !== 'resolved' && i?.status !== 'monitoring' && !isDailyRecordIncident(i)) ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; The components AIWatch tracks for ${esc(seo.displayName)} are operational, but the provider's incident below is still open.</p>` : ''}
 ${'' /* #857 — this meta line always renders. When the service is ranked it leads with the rank clause;
    when it's unranked (score withheld during a new service's coverage/confidence ramp, e.g. turbopuffer)
    it leads with a monthly-report context sentence instead of the rank — so the reports pointer keeps a
@@ -1499,21 +1500,22 @@ const INCIDENT_ROW_CAP = 20
 // dashboard ServiceDetails INCIDENT_HISTORY_PREVIEW so both surfaces preview the same count.
 const INCIDENT_PREVIEW_ROWS = 5
 
-function renderIncidentSingle(inc: GroupingIncident): string {
+function renderIncidentSingle(inc: GroupingIncident, hideStatus = false): string {
   const impactCls = inc.impact === 'major' || inc.impact === 'critical' ? 'impact-major' : inc.impact === 'minor' ? 'impact-minor' : ''
-  const stillDown = isDailyRecordIncident(inc) && inc.continuing
+  const stillDown = isDailyRecordIncident(inc) && (inc.continuing || inc.status !== 'resolved')
   const statusColor = stillDown ? '#e86235' : inc.status === 'resolved' ? '#3fb950' : inc.status === 'monitoring' ? '#58a6ff' : '#e86235'
-  const statusText = stillDown ? 'Still down' : inc.status === 'resolved' ? 'Resolved' : inc.status === 'monitoring' ? 'Monitoring' : 'Investigating'
+  const statusText = stillDown ? 'Ongoing' : inc.status === 'resolved' ? 'Resolved' : inc.status === 'monitoring' ? 'Monitoring' : 'Investigating'
   // #1390 — a resolved incident with no duration is not ongoing and is not blank: there is no elapsed
   // time to show and no duration to state. Say which, rather than dropping the field silently. Keyed on
   // the broad condition (resolved, no duration), which several parsers can produce.
   const durationOrElapsed = inc.duration
     ? ` &middot; ${esc(incidentDurationEn(inc)!)}`
+    : isDailyRecordIncident(inc) ? ''
     : inc.status !== 'resolved' ? ` &middot; ${formatElapsed(inc.startedAt)}` : ' &middot; duration unknown'
   const impactMeta = impactCls ? ` &middot; <span class="${impactCls}">${esc(inc.impact ?? '')}</span>` : ''
   return `<div class="incident-item">
 <div class="incident-title">${esc(inc.title)}</div>
-<div class="incident-meta mono">${esc(formatDate(inc.startedAt, isDailyRecordIncident(inc), inc.derivedDay))} &middot; <span style="color:${statusColor}">${statusText}</span>${durationOrElapsed}${impactMeta}</div>
+<div class="incident-meta mono">${esc(formatDate(inc.startedAt, isDailyRecordIncident(inc), inc.derivedDay))}${hideStatus ? '' : ` &middot; <span style="color:${statusColor}">${statusText}</span>`}${durationOrElapsed}${impactMeta}</div>
 ${renderIncidentTimeline(inc)}</div>`
 }
 
@@ -1555,14 +1557,26 @@ export function renderIncidentTimeline(inc: Pick<GroupingIncident, 'status' | 't
   return `${latest}${full}`
 }
 
+/** #1623 — a multi-day outage: its days, whether it still runs, and the day totals summed. */
+function runGroupMeta(g: GroupRow): string {
+  const day = (d?: string) => esc(formatDate(`${d}T12:00:00Z`, true, d))
+  const downMin = Math.ceil((g.downSec ?? 0) / 60)
+  const dur = downMin >= 60 ? displayDuration(`${Math.floor(downMin / 60)}h ${downMin % 60}m`) : `${downMin}m`
+  const total = downMin > 0 ? ` &middot; ${esc(dur)} down${g.ongoing ? ' + ongoing' : ''}` : ''
+  return g.ongoing
+    ? `${day(g.startDay)} &rarr; <span style="color:#e86235">ongoing</span>${total}`
+    : `${day(g.startDay)} &rarr; ${day(g.endDay)}${total}`
+}
+
 function renderIncidentGroup(g: GroupRow): string {
   // <details open> so crawlers always read the full entries. CSS in renderPage
   // styles the expanded/collapsed state; noscript users retain full access.
-  const summary = `${esc(g.normalizedTitle)} <span class="mono" style="color:#8b949e">&middot; ${g.count}×</span>`
-  const headMeta = g.uniformStatus
+  const summary = `${esc(g.normalizedTitle)} <span class="mono" style="color:#8b949e">&middot; ${g.run ? `${g.count} days` : `${g.count}×`}</span>`
+  const headMeta = g.run ? runGroupMeta(g)
+    : g.uniformStatus
     ? `${esc(formatDate(g.rangeEnd))}`
     : `${esc(formatDate(g.rangeStart))} &rarr; ${esc(formatDate(g.rangeEnd))}`
-  const entries = g.entries.map(renderIncidentSingle).join('\n')
+  const entries = g.entries.map((inc) => renderIncidentSingle(inc, !!g.run && inc.status === 'resolved')).join('\n')
   return `<details open class="incident-group">
 <summary><span class="incident-group-title">${summary}</span><span class="incident-group-meta mono">${headMeta}</span></summary>
 <div class="incident-group-entries">${entries}</div>

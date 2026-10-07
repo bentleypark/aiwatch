@@ -567,10 +567,11 @@ claims the whole day. Names are matched longest-first and case-insensitively, si
 - **`affectedDays` counts the days a resolved incident spans** (`score.ts`, via `incidentDays`). An
   unresolved, `startUnknown` or synthesized incident counts a single day, so a multi-day outage
   from a per-day source still contributes one affected day per downtime day. Total downtime is unchanged.
-- **The current local day is excluded** — still accruing, so its seconds are a partial read and an
-  incident there would have to invent a start time. Everything emitted is closed, which also keeps
-  synthesis off the alert path: the new-incident branch never sees a resolved incident, and the
-  resolved branch is gated on the `alertedNewMap` marker a new alert would have written. "Today" is the
+- **The current local day is the service's ongoing incident (#1623).** While the resource is in
+  `downtime`, today's row is unresolved (`<resource> — down`, no duration, start estimated); once it
+  recovers it is that day's total so far, under the id it will close with. `incidents:monthly` banks it
+  only once the day has closed. It never alerts, is never analyzed and never feeds `/feed`:
+  those paths refuse every `derived` row. "Today" is the
   **page-local** date — mixing a UTC date with page-local day strings made a page west of UTC compare
   against a midnight in the future.
 - **Count semantics change.** A synthesized count is the number of downtime DAYS, not a true event
@@ -579,7 +580,7 @@ claims the whole day. Names are matched longest-first and case-insensitively, si
 - **Volume**: capped at 20 per page, the same bound `parseRssIncidents` applies to the feed this stands
   in for, emitted newest-first; `fetchService` then sorts the MERGED list, because two consumers read a
   raw prefix of `svc.incidents` (the is-down "Last incident" header and `/api/v1/status/:id`).
-- **Window**: 30 completed days, matching the Score's own, not the 90 the page serves. A per-model page
+- **Window**: 30 completed days plus today (#1623), matching the Score's own, not the 90 the page serves. A per-model page
   exposes one resource each, and an unbounded sweep would cost KV reads on every `/feed` poll and push
   real incidents out of `incidents:monthly`, whose per-service cap truncates oldest-first.
 - Sub-threshold flaps drop at `BS_HISTORY_MIN_DOWNTIME_SEC` (600s), per resource-day, in both the
@@ -589,17 +590,26 @@ claims the whole day. Names are matched longest-first and case-insensitively, si
   The other two readers of this field, `parseBetterStackUptime` and `parseBetterStackDailyImpact`, do
   NOT exclude it. That divergence is inherited, not introduced here.
 - `impact: 'minor'` (matching what `mapBetterStackImpact` scored the RSS posts these replace).
-- **Titled `"<resource> — downtime"` (#1622)**, not `— recovered`: a day total is no evidence of a
-  recovery. Rows banked before #1622 keep the old title in `incidents:monthly`, so the two readers that
-  take the resource name off the title (`archive-patch.ts`, `scripts/prune-monthly-derived-dupes.mjs`)
-  accept both. The row for the last closed day can carry **`continuing: true`** (the condition lives in
-  `parseBetterStackDowntimeIncidents` and its tests); the dashboard and is-down render it as still down
-  instead of Resolved. Display only — `status` stays `resolved`. An outage that continues has no unresolved
-  incident at all; that is #1623.
-- **Never flap-grouped.** Pre-#1622 rows wear the `"<resource> — recovered"` suffix `groupIncidents`
-  keys on, but grouping buckets on the VIEWER's local day, so a real feed item and a synthetic could share
+- **Titled `"<resource> — down"` (#1623; `— downtime` from #1622, `— recovered` before)**: a day
+  total is no evidence of a recovery, and every row of a run — and its group header — reads the same.
+  Rows already banked keep their old title in `incidents:monthly`, so the two readers that take the
+  resource name off the title (`archive-patch.ts`, `scripts/prune-monthly-derived-dupes.mjs`) accept all three. Every closed day of the outage still running today can carry **`continuing: true`** (the condition
+  lives in `parseBetterStackDowntimeIncidents` and its tests); it is tiered and filtered with the ongoing incidents rather than
+  read as Resolved. Display only — `status` stays `resolved`.
+- **Never flap-grouped.** Synthesized rows wear the `"<resource> — down"` suffix `groupIncidents`
+  keys on (`— recovered` before #1622), but grouping buckets on the VIEWER's local day, so a real feed item and a synthetic could share
   a bucket and the merged row would print the anchor at minute precision (group ranges carry no
   `dayOnly`). Excluded at the source so the invariant is structural.
+- **Grouped by outage instead (#1623).** Consecutive day rows that `outageRuns` proves to be one outage
+  carry the same `outageRun` — the run's extent, measured by `describeRuns` over the rows actually
+  emitted, so a group never counts a day that is not one of its own rows (a claimed, held-back,
+  maintenance or sub-floor day breaks the run; an outage longer than the window starts at its edge).
+  `groupIncidents` (SPA and Edge) folds them into one group row headed by it, in days only.
+  Display-only: never an id, never archived, never read by an alert.
+- **Known limit (#1623).** `continuing` marks only the days of the run that is still running. When a
+  feed item claims today (a title naming no resource claims every resource) and yesterday is a lone
+  day, no today row is emitted and yesterday's row reads resolved while the resource is still down;
+  the component status still shows the outage. Follow-up: #1625.
 - **Timezone**: days are cut on the page's own timezone, published as a Rails zone NAME. ICU rejects a
   non-IANA name with `RangeError: Invalid time zone specified` — in workerd and Node alike — and Rails
   names most of the world as a bare city (`Berlin`, `Tokyo`), so the alias table is what keeps a

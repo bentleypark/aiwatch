@@ -1293,6 +1293,23 @@ describe('refreshOrReanalyze', () => {
     expect(result.refreshed).toEqual([])
   })
 
+  it('#1623 — a synthesized today-row is never analyzed', async () => {
+    const kv = mockKV({})
+    const svc: ServiceStatus = {
+      id: 'helicone', name: 'Helicone', provider: 'Helicone', category: 'api', status: 'degraded',
+      latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
+      incidents: [{
+        id: 'bs-hist:r:2026-03-27', title: 'api.hconeai.com — down', status: 'investigating', impact: 'minor',
+        startedAt: '2026-03-27T00:00:00Z', resolvedAt: null, duration: null, timeline: [],
+        derived: 'status_history', derivedDay: '2026-03-27',
+      }],
+    }
+    const analyzeFn = vi.fn()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, new Date('2026-03-27T06:00:00Z').getTime())
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.reanalyzed).toEqual([])
+  })
+
   it('skips TTL refresh when analysis is recent (< 30min)', async () => {
     const recentAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-27T05:50:00Z' }
     const kv = mockKV({ [analysisKey('claude', 'inc-1')]: JSON.stringify(recentAnalysis) })

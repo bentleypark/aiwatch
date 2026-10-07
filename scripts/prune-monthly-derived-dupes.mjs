@@ -69,11 +69,11 @@ export function collidesWithFeedRow(entries, derivedEntry, resource) {
   })
 }
 
-/** The resource a synthesized row names. Its title is `"<resource> — downtime"` (`— recovered` before
- *  #1622), written by `parseBetterStackDowntimeIncidents` from the resource's `public_name` — the one
+/** The resource a synthesized row names. Its title is `"<resource> — down"` (`— downtime` from #1622, `— recovered`
+ *  before it), written by `parseBetterStackDowntimeIncidents` from the resource's `public_name` — the one
  *  suffix this script strips, and only off rows it has already confirmed are `derived`. */
 export function resourceOfDerived(entry) {
-  const m = /^(.*) — (?:recovered|downtime)$/.exec(entry.title ?? '')
+  const m = /^(.*) — (?:recovered|downtime|down)$/.exec(entry.title ?? '')
   return m ? m[1] : null
 }
 

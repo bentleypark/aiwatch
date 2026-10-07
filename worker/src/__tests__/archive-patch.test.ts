@@ -200,17 +200,17 @@ describe('#1295 — the operator procedure', () => {
 })
 
 describe('#1295 — resourceOfDerivedEntry', () => {
-  it('reads the resource off a synthesized title and nothing else', () => {
+  it('reads the resource off a synthesized title, anchored at its end', () => {
     expect(resourceOfDerivedEntry(derived())).toBe(RESOURCE)
-    expect(resourceOfDerivedEntry(feed(`${RESOURCE} — down`, ANCHOR))).toBeNull()
     // Anchored at the END: a title that merely CONTAINS the suffix is not a synthesized row, and an
     // unanchored match would hand the guard a resource name the synthesizer never wrote.
     expect(resourceOfDerivedEntry({ title: 'api — recovered after maintenance' })).toBeNull()
   })
 
-  it('#1622 — reads both the pre-#1622 frozen title and the current one', () => {
+  it('#1622/#1623 — reads every title a synthesized row has carried', () => {
     expect(resourceOfDerivedEntry({ title: `${RESOURCE} — recovered` })).toBe(RESOURCE)
     expect(resourceOfDerivedEntry({ title: `${RESOURCE} — downtime` })).toBe(RESOURCE)
+    expect(resourceOfDerivedEntry({ title: `${RESOURCE} — down` })).toBe(RESOURCE)
   })
 })
 

@@ -25,7 +25,8 @@ describe('#1292 — index.ts routes every derived-incident path through a guard'
     // guaranteed misses. The second loop's read fails OPEN, so without the guard a service whose feed
     // died would emit up to 30 backdated "resolved" items at once.
     const feedGuards = CODE.match(/\.filter\(\(i\) => i\.status [^)]*i\.derived !== 'status_history'\)/g) ?? []
-    expect(feedGuards.length, 'both /feed loops must skip derived incidents').toBe(2)
+    // #1623 — 2 → 4: the two `feed:firstseen` / `feed:active-emitted` stamp loops skip the today-row too.
+    expect(feedGuards.length, 'both /feed loops and both /feed stamp loops must skip derived incidents').toBe(4)
   })
 
   it('skips the guaranteed-miss recovered: probe on both status paths', () => {
@@ -47,6 +48,7 @@ describe('#1292 — index.ts routes every derived-incident path through a guard'
     // comments beside these guards write the tag in backticks, so they never match this pattern —
     // it is the REGISTRY's looser grep that they satisfied.)
     const inCode = (CODE.match(/'status_history'/g) ?? []).length
-    expect(inCode, 'index.ts must branch on the tag in executable code').toBe(4)
+    // #1623 — 4 → 7: the two /feed stamp loops and the `detected:` active-incident pick.
+    expect(inCode, 'index.ts must branch on the tag in executable code').toBe(7)
   })
 })

@@ -84,7 +84,7 @@ test.describe('Incidents filtering', () => {
     // Check first row — if there are ongoing incidents, they should be first
     const firstRowText = await rows.first().textContent()
     const hasOngoing = firstRowText?.toLowerCase().includes('ongoing') || firstRowText?.toLowerCase().includes('monitoring')
-      || firstRowText?.toLowerCase().includes('still down')
+      || firstRowText?.toLowerCase().includes('in progress')
     // If no ongoing, all should be resolved — which is also valid
     if (!hasOngoing) {
       const allText = await rows.allTextContents()
@@ -102,7 +102,7 @@ test.describe('Incidents filtering', () => {
     const statuses = []
     for (let i = 0; i < count; i++) {
       const text = (await rows.nth(i).textContent())?.toLowerCase() ?? ''
-      if (text.includes('ongoing') || text.includes('still down')) statuses.push(0)
+      if (text.includes('ongoing') || text.includes('in progress')) statuses.push(0)
       else if (text.includes('monitoring')) statuses.push(1)
       else statuses.push(2)
     }
