@@ -24,7 +24,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildPageComponents, fetchPageComponents, pickBreakdownComponents, fetchService, resolveSvcComponents, SERVICES, TRACKED_COMPONENT_IDS } from '../services'
-import { diffPageComponents, partitionFirstSeen } from '../utils'
+import { createFetchTracker, diffPageComponents, partitionFirstSeen } from '../utils'
 import { computeIncidentIoUptime } from '../parsers/incident-io'
 import { UPSTREAM_FEEDS } from '../upstream-feed'
 
@@ -181,7 +181,7 @@ describe('fetchPageComponents outcomes (#1125)', () => {
 
   it('reads a non-empty array as ok', async () => {
     stub(async () => new Response(JSON.stringify({ components: COMPONENTS_SUPERSET }), { status: 200 }))
-    expect(await fetchPageComponents(URL, undefined)).toEqual({ ok: true, components: COMPONENTS_SUPERSET })
+    expect(await fetchPageComponents(URL, createFetchTracker())).toEqual({ ok: true, components: COMPONENTS_SUPERSET })
     expect(warnText()).toBe('')
   })
 
@@ -193,7 +193,7 @@ describe('fetchPageComponents outcomes (#1125)', () => {
     ['the payload carries an EMPTY array', async () => new Response(JSON.stringify({ components: [] }), { status: 200 }), 'an EMPTY array'],
   ])('reports not-ok AND warns when %s', async (_label, impl, expected) => {
     stub(impl as (url: string) => Promise<Response>)
-    expect(await fetchPageComponents(URL, undefined)).toEqual({ ok: false })
+    expect(await fetchPageComponents(URL, createFetchTracker())).toEqual({ ok: false })
     expect(warnText()).toContain(expected)
   })
 })
@@ -613,7 +613,7 @@ describe('prefetch + alert wiring (#1125)', () => {
   })
 
   it('the prefetch reads a page\'s componentsUrl and stores the OUTCOME on the prefetch entry', () => {
-    expect(SERVICES_SRC).toMatch(/const componentsFetch = componentsUrl \? fetchPageComponents\(componentsUrl, limiter\)/)
+    expect(SERVICES_SRC).toMatch(/const componentsFetch = componentsUrl \? fetchPageComponents\(componentsUrl, tracker\)/)
     expect(SERVICES_SRC).toMatch(/prefetchMap\.set\(apiUrl,\s*\{[^}]*componentsFetch: await componentsFetch[^}]*\}\)/)
   })
 
@@ -628,7 +628,7 @@ describe('prefetch + alert wiring (#1125)', () => {
     // Inside it, a slow components.json would inflate the published response time for every service
     // on the page; after it, it would serialize onto the prefetch every service waits on.
     const prefetchBody = SERVICES_SRC.slice(SERVICES_SRC.indexOf('const prefetchMap = new Map'))
-    const started = prefetchBody.indexOf('fetchPageComponents(componentsUrl, limiter)')
+    const started = prefetchBody.indexOf('fetchPageComponents(componentsUrl, tracker)')
     const awaited = prefetchBody.indexOf('const [summaryRes, incidentsRes] = await Promise.all')
     // Assert both are present before comparing: indexOf returns -1 for a missing anchor, and -1 is
     // less than any real offset — so a bare `<` would read "the call moved out of the prefetch

@@ -926,8 +926,8 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[cron] probe24h parse failed:', err instanceof Error ? err.message : err) }
       }
       const fetchStartedAt = Date.now()
-      const { raw: freshServices, pageComponents, upstreamFeeds: freshFeeds } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
-      recordStatusFetchRun(env.ANALYTICS, 'cron', Date.now() - fetchStartedAt, freshServices)
+      const { raw: freshServices, pageComponents, fetchStats, upstreamFeeds: freshFeeds } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
+      recordStatusFetchRun(env.ANALYTICS, 'cron', Date.now() - fetchStartedAt, freshServices, fetchStats)
       if (freshServices.length > 0) {
         services = freshServices
         // Adopted only alongside a usable service list, so `services` and `upstreamFeeds` always come
@@ -6267,8 +6267,8 @@ export default {
       }
 
       const fetchStartedAt = Date.now()
-      const { raw, enriched, upstreamFeeds } = await fetchAllServices(env.STATUS_CACHE, probe24h)
-      recordStatusFetchRun(env.ANALYTICS, 'live', Date.now() - fetchStartedAt, raw)
+      const { raw, enriched, fetchStats, upstreamFeeds } = await fetchAllServices(env.STATUS_CACHE, probe24h)
+      recordStatusFetchRun(env.ANALYTICS, 'live', Date.now() - fetchStartedAt, raw, fetchStats)
 
       // Cache results after cross-validation (probe-verified, no fallback substitution — prevents cache poisoning)
       // Await cacheWrite so badge/v1 endpoints see data immediately

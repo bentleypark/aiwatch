@@ -1296,45 +1296,50 @@ export function isNonReliabilityAdvisory(text: string): boolean {
 }
 
 /** #1489 — Workers let one invocation hold 6 connections waiting for response headers and queue the
- *  rest. Create one per invocation: isolate-level state is shared by concurrent invocations. The
- *  deadline is measured from creation: nothing starts after it, and a queued fetch waits for a slot
- *  until it, not for its own timeout. */
-export const WORKER_CONNECTION_SLOTS = 6
-export const STATUS_RUN_DEADLINE_MS = 90_000
-
-export interface ConnectionLimiter {
-  run<T>(task: () => Promise<T>): Promise<T>
+ *  rest. The tracker never delays a fetch; it records how many other fetches of the same run were
+ *  waiting for headers when each one started, summed separately over the fetches that timed out and the
+ *  ones that answered. Create one per invocation: isolate-level state is shared by concurrent
+ *  invocations. */
+export interface FetchRunStats {
+  maxInFlight: number
+  answered: number
+  timeouts: number
+  httpErrors: number
+  otherErrors: number
+  waitingAtStartAnswered: number
+  waitingAtStartTimeouts: number
 }
 
-export function createConnectionLimiter(slots = WORKER_CONNECTION_SLOTS, deadlineMs = STATUS_RUN_DEADLINE_MS): ConnectionLimiter {
-  const deadlineAt = Date.now() + deadlineMs
-  let active = 0
-  const waiting: Array<() => void> = []
+export interface FetchTracker {
+  track(send: () => Promise<Response>): Promise<Response>
+  stats(): FetchRunStats
+}
+
+export function createFetchTracker(): FetchTracker {
+  let inFlight = 0
+  const stats: FetchRunStats = { maxInFlight: 0, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, waitingAtStartAnswered: 0, waitingAtStartTimeouts: 0 }
   return {
-    async run<T>(task: () => Promise<T>): Promise<T> {
-      const remaining = deadlineAt - Date.now()
-      if (remaining <= 0) throw new DOMException('The operation was aborted', 'AbortError')
-      if (active >= slots) {
-        await new Promise<void>((resolve, reject) => {
-          const admit = () => {
-            clearTimeout(timer)
-            resolve()
-          }
-          const timer = setTimeout(() => {
-            waiting.splice(waiting.indexOf(admit), 1)
-            reject(new DOMException('The operation was aborted', 'AbortError'))
-          }, remaining)
-          waiting.push(admit)
-        })
-      } else active++
+    async track(send) {
+      const othersWaiting = inFlight
+      inFlight++
+      stats.maxInFlight = Math.max(stats.maxInFlight, inFlight)
       try {
-        return await task()
+        const res = await send()
+        stats.answered++
+        stats.waitingAtStartAnswered += othersWaiting
+        if (!res.ok) stats.httpErrors++
+        return res
+      } catch (err) {
+        if ((err as { name?: unknown } | null)?.name === 'AbortError') {
+          stats.timeouts++
+          stats.waitingAtStartTimeouts += othersWaiting
+        } else stats.otherErrors++
+        throw err
       } finally {
-        const next = waiting.shift()
-        if (next) next()
-        else active--
+        inFlight--
       }
     },
+    stats: () => ({ ...stats }),
   }
 }
 
@@ -1342,7 +1347,7 @@ export async function fetchWithTimeout(
   url: string,
   timeoutMs = 8000,
   init?: RequestInit,
-  limiter?: ConnectionLimiter,
+  tracker?: FetchTracker,
 ): Promise<Response> {
   const send = async () => {
     const controller = new AbortController()
@@ -1353,16 +1358,16 @@ export async function fetchWithTimeout(
       clearTimeout(timer)
     }
   }
-  return limiter ? limiter.run(send) : send()
+  return tracker ? tracker.track(send) : send()
 }
 
-export function fetchInSlot(
+export function fetchTracked(
   url: string,
   timeoutMs: number | undefined,
   init: RequestInit | undefined,
-  limiter: ConnectionLimiter | undefined,
+  tracker: FetchTracker,
 ): Promise<Response> {
-  return fetchWithTimeout(url, timeoutMs, init, limiter)
+  return fetchWithTimeout(url, timeoutMs, init, tracker)
 }
 
 /**
