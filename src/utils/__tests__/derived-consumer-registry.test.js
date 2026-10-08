@@ -281,12 +281,14 @@ const SU_APPLIERS = {
   'worker/src/score.ts': 'carriesRecoveryTime excludes it from the Recovery SAMPLE, not just the durations — otherwise the default scores Recovery 0 instead of abstaining at 15 (round 1, reproduced at -19 Score)',
   'worker/src/incident-history.ts': 'buildHistoryRecord returns null — a 0-minute row in the no-TTL corpus grades every prediction as over-predicted and grounds the next estimate',
   'worker/src/monthly-archive.ts': 'kept out of countedCount (the published "avg recovery" divisor) and out of longest; the reconstructed duration is null, never minutesToDurationString(0) = "0h 0m"; the flag itself survives the freeze',
-  'worker/src/recovery-mark.ts': 'markIncidentResolved writes no duration — formatDuration over a zero-length interval floors to the same 1m the repair removed (round 1, reproduced on the KV marker)',
+  'worker/src/recovery-mark.ts': 'marks a zeroLengthRecord as recovered only because its one published instant is a real resolution moment; it writes no duration, while every other startUnknown shape remains withheld',
   'worker/src/rss.ts': 'the resolved item publishes no predicted-vs-actual line — durationMinOf over the anchored pair is 0, which would grade a real AI estimate against a duration we declined to state, in a public feed',
   'src/utils/incidentSort.js': 'sumGroupDuration counts it as unknownCount rather than letting it fall through to hasOngoing, and groupDurationText states the absence — a group of entirely resolved incidents read "Ongoing" before (round 1, executed)',
   'src/utils/incidentNote.js': 'THE discriminator — gives a zeroLengthRecord row its own note instead of the #1390 one, which claims the provider published a recovery before the start; order is load-bearing because a zero-length record carries both flags',
   'src/pages/Overview.jsx': 'the flap-group label states the unknown rather than falling through to the ongoing label',
   'worker/src/monthly-narrative.ts': 'selectIncidentCandidates skips it — formatDurationLabel would call a resolved row with durationMin 0 "ongoing", the same mislabel sumGroupDuration was fixed for, and the prompt orders the model to copy durationLabel VERBATIM into the published report',
+  'src/utils/predictionAccuracy.js': 'returns null whenever startUnknown is set, including a zeroLengthRecord whose resolution is known but whose equal endpoints must never grade a prediction as 0m',
+  'src/utils/recoveredGrouping.js': 'may receive a recovery marker for a zeroLengthRecord, but returns no duration when startUnknown is set so the row reads only “recovered”, never “recovered in 0m”',
   'api/_is-down/html-template.ts': 'states the duration unknown rather than dropping the field, and discloses that no usable time range was available — it does NOT claim which end of the outage the shown instant marks, because nothing establishes that (see the startUnknown doc in worker/src/types.ts)',
 }
 
@@ -295,6 +297,7 @@ const SU_FORWARDERS = {
   'worker/src/index.ts': 'the /api/v1/status/:id field allowlist emits it — the #1292 precedent verbatim: without it the one PUBLIC surface hands a consumer a synthetic start with no way to apply the rule the rest of the codebase applies',
   'worker/src/services.ts': 'calls the producer AND forwards: mergeRetainedIncidentHistory rebuilds an Incident from a stored MonthlyIncidentEntry via `carriedIncidentTags`, pinned by retained-tag-forwarding.test.ts against the stored type\'s own field list. It sat in SAFE as "the orchestrator, not a consumer" while that rebuild silently dropped the flag. Scope, stated: that pin covers THIS forwarder only — src/utils/archiveMerge.js rehydrates the same stored type in a bundle that cannot import the helper, and carries the tags inline',
   'src/utils/archiveMerge.js': 'archive entry → live incident shape: forwards startUnknown and leaves duration undefined rather than re-stating the stored 0 as "0m". It carries its tags INLINE — the worker-side carriedIncidentTags cannot cross the bundle boundary — and it does not carry `autoMonitor`, a pre-existing drop this issue did not touch (its consequence is pinned by src/utils/__tests__/incidentGrouping.test.js)',
+  'api/is-down.ts': 'forwards startUnknown from the matching incident into its private AIInsight shape; without it html-template.ts receives equal timestamps with no way to refuse a public 0m prediction outcome',
 }
 
 /** Cannot be reached by an anchored incident, or reads nothing it could get wrong. Each reason is a
@@ -334,7 +337,6 @@ const SU_SAFE = {
   'src/utils/regionStatus.js': 'active incidents only',
   'src/utils/constants.js': 'active incidents only',
   'api/_is-down/region-status.ts': 'active incidents only',
-  'api/is-down.ts': 'active-only for the verdict; the AI card joins by incident id and an anchored one is never analyzed fresh',
 
   // Already require a truthy `duration`, which an anchored incident does not have — so the wrong
   // derivation is unreachable, not merely unlikely.
@@ -362,9 +364,7 @@ const SU_SAFE = {
   'worker/src/probe-archival.ts': 'the incidentWindows param that would read a duration is passed by NO production caller (TODO #132)',
   'worker/src/weekly-briefing.ts': 'reads the durable MonthlyIncidentEntry[] counts, not a derived elapsed time',
   'worker/src/parse-failure-log.ts': 'counts SOURCE-READ failures by reason; reads no incident field',
-  'src/utils/predictionAccuracy.js': 'every entry point returns early when the analysis carries no `resolvedAt` (predictionAccuracy.js:181), and markIncidentResolved refuses to stamp one for this shape — the same upstream-predicate property the other two axes rest on, not a claim about a different gate',
-  'src/utils/recoveredGrouping.js': 'a row exists only because of the recovered: KV marker, and markIncidentResolved writes none for this shape. It does NOT read the marker\'s duration field — it subtracts the incident\'s own timestamp pair — so withholding the marker is what makes it safe, not clearing a field',
-  'src/components/AnalysisModal.jsx': 'the predicted-vs-actual line comes from predictionAccuracy.js, which returns early without a stamped analysis resolvedAt — and markIncidentResolved stamps none for this shape',
+  'src/components/AnalysisModal.jsx': 'the predicted-vs-actual line comes from predictionAccuracy.js, which returns null for every startUnknown incident even when recovery-mark.ts stamps the known resolution moment',
   'src/components/IncidentTimeline.jsx': 'renders the timeline it is given; the note prop covers the empty case',
   'src/components/RecentUserReports.jsx': 'user-submitted reports, not provider incidents',
   'src/components/Sidebar.jsx': 'active incident count only',

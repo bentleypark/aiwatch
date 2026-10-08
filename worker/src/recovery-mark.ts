@@ -74,6 +74,8 @@ interface ResolvedIncident {
   resolvedAt?: string | null
   /** #1390 — `startedAt` is anchored on `resolvedAt`; no elapsed time is derivable. */
   startUnknown?: boolean
+  /** #1480 — the provider published one trustworthy resolution instant but no duration. */
+  zeroLengthRecord?: boolean
 }
 
 /**
@@ -96,9 +98,10 @@ export async function markIncidentResolved(
   inc: ResolvedIncident,
   now: string,
 ): Promise<AIAnalysisResult | null> {
-  // #1390 — refuse the whole resolution event for an incident whose start is anchored on its own
-  // `resolvedAt` (`startUnknown`). This is ONE predicate standing where the other two axes already put
-  // one, and it is deliberately not a per-field patch.
+  // #1390 — refuse a resolution event whose timestamps have been repaired into an anchor. #1480's
+  // zero-length source record is narrower: its single published instant is a trustworthy resolution
+  // moment, even though it cannot yield an elapsed duration. Let that shape light the recovered row,
+  // while the two readers below independently refuse to derive 0m from it.
   //
   // Round 2 of this issue cleared the marker's `duration` field and thought that closed it. It did not,
   // because the three surfaces this function lights up do not read that field — they subtract the
@@ -107,22 +110,19 @@ export async function markIncidentResolved(
   // the Overview "Recently Resolved" banner reading `recovered in 0m`, and the Analyze modal's verdict.
   // No field a patch can clear reaches them.
   //
-  // Both writes below are what they hang on — `recoveredGrouping.js` builds a row only from the
-  // `recovered:` marker, and `predictionAccuracy.js` / the is-down card / the modal all return early
-  // without the `resolvedAt` stamped onto the analysis (`predictionAccuracy.js:181`,
-  // `html-template.ts`'s `outcome`). Withholding both is therefore the same property the `#1292` and
-  // `#1384` axes rest on (`isMarkableOnStatusEdge` refusing the shape outright), rather than three more
-  // guards that the fourth consumer would walk around.
+  // Both writes below are what the read surfaces hang on. The explicit zero-length exception is safe
+  // only because recoveredGrouping and predictionAccuracy reject `startUnknown` before subtraction;
+  // it therefore renders a plain “recovered” row and never a fabricated duration or verdict.
   //
   // Gated HERE and not at the two call sites for the reason `buildHistoryRecord`'s own gate states:
   // both cron resolution paths funnel through this function. What is lost is the "Recently Resolved"
   // row for such an incident — the same trade already accepted for a `status_history` incident, and the
   // alternative is a row that states a recovery time we have said we do not have.
-  if (inc.startUnknown) {
+  if (inc.startUnknown && !inc.zeroLengthRecord) {
     console.warn(`[cron] ${svcId}/${inc.id}: no trustworthy start (startUnknown) — writing no recovery marker and stamping no analysis resolvedAt, so nothing downstream derives an elapsed time from the anchored pair`)
     return null
   }
-  const duration = inc.startedAt
+  const duration = inc.startedAt && !inc.startUnknown
     ? formatDuration(new Date(inc.startedAt), new Date(inc.resolvedAt ?? now))
     : undefined
   const markerOk = await kvPut(kv, recoveryMarkerKey(svcId, inc.id), JSON.stringify({

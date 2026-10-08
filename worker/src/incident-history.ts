@@ -368,6 +368,9 @@ export function resolvedPredictionLine(
   analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number } | null | undefined,
   inc: Incident,
 ): string | null {
+  // A zero-length source record can name its recovery instant, but never its elapsed duration. Keep
+  // the Discord recovery alert aligned with /feed, the dashboard, and the durable history corpus.
+  if (inc.startUnknown) return null
   const predicted = scoringBaselineHours(analysis)
   if (predicted == null) return null
   const pva = predictedVsActualText({

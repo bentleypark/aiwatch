@@ -20,6 +20,9 @@ import { computePredictionOutcome, fmtMin, withinEstimateText } from './predicti
  *  `recovered:` marker, so it's the resolution instant the prediction is graded against), else the
  *  incident's. Null when either end is missing or the timestamps are out of order. */
 export function recoveredDurationMin(incident, analysis) {
+  // A zero-length source record gives us a real resolution moment, but not a real start. Do not turn
+  // its equal timestamp pair into a seemingly precise 0m duration.
+  if (incident?.startUnknown) return null
   const startedAt = incident?.startedAt
   const resolvedAt = analysis?.resolvedAt ?? incident?.resolvedAt
   if (!startedAt || !resolvedAt) return null

@@ -449,6 +449,15 @@ describe('resolvedPredictionLine (#846 — Discord Incident-Resolved, matches /f
     expect(resolvedPredictionLine(an(0), inc())).toBeNull()
     expect(resolvedPredictionLine(an(-1), inc())).toBeNull()
   })
+  it('does not publish a 0m prediction result when the provider omitted the start', () => {
+    const instant = '2026-07-01T00:00:00.000Z'
+    expect(resolvedPredictionLine(an(2), inc({
+      startedAt: instant,
+      resolvedAt: instant,
+      startUnknown: true,
+      zeroLengthRecord: true,
+    }))).toBeNull()
+  })
   it('#1003 — scores against the FIRST estimate, not the re-analysis-inflated current one', () => {
     // A re-analyzed incident: first estimated 45m, re-estimated 2h after it outran that. Actual 45m.
     // Scoring against the current 2h would read "faster than ~2h est." — a fabricated win.

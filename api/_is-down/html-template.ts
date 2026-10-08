@@ -868,7 +868,7 @@ function predictedVsActualEn(predictedHours: number, actualMin: number): string 
   return `${fmtMinEn(actualMin)} (${within})`
 }
 
-type AIInsight = { summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }
+type AIInsight = { summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string; startUnknown?: boolean }
 
 /** #1104 — does the service still carry a LIVE incident? NOT the same predicate as the identically
  *  shaped `hasOngoingIncident` in `worker/src/alerts.ts` / `src/pages/ServiceDetails.jsx`, which count
@@ -972,7 +972,7 @@ function renderInsightBody(insight: AIInsight, multi: boolean, idx: number): str
   // "Est. Recovery" directly above its own "✅ Recovered 40m ago" line. `insight.resolvedAt` is the
   // same field that line already keys on, so gating both on it is what makes the block self-consistent.
   const baseline = scoringBaselineEn(insight)
-  const outcome = baseline != null && insight.startedAt && insight.resolvedAt
+  const outcome = !insight.startUnknown && baseline != null && insight.startedAt && insight.resolvedAt
     ? predictedVsActualEn(baseline, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
     : null
   const sep = multi && idx > 0 ? 'border-top:1px solid #21262d;margin-top:10px;padding-top:10px' : ''

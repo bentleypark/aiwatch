@@ -179,6 +179,9 @@ export function exceededRecoveryText(analysis, incident, lang, nowMs = Date.now(
  */
 export function computePredictionOutcome(analysis, incident) {
   if (!analysis?.resolvedAt) return null
+  // A stamped resolution moment is not enough to grade an estimate when the provider did not publish
+  // a trustworthy start. In particular, zeroLengthRecord has equal endpoints by source shape.
+  if (incident?.startUnknown) return null
   // #1003 — scored against the first estimate, not the re-analysis-inflated current one.
   const predictedHours = baselineHoursFrom(analysis)
   if (predictedHours == null) return null

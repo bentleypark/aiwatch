@@ -133,6 +133,17 @@ describe('renderAIInsight — predicted vs actual (#827 F4)', () => {
     expect(noHours).toContain('Est. Recovery:')
     expect(noHours).not.toContain('Predicted vs actual:')
   })
+  it('does not derive a 0m outcome when the provider omitted the incident start', () => {
+    const instant = new Date().toISOString()
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], {
+      ...resolvedInsight,
+      startedAt: instant,
+      resolvedAt: instant,
+      startUnknown: true,
+    })
+    expect(html).toContain('Est. Recovery:')
+    expect(html).not.toContain('Predicted vs actual:')
+  })
 })
 
 describe('renderAIInsight — scored against the FIRST estimate (#1003)', () => {

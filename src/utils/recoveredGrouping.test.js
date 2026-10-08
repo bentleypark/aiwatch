@@ -30,6 +30,11 @@ describe('recoveredDurationMin', () => {
     expect(recoveredDurationMin({ startedAt: '2026-07-17T00:00:00Z' }, undefined)).toBeNull()
     expect(recoveredDurationMin({ startedAt: '2026-07-17T02:00:00Z', resolvedAt: '2026-07-17T00:00:00Z' }, undefined)).toBeNull()
   })
+
+  it('does not derive 0m from a zero-length source record with an unknown start', () => {
+    const instant = '2026-07-17T00:00:00Z'
+    expect(recoveredDurationMin({ startedAt: instant, resolvedAt: instant, startUnknown: true, zeroLengthRecord: true }, undefined)).toBeNull()
+  })
 })
 
 describe('buildRecoveredRows', () => {

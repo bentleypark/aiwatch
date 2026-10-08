@@ -59,7 +59,8 @@ export interface Incident {
   startUnknown?: boolean
   /** #1480 — narrows the `startUnknown` above: this record carries ONE instant for both ends, so the
    *  absence of a duration is a property of the record's shape rather than of two unreliable
-   *  timestamps. Read by the reader-facing note ONLY. The #1390 note cannot be shown here — it says
+   *  timestamps. It permits a resolution marker, but every duration and prediction reader still
+   *  treats the start as unknown. The #1390 note cannot be shown here — it says
    *  which end the instant marks is unestablished, which is what licenses `getContextualTime`'s
    *  `Resolved` label there, and is not what this record says. */
   zeroLengthRecord?: boolean
@@ -591,4 +592,3 @@ export interface OutageRun {
   downSec: number
   ongoing: boolean
 }
-

@@ -439,13 +439,18 @@ export default async function handler(req: Request) {
           // `entry` (which has no `incidents`). `target` may be undefined on the `service_missing`
           // config-drift path (which doesn't return) while `aiAnalysis` still has an entry — optional-
           // chain so we never throw to the fallback render; absent → the card shows the bare estimate.
-          const incidents = (target?.incidents as Array<{ id?: string; startedAt?: string; title?: string }> | undefined) ?? []
+          const incidents = (target?.incidents as Array<{ id?: string; startedAt?: string; title?: string; startUnknown?: boolean }> | undefined) ?? []
           aiInsights = analysisList
             .map(a => {
               const inc = incidents.find(i => i.id === a.incidentId)
               // #926 — carry the incident title too so a multi-incident card can label each sub-block
               // (the dashboard modal does the same, keyed on incidentId).
-              return { ...a, ...(inc?.startedAt ? { startedAt: inc.startedAt } : {}), ...(inc?.title ? { incidentTitle: inc.title } : {}) }
+              return {
+                ...a,
+                ...(inc?.startedAt ? { startedAt: inc.startedAt } : {}),
+                ...(inc?.title ? { incidentTitle: inc.title } : {}),
+                ...(inc?.startUnknown ? { startUnknown: true } : {}),
+              }
             })
             // #926 — order newest-incident-first so the AI card lines up with the "Recent Incidents"
             // section on the same page. That section sorts status-tier-then-recency (active before

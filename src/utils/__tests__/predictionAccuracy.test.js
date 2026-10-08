@@ -137,6 +137,12 @@ describe('computePredictionOutcome', () => {
     expect(computePredictionOutcome({ estimatedRecoveryHours: 1, resolvedAt: resolved }, {})).toBeNull()
     expect(computePredictionOutcome({ estimatedRecoveryHours: 1, resolvedAt: resolved }, undefined)).toBeNull()
   })
+  it('returns null when the provider published no trustworthy start', () => {
+    expect(computePredictionOutcome(
+      { estimatedRecoveryHours: 1, resolvedAt: resolved },
+      { startedAt: resolved, resolvedAt: resolved, startUnknown: true, zeroLengthRecord: true },
+    )).toBeNull()
+  })
   it('returns null for out-of-order timestamps (no negative duration)', () => {
     expect(computePredictionOutcome(
       { estimatedRecoveryHours: 1, resolvedAt: started },
