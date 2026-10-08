@@ -191,6 +191,8 @@ const ko = {
   // Service Details
   'svc.latency': 'API 응답 시간',
   'svc.latency.notMeasured': 'probe할 수 있는 엔드포인트 없음',
+  'svc.latency.failed.http': '측정 실패 · HTTP {code} 응답',
+  'svc.latency.failed.noResponse': '측정 실패 · 응답 없음',
   'svc.latency.inherited': 'API 응답 시간 · {p} 기반',
   'svc.latency.inherited.sub': '{p}와 동일 엔드포인트 (상속)',
   'svc.uptime30d': '업타임',

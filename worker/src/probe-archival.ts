@@ -1,7 +1,7 @@
 // Probe RTT daily archival — aggregates 24h probe snapshots into daily summaries
 // Called by Daily Summary cron (UTC 09:00). Stored with 90d TTL for monthly reports.
 
-import type { ProbeSnapshot } from './probe'
+import { type ProbeResult, type ProbeSnapshot, type ProbeFailureKind, measuredRtt, probeFailureKind } from './probe'
 import type { ProbeSummary } from './types'
 
 export interface ProbeDailyStat {
@@ -11,8 +11,12 @@ export interface ProbeDailyStat {
   min: number
   max: number
   count: number
-  spikes: number // count of rtt > 3×median or rtt=-1
+  spikes: number // count of rtt > 3×median or a failed probe (timeout or 5xx)
+  /** #1644 — failed probes by kind. Absent on days archived before it. */
+  failures?: ProbeFailureCounts
 }
+
+export type ProbeFailureCounts = Record<ProbeFailureKind, number>
 
 export type ProbeDailyData = Record<string, ProbeDailyStat>
 
@@ -31,8 +35,8 @@ export function aggregateProbeDaily(
   snapshots: ProbeSnapshot[],
   incidentWindows?: Record<string, { startedAt: string; resolvedAt?: string }[]>,
 ): ProbeDailyData {
-  // Collect RTT values per service, excluding incident time windows
-  const rttMap: Record<string, number[]> = {}
+  // Collect results per service, excluding incident time windows
+  const resultMap: Record<string, ProbeResult[]> = {}
   for (const snap of snapshots) {
     const snapTime = new Date(snap.t).getTime()
     for (const [svcId, result] of Object.entries(snap.data)) {
@@ -42,25 +46,29 @@ export function aggregateProbeDaily(
         const end = w.resolvedAt ? new Date(w.resolvedAt).getTime() : Date.now()
         return snapTime >= start && snapTime <= end
       })) continue
-      if (!rttMap[svcId]) rttMap[svcId] = []
-      rttMap[svcId].push(result.rtt)
+      if (!resultMap[svcId]) resultMap[svcId] = []
+      resultMap[svcId].push(result)
     }
   }
 
   const result: ProbeDailyData = {}
-  for (const [svcId, allRtt] of Object.entries(rttMap)) {
-    // Separate valid RTTs from failures (rtt=-1)
-    const valid = allRtt.filter(r => r > 0).sort((a, b) => a - b)
-    const failures = allRtt.filter(r => r <= 0).length
+  for (const [svcId, all] of Object.entries(resultMap)) {
+    const valid = all.map(measuredRtt).filter((r): r is number => r !== null).sort((a, b) => a - b)
+    const failures: ProbeFailureCounts = { timeout: 0, http5xx: 0, http429: 0 }
+    for (const r of all) {
+      const kind = probeFailureKind(r)
+      if (kind) failures[kind]++
+    }
+    const failed = failures.timeout + failures.http5xx
 
     if (valid.length === 0) {
-      result[svcId] = { p50: 0, p75: 0, p95: 0, min: 0, max: 0, count: allRtt.length, spikes: failures }
+      result[svcId] = { p50: 0, p75: 0, p95: 0, min: 0, max: 0, count: all.length, spikes: failed, failures }
       continue
     }
 
     const median = percentile(valid, 50)
     const threshold = median * 3
-    const spikeCount = failures + valid.filter(r => r > threshold).length
+    const spikeCount = failed + valid.filter(r => r > threshold).length
 
     // Warm-up filtering: remove top 1% extreme RTTs + spike RTTs (>3×median)
     // Uses trimmed dataset for p50/p75/p95 to avoid cold-start/incident noise
@@ -76,8 +84,9 @@ export function aggregateProbeDaily(
       p95: percentile(cleaned, 95),
       min: cleaned[0],
       max: cleaned[cleaned.length - 1],
-      count: allRtt.length,
+      count: all.length,
       spikes: spikeCount, // raw spike count preserved for downstream filtering
+      failures,
     }
   }
 

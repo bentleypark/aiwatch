@@ -11,12 +11,20 @@
 //
 // Pure + presentation-free (returns kind/rtt/parentName; the component maps those to label/color).
 
+import { measuredRtt, probeFailureKind } from '../../worker/src/probe'
+
+/** #1644 — the latest probe's failure, when it measured no RTT: `{ status }` (0 = no response). */
+function failureOf(result) {
+  const kind = result ? probeFailureKind(result) : null
+  return kind === 'timeout' || kind === 'http5xx' ? { status: kind === 'timeout' ? 0 : result.status } : null
+}
+
 /**
  * @param {object}   service          the ServiceStatus being shown (needs id, latency, probeInheritedFrom)
  * @param {string[]} probeServiceIds  ids with a direct probe snapshot this cycle
- * @param {object}   latestProbe      latest probe snapshot `data` map: { id: { rtt } }
+ * @param {object}   latestProbe      latest probe snapshot `data` map: { id: { status, rtt } }
  * @param {object[]} services         all services (to resolve the parent's display name)
- * @returns {{ kind: 'probe'|'inherited'|'none', rtt: number|null, parentName: string|null }}
+ * @returns {{ kind: 'probe'|'inherited'|'none', rtt: number|null, parentName: string|null, failure: { status: number }|null }}
  */
 export function latencyCardState(service, probeServiceIds, latestProbe, services) {
   const isDirectProbe = (probeServiceIds ?? []).includes(service.id)
@@ -24,11 +32,19 @@ export function latencyCardState(service, probeServiceIds, latestProbe, services
 
   if (!isDirectProbe && inheritedFrom) {
     const parentName = (services ?? []).find((s) => s.id === inheritedFrom)?.name ?? inheritedFrom
-    const rtt = latestProbe?.[inheritedFrom]?.rtt
-    return { kind: 'inherited', rtt: rtt > 0 ? rtt : null, parentName }
+    const probe = latestProbe?.[inheritedFrom]
+    return { kind: 'inherited', rtt: measuredRtt(probe), parentName, failure: failureOf(probe) }
   }
   if (isDirectProbe) {
-    return { kind: 'probe', rtt: service.latency ?? null, parentName: null }
+    return { kind: 'probe', rtt: service.latency ?? null, parentName: null, failure: failureOf(latestProbe?.[service.id]) }
   }
-  return { kind: 'none', rtt: null, parentName: null }
+  return { kind: 'none', rtt: null, parentName: null, failure: null }
+}
+
+/** #1644 — the card's sub-line for a `latencyCardState` result. */
+export function latencyCardSub(card, t) {
+  if (card.kind === 'none') return t('svc.latency.notMeasured')
+  if (card.rtt != null) return card.kind === 'probe' ? t('svc.latency.sub') : t('svc.latency.inherited.sub').replace('{p}', card.parentName)
+  if (card.failure) return card.failure.status === 0 ? t('svc.latency.failed.noResponse') : t('svc.latency.failed.http').replace('{code}', String(card.failure.status))
+  return t('uptime.collecting')
 }

@@ -113,6 +113,25 @@ export function failedProbe(): ProbeResult {
   return { status: 0, rtt: -1 }
 }
 
+/** #1644 — the RTT a probe measured, or null when it measured none: a timeout/network failure, or a
+ *  5xx (the time it took a server to fail is not the service's latency). A 4xx is a live server
+ *  refusing an unauthenticated request, so its RTT counts — as does a 429, whose verdict is #576's. */
+export function measuredRtt(result: ProbeResult | undefined): number | null {
+  if (!result || !(result.rtt > 0) || result.status >= 500) return null
+  return result.rtt
+}
+
+export type ProbeFailureKind = 'timeout' | 'http5xx' | 'http429'
+
+/** #1644 — what kind of failure a probe result records, if any. `http429` is recorded, not judged:
+ *  `measuredRtt` still returns its RTT. */
+export function probeFailureKind(result: ProbeResult): ProbeFailureKind | null {
+  if (!(result.rtt > 0)) return 'timeout'
+  if (result.status >= 500) return 'http5xx'
+  if (result.status === 429) return 'http429'
+  return null
+}
+
 export interface ProbeSpike {
   serviceId: string
   consecutiveCount: number
@@ -125,7 +144,7 @@ export interface ProbeSpike {
 /**
  * Detect services with consecutive RTT spikes in the most recent probes.
  * Returns a ProbeSpike for each service that has >= minConsecutive spikes.
- * A spike is defined as RTT > 3× median or a failed probe (rtt=-1).
+ * A spike is defined as RTT > 3× median or a failed probe (no `measuredRtt`).
  */
 export function detectConsecutiveSpikes(
   snapshots: ProbeSnapshot[],
@@ -146,10 +165,11 @@ export function detectConsecutiveSpikes(
     for (let i = snapshots.length - 1; i >= 0; i--) {
       const probe = snapshots[i].data[serviceId]
       if (!probe) break // no data for this service → stop
-      const isSpike = probe.rtt === -1 || probe.rtt > threshold
+      const rtt = measuredRtt(probe)
+      const isSpike = rtt === null || rtt > threshold
       if (!isSpike) break // streak broken
       count++
-      if (probe.rtt > 0) { rttSum += probe.rtt; rttCount++ }
+      if (rtt !== null) { rttSum += rtt; rttCount++ }
       since = snapshots[i].t
     }
 
@@ -306,8 +326,5 @@ export function isProbeHealthy(
  *  snapshot, else null. A service with no probe has no latency — nothing else is published under it. */
 export function applyProbeLatency(services: Array<{ id: string; latency: number | null }>, snapshots?: ProbeSnapshot[]): void {
   const latest: Record<string, ProbeResult> = snapshots?.[snapshots.length - 1]?.data ?? {}
-  for (const svc of services) {
-    const rtt = latest[svc.id]?.rtt
-    svc.latency = rtt != null && rtt > 0 ? rtt : null
-  }
+  for (const svc of services) svc.latency = measuredRtt(latest[svc.id])
 }

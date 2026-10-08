@@ -5,7 +5,7 @@ import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
 import type { ProbeSnapshot } from './probe'
 import type { VitalsDaily } from './vitals'
 import { formatVitalsSection } from './vitals'
-import { aggregateProbeDaily } from './probe-archival'
+import { aggregateProbeDaily, type ProbeDailyData } from './probe-archival'
 import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
 import type { SourceHealthRead } from './reddit'
@@ -159,6 +159,22 @@ export interface DailySummaryData {
   archiveHealth?: ArchiveHealth | null
 }
 
+const PROBE_FAILURE_RATIO_FLOOR = 0.05
+
+/** #1644 — the day's failed probes, per service and kind, where a kind reached
+ *  `PROBE_FAILURE_RATIO_FLOOR` of that service's samples. Empty string when none did. */
+export function formatProbeFailureLine(probeDaily: ProbeDailyData, nameMap: Map<string, string>): string {
+  const items: string[] = []
+  for (const [id, stat] of Object.entries(probeDaily)) {
+    if (!stat.failures || stat.count === 0) continue
+    for (const [kind, label] of [['http5xx', '5xx'], ['timeout', 'timeout'], ['http429', '429']] as const) {
+      const n = stat.failures[kind]
+      if (n / stat.count >= PROBE_FAILURE_RATIO_FLOOR) items.push(`${nameMap.get(id) ?? id} ${label} ${n}/${stat.count}`)
+    }
+  }
+  return items.length > 0 ? `\n🚫 **Probe failures (24h)**\n   ${items.join(' · ')}` : ''
+}
+
 /** How long the source has been dark, for the #820 warning. Coarse on purpose — the operator needs
  *  "an hour" vs "all day", not precision. */
 export function formatDarkFor(ms: number): string {
@@ -238,12 +254,17 @@ export function buildDailySummary(data: DailySummaryData): string {
       const nameMap = new Map(services.map(s => [s.id, s.name]))
       const fastest = sorted.slice(0, 3).map(([id, s]) => `${nameMap.get(id) ?? id} ${s.p75}ms`).join(' · ')
       const slowest = sorted.slice(-2).reverse().map(([id, s]) => `${nameMap.get(id) ?? id} ${s.p75}ms`).join(' · ')
-      const spikeServices = probeEntries.filter(([, s]) => s.spikes > 0)
+      const slowCount = (s: ProbeDailyData[string]) => s.spikes - (s.failures ? s.failures.timeout + s.failures.http5xx : 0)
+      const spikeServices = probeEntries.filter(([, s]) => slowCount(s) > 0)
       const spikeLine = spikeServices.length > 0
-        ? `\n   Spikes: ${spikeServices.map(([id, s]) => `${nameMap.get(id) ?? id} (${s.spikes})`).join(', ')}`
+        ? `\n   Spikes: ${spikeServices.map(([id, s]) => `${nameMap.get(id) ?? id} (${slowCount(s)})`).join(', ')}`
         : ''
       lines.push(`\n⚡ **API Response Time (p75)**\n   Fastest: ${fastest}\n   Slowest: ${slowest}${spikeLine}`)
     }
+    const lastMs = Date.parse(probeSnaps[probeSnaps.length - 1].t)
+    const last24h = probeSnaps.filter((s) => Date.parse(s.t) > lastMs - 86_400_000)
+    const failureLine = formatProbeFailureLine(aggregateProbeDaily(last24h), new Map(services.map(s => [s.id, s.name])))
+    if (failureLine) lines.push(failureLine)
   }
 
   // Section 6: Daily alert count + Reddit

@@ -192,6 +192,8 @@ const en = {
   // Service Details
   'svc.latency': 'API Response Time',
   'svc.latency.notMeasured': 'No endpoint we can probe',
+  'svc.latency.failed.http': 'Probe failed · HTTP {code}',
+  'svc.latency.failed.noResponse': 'Probe failed · no response',
   'svc.latency.inherited': 'API Response Time · via {p}',
   'svc.latency.inherited.sub': 'Shared endpoint with {p}',
   'svc.uptime30d': 'Uptime',
