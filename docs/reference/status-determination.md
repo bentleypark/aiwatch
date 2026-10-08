@@ -429,7 +429,7 @@ either; `derived-consumer-registry.test.js`'s `SU_*` registries are the list, an
 A zero-length record carries BOTH flags, so the note branch is order-sensitive and tests
 `zeroLengthRecord` first. `markIncidentResolved` withholds its resolution event for a zero-length record
 exactly as for #1390's — no `recovered:` marker, no analysis `resolvedAt` (#1643); pinned in the `#1643`
-blocks of `impossible-incident-times.test.ts` and `parsers/__tests__/incident-io-global.test.ts`.
+block of `impossible-incident-times.test.ts`.
 `buildHistoryRecord` refuses it outright: the no-TTL corpus grounds the AI's next estimate via
 `findSimilarHistory` and its `accuracyOf` ratio is published daily, so a fabricated zero-minute record there
 would be permanent. The monthly accumulator also accepts duration corrections in both directions — but

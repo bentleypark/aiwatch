@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { parseIncidentIoGlobalPage, computeIncidentIoUptime } from '../incident-io'
+import { parseIncidentIoGlobalPage, computeIncidentIoUptime, correctIncidentIoImpossibleTimes } from '../incident-io'
 import { parseIncidents, normalizeStatus } from '../statuspage'
-import { SERVICES, resolveSvcStatus, resolveSvcComponents } from '../../services'
+import { SERVICES, resolveSvcStatus, resolveSvcComponents, fetchService } from '../../services'
 import { markZeroLengthResolvedIncidentsUnknown } from '../../utils'
 import { markIncidentResolved } from '../../recovery-mark'
 
@@ -364,14 +364,15 @@ describe('parseIncidentIoGlobalPage → resolveSvcStatus with the real langsmith
   })
 })
 
-describe('#1643 an inverted record clamped to one instant gets no resolution event', () => {
-  it('resolved, published 05:00, summary end 01:00, no impact rows → one instant (the filing time) → withheld', async () => {
+describe('#1645 an inverted global-page record reaches the #1390 repair, not the zero-length path', () => {
+  it('resolved, published 05:00, summary end 01:00, no impact rows → anchored on the published end, startUnknown only → withheld', async () => {
     const html = page([comp(API, 'LangSmith API')], [
       incident({ id: 'RETRO', name: 'Retro', status: 'resolved', published_at: '2026-09-01T05:00:00.000Z', end_at: '2026-09-01T01:00:00.000Z',
         affected: [{ id: API, current: 'operational', status: 'partial_outage' }] }),
     ])
-    const [inc] = markZeroLengthResolvedIncidentsUnknown(parseIncidents(parseIncidentIoGlobalPage(html)!))
-    expect(inc).toMatchObject({ startedAt: '2026-09-01T05:00:00.000Z', resolvedAt: '2026-09-01T05:00:00.000Z', startUnknown: true, zeroLengthRecord: true })
+    const [inc] = markZeroLengthResolvedIncidentsUnknown(correctIncidentIoImpossibleTimes(parseIncidents(parseIncidentIoGlobalPage(html)!), html))
+    expect(inc).toMatchObject({ startedAt: '2026-09-01T01:00:00.000Z', resolvedAt: '2026-09-01T01:00:00.000Z', duration: null, startUnknown: true })
+    expect(inc.zeroLengthRecord).toBeUndefined()
 
     const kv: Record<string, string> = { 'ai:analysis:langsmith:RETRO': JSON.stringify({ summary: 'x', firstEstimatedRecoveryHours: 2 }) }
     const api = { get: async (k: string) => kv[k] ?? null, put: async (k: string, v: string) => { kv[k] = v }, delete: async (k: string) => { delete kv[k] } }
@@ -381,5 +382,18 @@ describe('#1643 an inverted record clamped to one instant gets no resolution eve
       expect(Object.keys(kv).some((k) => k.startsWith('recovered:'))).toBe(false)
       expect(JSON.parse(kv['ai:analysis:langsmith:RETRO']).resolvedAt).toBeUndefined()
     } finally { warn.mockRestore() }
+  })
+
+  it('fetchService routes a langsmith global-page record through the same repair', async () => {
+    const langsmith = SERVICES.find((x) => x.id === 'langsmith')!
+    const html = page([comp(API, 'LangSmith API')], [
+      incident({ id: 'RETRO', name: 'Retro', status: 'resolved', published_at: '2026-09-01T05:00:00.000Z', end_at: '2026-09-01T01:00:00.000Z',
+        affected: [{ id: API, current: 'operational', status: 'partial_outage' }] }),
+    ])
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    try {
+      const svc = await fetchService(langsmith, { summary: null, incidents: null, uptimeHtml: html } as never, undefined, {})
+      expect(svc.incidents.find((x) => x.id === 'RETRO')).toMatchObject({ startedAt: '2026-09-01T01:00:00.000Z', resolvedAt: '2026-09-01T01:00:00.000Z', startUnknown: true })
+    } finally { vi.unstubAllGlobals() }
   })
 })
