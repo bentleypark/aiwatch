@@ -128,7 +128,6 @@ let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day (cost hygiene on Workers Paid 1M/month inclusion)
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
 let lastKvLimitAlert = 0 // in-memory throttle for KV limit alerts (can't use KV when KV is full)
-let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
 const alertProxyRate = new Map<string, { start: number; count: number }>() // rate limit for /api/alert
 const deliveryCounter = { discord: 0, failed: 0 } // in-memory counter, flushed to KV by daily summary cron (Discord-only since #467)
 const publicApiRate = new Map<string, { start: number; count: number }>() // rate limit for /api/v1/*
@@ -397,70 +396,6 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
   }
 
   return true
-}
-
-// In-memory throttle for the #1256 latency skip, mirroring `lastKvLimitAlert`: this writer runs
-// once per inbound request, so an unthrottled skip log scales with traffic, not with the fault.
-let lastLatencyWindowWarn = 0
-const LATENCY_WINDOW_WARN_INTERVAL_MS = 600_000 // 10 min
-function warnLatencyWindow(what: string, detail: string): void {
-  const now = Date.now()
-  if (now - lastLatencyWindowWarn < LATENCY_WINDOW_WARN_INTERVAL_MS) return
-  lastLatencyWindowWarn = now
-  console.warn(`[kv] latency ${what}:`, detail)
-}
-
-// 30-min latency snapshot — independent of cacheWrite throttle (+48 writes/day)
-// Exported for the same reason as writeProbeSnapshot — only the wiring shows that an unreadable
-// window never reaches the kv.put below.
-export async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]): Promise<void> {
-  const now = new Date()
-  const currentSlot = `${now.toISOString().slice(0, 14)}${now.getUTCMinutes() < 30 ? '00' : '30'}` // "2026-03-22T03:00" or "2026-03-22T03:30"
-  if (lastLatencySlot === currentSlot) return
-
-  const latencyData: Record<string, number> = {}
-  services.forEach((s) => { if (s.latency != null) latencyData[s.id] = s.latency })
-  // Writing an empty payload would claim the slot, and the dedup below then rejects the healthy
-  // poll seconds later, leaving the 30 minutes blank. Recorded rather than skipped silently: no
-  // service measured is a statement about our own polling, not about the providers.
-  if (Object.keys(latencyData).length === 0) {
-    warnLatencyWindow('measured nothing', `${services.length} services, zero latencies — skipping the slot`)
-    return
-  }
-
-  try {
-    const LATENCY_KEY = 'latency:24h'
-    const MAX_SNAPSHOTS = 48 // 24h × 2 per hour
-    // Fail CLOSED on an unreadable window (#1256) — same defect, same shape as writeProbeSnapshot
-    // below: the kv.put replaces the WHOLE value, so a window we could not read must not be
-    // treated as "no history". The read failure here was silent as well.
-    //
-    // The skip deliberately does not set `lastLatencySlot` — a retry inside the slot must stay
-    // possible.
-    let readFailed = false
-    const existing = await kv.get(LATENCY_KEY).catch((err) => {
-      readFailed = true
-      warnLatencyWindow('read failed', err instanceof Error ? err.message : String(err))
-      return null
-    })
-    if (readFailed) return
-    const snapshots = parseSnapshotWindow<{ t: string; data: Record<string, number> }>(existing)
-    if (snapshots === null) {
-      warnLatencyWindow('stored window is unreadable', 'skipping the write so it is not overwritten')
-      return
-    }
-    // Deduplicate: skip if this slot already exists (another isolate wrote it)
-    const slotTs = `${currentSlot}:00Z`
-    if (snapshots.some((s: { t: string }) => s.t === slotTs)) { lastLatencySlot = currentSlot; return }
-    snapshots.push({ t: slotTs, data: latencyData })
-    const trimmed = snapshots.slice(-MAX_SNAPSHOTS)
-    await kv.put(LATENCY_KEY, JSON.stringify({ snapshots: trimmed }), {
-      expirationTtl: 90000, // 25 hours
-    })
-    lastLatencySlot = currentSlot // set after successful write
-  } catch (err) {
-    console.warn('[kv] latency snapshot write rejected:', err instanceof Error ? err.message : err)
-  }
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
@@ -4083,10 +4018,9 @@ export default {
         if (!summaryMarker) {
           try {
             // Gather data for expanded daily report
-            const [cachedRaw, aiUsageRaw, latRaw, probeRaw] = await Promise.all([
+            const [cachedRaw, aiUsageRaw, probeRaw] = await Promise.all([
               env.STATUS_CACHE.get(CACHE_KEY).catch(() => null),
               env.STATUS_CACHE.get(`ai:usage:${today}`).catch(() => null),
-              env.STATUS_CACHE.get('latency:24h').catch(() => null),
               env.STATUS_CACHE.get('probe:24h').catch(() => null),
             ])
 
@@ -4108,12 +4042,6 @@ export default {
             if (aiUsageRaw) {
               try { aiUsage = JSON.parse(aiUsageRaw) } catch (err) {
                 console.error('[daily-summary] Failed to parse AI usage:', err instanceof Error ? err.message : err)
-              }
-            }
-            let latSnapshots: Array<{ t: string; data: Record<string, number> }> = []
-            if (latRaw) {
-              try { latSnapshots = JSON.parse(latRaw).snapshots ?? [] } catch (err) {
-                console.error('[daily-summary] Failed to parse latency data:', err instanceof Error ? err.message : err)
               }
             }
             let probeSnapshots: ProbeSnapshot[] = []
@@ -4484,7 +4412,6 @@ export default {
             const description = buildDailySummary({
               services: dailyServices,
               aiUsage,
-              latencySnapshots: latSnapshots,
               incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
               alertCounts,
               pushCount,
@@ -5922,7 +5849,7 @@ export default {
           return res
         }
         // Statusline polls (#438, tagged ?src=statusline-*) only need id/name/status.
-        // Return the ~KB lite projection and skip the ~2 MB probe/latency/AI reads —
+        // Return the ~KB lite projection and skip the ~2 MB probe/AI reads —
         // this path was the single largest Vercel Fast Data Transfer route. Freshly
         // copied snippets hit the Worker domain directly (off Vercel); legacy installs
         // still using ai-watch.dev get the small payload here via the rewrite.
@@ -5982,7 +5909,6 @@ export default {
         }
         const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
         if (cached) {
-          let latency24h: Array<{ t: string; data: Record<string, number> }> = []
           let probe24h: ProbeSnapshot[] = []
 
           // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
@@ -6042,10 +5968,7 @@ export default {
           }
 
           // #1531 part 3 — each reader below needs only the snapshot, so they run concurrently.
-          const seriesRead = withSeries ? Promise.all([
-            env.STATUS_CACHE!.get('latency:24h').catch(() => null),
-            env.STATUS_CACHE!.get('probe:24h').catch(() => null),
-          ]) : Promise.resolve([null, null])
+          const seriesRead = withSeries ? env.STATUS_CACHE!.get('probe:24h').catch(() => null) : Promise.resolve(null)
           const analysesRead = readAnalyses()
           // See readRecentSecurityAlerts — both endpoints must emit this field.
           const securityAlertsRead = readRecentSecurityAlerts(env.STATUS_CACHE!)
@@ -6055,15 +5978,12 @@ export default {
           const reportFeedRead = buildReportFeedMap(env.STATUS_CACHE!, cached.services)
           const probeSummariesRead = readProbeSummaries(env.STATUS_CACHE, 'status-cached')
 
-          const [latRaw, probeRaw] = await seriesRead
+          const probeRaw = await seriesRead
           await analysesRead
           const securityAlerts = await securityAlertsRead
           const alertFeed = await alertFeedRead
           const reportFeed = await reportFeedRead
           const cachedProbeSummaries = await probeSummariesRead
-          if (latRaw) {
-            try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
-          }
           if (probeRaw) {
             try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
           }
@@ -6097,7 +6017,6 @@ export default {
             services: scoredCached,
             lastUpdated: cached.cachedAt,
             cached: true,
-            ...(withSeries ? { latency24h } : {}),
             ...(probe24h.length > 0 ? { probe24h } : {}),
             ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
             ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
@@ -6254,16 +6173,9 @@ export default {
 
     try {
       // Read probe data BEFORE fetchAllServices — needed for cross-validation of status page failures
-      let latency24h: Array<{ t: string; data: Record<string, number> }> = []
       let probe24h: ProbeSnapshot[] = []
       if (env.STATUS_CACHE) {
-        const [latRaw, probeRaw] = await Promise.all([
-          env.STATUS_CACHE.get('latency:24h').catch(() => null),
-          env.STATUS_CACHE.get('probe:24h').catch(() => null),
-        ])
-        if (latRaw) {
-          try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] latency24h parse failed:', err instanceof Error ? err.message : err) }
-        }
+        const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
         if (probeRaw) {
           try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] probe24h parse failed:', err instanceof Error ? err.message : err) }
         }
@@ -6277,7 +6189,6 @@ export default {
       // Await cacheWrite so badge/v1 endpoints see data immediately
       if (env.STATUS_CACHE) {
         const wrote = await cacheWrite(env.STATUS_CACHE, raw, upstreamFeeds, env.DISCORD_WEBHOOK_URL)
-        ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
         // #1057 — when the 10-min throttle skipped cacheWrite, CACHE_KEY still holds the previous
         // snapshot, which the is-down/OG surfaces (via /api/status/cached) read. If THIS poll's fresh
         // status differs from that snapshot, force an immediate CACHE_KEY-only refresh (throttle
@@ -6393,7 +6304,6 @@ export default {
       return new Response(JSON.stringify({
         services: servicesWithScore,
         lastUpdated: new Date().toISOString(),
-        latency24h,
         ...(probe24h.length > 0 ? { probe24h } : {}),
         ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
         ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),

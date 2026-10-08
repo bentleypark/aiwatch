@@ -6,7 +6,7 @@ import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
 
 // Guards the #452 fix. The Vercel-proxied `/api/status/cached` rewrite MUST force
 // the statusline lite projection (`?src=statusline-*`). Without the tag the Worker
-// returns the full ~2.2 MB payload (services + probe:24h + latency:24h + AI
+// returns the full ~2.2 MB payload (services + probe:24h + AI
 // analysis), and legacy/untagged pollers — statusline snippets copied before #438,
 // which poll ~every prompt — re-download all of it through Vercel (uncached proxy,
 // billed as Fast Data Transfer). Vercel Observability measured this route at the

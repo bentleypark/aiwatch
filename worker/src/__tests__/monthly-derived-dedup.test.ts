@@ -298,7 +298,7 @@ describe('#1295 — the guard leaves a durable trace when it fires', () => {
     expect(formatGuardSkipLine(0)).toBe('')
     expect(formatGuardSkipLine(null)).toBe('🛡️ **Monthly dedup guard**: record unreadable')
     expect(formatGuardSkipLine(1)).toBe('🛡️ **Monthly dedup guard**: 1 synthesized day skipped (this month and last)')
-    const base = { services: [], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    const base = { services: [], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
     expect(buildDailySummary({ ...base, guardSkips: 3 } as never)).toContain('3 synthesized days skipped')
     expect(buildDailySummary({ ...base, guardSkips: 0 } as never)).not.toContain('Monthly dedup guard')
   })

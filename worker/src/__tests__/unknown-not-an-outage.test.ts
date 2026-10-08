@@ -225,7 +225,7 @@ describe('#1233 extension projection — the gate must be server-side', () => {
 describe('#1233 daily summary — counted, but not as an issue', () => {
   const summary = buildDailySummary({
     services: [UNREADABLE, svc({ id: 'openai', name: 'OpenAI API' })],
-    aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 },
+    aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 },
     redditCount: 0,
   } as Parameters<typeof buildDailySummary>[0])
 

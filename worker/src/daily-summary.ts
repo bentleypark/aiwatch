@@ -82,7 +82,6 @@ export function formatAiUsageSection(aiUsage: AiUsageCounters | null): string {
 export interface DailySummaryData {
   services: ServiceStatus[]
   aiUsage: AiUsageCounters | null
-  latencySnapshots: Array<{ t: string; data: Record<string, number> }>
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
   // #815 — Tier-1 ntfy phone pushes delivered today (#778); makes the otherwise-unobservable push visible.
@@ -171,7 +170,7 @@ export function formatDarkFor(ms: number): string {
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, pushCount, webhookCounts, deliveryCounts, redditCount, vitals, fetchFailureCounts, fetchFailureReasons, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
+  const { services, aiUsage, incidentCountToday, alertCounts, pushCount, webhookCounts, deliveryCounts, redditCount, vitals, fetchFailureCounts, fetchFailureReasons, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -244,17 +243,6 @@ export function buildDailySummary(data: DailySummaryData): string {
         ? `\n   Spikes: ${spikeServices.map(([id, s]) => `${nameMap.get(id) ?? id} (${s.spikes})`).join(', ')}`
         : ''
       lines.push(`\n⚡ **API Response Time (p75)**\n   Fastest: ${fastest}\n   Slowest: ${slowest}${spikeLine}`)
-    }
-  } else {
-    // Fallback to the latency:24h series (also probe RTT since #1633) if no probe data
-    const latencyAvg = computeLatencyAvg(latencySnapshots)
-    const latencyEntries = Object.entries(latencyAvg).filter(([, v]) => v > 0)
-    if (latencyEntries.length >= 3) {
-      const sorted = latencyEntries.sort((a, b) => a[1] - b[1])
-      const nameMap = new Map(services.map(s => [s.id, s.name]))
-      const fastest = sorted.slice(0, 2).map(([id, ms]) => `${nameMap.get(id) ?? id} ${Math.round(ms)}ms`).join(' · ')
-      const slowest = sorted.slice(-2).reverse().map(([id, ms]) => `${nameMap.get(id) ?? id} ${Math.round(ms)}ms`).join(' · ')
-      lines.push(`\n⚡ **Latency (24h avg)**\n   Fastest: ${fastest}\n   Slowest: ${slowest}`)
     }
   }
 
@@ -930,18 +918,3 @@ function formatDurationFromStart(startedAt: string): string {
   return `${days}d`
 }
 
-export function computeLatencyAvg(snapshots: Array<{ t: string; data: Record<string, number> }>): Record<string, number> {
-  const sums: Record<string, number> = {}
-  const counts: Record<string, number> = {}
-  for (const snap of snapshots) {
-    for (const [id, ms] of Object.entries(snap.data)) {
-      sums[id] = (sums[id] ?? 0) + ms
-      counts[id] = (counts[id] ?? 0) + 1
-    }
-  }
-  const avg: Record<string, number> = {}
-  for (const id of Object.keys(sums)) {
-    avg[id] = sums[id] / counts[id]
-  }
-  return avg
-}

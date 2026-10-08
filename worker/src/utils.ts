@@ -1178,10 +1178,7 @@ export function formatNewComponentAlert(
  * whole value. `[]` = the key is absent, so bootstrapping is safe.
  *
  * Elements are validated too, not just the container: the pre-#1256 code re-persisted junk it
- * could not use, and every reader dereferences `.data`.
- *
- * Shared by the two writers of this envelope (`probe:24h`, `latency:24h`) — the only part of their
- * read-modify-write that is genuinely identical. */
+ * could not use, and every reader dereferences `.data`. */
 export function parseSnapshotWindow<T>(raw: string | null): T[] | null {
   if (raw === null) return []
   let parsed: unknown
@@ -1191,7 +1188,7 @@ export function parseSnapshotWindow<T>(raw: string | null): T[] | null {
     return null
   }
   const snapshots = (parsed as { snapshots?: unknown } | null)?.snapshots
-  // An object without a `snapshots` array is malformed, not empty — these writers only ever emit
+  // An object without a `snapshots` array is malformed, not empty — the writer only ever emits
   // `{ snapshots: [...] }`, so `?? []` here would silently reset the window.
   if (!Array.isArray(snapshots)) return null
   const wellFormed = snapshots.every((s) => {
@@ -1426,7 +1423,7 @@ export function incidentDays(
   return days
 }
 
-// #1531 — `/api/status/cached?series=0` omits the probe + latency time series.
+// #1531 — `/api/status/cached?series=0` omits the probe time series.
 export function omitsTimeSeries(searchParams: URLSearchParams): boolean {
   return searchParams.get('series') === '0'
 }

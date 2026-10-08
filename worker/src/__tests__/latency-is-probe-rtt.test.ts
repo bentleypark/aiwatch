@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchAllServices } from '../services'
 import { TEST_TIMEOUT_MS, mockKV, seededTracking, stubFetchFailingClaudePage, probeFixture } from './helpers/unreadable-source'
 
-// #1633 — `latency` reaches /api/v1/status, services:latest and latency:24h straight from
+// #1633 — `latency` reaches /api/v1/status and services:latest straight from
 // fetchAllServices' `raw`, so it is asserted there, on the real entry point.
 
 afterEach(() => { vi.unstubAllGlobals() })

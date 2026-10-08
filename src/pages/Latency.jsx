@@ -66,14 +66,12 @@ function LatencyTrendSection({ services, t, hourlyData }) {
       if (cancelled || !canvasRef.current) return
       if (chartRef.current) chartRef.current.destroy()
 
-    // Detect data format: probe snapshots have { status, rtt } objects, latency snapshots have plain numbers
-    const isProbeData = hourlyData.length > 0 && typeof Object.values(hourlyData[0].data ?? {})[0] === 'object'
-    // For probe data, show only services present in probe snapshots
-    const probeServiceIds = isProbeData ? Object.keys(hourlyData[hourlyData.length - 1]?.data ?? {}) : null
+    // Show only services present in the latest probe snapshot
+    const probeServiceIds = Object.keys(hourlyData[hourlyData.length - 1]?.data ?? {})
     const isMobile = window.innerWidth < 768
 
     // Downsample 5-min probe data → 30-min slot averages (:00–:29, :30–:59)
-    const needsDownsample = isProbeData && hourlyData.length > 60
+    const needsDownsample = hourlyData.length > 60
     let chartData = hourlyData
     if (needsDownsample) {
       const slotMap = new Map()
@@ -92,7 +90,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
         for (const id of svcIds) {
           const vals = points.map((s) => {
             const v = s.data?.[id]
-            return v && typeof v === 'object' ? (v.rtt > 0 ? v.rtt : null) : v
+            return v?.rtt > 0 ? v.rtt : null
           }).filter((v) => v != null)
           if (vals.length > 0) merged[id] = { rtt: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length), status: 'ok' }
         }
@@ -109,9 +107,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
     })
     const rangeLabels = needsDownsample ? chartData.map((s) => s._rangeLabel) : null
 
-    let apiServices = probeServiceIds
-      ? services.filter((s) => probeServiceIds.includes(s.id) && s.category !== 'app') // #921 — apps (Character.AI) are probed for the detail card but excluded from the latency ranking/chart
-      : services.filter((s) => s.category === 'api' && s.latency != null)
+    let apiServices = services.filter((s) => probeServiceIds.includes(s.id) && s.category !== 'app') // #921 — apps (Character.AI) are probed for the detail card but excluded from the latency ranking/chart
     // #1186 KNOWN GAP (deliberately not fixed here) — this sorts across confidence tiers by raw
     // aiwatchScore, the same cross-scale comparison #1186 removed from Ranking.jsx/is-down.ts/the
     // fallback engine. Left as-is because this only decides CHART MEMBERSHIP (which 8 services get a
@@ -126,9 +122,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
       label: svc.name,
       data: chartData.map((s) => {
         const val = s.data[svc.id]
-        if (val == null) return null
-        if (typeof val === 'object') return val.rtt > 0 ? val.rtt : null
-        return val
+        return val?.rtt > 0 ? val.rtt : null
       }),
       borderColor: SERVICE_COLOR[svc.id] ?? '#8b949e',
       borderWidth: isMobile ? 1 : 1.5,
@@ -252,7 +246,7 @@ function RankingBar({ service, maxLatency, rank }) {
 
 export default function Latency() {
   const { t } = useLang()
-  const { services: rawServices, loading, error, probe24h, latency24h, probeServiceIds, refresh } = usePolling()
+  const { services: rawServices, loading, error, probe24h, probeServiceIds, refresh } = usePolling()
 
   // Defensive default — handles transient undefined state
   const services = rawServices ?? []
@@ -316,7 +310,7 @@ export default function Latency() {
       </section>
 
       {/* ── 24h Trend — shows badges + chart when hourly KV data exists ── */}
-      <LatencyTrendSection services={sorted} t={t} hourlyData={probe24h.length > 0 ? filterLast24h(probe24h) : latency24h} />
+      <LatencyTrendSection services={sorted} t={t} hourlyData={filterLast24h(probe24h)} />
 
     </div>
   )
