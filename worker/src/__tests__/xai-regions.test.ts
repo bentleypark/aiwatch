@@ -447,9 +447,9 @@ describe('xai Grok surface merge (#1337)', () => {
       expect(xaiGrokSurfaceOf('[Grok (Build)] Something')).toBe('Build')
       expect(xaiGrokSurfaceOf('[Grok in X] Something')).toBe('X')
       expect(xaiGrokSurfaceOf('[grok.com] Models outage')).toBe('grok.com')
+      expect(xaiGrokSurfaceOf('[Grok Build] Grok Build 0.1 high error rate')).toBe('Build')
     })
-    it('returns null for the page\'s other Grok-prefixed tags', () => {
-      expect(xaiGrokSurfaceOf('[Grok Build] Grok Build 0.1 high error rate')).toBeNull()
+    it('returns null for the page\'s other tags', () => {
       expect(xaiGrokSurfaceOf('[API (us-east-1.api.x.ai)] Models outage')).toBeNull()
       expect(xaiGrokSurfaceOf('[API Console] Console not loading')).toBeNull()
       expect(xaiGrokSurfaceOf('[Single Sign-On] Unable to Sign-In via X')).toBeNull()
@@ -629,14 +629,14 @@ describe('xai Grok surface merge (#1337)', () => {
       expect(filterIncidents(merged, GROK_CONFIG)).toHaveLength(1)
     })
 
-    it('#1585 — keeps Grok in X and every official parenthesized Grok surface, including Build', () => {
+    it('#1585 — keeps Grok in X, Grok Build in either form, and every parenthesized Grok surface', () => {
       const scoped = [
         fullInc({ id: 'x', title: '[Grok in X] Grok is Temporarily Unavailable' }),
         fullInc({ id: 'office', title: '[Grok (Office/Workspace Plugins)] Models outage' }),
         fullInc({ id: 'build-paren', title: '[Grok (Build)] Models outage' }),
         fullInc({ id: 'build', title: '[Grok Build] Grok Build is Temporarily Unavailable' }),
       ]
-      expect(filterIncidents(scoped, GROK_CONFIG).map(i => i.id)).toEqual(['x', 'office', 'build-paren'])
+      expect(filterIncidents(scoped, GROK_CONFIG).map(i => i.id)).toEqual(['x', 'office', 'build-paren', 'build'])
     })
 
     it('#1585 — merges Grok in X with the same-event Grok surface group (live 2026-09-03 shape)', () => {
@@ -655,6 +655,16 @@ describe('xai Grok surface merge (#1337)', () => {
       const merged = mergeXaiGrokSurfaceIncidents([
         fullInc({ id: 'ios', title: '[Grok (iOS)] Models outage' }),
         fullInc({ id: 'build', title: '[Grok (Build)] Models outage' }),
+      ])
+      expect(merged).toHaveLength(1)
+      expect(merged[0].title).toBe('[Grok (iOS, Build)] Models outage')
+      expect(filterIncidents(merged, GROK_CONFIG).map(i => i.id)).toEqual([merged[0].id])
+    })
+
+    it('#1585 — merges the unparenthesized `[Grok Build]` tag with same-event Grok surfaces', () => {
+      const merged = mergeXaiGrokSurfaceIncidents([
+        fullInc({ id: 'ios', title: '[Grok (iOS)] Models outage' }),
+        fullInc({ id: 'build', title: '[Grok Build] Models outage' }),
       ])
       expect(merged).toHaveLength(1)
       expect(merged[0].title).toBe('[Grok (iOS, Build)] Models outage')

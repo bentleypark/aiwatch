@@ -325,13 +325,14 @@ function mergeXaiEventGroup(members: Incident[], identity: { id: string; title: 
 
 /** The surface tag shape. Matched by SHAPE, not by a list of known surfaces: #1165 enumerated three
  *  (iOS / Android / Web) and 2026-09-03 introduced a fourth, `Office/Workspace Plugins`. The
- *  paren-less forms admitted are `[Grok in X]` (surface `X`) and `[grok.com]`. */
-export const XAI_GROK_SURFACE_RE = /^\[(?:Grok (?:\(([^)]+)\)|in (X))|(grok\.com))\]\s*/i
+ *  paren-less forms admitted are `[Grok in X]` (surface `X`), `[Grok Build]` (surface `Build`) and
+ *  `[grok.com]`. */
+export const XAI_GROK_SURFACE_RE = /^\[(?:Grok (?:\(([^)]+)\)|in (X)|(Build))|(grok\.com))\]\s*/i
 
 /** The surface label (e.g. 'iOS') from a Grok incident title, or null when not surface-tagged. */
 export function xaiGrokSurfaceOf(title: string): string | null {
   const m = XAI_GROK_SURFACE_RE.exec(title)
-  return m ? (m[1] ?? m[2] ?? m[3]) : null
+  return m ? (m[1] ?? m[2] ?? m[3] ?? m[4]) : null
 }
 
 /** The surface-tag-stripped grouping key. Lowercased and whitespace/trailing-punctuation normalized
