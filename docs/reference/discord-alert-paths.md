@@ -204,6 +204,8 @@ Fires when the `*/5` cron has not run for 20+ min. On 2026-09-23 Cloudflare stop
 
 Fires when `failSince` shows a source has been unreadable for **1h+**. Amber (`0xe67e22`), deduped 24h in `alerted:fetch-persistent:{svcId}`, swept by `worker/src/persistent-failure.ts`.
 
+**#1650** — this includes Mistral's expired `mistral:feed` (the scrape Action has not stored a feed within its 3h TTL); before #1650 that path never armed `failSince`, so a multi-hour `unknown` sent nothing. Its alert reads "Observed: Rootly scrape feed (KV, pushed by its GitHub Action) absent." — the place to look is the `mistral-feed.yml` runs, not the status-page URL.
+
 **The trigger carries no cause, so the alert may not assert one (#1391).** `trackFetchFailure` arms `failSince` from both the transport branches and the parse branches, and the sweep reads one `instatus-parse-fail:` key for one UTC day, over a window of a few cron slots. Nothing in that establishes WHY, so the message states the elapsed time and what was observed or booked, and stops. The alert was wrong in both directions before this settled — a structural block asserted for a source that answered 2xx, and later a denial of one for a source that never replied. Both are pinned against now.
 
 - **Pin the embed, not the vocabulary.** A `toContain`, or a ban on one spelling, leaves room for the same claim in other words, and a ban on the body leaves the title — which is where the removed sentence could still have landed. The count is part of the surface too: a second `send()` delivers a retired sentence as well as a first one.

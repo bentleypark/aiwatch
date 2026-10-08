@@ -279,12 +279,13 @@ export interface ServiceTrackingState {
 }
 export type TrackingStateBlob = Record<string, ServiceTrackingState>
 
-export const STATUS_SOURCE_READ_FAILURE_SOURCES = ['aws-health', 'datadog-config', 'instatus-scrape', 'rss', 'gcloud', 'betterstack'] as const
+export const STATUS_SOURCE_READ_FAILURE_SOURCES = ['aws-health', 'datadog-config', 'instatus-scrape', 'rss', 'gcloud', 'betterstack', 'rootly-feed'] as const
+const STATUS_SOURCE_READ_FAILURE_PHASES = ['transport', 'http', 'decode', 'shape', 'absent'] as const
 type StatusSourceReadFailureSource = typeof STATUS_SOURCE_READ_FAILURE_SOURCES[number]
 
 export type StatusSourceReadFailure = {
   source: StatusSourceReadFailureSource
-  phase: 'transport' | 'http' | 'decode' | 'shape'
+  phase: typeof STATUS_SOURCE_READ_FAILURE_PHASES[number]
   httpStatus?: number
   errorKind?: 'timeout' | 'network' | 'unknown'
 }
@@ -328,7 +329,7 @@ function sanitizeTrackingState(parsed: Record<string, unknown>): TrackingStateBl
     if (typeof v.uptimeMissingSince === 'string') entry.uptimeMissingSince = v.uptimeMissingSince
     if (v.sourceReadFailure && typeof v.sourceReadFailure === 'object' && !Array.isArray(v.sourceReadFailure)) {
       const failure = v.sourceReadFailure as Record<string, unknown>
-      if (STATUS_SOURCE_READ_FAILURE_SOURCES.includes(failure.source as StatusSourceReadFailureSource) && ['transport', 'http', 'decode', 'shape'].includes(String(failure.phase)) &&
+      if (STATUS_SOURCE_READ_FAILURE_SOURCES.includes(failure.source as StatusSourceReadFailureSource) && (STATUS_SOURCE_READ_FAILURE_PHASES as readonly string[]).includes(String(failure.phase)) &&
         (failure.httpStatus === undefined || (typeof failure.httpStatus === 'number' && Number.isInteger(failure.httpStatus))) &&
         (failure.errorKind === undefined || ['timeout', 'network', 'unknown'].includes(String(failure.errorKind)))) {
         entry.sourceReadFailure = failure as StatusSourceReadFailure
@@ -479,6 +480,8 @@ export async function trackFetchFailure(store: TrackingStateBlob, kv: KVLike | u
   // needs a second timestamp written on the per-request path, which would cost a `tracking:state` write
   // per request for the whole outage and break #1224's steady-state-zero invariant.
   const stillUnrecovered = isFailSinceLive(entry, nowMs)
+  // #1650 — a `failSince` that is not live is a frozen leftover; the episode starting now times its own hour.
+  if (!stillUnrecovered) delete entry.failSince
   const decayed = isCountDecayed(entry.failCountAt, nowMs, TRACKING_COUNT_DECAY_MS)
   const count = decayed ? 0 : (entry.failCount ?? 0)
   const next = count + 1
@@ -623,7 +626,9 @@ function formatSourceReadFailure(failure: StatusSourceReadFailure): string {
     rss: 'RSS feed',
     gcloud: 'Google Cloud incidents.json',
     betterstack: 'Better Stack index.json',
+    'rootly-feed': 'Rootly scrape feed (KV, pushed by its GitHub Action)',
   }[failure.source]
+  if (failure.phase === 'absent') return `${source} absent`
   if (failure.phase === 'transport') return `${source} transport ${failure.errorKind ?? 'unknown'}`
   if (failure.phase === 'http') return `${source} HTTP ${failure.httpStatus ?? 'unknown'}`
   return `${source} response ${failure.phase} failed`

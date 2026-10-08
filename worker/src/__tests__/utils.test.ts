@@ -248,9 +248,18 @@ describe('trackFetchFailure (#1224 — blob-based)', () => {
 
   it('does NOT overwrite an existing failSince (preserves first-failure time across re-climbs)', async () => {
     const original = '2026-06-01T00:00:00.000Z'
-    const store: TrackingStateBlob = { azure: { failCount: 2, failSince: original } }
-    await trackFetchFailure(store, undefined, 'azure') // rising edge again, but since already set
+    const now = Date.parse('2026-06-01T02:00:00.000Z')
+    const store: TrackingStateBlob = { azure: { failCount: 2, failCountAt: new Date(now - 10 * 60_000).toISOString(), failSince: original } }
+    await trackFetchFailure(store, undefined, 'azure', 3, now) // rising edge again, but since already set
     expect(store.azure?.failSince).toBe(original)
+  })
+
+  it('drops a frozen failSince, so a new episode times its own hour (#1650)', async () => {
+    const now = Date.parse('2026-10-08T12:03:00.000Z')
+    const store: TrackingStateBlob = { mistral: { failCount: 3, failCountAt: '2026-09-11T08:44:25.761Z', failSince: '2026-09-09T20:16:14.874Z' } }
+    expect(await trackFetchFailure(store, undefined, 'mistral', 3, now)).toBe(false)
+    expect(store.mistral?.failSince).toBeUndefined()
+    expect(store.mistral?.failCount).toBe(1)
   })
 
   it('does not set failSince below the rising edge', async () => {
