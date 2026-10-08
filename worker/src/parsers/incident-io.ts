@@ -637,9 +637,7 @@ export function parseIncidentIoGlobalPage(html: string): StatuspageResponse | nu
         return null
       }
       const startedAt = impactStart ?? m.published_at!
-      let resolvedAt = active ? null : (impactEnd ?? (validDate(detEnd) ? detEnd : null) ?? m.published_at ?? null)
-      // Never let a resolve precede its start (defensive — impact min/max can't, but a fallback mix could).
-      if (resolvedAt && Date.parse(resolvedAt) < Date.parse(startedAt)) resolvedAt = startedAt
+      const resolvedAt = active ? null : (impactEnd ?? (validDate(detEnd) ? detEnd : null) ?? m.published_at ?? null)
 
       return {
         id: m.id,
