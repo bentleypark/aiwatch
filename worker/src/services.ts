@@ -557,7 +557,7 @@ export const SERVICES: ServiceConfig[] = [
   // stripped title within a 30-min window, which is the narrower rule #1165's objection actually
   // pointed at. The `incidentKeywords` filter above is why its merged title must keep a `Grok (`
   // marker; see the title note in `mergeSurfaceGroup`.
-  { id: 'grok', name: 'Grok', provider: 'SpaceXAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok (', 'grok in x', '[grok.com]'], addedAt: '2026-07-26' },
+  { id: 'grok', name: 'Grok', provider: 'SpaceXAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok (', 'grok in x', '[grok build]', '[grok.com]'], addedAt: '2026-07-26' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the
