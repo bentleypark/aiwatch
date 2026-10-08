@@ -108,7 +108,6 @@ describe('buildDailySummary archive-health line (#1355)', () => {
   const base = {
     services: [] as ServiceStatus[],
     aiUsage: null,
-    latencySnapshots: [],
     incidentCountToday: { newCount: 0, resolvedCount: 0 },
     redditCount: 0,
   }

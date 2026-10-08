@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatFeedClientLine, formatSubscribedFeedsLine, buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAudienceScreenRow, AUDIENCE_SCREEN_TOP_N, formatAiUsageSection } from '../daily-summary'
+import { formatFeedClientLine, formatSubscribedFeedsLine, buildDailySummary, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAudienceScreenRow, AUDIENCE_SCREEN_TOP_N, formatAiUsageSection } from '../daily-summary'
 import { BADGE_UNKNOWN_SERVICE, clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from '../api-traffic'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
@@ -26,7 +26,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc({ id: 'a', name: 'Svc A' }), makeSvc({ id: 'b', name: 'Svc B' })],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
@@ -42,7 +41,6 @@ describe('buildDailySummary', () => {
         makeSvc({ id: 'c', name: 'C', status: 'down', incidents: [{ id: 'inc1', title: 'Down', status: 'investigating', startedAt: new Date(Date.now() - 3600000).toISOString(), impact: 'major', duration: null, timeline: [] }] }),
       ],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
@@ -61,7 +59,6 @@ describe('buildDailySummary', () => {
         }),
       ],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
@@ -72,7 +69,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: { calls: 5, success: 4, failed: 1, gemma: 3, sonnet: 1 },
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
@@ -87,7 +83,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: { calls: 0, success: 0, failed: 0 },
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
@@ -102,33 +97,12 @@ describe('buildDailySummary', () => {
         makeSvc({ id: 'c', name: 'Gamma', uptime30d: 97.28 }),
       ],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
     expect(result).toContain('📈 **Uptime**')
     expect(result).toContain('Alpha 100.00%')
     expect(result).toContain('Gamma 97.28%')
-  })
-
-  it('shows latency best/worst', () => {
-    const result = buildDailySummary({
-      services: [
-        makeSvc({ id: 'fast', name: 'FastSvc' }),
-        makeSvc({ id: 'mid', name: 'MidSvc' }),
-        makeSvc({ id: 'slow', name: 'SlowSvc' }),
-      ],
-      aiUsage: null,
-      latencySnapshots: [
-        { t: '2026-03-26T00:00:00Z', data: { fast: 50, mid: 300, slow: 800 } },
-        { t: '2026-03-26T00:30:00Z', data: { fast: 60, mid: 350, slow: 900 } },
-      ],
-      incidentCountToday: { newCount: 0, resolvedCount: 0 },
-      redditCount: 0,
-    })
-    expect(result).toContain('Latency (24h avg)')
-    expect(result).toContain('FastSvc 55ms')
-    expect(result).toContain('SlowSvc 850ms')
   })
 
   it('handles invalid startedAt without NaN', () => {
@@ -138,7 +112,6 @@ describe('buildDailySummary', () => {
         incidents: [{ id: 'i1', title: 'Bad', status: 'investigating', startedAt: 'not-a-date', impact: 'major', duration: null, timeline: [] }],
       })],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
@@ -158,7 +131,6 @@ describe('buildDailySummary', () => {
         makeSvc({ id: 'elevenlabs', name: 'ElevenLabs', uptime30d: 97.54 }),
       ],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
@@ -176,29 +148,16 @@ describe('buildDailySummary', () => {
         makeSvc({ id: 'b', name: 'Beta', uptime30d: 99.0 }),
       ],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
     expect(result).not.toContain('📈 **Uptime**')
   })
 
-  it('skips latency section when fewer than 3 services have data', () => {
-    const result = buildDailySummary({
-      services: [makeSvc({ id: 'a', name: 'A' }), makeSvc({ id: 'b', name: 'B' })],
-      aiUsage: null,
-      latencySnapshots: [{ t: '1', data: { a: 100, b: 200 } }],
-      incidentCountToday: { newCount: 0, resolvedCount: 0 },
-      redditCount: 0,
-    })
-    expect(result).not.toContain('Latency (24h avg)')
-  })
-
   it('shows daily alert counts from KV when available', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       alertCounts: { incidents: 3, resolved: 2, down: 1, degraded: 0, recovered: 1 },
       redditCount: 0,
@@ -216,7 +175,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       webhookCounts: { discord: 5 },
       redditCount: 0,
@@ -230,7 +188,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       webhookCounts: { discord: 5, slack: 2, newToday: 1 },
       redditCount: 0,
@@ -242,7 +199,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       webhookCounts: { discord: 0 },
       redditCount: 0,
@@ -255,7 +211,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       deliveryCounts: { discord: 10, failed: 1 },
       redditCount: 0,
@@ -270,7 +225,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       deliveryCounts: { discord: 0, failed: 0 },
       redditCount: 0,
@@ -282,7 +236,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 3, resolvedCount: 2 },
       redditCount: 5,
     })
@@ -297,7 +250,6 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc({ id: 'together', name: 'Together AI' })],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 1, resolvedCount: 0 },
       redditCount: 0,
     })
@@ -328,7 +280,6 @@ describe('buildDailySummary — Unreadable Status Sources section (#500)', () =>
       makeSvc({ id: 'claude', name: 'Claude API' }),
     ],
     aiUsage: null,
-    latencySnapshots: [],
     incidentCountToday: { newCount: 0, resolvedCount: 0 },
     redditCount: 0,
   }
@@ -427,31 +378,6 @@ describe('isInSummaryWindow', () => {
   })
 })
 
-describe('computeLatencyAvg', () => {
-  it('computes average across snapshots', () => {
-    const avg = computeLatencyAvg([
-      { t: '1', data: { a: 100, b: 200 } },
-      { t: '2', data: { a: 200, b: 400 } },
-    ])
-    expect(avg.a).toBe(150)
-    expect(avg.b).toBe(300)
-  })
-
-  it('handles empty snapshots', () => {
-    const avg = computeLatencyAvg([])
-    expect(Object.keys(avg)).toHaveLength(0)
-  })
-
-  it('handles services appearing in some snapshots', () => {
-    const avg = computeLatencyAvg([
-      { t: '1', data: { a: 100 } },
-      { t: '2', data: { a: 200, b: 400 } },
-    ])
-    expect(avg.a).toBe(150)
-    expect(avg.b).toBe(400)
-  })
-})
-
 describe('formatDegradationSection (#464)', () => {
   const svcs = [
     makeSvc({ id: 'deepseek', name: 'DeepSeek API' }),
@@ -529,7 +455,6 @@ describe('formatV1TrafficSection (#518)', () => {
     const out = buildDailySummary({
       services: [makeSvc({ id: 'claude', name: 'Claude' })],
       aiUsage: null,
-      latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
       v1Traffic: { today: { all: 5, service: 2, total: 7 }, cumulative: 7, since: '2026-06-01' },
@@ -837,7 +762,7 @@ describe('formatBadgeTrafficSection (#1157)', () => {
 
 describe('buildDailySummary — #548 webhook delta + feed section', () => {
   const base = {
-    services: [], aiUsage: null, latencySnapshots: [],
+    services: [], aiUsage: null,
     incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0,
   } as Parameters<typeof buildDailySummary>[0]
 
@@ -1008,7 +933,7 @@ describe('formatReferralLine (#842 — outbound referral evidence)', () => {
 })
 
 describe('formatPushLine (#815 — Tier-1 push observability)', () => {
-  const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+  const minimal = { services: [makeSvc()], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
   it('renders the count line when pushes were delivered', () => {
     expect(formatPushLine(3)).toBe('\n📱 **Tier-1 Pushes Sent**: 3')
   })
@@ -1024,7 +949,7 @@ describe('formatPushLine (#815 — Tier-1 push observability)', () => {
 })
 
 describe('formatAccuracyLine (#827 Feature 1 — prediction accuracy)', () => {
-  const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+  const minimal = { services: [makeSvc()], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
   const stats = (over: Partial<AccuracyStats> = {}): AccuracyStats => ({
     total: 4, accurate: 2, underPredicted: 1, overPredicted: 1, hitRate: 0.5, medianAbsErrorHours: 0.5, ...over,
   })
@@ -1280,7 +1205,7 @@ describe('formatAudienceLine (#842-B)', () => {
   // The reshape raises the stakes: the block is now four lines, so this also pins that the
   // multi-line string survives `lines.join('\n')` instead of arriving flattened.
   it('reaches the assembled daily summary, all rows intact', () => {
-    const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    const minimal = { services: [makeSvc()], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
     const out = buildDailySummary({
       ...minimal,
       audience: counts({
@@ -1299,7 +1224,7 @@ describe('formatAudienceLine (#842-B)', () => {
   })
 
   it('#1612 — the 30-day history click line reaches the assembled summary', () => {
-    const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    const minimal = { services: [makeSvc()], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
     expect(buildDailySummary({ ...minimal, historyClicks: { active: { clicks: 0, views: 3 }, clear: { clicks: 2, views: 50 } } }))
       .toContain('📜 **30-day History Link** (24h): during outages 0 clicks / 3 views · clear 2 clicks / 50 views')
   })
@@ -1452,7 +1377,6 @@ describe('#820 Reddit source-dead warning', () => {
   const base = {
     services: [makeSvc({ id: 'a', name: 'Svc A' })],
     aiUsage: null,
-    latencySnapshots: [],
     incidentCountToday: { newCount: 0, resolvedCount: 0 },
   }
 

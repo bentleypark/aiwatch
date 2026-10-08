@@ -126,7 +126,7 @@ describe('#1623 — the today-row stays off every push and every quoted claim', 
 
   it('lends no elapsed time to the daily summary', () => {
     const out = buildDailySummary({
-      services: [scored as unknown as ServiceStatus], aiUsage: null, latencySnapshots: [],
+      services: [scored as unknown as ServiceStatus], aiUsage: null,
       incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0,
     })
     expect(out).toContain('Helicone (degraded)')

@@ -1,5 +1,5 @@
 // #1531 — `/api/status/cached?series=0` through the real route: the Edge pages get the payload without
-// the time series, and the default response the SPA reads keeps both.
+// the probe time series, and the default response the SPA reads keeps it.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import workerModule from '../index'
@@ -11,7 +11,6 @@ function makeEnv(opts: { snapshot?: boolean } = {}) {
   const reads: string[] = []
   const store = new Map<string, string>([
     ['probe:24h', JSON.stringify({ snapshots: [SNAPSHOT] })],
-    ['latency:24h', JSON.stringify({ snapshots: [{ t: SNAPSHOT.t, data: { claude: 120 } }] })],
   ])
   if (opts.snapshot !== false) {
     store.set('services:latest', JSON.stringify({
@@ -60,22 +59,20 @@ async function get(query: string, opts: { origin?: string; snapshot?: boolean } 
 }
 
 describe('/api/status/cached time series (#1531)', () => {
-  it('default response carries probe24h + latency24h (the SPA reads both)', async () => {
+  it('default response carries probe24h and no latency24h (#1636)', async () => {
     const { status, body, reads } = await get('')
     expect(status).toBe(200)
     expect(body.probe24h).toEqual([SNAPSHOT])
-    expect(body.latency24h).toHaveLength(1)
+    expect(body).not.toHaveProperty('latency24h')
     expect(reads).toContain('probe:24h')
-    expect(reads).toContain('latency:24h')
+    expect(reads).not.toContain('latency:24h')
   }, 60_000)
 
-  it('?series=0 omits both keys and never reads them from KV', async () => {
+  it('?series=0 omits probe24h and never reads it from KV', async () => {
     const { status, body, reads } = await get('?series=0')
     expect(status).toBe(200)
     expect(body).not.toHaveProperty('probe24h')
-    expect(body).not.toHaveProperty('latency24h')
     expect(reads).not.toContain('probe:24h')
-    expect(reads).not.toContain('latency:24h')
     expect((body.services as unknown[]).length).toBe(1)
   }, 60_000)
 })

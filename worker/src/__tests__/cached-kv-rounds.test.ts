@@ -37,7 +37,6 @@ function makeEnv() {
     ['security:seen:osv:X', '1'],
     ['probe:summaries', JSON.stringify([])],
     ['probe:24h', JSON.stringify({ snapshots: [] })],
-    ['latency:24h', JSON.stringify({ snapshots: [] })],
   ])
   let rounds = 0
   let queue: Array<() => void> = []
@@ -99,7 +98,7 @@ describe('/api/status/cached sequential KV round trips (#1531 part 3)', () => {
   it('the default response reads its time series in the same wave', async () => {
     const { inRound, lastRound } = await get('')
     expect(lastRound).toBe(3)
-    expect(inRound(2)).toEqual([...WAVE_READS, 'latency:24h', 'probe:24h'].sort())
+    expect(inRound(2)).toEqual([...WAVE_READS, 'probe:24h'].sort())
     expect(inRound(3)).toEqual(DEPENDENT_READS)
   }, 60_000)
 })

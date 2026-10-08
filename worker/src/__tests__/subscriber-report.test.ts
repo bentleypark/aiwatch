@@ -242,7 +242,7 @@ describe('daily report lines (#1590)', () => {
     expect(formatFanoutLine({ discord: { delivered: 3, failed: 0 }, slack: { delivered: 2, failed: 1 } })).toBe('📬 **Subscriber Alerts Sent**: Discord 3 · Slack 2 (1 failed)')
   })
   it('the summary uses the per-type change when it has one and the fan-out line when it has counts', () => {
-    const base = { services: [], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    const base = { services: [], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
     const text = buildDailySummary({
       ...base,
       webhookCounts: { discord: 5, slack: 2, newToday: 1, newTodayByType: { discord: 0, slack: 1 } },

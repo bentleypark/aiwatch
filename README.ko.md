@@ -192,7 +192,6 @@ Cloudflare KV
   ├── services:latest      (상태 캐시, TTL 5분)
   ├── daily:YYYY-MM-DD     (가동률 카운터, TTL 2일)
   ├── history:YYYY-MM-DD   (아카이브 카운터, TTL 90일)
-  ├── latency:24h          (30분 스냅샷, 최대 48개, TTL 25시간)
   ├── probe:24h            (헬스체크 프로브, 최대 2016개, TTL 7일, 35개 probe 대상)
   ├── ai:analysis:{svcId}:{incId}  (AI 인시던트별 분석, TTL 1시간, 활성 시 갱신)
   ├── ai:reanalysis-skip:* (재분석 실패 쿨다운, 실패 유형별 TTL — #955)
@@ -268,7 +267,7 @@ npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
 
 | 엔드포인트 | 메서드 | 설명 |
 |-----------|--------|------|
-| `/api/status` | GET | 전체 서비스 상태 + 인시던트 + 가동률 + latency24h + aiAnalysis |
+| `/api/status` | GET | 전체 서비스 상태 + 인시던트 + 가동률 + aiAnalysis |
 | `/api/status/cached` | GET | KV 캐시 전용 (Edge SSR용, ~1.2초) |
 | `/api/uptime?days=30` | GET | 일별 가동률 이력 (1-90일) |
 | `/api/report?month=YYYY-MM` | GET | 월간 안정성 아카이브 (가동률, 점수, 인시던트, 레이턴시) |

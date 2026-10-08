@@ -9,7 +9,7 @@ import { SERVICE_ID_TO_SLUG } from '../../api/_is-down/slug-map'
 // The Claude Code statusline snippets (#400, src/pages/Statusline.jsx) poll the
 // status endpoint on (roughly) every prompt and `jq` out only id/name/status.
 // The full /api/status/cached response is ~2 MB (services + probe:24h +
-// latency:24h + AI analysis) — downloaded and discarded on every poll — which
+// AI analysis) — downloaded and discarded on every poll — which
 // made /api/status/cached the single largest Vercel Fast Data Transfer route
 // (17.8 GB/cycle). This projection drops everything but id/name/status so each
 // poll is ~KB. Served when the request carries the `?src=statusline-*` tag.

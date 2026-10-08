@@ -129,9 +129,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
     })
     const values = hourlyData.map((s) => {
       const val = s.data[service.id]
-      if (val == null) return null
-      if (typeof val === 'object') return val.rtt > 0 ? val.rtt : null
-      return val
+      return val?.rtt > 0 ? val.rtt : null
     })
     const color = SERVICE_COLOR[service.id] ?? '#8b949e'
 
@@ -741,7 +739,7 @@ const SECURITY_PREVIEW = 5
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error, probe24h, latency24h, probeServiceIds, refresh, recentlyRecovered, securityAlerts, reportFeed } = usePolling()
+  const { services: rawServices, loading, error, probe24h, probeServiceIds, refresh, recentlyRecovered, securityAlerts, reportFeed } = usePolling()
   const services = rawServices ?? []
   const [reportOpen, setReportOpen] = useState(false)
 
@@ -1108,7 +1106,7 @@ export default function ServiceDetails({ serviceId }) {
       )}
 
       {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
-      {service.category === 'api' && probeServiceIds.includes(service.id) && <ServiceLatencyTrend service={service} t={t} hourlyData={probe24h.length > 0 ? filterLast24h(probe24h) : latency24h} />}
+      {service.category === 'api' && probeServiceIds.includes(service.id) && <ServiceLatencyTrend service={service} t={t} hourlyData={filterLast24h(probe24h)} />}
 
       {/* ── Regional Availability (only for services with defined regions) ── */}
       {SERVICE_REGIONS[service.id] && <RegionalAvailability service={service} t={t} />}

@@ -24,7 +24,7 @@ let CURRENT = null
 vi.mock('../../hooks/usePolling', () => ({
   usePolling: () => ({
     services: CURRENT ? [CURRENT] : [], loading: false, error: null,
-    probe24h: [], latency24h: [], probeServiceIds: [], refresh: () => {},
+    probe24h: [], probeServiceIds: [], refresh: () => {},
     recentlyRecovered: {}, securityAlerts: [], reportFeed: {},
   }),
 }))

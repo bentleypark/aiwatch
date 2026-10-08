@@ -193,7 +193,6 @@ Cloudflare KV
   ├── services:latest      (status cache, TTL 5min)
   ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
-  ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
   ├── probe:24h            (health check probes, max 2016, TTL 7d, 35 probe targets)
   ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL scaled by failure type — #955)
@@ -269,7 +268,7 @@ npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/status` | GET | All service statuses + incidents + uptime + latency24h + aiAnalysis |
+| `/api/status` | GET | All service statuses + incidents + uptime + aiAnalysis |
 | `/api/status/cached` | GET | KV-only cached status (for Edge SSR, fast ~1.2s) |
 | `/api/uptime?days=30` | GET | Daily uptime history (1-90 days) |
 | `/api/report?month=YYYY-MM` | GET | Monthly reliability archive (uptime, score, incidents, latency) |
