@@ -2004,33 +2004,32 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
 }
 
 // #1381 — read the browser-rendered Rootly feed (pushed to KV by the mistral-feed Action) and
-// normalize it into a ServiceStatus. Returns null when the key is absent/expired/corrupt; what the
-// caller does with that is stated at the call site, which is the only place it is decidable.
+// normalize it into a ServiceStatus.
 //
 // Mistral is feed-ONLY: there is no apiUrl mirror to fall back to, because the Cloudflare managed
 // challenge in front of the page refuses the Worker outright.
-async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: ServiceStatus, now: string): Promise<ServiceStatus | null> {
+async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: ServiceStatus, now: string): Promise<{ status: ServiceStatus } | { failure: StatusSourceReadFailure }> {
   let raw: string | null
   try {
     raw = await kv.get(MISTRAL_FEED_KV_KEY)
   } catch (err) {
     console.warn(`[fetchService] ${base.id} rootly KV read failed:`, err instanceof Error ? err.message : err)
-    return null
+    return { failure: { source: 'rootly-feed', phase: 'transport', errorKind: 'unknown' } }
   }
-  if (!raw) return null
+  if (!raw) return { failure: { source: 'rootly-feed', phase: 'absent' } }
 
   let stored: StoredRootlyFeed
   try {
     stored = JSON.parse(raw) as StoredRootlyFeed
   } catch (err) {
     console.warn(`[fetchService] ${base.id} rootly feed JSON parse failed:`, err instanceof Error ? err.message : err)
-    return null
+    return { failure: { source: 'rootly-feed', phase: 'decode' } }
   }
   // The same rejection test the ingest endpoint applies, re-run at READ time: a value that got into KV
   // some other way (an older writer, a hand-edited key) must not be trusted just because it is stored.
   if (!isStorableRootlyFeed(stored.feed, config.displayComponentIds, Date.parse(now))) {
     console.warn(`[fetchService] ${base.id} rootly feed in KV failed the storable check — ignoring`)
-    return null
+    return { failure: { source: 'rootly-feed', phase: 'shape' } }
   }
 
   const norm = normalizeRootlyIncidents(stored.feed)
@@ -2148,11 +2147,11 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
   // sources and none took this flag — and #1007's title is literally "stop rendering an unreadable
   // source as an outage". The flag's remaining users are the two DeepSeek services, whose Flashduty
   // mirror really is frozen.
-  return result
+  return { status: result }
 }
 
-// #1510 Slice 2 — whenever the scrape feed could not be read (`readRootlyStatus` returned null;
-// `grep -n "if (fed) return fed" worker/src/services.ts` — a readable feed is never this case),
+// #1510 Slice 2 — whenever the scrape feed could not be read (`readRootlyStatus` returned a failure;
+// `grep -n "'status' in fed" worker/src/services.ts` — a readable feed is never this case),
 // overlay the status from Mistral's public Rootly JSON API's ACTIVE incidents instead of publishing
 // `unknown` outright.
 //
@@ -2386,9 +2385,13 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
     // rather than falling through to the challenged statusUrl below.
     if (config.rootlyFeed && kv) {
       const fed = await readRootlyStatus(kv, config, base, now)
-      if (fed) return fed
-      // No feed: the KV key expired, the Action stopped pushing, or nothing has pushed yet. `base`
-      // says `operational`, which for a feed-ONLY service would publish a green pill for a service we
+      if ('status' in fed) {
+        resetFetchFailure(trackingStore, config.id)
+        return fed.status
+      }
+      // #1650 — arms the #500 alert; the published verdict below does not depend on its return.
+      await trackFetchFailure(trackingStore, kv, config.id, undefined, undefined, fed.failure)
+      // `base` says `operational`, which for a feed-ONLY service would publish a green pill for a service we
       // have no reading of at all — so expiry against the 3h TTL is a realistic state to handle,
       // rather than a corner (see `workflow-dispatch.ts` for how this feed is triggered).
       // #1510 Slice 2 — before falling back to `unknown`, check whether the public API's cron-written
@@ -2398,7 +2401,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // #1233's `unknown` is what this is:
       // neither an outage nor an all-clear. Warned as well, because every OTHER failure on this path
       // warns and a silent one is indistinguishable in the logs from a healthy quiet page.
-      console.warn(`[fetchService] ${config.id} rootly feed absent from KV — publishing unknown`)
+      console.warn(`[fetchService] ${config.id} rootly feed unreadable (${fed.failure.phase}) — publishing unknown`)
       return { ...base, status: 'unknown' as const, sourceUnknown: true }
     }
 
