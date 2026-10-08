@@ -426,11 +426,10 @@ are the same instant already.
 It also sets **`zeroLengthRecord`**, which only the reader-facing note reads. Every other consumer gates
 on `startUnknown` and treats the two populations alike, because no elapsed time is derivable from
 either; `derived-consumer-registry.test.js`'s `SU_*` registries are the list, and they are derived.
-The note cannot be shared: #1390's says *which end of the outage the shown instant marks is not
-established*, which is what licenses `getContextualTime` keeping the precise `Resolved` label there, and
-a zero-length source never said that — `parsers/aws.ts`'s single-update RSS items state theirs is the
-resolution time. So `incidents.zeroLengthRecord.note` describes the record's shape instead, and the
-branch is order-sensitive: a zero-length record carries BOTH flags, so it must be tested first.
+A zero-length record carries BOTH flags, so the note branch is order-sensitive and tests
+`zeroLengthRecord` first. `markIncidentResolved` withholds its resolution event for a zero-length record
+exactly as for #1390's — no `recovered:` marker, no analysis `resolvedAt` (#1643); pinned in the `#1643`
+blocks of `impossible-incident-times.test.ts` and `parsers/__tests__/incident-io-global.test.ts`.
 `buildHistoryRecord` refuses it outright: the no-TTL corpus grounds the AI's next estimate via
 `findSimilarHistory` and its `accuracyOf` ratio is published daily, so a fabricated zero-minute record there
 would be permanent. The monthly accumulator also accepts duration corrections in both directions — but

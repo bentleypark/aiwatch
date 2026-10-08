@@ -5,6 +5,9 @@ import { isTimeOrderImpossible, formatDuration, markZeroLengthResolvedIncidentsU
 import { buildHistoryRecord } from '../incident-history'
 import { calculateAIWatchScore } from '../score'
 import { markIncidentResolved } from '../recovery-mark'
+import { parseAwsRssIncidentsResult } from '../parsers/aws'
+import { parseIncidents } from '../parsers/statuspage'
+import { parseRssIncidents, parseXaiRssIncidents } from '../parsers/betterstack'
 import { SERVICES, fetchService } from '../services'
 import type { Incident } from '../types'
 
@@ -455,9 +458,7 @@ describe('#1480 zero-length resolved incidents', () => {
 
   it('carries zeroLengthRecord, which the #1390 anchored path must NOT', () => {
     // The two paths share `startUnknown` — every duration consumer treats them alike — and differ
-    // only in the note they render. #1390's note says which end the instant marks is unestablished,
-    // which is what licenses getContextualTime's `Resolved` label; on a zero-length record that
-    // claim is not what the source says, so the flags must stay distinguishable here.
+    // only in the note they render, so the flags must stay distinguishable here.
     const base = { status: 'resolved' as const, impact: 'minor' as const, title: 't', timeline: [] }
     const [zeroLength] = markZeroLengthResolvedIncidentsUnknown([
       { ...base, id: 'z', startedAt: '2026-09-11T08:00:00.000Z', resolvedAt: '2026-09-11T08:00:00.000Z', duration: '1m' },
@@ -578,5 +579,52 @@ describe('#1390 markIncidentResolved refuses an anchored incident outright', () 
     const marker = Object.entries(s.kv).find(([k]) => k.startsWith('recovered:'))
     expect(marker, 'an ordinary incident still gets its marker').toBeDefined()
     expect(JSON.parse(marker![1]).duration).toBe('7m')
+  })
+})
+
+describe('#1643 a zero-length resolved record gets no resolution event, whichever source produced it', () => {
+  const resolveThrough = async (svcId: string, inc: Incident) => {
+    const kv: Record<string, string> = { [`ai:analysis:${svcId}:${inc.id}`]: JSON.stringify({ summary: 'x', firstEstimatedRecoveryHours: 2 }) }
+    const api = { get: async (k: string) => kv[k] ?? null, put: async (k: string, v: string) => { kv[k] = v }, delete: async (k: string) => { delete kv[k] } }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const out = await markIncidentResolved(api as never, svcId, inc, '2026-10-08T00:00:00Z')
+      return { out, marker: Object.keys(kv).some((k) => k.startsWith('recovered:')), stamp: JSON.parse(kv[`ai:analysis:${svcId}:${inc.id}`]).resolvedAt }
+    } finally { warn.mockRestore() }
+  }
+
+  it('Atlassian back-filled record (copilot ykb44v068g8v)', async () => {
+    const [inc] = markZeroLengthResolvedIncidentsUnknown(parseIncidents({
+      incidents: [{ id: 'ykb44v068g8v', name: 'x', status: 'resolved', impact: 'minor', created_at: '2026-05-19T05:30:00.000Z', resolved_at: '2026-05-19T05:30:00.000Z',
+        incident_updates: [{ status: 'resolved', body: 'between 05:30 UTC and 14:50 UTC, some Copilot users experienced failures', created_at: '2026-05-28T12:40:00.000Z' }], components: [] }],
+    } as never))
+    expect(inc).toMatchObject({ startUnknown: true, zeroLengthRecord: true })
+    expect(await resolveThrough('copilot', inc)).toEqual({ out: null, marker: false, stamp: undefined })
+  })
+
+  it('Better Stack RSS single update closed by the stale guard (modal 938811)', async () => {
+    const xml = '<rss><channel><item><title>Storage degraded - impacting app creation</title><link>https://status.modal.com</link>' +
+      '<guid>https://status.modal.com/incident/938811#b8a6</guid><pubDate>Mon, 29 Jun 2026 21:02:00 -0000</pubDate>' +
+      "<description>We're tracking errors in our storage subsystem. At 9:03 UTC we applied a mitigation and have observed recovery.</description></item></channel></rss>"
+    const [inc] = markZeroLengthResolvedIncidentsUnknown(parseRssIncidents(xml, Date.parse('2026-10-08T00:00:00Z')))
+    expect(inc).toMatchObject({ status: 'resolved', startUnknown: true, zeroLengthRecord: true })
+    expect(await resolveThrough('modal', inc)).toEqual({ out: null, marker: false, stamp: undefined })
+  })
+
+  it('xAI RSS item whose Resolved: date is its one update', async () => {
+    const xml = '<rss><channel><item><title>[API] Elevated error rates</title><guid>xai-z</guid>' +
+      '<description><![CDATA[<h3>Status: RESOLVED</h3><p>Resolved: Wed, 07 Oct 2026 00:30:19 GMT</p><hr /><h4>Updates:</h4>' +
+      '<div><p><strong>Wed, 07 Oct 2026 00:30:19 GMT</strong></p><h3>Resolved</h3><p>Issue has been resolved.</p></div>]]></description></item></channel></rss>'
+    const [inc] = markZeroLengthResolvedIncidentsUnknown(parseXaiRssIncidents(xml))
+    expect(inc).toMatchObject({ status: 'resolved', startUnknown: true, zeroLengthRecord: true })
+    expect(await resolveThrough('xai', inc)).toEqual({ out: null, marker: false, stamp: undefined })
+  })
+
+  it('AWS-style RSS resolved item (azureopenai)', async () => {
+    const parsed = parseAwsRssIncidentsResult('<rss version="2.0"><channel><title>t</title><item><title>[RESOLVED] Azure OpenAI - Degraded</title><pubDate>Tue, 01 Sep 2026 05:00:00 GMT</pubDate><guid>g1</guid></item></channel></rss>')
+    if (!parsed.ok) throw new Error(parsed.reason)
+    const [inc] = markZeroLengthResolvedIncidentsUnknown(parsed.incidents)
+    expect(inc).toMatchObject({ status: 'resolved', startUnknown: true, zeroLengthRecord: true })
+    expect(await resolveThrough('azureopenai', inc)).toEqual({ out: null, marker: false, stamp: undefined })
   })
 })

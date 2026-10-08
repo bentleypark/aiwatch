@@ -267,8 +267,7 @@ export function getContextualTime(inc, t) {
   // the same instant — the two disagreeing by one day on one screen, which is the disagreement #1400
   // closed from the other side. The row keeps minute precision and states the provider's own published
   // instant; `incidents.startUnknown.note` on the same card is what says how far to trust it. That is
-  // the same division of labour `status_history` uses — a precise-looking anchor plus a note — not a
-  // contradiction to be fixed by hedging the label.
+  // the same division of labour `status_history` uses — a precise-looking anchor plus a note.
   const dayOnly = inc.derived === 'status_history'
   // The day travels WITH the flag: for a resolved incident this returns `resolvedAt`, and a day bucket
   // over 12h resolves on the NEXT calendar day under the noon anchor — so a consumer formatting that
@@ -281,7 +280,7 @@ export function getContextualTime(inc, t) {
   }
   if (inc.status === 'resolved') {
     const resolved = getResolvedTime(inc)
-    if (resolved) return { label: t('incidents.time.resolved'), date: resolved, dayOnly, day }
+    if (resolved) return { label: t(inc.startUnknown ? 'incidents.time.recorded' : 'incidents.time.resolved'), date: resolved, dayOnly, day }
   }
   if (inc.status === 'monitoring' && lastTimeline?.at) {
     return { label: t('incidents.time.updated'), date: lastTimeline.at, dayOnly, day }
