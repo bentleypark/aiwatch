@@ -3,7 +3,7 @@
 const ORIG_TZ = process.env.TZ
 process.env.TZ = 'Asia/Seoul' // UTC+9
 
-import { describe, it, expect, afterAll } from 'vitest'
+import { describe, it, expect, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { buildCalendarFromIncidents } from './calendar'
 
 // Restore TZ so this file's global side effect can't leak into other date-sensitive test files
@@ -185,6 +185,12 @@ describe('buildCalendarFromIncidents — prefer an incident\'s own precise local
 })
 
 describe('#1623 — today\'s cell for a running Better Stack outage', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-08T05:00:00Z'))
+  })
+  afterEach(() => vi.useRealTimers())
+
   const day = (n) => localKey(new Date(Date.now() - n * 86_400_000))
   const ongoing = (derivedDay) => ({
     id: `bs-hist:r:${derivedDay}`, title: 'api — down', status: 'investigating', impact: 'minor',
