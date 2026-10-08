@@ -153,6 +153,7 @@ const ko = {
   'incidents.time.started': '발생',
   'incidents.time.updated': '업데이트',
   'incidents.time.resolved': '해결',
+  'incidents.time.recorded': '기록',
   'incidents.time.down': '중단',
   'incidents.period.7d': '최근 7일',
   'incidents.period.30d': '최근 30일',

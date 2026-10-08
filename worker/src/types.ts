@@ -38,7 +38,7 @@ export interface Incident {
   /** The start is not derivable from this record, so `duration` is null. Set by two paths. Every
    *  duration consumer (Score's recovery sample, the no-TTL corpus, the archive divisor, the group
    *  labels) treats them alike; only the reader-facing note distinguishes them, via
-   *  `zeroLengthRecord` below, because one path can say what the shown instant is and the other cannot:
+   *  `zeroLengthRecord` below:
    *
    *  **#1390 (incident.io, `correctIncidentIoImpossibleTimes`)** — the record recovered BEFORE it
    *  started and the page carried no `component_impacts` window to recover the real one. NEITHER
@@ -51,17 +51,14 @@ export interface Incident {
    *
    *  **#1480 (`markZeroLengthResolvedIncidentsUnknown`, over every parser's output)** — the record
    *  resolved at exactly the instant it started. No page is consulted and BOTH timestamps are left as
-   *  published; what each one means is whatever its source says (`parsers/aws.ts`'s single-update RSS
-   *  items, for one, state theirs is the resolution time).
+   *  published.
    *
    *  Readers that need a real elapsed time must check this: `buildHistoryRecord` refuses such a record
    *  outright, since `durationMin` would be a fabricated 0 in a corpus with no TTL. */
   startUnknown?: boolean
   /** #1480 — narrows the `startUnknown` above: this record carries ONE instant for both ends, so the
    *  absence of a duration is a property of the record's shape rather than of two unreliable
-   *  timestamps. Read by the reader-facing note ONLY. The #1390 note cannot be shown here — it says
-   *  which end the instant marks is unestablished, which is what licenses `getContextualTime`'s
-   *  `Resolved` label there, and is not what this record says. */
+   *  timestamps. Read by the reader-facing note ONLY. */
   zeroLengthRecord?: boolean
   duration: string | null
   timeline: TimelineEntry[]

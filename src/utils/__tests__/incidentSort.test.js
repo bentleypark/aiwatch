@@ -782,6 +782,20 @@ describe('#1390 getContextualTime — an anchored instant keeps minute precision
   })
 })
 
+describe('#1643 getContextualTime — an instant whose end is unknown is not labelled a resolution', () => {
+  const t = (k) => k
+  const base = { status: 'resolved', startedAt: '2026-10-06T10:30:00Z', resolvedAt: '2026-10-06T10:30:00Z', duration: null, timeline: [{ stage: 'resolved', at: '2026-10-06T10:30:00Z' }] }
+  it('labels a zero-length record "recorded", keeping the same instant on the sort axis', () => {
+    expect(getContextualTime({ ...base, startUnknown: true, zeroLengthRecord: true }, t)).toMatchObject({ label: 'incidents.time.recorded', date: base.resolvedAt })
+  })
+  it('labels a #1390 anchored record "recorded" too', () => {
+    expect(getContextualTime({ ...base, startUnknown: true }, t).label).toBe('incidents.time.recorded')
+  })
+  it('keeps "resolved" for an ordinary resolved record', () => {
+    expect(getContextualTime({ ...base, resolvedAt: '2026-10-06T12:30:00Z', duration: '2h 0m' }, t).label).toBe('incidents.time.resolved')
+  })
+})
+
 describe('#1622 — a status_history day row as displayed', () => {
   const t = (k) => ({
     'incidents.derived.dayTotal': '(that day)',

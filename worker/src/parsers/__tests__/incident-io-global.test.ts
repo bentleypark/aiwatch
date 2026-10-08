@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseIncidentIoGlobalPage, computeIncidentIoUptime } from '../incident-io'
 import { parseIncidents, normalizeStatus } from '../statuspage'
 import { SERVICES, resolveSvcStatus, resolveSvcComponents } from '../../services'
+import { markZeroLengthResolvedIncidentsUnknown } from '../../utils'
+import { markIncidentResolved } from '../../recovery-mark'
 
 // #1066 — LangSmith migrated to an incident.io "global"/multi-region page whose Atlassian v2 compat API
 // returns `components: []`. parseIncidentIoGlobalPage rebuilds the summary.json shape from the page-root
@@ -359,5 +361,25 @@ describe('parseIncidentIoGlobalPage → resolveSvcStatus with the real langsmith
     const rebuilt = parseIncidentIoGlobalPage(html)!
     // API is in langsmith.statusComponentIds → worst-of major_outage → down.
     expect(resolveSvcStatus(langsmith, rebuilt, [])).toBe('down')
+  })
+})
+
+describe('#1643 an inverted record clamped to one instant gets no resolution event', () => {
+  it('resolved, published 05:00, summary end 01:00, no impact rows → one instant (the filing time) → withheld', async () => {
+    const html = page([comp(API, 'LangSmith API')], [
+      incident({ id: 'RETRO', name: 'Retro', status: 'resolved', published_at: '2026-09-01T05:00:00.000Z', end_at: '2026-09-01T01:00:00.000Z',
+        affected: [{ id: API, current: 'operational', status: 'partial_outage' }] }),
+    ])
+    const [inc] = markZeroLengthResolvedIncidentsUnknown(parseIncidents(parseIncidentIoGlobalPage(html)!))
+    expect(inc).toMatchObject({ startedAt: '2026-09-01T05:00:00.000Z', resolvedAt: '2026-09-01T05:00:00.000Z', startUnknown: true, zeroLengthRecord: true })
+
+    const kv: Record<string, string> = { 'ai:analysis:langsmith:RETRO': JSON.stringify({ summary: 'x', firstEstimatedRecoveryHours: 2 }) }
+    const api = { get: async (k: string) => kv[k] ?? null, put: async (k: string, v: string) => { kv[k] = v }, delete: async (k: string) => { delete kv[k] } }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(await markIncidentResolved(api as never, 'langsmith', inc, '2026-10-08T00:00:00Z')).toBeNull()
+      expect(Object.keys(kv).some((k) => k.startsWith('recovered:'))).toBe(false)
+      expect(JSON.parse(kv['ai:analysis:langsmith:RETRO']).resolvedAt).toBeUndefined()
+    } finally { warn.mockRestore() }
   })
 })

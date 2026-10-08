@@ -154,6 +154,7 @@ const en = {
   'incidents.time.started': 'Started',
   'incidents.time.updated': 'Updated',
   'incidents.time.resolved': 'Resolved',
+  'incidents.time.recorded': 'Recorded',
   'incidents.time.down': 'Down',
   'incidents.period.7d': 'Last 7 days',
   'incidents.period.30d': 'Last 30 days',

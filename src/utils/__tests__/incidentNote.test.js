@@ -26,7 +26,7 @@ describe('#1480 incidentNoteKey', () => {
       .toBe('incidents.zeroLengthRecord.note')
   })
 
-  it('gives a #1390-anchored record the note that licenses its Resolved label', () => {
+  it('gives a #1390-anchored record its own note', () => {
     expect(incidentNoteKey({ ...resolved, startUnknown: true }))
       .toBe('incidents.startUnknown.note')
   })
