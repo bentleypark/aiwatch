@@ -20,7 +20,8 @@ import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMinShown } from '../utils/recovery'
 import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
-import { latencyCardState } from '../utils/latencyCard'
+import { latencyCardState, latencyCardSub } from '../utils/latencyCard'
+import { measuredRtt } from '../../worker/src/probe'
 import { filterSecurityAlertsForService, securitySourceLabel } from '../utils/securityAlerts'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
@@ -128,8 +129,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     })
     const values = hourlyData.map((s) => {
-      const val = s.data[service.id]
-      return val?.rtt > 0 ? val.rtt : null
+      return measuredRtt(s.data[service.id])
     })
     const color = SERVICE_COLOR[service.id] ?? '#8b949e'
 
@@ -946,11 +946,7 @@ export default function ServiceDetails({ serviceId }) {
         <MetricCard
           label={latencyCard.kind === 'inherited' ? t('svc.latency.inherited').replace('{p}', latencyCard.parentName) : t('svc.latency')}
           value={latencyCard.rtt != null ? `${latencyCard.rtt} ms` : '—'}
-          sub={latencyCard.kind === 'probe'
-            ? (latencyCard.rtt != null ? t('svc.latency.sub') : t('uptime.collecting'))
-            : latencyCard.kind === 'inherited'
-              ? (latencyCard.rtt != null ? t('svc.latency.inherited.sub').replace('{p}', latencyCard.parentName) : t('uptime.collecting'))
-              : t('svc.latency.notMeasured')}
+          sub={latencyCardSub(latencyCard, t)}
           colorClass={latencyCard.kind === 'probe' ? 'text-[var(--blue)]' : latencyCard.kind === 'inherited' ? 'text-[var(--teal)]' : 'text-[var(--text2)]'}
         />
         <MetricCard

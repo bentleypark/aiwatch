@@ -381,6 +381,7 @@ ${consentInitScript(nonce)}
   <div class="limits">
     <div class="limits-label">⚠ <span data-i18n="s5.limit.label">핵심 한계 — 네트워크 RTT ≠ 추론 레이턴시</span></div>
     <p data-i18n="s5.limit.body">Probe RTT는 <strong>네트워크 왕복 시간</strong>을 측정합니다. 모델의 추론(토큰 생성) 레이턴시가 아닙니다. "이 서비스가 얼마나 빨리 토큰을 만드나"가 아니라 "엔드포인트가 네트워크 계층에서 얼마나 빨리 응답하나"를 나타냅니다.</p>
+    <p data-i18n="s5.limit.failed"><strong>측정 실패:</strong> 응답이 없거나(타임아웃) 서버 오류(HTTP 5xx)가 돌아온 측정은 레이턴시 값과 분위수에 넣지 않고 실패로 따로 셉니다. 서버가 오류를 내는 데 걸린 시간은 그 서비스의 응답 속도가 아니기 때문입니다. 인증 없이 보낸 요청에 4xx가 돌아온 경우는 서버가 응답한 것이므로 측정값으로 씁니다.</p>
     <p data-i18n="s5.limit.probe"><strong>Probe 미적용:</strong> 레이턴시 랭킹은 앱을 제외한 모든 분야에서 엔드포인트를 직접 probe하는 서비스를 대상으로 합니다. 대표성 있는 엔드포인트를 찾지 못해 probe하지 않는 서비스(대부분의 앱, 일부 코딩 에이전트, Azure OpenAI · Modal)는 제외되며, Character.AI는 probe하지만 앱이라 상세 페이지에만 표시합니다.</p>
   </div>
 </section>
@@ -623,6 +624,7 @@ const i18n = {
     's5.lead': '35개 AI 서비스의 엔드포인트를 Cloudflare Workers 엣지에서 5분 간격으로 직접 측정합니다. p50 / p75 / p95 분위수를 산출합니다.',
     's5.limit.label': '핵심 한계 — 네트워크 RTT ≠ 추론 레이턴시',
     's5.limit.body': 'Probe RTT는 <strong>네트워크 왕복 시간</strong>을 측정합니다. 모델의 추론(토큰 생성) 레이턴시가 아닙니다. "이 서비스가 얼마나 빨리 토큰을 만드나"가 아니라 "엔드포인트가 네트워크 계층에서 얼마나 빨리 응답하나"를 나타냅니다.',
+    's5.limit.failed': '<strong>측정 실패:</strong> 응답이 없거나(타임아웃) 서버 오류(HTTP 5xx)가 돌아온 측정은 레이턴시 값과 분위수에 넣지 않고 실패로 따로 셉니다. 서버가 오류를 내는 데 걸린 시간은 그 서비스의 응답 속도가 아니기 때문입니다. 인증 없이 보낸 요청에 4xx가 돌아온 경우는 서버가 응답한 것이므로 측정값으로 씁니다.',
     's5.limit.probe': '<strong>Probe 미적용:</strong> 레이턴시 랭킹은 앱을 제외한 모든 분야에서 엔드포인트를 직접 probe하는 서비스를 대상으로 합니다. 대표성 있는 엔드포인트를 찾지 못해 probe하지 않는 서비스(대부분의 앱, 일부 코딩 에이전트, Azure OpenAI · Modal)는 제외되며, Character.AI는 probe하지만 앱이라 상세 페이지에만 표시합니다.',
     's6.title': '인시던트 · MTTR · 탐지',
     's6.counting.title': '인시던트 집계',
@@ -714,6 +716,7 @@ const i18n = {
     's5.lead': 'We measure the endpoints of 35 AI services directly from the Cloudflare Workers edge every 5 minutes, producing p50 / p75 / p95 percentiles.',
     's5.limit.label': 'Key limit — network RTT ≠ inference latency',
     's5.limit.body': 'Probe RTT measures <strong>network round-trip time</strong>, NOT a model\\\'s inference (token-generation) latency. It reflects how fast the endpoint responds at the network layer, not how fast the service generates tokens.',
+    's5.limit.failed': '<strong>Failed probes:</strong> A probe that gets no response (timeout) or a server error (HTTP 5xx) is left out of the latency value and its percentiles and counted as a failure instead — the time a server takes to fail is not how fast the service responds. A 4xx answer to our unauthenticated request means the server responded, so it is kept as a measurement.',
     's5.limit.probe': '<strong>No probe:</strong> The latency ranking covers services whose endpoint we probe directly, in every category except apps. Services with no representative endpoint we can probe (most apps, some coding agents, Azure OpenAI and Modal) are excluded; Character.AI is probed but, as an app, shown on its detail page only.',
     's6.title': 'Incidents · MTTR · Detection',
     's6.counting.title': 'Incident counting',

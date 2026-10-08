@@ -9,6 +9,7 @@ import EmptyState from '../components/EmptyState'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
 import { rankedByLatency } from '../utils/latencyRanking'
+import { measuredRtt } from '../../worker/src/probe'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -89,8 +90,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
         const svcIds = new Set(points.flatMap((s) => Object.keys(s.data ?? {})))
         for (const id of svcIds) {
           const vals = points.map((s) => {
-            const v = s.data?.[id]
-            return v?.rtt > 0 ? v.rtt : null
+            return measuredRtt(s.data?.[id])
           }).filter((v) => v != null)
           if (vals.length > 0) merged[id] = { rtt: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length), status: 'ok' }
         }
@@ -121,8 +121,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
     const datasets = apiServices.map((svc) => ({
       label: svc.name,
       data: chartData.map((s) => {
-        const val = s.data[svc.id]
-        return val?.rtt > 0 ? val.rtt : null
+        return measuredRtt(s.data[svc.id])
       }),
       borderColor: SERVICE_COLOR[svc.id] ?? '#8b949e',
       borderWidth: isMobile ? 1 : 1.5,

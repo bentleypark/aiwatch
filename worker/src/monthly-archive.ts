@@ -6,7 +6,7 @@
 // stored in incidents:monthly:{YYYY-MM} KV key (60d TTL). This ensures accurate monthly
 // incident counts, unlike services:latest which is a point-in-time snapshot.
 
-import type { ProbeDailyData } from './probe-archival'
+import type { ProbeDailyData, ProbeFailureCounts } from './probe-archival'
 import { summariesFromDailyData } from './probe-archival'
 import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './types'
 import { calculateAIWatchScore, classifyProbe, mergeImpactWindows } from './score'
@@ -131,6 +131,9 @@ export interface MonthlyServiceData {
   avgLatencyMs: number | null    // average probe RTT p75 in ms (null if no probe data)
   p95LatencyMs: number | null    // mean of daily probe RTT p95 in ms (#17 — null if no valid p95 data)
   latencySpikes: number | null   // total RTT spikes this month (rtt>3×median or failed probe; #17 — null if no probe data)
+  /** #1644 — failed probes this month by kind, summed over the days that recorded them. Null when no
+   *  day did; ABSENT on archives written before it. */
+  probeFailures?: ProbeFailureCounts | null
   /** #1002 / aiwatch-reports#76 — the two figures **`monthlyScore`'s** Responsiveness component (20 pts)
    *  was scored on: `computeResponsiveness` reads p50 (the `speed` axis) + cvCombined (`stability`).
    *  Both are computed at build time to derive `monthlyScore`, and were then discarded — so a reader
@@ -1425,10 +1428,11 @@ export function computeMonthlyLatency(
  */
 export function computeMonthlyLatencyStats(
   probeData: Record<string, ProbeDailyData>,
-): Record<string, { p95: number | null; spikes: number }> {
+): Record<string, { p95: number | null; spikes: number; failures: ProbeFailureCounts | null }> {
   const p95Sums: Record<string, number> = {}
   const p95Counts: Record<string, number> = {}
   const spikeTotals: Record<string, number> = {}
+  const failureTotals: Record<string, ProbeFailureCounts> = {}
   for (const daily of Object.values(probeData)) {
     for (const [id, stat] of Object.entries(daily)) {
       if (stat.p95 > 0) {
@@ -1438,14 +1442,21 @@ export function computeMonthlyLatencyStats(
       if (typeof stat.spikes === 'number' && stat.spikes > 0) {
         spikeTotals[id] = (spikeTotals[id] ?? 0) + stat.spikes
       }
+      if (stat.failures) {
+        const t = failureTotals[id] ??= { timeout: 0, http5xx: 0, http429: 0 }
+        t.timeout += stat.failures.timeout
+        t.http5xx += stat.failures.http5xx
+        t.http429 += stat.failures.http429
+      }
     }
   }
-  const result: Record<string, { p95: number | null; spikes: number }> = {}
+  const result: Record<string, { p95: number | null; spikes: number; failures: ProbeFailureCounts | null }> = {}
   const ids = new Set([...Object.keys(p95Sums), ...Object.keys(spikeTotals)])
   for (const id of ids) {
     result[id] = {
       p95: p95Counts[id] ? Math.round(p95Sums[id] / p95Counts[id]) : null,
       spikes: spikeTotals[id] ?? 0,
+      failures: failureTotals[id] ?? null,
     }
   }
   return result
@@ -2089,6 +2100,7 @@ export async function buildMonthlyArchive(
       avgLatencyMs: latencyMap[id] ?? null,
       p95LatencyMs: latencyStats[id]?.p95 ?? null,
       latencySpikes: latencyStats[id]?.spikes ?? null,
+      probeFailures: latencyStats[id]?.failures ?? null,
       // #1002 / aiwatch-reports#76 — the p50 + cvCombined monthlyScore's Responsiveness was computed
       // from, off the same `monthlySummaries` computeMonthlyScore reads. Null (not absent) when it
       // scored none, matching how every other later-added measurement here reports "no data"
