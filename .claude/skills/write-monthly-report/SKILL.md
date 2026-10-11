@@ -130,6 +130,12 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      Movers / p75). Never invent a number, and never assert incident detail the archive doesn't carry —
      hedge a long-"open"-status artifact (a 264h open window ≠ a 264h hard outage; an Instatus/Nuxt
      ongoing incident has no final duration). The AUTO-DRAFT blocks are a starting draft to adapt, not to keep.
+   - **A low Incidents score is not "unreliable" by itself (aiwatch#1657).** The component counts affected
+     days (one per day, however long the incident), so a provider posting short `minor` notices on many days scores low on it. Before a
+     Rankings **Why** cell or a narrative blames incidents, check that service's `incidentList` in
+     `_data/YYYY-MM.json` (`impact` + `durationMin`; the Incident Summary table has no impact column): if the
+     entries are mostly short `minor` ones, write "frequent short notices", not "unstable" — `/methodology#score`
+     says the same to readers.
    - **The KO `<details>` mirrors must read as NATIVE Korean, not 직역투 (literal EN calques).** This is a
      recurring critique. The KO is a *translation of the meaning*, not word-for-word — read each KO sentence
      aloud; if it sounds translated, rewrite it. Common calques to avoid: *decompose/decomposition* → **not**

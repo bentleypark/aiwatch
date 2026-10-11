@@ -457,6 +457,7 @@ ${consentInitScript(nonce)}
     </div>
     <p class="note" data-i18n="s4.inc.note">표의 값은 critical/major 영향(가중치 1.0)을 기준으로 합니다. minor만 발생한 날은 가중치 0.3입니다 — 예: minor 5일 ≈ 가중 1.5일 ≈ 21.5점.</p>
     <p data-i18n="s4.inc.why"><strong>영향 일수를 쓰는 이유:</strong> 일부 서비스는 하나의 장애를 모델·컴포넌트별로 여러 인시던트로 나눠 보고해 같은 장애가 여러 건으로 집계됩니다. 그래서 건수가 아닌 영향 일수를 쓰고, 각 날짜를 그날의 가장 심각한 영향도로 가중합니다 — critical/major = 1.0, minor = 0.3, 정보성/null = 제외. 인시던트는 시작한 기간에 속하며, 해결된 인시던트는 시작한 날부터 해결된 날까지 걸친 모든 날을 셉니다.</p>
+    <p data-i18n="s4.inc.freq"><strong>날짜 단위로 셉니다:</strong> 같은 날 안에서는 인시던트가 얼마나 길었든 하루로 셉니다(길이는 주로 Uptime Score와 Recovery Score에 반영됩니다). 그래서 짧은 minor 공지를 여러 날에 걸쳐 자주 올리는 서비스는 이 항목이 더 낮게 나올 수 있습니다 — 예: 5분짜리 minor 공지가 10일 ≈ 가중 3.0일 ≈ 18.5점, 같은 날 시작해 끝난 12시간짜리 major 장애 1건 ≈ 가중 1.0일 ≈ 22.6점. 공지가 잦다고 해서 덜 안정적인 것은 아니므로, 서비스를 비교할 때는 Uptime Score와 함께 보세요.</p>
   </div>
 
   <!-- Recovery sub -->
@@ -604,6 +605,7 @@ const i18n = {
     's4.inc.title': 'Incident Score (0~25)',
     's4.inc.note': '표의 값은 critical/major 영향(가중치 1.0)을 기준으로 합니다. minor만 발생한 날은 가중치 0.3입니다 — 예: minor 5일 ≈ 가중 1.5일 ≈ 21.5점.',
     's4.inc.why': '<strong>영향 일수를 쓰는 이유:</strong> 일부 서비스는 하나의 장애를 모델·컴포넌트별로 여러 인시던트로 나눠 보고해 같은 장애가 여러 건으로 집계됩니다. 그래서 건수가 아닌 영향 일수를 쓰고, 각 날짜를 그날의 가장 심각한 영향도로 가중합니다 — critical/major = 1.0, minor = 0.3, 정보성/null = 제외. 인시던트는 시작한 기간에 속하며, 해결된 인시던트는 시작한 날부터 해결된 날까지 걸친 모든 날을 셉니다.',
+    's4.inc.freq': '<strong>날짜 단위로 셉니다:</strong> 같은 날 안에서는 인시던트가 얼마나 길었든 하루로 셉니다(길이는 주로 Uptime Score와 Recovery Score에 반영됩니다). 그래서 짧은 minor 공지를 여러 날에 걸쳐 자주 올리는 서비스는 이 항목이 더 낮게 나올 수 있습니다 — 예: 5분짜리 minor 공지가 10일 ≈ 가중 3.0일 ≈ 18.5점, 같은 날 시작해 끝난 12시간짜리 major 장애 1건 ≈ 가중 1.0일 ≈ 22.6점. 공지가 잦다고 해서 덜 안정적인 것은 아니므로, 서비스를 비교할 때는 Uptime Score와 함께 보세요.',
     's4.rec.title': 'Recovery Score (0~15)',
     's4.rec.note': 'MTTR은 해결된 인시던트의 장애 구간 길이로 구한 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록). 시간이 겹치는 인시던트는 하나의 구간으로 합칩니다.',
     's4.resp.title': 'Responsiveness Score (0~20)',
@@ -696,6 +698,7 @@ const i18n = {
     's4.inc.title': 'Incident Score (0–25)',
     's4.inc.note': 'Table values assume critical/major impact days (weight 1.0). Minor-only days are weighted 0.3 — e.g. 5 minor days ≈ 1.5 weighted days ≈ 21.5 points.',
     's4.inc.why': '<strong>Why affected days:</strong> some services split one outage into several incidents, per model or per component, so it gets counted multiple times. We use affected days instead of raw count, each day weighted by its worst impact — critical/major = 1.0, minor = 0.3, informational/null = excluded. An incident belongs to the period it started in, and a resolved one counts every day from the one it started to the one it resolved.',
+    's4.inc.freq': '<strong>Counted by day:</strong> within one day, an incident counts once however long it lasted (duration mostly shows up in the Uptime and Recovery scores). A service that posts short minor notices on many days can therefore score lower here — e.g. a 5-minute minor notice on 10 days ≈ 3.0 weighted days ≈ 18.5 points, while one 12-hour major outage that starts and ends on the same day ≈ 1.0 weighted day ≈ 22.6 points. Posting more often does not mean being less reliable, so read this component together with the Uptime score when comparing services.',
     's4.rec.title': 'Recovery Score (0–15)',
     's4.rec.note': 'MTTR is the 30-day median of resolved-incident impact windows (for a small sample of fewer than 3, an unusually long value is eased toward a 1-hour baseline so a single long incident cannot over-penalize a low-incident service). Incidents that overlap in time are merged into one window.',
     's4.resp.title': 'Responsiveness Score (0–20)',
