@@ -1,6 +1,6 @@
 /**
  * #1489 — one Analytics Engine row per `fetchAllServices` run: which path ran it, how long it took,
- * which services came back without an uptime figure, and how the run's fetches failed. The
+ * which services came back without a freshly read uptime figure, and how the run's fetches failed. The
  * before/after measure for changes to how the status fetch spends its connections.
  */
 import type { ServiceStatus } from './types'
@@ -19,10 +19,10 @@ export function recordStatusFetchRun(
 ): void {
   if (!analytics) return
   try {
-    const nullIds = services.filter((s) => s.uptime30d == null).map((s) => s.id).sort()
+    const nullIds = services.filter((s) => s.uptime30d == null || s.uptimeCarriedFrom).map((s) => s.id).sort()
     analytics.writeDataPoint({
-      // blob1 route, blob2 null-uptime service ids (comma-joined, sorted).
-      // doubles: count, wall-clock ms, services with uptime30d null, services returned, most fetches
+      // blob1 route, blob2 ids with no uptime read this run (null or carried; comma-joined, sorted).
+      // doubles: count, wall-clock ms, services with no uptime read this run, services returned, most fetches
       // waiting for headers at once, fetches answered, timeouts, non-2xx responses, other fetch errors,
       // then the other fetches waiting at each start, summed over the answered and over the timeouts.
       blobs: [route, nullIds.join(',')],

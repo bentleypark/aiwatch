@@ -15,6 +15,7 @@ Browser (React SPA, 60s polling)
       fetches were waiting for headers when each one started, for the timeouts and the answers apart.
     → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes (#717: failed aistudio read holds last-known ACTIVE aistudio incidents from services:latest instead of dropping to vertex-only, so the incident doesn't flap in/out per refresh; successful read is authoritative)
     → normalize to ServiceStatus[]
+    → #1489: a service whose uptime read failed this run publishes services:latest's last figure (`carryForwardUptime`, marked `uptimeCarriedFrom`) for up to 6h after that figure was read — the same 6h after which the uptime-missing alert fires
     → write to KV (cache + daily counters), THROTTLED to 10-min (cacheWrite)
     → #1057: if this poll's status differs from the cached snapshot while throttled, force an immediate
       CACHE_KEY-only refresh (refreshStatusCacheOnLiveEdge, off-response via ctx.waitUntil) so the

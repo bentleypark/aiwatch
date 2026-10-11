@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
-import { fetchTracked, createFetchTracker, type FetchTracker, type FetchRunStats, formatDuration, markZeroLengthResolvedIncidentsUnknown, normalizeIncidentTimes, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
+import { fetchTracked, createFetchTracker, type FetchTracker, type FetchRunStats, formatDuration, markZeroLengthResolvedIncidentsUnknown, normalizeIncidentTimes, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, UPTIME_MISSING_ALERT_MS, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, isStorableOverlayIncident } from './mistral-public-api'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, applyProbeLatency, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
@@ -670,6 +670,40 @@ export function carryOverAistudioIncidents(
     if (Number.isFinite(started) && now - started > maxAgeMs) return false
     return true
   })
+}
+
+/**
+ * #1489 — a run that could not read a service's uptime publishes the previous snapshot's figure instead
+ * of null, for at most `maxAgeMs` after the last real reading. `uptimeCarriedFrom` holds that reading's
+ * time, so the age cap holds across consecutive carries. Mutates `services`; returns the ids carried.
+ */
+export function carryForwardUptime(
+  services: ServiceStatus[],
+  prevServices: ServiceStatus[] | null,
+  now: number,
+  maxAgeMs: number = UPTIME_MISSING_ALERT_MS,
+): string[] {
+  if (!prevServices) return []
+  const carried: string[] = []
+  for (const svc of services) {
+    if (svc.uptime30d != null) continue
+    const prev = prevServices.find((p) => p.id === svc.id)
+    if (prev?.uptime30d == null) continue
+    const readAt = prev.uptimeCarriedFrom ?? prev.lastChecked
+    const readMs = Date.parse(readAt)
+    if (!Number.isFinite(readMs) || now - readMs > maxAgeMs) continue
+    svc.uptime30d = prev.uptime30d
+    svc.uptimeCarriedFrom = readAt
+    if (prev.uptimeSource) svc.uptimeSource = prev.uptimeSource
+    if (prev.uptimeWindowDays != null) svc.uptimeWindowDays = prev.uptimeWindowDays
+    if (prev.uptimeReported != null) svc.uptimeReported = prev.uptimeReported
+    if (prev.uptimeReportedDays != null) svc.uptimeReportedDays = prev.uptimeReportedDays
+    if (svc.todayWeightedOutageSec == null && prev.todayWeightedOutageSec != null && readAt.slice(0, 10) === new Date(now).toISOString().slice(0, 10)) {
+      svc.todayWeightedOutageSec = prev.todayWeightedOutageSec
+    }
+    carried.push(svc.id)
+  }
+  return carried
 }
 
 export async function mergeAistudioIncidents(
@@ -4618,16 +4652,18 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // Read cached snapshot for fallback (only if needed)
   let cachedServices: ServiceStatus[] | null = null
   const needsFallback = raw.some((s) => s.status === 'degraded')
-  if (needsFallback && kv) {
+  const uptimeLost = raw.some((s) => s.uptime30d == null && trackingBefore[s.id]?.uptimeSeenAt)
+  if ((needsFallback || uptimeLost) && kv) {
     const cached = await kv.get(CACHE_KEY).catch(() => null)
     if (cached) {
-      // NOT normalised (#1233): the only thing read from this snapshot is `prev.status === 'operational'`
-      // below, and the transitional decode only ever rewrites `degraded` → `unknown` — both of which fail
+      // NOT normalised (#1233): apart from the uptime fields `carryForwardUptime` copies, which the decode
+      // does not touch, the only thing read from this snapshot is `prev.status === 'operational'` below, and the transitional decode only ever rewrites `degraded` → `unknown` — both of which fail
       // that test identically. A decode here would be a provable no-op, so it is left out rather than
       // added as reassurance. The read-side decode that matters is in `cacheRead` and `cronAlertCheck`.
       try { cachedServices = JSON.parse(cached).services } catch { console.warn('[fetchAllServices] corrupt services cache in KV — fallback not available') }
     }
   }
+  carryForwardUptime(raw, cachedServices, Date.now())
 
   // Enriched results (with cache fallback for degraded services)
   //

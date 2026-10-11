@@ -9,9 +9,9 @@
 // confined to things nobody is paged about: the Score switching to the no-uptime path, and the service
 // leaving the high-confidence ranking table (#1186).
 //
-// The signal is `trackUptimeReading` (utils.ts), which records per service WHEN the published
-// `uptime30d` went missing, at the one place that sees the final value rather than any single parser's
-// opinion. That placement is deliberate: it makes a vendor migration detectable by the same machinery
+// The signal is `trackUptimeReading` (utils.ts), which records per service WHEN the read `uptime30d`
+// went missing (before `carryForwardUptime`, #1489), at the one place that sees the final value rather
+// than any single parser's opinion. That placement is deliberate: it makes a vendor migration detectable by the same machinery
 // as a payload shape change, because from the reader's side those are the same event.
 //
 // The tracker records the absence; this sweep reports it. Keep that split — two earlier attempts judged

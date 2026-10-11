@@ -679,8 +679,9 @@ export const UPTIME_SEEN_RETENTION_MS = 2_592_000_000 // 30d
  * #1389/#957 — record whether this cycle produced an uptime figure, so that a service which STOPS
  * publishing becomes detectable. Called on every fetch, cron and live poll alike, unconditionally.
  *
- * `hasUptime` is the published `uptime30d`, not any one parser's opinion: what matters is whether the
- * READER got a number, whichever of the six sources produced it. That is what makes this catch a vendor
+ * `hasUptime` is the service's final `uptime30d` for this read, before `carryForwardUptime` (#1489), not
+ * any one parser's opinion: what matters is whether this run READ a number, whichever of the six sources
+ * produced it. That is what makes this catch a vendor
  * migration with the same machinery as a payload shape change, and why it lives here rather than in any
  * single parser.
  *

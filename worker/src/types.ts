@@ -257,6 +257,9 @@ export interface ServiceStatus {
    *  either a whole window OR a source that does not disclose one. The UI states the real window rather than
    *  passing a short one off as a 30-day figure. */
   uptimeWindowDays?: number
+  /** #1489 — set when this run could not read uptime and `uptime30d` is the last reading, taken at this
+   *  time (`carryForwardUptime`). */
+  uptimeCarriedFrom?: string
   detectedAt?: string
   /** BetterStack only: `parseBetterStackPartialCount` (#447); absent when 0. */
   partialCount?: number
