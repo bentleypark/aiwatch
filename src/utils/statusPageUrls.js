@@ -30,6 +30,7 @@ export const STATUS_URL = {
   stability:   'https://status.stability.ai',
   bfl:         'https://status.bfl.ml',
   voyageai:    'https://voyageai-status.statuspage.io',
+  jina:        'https://status.jina.ai',
   modal:       'https://status.modal.com',
   twelvelabs:  'https://status.twelvelabs.io',
   langsmith:   'https://global.status.smith.langchain.com/gcp-us',

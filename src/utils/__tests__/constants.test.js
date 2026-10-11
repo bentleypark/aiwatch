@@ -808,14 +808,14 @@ describe('#1119 — frontend mirror: a ROUTED outage crosses the category bounda
 
   it('an EXCLUDE_FALLBACK service is never a candidate, and a routed pool does not fire tierFor\'s warn for one', () => {
     // Two things in one shape, both tied to the guard ORDERING: the id-only guards must run before any
-    // tier lookup. Six EXCLUDE_FALLBACK members are deliberately absent from API_TIER, so a tier lookup
+    // tier lookup. EXCLUDE_FALLBACK members are deliberately absent from API_TIER, so a tier lookup
     // that sees them turns `tierFor`'s warn-once — the #402/#403 "someone forgot a tier entry"
     // breadcrumb — into standing false alarms. The membership half is behavioural; the warn half is
     // log-only, so only a spy can pin it.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const src = chatgpt(['Image Generation'])
-      const untiered = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'twelvelabs']
+      const untiered = ['replicate', 'huggingface', 'fal', 'modal', 'twelvelabs']
         .map((id, i) => op(id, 'api', `Untiered ${id}`, 90 + i))
       const ids = getFallbacks(src, [src, ...untiered, ...pool]).map(f => f.id)
       for (const id of untiered) expect(ids).not.toContain(id)
@@ -887,5 +887,21 @@ describe('#1119 — frontend mirror: a ROUTED outage crosses the category bounda
         expect(appAgentSet.has(id), `CAPABILITY_PROVIDERS.${cap} lists app/agent service "${id}"`).toBe(false)
       }
     }
+  })
+})
+
+// #880 — `fallbackSuppressed` is the worker's verdict that the outage is outside the service's fallback
+// scope; the dashboard must honour it rather than re-derive it.
+describe('getFallbacks — fallbackSuppressed (#880)', () => {
+  const jina = (extra = {}) => ({ id: 'jina', category: 'api', name: 'Jina AI', status: 'down', aiwatchScore: 70, incidents: [], ...extra })
+  const voyage = { id: 'voyageai', category: 'api', name: 'Voyage AI', status: 'operational', aiwatchScore: 80, incidents: [] }
+  it('recommends the embeddings sibling for an in-scope outage', () => {
+    expect(getFallbacks(jina(), [jina(), voyage]).map(f => f.id)).toEqual(['voyageai'])
+    expect(getGroupedFallbacks([jina()], [jina(), voyage]).map(g => g.items.map(f => f.id))).toEqual([['voyageai']])
+  })
+  it('recommends nothing when the worker marked the outage out of scope', () => {
+    const src = jina({ fallbackSuppressed: true })
+    expect(getFallbacks(src, [src, voyage])).toEqual([])
+    expect(getGroupedFallbacks([src], [src, voyage])).toEqual([])
   })
 })

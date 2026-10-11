@@ -310,7 +310,7 @@ test('#1444: membership is read off the config, not off a hand-kept list', () =>
   const members = fieldMembership(SERVICES)
   // The round-15 finding on #1434: four different spellings of this set across docs and comments, the
   // narrowest of them `cohere/groq`.
-  assert.deepEqual([...members.get('displayAllComponents')].sort(), ['bfl', 'cerebras', 'cohere', 'fireworks', 'groq'])
+  assert.deepEqual([...members.get('displayAllComponents')].sort(), ['bfl', 'cerebras', 'cohere', 'fireworks', 'groq', 'jina'])
   assert.ok(!members.has('id') && !members.has('name'), 'non-camelCase keys are prose, not citations')
   for (const s of SERVICES) assert.ok(s.keys.has('statusUrl'), `${s.id} parsed without statusUrl`)
 })

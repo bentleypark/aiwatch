@@ -18,7 +18,7 @@ export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate', 'fal',
   'elevenlabs', 'xai', 'deepseek', 'kimi', 'openrouter', 'bedrock', 'azureopenai',
-  'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'twelvelabs', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram', 'fishaudio',
+  'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'jina', 'modal', 'twelvelabs', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram', 'fishaudio',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -37,7 +37,7 @@ export const SERVICE_AND_APP_IDS = [
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram', 'fishaudio',
   // inference / infrastructure
-  'huggingface', 'replicate', 'fal', 'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'twelvelabs',
+  'huggingface', 'replicate', 'fal', 'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'jina', 'modal', 'twelvelabs',
   // LLM observability (#601)
   'langsmith', 'helicone', 'langfuse',
   // video-gen
@@ -59,7 +59,7 @@ export const SERVICE_CATEGORIES = {
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'kimi', 'openrouter'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
   voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram', 'fishaudio'] }, // #658 — STT/TTS
-  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'pinecone', 'turbopuffer', 'twelvelabs'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone/turbopuffer, #857). Observability (#601) and image (#756) split out to their own categories; vector stays here as a sidebar group (its ≥2-member split is a fallback tier only, #857) — remaining single-service sub-domains stay until they gain siblings
+  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'jina', 'pinecone', 'turbopuffer', 'twelvelabs'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone/turbopuffer, #857). Observability (#601) and image (#756) split out to their own categories; vector stays here as a sidebar group (its ≥2-member split is a fallback tier only, #857) — remaining single-service sub-domains stay until they gain siblings
   observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
   video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
   image:     { labelKey: 'filter.image',     ids: ['stability', 'bfl'] }, // #756 — image-gen split out (Stability + FLUX recommend each other, fallback tier 7); mirrors the video/observability precedent
@@ -81,7 +81,7 @@ export function categoryRankOf(id) {
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform, like replicate/huggingface); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform, like replicate/huggingface); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8); #880 — voyageai un-excluded (embeddings sibling Jina added, tier 9)
 
 // #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a
 // fallback (Analyze modal / Overview ActionBanner), so an outage-moment visitor can ACT on the
@@ -100,6 +100,8 @@ export const SERVICE_SITE_URL = {
   elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com', fishaudio: 'https://fish.audio',
   // Vector DB (#857) — pinecone + turbopuffer are now fallback candidates (Tier 8); keep in sync with api/is-down/slug-map.ts
   pinecone: 'https://www.pinecone.io', turbopuffer: 'https://turbopuffer.com',
+  // Embeddings (#880) — voyageai + jina are now fallback candidates (Tier 9)
+  voyageai: 'https://www.voyageai.com', jina: 'https://jina.ai',
   // Image
   // #1119 — MIRROR of api/_is-down/slug-map.ts (see there for the full rationale): Brand Studio is
   // Stability's consumer image product, so an image recommendation reached from an app-category outage
@@ -182,7 +184,7 @@ export function feedUrlOf(serviceId) {
 // makes sense (Settings Alerts, incident banner, sidebar footer — #433).
 export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
 
-// Fallback tier priority — API services (1-8) and coding agents (11) use distinct number ranges
+// Fallback tier priority — API services (1-9) and coding agents (11) use distinct number ranges
 // so TIER_LABEL maps each tier number to one unambiguous label. Within a category, getFallbacks
 // orders by tier-distance then by Score.
 //
@@ -209,6 +211,8 @@ export const API_TIER = {
   stability: 7, bfl: 7,
   // Tier 8 = Vector database (#857) — Pinecone + turbopuffer; pinecone un-excluded (≥2 members).
   pinecone: 8, turbopuffer: 8,
+  // Tier 9 = Embeddings + reranking (#880) — Voyage + Jina; voyageai un-excluded (≥2 members).
+  voyageai: 9, jina: 9,
   // Tier 11 = Coding agents (#1027) — one tier for all six; multi-form (CLI + IDE), Score-ordered.
   claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11,
   chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21, grok: 21,
@@ -217,7 +221,7 @@ export const API_TIER = {
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
 // promoted here so the sync test can compare both copies via a single import without parsing JSX.
 export const TIER_LABEL = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
   11: 'Coding Agent', // #1027 — single tier for all coding agents (was CLI/IDE/Plugin Agent)
   21: 'AI Apps',
 }
@@ -236,7 +240,7 @@ export function tierFor(id) {
   return 99
 }
 
-// #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 / Vector 8)
+// #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 / Vector 8 / Embeddings 9)
 // only recommends its OWN tier; cross-tier fill stays for LLM tiers (1-3). Mirror of worker/src/fallback.ts
 // isSpecializedSubTier. Agents (11) + apps (21) are separate categories → excluded (range 4-10).
 export function isSpecializedSubTier(tier) {
@@ -281,10 +285,11 @@ export function capabilityOfComponent(name) {
 }
 
 // #1062 facet B — the fallback TIER a degraded secondary capability routes to. Absent capabilities
-// (embeddings until #880; realtime — no peer) have no substitute → suppressed. MIRROR of worker copy.
+// (realtime — no peer) have no substitute → suppressed. MIRROR of worker copy.
 export const CAPABILITY_TIER = {
   image: 7,
   video: 5,
+  embeddings: 9,
   audio: 4,
 }
 const ROUTE_SUPPRESS = -1
@@ -295,6 +300,7 @@ export const CAPABILITY_LABEL = {
   image: 'Image generation',
   video: 'Video generation',
   audio: 'Audio / speech',
+  embeddings: 'Embeddings',
 }
 
 // #1129 — MIRROR of worker CAPABILITY_TAG_LABEL. A finer label for a ROUTED audio group, keyed by the
@@ -472,8 +478,9 @@ export function orderForFallback(candidates, sourceTier) {
  */
 export function getFallbacks(service, allServices) {
   if (!service || !Array.isArray(allServices) || EXCLUDE_FALLBACK.includes(service.id)) return []
+  if (service.fallbackSuppressed) return [] // #880 — the worker's verdict: outage outside the fallback scope
   // #1062 facet B — a single secondary-capability outage (e.g. OpenAI 'Images') routes to that
-  // capability's tier; a secondary cap with no peer tier (realtime/embeddings) suppresses.
+  // capability's tier; a secondary cap with no peer tier (realtime) suppresses.
   const routed = routingTier(service)
   if (routed === ROUTE_SUPPRESS) return []
   const sourceTier = routed ?? tierFor(service.id)
@@ -491,7 +498,7 @@ export function getFallbacks(service, allServices) {
   const routedCross = routed !== null && routed > 0
   const eligible = allServices
     // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either
-    // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the six deliberately-untiered
+    // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the deliberately-untiered
     // services and `tierFor`'s warn-once keeps meaning "someone forgot a tier entry" (#402/#403).
     .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== service.id
       && (routedCross ? inSourceTier(s.id) : s.category === service.category)
@@ -549,7 +556,7 @@ export function getGroupedFallbacks(affected, allServices) {
   // #1062 facet B — key/label by the EFFECTIVE tier (routed capability tier for a secondary-only outage)
   // so a routed OpenAI-'Images' outage groups + reads as "Image", not the source's LLM tier. Resolve each
   // anchor's candidates FIRST and keep only groups that render: a routed service that SUPPRESSES
-  // (Realtime/embeddings) yields none and its effectiveTierFor falls back to its own (LLM) tier — so
+  // (Realtime) yields none and its effectiveTierFor falls back to its own (LLM) tier — so
   // reserving that key pre-resolve dropped a later genuine-LLM sibling's group and inflated numGroups.
   // First-non-empty-per-key wins; numGroups is the count of rendered groups.
   const seenGroups = new Set()

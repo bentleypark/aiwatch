@@ -174,6 +174,8 @@ export interface ServiceStatus {
    *  above but retained here for the ServiceDetails / is-down breakdown. Present only when
    *  ≥2 components matched; absent otherwise. */
   components?: ServiceComponent[]
+  /** #880 — set by `fallbackSuppressedFor`; no surface recommends an alternative while it is true. */
+  fallbackSuppressed?: boolean
   /** When true, the breakdown UI renders its sections (each group as a collapsible
    *  block; each consecutive run of ungrouped components as a surface grid) in resolved COMPONENT-ARRAY
    *  order — each group placed where its first member appears — instead of the default "surfaces grid
@@ -376,6 +378,9 @@ export interface ServiceConfig {
   // 'AI Platform' can't collide with the sibling 'AI Platform China'. Takes precedence over
   // incidentKeywords; an untagged incident (no componentNames) matches nothing and is dropped.
   incidentComponents?: string[]
+  // #880 — component NAMES an outage must touch for this service to recommend an alternative
+  // (`fallbackSuppressedFor`). Badge, incidents and Score still cover the whole page.
+  fallbackComponents?: string[]
   incidentIoBaseUrl?: string
   // #1066 — this apiUrl is an incident.io "global"/multi-region page whose Atlassian v2 compat API
   // returns `components: []` (the live data is only in the page-root RSC). When set, fetchService

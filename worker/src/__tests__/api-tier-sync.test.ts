@@ -263,8 +263,8 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     expect(workerCapOf('Realtime')).toBe('realtime')
     expect(workerCapOf('Embeddings')).toBe('embeddings')
     expect(workerCapOf('Chat Completions')).toBe('llm')
-    // image/video/audio route to a tier; embeddings/realtime deliberately absent (→ suppress).
-    expect(workerCapTier).toEqual({ image: 7, video: 5, audio: 4 })
+    // image/video/audio/embeddings route to a tier; realtime deliberately absent (→ suppress).
+    expect(workerCapTier).toEqual({ image: 7, video: 5, audio: 4, embeddings: 9 })
   })
 
   it('api/is-down.ts inline CAPABILITY_TIER is EXACTLY the canonical map', () => {
@@ -331,7 +331,7 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     expect((isDownSource.match(/s\.category === entry\.category/g) ?? []).length,
       'api/is-down.ts must compare category exactly once — inside the #1119 ternary').toBe(1)
     // Ordering: EXCLUDE_FALLBACK must be evaluated BEFORE any tier lookup, or `tierFor`'s warn-once
-    // fires for the six deliberately-untiered services — and on the Edge that set is per-REQUEST.
+    // fires for the deliberately-untiered services — and on the Edge that set is per-REQUEST.
     expect(/\.filter\(s => !EXCLUDE_FALLBACK\.includes\(s\.id\) && s\.id !== entry\.id\s*\n\s*&& \(routedCross \?/.test(isDownSource),
       'is-down must test the id-only guards before the routed-tier lookup').toBe(true)
   })

@@ -473,8 +473,20 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Voyage AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Voyage AI every 5 minutes and shows real-time operational status.' },
       { q: 'How do I check Voyage AI status?', a: 'You can check Voyage status on this page, on the official Voyage status page (statuspage.io), or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to Voyage AI?', a: 'For embeddings and reranking, Cohere offers similar capabilities. OpenAI provides general-purpose embeddings as well. AIWatch shows current availability.' },
+      { q: 'What are alternatives to Voyage AI?', a: 'For embeddings and reranking, Jina AI and Cohere offer similar capabilities. OpenAI provides general-purpose embeddings as well. AIWatch shows current availability.' },
       { q: 'Does Voyage AI downtime affect RAG search?', a: 'Yes — both initial embedding and rerank steps depend on Voyage. Pipelines without cached embeddings or fallback rerankers will degrade. Check this page for current status.' },
+    ],
+  },
+  jina: {
+    displayName: 'Jina AI',
+    description: 'Jina AI provides embedding and reranking APIs (jina-embeddings, jina-reranker) for retrieval-augmented generation (RAG) and semantic search, plus the Reader (r.jina.ai) and Search (s.jina.ai) endpoints.',
+    insight: 'Jina AI posts an automated latency incident per model on its Atlassian status page, and AIWatch tracks every one of those models.',
+    whenDown: 'When Jina AI is down, RAG pipelines that embed queries or rerank results through its API will degrade — new documents cannot be indexed and search relevance drops until the API recovers.',
+    faqs: [
+      { q: 'Is Jina AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Jina AI every 5 minutes and shows real-time operational status.' },
+      { q: 'How do I check Jina AI status?', a: 'You can check Jina AI status on this page, on the official Jina AI status page at status.jina.ai, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'What are alternatives to Jina AI?', a: 'For embeddings and reranking, Voyage AI and Cohere offer similar capabilities. OpenAI provides general-purpose embeddings as well. AIWatch shows current availability.' },
+      { q: 'Why is no alternative suggested during some Jina AI outages?', a: 'During a Jina AI outage, AIWatch suggests Voyage AI when a text-embedding or reranker model is affected. An outage of r.jina.ai, s.jina.ai, CLIP or the code-embedding models is shown on this page without a suggestion.' },
     ],
   },
   modal: {

@@ -39,7 +39,7 @@ function isAbortTimeout(err: unknown): boolean {
 }
 
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
-const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
+const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8); #880 — voyageai un-excluded (embeddings sibling Jina added, tier 9)
 
 // #378: notify the Worker when this Edge Function falls back to a degraded render so an operator
 // Discord alert fires. Worker handles 5-min KV dedup, so fan-out across concurrent requests
@@ -243,6 +243,7 @@ export default async function handler(req: Request) {
           langsmith: 6, helicone: 6, langfuse: 6, // Observability (#601) — keep in sync with worker/src/fallback.ts
           stability: 7, bfl: 7, // Image (#756) — keep in sync with worker/src/fallback.ts
           pinecone: 8, turbopuffer: 8, // Vector (#857) — keep in sync with worker/src/fallback.ts
+          voyageai: 9, jina: 9, // Embeddings (#880) — keep in sync with worker/src/fallback.ts
           claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11, // Coding agents (#1027) — one tier; keep in sync with worker/src/fallback.ts
           chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21, grok: 21,
         }
@@ -276,8 +277,7 @@ export default async function handler(req: Request) {
         // #1062 facet B — inline mirror of worker/src/fallback.ts routingTier. When THIS service's own
         // component snapshot shows ONLY a single secondary-capability surface degraded (e.g. OpenAI
         // 'Images' down, 'Chat Completions' operational), route the fallback to that capability's tier
-        // instead of LLM peers; a capability with no CAPABILITY_TIER entry (realtime; embeddings until #880
-        // adds a tier) suppresses. Keep identical to the worker copy: api-tier-sync.test.ts pins this via
+        // instead of LLM peers; a capability with no CAPABILITY_TIER entry (realtime) suppresses. Keep identical to the worker copy: api-tier-sync.test.ts pins this via
         // SOURCE match (Edge can't be imported) — CAPABILITY_TIER deep-equal, each COMPONENT_CAPABILITY
         // [regex, cap] literal, the routingTier guards (has('llm') / size>1 / route-else-suppress), and the
         // routingTier(target) wiring. Not execution-verified; keep the body byte-identical to the worker.
@@ -285,8 +285,8 @@ export default async function handler(req: Request) {
           [/image/i, 'image'], [/\b(sora|video)\b/i, 'video'],
           [/audio|speech|voice|transcri/i, 'audio'], [/embed/i, 'embeddings'], [/realtime/i, 'realtime'],
         ]
-        const CAPABILITY_TIER: Record<string, number> = { image: 7, video: 5, audio: 4 }
-        const CAPABILITY_LABEL: Record<string, string> = { image: 'Image generation', video: 'Video generation', audio: 'Audio / speech' }
+        const CAPABILITY_TIER: Record<string, number> = { image: 7, video: 5, embeddings: 9, audio: 4 }
+        const CAPABILITY_LABEL: Record<string, string> = { image: 'Image generation', video: 'Video generation', audio: 'Audio / speech', embeddings: 'Embeddings' }
         // #1062 facet C — inline mirror. Multimodal providers admitted into a dedicated capability tier's
         // candidate pool (only OpenAI has monitored image/audio components → faithful health proxy; `video` has none, see fallback-tiers.md).
         const CAPABILITY_PROVIDERS: Record<string, string[]> = { image: ['openai'], video: ['openai'], audio: ['openai'] }
@@ -314,7 +314,7 @@ export default async function handler(req: Request) {
           const cap = Object.keys(CAPABILITY_TIER).find(k => CAPABILITY_TIER[k] === routed)
           fallbackCapabilityLabel = cap ? CAPABILITY_LABEL[cap] : undefined
         }
-        if (!EXCLUDE_FALLBACK.includes(entry.id) && routed !== ROUTE_SUPPRESS) {
+        if (!EXCLUDE_FALLBACK.includes(entry.id) && routed !== ROUTE_SUPPRESS && !target?.fallbackSuppressed) { // #880
           const sourceTier = routed ?? tierFor(entry.id)
           // #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 /
           // Vector 8) recommends its OWN tier only (no cross-tier bleed); LLM tiers 1-3 keep cross-tier
@@ -405,7 +405,7 @@ export default async function handler(req: Request) {
             // this fires in — an incident now survives our own component's recovery — see
             // docs/reference/status-determination.md.
             // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either.
-            // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the six deliberately-untiered
+            // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the deliberately-untiered
             // services. `warnedTierIds` above is per-REQUEST on the Edge, so a routed page would
             // otherwise log six "no API_TIER" false alarms on EVERY view (#402/#403 breadcrumb).
             .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id

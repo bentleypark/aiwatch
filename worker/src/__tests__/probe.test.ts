@@ -77,10 +77,11 @@ describe('PROBE_TARGETS', () => {
     'cursor', // #883 — coding agent with its own API infra (api2.cursor.sh), independent signal
     'characterai', // #921 — app whose Statuspage died (#689/#800); neo.character.ai/health backend probe
     'fishaudio', // #1549
+    'jina', // #880
   ]
 
-  it('has all 35 probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(35)
+  it('has all 36 probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(36)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)

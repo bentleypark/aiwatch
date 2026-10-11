@@ -18,7 +18,7 @@ export const GROUP_MEMBERS: Record<ServiceGroup, readonly string[]> = {
   llm: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'kimi', 'openrouter'],
   agents: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'],
   voice: ['elevenlabs', 'assemblyai', 'deepgram', 'fishaudio'],
-  inference: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'pinecone', 'turbopuffer', 'twelvelabs'],
+  inference: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'jina', 'pinecone', 'turbopuffer', 'twelvelabs'],
   observability: ['langsmith', 'helicone', 'langfuse'],
   video: ['runway', 'luma'],
   image: ['stability', 'bfl'],

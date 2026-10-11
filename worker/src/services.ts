@@ -405,6 +405,13 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentGroupsInline: true, addedAt: '2026-06-24', rosterAuditFixedScope: true }, // #802
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
+  // Jina AI (#880) — embeddings + reranking, Voyage's sibling in the Embeddings fallback tier (9). The badge,
+  // uptime and incident list cover every model component on the page; `fallbackComponents` limits the
+  // RECOMMENDATION to the text-embedding + reranker models that substitute for Voyage, so a code-embeddings,
+  // CLIP, VLM or Reader/Search (r.jina.ai, s.jina.ai) outage shows as an outage but recommends nothing.
+  // rosterAuditExclude = the page's 3 group headers. Every incident on the page (50 read 2026-10-11) is
+  // machine-emitted from a P99-latency monitor, all `minor`, mostly 5m — hence holdShortIncidents.
+  { id: 'jina', name: 'Jina AI', provider: 'Jina AI', category: 'api', statusUrl: 'https://status.jina.ai', apiUrl: 'https://status.jina.ai/api/v2/summary.json', statusComponentId: 'fc5zn3rkh5bd', statusComponentIds: ['fc5zn3rkh5bd', 'v6lh7spvvvf5', '7b9xrr2ksh44', '67hcttb83zzv', 'skb1snhyjd6h', 'phbgjfg719q6', 'd52c7tz1hnpd', 'b2tt4jb1x7pz', 'd7nnpf4sr394', 'dwcjc0rgg6hn', 'cm0h2r8mw593', '3f6qdtwq4yv6', 'lbtxhdqvr205', 'yxvtk6kpvycp', '895s37lq7d5q'], fallbackComponents: ['jina-embeddings-v4', 'jina-embeddings-v3', 'jina-embeddings-v5-text-small', 'jina-embeddings-v5-text-nano', 'Rest Embeddings', 'jina-reranker-v2-base-multilingual', 'jina-reranker-v3', 'jina-reranker-m0', 'Rest Rerankers'], displayAllComponents: true, holdShortIncidents: true, rosterAuditExclude: ['6d9w2f73tz7v', 'hq1bx2j16lhs', 'ftwn2h2xvr77'], addedAt: '2026-10-11' }, // #802
   { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website'] },
   // Twelve Labs (#839) — video understanding / multimodal AI platform (search, embed, analyze over
   // video via Marengo & Pegasus foundation models). Atlassian Statuspage (page 5j9dmpdjtybc) →
@@ -2338,6 +2345,28 @@ export async function fetchService(config: ServiceConfig, prefetched: Prefetched
   // it must hold on every one of this function's ~10 return paths, and a per-return copy is a rule
   // nothing enforces. See `withUnreadFeedFlag`.
   return withUnreadFeedFlag(incidents === svc.incidents ? svc : { ...svc, incidents })
+}
+
+/** #880 — does this service's current outage fall outside its `fallbackComponents`? Pure. */
+export function fallbackSuppressedFor(
+  scopeNames: string[],
+  components: Array<{ name: string; status: string }>,
+  incidents: Array<{ status: string; componentNames?: string[] }>,
+): boolean {
+  if (components.length === 0) return false
+  const scope = new Set(scopeNames.map((n) => n.toLowerCase()))
+  const inScope = (name: string) => scope.has(name.toLowerCase())
+  const affected = components.filter((c) => c.status !== 'operational')
+  const active = incidents.filter((i) => i.status !== 'resolved')
+  if (affected.length === 0 && active.length === 0) return false
+  if (affected.some((c) => inScope(c.name))) return false
+  return !active.some((i) => !i.componentNames?.length || i.componentNames.some(inScope))
+}
+
+function withFallbackScope(svc: ServiceStatus): ServiceStatus {
+  const scope = SERVICES.find((c) => c.id === svc.id)?.fallbackComponents
+  if (!scope) return svc
+  return fallbackSuppressedFor(scope, svc.components ?? [], svc.incidents) ? { ...svc, fallbackSuppressed: true } : svc
 }
 
 // #1224 — `trackingStore` is the in-memory blob `trackFetchFailure`/etc. mutate directly (see
@@ -4649,8 +4678,8 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   await writeTrackingStateIfChanged(kv, trackingBefore, trackingStore)
 
   return {
-    raw: applySuppressions(downclassifyAdvisoryIncidents(raw), suppressions),
-    enriched: applySuppressions(downclassifyAdvisoryIncidents(enriched), suppressions),
+    raw: applySuppressions(downclassifyAdvisoryIncidents(raw), suppressions).map(withFallbackScope),
+    enriched: applySuppressions(downclassifyAdvisoryIncidents(enriched), suppressions).map(withFallbackScope),
     pageComponents,
     // NOT suppression-filtered: `applySuppressions` is an operator layer over AIWatch's OWN service
     // incidents (#904), and a feed has no card, no Score and no accumulator for a suppression to

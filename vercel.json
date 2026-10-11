@@ -62,6 +62,7 @@
     { "source": "/is-stability-down", "destination": "/api/is-down?slug=stability" },
     { "source": "/is-flux-down", "destination": "/api/is-down?slug=flux" },
     { "source": "/is-voyageai-down", "destination": "/api/is-down?slug=voyageai" },
+    { "source": "/is-jina-down", "destination": "/api/is-down?slug=jina" },
     { "source": "/is-modal-down", "destination": "/api/is-down?slug=modal" },
     { "source": "/is-twelvelabs-down", "destination": "/api/is-down?slug=twelvelabs" },
     { "source": "/is-langchain-down", "destination": "/api/is-down?slug=langchain" },

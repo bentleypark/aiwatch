@@ -138,7 +138,7 @@ describe('#1381 Mistral (Rootly) service config', () => {
     expect(byCapability.get('llm')).toHaveLength(11)
     expect([...byCapability.keys()].sort()).toEqual(['audio', 'embeddings', 'llm'])
     const unroutable = [...byCapability.keys()].filter((c) => c !== 'llm' && !(c in CAPABILITY_TIER))
-    expect(unroutable).toEqual(['embeddings'])
+    expect(unroutable).toEqual([])
   })
 
   it('the rename did not move a component across a capability boundary', () => {
@@ -148,9 +148,9 @@ describe('#1381 Mistral (Rootly) service config', () => {
     expect(capabilityOfComponent('Completion API')).toBe('llm')
   })
 
-  it('routes audio to the Voice tier and SUPPRESSES embeddings until #880', () => {
+  it('routes audio to the Voice tier and embeddings to the Embeddings tier (#880)', () => {
     expect(CAPABILITY_TIER[capabilityOfComponent('Audio API')]).toBe(4)
-    expect(capabilityOfComponent('Embedding API') in CAPABILITY_TIER).toBe(false)
+    expect(CAPABILITY_TIER[capabilityOfComponent('Embedding API')]).toBe(9)
   })
 
   it('stays a tier-2 LLM service eligible for fallback recommendations', () => {

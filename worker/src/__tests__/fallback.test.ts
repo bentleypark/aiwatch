@@ -568,10 +568,10 @@ describe('getFallbacks — coding agents share one tier, Score-ordered (#1027)',
 })
 
 describe('EXCLUDE_FALLBACK', () => {
-  it('contains inference/embedding/infra services but not voice services', () => {
+  it('contains inference/infra services but not voice or embeddings services', () => {
     expect(EXCLUDE_FALLBACK).toContain('replicate')
     expect(EXCLUDE_FALLBACK).toContain('huggingface')
-    expect(EXCLUDE_FALLBACK).toContain('voyageai')
+    expect(EXCLUDE_FALLBACK).not.toContain('voyageai')
     expect(EXCLUDE_FALLBACK).toContain('modal')
     expect(EXCLUDE_FALLBACK).not.toContain('elevenlabs')
     expect(EXCLUDE_FALLBACK).not.toContain('assemblyai')
@@ -877,14 +877,17 @@ describe('#1062 facet B — capability routing on a secondary-component outage',
       expect(groups[0].fallbacks.map((f) => f.name)).not.toContain('Cohere API') // never an LLM peer
     })
 
-    it('SUPPRESSES an Embeddings-API-only outage until #880 adds an embeddings tier', () => {
-      // Deliberate, recorded behaviour change: previously this emitted default LLM peers. OpenAI and
-      // Cohere already suppress here; #761 makes Mistral consistent rather than leaving it with a
-      // wrong-capability recommendation. Flip this test when #880 lands.
+    it('routes an Embeddings-API-only outage to the Embeddings tier (#880), never an LLM peer', () => {
       const svc = mistral(only('Embeddings API'))
-      expect(routingTier(svc)).toBe(-1) // ROUTE_SUPPRESS
-      expect(getFallbacks('mistral', 'api', [svc, ...mistralPool])).toEqual([])
-      expect(getGroupedFallbacks(['mistral'], [svc, ...mistralPool])).toEqual([])
+      expect(routingTier(svc)).toBe(CAPABILITY_TIER.embeddings)
+      const embeddingsPool = [
+        { id: 'voyageai', category: 'api', name: 'Voyage AI', status: 'operational', aiwatchScore: 80 },
+        { id: 'jina', category: 'api', name: 'Jina AI', status: 'operational', aiwatchScore: 70 },
+      ]
+      const groups = getGroupedFallbacks(['mistral'], [svc, ...mistralPool, ...embeddingsPool])
+      expect(groups).toHaveLength(1)
+      expect(groups[0].label).toBe('Embeddings')
+      expect(groups[0].fallbacks.map((f) => f.name)).toEqual(['Voyage AI', 'Jina AI'])
     })
 
     it('falls back to normal LLM peers when the primary surface is degraded', () => {
@@ -923,9 +926,11 @@ describe('#1062 facet B — capability routing on a secondary-component outage',
       expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Sora', status: 'down' }]))).toBe(5)
       expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }]))).toBe(4)
     })
-    it('suppresses (-1) a secondary capability with no peer tier (realtime; embeddings pre-#880)', () => {
+    it('suppresses (-1) a secondary capability with no peer tier (realtime)', () => {
       expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Realtime', status: 'down' }]))).toBe(-1)
-      expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Embeddings', status: 'down' }]))).toBe(-1)
+    })
+    it('routes an embeddings-only outage to the Embeddings tier (#880)', () => {
+      expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Embeddings', status: 'down' }]))).toBe(9)
     })
     it('defaults (null) when the primary llm surface is degraded, or ambiguous/absent signal', () => {
       // primary among the degraded → LLM peers, not a modality reroute
@@ -964,10 +969,14 @@ describe('#1062 facet B — capability routing on a secondary-component outage',
     expect(getFallbacks('openai', 'api', services)).toEqual([])
   })
 
-  it('Cohere embeddings-only outage → SUPPRESSED until Voyage un-excluded (#880)', () => {
+  it('Cohere embeddings-only outage → recommends the Embeddings tier (Voyage/Jina), not LLM peers (#880)', () => {
     const cohere = { id: 'cohere', category: 'api', name: 'Cohere API', status: 'down', aiwatchScore: 76,
       components: [{ name: 'Coral', status: 'operational' }, { name: 'embeddings', status: 'down' }] }
-    expect(getFallbacks('cohere', 'api', [cohere, ...pool])).toEqual([])
+    const embeddings = [
+      { id: 'voyageai', category: 'api', name: 'Voyage AI', status: 'operational', aiwatchScore: 80 },
+      { id: 'jina', category: 'api', name: 'Jina AI', status: 'operational', aiwatchScore: 70 },
+    ]
+    expect(getFallbacks('cohere', 'api', [cohere, ...pool, ...embeddings])).toEqual([{ name: 'Voyage AI', score: 80 }, { name: 'Jina AI', score: 70 }])
   })
 
   it('OpenAI whole-API outage (primary degraded) → falls back to LLM peers (default, unchanged)', () => {
@@ -994,7 +1003,7 @@ describe('#1062 facet B — capability routing on a secondary-component outage',
     it('effectiveTierFor returns the routed tier for a secondary outage, else the service tier', () => {
       expect(effectiveTierFor(openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }]))).toBe(7)
       expect(effectiveTierFor(openai([{ name: 'Chat Completions', status: 'down' }]))).toBe(1) // primary → own tier
-      expect(CAPABILITY_TIER).toEqual({ image: 7, video: 5, audio: 4 })
+      expect(CAPABILITY_TIER).toEqual({ image: 7, video: 5, audio: 4, embeddings: 9 })
     })
 
     // A SUPPRESSED anchor (Realtime-only OpenAI) has effectiveTierFor = its own LLM tier, so its group
@@ -1378,13 +1387,13 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
 
   it('a routed pool does not fire tierFor\'s warn for the deliberately-untiered EXCLUDE_FALLBACK ids', () => {
     // Ordering guard: `!EXCLUDE_FALLBACK.includes(s.id)` must be evaluated BEFORE any tier lookup.
-    // Six EXCLUDE_FALLBACK members are intentionally absent from API_TIER, so letting a tier lookup see
+    // EXCLUDE_FALLBACK members are intentionally absent from API_TIER, so letting a tier lookup see
     // them turns `tierFor`'s warn-once — the #402/#403 "someone forgot a tier entry" breadcrumb — into
-    // six standing false alarms. Behaviour-neutral, so only a log assertion can pin it.
+    // standing false alarms. Behaviour-neutral, so only a log assertion can pin it.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const src = chatgpt(['Image Generation'])
-      const untiered = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'twelvelabs']
+      const untiered = ['replicate', 'huggingface', 'fal', 'modal', 'twelvelabs']
         .map((id, i) => op(id, 'api', `Untiered ${id}`, 50 + i))
       getFallbacks('chatgpt', 'app', [src, ...untiered, ...pool])
       expect(warn.mock.calls.filter(c => String(c[0]).includes('no API_TIER'))).toEqual([])

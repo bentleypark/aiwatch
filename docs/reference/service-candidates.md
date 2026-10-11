@@ -31,12 +31,12 @@ uptime and no incidents (see the declined gcloud sources below).
 A category with only ONE monitored service cannot get a sensible fallback recommendation during an
 outage. `getFallbacks` filters candidates by the **coarse** worker `category` (`'api'`) and then
 orders by `API_TIER` distance — so a solo service isn't short of candidates, it gets wrongly-tiered
-ones. Two outcomes, both bad: it sits in `EXCLUDE_FALLBACK` and returns nothing (Voyage AI today); or
+ones. Two outcomes, both bad: it sits in `EXCLUDE_FALLBACK` and returns nothing; or
 it is fallback-eligible and gets a semantically wrong cross-category pick (Runway was offered
 `openrouter`, an LLM router). A third is latent rather than live: since #859 capped the specialized
 sub-tiers (4–10) to same-tier-only, giving a solo service its own sub-tier would make `sameTierOnly`
-return `[]` — no service is in that state today (every *populated* specialized tier, 4–8, has ≥2
-members; 9 and 10 are unused), but it is the trap waiting for whoever adds tier 9. Adding a sibling is the prerequisite for a category-aware sub-tier. Tracking issue: #601; tier membership: [fallback-tiers.md](fallback-tiers.md).
+return `[]` — no service is in that state today (every populated specialized tier, 4–9, has ≥2
+members). Adding a sibling is the prerequisite for a category-aware sub-tier. Tracking issue: #601; tier membership: [fallback-tiers.md](fallback-tiers.md).
 
 **The one genuinely EMPTY tier is not a gap, and seeding it would create one.** `openrouter` is the
 only monitored service with ZERO same-tier candidates — tier 3 also holds `bedrock` and
@@ -58,9 +58,8 @@ LiteLLM, Vercel AI Gateway) are therefore **additive at best** — do not file t
 
 Three kinds of candidate, and they are not comparable:
 
-1. **The last remaining gap — [embeddings](#embeddings--open-voyage-ai-is-still-solo).** Voyage AI is
-   solo, so any sibling closes it; **#880 targets Jina AI**, with Nomic as the alternative. This is the
-   only row that buys a fallback *capability*.
+1. **No gap remains — [embeddings](#embeddings--closed-voyage-ai--jina-ai) closed with #880** (Jina AI
+   joined Voyage AI in tier 9). A further embeddings sibling (Nomic) is additive, like item 3.
 2. **The unseeded category — [Search / RAG](#search--rag--new-category-not-yet-seeded).** #392 (Tavily)
    is neither a gap-closer nor a 3rd sibling: nothing is monitored there at all. It lands under
    `inference` until an Exa/Linkup-class sibling justifies a `search` sub-tier, so it adds coverage
@@ -126,13 +125,13 @@ The earlier shortlist also named Langfuse and FLUX; both have since shipped.
 | Leonardo.ai | leonardo.instatus.com | Instatus ✅ | Yes (page branded "Rockgaming" — verify) |
 | ❌ Midjourney | — | Discord-only | **No** |
 
-## Embeddings — OPEN (Voyage AI is still solo)
+## Embeddings — CLOSED (Voyage AI + Jina AI)
 
-The **last** of the five single-service-category gaps. Execution issue: #880.
+The last of the five single-service-category gaps, closed by #880 (Jina AI added, tier 9).
 
 | Candidate | Status page | Platform | Monitorable |
 |---|---|---|---|
-| **Jina AI** | status.jina.ai | Atlassian ✅ | Yes — the #880 target. Re-verified Atlassian 2026-07-17 (`x-statuspage-version` header + `window.uptimeData`) |
+| **Jina AI** | status.jina.ai | Atlassian ✅ | Added in #880 |
 | **Nomic AI** | status.nomic.ai | incident.io ✅ | Yes — optional 3rd |
 | Mixedbread | mixedbread-ai.openstatus.dev | OpenStatus + RSS | Likely (RSS path only; no Atlassian/Instatus JSON) |
 

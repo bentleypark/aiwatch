@@ -9,8 +9,8 @@ import { MOCK_SERVICES } from './usePolling'
 describe('MOCK_SERVICES order (#796)', () => {
   const cats = MOCK_SERVICES.map((s) => s.category)
 
-  it('has the full 46-service roster', () => {
-    expect(MOCK_SERVICES.length).toBe(46)
+  it('has the full 47-service roster', () => {
+    expect(MOCK_SERVICES.length).toBe(47)
   })
 
   it('is grouped in the canonical api → app → agent order (matches worker SERVICES + live API)', () => {

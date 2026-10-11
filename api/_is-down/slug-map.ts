@@ -59,6 +59,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // src/utils/constants.js FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
   'flux':            { id: 'bfl',        name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', group: 'image' },
   'voyageai':        { id: 'voyageai',   name: 'Voyage AI',        provider: 'Voyage AI',   category: 'api', group: 'inference' },
+  'jina':            { id: 'jina',       name: 'Jina AI',          provider: 'Jina AI',     category: 'api', group: 'inference' }, // #880 — embeddings + reranking
   'modal':           { id: 'modal',      name: 'Modal',            provider: 'Modal',       category: 'api', group: 'inference' },
   // Twelve Labs (#839) — video-understanding API (search/embed/analyze), not video generation. Slug == worker id.
   'twelvelabs':      { id: 'twelvelabs', name: 'Twelve Labs',      provider: 'Twelve Labs', category: 'api', group: 'inference' },
@@ -131,7 +132,8 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'turbopuffer':    ['pinecone', 'voyageai'], // #857
   'stability':      ['flux', 'replicate', 'huggingface'], // #756 — image sibling first
   'flux':           ['stability', 'replicate', 'huggingface'], // #756
-  'voyageai':       ['pinecone', 'cohere'],
+  'voyageai':       ['jina', 'pinecone', 'cohere'], // #880 — embeddings sibling first
+  'jina':           ['voyageai', 'pinecone', 'cohere'], // #880
   'modal':          ['replicate', 'huggingface'],
   'twelvelabs':     ['replicate', 'huggingface', 'runway', 'luma'],
   'langchain':      ['helicone', 'langfuse'],
@@ -183,8 +185,8 @@ export const FAMILY_GROUPS: Record<string, ServiceFamily> = {
 // affordance (graceful). NOT an endorsement or paid placement — the link is disclosed + `rel="nofollow"`
 // (unpaid editorial; `sponsored` would falsely mark it paid) and rankings stay Score-only. Kept
 // byte-identical to the SPA mirror in src/utils/constants.js (pinned by service-site-url-sync test).
-// EXCLUDE_FALLBACK services (replicate/huggingface/fal/pinecone/voyageai/modal/characterai/bedrock/
-// azureopenai) are intentionally absent — they never appear as a fallback candidate.
+// EXCLUDE_FALLBACK services (replicate/huggingface/fal/modal/characterai/bedrock/azureopenai/
+// twelvelabs) are intentionally absent — they never appear as a fallback candidate.
 export const SERVICE_SITE_URL: Record<string, string> = {
   // LLM APIs
   claude: 'https://claude.com', openai: 'https://platform.openai.com', gemini: 'https://ai.google.dev',
@@ -197,6 +199,8 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   // Vector DB (#857) — pinecone + turbopuffer are now fallback candidates (Tier 8), so the "Open ↗"
   // referral wedge needs their product URLs (without these the actual relevant vector sibling had no button).
   pinecone: 'https://www.pinecone.io', turbopuffer: 'https://turbopuffer.com',
+  // Embeddings (#880) — voyageai + jina are now fallback candidates (Tier 9)
+  voyageai: 'https://www.voyageai.com', jina: 'https://jina.ai',
   // Image
   // #1119 — the image tier is now reachable from an APP-category outage (a ChatGPT image-generation
   // outage recommends these), so the "Open ↗" target has to be a surface a non-developer can actually

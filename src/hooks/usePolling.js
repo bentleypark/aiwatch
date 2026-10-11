@@ -459,6 +459,13 @@ export const MOCK_SERVICES = [
     incidents: [],
   },
   {
+    id: 'jina', category: 'api', name: 'Jina AI', provider: 'Jina AI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
     id: 'modal', category: 'api', name: 'Modal', provider: 'Modal', status: 'operational',
     latency: 210, uptime30d: 99.60,
     history30d: hist([12, 25]),

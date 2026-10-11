@@ -10,7 +10,7 @@ tags: [worker, cron, data-flow]
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (46 services) through one per-invocation `createFetchTracker` (#1489). It never delays a
+    → parallel fetch (47 services) through one per-invocation `createFetchTracker` (#1489). It never delays a
       fetch, and each `fetchWithTimeout` timeout starts at the `fetch()` call. It records, per run, how many other
       fetches were waiting for headers when each one started, for the timeouts and the answers apart.
     → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes (#717: failed aistudio read holds last-known ACTIVE aistudio incidents from services:latest instead of dropping to vertex-only, so the incident doesn't flap in/out per refresh; successful read is authoritative)

@@ -8,12 +8,14 @@ import { isAffectedStatus, asServiceStatus } from './status-verdict'
 // each other in Tier 7); bfl is fallback-eligible from the start (never added here).
 // #857 — pinecone un-excluded now that the vector category has ≥2 members (Pinecone + turbopuffer recommend
 // each other in Tier 8); turbopuffer is fallback-eligible from the start (never added here).
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs']
+// #880 — voyageai un-excluded now that the embeddings category has ≥2 members (Voyage + Jina recommend
+// each other in Tier 9); jina is fallback-eligible from the start (never added here).
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs']
 
 // Tier-based priority — same-tier services first via orderForFallback (#1186 — a confidence-aware
 // proportional interleave, NOT a raw Score sort; see that function's doc comment), then adjacent tiers
 // by distance.
-// API tiers (1-8) and the agent tier (11) use distinct number ranges so TIER_LABEL stays unambiguous
+// API tiers (1-9) and the agent tier (11) use distinct number ranges so TIER_LABEL stays unambiguous
 // and the category filter in getFallbacks prevents API ↔ agent leakage on every NON-routed path.
 // #1119 narrowed that claim: a capability-ROUTED source is pinned to the routed TIER instead of its
 // category, so an agent source can route INTO an api sub-tier (intended). The reverse cannot happen —
@@ -59,6 +61,9 @@ export const API_TIER: Record<string, number> = {
   // un-excluded from EXCLUDE_FALLBACK now that the category has ≥2 members. A distinct tier so a degraded
   // vector DB recommends its vector sibling (distance 0) over an LLM/voice/image/infra service.
   pinecone: 8, turbopuffer: 8,
+  // Tier 9 = Embeddings + reranking (#880 / #601 Phase 5). Voyage + Jina recommend each other; voyageai
+  // un-excluded from EXCLUDE_FALLBACK now that the category has ≥2 members.
+  voyageai: 9, jina: 9,
   // Tier 11 = Coding agents (#1027) — one tier for all six; multi-form (CLI + IDE), Score-ordered.
   claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11,
   // App-category services. All five share tier 21, so same-tier distance collapses to 0
@@ -122,6 +127,8 @@ interface FallbackCandidate {
    *  Completions' operational) and route the fallback to that capability's tier. Absent for services
    *  with <2 matched components; those fall to the default. */
   components?: Array<{ name: string; status: string }>
+  /** #880 — ServiceStatus.fallbackSuppressed: the source's outage is outside its fallback scope. */
+  fallbackSuppressed?: boolean
   /** #554 — provider is intentionally NOT read by selection here: the worker has no same-provider
    *  exclusion (the dashboard dropped its dashboard-only one for parity). Carried only so the #554
    *  parity-guard test can prove a same-provider clean candidate is kept — re-adding a provider
@@ -212,19 +219,12 @@ export function capabilityOfComponent(name: string): string {
 
 // #1062 facet B — the fallback TIER a degraded secondary capability routes to. A capability ABSENT from
 // this map (the mechanical suppress trigger, via routingTier's `cap in CAPABILITY_TIER ? … : SUPPRESS`)
-// has no monitored substitute → suppressed rather than mis-recommended. `embeddings`: no entry because
-// there is no embeddings tier — Voyage is both EXCLUDE_FALLBACK'd and untiered; enabling it needs #880 to
-// add a sibling + an API_TIER embeddings tier AND an entry here. `realtime`: no peer at all. Keep in lockstep.
-// LIVE CONSEQUENCE of the missing `embeddings` entry, recorded so it is a decision and not a
-// side effect: an embeddings-ONLY outage at a service whose components[] names an embeddings surface
-// emits NO fallback on any surface (RSS item, Discord alert, is-down card, Analyze modal) instead of
-// the pre-#1062 default LLM peers. That is already live for OpenAI and Cohere (whose components
-// include `embeddings`/`embed-*`), and #761 adds Mistral (`Embeddings API`) to the same behaviour —
-// deliberately, so all three act alike rather than Mistral keeping a wrong-capability recommendation.
-// #880 (Jina sibling + an embeddings tier + un-excluding Voyage) is what flips all of them to routing.
+// has no monitored substitute → suppressed rather than mis-recommended. `realtime`: no peer at all.
+// Keep in lockstep.
 export const CAPABILITY_TIER: Record<string, number> = {
   image: 7, // Stability / FLUX
   video: 5, // Runway / Luma
+  embeddings: 9, // Voyage / Jina (#880) — an embeddings-only OpenAI/Cohere/Mistral outage routes here
   // Voice tier. NB facet A's STT/TTS gate does NOT apply to a routed audio outage: the routed source
   // (e.g. OpenAI) is untagged in SERVICE_CAPABILITY, so sharesCapability(source, voice-svc) is always
   // true and ALL Voice services are eligible. That is acceptable here — OpenAI's 'Audio' component
@@ -244,6 +244,7 @@ export const CAPABILITY_LABEL: Record<string, string> = {
   image: 'Image generation',
   video: 'Video generation',
   audio: 'Audio / speech',
+  embeddings: 'Embeddings',
 }
 
 // #1129 — a finer label for a ROUTED audio group, keyed by the anchor's `SERVICE_CAPABILITY` sub-tag.
@@ -297,8 +298,7 @@ export function isCapabilityProvider(candidateId: string, sourceTier: number): b
 //                      signal (no components[]) or none is actually non-operational, OR ≥2 DISTINCT
 //                      secondary capabilities are degraded (ambiguous — don't guess which to route to).
 //   • ROUTE_SUPPRESS → exactly one secondary capability degraded but it has no available peer tier —
-//                      because it has no CAPABILITY_TIER entry (`realtime`; `embeddings`, whose peer
-//                      Voyage is both EXCLUDE_FALLBACK'd AND untiered until #880) → suppress.
+//                      because it has no CAPABILITY_TIER entry (`realtime`) → suppress.
 //   • a tier number  → route candidates to that capability's tier.
 // Requires components[]. No enumeration of "which services are multi-capability" is kept here: the
 // set is emergent (any service whose components[] names a surface COMPONENT_CAPABILITY matches), the
@@ -459,8 +459,9 @@ export function getFallbacks(
   services: FallbackCandidate[],
 ): Array<{ name: string; score: number | null }> {
   if (EXCLUDE_FALLBACK.includes(serviceId)) return []
+  if (services.find(s => s.id === serviceId)?.fallbackSuppressed) return []
   // #1062 facet B — if the outage is a single secondary-capability component (e.g. OpenAI 'Images'),
-  // route candidates to that capability's tier; if it has no peer tier (realtime/embeddings), suppress.
+  // route candidates to that capability's tier; if it has no peer tier (realtime), suppress.
   const routed = routingTier(services.find(s => s.id === serviceId))
   if (routed === ROUTE_SUPPRESS) return []
   const sourceTier = routed ?? tierFor(serviceId)
@@ -501,7 +502,7 @@ export function getFallbacks(
   // could make it reachable with no signal here.)
   const routedCross = routed !== null && routed > 0
   const eligible = services
-    // The two id-only guards run FIRST, before any tier lookup. Six of the nine EXCLUDE_FALLBACK
+    // The two id-only guards run FIRST, before any tier lookup. Most EXCLUDE_FALLBACK
     // members are deliberately absent from API_TIER, and the source itself may be an id it doesn't
     // carry — so
     // letting a tier lookup see either fires `tierFor`'s warn-once, the #402/#403 "someone forgot a tier
@@ -552,7 +553,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 // Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
 // Overview.jsx imports from there so there is no third inline copy to drift against.
 export const TIER_LABEL: Record<number, string> = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
   11: 'Coding Agent', // #1027 — single tier for all coding agents (matches CATEGORY_LABEL[agent])
   21: 'AI Apps', // matches CATEGORY_LABEL[app] so the existing buildGroupedFallbackText copy stays consistent
 }
@@ -643,7 +644,7 @@ export function getGroupedFallbacks(
       // incident still anchors, via `hasActiveIncident`.
       !!s && !EXCLUDE_FALLBACK.includes(s.id) && (isAffectedStatus(asServiceStatus(s.status)) || hasActiveIncident(s)))
   // #1062 facet B — resolve each anchor's candidates FIRST, keeping only groups that will actually
-  // render. A routed service that SUPPRESSES (Realtime/embeddings) yields no candidates, and its
+  // render. A routed service that SUPPRESSES (Realtime) yields no candidates, and its
   // `effectiveTierFor` falls back to its own (LLM) tier — so if it reserved the `api:LLM` key (as a
   // pre-resolve `seen.add` did), a later genuinely-LLM-down sibling sharing that key was silently
   // dropped, and it also inflated `numGroups`, needlessly narrowing surviving groups to perGroup=1.
