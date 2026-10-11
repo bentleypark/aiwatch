@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   classifyReferrer,
   parsePageviewBody,
+  classifyXLink,
   parseOutageAudienceResponse,
   buildOutageAudienceSql,
   queryOutageAudience,
@@ -152,7 +153,7 @@ describe('parsePageviewBody (#842-B)', () => {
   const ids = new Set(['claude', 'openai'])
   it('accepts a valid body and classifies the source', () => {
     expect(parsePageviewBody({ svc: 'claude', utm: 'x', ref: '', active: true, surface: 'service' }, ids)).toEqual({
-      svc: 'claude', source: 'x', active: true, surface: 'service',
+      svc: 'claude', source: 'x', active: true, surface: 'service', xLink: 'other',
     })
   })
   // #1287 — a MALFORMED body is still rejected: nothing was sent to identify.
@@ -182,12 +183,12 @@ describe('parsePageviewBody (#842-B)', () => {
     // stored raw), so it belongs in `refhost`, not `direct`. `direct` now asserts the absence of a
     // referrer, and a garbage referrer is not an absent one.
     const r = parsePageviewBody({ svc: 'claude', utm: 123, ref: 'x'.repeat(500) }, ids)
-    expect(r).toEqual({ svc: 'claude', source: 'refhost', active: false, surface: 'unknown' })
+    expect(r).toEqual({ svc: 'claude', source: 'refhost', active: false, surface: 'unknown', xLink: '' })
   })
 
   it('maps a non-string (absent) ref to direct — no host at all (#1055)', () => {
     expect(parsePageviewBody({ svc: 'claude', utm: 123, ref: 456 }, ids))
-      .toEqual({ svc: 'claude', source: 'direct', active: false, surface: 'unknown' })
+      .toEqual({ svc: 'claude', source: 'direct', active: false, surface: 'unknown', xLink: '' })
   })
 })
 
@@ -357,30 +358,30 @@ describe('queryOutageAudience (#842-B)', () => {
 describe('recordOutageView (#842-B)', () => {
   it('writes one data point with the source/phase/svc/surface blob order the SQL reads', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claude', 'service', 'unflagged')
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claude', 'service', 'unflagged', '')
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['x', 'active', 'claude', 'service', 'unflagged'],
+      blobs: ['x', 'active', 'claude', 'service', 'unflagged', ''],
       doubles: [1],
       indexes: ['isdown-view'],
     })
   })
   it('maps active=false → clear and no-ops when the binding is absent', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'search', false, 'openai', 'service', 'unflagged')
-    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['search', 'clear', 'openai', 'service', 'unflagged'] }))
-    expect(() => recordOutageView(undefined, 'x', true, 'claude', 'service', 'unflagged')).not.toThrow()
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'search', false, 'openai', 'service', 'unflagged', '')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['search', 'clear', 'openai', 'service', 'unflagged', ''] }))
+    expect(() => recordOutageView(undefined, 'x', true, 'claude', 'service', 'unflagged', '')).not.toThrow()
   })
   // #1280 — the group surface is the whole point of blob4: without it this row is indistinguishable
   // from a view of claude's OWN page, because the group page reports a member id by design.
   it('writes the group surface without altering the service id it reports', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claudecode', 'group', 'unflagged')
-    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['x', 'active', 'claudecode', 'group', 'unflagged'] }))
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claudecode', 'group', 'unflagged', '')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['x', 'active', 'claudecode', 'group', 'unflagged', ''] }))
   })
   it('writes the unknown sentinel through unchanged, so a pre-blob4 body is not booked as service', () => {
     const writeDataPoint = vi.fn()
-    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'direct', false, 'claude', 'unknown', 'unflagged')
-    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['direct', 'clear', 'claude', 'unknown', 'unflagged'] }))
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'direct', false, 'claude', 'unknown', 'unflagged', '')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['direct', 'clear', 'claude', 'unknown', 'unflagged', ''] }))
   })
 })
 
@@ -451,5 +452,31 @@ describe('parseOutageAudienceResponse — agent dimension (#1083)', () => {
     expect(r.activeByAgent).toEqual({ bot: 1, unflagged: 8, unknown: 5 })
     expect(Object.values(r.byAgent).reduce((a, b) => a + b, 0)).toBe(r.total)
     expect(Object.values(r.activeByAgent).reduce((a, b) => a + b, 0)).toBe(r.activeTotal)
+  })
+})
+
+// #1653 — the operator replies first, then posts, inside one outage window; both land in `x`.
+describe('X link kind (#1653)', () => {
+  const ids = new Set(['claude'])
+  const xLink = (body: Record<string, unknown>) => parsePageviewBody({ svc: 'claude', ...body }, ids)?.xLink
+  it('splits the operator reply and post links, and books every other X view as other', () => {
+    expect(xLink({ utm: 'x', uc: 'reply' })).toBe('reply')
+    expect(xLink({ utm: 'x', uc: 'post' })).toBe('post')
+    expect(xLink({ utm: 'x', uc: 'REPLY' })).toBe('reply')
+    expect(xLink({ utm: 'x' })).toBe('other')
+    expect(xLink({ ref: 'x.com', uc: '' })).toBe('other')
+  })
+  it('cannot mint a bucket from free-text utm_content', () => {
+    expect(xLink({ utm: 'x', uc: 'anything-else' })).toBe('other')
+    expect(xLink({ utm: 'x', uc: 42 })).toBe('other')
+  })
+  it('stays empty for a non-X view, even when it carries a reply tag', () => {
+    expect(xLink({ utm: 'reddit', uc: 'reply' })).toBe('')
+    expect(classifyXLink('search', 'post')).toBe('')
+  })
+  it('writes the kind as blob6', () => {
+    const writeDataPoint = vi.fn()
+    recordOutageView({ writeDataPoint } as unknown as AnalyticsEngineDataset, 'x', true, 'claude', 'group', 'unflagged', 'reply')
+    expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ blobs: ['x', 'active', 'claude', 'group', 'unflagged', 'reply'] }))
   })
 })

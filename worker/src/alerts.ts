@@ -1187,6 +1187,9 @@ const X_UTM = 'utm_source=x&utm_medium=social&utm_campaign=outage'
 // 🐦 standalone-compose draft (both stay in campaign=outage → total X inflow still rolls up). This tests
 // the core #777 hypothesis: replying to a viral tweet converts better than a fresh post (2026-06-23).
 const X_REPLY_UTM = `${X_UTM}&utm_content=reply`
+// #1653 — the standalone post draft names itself too, so the is-down beacon can split reply inflow from
+// post inflow (the operator replies first, then posts, inside the same outage window).
+const X_POST_UTM = `${X_UTM}&utm_content=post`
 
 /** Single-line, tweet-safe text: drop backticks (would break the Discord blockquote preview AND
  *  read oddly on X) and collapse all whitespace/newlines to single spaces. */
@@ -1260,7 +1263,7 @@ function buildTweetForService(
   // #804 — append the per-incident token (when this is an incident alert) so the og:url is distinct
   // per outage and the platform re-scrapes a fresh card instead of reusing the prior `?e=down` cache.
   const token = incidentTokenForAlert(alert)
-  const url = `${appendStatusHint(`https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`, hint)}&${X_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
+  const url = `${appendStatusHint(`https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`, hint)}&${X_POST_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
 
   let text: string
   if (isRecovery) {
@@ -1345,7 +1348,7 @@ function buildGroupTweetDraft(
   // worst member status hasn't flipped off 'operational' yet" — never emit ?e=operational on an outage.
   const hint = isRecovery ? 'resolved' : worst === 'operational' ? 'active' : worst
   const token = incidentTokenForAlert(alert)
-  const url = `${appendStatusHint(`https://ai-watch.dev/is-${family.slug}-down`, hint)}&${X_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
+  const url = `${appendStatusHint(`https://ai-watch.dev/is-${family.slug}-down`, hint)}&${X_POST_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
   const text = isRecovery
     ? `🟢 ${family.name} services have recovered (${names}). Live status → ${url}`
     : `🔴 Multiple ${family.name} services are affected (${names}). Live status → ${url}`

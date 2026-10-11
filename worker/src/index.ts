@@ -28,6 +28,7 @@ import { runMistralPublicApiProbe } from './mistral-public-api'
 import { handleMistralEmail } from './mistral-email'
 import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
+import { XREPLY_PATH, buildXReplyMarkMessage, handleXReplyMarkRequest, xReplyMarkTarget } from './x-reply-mark'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
 import { buildSupplyChainBanner } from './supply-chain'
 import { buildUpstreamLinks } from './upstream-link'
@@ -1814,6 +1815,16 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         await sendDiscordMessage(env.DISCORD_WEBHOOK_URL, reply.text)
       } catch (err) {
         console.error('[cron] reply copy message failed (operator alert sent):', alert.key, err instanceof Error ? err.message : err)
+      }
+      const markTarget = xReplyMarkTarget(alert, reply)
+      if (markTarget && env.ADMIN_API_KEY) {
+        try {
+          if (!(await sendDiscordMessage(env.DISCORD_WEBHOOK_URL, await buildXReplyMarkMessage(env.ADMIN_API_KEY, markTarget.token, markTarget.svc)))) {
+            console.error('[cron] #1653 x reply mark message failed (operator alert sent):', alert.key)
+          }
+        } catch (err) {
+          console.error('[cron] #1653 x reply mark message failed (operator alert sent):', alert.key, err instanceof Error ? err.message : err)
+        }
       }
     }
     // #1548 — one plain message per engage platform.
@@ -4719,6 +4730,11 @@ export default {
       }
     }
 
+    // #1653 — the operator's per-outage X reply mark (signed link in the operator alert).
+    if (url.pathname === XREPLY_PATH) {
+      return handleXReplyMarkRequest(request, env.STATUS_CACHE, env.ADMIN_API_KEY, Date.now())
+    }
+
     // #842-B — consent-free outage-moment audience beacon. The is-down page fires a page-load beacon
     // here (outside any GA/consent guard) → one WAE data point per view, classified by inbound source
     // and tagged with the active-outage flag → the daily "is-down Audience" line. No KV (WAE absorbs
@@ -4735,7 +4751,7 @@ export default {
             (request.cf as { verifiedBotCategory?: unknown } | undefined)?.verifiedBotCategory,
             request.headers.get('User-Agent'),
           )
-          recordOutageView(env.ANALYTICS, parsed.source, parsed.active, parsed.svc, parsed.surface, agent)
+          recordOutageView(env.ANALYTICS, parsed.source, parsed.active, parsed.svc, parsed.surface, agent, parsed.xLink)
           return new Response(null, { status: 204, headers: cors })
         } catch (err) {
           if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })

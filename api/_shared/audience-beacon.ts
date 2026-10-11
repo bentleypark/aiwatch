@@ -25,10 +25,12 @@
 export function audienceBeaconScript(svcId: string, active: boolean, surface: 'service' | 'group'): string {
   return `(function () {
   try {
-    var u = new URLSearchParams(location.search).get('utm_source') || '';
+    var q = new URLSearchParams(location.search);
+    var u = q.get('utm_source') || '';
+    var c = q.get('utm_content') || '';
     var r = '';
     try { if (document.referrer) r = new URL(document.referrer).hostname; } catch (e0) {}
-    fetch('https://aiwatch-worker.p2c2kbf.workers.dev/api/pageview', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ svc: ${JSON.stringify(svcId)}, ref: r, utm: u, active: ${active ? 'true' : 'false'}, surface: ${JSON.stringify(surface)} }) }).catch(function () {});
+    fetch('https://aiwatch-worker.p2c2kbf.workers.dev/api/pageview', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ svc: ${JSON.stringify(svcId)}, ref: r, utm: u, uc: c, active: ${active ? 'true' : 'false'}, surface: ${JSON.stringify(surface)} }) }).catch(function () {});
   } catch (e1) {}
 })();`
 }

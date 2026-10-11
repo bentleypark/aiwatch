@@ -87,13 +87,13 @@ export function randomToken(): string {
   return b64urlFromBytes(crypto.getRandomValues(new Uint8Array(32)))
 }
 
-async function hmac(secret: string, data: string): Promise<string> {
+export async function hmac(secret: string, data: string): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data))
   return b64urlFromBytes(new Uint8Array(sig))
 }
 
-function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false
   let diff = 0
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
