@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { latencyCardState, latencyCardSub } from '../latencyCard'
+import { latencyCardState, latencyCardSub, overviewLatencyCell, latestProbeData } from '../latencyCard'
 import en from '../../locales/en'
 
 const services = [
@@ -109,5 +109,40 @@ describe('latencyCardSub — the sub-line each card state renders (#1644)', () =
     expect(sub({ ...byId('cursor'), latency: 140 }, ['cursor'], { cursor: { status: 200, rtt: 140 } })).toBe(en['svc.latency.sub'])
     expect(sub({ ...byId('claudecode'), latency: null }, ['openai'], {})).toBe(en['uptime.collecting'])
     expect(sub({ ...byId('chatgpt'), latency: 99 }, ['claude'], {})).toBe(en['svc.latency.notMeasured'])
+  })
+})
+
+describe('latestProbeData', () => {
+  it('reads the newest snapshot, which probe24h holds last', () => {
+    expect(latestProbeData([{ data: { claude: { rtt: 999 } } }, { data: { claude: { rtt: 69 } } }])).toEqual({ claude: { rtt: 69 } })
+  })
+
+  it('is empty with no snapshots or a snapshot without data', () => {
+    expect(latestProbeData([])).toEqual({})
+    expect(latestProbeData([{}])).toEqual({})
+  })
+})
+
+describe('overviewLatencyCell (#1661)', () => {
+  const t = (k) => en[k] ?? k
+  const cell = (svc, probeIds, latest) => overviewLatencyCell(latencyCardState(svc, probeIds, latest, services), t)
+
+  it('inherited service shows the parent RTT, teal, labeled with the parent', () => {
+    expect(cell({ ...byId('claudecode'), latency: null }, ['claude'], { claude: { status: 200, rtt: 69 } }))
+      .toEqual({ text: '69ms', colorClass: 'text-[var(--teal)]', label: 'via Claude API' })
+  })
+
+  it('directly probed service keeps its own RTT, threshold colour and the API label', () => {
+    expect(cell({ ...byId('cursor'), latency: 140 }, ['cursor'], { cursor: { status: 200, rtt: 140 } }))
+      .toEqual({ text: '140ms', colorClass: 'text-[var(--green)]', label: en['overview.card.latency.api'] })
+    expect(cell({ ...byId('cursor'), latency: 650 }, ['cursor'], {}).colorClass).toBe('text-[var(--amber)]')
+    expect(cell({ ...byId('cursor'), latency: 900 }, ['cursor'], {}).colorClass).toBe('text-[var(--red)]')
+  })
+
+  it('unprobed service and an inherited parent with no RTT render a muted dash', () => {
+    expect(cell({ ...byId('chatgpt'), latency: 99 }, ['claude'], {}))
+      .toEqual({ text: '—', colorClass: 'text-[var(--text2)]', label: en['overview.card.latency.api'] })
+    expect(cell({ ...byId('codex'), latency: null }, ['openai'], {}))
+      .toEqual({ text: '—', colorClass: 'text-[var(--text2)]', label: 'via OpenAI API' })
   })
 })

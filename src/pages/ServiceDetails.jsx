@@ -20,7 +20,7 @@ import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMinShown } from '../utils/recovery'
 import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
-import { latencyCardState, latencyCardSub } from '../utils/latencyCard'
+import { latencyCardState, latencyCardSub, latestProbeData } from '../utils/latencyCard'
 import { measuredRtt } from '../../worker/src/probe'
 import { filterSecurityAlertsForService, securitySourceLabel } from '../utils/securityAlerts'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
@@ -786,7 +786,7 @@ export default function ServiceDetails({ serviceId }) {
   // #883 — latency card is one of three states (direct probe / inherited-from-parent / not measured).
   // See src/utils/latencyCard.js for the rationale. Inherited services (Claude Code/Codex) show their
   // parent API's current RTT, labeled, instead of a contradictory "Not provided".
-  const latestProbe = probe24h.length > 0 ? (probe24h[probe24h.length - 1].data ?? {}) : {}
+  const latestProbe = latestProbeData(probe24h)
   const latencyCard = latencyCardState(service, probeServiceIds, latestProbe, services)
   const cutoff7d = Date.now() - 7 * 86_400_000
   const recentIncidents = (service.incidents ?? []).filter(

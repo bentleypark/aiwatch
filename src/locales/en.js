@@ -69,6 +69,7 @@ const en = {
   'overview.incidents.title': 'Recent Incidents',
   'overview.latency.title': 'Latency Rankings',
   'overview.card.latency.api': 'API response',
+  'overview.card.latency.via': 'via {p}',
   'overview.card.uptime': 'uptime',
   'overview.card.incidents': 'incidents',
   'overview.panel.incidents.sub': 'Last 7 days',

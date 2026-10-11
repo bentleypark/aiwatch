@@ -76,7 +76,7 @@ const overviewHarness = (services, recentlyRecovered) => {
   vi.doMock('../../hooks/usePolling', () => ({
     usePolling: () => ({
       services, recentlyRecovered, aiAnalysis: {}, loading: false, error: null,
-      lastUpdated: new Date().toISOString(), refresh: () => {}, probeServiceIds: [],
+      lastUpdated: new Date().toISOString(), refresh: () => {}, probeServiceIds: [], probe24h: [],
       reportFeed: [], supplyChainBanner: null,
     }),
   }))

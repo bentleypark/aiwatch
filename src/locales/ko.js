@@ -69,6 +69,7 @@ const ko = {
   'overview.incidents.title': '최근 인시던트',
   'overview.latency.title': '레이턴시 순위',
   'overview.card.latency.api': 'API 응답',
+  'overview.card.latency.via': '{p} 기반',
   'overview.card.uptime': 'uptime',
   'overview.card.incidents': 'incidents',
   'overview.panel.incidents.sub': '최근 7일',

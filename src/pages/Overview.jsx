@@ -27,6 +27,7 @@ import { resolveStatusDisplay, sourceFlagsOf, displayStatusOf, isDisplayAffected
 import EmptyState from '../components/EmptyState'
 import { showRecoveredChip } from '../utils/liveIncident'
 import { rankedByLatency } from '../utils/latencyRanking'
+import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
 
 // ── Status color maps ────────────────────────────────────────
 
@@ -100,7 +101,7 @@ function HistoryBars({ history30d, compact }) {
   )
 }
 
-function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
+function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
   const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
   // #591 — blank UPTIME / score for estimate-no-data OR stale-source (showing frozen/assumed figures
   // as current would mislead). #653 — the incident COUNT, however, is the LIVE list and blanks only for
@@ -110,11 +111,6 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
   const incidentsBlanked = !!service.incidentSourceStale
   const hasUptime = service.uptime30d != null && !isUnreliable
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
-  const latency = isProbed ? service.latency : null
-  const latencyColor = latency == null ? 'text-[var(--text2)]'
-    : latency < 500 ? 'text-[var(--green)]'
-    : latency < 800 ? 'text-[var(--amber)]'
-    : 'text-[var(--red)]'
   const uptimeStr = hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')
   const scoreStr = service.aiwatchScore != null ? `${service.aiwatchScore} ${service.scoreGrade}` : null
   // #1004 — one derivation of the source flags, shared by the pill, the stripe, and the banner/stats
@@ -180,8 +176,8 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
 
         <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
           <div>
-            <div className={`mono text-[13px] font-medium ${latencyColor}`}>{latency != null ? `${latency}ms` : '—'}</div>
-            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency.api')}</div>
+            <div className={`mono text-[13px] font-medium ${latencyCell.colorClass}`}>{latencyCell.text}</div>
+            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{latencyCell.label}</div>
           </div>
           <div>
             <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t(noOfficialUptime(service) ? 'uptime.noOfficial.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
@@ -706,7 +702,7 @@ export function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, probeServiceIds, reportFeed, supplyChainBanner } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, probeServiceIds, probe24h, reportFeed, supplyChainBanner } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -827,6 +823,7 @@ export default function Overview() {
 
   const sortedByLatency = rankedByLatency(services, probeServiceIds) // #798 — all services, not catServices (cross-category like Recent Incidents)
   const maxLatency = sortedByLatency.length ? sortedByLatency[sortedByLatency.length - 1].latency : 1
+  const latestProbe = latestProbeData(probe24h)
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -941,7 +938,7 @@ export default function Overview() {
                   service={svc}
                   index={i}
                   t={t}
-                  isProbed={probeServiceIds.includes(svc.id)}
+                  latencyCell={overviewLatencyCell(latencyCardState(svc, probeServiceIds, latestProbe, allServices), t)}
                   // #1104 — the marker is per-INCIDENT; this chip is a claim about the SERVICE.
                   // Ungated, it sat on the card of a service still carrying a live incident. Same
                   // predicate as the ServiceDetails header chip (utils/liveIncident), so the two

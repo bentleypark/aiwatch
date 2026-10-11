@@ -1,4 +1,4 @@
-// #883 — Latency metric-card state resolver (ServiceDetails).
+// #883 — Latency metric-card state resolver (ServiceDetails, and the Overview service card since #1661).
 //
 // Three states, in priority order:
 //   'probe'      — the service is directly probed (own endpoint) → show its own latest RTT.
@@ -6,7 +6,7 @@
 //                  via worker PROBE_INHERIT, surfaced as `service.probeInheritedFrom`). It has no own
 //                  probe, but its Score's Responsiveness inherits the parent's — so show the PARENT's
 //                  current RTT, labeled, instead of a contradictory "Not provided". Stays OUT of the
-//                  Latency ranking (not in probeServiceIds) — the distinction lives on the detail card.
+//                  Latency ranking (not in probeServiceIds) — the distinction lives on the service cards.
 //   'none'       — neither: not measured (#1633 — status-page fetch timing is never shown as latency).
 //
 // Pure + presentation-free (returns kind/rtt/parentName; the component maps those to label/color).
@@ -47,4 +47,21 @@ export function latencyCardSub(card, t) {
   if (card.rtt != null) return card.kind === 'probe' ? t('svc.latency.sub') : t('svc.latency.inherited.sub').replace('{p}', card.parentName)
   if (card.failure) return card.failure.status === 0 ? t('svc.latency.failed.noResponse') : t('svc.latency.failed.http').replace('{code}', String(card.failure.status))
   return t('uptime.collecting')
+}
+
+/** The newest snapshot's `{ id: { status, rtt } }` map from `probe24h` (oldest first), or `{}`. */
+export function latestProbeData(probe24h) {
+  return probe24h.length > 0 ? (probe24h[probe24h.length - 1].data ?? {}) : {}
+}
+
+/** #1661 — the Overview service card's latency cell, from the same `latencyCardState` as the detail card. */
+export function overviewLatencyCell(card, t) {
+  const rtt = card.rtt
+  const colorClass = rtt == null ? 'text-[var(--text2)]'
+    : card.kind === 'inherited' ? 'text-[var(--teal)]'
+    : rtt < 500 ? 'text-[var(--green)]'
+    : rtt < 800 ? 'text-[var(--amber)]'
+    : 'text-[var(--red)]'
+  const label = card.kind === 'inherited' ? t('overview.card.latency.via').replace('{p}', card.parentName) : t('overview.card.latency.api')
+  return { text: rtt != null ? `${rtt}ms` : '—', colorClass, label }
 }
