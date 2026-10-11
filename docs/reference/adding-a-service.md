@@ -168,7 +168,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 24. `_templates/monthly-report.md` — service count, category breakdown
 25. Current month report (e.g., `2026-03/index.md`) — service count, category breakdown
 26. `index.md` — top-level index page
-27. `scripts/generate-charts.js` — service count in comments
+27. `scripts/generate-charts.js` — chart names come from `/api/v1/status` (aiwatch-reports#146). Edit only when the service adds a dashboard section (a new `SECTION_KEYS` entry): add that key to `GROUP_ORDER` at the same position
 
 ## Assets (after deploy)
 28. `scripts/generate-og-intro.mjs` — update `SERVICE_COUNT`, run `node scripts/generate-og-intro.mjs` (generates both `public/og-intro.png` + `docs/social-preview.png`), then commit + push
