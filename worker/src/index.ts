@@ -167,6 +167,8 @@ async function buildReportFeedMap(kv: KVNamespace, services: ServiceStatus[]): P
   return out
 }
 const HOUR_MS = 3_600_000
+// #1531 — under the Edge's 5 s budget, with room left for the log line to be emitted before a cancel.
+const CACHED_WATCHDOG_MS = 3_000
 /** Fixed-window per-IP limiter (in-memory, per-isolate — same mechanism as the existing
  *  alertProxyRate/webhookPingRate counters, just an hour window). Returns true if over the limit.
  *  Fixed-window means up to 2× the limit can pass across a window boundary; acceptable for these
@@ -2146,6 +2148,7 @@ import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from '.
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
+import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -5755,6 +5758,7 @@ export default {
 
     // GET /api/status/cached — KV cache only (no live fetch), for Is X Down SSR pages
     if (request.method === 'GET' && url.pathname === '/api/status/cached') {
+    let watchdog: StageWatchdog | undefined
     try {
         // Claude-only Chrome extension polls (#837, tagged ?src=ext-claude) need just
         // the three Anthropic surfaces' status + Score + per-category fallback. Checked
@@ -5901,13 +5905,14 @@ export default {
           })
         }
         const withSeries = !omitsTimeSeries(url.searchParams)
+        watchdog = startStageWatchdog('status-cached', CACHED_WATCHDOG_MS)
         // #1531 — the Edge is-down fetch sends no Origin; a browser request would need its own CORS headers.
         const leanCacheKey = !withSeries && !origin ? new Request(`${url.origin}${url.pathname}?series=0`) : null
         if (leanCacheKey) {
-          const hit = await caches.default.match(leanCacheKey)
+          const hit = await watchdog.track('edge-cache', caches.default.match(leanCacheKey))
           if (hit) return hit
         }
-        const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+        const cached = await watchdog.track('snapshot', cacheRead(env.STATUS_CACHE, env.ANALYTICS))
         if (cached) {
           let probe24h: ProbeSnapshot[] = []
 
@@ -5968,15 +5973,15 @@ export default {
           }
 
           // #1531 part 3 — each reader below needs only the snapshot, so they run concurrently.
-          const seriesRead = withSeries ? env.STATUS_CACHE!.get('probe:24h').catch(() => null) : Promise.resolve(null)
-          const analysesRead = readAnalyses()
+          const seriesRead = withSeries ? watchdog.track('series', env.STATUS_CACHE!.get('probe:24h').catch(() => null)) : Promise.resolve(null)
+          const analysesRead = watchdog.track('analyses', readAnalyses())
           // See readRecentSecurityAlerts — both endpoints must emit this field.
-          const securityAlertsRead = readRecentSecurityAlerts(env.STATUS_CACHE!)
+          const securityAlertsRead = watchdog.track('security', readRecentSecurityAlerts(env.STATUS_CACHE!))
           // #475 — canonical per-user alert feed (see /api/status). Both endpoints emit it.
-          const alertFeedRead = readAlertFeed(env.STATUS_CACHE!)
+          const alertFeedRead = watchdog.track('alert-feed', readAlertFeed(env.STATUS_CACHE!))
           // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
-          const reportFeedRead = buildReportFeedMap(env.STATUS_CACHE!, cached.services)
-          const probeSummariesRead = readProbeSummaries(env.STATUS_CACHE, 'status-cached')
+          const reportFeedRead = watchdog.track('report-feed', buildReportFeedMap(env.STATUS_CACHE!, cached.services))
+          const probeSummariesRead = watchdog.track('probe-summaries', readProbeSummaries(env.STATUS_CACHE, 'status-cached'))
 
           const probeRaw = await seriesRead
           await analysesRead
@@ -6037,6 +6042,7 @@ export default {
           headers: { ...cors, 'Content-Type': 'application/json' },
         })
     } finally {
+      watchdog?.stop()
       // #1224 — one line per request on this route, on EVERY exit. The route has many exits,
       // so emitting at each is a rule the next one added silently breaks; the census is read in
       // `finally` instead. Fail-soft: a census failure must never replace the response or the

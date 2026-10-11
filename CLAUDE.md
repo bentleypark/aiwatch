@@ -279,6 +279,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   api-traffic.ts outage-audience.ts history-click.ts referral.ts vitals.ts mistral-feed-observation.ts mistral-public-api.ts status-fetch-run.ts   # WAE/KV instrumentation
   mistral-email.ts   # email() handler — Mistral notification mail triggers a scrape (#1510)
   kv-read-census.ts  # KV READ attribution (#1224) — every read bucketed by key
+  stage-watchdog.ts  # Names the stage a slow is-down /api/status/cached fetch waits on (#1531)
   growth-series.ts   # Durable daily series of the consent-free growth counters (#986)
   reddit.ts security-monitor.ts changelog.ts provider-changes.ts platform-monitor.ts  # External monitoring
   alert-feed.ts ext-claude.ts indexnow.ts badge.ts og.ts og-render.ts slack.ts slack-message.ts  # Feeds, projections, SEO, images, Slack
