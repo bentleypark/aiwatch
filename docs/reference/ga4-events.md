@@ -85,7 +85,7 @@ Every clickable inbound link **we** emit is UTM-tagged so GA4 (and the `#842-B` 
 
 | `utm_source` | `utm_medium` | `utm_campaign` | Emitted by | `classifyReferrer` bucket |
 |---|---|---|---|---|
-| `x` | `social` | `outage` | tweet/reply drafts (`X_UTM`/`X_REPLY_UTM`, alerts.ts), is-down X share | `x` |
+| `x` | `social` | `outage` | operator post/reply drafts (`X_POST_UTM`/`X_REPLY_UTM`, alerts.ts — `utm_content=post`/`reply`, which the beacon stores as blob6, #1653), is-down X share (no `utm_content`) | `x` |
 | `threads` / `copy-link` | `share` | `outage` | is-down share buttons (`buildShareUrl`) | `direct` if the visit carries no referrer host, else `refhost` (#1055) |
 | `rss` | `feed` | `outage` | RSS feed items (`appendUtm`, rss.ts) | `feed` |
 | `reddit` | `social` | `outage` | Reddit promote links (`appendUtm`, reddit.ts) | **`reddit`** (#1055 — was `direct`) |

@@ -29,6 +29,8 @@
 //                                                     drops every deploy-window row.
 //   blob5   = agent ('bot'|'unflagged')             → #1083, see AudienceAgent. A row written before
 //                                                     blob5 existed reads back as `unknown`.
+//   blob6   = X link kind ('reply'|'post'|'other'), '' when blob1 is not 'x' → #1653, see XLinkKind.
+//                                                     A row written before blob6 existed reads back as ''.
 //   double1 = 1                                    → view counter
 //
 // #1280 — why blob3 alone could not be read. Two surfaces write it. A per-service page sends its own
@@ -201,8 +203,19 @@ export function classifyReferrer(utmSource: string | undefined, refHost: string 
   return host ? 'refhost' : 'direct' // #1055 — 'direct' now means literally no referrer
 }
 
+// #1653 — which operator X link brought an `x` view. The alert's reply draft carries utm_content=reply and
+// its post draft utm_content=post; anything else on X (a visitor's share, an older link, a bare x.com
+// referrer) is `other`. Bounded to these three so a free-text utm_content cannot mint a bucket.
+export type XLinkKind = 'reply' | 'post' | 'other'
+
+export function classifyXLink(source: AudienceSource, utmContent: string): XLinkKind | '' {
+  if (source !== 'x') return ''
+  const c = utmContent.toLowerCase()
+  return c === 'reply' || c === 'post' ? c : 'other'
+}
+
 /**
- * Validate a beacon body → `{ svc, source, active, surface }` or null. `svc` must be a NON-EMPTY
+ * Validate a beacon body → `{ svc, source, active, surface, xLink }` or null. `svc` must be a NON-EMPTY
  * string; an id we do not recognise is bounded to a sentinel rather than trusted (see #1287 below),
  * so an arbitrary body still cannot mint a per-service bucket. `ref` (referrer hostname) + `utm` (utm_source) are length-capped free-text — never stored raw, only
  * fed to the pure `classifyReferrer` → a fixed bucket. `active` (in an outage window) comes from the
@@ -224,7 +237,7 @@ export function classifyReferrer(utmSource: string | undefined, refHost: string 
 export function parsePageviewBody(
   body: unknown,
   validIds: Set<string>,
-): { svc: string; source: AudienceSource; active: boolean; surface: AudienceSurfaceKey } | null {
+): { svc: string; source: AudienceSource; active: boolean; surface: AudienceSurfaceKey; xLink: XLinkKind | '' } | null {
   if (!body || typeof body !== 'object') return null
   const b = body as Record<string, unknown>
   const rawSvc = typeof b.svc === 'string' ? b.svc : ''
@@ -235,7 +248,9 @@ export function parsePageviewBody(
   const surface: AudienceSurfaceKey = AUDIENCE_SURFACES.includes(b.surface as AudienceSurface)
     ? (b.surface as AudienceSurface)
     : AUDIENCE_SURFACE_UNKNOWN
-  return { svc, source: classifyReferrer(utm, ref), active: b.active === true, surface }
+  const source = classifyReferrer(utm, ref)
+  const uc = typeof b.uc === 'string' ? b.uc : ''
+  return { svc, source, active: b.active === true, surface, xLink: classifyXLink(source, uc) }
 }
 
 /**
@@ -250,11 +265,12 @@ export function recordOutageView(
   svcId: string,
   surface: AudienceSurfaceKey,
   agent: AudienceAgent,
+  xLink: XLinkKind | '',
 ): void {
   if (!analytics) return
   try {
     analytics.writeDataPoint({
-      blobs: [source, active ? 'active' : 'clear', svcId, surface, agent],
+      blobs: [source, active ? 'active' : 'clear', svcId, surface, agent, xLink],
       doubles: [1],
       indexes: [ISDOWN_INDEX],
     })
