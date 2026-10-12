@@ -70,9 +70,9 @@ export const isProbeWarming = (s) => s.scoreBreakdown?.responsivenessStatus === 
 /** #802/#870 — a NOT-YET-RANKED service is "Recently Added" (building data, `ranks in Nd`) — as opposed
  *  to "Insufficient Data" (genuinely un-measurable) — when it has a live feed + a <30d window AND either
  *  (a) it is ALREADY scorable (non-null score, non-low confidence) and only the 30d coverage gate holds
- *  it out, OR (b) its only disqualifier is a WARMING probe (a new probe target, e.g. turbopuffer days
- *  1-7): it has no official uptime yet by design + a probe that will reach `available` at ~7d, so it WILL
- *  rank — it must not be lumped with Azure OpenAI (unsupported, no probe) or a stale feed. */
+ *  it out, OR (b) its only disqualifier is a WARMING probe (a new probe target that will reach `available`
+ *  at ~7d), so it WILL rank — it must not be lumped with Azure OpenAI (unsupported, no probe) or a stale
+ *  feed. */
 export const isRecentlyAdded = (s) =>
   !s.incidentSourceStale && s.coverageDays != null && s.coverageDays < MIN_COVERAGE_DAYS
   && ((s.aiwatchScore != null && s.scoreConfidence !== 'low') || isProbeWarming(s))

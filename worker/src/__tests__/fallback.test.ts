@@ -651,7 +651,7 @@ describe('#857 vector fallback sub-tier (Pinecone ↔ turbopuffer)', () => {
   it('a down vector DB recommends its vector sibling over an LLM/voice service', () => {
     const services = [
       svc('pinecone', 'Pinecone', 'down'),
-      svc('turbopuffer', 'turbopuffer', 'operational', null), // no official uptime → score may be null; still recommended
+      svc('turbopuffer', 'turbopuffer', 'operational', null), // score may be null; still recommended
       svc('claude', 'Claude API', 'operational', 95),
       svc('elevenlabs', 'ElevenLabs', 'operational', 92),
     ]

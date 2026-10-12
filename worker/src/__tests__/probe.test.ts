@@ -73,7 +73,7 @@ describe('PROBE_TARGETS', () => {
     'kimi', // #989 — Moonshot AI, api.moonshot.ai/v1/models (401, no auth for RTT)
     'openrouter', 'stability', 'bfl', 'assemblyai', 'deepgram', 'voyageai', 'twelvelabs',
     'pinecone', 'langsmith', 'runway', 'luma', // #678 — added (stable representative API path)
-    'turbopuffer', // #857 — no official uptime, probe is the sole measured signal
+    'turbopuffer', // #857
     'cursor', // #883 — coding agent with its own API infra (api2.cursor.sh), independent signal
     'characterai', // #921 — app whose Statuspage died (#689/#800); neo.character.ai/health backend probe
     'fishaudio', // #1549

@@ -434,7 +434,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   turbopuffer: {
     displayName: 'turbopuffer',
     description: 'turbopuffer is a serverless vector-search database built directly on object storage. It powers retrieval-augmented generation (RAG), semantic search, and AI agent memory, and is used as the retrieval backend for products like Cursor\'s codebase index.',
-    insight: 'turbopuffer is region-specific — its status page reports health per region (aws-us-east-1, gcp-us-central1, etc.) rather than a single global indicator, so an outage can affect one region without breaking the platform. turbopuffer does not publish an official uptime %, so AIWatch tracks it via incident history plus a direct response-time probe rather than a reported uptime figure.',
+    insight: 'turbopuffer is region-specific — its status page lists each region (aws-us-east-1, gcp-us-central1, etc.) as its own component alongside an overall status, so an outage can affect one region without breaking the platform.',
     whenDown: 'When turbopuffer is down, applications relying on vector search for RAG, semantic search, or recommendations will fail. AI agents and code tools that depend on long-term memory or knowledge retrieval will lose context until service recovers.',
     faqs: [
       { q: 'Is turbopuffer down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors turbopuffer every 5 minutes and shows real-time operational status.' },
