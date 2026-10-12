@@ -8,10 +8,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   planArchivePatch, applyArchivePatch, figuresFrom, storedFigures, figureDiff, resourceOfDerivedEntry,
+  planRowReplacement, ROW_REPLACEMENTS,
 } from '../archive-patch'
+import type { RowReplacement } from '../archive-patch'
 import type { PatchableArchive } from '../archive-patch'
 import { applyCommands, monthWindow, NAMESPACE_ID } from '../archive-patch'
-import { buildMonthlyArchive } from '../monthly-archive'
+import { buildMonthlyArchive, parseDurationMin } from '../monthly-archive'
+import { formatDuration } from '../utils'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { MonthlyIncidentEntry } from '../monthly-archive'
@@ -338,5 +341,71 @@ describe('#1295 — applyArchivePatch', () => {
     // `refusals` too: a patched service has no collision left, so it exits before the gate — a document
     // its own gate would reject is otherwise indistinguishable from an idempotent one here.
     expect(again.refusals).toEqual([])
+  })
+})
+
+describe('#1664 — planRowReplacement (2026-09 azureopenai)', () => {
+  const SEPT = monthWindow('2026-09')
+  const spec = ROW_REPLACEMENTS['2026-09-azureopenai']
+  const stuck = (id: string): MonthlyIncidentEntry => ({
+    id, title: id, startedAt: '2026-09-29T10:00:00.000Z', resolvedAt: null,
+    durationMin: 0, finalStatus: 'investigating', impact: 'major',
+  })
+  const azureArchive = (rows: MonthlyIncidentEntry[]): PatchableArchive => {
+    const svc: Record<string, unknown> = { incidentList: rows, officialUptime: null, uptime: 97.36 }
+    return { services: { azureopenai: { ...svc, ...figuresFrom('azureopenai', svc, rows, SEPT) } } }
+  }
+  const withEvent = (patch: Partial<RowReplacement['add'][number]>): RowReplacement => ({ ...spec, add: [{ ...spec.add[0], ...patch }] })
+
+  it('replaces the three stuck rows with the one provider-recorded event, duration derived', () => {
+    const { changes, refusals } = planRowReplacement(azureArchive(spec.remove.map(stuck)), SEPT, spec)
+    expect(refusals).toEqual([])
+    expect(changes[0].before).toMatchObject({ incidents: 3, totalDowntimeMin: null, longestIncidentMin: null, avgResolutionMin: null })
+    expect(changes[0].after).toMatchObject({ incidents: 1, totalDowntimeMin: 355, longestIncidentMin: 355, avgResolutionMin: 355, countedIncidents: 1 })
+    expect(changes[0].keptList).toEqual([{ ...spec.add[0], durationMin: 355, finalStatus: 'resolved' }])
+  })
+
+  it('keeps rows the correction does not name', () => {
+    const other = { ...stuck('other'), finalStatus: 'resolved' as const, resolvedAt: '2026-09-02T11:00:00.000Z', startedAt: '2026-09-02T10:00:00.000Z', durationMin: 60 }
+    const { changes } = planRowReplacement(azureArchive([...spec.remove.map(stuck), other]), SEPT, spec)
+    expect(changes[0].keptList.map((e) => e.id)).toEqual(['other', 'azure-7QL5-Z50'])
+  })
+
+  it('derives the duration the way the archive does, from the formatted duration', () => {
+    const { changes } = planRowReplacement(azureArchive(spec.remove.map(stuck)), SEPT, withEvent({ startedAt: '2026-09-29T10:03:40.000Z' }))
+    expect(changes[0].keptList[0].durationMin).toBe(parseDurationMin(formatDuration(new Date('2026-09-29T10:03:40.000Z'), new Date('2026-09-29T15:58:00.000Z'))))
+    expect(changes[0].keptList[0].durationMin).toBe(355)
+  })
+
+  const clashRow = { ...stuck('azure-7QL5-Z50'), finalStatus: 'resolved' as const, resolvedAt: '2026-09-02T11:00:00.000Z', durationMin: 60 }
+  const refused: [string, PatchableArchive | null, RowReplacement, RegExp][] = [
+    ['a row to remove is missing', azureArchive(spec.remove.slice(0, 2).map(stuck)), spec, /not in the archive/],
+    ['an added id collides with a kept row', azureArchive([...spec.remove.map(stuck), clashRow]), spec, /collides/],
+    ['an added id repeats', null, { ...spec, add: [spec.add[0], spec.add[0]] }, /collides/],
+    ['an offset timestamp', null, withEvent({ startedAt: '2026-09-29T19:03:00+09:00' }), /canonical UTC/],
+    ['a zone-less timestamp', null, withEvent({ resolvedAt: '2026-09-29T15:58:00' }), /canonical UTC/],
+    ['an end at its start', null, withEvent({ resolvedAt: spec.add[0].startedAt }), /end after it starts/],
+    ['a start before the month', null, withEvent({ startedAt: '2026-08-31T23:59:00.000Z' }), /outside 2026-09/],
+    ['a start at the month end', null, withEvent({ startedAt: '2026-10-01T00:00:00.000Z', resolvedAt: '2026-10-01T01:00:00.000Z' }), /outside 2026-09/],
+    ['no service', { services: {} }, spec, /no incident list/],
+    ['a service without an incident list', { services: { azureopenai: {} } }, spec, /no incident list/],
+  ]
+  it.each(refused)('REFUSES when %s', (_, arch, s, why) => {
+    const { changes, refusals } = planRowReplacement(arch ?? azureArchive(spec.remove.map(stuck)), SEPT, s)
+    expect(changes).toEqual([])
+    expect(refusals.join(' | ')).toMatch(why)
+  })
+
+  it('REFUSES when the stored figures do not reproduce', () => {
+    const arch = azureArchive(spec.remove.map(stuck))
+    arch.services!.azureopenai.incidents = 4
+    expect(planRowReplacement(arch, SEPT, spec).refusals[0]).toMatch(/do not reproduce/)
+  })
+
+  it('the applied document reproduces under its own gate', () => {
+    const arch = azureArchive(spec.remove.map(stuck))
+    const { changes } = planRowReplacement(arch, SEPT, spec)
+    const out = applyArchivePatch(arch, changes).services!.azureopenai
+    expect(figureDiff(storedFigures(out), figuresFrom('azureopenai', out, out.incidentList as MonthlyIncidentEntry[], SEPT))).toEqual([])
   })
 })

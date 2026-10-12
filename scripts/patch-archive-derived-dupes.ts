@@ -17,6 +17,10 @@
  * prints the commands the operator runs, so the one irreversible action stays in human hands.
  *
  *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-08
+ *
+ * #1664 — `--correction <name>` applies a row replacement from `ROW_REPLACEMENTS` instead:
+ *
+ *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-09 --correction 2026-09-azureopenai
  */
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -67,7 +71,17 @@ function main(argv: string[]): void {
     process.exit(1)
   }
 
-  const { changes, refusals } = archivePatch.planArchivePatch(archive, archivePatch.monthWindow(period))
+  const c = argv.indexOf('--correction')
+  const name = c >= 0 ? argv[c + 1] : undefined
+  const correction = name ? archivePatch.ROW_REPLACEMENTS[name] : undefined
+  if (c >= 0 && (!correction || correction.period !== period)) {
+    console.error(`--correction must name a ${period} entry of ROW_REPLACEMENTS: ${Object.keys(archivePatch.ROW_REPLACEMENTS).join(', ')}`)
+    process.exit(2)
+  }
+  const window = archivePatch.monthWindow(period)
+  const { changes, refusals } = correction
+    ? archivePatch.planRowReplacement(archive, window, correction)
+    : archivePatch.planArchivePatch(archive, window)
   for (const r of refusals) console.error(`REFUSED  ${r}`)
   if (refusals.length) {
     console.error(`\nREFUSING THE WHOLE RUN — ${refusals.length} service(s) could not be verified. Nothing written.`)
@@ -81,7 +95,7 @@ function main(argv: string[]): void {
     const moved = (Object.keys(c.before) as (keyof typeof c.before)[])
       .filter((k) => c.before[k] !== c.after[k])
       .map((k) => `${k} ${String(c.before[k])}→${String(c.after[k])}`)
-    console.log(`${c.id}: -${c.removed.length} duplicate(s) | ${moved.join(' | ')}`)
+    console.log(`${c.id}: -${c.removed.length} row(s) | ${moved.join(' | ')}`)
   }
 
   const outDir = process.env.ARCHIVE_PATCH_DIR ?? '.'
@@ -90,10 +104,9 @@ function main(argv: string[]): void {
   writeFileSync(out, JSON.stringify(archivePatch.applyArchivePatch(archive, changes)))
 
   console.log(`\nPatched document written to: ${out}`)
-  console.log('\nThe archive also carries a `narrative` generated from the PRE-patch figures:')
-  console.log('`monthly-narrative.ts` builds its Observations from `incidents` / `countedIncidents` /')
-  console.log('`avgResolutionMin`, and the reports site consumes it as an operator-reviewed draft. This')
-  console.log('patch does not touch it — re-read it, or null it, before publishing the month.')
+  console.log('\nThe archive also carries a `narrative` (Notable Incidents + Observations) generated from')
+  console.log('the PRE-patch rows and figures, which the reports site consumes as an operator-reviewed draft.')
+  console.log('This patch does not touch it — re-read it, or null it, before publishing the month.')
   console.log('\nThis key is PERMANENT and has no TTL — the apply command below deliberately sets none.')
   console.log('`--remote` is not optional: without it wrangler writes the LOCAL Miniflare store and')
   console.log('the read-back still matches.')

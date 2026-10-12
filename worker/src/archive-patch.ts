@@ -17,12 +17,13 @@
 // come back identical is refused rather than guessed at, exactly as `patch-archive-automonitor.mjs`
 // (#1210) refuses a service it cannot account for. A service with no collision is never rewritten, so
 // it is never reproduced either — step 2's `diff` is what shows the operator that untouched remainder.
-import { aggregateIncidentDurations, computeMonthlyScore } from './monthly-archive'
+import { aggregateIncidentDurations, computeMonthlyScore, parseDurationMin } from './monthly-archive'
 import type { MonthlyIncidentEntry } from './monthly-archive'
 import { derivedDayAlreadyBankedFromFeed } from './monthly-archive'
 import { resolveProbeId } from './probe'
 import { SERVICES } from './services'
 import type { Incident, ProbeSummary } from './types'
+import { formatDuration } from './utils'
 
 /** STATUS_CACHE (worker/wrangler.toml). Pinned against the toml by the test beside this file. */
 export const NAMESPACE_ID = 'e49508d80bb144e9a7ff872f2be771a4'
@@ -123,15 +124,7 @@ function summariesFor(id: string, svc: Record<string, unknown>): Map<string, Pro
   return out
 }
 
-/** Every figure this patch writes, computed by the archive's own functions from a given entry list.
- *
- *  FOUR of the nine are invariant under this patch, by two different mechanisms, so dropping their
- *  writes is an equivalent mutation rather than an untested one:
- *  `longestIncidentMin` / `countedIncidents` / `avgResolutionMin` because `aggregateIncidentDurations`
- *  `continue`s on `derived === 'status_history'` BEFORE counting, and this patch removes only such rows;
- *  `monthlyScoreConfidence` because `score.ts` computes it from uptime presence and probe availability
- *  alone, neither of which reads the incident list. The first three stop being invariant if #1292's
- *  exclusions are ever revisited. */
+/** Every figure this patch writes, computed by the archive's own functions from a given entry list. */
 export function figuresFrom(
   id: string,
   svc: Record<string, unknown>,
@@ -244,4 +237,102 @@ export function applyArchivePatch(archive: PatchableArchive, changes: ArchivePat
     svc.monthlyScoreConfidence = c.after.monthlyScoreConfidence
   }
   return archive
+}
+
+/** #1664 — the provider's own record of one event: what a correction adds. Duration and status are derived. */
+export interface ProviderEvent {
+  id: string
+  title: string
+  startedAt: string
+  resolvedAt: string
+  impact: MonthlyIncidentEntry['impact']
+}
+
+/** #1664 — one service's archived rows replaced with the provider's own record of the same event. */
+export interface RowReplacement {
+  period: string
+  service: string
+  source: string
+  remove: string[]
+  add: ProviderEvent[]
+}
+
+export const ROW_REPLACEMENTS: Record<string, RowReplacement> = {
+  '2026-09-azureopenai': {
+    period: '2026-09',
+    service: 'azureopenai',
+    source: 'https://azure.status.microsoft/en-us/status/history/ — Tracking ID 7QL5-Z50, "Between 10:03 UTC and 15:58 UTC on 29 September 2026", Sweden Central',
+    remove: [
+      'azure-openai-and-foundry-agent-service-intermittent-request-failures-and-increased-latency',
+      'intermittent-request-failures-and-increased-latency-across-azure-openai-azure-ai-foundry-and-cognitive-services',
+      'observing-improvements-intermittent-request-failures-and-increased-latency-across-azure-openai-azure-ai-foundry-and-cognitive-services',
+    ],
+    add: [{
+      id: 'azure-7QL5-Z50',
+      title: 'Intermittent request failures and increased latency across Azure OpenAI, Azure AI Foundry, and Cognitive Services',
+      startedAt: '2026-09-29T10:03:00.000Z',
+      resolvedAt: '2026-09-29T15:58:00.000Z',
+      impact: 'major',
+    }],
+  },
+}
+
+const isCanonicalUtc = (s: string) => {
+  const t = Date.parse(s)
+  return Number.isFinite(t) && new Date(t).toISOString() === s
+}
+
+/**
+ * Plan a row replacement. Pure, and behind the same reproduction gate as `planArchivePatch`: the
+ * service's stored figures must come back identical from its stored list, or it is refused. Every id in
+ * `remove` must be present, and no resulting id may repeat. An added event must be canonical UTC, end
+ * after it starts, and start inside the month.
+ */
+export function planRowReplacement(
+  archive: PatchableArchive,
+  window: { startISO: string; endISO: string },
+  spec: RowReplacement,
+): { changes: ArchivePatchChange[]; refusals: string[] } {
+  const refuse = (why: string) => ({ changes: [], refusals: [`${spec.service}: ${why}`] })
+  const lo = Date.parse(window.startISO)
+  const hi = Date.parse(window.endISO)
+  for (const e of spec.add) {
+    if (!isCanonicalUtc(e.startedAt) || !isCanonicalUtc(e.resolvedAt)) return refuse(`${e.id} timestamps are not canonical UTC`)
+    const start = Date.parse(e.startedAt)
+    if (Date.parse(e.resolvedAt) <= start) return refuse(`${e.id} does not end after it starts`)
+    if (start < lo || start >= hi) return refuse(`${e.id} starts outside ${window.startISO.slice(0, 7)}`)
+  }
+
+  const svc = archive.services?.[spec.service]
+  const list = svc?.incidentList
+  if (!svc || !Array.isArray(list)) return refuse('no incident list in the archive')
+  const entries = list as MonthlyIncidentEntry[]
+
+  const present = new Set(entries.map((e) => e.id))
+  const missing = spec.remove.filter((id) => !present.has(id))
+  if (missing.length) return refuse(`rows to remove are not in the archive — ${missing.join(', ')}`)
+
+  const drift = figureDiff(storedFigures(svc), figuresFrom(spec.service, svc, entries, window))
+  if (drift.length) return refuse(`stored figures do not reproduce from the stored list — ${drift.join(', ')}`)
+
+  const drop = new Set(spec.remove)
+  const next = entries.filter((e) => !drop.has(e.id))
+  for (const e of spec.add) {
+    if (next.some((k) => k.id === e.id)) return refuse(`added id collides with another row — ${e.id}`)
+    next.push({
+      ...e,
+      durationMin: parseDurationMin(formatDuration(new Date(e.startedAt), new Date(e.resolvedAt))),
+      finalStatus: 'resolved',
+    })
+  }
+  return {
+    changes: [{
+      id: spec.service,
+      removed: [...drop],
+      before: storedFigures(svc),
+      after: figuresFrom(spec.service, svc, next, window),
+      keptList: next,
+    }],
+    refusals: [],
+  }
 }
