@@ -12,7 +12,7 @@ import { groupIncidents } from '../utils/incidentGrouping'
 import { incidentNote } from '../utils/incidentNote'
 import { getResolvedTime, getContextualTime, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService } from '../utils/archiveMerge'
-import { mergeReferenceRows } from '../utils/referenceIncidents'
+import { mergeReferenceRows, referenceIncidentRows } from '../utils/referenceIncidents'
 import { filterIncidentList } from '../utils/incidentFilter'
 import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
@@ -370,10 +370,13 @@ export default function Incidents({ filters } = {}) {
             serviceId: svc.id,
           }])
         )
-        if (archiveMonths.length === 0) return live
-        const liveCompositeIds = new Set(live.map((i) => i.id))
+        const withRefs = live.concat(referenceIncidentRows(services)
+          .filter((r) => r.serviceId === serviceFilter)
+          .map(toReferenceRow))
+        if (archiveMonths.length === 0) return withRefs
+        const liveCompositeIds = new Set(withRefs.map((i) => i.id))
         const supplement = archiveSupplementForService(liveCompositeIds, serviceFilter, archives, services)
-        return live.concat(supplement)
+        return withRefs.concat(supplement)
       }
       // Without filter: dedup by raw incidentId, collect all affected service names.
       const incMap = new Map() // raw incidentId → merged incident (composite id assigned at render time below)

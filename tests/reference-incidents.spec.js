@@ -20,6 +20,15 @@ const MOCK = {
       referenceComponents: [{ id: '0qbwn08sd68x', name: CONSOLE, status: 'degraded' }],
     },
     { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 110, incidents: [] },
+    {
+      id: 'turbopuffer', category: 'api', name: 'turbopuffer', provider: 'turbopuffer', status: 'operational', latency: 90,
+      incidents: [],
+      referenceIncidents: [{
+        id: '01M1SDXV1KRRFS61H6HMXPVA0P', title: 'Dashboard outage', status: 'resolved', impact: 'critical',
+        startedAt: new Date(Date.now() - 2 * 3600_000).toISOString(), resolvedAt: new Date(Date.now() - 3600_000).toISOString(),
+        duration: '13m', timeline: [], componentNames: ['Dashboard'],
+      }],
+    },
   ],
   lastUpdated: new Date().toISOString(),
 }
@@ -46,6 +55,13 @@ test.describe('Reference incidents (#1669)', () => {
     await page.locator('select[aria-label="Status"]').selectOption('all')
     await page.locator('select[aria-label="Service"]').selectOption('claude')
     await expect(page.getByRole('row').filter({ hasText: TITLE })).toHaveCount(0)
+  })
+
+  test('#1672 a row whose label names the service shows under that service filter', async ({ page }) => {
+    await page.goto('/#incidents')
+    await expect(page.getByRole('row').filter({ hasText: 'Dashboard outage' })).toContainText('turbopuffer · Dashboard', { timeout: 20000 })
+    await page.locator('select[aria-label="Service"]').selectOption('turbopuffer')
+    await expect(page.getByRole('row').filter({ hasText: 'Dashboard outage' })).toBeVisible()
   })
 
   test('the Claude API detail page does not show it', async ({ page }) => {

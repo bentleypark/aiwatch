@@ -157,6 +157,9 @@ export interface ServiceStatus {
   referenceIncidents?: Incident[]
   // #1669 — the current status of those components, for the provider page.
   referenceComponents?: ServiceComponent[]
+  // #1672 — the ids each side has held, carried across cycles (including ones that read nothing). Set only
+  // on services whose component tags come from page HTML.
+  referenceLedger?: { counted: string[]; reference: string[] }
   // #1614 — the oldest page-wide row of a capped Statuspage-compatible `incidents.json`
   // (`cappedFeedDepthStart`). Absent when the feed returned its whole history.
   feedDepthStart?: string

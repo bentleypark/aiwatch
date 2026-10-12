@@ -21,6 +21,16 @@ describe('referenceIncidentRows (#1669)', () => {
     expect(filterIncidentList(rows, { serviceFilter: 'all', statusFilter: 'all', cutoff: null })).toHaveLength(1)
   })
 
+  it('is filed under the service its label names (turbopuffer · Dashboard under turbopuffer)', () => {
+    const turbopuffer = {
+      id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', incidents: [],
+      referenceIncidents: [{ id: 'dash-1', title: 'Dashboard outage', status: 'resolved', startedAt: '2026-09-05T18:40:07Z', componentNames: ['Dashboard'] }],
+    }
+    const rows = referenceIncidentRows([turbopuffer])
+    expect(rows[0].serviceName).toBe('turbopuffer · Dashboard')
+    expect(filterIncidentList(rows, { serviceFilter: 'turbopuffer', statusFilter: 'all', cutoff: null })).toHaveLength(1)
+  })
+
   it('a service without reference incidents adds nothing', () => {
     expect(referenceIncidentRows([{ id: 'openai', provider: 'OpenAI', incidents: [] }])).toEqual([])
     expect(referenceIncidentRows(undefined)).toEqual([])

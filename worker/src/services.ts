@@ -390,7 +390,7 @@ export const SERVICES: ServiceConfig[] = [
   // an API surface (turbopuffer has no badge scope at all — see the paragraph above), needs the matching
   // roster-audit exclusion too — without it the audit reports it as aged-in-out-of-scope, the exact
   // false positive an exclude list exists to prevent.
-  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD', '01M1EB2MF3HY0FGY4G4XKG6NWD', '01M1ENXV57AJASWNHCRYDGS5N8', '01M1ENXV5779G7VTW967EJHE5H', '01M1ENXV572CR9QK3M3RB2236R'], addedAt: '2026-07-01', rosterAuditExclude: ['01K0Q5QSJV9KAZMEMMQ0NCHD9E'] }, // #802 / #857
+  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD', '01M1EB2MF3HY0FGY4G4XKG6NWD', '01M1ENXV57AJASWNHCRYDGS5N8', '01M1ENXV5779G7VTW967EJHE5H', '01M1ENXV572CR9QK3M3RB2236R'], addedAt: '2026-07-01', rosterAuditExclude: ['01K0Q5QSJV9KAZMEMMQ0NCHD9E'], referenceComponentIds: ['01K0Q5QSJV9KAZMEMMQ0NCHD9E'] }, // #802 / #857
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // Black Forest Labs / FLUX (#756) — image-generation sibling for Stability AI (un-blocks the image
   // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge
@@ -671,6 +671,51 @@ export function carryOverAistudioIncidents(
     return true
   })
 }
+
+/**
+ * #1672 — on a service whose component tags come only from page HTML, an incident keeps the side it was
+ * first put on: counted stays counted; reference stays reference while this cycle carries no component
+ * tags for it. `referenceLedger` carries that memory across cycles; with no readable snapshot every incident
+ * is counted. Mutates `services`.
+ */
+export function holdReferenceClassification(services: ServiceStatus[], prevServices: ServiceStatus[] | null): void {
+  for (const svc of services) {
+    const config = SERVICES.find((c) => c.id === svc.id)
+    if (!config?.referenceComponentIds?.length || !config.incidentIoComponentId) continue
+    if (!prevServices) {
+      svc.incidents = [...svc.incidents, ...(svc.referenceIncidents ?? [])].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+      delete svc.referenceIncidents
+      svc.referenceLedger = { counted: svc.incidents.map((i) => i.id).slice(0, REFERENCE_LEDGER_MAX), reference: [] }
+      continue
+    }
+    const prev = prevServices.find((p) => p.id === svc.id)
+    const ledger = prev?.referenceLedger ?? {
+      counted: (prev?.incidents ?? []).map((i) => i.id),
+      reference: (prev?.referenceIncidents ?? []).map((i) => i.id),
+    }
+    const wasCounted = new Set(ledger.counted)
+    const wasReference = new Set(ledger.reference)
+    const toCounted = (svc.referenceIncidents ?? []).filter((i) => wasCounted.has(i.id))
+    const toReference = svc.incidents.filter((i) => wasReference.has(i.id) && !(i.componentNames ?? []).length)
+    if (toCounted.length > 0 || toReference.length > 0) {
+      const out = new Set([...toCounted, ...toReference].map((i) => i.id))
+      svc.incidents = [...svc.incidents.filter((i) => !out.has(i.id)), ...toCounted]
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+      const reference = [...(svc.referenceIncidents ?? []).filter((i) => !out.has(i.id)), ...toReference]
+      if (reference.length > 0) svc.referenceIncidents = reference
+      else delete svc.referenceIncidents
+    }
+    const counted = svc.incidents.map((i) => i.id)
+    const reference = (svc.referenceIncidents ?? []).map((i) => i.id)
+    const now = new Set([...counted, ...reference])
+    svc.referenceLedger = {
+      counted: [...new Set([...counted, ...ledger.counted.filter((id) => !now.has(id))])].slice(0, REFERENCE_LEDGER_MAX),
+      reference: [...new Set([...reference, ...ledger.reference.filter((id) => !now.has(id))])].slice(0, REFERENCE_LEDGER_MAX),
+    }
+  }
+}
+
+const REFERENCE_LEDGER_MAX = 200
 
 /**
  * #1489 — a run that could not read a service's uptime publishes the previous snapshot's figure instead
@@ -2767,7 +2812,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // or the whole prefetch entry is missing because summary.json failed that cycle and fetchService
       // re-fetched it above) — so fetch it here rather than silently dropping every incident.
       // (uptimeHtml is declared + possibly populated above for the #1066 global-page rebuild.)
-      const tagsNeedHtml = !!(config.incidentComponents && config.incidentIoComponentId)
+      const tagsNeedHtml = !!((config.incidentComponents || config.referenceComponentIds) && config.incidentIoComponentId)
       // #1032 — the id-axis twin (`canIdBypass`: exclude + badge group + incident.io page). The gate
       // states the reachable set rather than widening it. Deliberately NOT "every incident.io service":
       // `attachIncidentIoComponentIds` is cheap but its output would then ride the KV/API payload for
@@ -2825,9 +2870,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // present but its shape changed upstream.
         if (incidents.length > 0 && !tagged.some((i) => (i.componentNames ?? []).length > 0)) {
           console.warn(
-            `[fetchService] ${config.id}: incidentComponents is set but NO incident could be tagged from ` +
-            `component_impacts (uptimeHtml ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — ` +
-            'every incident will be filtered out this cycle',
+            `[fetchService] ${config.id}: NO incident could be tagged from component_impacts ` +
+            `(uptimeHtml ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — ` +
+            (config.incidentComponents
+              ? 'incidentComponents is set, so every incident will be filtered out this cycle'
+              : 'referenceComponentIds cannot be identified this cycle'),
           )
         }
         incidents = tagged
@@ -4673,14 +4720,12 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // feed's depth. Runs before scoring/cache consumers receive `raw`.
   await attachRecordedIncidentHistory(raw, kv, new Date())
 
-  // Read cached snapshot for fallback (only if needed)
+  // Read cached snapshot — the degraded fallback, the uptime carry-forward and the #1672 reference hold
   let cachedServices: ServiceStatus[] | null = null
-  const needsFallback = raw.some((s) => s.status === 'degraded')
-  const uptimeLost = raw.some((s) => s.uptime30d == null && trackingBefore[s.id]?.uptimeSeenAt)
-  if ((needsFallback || uptimeLost) && kv) {
+  if (kv) {
     const cached = await kv.get(CACHE_KEY).catch(() => null)
     if (cached) {
-      // NOT normalised (#1233): apart from the uptime fields `carryForwardUptime` copies, which the decode
+      // NOT normalised (#1233): apart from the uptime fields `carryForwardUptime` copies and the incident lists `holdReferenceClassification` reads, which the decode
       // does not touch, the only thing read from this snapshot is `prev.status === 'operational'` below, and the transitional decode only ever rewrites `degraded` → `unknown` — both of which fail
       // that test identically. A decode here would be a provable no-op, so it is left out rather than
       // added as reassurance. The read-side decode that matters is in `cacheRead` and `cronAlertCheck`.
@@ -4688,6 +4733,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     }
   }
   carryForwardUptime(raw, cachedServices, Date.now())
+  holdReferenceClassification(raw, cachedServices)
 
   // Enriched results (with cache fallback for degraded services)
   //
