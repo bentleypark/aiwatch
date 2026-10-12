@@ -21,9 +21,9 @@ describe('incidentIoUptimeScopeOf (#1518 — the same expression fetchService co
 })
 
 describe('rosterAuditPages (#1518 — grouping by shared status page)', () => {
-  it('puts aged Fireworks GLM models in the uptime scope (#1561)', () => {
+  it('puts aged Fireworks models (GLM #1561, Deepseek V4.1 Flash) in the uptime scope', () => {
     const fireworks = rosterAuditPages().find((page) => page.statusUrl === 'https://status.fireworks.ai')!
-    const ids = ['01M1DFY7G1ZJQNNZWX0Y0APVX6', '01M1DFY7G1JXWQQQ852G0PAQCP']
+    const ids = ['01M1DFY7G1ZJQNNZWX0Y0APVX6', '01M1DFY7G1JXWQQQ852G0PAQCP', '01M29PF3FR517GWQBY4BHZMV8A']
 
     expect(fireworks.scopeIds).toEqual(expect.arrayContaining(ids))
   })
