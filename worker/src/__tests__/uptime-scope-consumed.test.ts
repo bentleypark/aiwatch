@@ -112,7 +112,7 @@ describe('#1435 — the Atlassian uptime figure is computed over the SERVICE bad
 
     for (const apiUrl of pages) {
       it(`${apiUrl} requests exactly the union of its services' badge scopes`, () => {
-        const union = new Set(atlassian.filter((s) => s.apiUrl === apiUrl).flatMap(uptimeScopeOf))
+        const union = new Set(atlassian.filter((s) => s.apiUrl === apiUrl).flatMap((x) => uptimeScopeOf(x)))
         expect(new Set(uptimeScopeForPage(apiUrl))).toEqual(union)
       })
     }
@@ -166,9 +166,9 @@ describe('#1435 — the Atlassian uptime figure is computed over the SERVICE bad
   describe('a sibling service on the same status page', () => {
     for (const group of SHARED_PAGE) {
       for (const s of group) {
-        const siblingOnly = group.filter((o) => o.id !== s.id).flatMap(uptimeScopeOf)
+        const siblingOnly = group.filter((o) => o.id !== s.id).flatMap((x) => uptimeScopeOf(x))
         onBothTransports(`${s.id}: an outage on a sibling's components does not move uptime`, s,
-          group.flatMap(uptimeScopeOf), siblingOnly, (u) => expect(u).toBe(100))
+          group.flatMap((x) => uptimeScopeOf(x)), siblingOnly, (u) => expect(u).toBe(100))
       }
     }
   })

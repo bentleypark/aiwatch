@@ -214,10 +214,11 @@ export const SERVICES: ServiceConfig[] = [
   // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
   // like cohere/groq): the breakdown lists every live component and the badge worst-ofs them (the #992
   // resolveSvcStatus dynamic branch), so a new/retired model needs no config edit.
-  // Developer Console is a componentSurfaces row (models fold into the collapsible "Models" group).
+  // #1679 — Developer Console is in componentDenylist and referenceComponentIds (a console is not a service, #1669), and uptime is
+  // the worst-of the live models (`uptimeOverLiveComponents`), not the statusComponentId.
   // componentDenylist mirrors the cohere/groq convention — a future non-availability component
   // (Website/Docs) must not enter the dynamic worst-of badge or the breakdown.
-  { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', displayAllComponents: true, componentSurfaces: ['Developer Console'], componentDenylist: ['Website', 'Docs'] },
+  { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', displayAllComponents: true, uptimeOverLiveComponents: true, componentDenylist: ['Website', 'Docs', 'Developer Console'], referenceComponentIds: ['83h1cchw4vs4'] },
   // #623/#1177 → #1390 — status.perplexity.com moved from Instatus to incident.io. The page carries
   // its own migration notice: announced 2026-09-07, cut over by DNS on 2026-09-10 21:00 UTC — the very
   // cycle our `officialUptime` snapshot went null. The Instatus parser cannot read an incident.io page,
@@ -870,6 +871,14 @@ type StatusResolverSummary = {
 }
 type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds' | 'displayComponentIds' | 'displayAllComponents' | 'componentDenylist' | 'componentSurfaces' | 'componentGroups'>
 
+/** #1679 — the components a `displayAllComponents` service shows: every page component except its
+ *  `componentDenylist` names and the page's own group headers. One rule for the badge, the breakdown
+ *  and `uptimeOverLiveComponents`. */
+export function isLiveComponent(config: Pick<ServiceConfig, 'componentDenylist'>): (c: { name: string; group?: boolean }) => boolean {
+  const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
+  return (c) => !c.group && !deny.has(c.name.toLowerCase())
+}
+
 /**
  * Resolve a service's overall badge status from its config + status page summary.
  *
@@ -925,8 +934,7 @@ export function resolveSvcStatus(
   //   Developer Console — does not pin the badge to that one component). cohere/groq/together/fireworks
   //   have no statusComponent* so they returned at branch 1 (overall indicator) already; they never reach here.
   if (config.displayAllComponents && summaryData.components) {
-    const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
-    const shown = summaryData.components.filter((c) => !deny.has(c.name.toLowerCase()))
+    const shown = summaryData.components.filter(isLiveComponent(config))
     if (shown.length > 0) {
       return worstStatus(shown.map((c) => normalizeStatus(c.status)))
     }
@@ -969,14 +977,14 @@ export function resolveSvcComponents(
   // componentGroups preserve a provider-published group the flat API omits; on a page without its
   // own groups, each remaining non-surface component is tagged `group: 'Models'` so the UI collapses them under one header.
   if (config.displayAllComponents) {
-    const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
+    const live = isLiveComponent(config)
     const groups = config.componentGroups
     // #1525 — a page that publishes its own groups (Atlassian `group: true` + members' `group_id`)
     // is rendered with those groups, in the page's `position` order; the header component itself is dropped.
     const pageGroups = new Map(summaryData.components.filter((c) => c.group).map((c) => [c.id, c.name]))
     if (pageGroups.size > 0) {
       const matched = orderByPagePosition(summaryData.components, pageGroups)
-        .filter((c) => !c.group && !deny.has(c.name.toLowerCase()))
+        .filter(live)
         .map((c) => ({
           id: c.id,
           name: c.name,
@@ -991,7 +999,7 @@ export function resolveSvcComponents(
     }
     const surfaces = new Set((config.componentSurfaces ?? []).map((n) => n.toLowerCase()))
     const matched = summaryData.components
-      .filter((c) => !deny.has(c.name.toLowerCase()))
+      .filter(live)
       .map((c) => ({
         id: c.id,
         name: c.name,
@@ -1140,8 +1148,8 @@ export const TRACKED_COMPONENT_IDS: ReadonlySet<string> = new Set(
  * #1389 — every component code the `/uptime_showcase` request for one status page must ask for: the
  * union of the UPTIME SCOPE of each service sharing that page.
  *
- * The scope per service is `statusComponentIds ?? statusComponentId` — deliberately the exact
- * expression the `parseUptimeData` call site passes, and NOT `displayComponentIds`. The badge worst-of
+ * The scope per service is `uptimeScopeOf` — the same call the `parseUptimeData` call site makes, and
+ * NOT `displayComponentIds`. The badge worst-of
  * is what uptime is computed over (#1006/#379), and asking for the display roster instead would fetch
  * up to 11 extra timelines per page that nothing reads. Services with no `statusComponentId` contribute
  * nothing: the uptime branch is gated on that field, so a code fetched for them could not be used.
@@ -1150,11 +1158,14 @@ export const TRACKED_COMPONENT_IDS: ReadonlySet<string> = new Set(
  * one document; one request per page is the same dedup `uniqueApiUrls` already does for summary.json.
  * Order follows SERVICES so the request URL is stable cycle to cycle.
  */
-export function uptimeScopeForPage(apiUrl: string): string[] {
+export function uptimeScopeForPage(
+  apiUrl: string,
+  pageComponents?: ReadonlyArray<{ id: string; name: string; group?: boolean }>,
+): string[] {
   const codes = new Set<string>()
   for (const s of SERVICES) {
     if (s.apiUrl !== apiUrl) continue
-    for (const id of uptimeScopeOf(s)) codes.add(id)
+    for (const id of uptimeScopeOf(s, pageComponents)) codes.add(id)
   }
   return [...codes]
 }
@@ -1171,8 +1182,12 @@ export function uptimeScopeForPage(apiUrl: string): string[] {
  * worst-of over A,B,C, and the symptom would be a silently too-optimistic uptime rather than an error
  * (`feedback_shared_primitive_over_parallel_copies`; the second copy is the moment to extract).
  */
-export function uptimeScopeOf(config: Pick<ServiceConfig, 'statusComponentId' | 'statusComponentIds'>): string[] {
+export function uptimeScopeOf(
+  config: Pick<ServiceConfig, 'statusComponentId' | 'statusComponentIds' | 'uptimeOverLiveComponents' | 'componentDenylist'>,
+  pageComponents?: ReadonlyArray<{ id: string; name: string; group?: boolean }>,
+): string[] {
   if (!config.statusComponentId) return []
+  if (config.uptimeOverLiveComponents) return (pageComponents ?? []).filter(isLiveComponent(config)).map((c) => c.id)
   return config.statusComponentIds ?? [config.statusComponentId]
 }
 
@@ -1903,13 +1918,7 @@ export function badgeGroupNames(
   // the curated ids too — else the group would broaden past the badge and #970 would KEEP an impact:none
   // incident the curated badge doesn't cover. So dynamic-group ONLY when there's no statusComponentIds.
   if (config.displayAllComponents && !(config.statusComponentIds && config.statusComponentIds.length > 0)) {
-    const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
-    const names = new Set<string>()
-    for (const c of components) {
-      const lower = c.name.toLowerCase()
-      if (!deny.has(lower)) names.add(lower)
-    }
-    return names
+    return new Set(components.filter(isLiveComponent(config)).map((c) => c.name.toLowerCase()))
   }
   const names = new Set<string>()
   for (const id of badgeGroupIds(config)) {
@@ -2984,7 +2993,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // An earlier draft of this line called the overlap impossible "by construction" because a lazy
       // page carries no blob — but that is an assumption about someone else's rollout, not an invariant
       // we hold, and the transition window of the NEXT rollout is when both coexist.
-      const uptimeScope = uptimeScopeOf(config)
+      const uptimeScope = uptimeScopeOf(config, breakdownComponents)
       let uptimeResult: UptimeDataResult | null = null
       if (uptimeScope.length > 0) {
         uptimeResult = (uptimeTimelines && Object.keys(uptimeTimelines).length > 0)
@@ -4519,7 +4528,8 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       // the page has already been waited on twice this cycle, and the one that is slow is the one that
       // would eat the batch budget. `scope` is computed first so a lazy page on which we track nothing
       // costs no request at all.
-      const scope = uptimeScopeForPage(apiUrl)
+      const pageComponents = await componentsFetch
+      const scope = uptimeScopeForPage(apiUrl, pickBreakdownComponents(summary?.components, pageComponents?.ok ? pageComponents.components : undefined))
       const uptimeTimelines = (uptimeHtml && scope.length > 0 && hasLazyUptimeShowcase(uptimeHtml))
         ? await fetchUptimeShowcase(statusUrl, scope, 3000, tracker)
         : undefined
