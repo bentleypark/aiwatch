@@ -27,18 +27,8 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'ch
 // Agents now fall back by Score within the category, like ties inside an LLM tier. Keeping a defined
 // tier (vs the pre-#402 `?? 99` fall-through) still suppresses the tierFor warn-once.
 //
-// TRADE-OFF (honest): this RE-EXPOSES the #402 failure mode — a shallow-history agent whose Score is
-// *inflated* (few incidents → high, non-null Score) ranking #1 for an unrelated agent outage — WITHIN
-// the agent category. The old sub-tiers masked it via form-proximity; #1027 adds NO structural guard.
-// getFallbacks (below) orders by Score via orderForFallback — which reduces to a plain Score sort here
-// since every agent is 'high' confidence (every agent HAS official uptime, so #713's confidence-
-// downgrade never fires for them) — and does NOT consult the coverage gate (#802 is a rankings-page-
-// only exclusion).
-// Only a genuinely null/low-confidence Score sinks (via orderForFallback's low/'__none__' bucket) — every
-// agent here is 'high', so that sink never fires for them in practice. Mitigation is procedural, not
-// structural: verify after
-// adding any new agent that it doesn't dominate the fallback slot on an unrelated outage. This is an
-// accepted trade-off of design A (Score-neutral ordering over a form axis that no longer discriminates).
+// A candidate whose Score has no incident and no probe behind it sorts after those with evidence
+// (orderForFallback, #1682).
 //
 // Exported for the cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) — that test
 // is the only safeguard against drift between the three independent copies of this map (#403).
@@ -108,6 +98,8 @@ interface FallbackCandidate {
    *  #811 — `title` lets `hasActiveIncident` ignore a non-reliability ADVISORY (access suspension /
    *  compliance / deprecation), which must NOT disqualify an otherwise-operational candidate. */
   incidents?: Array<{ status: string; title?: string; retainedBridge?: boolean }>
+  scoreMetrics?: { incidents30d?: number | null } | null
+  scoreBreakdown?: { responsivenessStatus?: string | null } | null
   /** #616 — stale incident source (#591). Excluded from Score ranking, so it must also be excluded
    *  as a fallback candidate: recommending a service we don't trust enough to rank contradicts the
    *  same product surface. */
@@ -394,7 +386,20 @@ export function effectiveTierFor(svc: FallbackCandidate): number {
 //      worked fixture in fallback.test.ts). No magic threshold: the fraction IS the fairness rule, and
 //      it degrades gracefully as the pools grow apart instead of granting either extreme (never /
 //      always) a fixed share.
-export function orderForFallback<T extends { id: string; aiwatchScore?: number | null; scoreConfidence?: string | null }>(
+type OrderCandidate = {
+  id: string
+  aiwatchScore?: number | null
+  scoreConfidence?: string | null
+  scoreMetrics?: { incidents30d?: number | null } | null
+  scoreBreakdown?: { responsivenessStatus?: string | null } | null
+}
+
+// #1682 — the Score's own evidence is empty: no incident in its 30-day window and no probe behind its
+// Responsiveness. Read from what the Score used, not re-derived. Absent fields mean "unknown".
+const isUncorroborated = (c: OrderCandidate): boolean =>
+  c.scoreConfidence === 'high' && c.scoreMetrics?.incidents30d === 0 && c.scoreBreakdown?.responsivenessStatus === 'unsupported'
+
+export function orderForFallback<T extends OrderCandidate>(
   candidates: T[],
   sourceTier: number,
 ): T[] {
@@ -413,7 +418,7 @@ export function orderForFallback<T extends { id: string; aiwatchScore?: number |
     for (const c of group) {
       // '__none__' covers a caller that doesn't attach scoreConfidence at all (e.g. the RSS feed's
       // degraded path — see orderForFallback's doc comment).
-      const key = c.scoreConfidence ?? '__none__'
+      const key = isUncorroborated(c) ? 'uncorroborated' : (c.scoreConfidence ?? '__none__')
       const bucket = byConfidence.get(key)
       if (bucket) bucket.push(c)
       else byConfidence.set(key, [c])
@@ -435,6 +440,7 @@ export function orderForFallback<T extends { id: string; aiwatchScore?: number |
     })
     interleaved.sort((a, b) => a.pos - b.pos || a.priority - b.priority)
     result.push(...interleaved.map((e) => e.item))
+    result.push(...(byConfidence.get('uncorroborated') ?? []))
     // 'low' (score withheld), '__none__' (no confidence signal), and any OTHER value never compete for
     // an early slot — appended after, Score-sorted among themselves (mirrors the old `?? 0` sink: a
     // `low` candidate's score is null, so this is a stable/arbitrary order among them, same as before).
@@ -443,7 +449,7 @@ export function orderForFallback<T extends { id: string; aiwatchScore?: number |
     // future value) must sink here, not silently vanish from the recommendation. serviceReliability.js's
     // buildRanking hit this exact shape on the Ranking page; a hardcoded 2-key list here missed it.
     for (const [key, bucket] of byConfidence) {
-      if (key === 'high' || key === 'medium') continue
+      if (key === 'high' || key === 'medium' || key === 'uncorroborated') continue
       if (key !== 'low' && key !== '__none__') {
         console.warn(`[fallback] unrecognized scoreConfidence "${key}" on ${bucket.map((c) => c.id).join(', ')} — sinking below high/medium instead of dropping`)
       }

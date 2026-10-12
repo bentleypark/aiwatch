@@ -330,6 +330,32 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     expect(order.indexOf('Claude API')).toBeLessThan(order.indexOf('Gemini API'))
   })
 
+  // #1682 — Windsurf-shaped candidate read from live data on 2026-10-12: Score 100 / high on
+  // incidents30d 0 and no probe (responsivenessStatus 'unsupported').
+  describe('a Score backed by no incident and no probe (#1682)', () => {
+    const resolved = [{ id: 'r-1', title: 'Elevated errors', status: 'resolved', impact: 'minor', startedAt: now, duration: '10m', timeline: [] }]
+    const active = [{ id: 'a-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }]
+    const evidence = (incidents30d: number, responsivenessStatus: string) => ({ scoreMetrics: { incidents30d }, scoreBreakdown: { responsivenessStatus } })
+    const agent = (over: Record<string, unknown>) => svc({ category: 'agent', scoreConfidence: 'high', uptime30d: 99.9, ...over })
+    const source = agent({ id: 'claudecode', name: 'Claude Code', status: 'down', aiwatchScore: 74, incidents: active, ...evidence(7, 'available') })
+    const windsurf = agent({ id: 'windsurf', name: 'Windsurf (Devin Desktop)', aiwatchScore: 100, incidents: [], ...evidence(0, 'unsupported') })
+    const junie = agent({ id: 'junie', name: 'Junie', aiwatchScore: 96, incidents: resolved, ...evidence(1, 'unsupported') })
+    const copilot = agent({ id: 'copilot', name: 'GitHub Copilot', aiwatchScore: 85, incidents: resolved, ...evidence(4, 'unsupported') })
+
+    const alternativesFor = async (services: unknown[]) => {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ services, aiAnalysis: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      return bulletOrder(await (await handler(makeReq('claude-code'))).text())
+    }
+
+    it('is not listed over peers that have a record', async () => {
+      expect(await alternativesFor([source, windsurf, junie, copilot])).toEqual(['Junie', 'GitHub Copilot'])
+    })
+
+    it('is still listed, after them, when a slot is left', async () => {
+      expect(await alternativesFor([source, windsurf, junie])).toEqual(['Junie', 'Windsurf (Devin Desktop)'])
+    })
+  })
+
   it('a low-confidence (score-withheld) candidate never displaces a real-scored peer', async () => {
     const payload = new Response(JSON.stringify({
       services: [

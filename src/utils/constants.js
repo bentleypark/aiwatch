@@ -192,8 +192,7 @@ export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
 // delivery-FORM axis that no longer distinguishes agents — Claude Code, Codex, Cursor, Windsurf,
 // Copilot and Junie each ship both a CLI and an IDE surface — so a single-form label was inaccurate.
 // Unlike the LLM tiers (1-3 = a still-valid capability axis), the form axis no longer discriminates,
-// so agents fall back by Score within the category. Trade-off + the re-exposed #402 risk: see the
-// canonical note in worker/src/fallback.ts (the worker is the fallback authority).
+// so agents fall back by Score within the category.
 //
 // Cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) asserts byte-for-byte equality
 // against worker/src/fallback.ts API_TIER. api/is-down.ts inline copy is checked via string-match.
@@ -418,6 +417,11 @@ export function hasActiveIncident(s) {
 // small medium tier still gets a fair shot when pools are comparable in size, and naturally fades out
 // (not excluded, not over-weighted) as the high pool grows relative to it — no magic threshold, the
 // fraction IS the rule.
+// #1682 — the Score's own evidence is empty: no incident in its 30-day window and no probe behind its
+// Responsiveness. Read from what the Score used, not re-derived. Absent fields mean "unknown".
+const isUncorroborated = (c) =>
+  c.scoreConfidence === 'high' && c.scoreMetrics?.incidents30d === 0 && c.scoreBreakdown?.responsivenessStatus === 'unsupported'
+
 export function orderForFallback(candidates, sourceTier) {
   const byDistance = new Map()
   for (const c of candidates) {
@@ -432,7 +436,7 @@ export function orderForFallback(candidates, sourceTier) {
     const group = byDistance.get(dist)
     const byConfidence = new Map()
     for (const c of group) {
-      const key = c.scoreConfidence ?? '__none__'
+      const key = isUncorroborated(c) ? 'uncorroborated' : (c.scoreConfidence ?? '__none__')
       const bucket = byConfidence.get(key)
       if (bucket) bucket.push(c)
       else byConfidence.set(key, [c])
@@ -452,13 +456,14 @@ export function orderForFallback(candidates, sourceTier) {
     })
     interleaved.sort((a, b) => a.pos - b.pos || a.priority - b.priority)
     result.push(...interleaved.map((e) => e.item))
+    result.push(...(byConfidence.get('uncorroborated') ?? []))
     // 'low' (score withheld), '__none__' (no confidence signal), and any OTHER value never compete for
     // an early slot — appended after, Score-sorted among themselves (mirrors the old `?? 0` sink).
     // Iterates every REMAINING bucket rather than a hardcoded ['low', '__none__'] pair — a candidate
     // with a scoreConfidence outside {high,medium,low} (a legacy KV record predating this field, or a
     // future value) must sink here, not silently vanish from the recommendation.
     for (const [key, bucket] of byConfidence) {
-      if (key === 'high' || key === 'medium') continue
+      if (key === 'high' || key === 'medium' || key === 'uncorroborated') continue
       if (key !== 'low' && key !== '__none__') {
         console.warn(`[fallback] unrecognized scoreConfidence "${key}" on ${bucket.map((c) => c.id).join(', ')} — sinking below high/medium instead of dropping`)
       }

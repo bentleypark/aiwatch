@@ -32,7 +32,53 @@ const REPO_ROOT = join(__dirname, '..', '..', '..')
 // low-confidence (score-withheld) candidate that must sink below both real-scored tiers. Ids are shared
 // between the worker and frontend API_TIER maps (pinned by api-tier-sync.test.ts), so `sourceTier`
 // (tier 1 or 2, as noted) is valid identically on both sides.
-const FIXTURES: Array<{ label: string; sourceTier?: number; candidates: Array<{ id: string; aiwatchScore: number | null; scoreConfidence?: string }> }> = [
+type Evidence = { scoreMetrics?: { incidents30d: number }; scoreBreakdown?: { responsivenessStatus: string } }
+const evidence = (incidents30d: number, responsivenessStatus: string): Evidence =>
+  ({ scoreMetrics: { incidents30d }, scoreBreakdown: { responsivenessStatus } })
+
+const FIXTURES: Array<{ label: string; sourceTier?: number; candidates: Array<{ id: string; aiwatchScore: number | null; scoreConfidence?: string } & Evidence> }> = [
+  {
+    label: '#1682 — no incident in the Score window and no probe (Windsurf-shaped, Score 100) sinks below peers with evidence',
+    sourceTier: 11,
+    candidates: [
+      { id: 'windsurf', aiwatchScore: 100, scoreConfidence: 'high', ...evidence(0, 'unsupported') },
+      { id: 'junie', aiwatchScore: 96, scoreConfidence: 'high', ...evidence(1, 'unsupported') },
+      { id: 'copilot', aiwatchScore: 85, scoreConfidence: 'high', ...evidence(4, 'available') },
+    ],
+  },
+  {
+    label: '#1682 — no incident WITH a probe behind the Score keeps its Score rank',
+    sourceTier: 11,
+    candidates: [
+      { id: 'windsurf', aiwatchScore: 100, scoreConfidence: 'high', ...evidence(0, 'available') },
+      { id: 'junie', aiwatchScore: 96, scoreConfidence: 'high', ...evidence(1, 'unsupported') },
+    ],
+  },
+  {
+    label: '#1682 — absent score evidence never demotes',
+    sourceTier: 11,
+    candidates: [
+      { id: 'windsurf', aiwatchScore: 100, scoreConfidence: 'high' },
+      { id: 'junie', aiwatchScore: 96, scoreConfidence: 'high', ...evidence(1, 'unsupported') },
+    ],
+  },
+  {
+    label: '#1682 — an uncorroborated candidate sorts ahead of a score-withheld one',
+    sourceTier: 11,
+    candidates: [
+      { id: 'cursor', aiwatchScore: null, scoreConfidence: 'low', ...evidence(0, 'unsupported') },
+      { id: 'windsurf', aiwatchScore: 100, scoreConfidence: 'high', ...evidence(0, 'unsupported') },
+      { id: 'junie', aiwatchScore: 96, scoreConfidence: 'high', ...evidence(1, 'unsupported') },
+    ],
+  },
+  {
+    label: '#1682 — a score-withheld candidate with the same evidence is not moved ahead of other score-withheld ones',
+    sourceTier: 11,
+    candidates: [
+      { id: 'cursor', aiwatchScore: null, scoreConfidence: 'low', ...evidence(4, 'unsupported') },
+      { id: 'copilot', aiwatchScore: null, scoreConfidence: 'low', ...evidence(0, 'unsupported') },
+    ],
+  },
   {
     label: 'high(85) + medium(92, higher raw score)',
     candidates: [
@@ -126,6 +172,10 @@ describe('orderForFallback cross-mirror sync (#1186)', () => {
     // whose scoreConfidence is neither 'high'/'medium' nor literally 'low'/undefined (a legacy KV
     // record predating a future confidence value) was bucketed but never pushed to the result.
     expect(isDownSource).toMatch(/for \(const \[key, bucket\] of byConfidence\)/)
+    // #1682 — the uncorroborated predicate and its bucket are wired in, not just declared.
+    expect(isDownSource).toMatch(/c\.scoreConfidence === 'high' && c\.scoreMetrics\?\.incidents30d === 0 && c\.scoreBreakdown\?\.responsivenessStatus === 'unsupported'/)
+    expect(isDownSource).toMatch(/isUncorroborated\(c\) \? 'uncorroborated'/)
+    expect(isDownSource).toMatch(/byConfidence\.get\('uncorroborated'\)/)
     expect(isDownSource).not.toMatch(/for \(const key of \['low',\s*'__none__'\]\)/)
     // The rejected 1-per-tier-per-round shape (attempt 3) must NOT reappear: it gave 'low' its own
     // round-0 slot via this exact 4-key priority array.

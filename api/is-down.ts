@@ -342,7 +342,19 @@ export default async function handler(req: Request) {
           // tier `(rank + 0.5) / tierSize` — ties favor 'high'. A small medium tier still gets a fair
           // shot when pools are comparable in size, and naturally fades out as the high pool grows
           // relative to it — no magic threshold, the fraction IS the rule.
-          const orderForFallback = <T extends { id: string; aiwatchScore?: number | null; scoreConfidence?: string }>(
+          type OrderCandidate = {
+            id: string
+            aiwatchScore?: number | null
+            scoreConfidence?: string
+            scoreMetrics?: { incidents30d?: number | null } | null
+            scoreBreakdown?: { responsivenessStatus?: string | null } | null
+          }
+          // #1682 — the Score's own evidence is empty: no incident in its 30-day window and no probe
+          // behind its Responsiveness. Read from what the Score used, not re-derived. Absent fields
+          // mean "unknown".
+          const isUncorroborated = (c: OrderCandidate): boolean =>
+            c.scoreConfidence === 'high' && c.scoreMetrics?.incidents30d === 0 && c.scoreBreakdown?.responsivenessStatus === 'unsupported'
+          const orderForFallback = <T extends OrderCandidate>(
             candidates: T[],
           ): T[] => {
             const byDistance = new Map<number, T[]>()
@@ -358,7 +370,7 @@ export default async function handler(req: Request) {
               const group = byDistance.get(dist)!
               const byConfidence = new Map<string, T[]>()
               for (const c of group) {
-                const key = c.scoreConfidence ?? '__none__'
+                const key = isUncorroborated(c) ? 'uncorroborated' : (c.scoreConfidence ?? '__none__')
                 const bucket = byConfidence.get(key)
                 if (bucket) bucket.push(c)
                 else byConfidence.set(key, [c])
@@ -379,6 +391,7 @@ export default async function handler(req: Request) {
               })
               interleaved.sort((a, b) => a.pos - b.pos || a.priority - b.priority)
               result.push(...interleaved.map((e) => e.item))
+              result.push(...(byConfidence.get('uncorroborated') ?? []))
               // 'low' (score withheld), '__none__' (no confidence signal), and any OTHER value never
               // compete for an early slot — appended after, Score-sorted among themselves (mirrors the
               // old `?? 0` sink). Iterates every REMAINING bucket rather than a hardcoded
@@ -386,7 +399,7 @@ export default async function handler(req: Request) {
               // (a legacy KV record predating this field, or a future value) must sink here, not
               // silently vanish from the recommendation.
               for (const [key, bucket] of byConfidence) {
-                if (key === 'high' || key === 'medium') continue
+                if (key === 'high' || key === 'medium' || key === 'uncorroborated') continue
                 if (key !== 'low' && key !== '__none__') {
                   console.warn(`[is-down] unrecognized scoreConfidence "${key}" on ${bucket.map((c) => c.id).join(', ')} — sinking below high/medium instead of dropping`)
                 }

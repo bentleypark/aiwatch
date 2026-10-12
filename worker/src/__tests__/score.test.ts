@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { calculateAIWatchScore, classifyProbe, computeMttrHours, isReliabilityIncident, MTTR_PRIOR_MIN, MTTR_PRIOR_WEIGHT, MIN_VALID_DAYS, type ProbeContext } from '../score'
 import { PROBE_TARGETS, resolveProbeId } from '../probe'
-import { scoreFor } from '../index'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { scoreFor, withScore } from '../index'
 import type { ProbeSummary, ServiceStatus } from '../types'
 
 describe('computeMttrHours (#1019 Part B — small-sample robustness)', () => {
@@ -625,6 +627,24 @@ describe('parent-probe inheritance in scoring (#883)', () => {
     // chatgpt is neither probed nor an inheritor → must stay unsupported through the real path.
     const svc = makeSvc({ id: 'chatgpt', category: 'app', uptime30d: 99.9 })
     expect(scoreFor(svc, new Map()).breakdown.responsivenessStatus).toBe('unsupported')
+  })
+})
+
+describe('withScore (#1682)', () => {
+  it('carries the evidence the Score used: an inheriting agent shows its parent probe and the incidents beyond the feed', () => {
+    const summaries = new Map([['openai', makeProbeSummary()]])
+    const svc = makeSvc({ id: 'codex', category: 'agent', uptime30d: 99.9, incidents: [] })
+    const beyond = [{ id: 'b-1', title: 'Elevated errors', status: 'resolved' as const, impact: 'minor' as const, startedAt: new Date().toISOString(), resolvedAt: new Date().toISOString(), duration: '10m', timeline: [] }]
+    const carried = withScore({ ...svc, incidentsBeyondFeed: beyond }, scoreFor({ ...svc, incidentsBeyondFeed: beyond }, summaries))
+    expect(carried.scoreBreakdown.responsivenessStatus).toBe('available')
+    expect(carried.scoreMetrics.incidents30d).toBe(1)
+    expect(carried.scoreConfidence).toBe('high')
+  })
+
+  it('the alert, RSS, statusline and Claude-extension candidate lists are built with it', () => {
+    const source = readFileSync(join(__dirname, '..', 'index.ts'), 'utf8')
+    expect(source.match(/withScore\(svc, scoreFor\(svc,/g)).toHaveLength(4)
+    expect(source).not.toMatch(/scoreConfidence: s\.confidence \}/)
   })
 })
 

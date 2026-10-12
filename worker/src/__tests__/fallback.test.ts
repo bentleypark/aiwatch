@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SERVICES } from '../services'
-import { COMPONENT_CAPABILITY, getFallbacks, buildFallbackText, buildGroupedFallbackText, fallbackEmbedSection, getGroupedFallbacks, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier, routingTier, capabilityOfComponent, effectiveTierFor, CAPABILITY_TIER, isCapabilityProvider, CAPABILITY_PROVIDERS } from '../fallback'
+import { COMPONENT_CAPABILITY, getFallbacks, buildFallbackText, buildGroupedFallbackText, fallbackEmbedSection, getGroupedFallbacks, orderForFallback, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier, routingTier, capabilityOfComponent, effectiveTierFor, CAPABILITY_TIER, isCapabilityProvider, CAPABILITY_PROVIDERS } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -583,6 +583,71 @@ describe('getFallbacks — coding agents share one tier, Score-ordered (#1027)',
     for (const id of ['claudecode', 'codex', 'cursor', 'windsurf', 'copilot', 'junie']) {
       expect(tierFor(id)).toBe(11)
     }
+  })
+})
+
+// #1682 — Score evidence read from live /api/status/cached on 2026-10-12: Windsurf scored 100 / high on
+// incidents30d 0 and no probe (responsivenessStatus 'unsupported'), ahead of every peer.
+describe('#1682 — a Score backed by no incident and no probe does not take a fallback slot over candidates with evidence', () => {
+  const evidence = (incidents30d: number, responsivenessStatus: string) =>
+    ({ scoreMetrics: { incidents30d }, scoreBreakdown: { responsivenessStatus } })
+  const agent = (id: string, name: string, aiwatchScore: number, over: Record<string, unknown> = {}) =>
+    ({ id, category: 'agent', name, status: 'operational', aiwatchScore, scoreConfidence: 'high' as const, incidents: [], ...evidence(4, 'unsupported'), ...over })
+  const windsurf = agent('windsurf', 'Windsurf (Devin Desktop)', 100, evidence(0, 'unsupported'))
+  const peers = [
+    agent('codex', 'Codex', 76, evidence(7, 'available')),
+    agent('copilot', 'GitHub Copilot', 85, evidence(4, 'unsupported')),
+    agent('junie', 'Junie', 96, evidence(1, 'unsupported')),
+  ]
+
+  it('Claude Code affected → [Junie 96, GitHub Copilot 85], not Windsurf 100', () => {
+    const source = agent('claudecode', 'Claude Code', 74, { status: 'down' })
+    expect(getFallbacks('claudecode', 'agent', [source, windsurf, ...peers]).map(f => f.name)).toEqual(['Junie', 'GitHub Copilot'])
+  })
+
+  it('is still recommended when it is the only candidate left', () => {
+    const source = agent('claudecode', 'Claude Code', 74, { status: 'down' })
+    expect(getFallbacks('claudecode', 'agent', [source, windsurf]).map(f => f.name)).toEqual(['Windsurf (Devin Desktop)'])
+  })
+
+  it('sorts after candidates with evidence but ahead of a score-withheld one', () => {
+    const withheld = agent('cursor', 'Cursor', 0, { aiwatchScore: null, scoreConfidence: 'low' as const })
+    expect(orderForFallback([withheld, windsurf, peers[0]], 11).map(c => c.id)).toEqual(['codex', 'windsurf', 'cursor'])
+  })
+
+  it('zero incidents WITH a probe behind the Score keeps its Score rank', () => {
+    const probed = agent('windsurf', 'Windsurf (Devin Desktop)', 100, evidence(0, 'available'))
+    expect(orderForFallback([peers[2], probed], 11).map(c => c.id)).toEqual(['windsurf', 'junie'])
+  })
+
+  it('a probe with too little data, or an unreadable probe window, is not "no probe"', () => {
+    for (const status of ['insufficient', 'unavailable']) {
+      const probed = agent('windsurf', 'Windsurf (Devin Desktop)', 100, evidence(0, status))
+      expect(orderForFallback([peers[2], probed], 11).map(c => c.id)).toEqual(['windsurf', 'junie'])
+    }
+  })
+
+  it('Codex on a quiet feed keeps its rank: the Score counts incidents the feed no longer lists, and an inherited probe', () => {
+    // Live shape: Codex's own feed array is empty after a quiet stretch, `latency` is null (it inherits
+    // OpenAI's probe), yet its Score rests on 3 recorded incidents and a probe.
+    const quiet = agent('codex', 'Codex', 90, { incidents: [], latency: null, ...evidence(3, 'available') })
+    expect(orderForFallback([peers[2], quiet], 11).map(c => c.id)).toEqual(['junie', 'codex'])
+    expect(orderForFallback([peers[1], quiet], 11).map(c => c.id)).toEqual(['codex', 'copilot'])
+  })
+
+  it('a candidate with an incident in the window but no probe keeps its Score rank', () => {
+    expect(orderForFallback([peers[1], peers[2]], 11).map(c => c.id)).toEqual(['junie', 'copilot'])
+  })
+
+  it('absent score evidence means unknown, never uncorroborated', () => {
+    const bare = { id: 'windsurf', aiwatchScore: 100, scoreConfidence: 'high' }
+    expect(orderForFallback([peers[2], bare], 11).map(c => c.id)).toEqual(['windsurf', 'junie'])
+  })
+
+  it('a score-withheld candidate with the same evidence is not moved ahead of other score-withheld ones', () => {
+    const withheld = (id: string, over: Record<string, unknown>) => agent(id, id, 0, { aiwatchScore: null, scoreConfidence: 'low' as const, ...over })
+    const [first, second] = [withheld('cursor', evidence(4, 'unsupported')), withheld('copilot', evidence(0, 'unsupported'))]
+    expect(orderForFallback([first, second], 11).map(c => c.id)).toEqual(['cursor', 'copilot'])
   })
 })
 

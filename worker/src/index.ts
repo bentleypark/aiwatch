@@ -427,6 +427,11 @@ export function scoreFor(svc: ServiceStatus, summaries: Map<string, ProbeSummary
   return calculateAIWatchScore(scored, 30, classifyProbe(probeId, PROBED_SERVICE_IDS.has(probeId), summaries))
 }
 
+// The Score fields a fallback candidate carries; `orderForFallback` reads scoreBreakdown/scoreMetrics (#1682).
+export function withScore<T extends ServiceStatus>(svc: T, s: ReturnType<typeof scoreFor>) {
+  return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics }
+}
+
 const ROOTLY_SERVICE_IDS = new Set(SERVICES.filter((s) => s.rootlyFeed).map((s) => s.id))
 
 // Read probe summaries from KV with logging — distinguishes infra failure from genuine missing data.
@@ -933,10 +938,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 
   // Calculate scores for fallback recommendations
   const cronProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'cron')
-  const scored = services.map((svc) => {
-    const s = scoreFor(svc, cronProbeSummaries)
-    return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
-  })
+  const scored = services.map((svc) => withScore(svc, scoreFor(svc, cronProbeSummaries)))
 
   // #587 — accumulate this cycle's incidents into incidents:monthly every */5 (not just the daily
   // summary), so a short-lived / RSS-sourced incident (Azure/Bedrock) that fires an alert is
@@ -5253,8 +5255,7 @@ export default {
         feedCached = {
           ...cached,
           services: cached.services.map((svc) => {
-            const s = scoreFor(svc, feedProbe)
-            return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
+            return withScore(svc, scoreFor(svc, feedProbe))
           }),
         }
         // #1224 — scope every per-incident KV-read loop below to the service(s) THIS feed actually
@@ -5678,10 +5679,7 @@ export default {
       }
       const summaries = await readProbeSummaries(env.STATUS_CACHE, 'statusline-brief')
       // Score the FULL set — getFallbacks needs the candidate pool — then narrow in the renderer.
-      const scoredAll = cacheData.services.map((svc) => {
-        const s = scoreFor(svc, summaries)
-        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
-      })
+      const scoredAll = cacheData.services.map((svc) => withScore(svc, scoreFor(svc, summaries)))
       // AI summary of each ACTIVE incident on a non-operational service (bounded: only down/degraded
       // services, usually few). Best-effort per key: a missing/unparseable ai:analysis → no summary,
       // never a 500 (mirrors the ext-claude reads).
@@ -5823,10 +5821,7 @@ export default {
           const summaries = await readProbeSummaries(env.STATUS_CACHE, 'ext-claude')
           // Score the FULL set — getFallbacks needs the candidate pool — but emit only
           // the three Claude surfaces (buildExtClaudePayload narrows).
-          const scoredAll = cacheData.services.map((svc) => {
-            const s = scoreFor(svc, summaries)
-            return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
-          })
+          const scoredAll = cacheData.services.map((svc) => withScore(svc, scoreFor(svc, summaries)))
           // #837 PR2 — enrich so the popup shows what's actually happening, not just a color:
           // (1) the GATED crowd-report map (same #575 gate as the dashboard — only corroborated
           //     services appear, so crowd alone can never contradict an operational badge), and

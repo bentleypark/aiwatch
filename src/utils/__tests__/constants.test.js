@@ -376,6 +376,39 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
   })
 })
 
+// #1682 — shapes read from live /api/status/cached on 2026-10-12 (see the worker mirror's tests).
+describe('#1682 — frontend: a Score backed by no incident and no probe does not take a fallback slot over candidates with evidence', () => {
+  const evidence = (incidents30d, responsivenessStatus) => ({ scoreMetrics: { incidents30d }, scoreBreakdown: { responsivenessStatus } })
+  const agent = (id, name, aiwatchScore, over = {}) =>
+    ({ id, category: 'agent', name, status: 'operational', aiwatchScore, scoreConfidence: 'high', incidents: [], ...evidence(4, 'unsupported'), ...over })
+  const source = { id: 'claudecode', category: 'agent' }
+  const peers = [agent('copilot', 'GitHub Copilot', 85), agent('junie', 'Junie', 96, evidence(1, 'unsupported'))]
+  const silent = () => agent('windsurf', 'Windsurf (Devin Desktop)', 100, evidence(0, 'unsupported'))
+
+  it('Claude Code affected → [Junie 96, GitHub Copilot 85], not Windsurf 100', () => {
+    expect(getFallbacks(source, [silent(), ...peers]).map(f => f.name)).toEqual(['Junie', 'GitHub Copilot'])
+  })
+
+  it('is still recommended when it is the only candidate', () => {
+    expect(getFallbacks(source, [silent()]).map(f => f.name)).toEqual(['Windsurf (Devin Desktop)'])
+  })
+
+  it('zero incidents WITH a probe behind the Score keeps its Score rank', () => {
+    const probed = agent('windsurf', 'Windsurf (Devin Desktop)', 100, evidence(0, 'available'))
+    expect(getFallbacks(source, [probed, ...peers]).map(f => f.name)).toEqual(['Windsurf (Devin Desktop)', 'Junie'])
+  })
+
+  it('Codex on a quiet feed keeps its rank: the Score counts incidents the feed no longer lists', () => {
+    const quiet = agent('codex', 'Codex', 90, { incidents: [], latency: null, ...evidence(3, 'available') })
+    expect(getFallbacks(source, [quiet, ...peers]).map(f => f.name)).toEqual(['Junie', 'Codex'])
+  })
+
+  it('absent score evidence means unknown, never uncorroborated', () => {
+    const bare = { id: 'windsurf', category: 'agent', name: 'Windsurf (Devin Desktop)', status: 'operational', aiwatchScore: 100, scoreConfidence: 'high' }
+    expect(getFallbacks(source, [bare, ...peers]).map(f => f.name)).toEqual(['Windsurf (Devin Desktop)', 'Junie'])
+  })
+})
+
 describe('#1062 facet B — frontend capability routing on a secondary-component outage', () => {
   // Pins the frontend WIRING: getFallbacks/getGroupedFallbacks must call routingTier/effectiveTierFor.
   const op2 = (id, name, score) => ({ id, category: 'api', name, status: 'operational', aiwatchScore: score, incidents: [] })
