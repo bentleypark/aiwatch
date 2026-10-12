@@ -9,5 +9,6 @@ export default defineConfig({
     // happy-dom needed for analytics.test.js (localStorage / document.cookie / window).
     // Other tests are pure-function and unaffected by the environment.
     environment: 'happy-dom',
+    setupFiles: ['./vitest.setup.js'],
   },
 })

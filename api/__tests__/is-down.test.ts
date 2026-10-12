@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down'
+import { spyFetchWithEmptyReportFeed } from './fetch-stub'
 
 function makeReq(slug: string): Request {
   return new Request(`https://ai-watch.dev/api/is-down?slug=${slug}`, { method: 'GET' })
@@ -153,7 +154,7 @@ describe('is-down.ts cache-header divergence (#378)', () => {
 
 describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
-  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  beforeEach(() => { fetchMock = spyFetchWithEmptyReportFeed() })
   afterEach(() => { fetchMock.mockRestore() })
 
   function makeWorkerResolved(): Response {
@@ -300,7 +301,7 @@ describe('is-down.ts — rank is scoped to the target\'s own confidence tier (#1
 // shape — never a behavioral test through the real handler. These exercise it end-to-end.
 describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
-  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  beforeEach(() => { fetchMock = spyFetchWithEmptyReportFeed() })
   afterEach(() => { fetchMock.mockRestore() })
 
   const now = new Date().toISOString()
@@ -399,7 +400,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
 // documented "tested twin vs called path" seam. Handler-level, so the wiring is what is pinned.
 describe('is-down.ts - the handler carries the analysis prose halves (#1328)', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
-  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  beforeEach(() => { fetchMock = spyFetchWithEmptyReportFeed() })
   afterEach(() => { fetchMock.mockRestore() })
 
   const DURABLE = 'Auth overload caused login failures.'

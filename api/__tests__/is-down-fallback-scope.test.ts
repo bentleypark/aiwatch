@@ -3,6 +3,7 @@
 // no in-outage 🔄 Alternatives block.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down'
+import { spyFetchWithEmptyReportFeed } from './fetch-stub'
 
 const req = (slug: string) => new Request(`https://ai-watch.dev/api/is-down?slug=${slug}`, { method: 'GET' })
 
@@ -23,7 +24,7 @@ const payload = (fallbackSuppressed: boolean) => {
 
 describe('is-down.ts — fallbackSuppressed (#880)', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
-  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  beforeEach(() => { fetchMock = spyFetchWithEmptyReportFeed() })
   afterEach(() => { fetchMock.mockRestore() })
 
   it('recommends Voyage AI for an in-scope outage', async () => {
