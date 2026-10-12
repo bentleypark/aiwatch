@@ -1,6 +1,7 @@
 // Shared utility functions for AIWatch Worker
 
 import type { Incident, PlacementSource, ServiceConfig, ServiceStatus } from './types'
+import { isUnreadableStatus } from './status-verdict'
 
 const IMPACT_RANK: Record<string, number> = { critical: 3, major: 2, minor: 1 }
 
@@ -1432,4 +1433,41 @@ export function incidentDays(
 // #1531 — `/api/status/cached?series=0` omits the probe time series.
 export function omitsTimeSeries(searchParams: URLSearchParams): boolean {
   return searchParams.get('series') === '0'
+}
+
+// #1674 — the severity dot and impact label an incident is announced with, shared by the Slack /feed
+// item (rss.ts) and the new-incident alert (alerts.ts → Discord, per-user Discord, Slack direct).
+export type SeverityKind = 'active' | 'resolved' | 'withdrawn'
+
+// Severity dot for the title + meta line (#467).
+export function severityEmoji(svc: Pick<ServiceStatus, 'status'>, inc: Pick<Incident, 'title' | 'impact'>, kind: SeverityKind): string {
+  // #1106 — a withdrawal is neither an outage (🔴/🟡) nor a recovery (🟢): the record was retracted,
+  // and we learned nothing about whether the service recovered. Neutral, ahead of every other branch
+  // so no impact/status value can colour it into a claim we can't support.
+  if (kind === 'withdrawn') return '⚪'
+  const isResolved = kind === 'resolved'
+  // #1021 — a non-reliability advisory (usage-limits/quota/…) is informational, not an outage severity, so
+  // the public feed shows ℹ️ (matching the Discord/webhook "ℹ️ Advisory" reframe) instead of 🟡/🟢. Keyed
+  // on the title (OUTAGE_SIGNAL guard inside), so a real outage that reuses a quota word stays red/amber.
+  if (isNonReliabilityAdvisory(inc.title)) return 'ℹ️'
+  if (isResolved) return '🟢'
+  if (inc.impact === 'critical' || inc.impact === 'major' || svc.status === 'down') return '🔴'
+  // #1233 — an unreadable source falls to ⚪, not to the 🟡 degradation claim. The feed is a PUSH
+  // surface (Slack re-notifies), so a wrong severity here is delivered, not merely displayed. ⚪ is
+  // already the neutral marker for a withdrawn item above.
+  if (isUnreadableStatus(svc.status)) return '⚪'
+  return '🟡'
+}
+
+function capitalize(s: string): string {
+  return s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s
+}
+
+// The impact word for an active incident, or null when there is nothing true to say.
+export function impactLabel(svc: Pick<ServiceStatus, 'status'>, inc: Pick<Incident, 'impact'>): string | null {
+  return inc.impact ? capitalize(inc.impact)
+    : svc.status === 'down' ? 'Down'
+    : isUnreadableStatus(svc.status) ? 'Status unknown'
+    : svc.status === 'degraded' ? 'Degraded'
+    : null
 }

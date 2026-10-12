@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, placeNewComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, parseSnapshotWindow, omitsTimeSeries, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, placeNewComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, severityEmoji, impactLabel, parseSnapshotWindow, omitsTimeSeries, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
 import type { Incident, ServiceComponent } from '../types'
 
 describe('appendStatusHint (#539)', () => {
@@ -735,6 +735,36 @@ describe('countsAsUptimeOk (#733)', () => {
     expect(countsAsUptimeOk('degraded', [inc('major')])).toBe(false)
     expect(countsAsUptimeOk('degraded', [inc('critical')])).toBe(false)
     expect(countsAsUptimeOk('degraded', [inc('minor'), inc('major')])).toBe(false) // worst wins
+  })
+})
+
+describe('impactLabel (#1674)', () => {
+  it('names the incident impact when it has one', () => {
+    expect(impactLabel({ status: 'operational' }, { impact: 'minor' })).toBe('Minor')
+    expect(impactLabel({ status: 'down' }, { impact: 'critical' })).toBe('Critical')
+  })
+
+  it('falls back to what the service status supports, and to nothing when it supports nothing', () => {
+    expect(impactLabel({ status: 'down' }, { impact: null })).toBe('Down')
+    expect(impactLabel({ status: 'degraded' }, { impact: null })).toBe('Degraded')
+    expect(impactLabel({ status: 'unknown' }, { impact: null })).toBe('Status unknown')
+    expect(impactLabel({ status: 'operational' }, { impact: null })).toBeNull()
+  })
+})
+
+describe('severityEmoji (#1674)', () => {
+  const inc = (over: object = {}) => ({ title: 'API errors', impact: 'minor' as const, ...over })
+
+  it('🔴 for major impact on a degraded service and for minor impact on a down one, 🟡 for minor impact on a degraded one', () => {
+    expect(severityEmoji({ status: 'degraded' }, inc({ impact: 'major' }), 'active')).toBe('🔴')
+    expect(severityEmoji({ status: 'down' }, inc(), 'active')).toBe('🔴')
+    expect(severityEmoji({ status: 'degraded' }, inc(), 'active')).toBe('🟡')
+  })
+
+  it('⚪ for an unreadable source with no impact and for a withdrawal, 🟢 for a resolved outage', () => {
+    expect(severityEmoji({ status: 'unknown' }, inc({ impact: null }), 'active')).toBe('⚪')
+    expect(severityEmoji({ status: 'down' }, inc(), 'withdrawn')).toBe('⚪')
+    expect(severityEmoji({ status: 'down' }, inc(), 'resolved')).toBe('🟢')
   })
 })
 

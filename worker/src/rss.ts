@@ -6,12 +6,12 @@
 
 import { SERVICES } from './services'
 import type { ServiceStatus, Incident } from './types'
-import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
+import { isAffectedStatus } from './status-verdict'
 import { escapeXml } from './badge'
-import { getGroupedFallbacks } from './fallback'
+import { getGroupedFallbacks, formatFallbackGroups } from './fallback'
 import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE, OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
-import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, formatDuration } from './utils'
+import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, formatDuration, severityEmoji, impactLabel } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
 import { withdrawalHold, liveIncidentIds, type WithdrawnIncident } from './withdrawn'
 
@@ -263,7 +263,7 @@ export function isDownUrl(serviceId: string): string {
 // #1164 — `groupUrl`, when given, wins outright: a shared multi-surface incident (2+ of the SAME
 // family carrying this incident id — see itemXml's `familyMemberCount` check) points general
 // subscribers at the family group is-down page instead of one arbitrarily-"first" surface, matching
-// the #724 provider-grouped TITLE this item already renders ("Anthropic (Claude API, claude.ai): …").
+// the #724 provider-grouped TITLE this item already renders ("Anthropic (Claude API, claude.ai) — New Incident").
 // No `?e=` hint on the group URL — is-down-group.ts computes its own live worst-of headline and
 // never reads the query param, unlike the single-surface page's OG-pinning use of it.
 function serviceLink(serviceId: string, kind: ItemKind, status: ServiceStatus['status'], groupUrl?: string): string {
@@ -301,7 +301,7 @@ function rfc822(iso: string): string {
 // Map of incident ID → every service name carrying it. A provider that reports
 // per-surface (Anthropic: Claude API / claude.ai / Claude Code) links one root
 // incident to multiple services, so the same ID would surface as several items —
-// the provider-grouped title ("Anthropic (Claude API, claude.ai, Claude Code): …", #724) tells a
+// the provider-grouped title ("Anthropic (Claude API, claude.ai, Claude Code) — New Incident", #724) tells a
 // subscriber it's one event, not three (the old "Also affecting" line was dropped in #760 as a dup).
 // #1106 — tombstones contribute too. A withdrawn incident is in NOBODY's live list by construction,
 // so without this its co-affected set is always empty and the retraction's title names only the
@@ -353,10 +353,7 @@ type ItemKind = 'active' | 'resolved' | 'withdrawn'
 // is shared with the Discord Incident-Resolved embed via incident-history's resolvedAtOf (#846), so
 // both surfaces derive the same actual recovery time.
 
-// "Try instead" line for an active item when the service is impaired (#467). Reuses the same
-// tier-aware ranking as Discord/dashboard fallbacks. services:latest carries no aiwatchScore,
-// so the ordering is tier-distance-first (intra-tier order arbitrary) and names are shown
-// without scores — enough to point a subscriber somewhere useful.
+// Fallback lines for an active item when the service is impaired (#467), names only.
 function fallbackLine(svc: ServiceStatus, inc: Incident, services: ServiceStatus[]): string | undefined {
   // #1233 — `!isAffectedStatus`, not `=== 'operational'`. This is the inverse spelling of the same
   // two-valued question, so an unreadable source passed it and the feed attached "try X instead" to a
@@ -364,57 +361,17 @@ function fallbackLine(svc: ServiceStatus, inc: Incident, services: ServiceStatus
   // item here is not merely displayed, it is delivered.
   if (!isAffectedStatus(svc.status)) return undefined
   // #781 — grouped per-category fallbacks across ALL surfaces of THIS incident (matching the dashboard
-  // + Discord), not just the primary service's category. A single-category incident keeps the flat
-  // "A · B" top-2; a multi-category one lists one alternative per category ("LLM → OpenAI · App → ChatGPT").
+  // + Discord), not just the primary service's category.
   const affectedIds = services.filter((s) => (s.incidents ?? []).some((i) => i.id === inc.id)).map((s) => s.id)
   const groups = getGroupedFallbacks(affectedIds.length > 0 ? affectedIds : [svc.id], services)
   if (groups.length === 0) return undefined
-  // #1062 facet B — a ROUTED group (one with a `capability`) must keep its label even when it is the
-  // ONLY group. Without it a Mistral "Audio API Degraded" item reads "Try instead: AssemblyAI ·
-  // ElevenLabs", leaving a subscriber no way to tell why voice services are offered for an LLM
-  // provider's outage — the exact gap the self-describing labels were introduced to close, which the
-  // single-group path was silently bypassing (it hit OpenAI's Images/Sora routing too, shipped in PR #1071).
-  // A NON-routed single group keeps the flat form, byte-identical to before.
-  if (groups.length === 1) {
-    const g = groups[0]
-    return g.capability
-      ? `Try instead: ${g.label} → ${g.fallbacks.map((f) => f.name).join(' · ')}`
-      : `Try instead: ${g.fallbacks.map((f) => f.name).join(' · ')}`
-  }
-  return `Try instead: ${groups.map((g) => `${g.label} → ${g.fallbacks.map((f) => f.name).join('/')}`).join(' · ')}`
-}
-
-// Severity dot for the title + meta line (#467). Resolved → green; critical/major impact or a
-// down service → red; everything else (minor / degraded) → amber. Roughly mirrors the dashboard
-// status colors — note the feed additionally treats `major` impact as red even when the service
-// is only `degraded` (the dashboard pill stays amber there), favoring alert legibility.
-function severityEmoji(svc: ServiceStatus, inc: Incident, kind: ItemKind): string {
-  // #1106 — a withdrawal is neither an outage (🔴/🟡) nor a recovery (🟢): the record was retracted,
-  // and we learned nothing about whether the service recovered. Neutral, ahead of every other branch
-  // so no impact/status value can colour it into a claim we can't support.
-  if (kind === 'withdrawn') return '⚪'
-  const isResolved = kind === 'resolved'
-  // #1021 — a non-reliability advisory (usage-limits/quota/…) is informational, not an outage severity, so
-  // the public feed shows ℹ️ (matching the Discord/webhook "ℹ️ Advisory" reframe) instead of 🟡/🟢. Keyed
-  // on the title (OUTAGE_SIGNAL guard inside), so a real outage that reuses a quota word stays red/amber.
-  if (isNonReliabilityAdvisory(inc.title)) return 'ℹ️'
-  if (isResolved) return '🟢'
-  if (inc.impact === 'critical' || inc.impact === 'major' || svc.status === 'down') return '🔴'
-  // #1233 — an unreadable source falls to ⚪, not to the 🟡 degradation claim. The feed is a PUSH
-  // surface (Slack re-notifies), so a wrong severity here is delivered, not merely displayed. ⚪ is
-  // already this file's neutral marker for a withdrawn item.
-  if (isUnreadableStatus(svc.status)) return '⚪'
-  return '🟡'
+  return formatFallbackGroups(groups, false).join('\n')
 }
 
 // HTML-escape for text embedded inside the CDATA description. escapeXml turns `>` into `&gt;`,
 // which also neutralizes any `]]>` sequence so user-sourced text can't terminate the CDATA early.
 function escHtml(s: string): string {
   return escapeXml(stripControlChars(s))
-}
-
-function cap(s: string): string {
-  return s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s
 }
 
 // Render the description as small HTML paragraphs instead of one `·`-joined line (#467). Slack
@@ -451,7 +408,7 @@ function descHtml(
   // #1106 — a withdrawal renders ONLY the retraction sentence, and returns before every other block.
   // Deliberately no duration (we never saw an end), no timeline (the provider deleted it), no AI
   // analysis (a prediction about an incident whose record no longer exists is noise), and no
-  // "Try instead" (recommending an alternative implies the outage is still on). Each of those would
+  // fallback block (recommending an alternative implies the outage is still on). Each of those would
   // re-assert something about an outage whose only remaining fact is that the claim was withdrawn.
   // KEEP THIS RETURN FIRST — everything below reads fields the synthesized tombstone incident only
   // has placeholder values for. A new block added ABOVE it would silently render those placeholders.
@@ -479,7 +436,7 @@ function descHtml(
       if (pva) lines.push(`<p>🎯 AI prediction: ${escHtml(pva)}</p>`)
     }
   } else {
-    // #768 — the active item's description is STATUS-INVARIANT: severity + impact label only. The
+    // #768 — the active item's description is STATUS-INVARIANT. The
     // status word (investigating→identified→monitoring), the running duration, and the per-update
     // timeline text (dropped below) all change as the incident progresses; including them made Slack
     // `/feed` (which re-notifies on ANY item content change) re-post the same incident on every
@@ -490,16 +447,11 @@ function descHtml(
     // (and should): an impact escalation (major→critical), a surface joining the provider-grouped title, an AI
     // re-analysis rewriting the summary, or a fallback recommendation flip. Stability holds *given*
     // stable impact / co-affected / AI / fallback — which is the common case across investigating→identified.
-    // #1233 — without the `unknown` arm this renders the literal word "Degraded" for a source we could
-    // not read, in a feed item that is pushed to subscribers.
-    const label = inc.impact ? cap(inc.impact)
-      : service.status === 'down' ? 'Down'
-      : isUnreadableStatus(service.status) ? 'Status unknown'
-      : 'Degraded'
-    lines.push(`<p>${severityEmoji(service, inc, 'active')} <strong>${escHtml(label)}</strong></p>`)
+    const impact = impactLabel(service, inc)
+    if (impact) lines.push(`<p>${severityEmoji(service, inc, 'active')} <strong>${escHtml(impact)}</strong></p>`)
   }
   // #760 — no "Also affecting" line: it only ever appeared when coAffected.length>0, which is EXACTLY
-  // when itemXml's title is provider-grouped ("Anthropic (Claude API, claude.ai, Claude Code): …") and
+  // when itemXml's title is provider-grouped ("Anthropic (Claude API, claude.ai, Claude Code) — New Incident") and
   // already lists those services — pure duplication. The provider-grouped title carries the set.
   // #768 — per-update timeline text is shown ONLY on the resolved item (a one-time, stable resolution
   // message; #539 defuses a bare brand domain in it). On the active item it churns across status
@@ -519,7 +471,11 @@ function descHtml(
     if (a.affectedScope.length > 0) detail.push(`Scope: ${escHtml(defuseAutolinkDomain(a.affectedScope.join(', ')))}`)
     lines.push(`<p>${detail.join(' · ')}</p>`)
   }
-  if (opts.fallbackText) { lines.push(FEED_DIV); lines.push(`<p>↪ ${escHtml(opts.fallbackText)}</p>`) } // #760 — divider before Try-instead
+  if (opts.fallbackText) {
+    lines.push(FEED_DIV) // #760 — divider before the fallback block
+    lines.push('<p>👉 <strong>SUGGESTED FALLBACK</strong></p>')
+    for (const l of opts.fallbackText.split('\n')) lines.push(`<p>• ${escHtml(l)}</p>`)
+  }
   // #1330 — LAST, under the AI and fallback blocks, which is where the Discord sibling puts the same
   // sentence (index.ts renders it after the fallback and region hints, immediately before the CTA).
   // It is a provenance footnote for a number the reader meets later, so it belongs under the content
@@ -554,15 +510,18 @@ function itemXml(
   const emoji = severityEmoji(service, inc, opts.kind)
   // #724 — provider-grouped header for a multi-surface (shared) incident, mirroring the Discord
   // embed ("Anthropic (Claude API, claude.ai, Claude Code) — …") instead of an API-centric
-  // "Claude API: …". Single-surface incidents keep the plain "<service>: …" lead.
+  // "Claude API — …". Single-surface incidents keep the plain "<service>" lead.
   // #539: defuse the bare "claude.ai" brand so Slack /feed doesn't auto-link/unfurl it.
   const lead = coAffected.length > 0
     ? `${service.provider || service.name} (${[service.name, ...coAffected].join(', ')})`
     : service.name
-  // #1106 — "Withdrawn — " never "Resolved — ": the lead word is the whole point of the item, and it
-  // is the one place a subscriber skimming a Slack channel actually reads what happened.
-  const leadWord = isResolved ? 'Resolved — ' : isWithdrawn ? 'Withdrawn — ' : ''
-  const title = defuseAutolinkDomain(`${emoji} ${lead}: ${leadWord}${inc.title}`)
+  // The Discord alert's title shapes (alerts.ts). #1106 — "Withdrawn" never "Resolved": the event word
+  // is the whole point of the item.
+  const isAdvisory = isNonReliabilityAdvisory(inc.title)
+  const event = isWithdrawn ? 'Incident Withdrawn'
+    : isResolved ? (isAdvisory ? 'Advisory cleared' : `Incident Resolved${inc.duration ? ` (${inc.duration})` : ''}`)
+    : isAdvisory ? 'Advisory' : 'New Incident'
+  const title = defuseAutolinkDomain(`${emoji} ${lead} — ${event}`)
   const guid = isResolved
     ? `aiwatch:${service.id}:${inc.id}:resolved`
     : isWithdrawn
@@ -574,7 +533,7 @@ function itemXml(
       <link>${xml(serviceLink(service.id, opts.kind, service.status, groupUrl))}</link>
       <guid isPermaLink="false">${xml(guid)}</guid>
       <pubDate>${rfc822(opts.pubDate)}</pubDate>${inc.impact ? `\n      <category>${xml(inc.impact)}</category>` : ''}
-      <description><![CDATA[${descHtml(service, inc, opts)}]]></description>
+      <description><![CDATA[<p>${escHtml(defuseAutolinkDomain(inc.title))}</p>\n${descHtml(service, inc, opts)}]]></description>
     </item>`
 }
 

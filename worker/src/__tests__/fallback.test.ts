@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SERVICES } from '../services'
-import { COMPONENT_CAPABILITY, getFallbacks, buildFallbackText, buildGroupedFallbackText, getGroupedFallbacks, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier, routingTier, capabilityOfComponent, effectiveTierFor, CAPABILITY_TIER, isCapabilityProvider, CAPABILITY_PROVIDERS } from '../fallback'
+import { COMPONENT_CAPABILITY, getFallbacks, buildFallbackText, buildGroupedFallbackText, fallbackEmbedSection, getGroupedFallbacks, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier, routingTier, capabilityOfComponent, effectiveTierFor, CAPABILITY_TIER, isCapabilityProvider, CAPABILITY_PROVIDERS } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -384,6 +384,25 @@ describe('buildFallbackText', () => {
 
   it('returns an empty string when there are no fallbacks (#641 — no subjective "no fallback" claim)', () => {
     expect(buildFallbackText([])).toBe('')
+  })
+})
+
+describe('fallbackEmbedSection (#1674)', () => {
+  const DIV = '┈┈'
+
+  it('renders the grouped text under ONE heading, one bullet per group', () => {
+    const text = '👉 Suggested fallback:\nLLM: OpenAI API (Score 86)\nAI Apps: ChatGPT (Score 67)'
+    expect(fallbackEmbedSection(text, DIV)).toBe(`${DIV}\n👉 **SUGGESTED FALLBACK**\n• LLM: OpenAI API (Score 86)\n• AI Apps: ChatGPT (Score 67)`)
+  })
+
+  it('never repeats the header of what buildGroupedFallbackText really returns', () => {
+    const services = [
+      { id: 'claude', category: 'api', name: 'Claude API', status: 'down', aiwatchScore: 85 },
+      { id: 'openai', category: 'api', name: 'OpenAI API', status: 'operational', aiwatchScore: 86 },
+    ]
+    const section = fallbackEmbedSection(buildGroupedFallbackText(['claude'], services), DIV)
+    expect(section).not.toContain('Suggested fallback')
+    expect(section).toContain('• LLM: OpenAI API (Score 86)')
   })
 })
 

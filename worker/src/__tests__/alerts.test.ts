@@ -712,11 +712,11 @@ describe('region-switch hint (#422)', () => {
     // is generic — pin that a set regionText survives the merge. (#422 Severity-6)
     const withRegion: AlertCandidate = {
       key: 'alerted:new:t1', title: '🔴 Together AI — New Incident', description: 'A — down',
-      color: 0xED4245, url: 'https://ai-watch.dev/#together', regionText: '📍 Try region: AWS US West',
+      color: 0xED4245, url: 'https://ai-watch.dev/#together', regionText: '📍 Try region: AWS US West', svcIds: ['together'],
     }
     const second: AlertCandidate = {
       key: 'alerted:new:t2', title: '🔴 Together AI — New Incident', description: 'B — down',
-      color: 0xED4245, url: 'https://ai-watch.dev/#together',
+      color: 0xED4245, url: 'https://ai-watch.dev/#together', svcIds: ['together'],
     }
     const merged = mergeTogetherAlerts([withRegion, second])
     expect(merged).toHaveLength(1)
@@ -983,6 +983,7 @@ describe('mergeTogetherAlerts', () => {
       fallbackText: '👉 Suggested fallback: Fireworks AI',
       color: 0xED4245,
       url: `https://ai-watch.dev/#together`,
+      svcIds: ['together'],
     }
   }
 
@@ -993,8 +994,33 @@ describe('mergeTogetherAlerts', () => {
       description: `${model} — recovered`,
       color: 0x57F287,
       url: `https://ai-watch.dev/#together`,
+      svcIds: ['together'],
     }
   }
+
+  it('merges two Together alerts whose title dot is not red (#1674)', () => {
+    const minor = (incId: string) => ({ ...togetherNewAlert(incId, 'M'), title: '🟡 Together AI — New Incident', color: 0xFEE75C })
+    const [merged, ...rest] = mergeTogetherAlerts([minor('inc1'), minor('inc2')])
+    expect(rest).toHaveLength(0)
+    expect(merged.title).toBe('🔴 Together AI — 2 New Incidents')
+  })
+
+  it('leaves a Together withdrawal out of the merge (#1674)', () => {
+    const withdrawal = { ...togetherNewAlert('wd1', 'M'), key: 'alerted:wd:wd1', title: '⚪ Together AI — Incident Withdrawn' }
+    const result = mergeTogetherAlerts([togetherNewAlert('a', 'M'), togetherNewAlert('b', 'N'), withdrawal])
+    expect(result.map((a) => a.key)).toContain('alerted:wd:wd1')
+  })
+
+  it('leaves a Together advisory out of the merge', () => {
+    const advisory = { ...togetherNewAlert('inc1', 'M'), title: 'ℹ️ Together AI — Advisory', advisory: true }
+    expect(mergeTogetherAlerts([advisory, togetherNewAlert('inc2', 'N')])).toHaveLength(2)
+  })
+
+  it('does not carry impactText onto a merged alert (#1674)', () => {
+    const withImpact = (incId: string, impact: string) => ({ ...togetherNewAlert(incId, 'M'), impactText: impact })
+    const [merged] = mergeTogetherAlerts([withImpact('inc1', '🟡 **Minor**'), withImpact('inc2', '🔴 **Major**')])
+    expect(merged.impactText).toBeUndefined()
+  })
 
   it('merges multiple new Together AI alerts into one', () => {
     const alerts = [
@@ -1130,6 +1156,16 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
     color: 0x57f287,
     url: 'https://ai-watch.dev/#xai',
     svcIds: ['xai'],
+  })
+
+  it('leaves an xAI withdrawal out of the merge (#1674)', () => {
+    const withdrawal = { ...xaiNew('wd1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'), key: 'alerted:wd:wd1', title: '⚪ SpaceXAI API — Incident Withdrawn' }
+    const result = mergeXaiRegionalAlerts([
+      xaiNew('us1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'),
+      xaiNew('eu1', 'eu-west-1', 'Increased Error rate on Image Generation Endpoint'),
+      withdrawal,
+    ])
+    expect(result.map((a) => a.key)).toContain('alerted:wd:wd1')
   })
 
   it('merges the SAME event across two regions into one alert listing both regions', () => {

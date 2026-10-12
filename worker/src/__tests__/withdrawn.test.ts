@@ -595,35 +595,35 @@ describe('RSS withdrawal item (#1106)', () => {
   // delete that branch and this fixture renders 🟡, an impaired one 🔴.
   it('says ⚪ Withdrawn, never Resolved', () => {
     const xml = feed()
-    expect(xml).toContain('<title>⚪ Mistral API: Withdrawn — Audio API Degraded</title>')
-    expect(xml).not.toContain('Resolved — Audio API Degraded')
+    expect(xml).toContain('<title>⚪ Mistral API — Incident Withdrawn</title>')
+    expect(xml).not.toContain('Incident Resolved')
     expect(xml).not.toContain('aiwatch:mistral:aud-1:resolved')
     // …and still ⚪ when the service is impaired, where the impact/status branches would say 🔴.
     const impaired = buildRssFeed([svc('mistral', [], { status: 'down' })], { scope: 'all' },
       new Date('2026-07-21T12:00:00Z'), undefined, undefined, served, [TOMB])
     // (the service being `down` holds the notice, so assert the emoji via the descHtml path instead)
-    expect(impaired).not.toContain('🔴 Mistral API: Withdrawn')
+    expect(impaired).not.toContain('🔴 Mistral API — Incident Withdrawn')
   })
 
   // Exact-equality, not a set of `not.toContain`s: the withdrawn push site supplies no analysis and
   // no fallbackText, so absence assertions cannot fail whatever descHtml does. Pinning the whole
   // CDATA is what actually protects the "KEEP THIS RETURN FIRST" invariant — any block added above
   // the early return, from any source, changes this string.
-  it('renders EXACTLY the two-paragraph retraction — no duration, no fallback, no AI block', () => {
+  it('renders EXACTLY the incident title plus the two-paragraph retraction — no duration, no fallback, no AI block', () => {
     const body = feed().match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/)?.[1]
-    expect(body).toBe(`<p>⚪ <strong>Withdrawn by the provider</strong></p>\n<p>${WITHDRAWN_NOTE}</p>`)
+    expect(body).toBe(`<p>Audio API Degraded</p>\n<p>⚪ <strong>Withdrawn by the provider</strong></p>\n<p>${WITHDRAWN_NOTE}</p>`)
   })
 
   // Positive control for the above: the same renderer DOES emit an AI block + fallback for an
   // ordinary active item, so the exact-shape assertion is the withdrawn branch working, not an
   // inert renderer.
-  it('positive control — an ordinary active item does carry the AI block and Try instead', () => {
+  it('positive control — an ordinary active item does carry the AI block and the fallback block', () => {
     const analysis = { mistral: [{ incidentId: 'aud-1', summary: 'Audio pipeline saturated', estimatedRecovery: '~1h', affectedScope: ['Audio'] }] }
     const live = [svc('mistral', [inc('aud-1', TOMB.startedAt, 'investigating', 'Audio API Degraded')], { status: 'down' }),
       svc('openai', [], { name: 'OpenAI', status: 'operational' })]
     const xml = buildRssFeed(live, { scope: 'all' }, new Date('2026-07-21T12:00:00Z'), analysis, { 'aud-1': '2026-07-17T08:18:00Z' }, served, [])
     expect(xml).toContain('🤖')
-    expect(xml).toContain('Try instead')
+    expect(xml).toContain('SUGGESTED FALLBACK')
   })
 
   it('dates the item at prunedAt — a wall-clock pubDate would churn the #860 ETag on every poll', () => {
@@ -689,7 +689,7 @@ describe('RSS withdrawal item (#1106)', () => {
     // The co-affected set comes from LIVE incidents, and a tombstoned incident is in nobody's live
     // list — so without folding the tombstones into that map the retraction would name one surface
     // while the original 🔴 named three, and while Discord's withdrawal alert names them all.
-    expect(xml).toContain('Mistral (Mistral API, claude ai): Withdrawn —')
+    expect(xml).toContain('Mistral (Mistral API, claude ai) — Incident Withdrawn')
   })
 
   it('is scoped — a /feed/{other-service} poll does not carry it', () => {

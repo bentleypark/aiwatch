@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S } from '../alerts'
+import { OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S, buildIncidentAlerts } from '../alerts'
 import { buildRssFeed, buildFeedWithMeta, weakFeedEtag, isFeedNotModified, feedHttpResponse, reportArchiveResponse, ARCHIVE_MAX_AGE_S, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, isActiveItemHeld, type RssAiAnalysisMap, feedAgeText } from '../rss'
 import { getFallbacks } from '../fallback'
 import type { ServiceStatus, Incident } from '../types'
@@ -61,8 +61,10 @@ describe('buildRssFeed — all scope', () => {
       { scope: 'all' },
       NOW,
     )
-    expect(xml).toContain('Claude: Claude issue')
-    expect(xml).toContain('OpenAI: OpenAI issue')
+    expect(xml).toContain('Claude — New Incident')
+    expect(xml).toContain('<p>Claude issue</p>')
+    expect(xml).toContain('OpenAI — New Incident')
+    expect(xml).toContain('<p>OpenAI issue</p>')
     expect((xml.match(/<item>/g) ?? []).length).toBe(2)
   })
 
@@ -215,7 +217,7 @@ describe('buildRssFeed — resolution notifications (#467)', () => {
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
     expect(xml).toContain('aiwatch:claude:r1:resolved</guid>')
     expect(xml).not.toContain('aiwatch:claude:r1</guid>')
-    expect(xml).toContain('🟢 Claude: Resolved — Elevated errors')
+    expect(xml).toContain('🟢 Claude — Incident Resolved')
     // The resolved item uses resolvedAt as its pubDate so it re-notifies as a fresh item.
     expect(xml).toContain(`<pubDate>${new Date('2026-05-10T14:30:00.000Z').toUTCString()}</pubDate>`)
   })
@@ -288,17 +290,17 @@ describe('buildRssFeed — fallback suggestions (#467)', () => {
     service({ id: 'gemini', name: 'Gemini', category: 'api', status: 'operational' }),
   ]
 
-  it('adds a "Try instead" line to an active item when the service is impaired', () => {
+  it('adds a SUGGESTED FALLBACK block to an active item when the service is impaired', () => {
     const down = service({ id: 'claude', name: 'Claude', category: 'api', status: 'down', incidents: [incident({ id: 'd1' })] })
     const xml = buildRssFeed([down, ...candidates], { scope: 'all' }, NOW)
-    expect(xml).toContain('Try instead:')
-    expect(xml).toMatch(/Try instead: (OpenAI|Gemini)/)
+    expect(xml).toContain('<p>👉 <strong>SUGGESTED FALLBACK</strong></p>')
+    expect(xml).toMatch(/<p>• LLM: (OpenAI|Gemini)/)
   })
 
   it('omits the fallback line for an operational service', () => {
     const ok = service({ id: 'claude', name: 'Claude', category: 'api', status: 'operational', incidents: [incident({ id: 'o1' })] })
     const xml = buildRssFeed([ok, ...candidates], { scope: 'all' }, NOW)
-    expect(xml).not.toContain('Try instead:')
+    expect(xml).not.toContain('SUGGESTED FALLBACK')
   })
 
   // #1062 facet B — the routed/non-routed label split on the SINGLE-group path. Driven through the
@@ -306,7 +308,7 @@ describe('buildRssFeed — fallback suggestions (#467)', () => {
   // reimplementation of the expression.
   it('keeps the capability label when a single group is ROUTED (secondary-capability outage)', () => {
     // Mistral degraded ONLY on its Audio component → routes to the Voice tier. Without the label the
-    // item would read "Try instead: AssemblyAI · ElevenLabs" with no hint why voice services appear.
+    // item would read "• AssemblyAI · ElevenLabs" with no hint why voice services appear.
     const mistral = service({
       id: 'mistral', name: 'Mistral', category: 'api', status: 'degraded',
       incidents: [incident({ id: 'm1', title: 'Audio API Degraded' })],
@@ -320,43 +322,41 @@ describe('buildRssFeed — fallback suggestions (#467)', () => {
       service({ id: 'elevenlabs', name: 'ElevenLabs', category: 'api', status: 'operational' }),
     ]
     const xml = buildRssFeed([mistral, ...voice, ...candidates], { scope: 'all' }, NOW)
-    expect(xml).toContain('Try instead: Audio / speech → ')
-    expect(xml).toMatch(/Try instead: Audio \/ speech → (AssemblyAI|ElevenLabs)/)
+    expect(xml).toMatch(/<p>• Audio \/ speech: (AssemblyAI|ElevenLabs)/)
   })
 
-  it('keeps the flat form when the single group is NOT routed (no behaviour change)', () => {
+  it('labels a single NOT-routed group with its tier', () => {
     const down = service({ id: 'claude', name: 'Claude', category: 'api', status: 'down', incidents: [incident({ id: 'd2' })] })
     const xml = buildRssFeed([down, ...candidates], { scope: 'all' }, NOW)
-    expect(xml).toMatch(/Try instead: (OpenAI|Gemini)/)
-    expect(xml).not.toContain('→') // no label arrow on a plain same-tier recommendation
+    expect(xml).toMatch(/<p>• LLM: (OpenAI|Gemini)/)
   })
 
   it('omits the fallback line on the resolved item', () => {
     const resolved = service({ id: 'claude', name: 'Claude', category: 'api', status: 'down', incidents: [incident({ id: 'rr', status: 'resolved', resolvedAt: '2026-05-10T14:00:00.000Z' })] })
     const xml = buildRssFeed([resolved, ...candidates], { scope: 'all' }, NOW)
-    // The resolved item (distinct guid) must not carry a stale "Try instead" line.
+    // The resolved item (distinct guid) must not carry a stale fallback block.
     const resolvedItem = xml.slice(xml.indexOf('aiwatch:claude:rr:resolved'))
-    expect(resolvedItem.split('</item>')[0]).not.toContain('Try instead:')
+    expect(resolvedItem.split('</item>')[0]).not.toContain('SUGGESTED FALLBACK')
   })
 })
 
 describe('buildRssFeed — item formatting (#467)', () => {
   it('prefixes the title with a severity emoji (red for down/major, amber for minor)', () => {
     const down = buildRssFeed([service({ name: 'OpenAI', status: 'down', incidents: [incident({ id: 'd', title: 'API errors', impact: 'major' })] })], { scope: 'all' }, NOW)
-    expect(down).toContain('<title>🔴 OpenAI: API errors</title>')
+    expect(down).toContain('<title>🔴 OpenAI — New Incident</title>')
     const minor = buildRssFeed([service({ name: 'ElevenLabs', status: 'degraded', incidents: [incident({ id: 'm', title: 'Export failures', impact: 'minor', status: 'identified' })] })], { scope: 'all' }, NOW)
-    expect(minor).toContain('<title>🟡 ElevenLabs: Export failures</title>')
+    expect(minor).toContain('<title>🟡 ElevenLabs — New Incident</title>')
   })
 
-  it('marks a resolved item title with the green emoji + "Resolved"', () => {
+  it('marks a resolved item title with the green emoji + "Incident Resolved (duration)"', () => {
     const xml = buildRssFeed([service({ incidents: [incident({ id: 'r', title: 'Outage', status: 'resolved', resolvedAt: '2026-05-10T14:00:00.000Z', duration: '2h' })] })], { scope: 'all' }, NOW)
-    expect(xml).toContain('<title>🟢 Claude: Resolved — Outage</title>')
+    expect(xml).toContain('<title>🟢 Claude — Incident Resolved (2h)</title>')
   })
 
   it('renders the active description as CDATA HTML with a bold impact label (status-invariant, #768)', () => {
     const xml = buildRssFeed([service({ name: 'ElevenLabs', status: 'degraded', incidents: [incident({ id: 'm', impact: 'minor', status: 'identified', timeline: [{ stage: 'identified', text: 'Scaling resources', at: '2026-05-10T12:30:00.000Z' }] })] })], { scope: 'all' }, NOW)
     // #768 — active item is status-invariant: impact label only, NO status word, NO per-update text.
-    expect(xml).toContain('<description><![CDATA[<p>🟡 <strong>Minor</strong></p>')
+    expect(xml).toContain('<description><![CDATA[<p>API errors</p>\n<p>🟡 <strong>Minor</strong></p>')
     expect(xml).not.toContain('· identified')      // status word dropped
     expect(xml).not.toContain('Scaling resources')  // per-update timeline text dropped on active
     expect(xml).toContain(']]></description>')
@@ -484,7 +484,8 @@ describe('buildRssFeed — item fields', () => {
       { scope: 'all' },
       NOW,
     )
-    expect(xml).toContain('A&amp;B: &lt;script&gt; &quot;x&quot;')
+    expect(xml).toContain('A&amp;B — New Incident')
+    expect(xml).toContain('<p>&lt;script&gt; &quot;x&quot;</p>')
     expect(xml).not.toContain('<script>')
   })
 
@@ -644,7 +645,7 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
     // #724 — provider-grouped title (mirrors Discord "Anthropic (Claude API, claude.ai, Claude Code)").
     // Primary = first in SERVICES order (Claude API); the title carries the full co-affected set.
-    expect(xml).toContain('🔴 Anthropic (Claude API, claude ai, Claude Code): Elevated errors') // 'major' → 🔴, #539 brand defused
+    expect(xml).toContain('🔴 Anthropic (Claude API, claude ai, Claude Code) — New Incident') // 'major' → 🔴, #539 brand defused
     // #760 — the redundant "Also affecting" line is dropped; the grouped title already lists the set.
     expect(xml).not.toContain('Also affecting')
   })
@@ -680,7 +681,7 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
 
   it('keeps a single consolidated item in a service-scoped feed; the grouped title carries the co-affected set (#760)', () => {
     const xml = buildRssFeed(anthropic, { scope: 'service', service: anthropic[0] }, NOW)
-    expect(xml).toContain('🔴 Anthropic (Claude API, claude ai, Claude Code): Elevated errors') // #539 brand defused
+    expect(xml).toContain('🔴 Anthropic (Claude API, claude ai, Claude Code) — New Incident') // #539 brand defused
     expect(xml).not.toContain('Also affecting') // #760 — dropped (redundant with the grouped title)
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
   })
@@ -845,9 +846,9 @@ describe('buildRssFeed — AI analysis block (#724)', () => {
 })
 
 describe('buildRssFeed — provider-grouped title (#724)', () => {
-  it('keeps the plain "<service>: …" title for a single-surface incident', () => {
+  it('keeps the plain "<service> — New Incident" title for a single-surface incident', () => {
     const xml = buildRssFeed([service({ name: 'Mistral API', status: 'degraded', incidents: [incident({ id: 'solo', title: 'Errors' })] })], { scope: 'all' }, NOW)
-    expect(xml).toContain('Mistral API: Errors')
+    expect(xml).toContain('Mistral API — New Incident')
     expect(xml).not.toContain('(Mistral API)') // no group parens for a solo incident
   })
 
@@ -857,7 +858,7 @@ describe('buildRssFeed — provider-grouped title (#724)', () => {
       service({ id: 'claude', name: 'Claude API', provider: 'Anthropic', incidents: [resolved] }),
       service({ id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', incidents: [resolved] }),
     ], { scope: 'all' }, NOW)
-    expect(xml).toContain('🟢 Anthropic (Claude API, claude ai): Resolved — Elevated errors')
+    expect(xml).toContain('🟢 Anthropic (Claude API, claude ai) — Incident Resolved (2h)')
   })
 
   it('falls back to the service name when provider is empty (defensive guard)', () => {
@@ -866,15 +867,15 @@ describe('buildRssFeed — provider-grouped title (#724)', () => {
       service({ id: 'a', name: 'Svc A', provider: '', status: 'degraded', incidents: [shared] }),
       service({ id: 'b', name: 'Svc B', provider: '', status: 'degraded', incidents: [shared] }),
     ], { scope: 'all' }, NOW)
-    expect(xml).toContain('Svc A (Svc A, Svc B): Errors') // no leading " (" / "undefined ("
+    expect(xml).toContain('Svc A (Svc A, Svc B) — New Incident') // no leading " (" / "undefined ("
     expect(xml).not.toContain('undefined (')
   })
 })
 
 describe('buildRssFeed — fallback ranking parity with Discord (#724)', () => {
-  it('orders "Try instead" by the same getFallbacks ranking when services carry aiwatchScore', () => {
+  it('orders the fallback block by the same getFallbacks ranking when services carry aiwatchScore', () => {
     // services:latest has no aiwatchScore, so the feed handler attaches it before calling buildRssFeed.
-    // With scores present, the "Try instead" line must match getFallbacks() (the Discord/dashboard oracle).
+    // With scores present, the fallback line must match getFallbacks() (the Discord/dashboard oracle).
     const down = { ...service({ id: 'cohere', name: 'Cohere', category: 'api', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
     const candidates = [
       { ...service({ id: 'groq', name: 'Groq Cloud', category: 'api', status: 'operational' }), aiwatchScore: 50 },
@@ -884,9 +885,9 @@ describe('buildRssFeed — fallback ranking parity with Discord (#724)', () => {
     const expected = getFallbacks('cohere', 'api', all).map((f) => f.name)
     expect(expected.length).toBeGreaterThan(0)
     const xml = buildRssFeed(all, { scope: 'all' }, NOW)
-    const tryLine = xml.split('\n').find((l) => l.includes('Try instead')) ?? ''
+    const tryLine = xml.split('\n').find((l) => l.includes('• LLM:')) ?? ''
     // the feed's candidate order matches getFallbacks exactly (proves scored services are used)
-    expect(tryLine).toContain(`Try instead: ${expected.join(' · ')}`)
+    expect(tryLine).toContain(`• LLM: ${expected.join(' · ')}`)
   })
 })
 
@@ -1048,20 +1049,20 @@ describe('buildRssFeed — #760 feed format polish (dividers + no redundant "Als
   const DIV = '<p>┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</p>'
   const ai: RssAiAnalysisMap = { claude: [{ incidentId: 'inc-1', summary: 'root cause', estimatedRecovery: '1h', affectedScope: ['Claude API'] }] }
 
-  it('inserts a divider before the 🤖 AI block and before the ↪ Try-instead line (mirrors Discord)', () => {
-    // Down service so the fallback ("Try instead") line is present; AI present so the AI block is too.
+  it('inserts a divider before the 🤖 AI block and before the fallback block (mirrors Discord)', () => {
+    // Down service so the fallback block is present; AI present so the AI block is too.
     const svcs = [
       service({ id: 'claude', name: 'Claude API', status: 'down', incidents: [incident({ id: 'inc-1', impact: 'major' })] }),
       service({ id: 'openai', name: 'OpenAI API', status: 'operational', uptime30d: 99.9 }),
     ]
     const xml = buildRssFeed(svcs, { scope: 'all' }, NOW, ai, { 'inc-1': NOW.toISOString() })
     const desc = (xml.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || [])[1] ?? ''
-    // two dividers: one before AI, one before Try-instead (count full DIV strings, not a substring)
+    // two dividers: one before AI, one before the fallback block (count full DIV strings, not a substring)
     expect(desc.split(DIV).length - 1).toBe(2)
-    // ordering: impact label … DIV … AI … DIV … Try instead
+    // ordering: impact label … DIV … AI … DIV … fallback
     expect(desc.indexOf(DIV)).toBeLessThan(desc.indexOf('🤖 AI analysis'))
     expect(desc.indexOf('🤖 AI analysis')).toBeLessThan(desc.lastIndexOf(DIV))
-    expect(desc.lastIndexOf(DIV)).toBeLessThan(desc.indexOf('↪'))
+    expect(desc.lastIndexOf(DIV)).toBeLessThan(desc.indexOf('SUGGESTED FALLBACK'))
   })
 
   it('no divider on a plain active item with neither AI nor fallback', () => {
@@ -1095,8 +1096,8 @@ describe('resolveFeedFirstSeen (#776) — stamp firstseen at feed-visibility so 
   })
 })
 
-describe('buildRssFeed — #781 grouped per-category "Try instead" (feed parity with dashboard)', () => {
-  const tryLine = (xml: string) => (xml.match(/Try instead:[^<]*/g) || [])[0] ?? ''
+describe('buildRssFeed — #781 grouped per-category fallback (feed parity with dashboard)', () => {
+  const tryLine = (xml: string) => (xml.match(/<p>• [^<]*/g) || []).join('\n')
   // operational fallback candidates across categories
   const ops = [
     service({ id: 'openai', name: 'OpenAI API', category: 'api', status: 'operational', uptime30d: 99.9 }),
@@ -1105,13 +1106,13 @@ describe('buildRssFeed — #781 grouped per-category "Try instead" (feed parity 
     service({ id: 'codex', name: 'Codex', category: 'agent', status: 'operational', uptime30d: 99.6 }),
   ]
 
-  it('single-category incident → flat "Try instead: A · B" (unchanged top-2)', () => {
+  it('single-category incident → one "LLM: A · B" line (top-2)', () => {
     const claude = service({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', incidents: [incident({ id: 'solo', title: 'Errors' })] })
     const xml = buildRssFeed([claude, ...ops], { scope: 'all' }, NOW, undefined, { solo: '2026-05-19T08:45:00.000Z' })
     const line = tryLine(xml)
     expect(line).toContain('OpenAI API')
     expect(line).toContain('Gemini API')
-    expect(line).not.toContain('→') // no category labels for a single-category incident
+    expect(line.split('\n')).toHaveLength(1) // one group line for a single-category incident
   })
 
   it('multi-category incident → labeled per-category groups (LLM/App/Coding Agent)', () => {
@@ -1124,9 +1125,9 @@ describe('buildRssFeed — #781 grouped per-category "Try instead" (feed parity 
     ]
     const xml = buildRssFeed(svcs, { scope: 'all' }, NOW, undefined, { multi: '2026-05-19T08:45:00.000Z' })
     const line = tryLine(xml)
-    expect(line).toContain('LLM → OpenAI API')
-    expect(line).toContain('AI Apps → ChatGPT')
-    expect(line).toContain('Coding Agent → Codex') // #1027 — single agent tier label
+    expect(line).toContain('LLM: OpenAI API')
+    expect(line).toContain('AI Apps: ChatGPT')
+    expect(line).toContain('Coding Agent: Codex') // #1027 — single agent tier label
   })
 })
 
@@ -1496,5 +1497,87 @@ describe('feed age disclosure (#1330)', () => {
       { scope: 'all' }, NOW, undefined, { k: SEEN_LATE },
     )
     expect(done).not.toContain('The provider dates this incident')
+  })
+})
+
+describe('feed titles follow the Discord alert titles (#1674)', () => {
+  const STARTED = '2026-05-10T12:00:00.000Z'
+  const ALERT_NOW_MS = Date.parse('2026-05-10T12:30:00.000Z')
+  const feedNow = new Date(ALERT_NOW_MS)
+  const itemTitles = (xml: string) => [...xml.matchAll(/<title>([^<]*)<\/title>/g)].map((m) => m[1]).slice(1)
+  const ADVISORY = 'Usage Limits Depleting Faster Than Expected'
+
+  it('a new incident reads exactly like its Discord/Slack-direct alert title, major or minor', () => {
+    for (const [impact, status] of [['major', 'degraded'], ['minor', 'degraded'], ['minor', 'down'], ['critical', 'down']] as const) {
+      const svc = service({ status, incidents: [incident({ id: 'n1', impact, startedAt: STARTED })] })
+      const [alert] = buildIncidentAlerts([svc as never], new Map(), ALERT_NOW_MS)
+      expect(itemTitles(buildRssFeed([svc], { scope: 'all' }, feedNow))).toEqual([alert.title])
+    }
+  })
+
+  it('the alert colour bar follows the title dot', () => {
+    const colorOf = (impact: 'minor' | 'major', status: 'degraded' | 'down') => {
+      const svc = service({ status, incidents: [incident({ id: 'c1', impact, startedAt: STARTED })] })
+      return buildIncidentAlerts([svc as never], new Map(), ALERT_NOW_MS)[0].color
+    }
+    expect(colorOf('major', 'degraded')).toBe(0xED4245)
+    expect(colorOf('minor', 'down')).toBe(0xED4245)
+    expect(colorOf('minor', 'degraded')).toBe(0xFEE75C)
+  })
+
+  it('a resolved incident reads exactly like its Discord alert title, duration included', () => {
+    const svc = service({ incidents: [incident({ id: 'r1', status: 'resolved', startedAt: STARTED, resolvedAt: '2026-05-10T12:20:00.000Z', duration: '20m' })] })
+    const alert = buildIncidentAlerts([svc as never], new Map([['r1', new Set(['claude'])]]), ALERT_NOW_MS).find((a) => a.key === 'alerted:res:r1')!
+    expect(itemTitles(buildRssFeed([svc], { scope: 'all' }, feedNow))).toEqual([alert.title])
+  })
+
+  it('an advisory is "Advisory" / "Advisory cleared" in both, with no duration', () => {
+    const open = service({ incidents: [incident({ id: 'a1', title: ADVISORY, impact: null, startedAt: STARTED })] })
+    const [openAlert] = buildIncidentAlerts([open as never], new Map(), ALERT_NOW_MS)
+    expect(itemTitles(buildRssFeed([open], { scope: 'all' }, feedNow))).toEqual([openAlert.title])
+    const done = service({ incidents: [incident({ id: 'a1', title: ADVISORY, impact: null, status: 'resolved', startedAt: STARTED, resolvedAt: '2026-05-10T12:20:00.000Z', duration: '20m' })] })
+    const doneAlert = buildIncidentAlerts([done as never], new Map([['a1', new Set(['claude'])]]), ALERT_NOW_MS).find((a) => a.key === 'alerted:res:a1')!
+    expect(itemTitles(buildRssFeed([done], { scope: 'all' }, feedNow))).toEqual([doneAlert.title])
+  })
+
+  it('the impact line is the new-incident alert\'s impactText, word for word', () => {
+    for (const [impact, status] of [['minor', 'degraded'], ['major', 'down']] as const) {
+      const svc = service({ status, incidents: [incident({ id: 'p1', impact, startedAt: STARTED })] })
+      const [alert] = buildIncidentAlerts([svc as never], new Map(), ALERT_NOW_MS)
+      const asHtml = alert.impactText!.replace(/\*\*(.+)\*\*/, '<strong>$1</strong>')
+      expect(buildRssFeed([svc], { scope: 'all' }, feedNow)).toContain(`<p>${asHtml}</p>`)
+    }
+  })
+
+  it('an impact-none incident on a healthy service gets no impact line, in the alert or the feed (#970)', () => {
+    const svc = service({ status: 'operational', incidents: [incident({ id: 'n0', title: 'Delayed generations', impact: null, startedAt: STARTED })] })
+    expect(buildIncidentAlerts([svc as never], new Map(), ALERT_NOW_MS)[0].impactText).toBeUndefined()
+    const xml = buildRssFeed([svc], { scope: 'all' }, feedNow)
+    expect(xml).toContain('<p>Delayed generations</p>')
+    expect(xml).not.toContain('<strong>Degraded</strong>')
+  })
+
+  it('an advisory alert carries no impact line', () => {
+    const svc = service({ incidents: [incident({ id: 'a1', title: ADVISORY, impact: null, startedAt: STARTED })] })
+    expect(buildIncidentAlerts([svc as never], new Map(), ALERT_NOW_MS)[0].impactText).toBeUndefined()
+  })
+
+  it('the fallback lines print no score, so a score change that keeps the order leaves the item unchanged (#768)', () => {
+    const render = (groqScore: number) => {
+      const down = { ...service({ id: 'cohere', name: 'Cohere', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
+      const alts = [
+        { ...service({ id: 'groq', name: 'Groq Cloud', status: 'operational' }), aiwatchScore: groqScore },
+        { ...service({ id: 'mistral', name: 'Mistral API', status: 'operational' }), aiwatchScore: 99 },
+      ]
+      return buildRssFeed([down, ...alts] as ServiceStatus[], { scope: 'all' }, NOW)
+    }
+    expect(render(86)).toBe(render(95))
+    expect(render(86)).not.toContain('Score')
+  })
+
+  it('defuses a bare brand domain in the incident title that now leads the body (#539)', () => {
+    const xml = buildRssFeed([service({ incidents: [incident({ id: 'c', title: 'claude.ai login errors' })] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('<p>claude ai login errors</p>')
+    expect(xml).not.toContain('claude.ai login errors')
   })
 })

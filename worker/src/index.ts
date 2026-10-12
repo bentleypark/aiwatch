@@ -12,6 +12,7 @@ import { createReadCensus, formatCensus } from './kv-read-census'
 import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
+import { fallbackEmbedSection } from './fallback'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
@@ -1675,11 +1676,11 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 
     // Build sectioned description: incident → AI analysis → (recovery prediction) → fallback → link
     const parts = [alert.description]
+    if (alert.impactText) parts.push(alert.impactText)
     if (analysisSection) parts.push(analysisSection)
     if (recoverySection) parts.push(recoverySection) // #827 F4 status-edge recovery + #846 alerted:res: prediction
     if (alert.fallbackText && alert.fallbackText.startsWith('👉')) {
-      const list = alert.fallbackText.replace('👉 Suggested fallback: ', '')
-      parts.push(`${DIV}\n👉 **SUGGESTED FALLBACK**\n• ${list}`)
+      parts.push(fallbackEmbedSection(alert.fallbackText, DIV))
     } else if (alert.fallbackText) {
       parts.push(`${DIV}\n${alert.fallbackText}`)
     }
@@ -5234,7 +5235,7 @@ export default {
           : { scope: 'service', segment: url.pathname.split('/')[2] ?? '' }
       const cached = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
       // #724 — align the Slack /feed item with the Discord embed: (a) attach aiwatchScore to the
-      // cached services so the "Try instead" fallback ranks identically to Discord (services:latest
+      // cached services so the fallback block ranks identically to Discord (services:latest
       // has no score; getFallbacks needs it), and (b) read the per-incident AI analysis so the item
       // carries the same 🤖 summary. Public-safe — the operator-only tweet draft is never included.
       let feedCached = cached

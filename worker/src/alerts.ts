@@ -4,7 +4,7 @@
 import { buildGroupedFallbackText, API_TIER } from './fallback'
 import { CRON_CADENCE_MS } from './cache-ttl'
 import { isAffectedStatus } from './status-verdict'
-import { sanitize, formatDuration, appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
+import { sanitize, formatDuration, appendStatusHint, appendUtm, isNonReliabilityAdvisory, severityEmoji, impactLabel } from './utils'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 import { xaiRegionOf, xaiEventKey } from './xai-regions'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
@@ -391,11 +391,21 @@ export function shouldHoldForAiAnalysis(state: {
   return state.nowMs - firstSeen < AI_HOLD_MS          // within window → hold; past it → fail-open send
 }
 
+// #1674 — the embed colour of a new-incident alert, keyed by the title dot `severityEmoji` picked.
+const NEW_INCIDENT_COLOR: Record<string, number> = {
+  '🔴': 0xED4245,
+  '🟡': 0xFEE75C,
+  '⚪': 0x9CA3AF,
+  'ℹ️': 0x5865F2,
+}
+
 export interface AlertCandidate {
   key: string
   title: string
   description: string
   fallbackText?: string
+  /** #1674 — the incident's severity dot and impact word, the line the Slack /feed item carries. */
+  impactText?: string
   /** #422 — region-switch hint (e.g. "📍 Try region: AWS US West") for new incidents
    *  on region-aware services with a region-specific partial outage. Rendered below the
    *  cross-service fallback. Absent on resolved alerts and non-region-aware services. */
@@ -734,19 +744,22 @@ export function buildIncidentAlerts(
     // outage"), so promising one here would both dangle and restore the framing that issue removed —
     // and quota/deprecation notices are exactly the class providers publish with a backdated start,
     // so this is the common case for them, not an edge.
+    const impact = isAdvisory ? null : impactLabel(firstSvc, inc)
     const startedMs = new Date(inc.startedAt).getTime()
     const elapsedMs = now - startedMs
     const ageText = !isAdvisory && elapsedMs > OWN_DETECTION_LAG_MS
       ? `📅 The provider dates this incident ${formatDuration(new Date(startedMs), new Date(now))} before this alert — its duration will be measured from then, not from now.`
       : undefined
+    const dot = severityEmoji(firstSvc, inc, 'active')
     alerts.push({
       key: `alerted:new:${incId}`,
-      title: isAdvisory ? `ℹ️ ${displayName} — Advisory` : `🔴 ${displayName} — New Incident`,
+      title: `${dot} ${displayName} — ${isAdvisory ? 'Advisory' : 'New Incident'}`,
       description: sanitize(inc.title),
+      ...(impact ? { impactText: `${severityEmoji(firstSvc, inc, 'active')} **${impact}**` } : {}),
       fallbackText,
       regionText,
       ...(ageText ? { ageText } : {}),
-      color: isAdvisory ? 0x5865F2 : 0xED4245, // blurple (informational) vs red (outage)
+      color: NEW_INCIDENT_COLOR[dot] ?? 0xED4245,
       url: `https://ai-watch.dev/#${ids[0]}`,
       svcIds: ids, // #545 — the not-yet-alerted subset (all affected on first fire, only the joiner after)
       ...(alertedNewMap.get(incId)?.size ? { priorSvcIds: [...alertedNewMap.get(incId)!] } : {}),
@@ -857,6 +870,9 @@ export function buildWithdrawalAlerts(
   return alerts
 }
 
+const isIncidentAlertOf = (a: AlertCandidate, svcId: string) =>
+  !a.advisory && /^alerted:(new|res):/.test(a.key) && a.svcIds?.length === 1 && a.svcIds[0] === svcId
+
 /**
  * Merge concurrent Together AI model-level alerts into single grouped alerts.
  * Together AI reports individual model incidents (e.g., "FLUX.1 Krea [dev] — down").
@@ -868,7 +884,7 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
   const rest: AlertCandidate[] = []
 
   for (const a of alerts) {
-    if (a.title.startsWith('🔴 Together AI — New Incident') || a.title.startsWith('🟢 Together AI — Incident Resolved')) {
+    if (isIncidentAlertOf(a, 'together')) {
       together.push(a)
     } else {
       rest.push(a)
@@ -939,8 +955,7 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
  * the daily count still tallies each region (index.ts). svcIds stays `['xai']` so tweets/feed are unaffected.
  */
 export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate[] {
-  const isXai = (a: AlertCandidate) =>
-    a.title.startsWith('🔴 SpaceXAI API — New Incident') || a.title.startsWith('🟢 SpaceXAI API — Incident Resolved')
+  const isXai = (a: AlertCandidate) => isIncidentAlertOf(a, 'xai')
   const xai = alerts.filter(isXai)
   if (xai.length <= 1) return alerts
   const rest = alerts.filter((a) => !isXai(a))

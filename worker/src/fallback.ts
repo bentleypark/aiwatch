@@ -586,7 +586,7 @@ export function tierLabelFor(tier: number): string | undefined {
  * behavior), **1 when there are multiple groups** (a multi-category incident → one alternative per
  * category, so the line stays scannable). Free of I/O and of any dependence on call order, though
  * `getFallbacks` beneath it may emit a throttled #1119 warn; the worker surfaces (Discord alert via
- * buildGroupedFallbackText, RSS feed via fallbackLine) render this structure their own way.
+ * buildGroupedFallbackText, RSS feed via fallbackLine) render this structure through formatFallbackGroups.
  */
 export function getGroupedFallbacks(
   affectedServiceIds: string[],
@@ -679,9 +679,24 @@ export function buildGroupedFallbackText(
 ): string {
   const groups = getGroupedFallbacks(affectedServiceIds, services)
   if (groups.length === 0) return '' // #641 — no recommendation → emit nothing (see buildFallbackText)
-  const lines = groups.map(g => {
-    const list = g.fallbacks.map(f => (f.score != null ? `${f.name} (Score ${f.score})` : f.name)).join(' · ')
+  return `${FALLBACK_HEADER}\n${formatFallbackGroups(groups).join('\n')}`
+}
+
+const FALLBACK_HEADER = '👉 Suggested fallback:'
+
+export function formatFallbackGroups(
+  groups: Array<{ label: string; fallbacks: Array<{ name: string; score: number | null }> }>,
+  withScores = true,
+): string[] {
+  return groups.map(g => {
+    const list = g.fallbacks.map(f => (withScores && f.score != null ? `${f.name} (Score ${f.score})` : f.name)).join(' · ')
     return `${g.label}: ${list}`
   })
-  return `👉 Suggested fallback:\n${lines.join('\n')}`
+}
+
+/** The alert embed's fallback section body (below the divider): the `fallbackText` header becomes the
+ *  bold `SUGGESTED FALLBACK` heading and every remaining line a bullet. */
+export function fallbackEmbedSection(fallbackText: string, div: string): string {
+  const bullets = fallbackText.replace(/^👉 Suggested fallback:\s*/, '').split('\n').map(l => `• ${l}`).join('\n')
+  return `${div}\n👉 **SUGGESTED FALLBACK**\n${bullets}`
 }
