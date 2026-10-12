@@ -249,10 +249,10 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   cerebras: {
     displayName: 'Cerebras Inference',
     description: 'Cerebras Inference serves open-source LLMs (Llama 3.1, Qwen 3, GPT-OSS, GLM-4.7) at some of the fastest token throughput available, powered by its wafer-scale CS-3 hardware. It is a direct alternative to Groq, Together AI, and Fireworks AI for latency-sensitive workloads.',
-    insight: 'Cerebras runs its status page on Atlassian Statuspage with one component per served model plus a Developer Console component. AIWatch tracks all of them as a worst-of: any single model degrading marks Cerebras degraded, so model-specific outages are not under-reported. Uptime% is parsed from the Developer Console component.',
+    insight: 'Cerebras runs its status page on Atlassian Statuspage with one component per served model. Any single model degrading marks Cerebras degraded, so model-specific outages are not under-reported.',
     whenDown: 'When Cerebras Inference is down, apps relying on its high-throughput endpoints lose hosted inference for the affected open-source model. Streaming and high-volume batch workloads see request failures or fall back to slower providers.',
     faqs: [
-      { q: 'Is Cerebras Inference down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cerebras every 5 minutes — taking the worst status across all model components and the Developer Console — and shows real-time operational status.' },
+      { q: 'Is Cerebras Inference down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cerebras every 5 minutes — taking the worst status across all model components — and shows real-time operational status.' },
       { q: 'How do I check Cerebras status?', a: 'You can check Cerebras status on this page, on the official status page at status.cerebras.ai, or on the AIWatch dashboard at ai-watch.dev.' },
       { q: 'What are alternatives to Cerebras Inference?', a: 'Groq Cloud, Together AI, and Fireworks AI offer comparable high-throughput hosted inference for open-source models. AIWatch shows current availability and reliability rankings so you can pick the healthiest option.' },
       { q: 'Why is one Cerebras model down but not others?', a: 'Cerebras publishes per-model status components, so a rollout or capacity issue can affect just one model (e.g. GPT-OSS-120B) while the rest stay operational. AIWatch surfaces the worst-of, so the service shows degraded even if only one model is affected.' },
@@ -434,7 +434,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   turbopuffer: {
     displayName: 'turbopuffer',
     description: 'turbopuffer is a serverless vector-search database built directly on object storage. It powers retrieval-augmented generation (RAG), semantic search, and AI agent memory, and is used as the retrieval backend for products like Cursor\'s codebase index.',
-    insight: 'turbopuffer is region-specific — its status page reports health per region (aws-us-east-1, gcp-us-central1, etc.) rather than a single global indicator, so an outage can affect one region without breaking the platform. turbopuffer does not publish an official uptime %, so AIWatch tracks it via incident history plus a direct response-time probe rather than a reported uptime figure.',
+    insight: 'turbopuffer is region-specific — its status page lists each region (aws-us-east-1, gcp-us-central1, etc.) as its own component alongside an overall status, so an outage can affect one region without breaking the platform.',
     whenDown: 'When turbopuffer is down, applications relying on vector search for RAG, semantic search, or recommendations will fail. AI agents and code tools that depend on long-term memory or knowledge retrieval will lose context until service recovers.',
     faqs: [
       { q: 'Is turbopuffer down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors turbopuffer every 5 minutes and shows real-time operational status.' },

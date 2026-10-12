@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { computeIncidentIoUptime } from '../parsers/incident-io'
-import { SERVICES } from '../services'
+import { SERVICES, fetchService } from '../services'
 
 // #857 — turbopuffer's status page is an **incident.io** page (ULID component ids) that merely serves a
 // Statuspage-compatible summary.json. It was configured as an Atlassian Statuspage, so `needsHtml` never
@@ -90,5 +90,37 @@ describe('chart_only pages now get an uptime (#1006)', () => {
     )
     // 6h × 0.3 = 1.8h of 30 days → 99.75%
     expect(computeIncidentIoUptime(html, scope, NOW)).toEqual({ pct: 99.75, days: 30, todayWeightedOutageSec: 0, missing: [] })
+  })
+})
+
+// #1673 — showing a region in the breakdown must not put it in the uptime scope; `fetchService` reads the
+// roster, not the breakdown. The breakdown-only id is synthetic so the test survives the roster changing.
+describe('turbopuffer — a breakdown-only region does not move uptime (#1673)', () => {
+  const BREAKDOWN_ONLY = '01ZZZZZZZZBREAKDOWNONLY0000'
+  const configured = SERVICES.find((s) => s.id === 'turbopuffer')!
+  const turbopuffer = { ...configured, displayComponentIds: [...(configured.displayComponentIds ?? []), BREAKDOWN_ONLY] }
+  const roster = turbopuffer.incidentIoComponentId as string[]
+  const shown = turbopuffer.displayComponentIds
+
+  const uptimeWithOutageOn = async (id: string) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    const now = Date.now()
+    const at = (d: number) => new Date(now - d * DAY).toISOString()
+    const impact = `{\\"component_id\\":\\"${id}\\",\\"end_at\\":\\"${at(4)}\\",\\"id\\":\\"IMP\\",` +
+      `\\"start_at\\":\\"${at(5)}\\",\\"status\\":\\"full_outage\\",\\"status_page_incident_id\\":\\"INC\\"}`
+    const html = page([impact], shown.map((c) => uptimeEntry(c, at(400))))
+    const summary = { status: { indicator: 'none' }, components: shown.map((c) => ({ id: c, name: c, status: 'operational' })), incidents: [] }
+    const svc = await fetchService(turbopuffer, { summary: summary as never, incidents: { incidents: [] } as never, uptimeHtml: html } as never, undefined, {})
+    vi.unstubAllGlobals()
+    return svc.uptime30d
+  }
+
+  it('an outage on a breakdown-only region leaves uptime at 100', async () => {
+    expect(roster).not.toContain(BREAKDOWN_ONLY)
+    expect(await uptimeWithOutageOn(BREAKDOWN_ONLY)).toBe(100)
+  })
+
+  it('the same outage on a roster region moves it', async () => {
+    expect(await uptimeWithOutageOn(roster[0])).toBeLessThan(100)
   })
 })

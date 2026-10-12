@@ -57,7 +57,7 @@ describe('serviceReliability predicates (#713)', () => {
 // 'insufficient' → confidence low, score withheld) must show as "Recently Added" (it WILL rank), not
 // "Insufficient Data" (genuinely un-measurable). The signal is scoreBreakdown.responsivenessStatus.
 describe('isProbeWarming / isRecentlyAdded (#870)', () => {
-  // turbopuffer days 1-7: no uptime by design + a probe target still building history.
+  // days 1-7: no uptime yet + a probe target still building history.
   const warmingNew = { uptime30d: null, scoreConfidence: 'low', aiwatchScore: null, coverageDays: 1, scoreBreakdown: { responsivenessStatus: 'insufficient' } }
   // Bedrock/Azure: no probe target ever + no uptime.
   const unmeasurable = { uptime30d: null, scoreConfidence: 'low', aiwatchScore: null, coverageDays: null, scoreBreakdown: { responsivenessStatus: 'unsupported' } }

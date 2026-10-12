@@ -401,7 +401,7 @@ test('#1444 NEGATIVE CONTROL: a negation before a CHAIN of citations governs all
   // discord-alert-paths.md's real shape: the negation precedes the FIRST citation, and the list binds
   // to the LAST, so a lead window measured from the governing citation alone cannot see it.
   const line = 'A service with no `statusComponentId`/`statusComponentIds`/`displayComponentIds`'
-    + ' (turbopuffer, fireworks) has `uptimeScope` fall back to `config.incidentIoComponentId`.'
+    + ' (cohere, fireworks) has `uptimeScope` fall back to `config.incidentIoComponentId`.'
   assert.deepEqual(audit(line), [])
   assert.equal(audit(line.replace('with no ', 'with ')).length, 2, 'without the negation it IS the claim')
 })

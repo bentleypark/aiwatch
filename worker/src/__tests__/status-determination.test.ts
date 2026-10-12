@@ -1027,7 +1027,6 @@ describe('SERVICES multi-component config sanity (#379)', () => {
     const cb = SERVICES.find((s) => s.id === 'cerebras')!
     expect(cb.statusComponentId).toBe('83h1cchw4vs4') // Developer Console
     expect(cb.displayAllComponents).toBe(true)
-    expect(cb.componentSurfaces).toContain('Developer Console')
     expect(cb.statusComponentIds).toBeUndefined() // allowlist dropped
   })
 

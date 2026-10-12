@@ -454,9 +454,12 @@ export interface ServiceConfig {
   // stale as models ship/retire), surface EVERY page component except `componentDenylist`
   // names and the page's own group headers (#1525). Zero model-churn maintenance. The UI collapses the (long) list to a
   // "N of M operational" summary + non-operational rows when it exceeds a threshold.
-  // Display-only (never feeds resolveSvcStatus), like displayComponentIds; takes
-  // precedence over both id lists when set. Pair with componentDenylist.
+  // Takes precedence over both id lists for the breakdown when set. Pair with componentDenylist.
   displayAllComponents?: boolean
+  // #1679 — uptime is the worst-of the live components `displayAllComponents` shows (the same selection
+  // as the breakdown and the dynamic badge), so a per-model page needs no id list. Requires
+  // `displayAllComponents` and a `statusComponentId`, and no `statusComponentIds`.
+  uptimeOverLiveComponents?: true
   // Names (case-insensitive exact match) excluded from the displayAllComponents set —
   // non-availability surfaces like Docs/Website. Kept small + stable (unlike the model list).
   componentDenylist?: string[]

@@ -125,7 +125,7 @@ describe('uptimeScopeOf / uptimeScopeForPage — one definition, two readers', (
     // Derived from the configs rather than hardcoded, so a legitimate badge-scope edit moves both sides
     // together instead of failing on a count that says nothing about the property under test.
     for (const apiUrl of [CLAUDE_SUMMARY_URL, 'https://status.cursor.com/api/v2/summary.json']) {
-      const expected = new Set(SERVICES.filter((s) => s.apiUrl === apiUrl).flatMap(uptimeScopeOf))
+      const expected = new Set(SERVICES.filter((s) => s.apiUrl === apiUrl).flatMap((x) => uptimeScopeOf(x)))
       expect(new Set(uptimeScopeForPage(apiUrl))).toEqual(expected)
     }
     // …and the discriminating negative: Cursor's DISPLAY roster is seven, its badge scope five. Asking
