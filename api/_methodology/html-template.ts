@@ -392,7 +392,9 @@ ${consentInitScript(nonce)}
   <h2 data-i18n="s6.title">인시던트 · MTTR · 탐지</h2>
 
   <h3 data-i18n="s6.counting.title">인시던트 집계</h3>
-  <p data-i18n="s6.counting.body">인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — 한 장애를 컴포넌트나 플랫폼별로 따로 올리는 곳(예: Mistral, Grok)은 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.</p>
+  <p data-i18n="s6.counting.body">인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — 한 장애를 컴포넌트별로 따로 올리는 곳(예: Mistral)은 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.</p>
+
+  <p data-i18n="s6.counting.overlap">서비스별 다운타임 합계는 월간 리포트에서 보여 주며, 2026년 9월부터는 시간이 겹치는 인시던트를 한 번만 셉니다. 여러 인시던트가 동시에 진행된 시간은 인시던트마다 더하지 않고 하나의 장애 구간으로 한 번만 더하며, 가장 긴 인시던트도 이렇게 합친 구간 가운데 가장 긴 것입니다. 단, 아래의 재구성 기록은 하루 합계라서 합치지 않고 하나씩 더합니다. 인시던트 수는 그대로 모든 인시던트를 셉니다.</p>
 
   <p data-i18n="s6.counting.reconstructed">Better Stack을 쓰는 상태 페이지는 모니터가 자동으로 만들던 인시던트를 더 이상 게시하지 않기도 합니다. 그래서 피드가 다루지 않은 다운타임 날짜는 같은 페이지에 공개된 일별 가동 기록으로 채웁니다. 이때는 인시던트 하나를 1건으로 세지 않고, 컴포넌트마다 다운타임이 있었던 날짜를 하루에 1건씩 셉니다. 최근 30일까지만 채우고, 피드에 남은 가장 오래된 항목보다 이전 날짜는 채우지 않습니다. 하루 다운타임이 10분 미만인 날과 아직 끝나지 않은 당일도 제외합니다. 이렇게 채운 기록은 하루 합계라서 인시던트 하나의 길이가 아니므로 MTTR 계산에서 뺍니다.</p>
 
@@ -630,7 +632,8 @@ const i18n = {
     's5.limit.probe': '<strong>Probe 미적용:</strong> 레이턴시 랭킹은 앱을 제외한 모든 분야에서 엔드포인트를 직접 probe하는 서비스를 대상으로 합니다. 대표성 있는 엔드포인트를 찾지 못해 probe하지 않는 서비스(대부분의 앱, 일부 코딩 에이전트, Azure OpenAI · Modal)는 제외되며, Character.AI는 probe하지만 앱이라 상세 페이지에만 표시합니다.',
     's6.title': '인시던트 · MTTR · 탐지',
     's6.counting.title': '인시던트 집계',
-    's6.counting.body': '인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — 한 장애를 컴포넌트나 플랫폼별로 따로 올리는 곳(예: Mistral, Grok)은 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.',
+    's6.counting.body': '인시던트 수는 서비스별 영향 컴포넌트를 모두 반영합니다. 제공사마다 인시던트를 세분화하는 정도가 다릅니다 — 한 장애를 컴포넌트별로 따로 올리는 곳(예: Mistral)은 서비스 단위로 묶어 보고하는 곳보다 건수가 부풀려집니다. 따라서 건수가 많다고 신뢰도가 낮은 것은 아니며, 제공사끼리 비교할 때는 이 세분화 차이를 감안해야 합니다.',
+    's6.counting.overlap': '서비스별 다운타임 합계는 월간 리포트에서 보여 주며, 2026년 9월부터는 시간이 겹치는 인시던트를 한 번만 셉니다. 여러 인시던트가 동시에 진행된 시간은 인시던트마다 더하지 않고 하나의 장애 구간으로 한 번만 더하며, 가장 긴 인시던트도 이렇게 합친 구간 가운데 가장 긴 것입니다. 단, 아래의 재구성 기록은 하루 합계라서 합치지 않고 하나씩 더합니다. 인시던트 수는 그대로 모든 인시던트를 셉니다.',
     's6.counting.reconstructed': 'Better Stack을 쓰는 상태 페이지는 모니터가 자동으로 만들던 인시던트를 더 이상 게시하지 않기도 합니다. 그래서 피드가 다루지 않은 다운타임 날짜는 같은 페이지에 공개된 일별 가동 기록으로 채웁니다. 이때는 인시던트 하나를 1건으로 세지 않고, 컴포넌트마다 다운타임이 있었던 날짜를 하루에 1건씩 셉니다. 최근 30일까지만 채우고, 피드에 남은 가장 오래된 항목보다 이전 날짜는 채우지 않습니다. 하루 다운타임이 10분 미만인 날과 아직 끝나지 않은 당일도 제외합니다. 이렇게 채운 기록은 하루 합계라서 인시던트 하나의 길이가 아니므로 MTTR 계산에서 뺍니다.',
     's6.mttr.title': '복구 시간 (MTTR)',
     's6.mttr.body': 'Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 서로 다를 수 있으며, 이는 정상입니다.',
@@ -723,7 +726,8 @@ const i18n = {
     's5.limit.probe': '<strong>No probe:</strong> The latency ranking covers services whose endpoint we probe directly, in every category except apps. Services with no representative endpoint we can probe (most apps, some coding agents, Azure OpenAI and Modal) are excluded; Character.AI is probed but, as an app, shown on its detail page only.',
     's6.title': 'Incidents · MTTR · Detection',
     's6.counting.title': 'Incident counting',
-    's6.counting.body': 'Incident counts reflect all affected components per service. Providers differ in reporting granularity — those that file one outage per component or platform (e.g. Mistral, Grok) inflate their totals versus service-level reporters. A higher count does not mean lower reliability; adjust for granularity before comparing across providers.',
+    's6.counting.body': 'Incident counts reflect all affected components per service. Providers differ in reporting granularity — those that file one outage per component (e.g. Mistral) inflate their totals versus service-level reporters. A higher count does not mean lower reliability; adjust for granularity before comparing across providers.',
+    's6.counting.overlap': 'Per-service downtime totals appear in the monthly report, and from September 2026 incidents that overlap in time are counted once in them: time when several were open at once is added once, as one impact window, not once per incident, and the longest incident is the longest such window. Reconstructed entries (below) are daily totals, so they are still added one by one. The incident count still counts every incident.',
     's6.counting.reconstructed': 'A Better Stack status page may stop publishing the incidents its monitors used to create. AIWatch then fills the downtime days the feed does not cover from the daily availability record published on the same page. One incident is not one entry there: each component contributes one entry for every day it had downtime. Only the last 30 days are filled, and nothing older than the oldest item still in the feed. A day with under 10 minutes of downtime and the current, unfinished day are left out too. An entry built this way is a daily total rather than the length of one incident, so it is excluded from MTTR.',
     's6.mttr.title': 'Recovery time (MTTR)',
     's6.mttr.body': 'The Score\\\'s Recovery component uses a 30-day median. The ServiceDetails "Recovery" card is a separate display — a 7-day median + worst ("typical 15m · worst 29h34m"). The figures can legitimately differ.',

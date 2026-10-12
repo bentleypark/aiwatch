@@ -318,6 +318,19 @@ describe('renderMethodologyPage', () => {
     expect(en, 'EN: fill window').toContain(`last ${BS_HISTORY_WINDOW_DAYS} days`)
   })
 
+  it('states the impact-window rule and cites no merged-at-source provider as inflated (#1665)', () => {
+    const key = 's6.counting.overlap'
+    for (const [where, text] of [['inline', inline(key, 'p')], ['ko map', entry(koBlock, key)]] as const) {
+      expect(text, `KO ${where}: overlap counted once`).toContain('한 번만')
+      expect(text, `KO ${where}: reconstructed entries are the exception`).toContain('재구성 기록은 하루 합계라서 합치지 않고')
+    }
+    expect(entry(enBlock, key), 'EN: overlap counted once').toContain('counted once')
+    expect(entry(enBlock, key), 'EN: reconstructed entries are the exception').toContain('Reconstructed entries (below) are daily totals')
+    for (const text of [inline('s6.counting.body', 'p'), entry(koBlock, 's6.counting.body'), entry(enBlock, 's6.counting.body')]) {
+      expect(text, 'Grok is merged at the source (#1345), so its count is not inflated').not.toContain('Grok')
+    }
+  })
+
   it('keeps the honest detection framing — MTTD + RTT, explicitly disclaiming "faster than official" (#464)', () => {
     // #464: the page must NOT positively claim speed superiority over the official status page.
     // The honest framing is MTTD + RTT degradation; a sentence that explicitly DISCLAIMS the
