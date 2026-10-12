@@ -785,6 +785,12 @@ export function rootlyScoringImpact(inc: { impact?: Incident['impact']; title?: 
   return isNonReliabilityAdvisory(inc.title ?? '') ? null : ROOTLY_DEFAULT_IMPACT
 }
 
+/** The impact the monthly Score weighs an archived row at (#1663 shares it with the Notable Incidents ranking). */
+export function monthlyScoredImpact(inc: { impact?: Incident['impact']; title?: string }, rootlyFeed: boolean | undefined): Incident['impact'] {
+  if (isNonReliabilityAdvisory(inc.title ?? '')) return null
+  return rootlyFeed ? rootlyScoringImpact(inc) : (inc.impact ?? null)
+}
+
 /**
  * Give each incident the severity its component-day carries.
  *

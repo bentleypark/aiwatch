@@ -12,7 +12,7 @@ import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './typ
 import { calculateAIWatchScore, classifyProbe, mergeImpactWindows } from './score'
 import type { AIWatchScore } from './score'
 import { resolveProbeId, PROBE_TARGETS } from './probe'
-import { rootlyScoringImpact } from './parsers/rootly'
+import { monthlyScoredImpact } from './parsers/rootly'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
@@ -1367,7 +1367,7 @@ export function computeMonthlyScore(
     // open across the deploy boundary, whose stored 'minor' a later live null never overwrites
     // (accumulateMonthlyIncidents nullish-coalesces impact) — would otherwise drop the advisory from
     // downtime yet still count it in the Score, an internally-contradictory report (the Codex June case).
-    impact: isNonReliabilityAdvisory(e.title ?? '') ? null : svcConfig?.rootlyFeed ? rootlyScoringImpact(e) : (e.impact ?? null),
+    impact: monthlyScoredImpact(e, svcConfig?.rootlyFeed),
     // #1292 — same carry-through: without it the MONTHLY Score computes MTTR from day-buckets while
     // the live Score abstains, so the two disagree for the same service and window and the monthly
     // one is what the reports site publishes.

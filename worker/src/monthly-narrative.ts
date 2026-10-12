@@ -18,6 +18,9 @@ import { GEMMA_MODEL } from './ai-analysis'
 import { callAnthropicMessages } from './anthropic'
 import type { MonthlyArchive, MonthlyIncidentEntry } from './monthly-archive'
 import { groupImpactWindows } from './score'
+import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
+import { monthlyScoredImpact } from './parsers/rootly'
+import { SERVICES } from './services'
 
 // ── Public types ─────────────────────────────────────────────────────
 
@@ -80,9 +83,21 @@ interface FlatIncident extends MonthlyIncidentEntry {
   serviceName: string
 }
 
+const ROOTLY_FEED_IDS = new Set(SERVICES.filter((s) => s.rootlyFeed).map((s) => s.id))
+
+function scoredImpact(inc: FlatIncident): MonthlyIncidentEntry['impact'] {
+  return monthlyScoredImpact(inc, ROOTLY_FEED_IDS.has(inc.serviceId))
+}
+
+function weightedMin(inc: FlatIncident): number {
+  const impact = scoredImpact(inc)
+  return inc.durationMin * (impact ? INCIDENT_IO_IMPACT_WEIGHTS[impact] ?? 0 : 0)
+}
+
 /** Flatten every service's incidentList into one array, tagged with the
- *  service, ranked by significance (longest duration first; unresolved
- *  incidents float up since an open incident at month-end is itself notable). */
+ *  service, ranked by significance (impact-weighted duration first, using the
+ *  impact and weights the monthly Score uses;
+ *  unresolved incidents float up since an open incident at month-end is itself notable). */
 export function selectIncidentCandidates(
   archive: MonthlyArchive,
   serviceNames: Record<string, string>,
@@ -125,8 +140,8 @@ export function selectIncidentCandidates(
     const aOpen = a.finalStatus !== 'resolved' ? 1 : 0
     const bOpen = b.finalStatus !== 'resolved' ? 1 : 0
     if (aOpen !== bOpen) return bOpen - aOpen
-    // Then longest duration.
-    return b.durationMin - a.durationMin
+    // Then impact-weighted duration (#1663), then raw duration.
+    return weightedMin(b) - weightedMin(a) || b.durationMin - a.durationMin
   })
   if (excludedDerived > 0) {
     // Named: a candidate list that quietly shrinks is indistinguishable from a
@@ -174,7 +189,7 @@ export function buildMonthlyNarrativePrompt(
 
   const incidentLines = candidates.map((c, i) => {
     const dur = formatDurationLabel(c.durationMin, c.finalStatus)
-    return `${i + 1}. service="${c.serviceName}" | title="${c.title}" | duration="${dur}" | status=${c.finalStatus}`
+    return `${i + 1}. service="${c.serviceName}" | title="${c.title}" | duration="${dur}" | impact=${scoredImpact(c) ?? 'unspecified'} | status=${c.finalStatus}`
   })
 
   // Per-service summary for Observations — services with incidents first, then

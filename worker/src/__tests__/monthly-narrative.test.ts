@@ -235,6 +235,39 @@ describe('selectIncidentCandidates', () => {
     expect(out.map(c => c.id)).toEqual(['long', 'mid', 'short'])
   })
 
+  it('#1663 — ranks resolved incidents by impact-weighted duration, not raw duration', () => {
+    const archive = mkArchive({
+      services: {
+        a: { uptime: 99, score: 80, grade: 'good', incidents: 4, avgResolutionMin: 60, totalDowntimeMin: 2000, longestIncidentMin: 1000, avgLatencyMs: 200, officialUptime: 99, p95LatencyMs: 320, latencySpikes: 4, p50LatencyMs: null, cvCombined: null,
+          incidentList: [
+            mkIncident({ id: 'minor-long', durationMin: 1000, impact: 'minor' }),
+            mkIncident({ id: 'major-mid', durationMin: 400, impact: 'major' }),
+            mkIncident({ id: 'critical-short', durationMin: 200, impact: 'critical' }),
+            mkIncident({ id: 'null-longest', durationMin: 5000, impact: null }),
+          ] },
+      },
+    })
+    expect(selectIncidentCandidates(archive, {}).map(c => c.id))
+      .toEqual(['major-mid', 'minor-long', 'critical-short', 'null-longest'])
+  })
+
+  it('#1663 — ranks by the impact the monthly Score weighs, not the stored one', () => {
+    const svc = { uptime: 99, score: 80, grade: 'good' as const, incidents: 1, avgResolutionMin: 60, totalDowntimeMin: 60, longestIncidentMin: 60, avgLatencyMs: 200, officialUptime: 99, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null }
+    const archive = mkArchive({
+      services: {
+        mistral: { ...svc, incidentList: [mkIncident({ id: 'rootly-null', title: 'Elevated error rate', durationMin: 2000, impact: null })] },
+        a: { ...svc, incidentList: [
+          mkIncident({ id: 'major', durationMin: 400, impact: 'major' }),
+          mkIncident({ id: 'advisory', title: 'Usage Limits Depleting Faster Than Expected', durationMin: 3000, impact: 'major' }),
+        ] },
+      },
+    })
+    expect(selectIncidentCandidates(archive, {}).map(c => c.id)).toEqual(['rootly-null', 'major', 'advisory'])
+    const prompt = buildMonthlyNarrativePrompt(archive, {})
+    expect(prompt).toMatch(/title="Elevated error rate" \| duration="[^"]+" \| impact=minor \|/)
+    expect(prompt).toMatch(/title="Usage Limits Depleting Faster Than Expected" \| duration="[^"]+" \| impact=unspecified \|/)
+  })
+
   it('caps the candidate list at 14 entries', () => {
     const incidentList = Array.from({ length: 30 }, (_, i) =>
       mkIncident({ id: `i${i}`, durationMin: i * 10 }))
@@ -281,6 +314,21 @@ describe('buildMonthlyNarrativePrompt', () => {
     // Service summary surfaces score + incident count.
     expect(prompt).toContain('Claude API: score 95')
     expect(prompt).toContain('Gemini API: score 61')
+  })
+
+  it('#1663 — each candidate line carries its impact', () => {
+    const mixed = mkArchive({
+      services: {
+        a: { uptime: 99, score: 80, grade: 'good', incidents: 2, avgResolutionMin: 60, totalDowntimeMin: 120, longestIncidentMin: 60, avgLatencyMs: 200, officialUptime: 99, p95LatencyMs: 320, latencySpikes: 0, p50LatencyMs: null, cvCombined: null,
+          incidentList: [
+            mkIncident({ id: 'm', title: 'Major one', impact: 'major' }),
+            mkIncident({ id: 'n', title: 'No impact one', impact: null }),
+          ] },
+      },
+    })
+    const prompt = buildMonthlyNarrativePrompt(mixed, { a: 'A' })
+    expect(prompt).toMatch(/title="Major one" \| duration="[^"]+" \| impact=major \|/)
+    expect(prompt).toMatch(/title="No impact one" \| duration="[^"]+" \| impact=unspecified \|/)
   })
 
   it('shows a placeholder line when the month had zero incidents', () => {
