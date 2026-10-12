@@ -44,6 +44,9 @@ interface MemberStatus {
 }
 
 interface FamilyIncident {
+  /** #1669 — set on a console/dashboard incident (worker `referenceIncidents`): the component it is on.
+   *  Such a row names the component instead of linking a member, and feeds no count. */
+  component?: string
   /** #1164 — a shared multi-surface incident (one incident id across e.g. Claude API + claude.ai, the
    *  same model the worker's alert/tweet-draft svcIds resolution already relies on) carries every
    *  affected member here instead of being split into one row per member. Almost always length 1. */
@@ -212,6 +215,8 @@ function renderGroupPage(
    *  `ogIncidentToken`, the INBOUND `?i=` a visitor arrived on: that one pins what this page's own card
    *  shows, this one is what the page hands out. */
   shareIncidentToken?: string | null,
+  /** #1669 — the family's console/dashboard components: not services, listed apart from members. */
+  referenceComponents: Array<{ name: string; status: MemberStatus['status'] }> = [],
 ): string {
   const headline = worstStatus(members)
   // #1193 — the member the audience beacon attributes a view to: the one carrying the headline
@@ -293,6 +298,14 @@ function renderGroupPage(
     </li>`
   }).join('')
 
+  const referenceSection = referenceComponents.length === 0 ? '' : `<p class="reference-note">Other ${esc(family.name)} components &middot; not monitored services, not counted above</p>
+<ul class="member-list">${referenceComponents.map((c) => `
+    <li class="member-row"><div class="member-plain">
+      <span class="member-emoji">${STATUS_EMOJI[c.status]}</span>
+      <span class="member-details"><span class="member-name">${esc(c.name)}</span></span>
+      <span class="member-status">${STATUS_LABEL[c.status]}</span>
+    </div></li>`).join('')}</ul>`
+
   const summarySection = summary ? `<section class="family-summary" aria-label="30-day family summary">
   <strong>30-day family summary</strong>
   <span>${summary.incidents} incident${summary.incidents === 1 ? '' : 's'} across monitored services${summary.averageRecoveryMinutes != null ? ` · average recovery: ${formatRecoveryMinutes(summary.averageRecoveryMinutes)}` : ''}</span>
@@ -361,7 +374,7 @@ function renderGroupPage(
 <ul class="incident-list">${incidents.map((inc) => `
     <li class="incident-row">
       <div class="incident-header">
-        <span class="incident-service">${inc.members.map((m) => `<a href="/is-${esc(m.slug)}-down">${esc(m.name)}</a>`).join(', ')}</span>
+        <span class="incident-service">${inc.component ? esc(inc.component) : inc.members.map((m) => `<a href="/is-${esc(m.slug)}-down">${esc(m.name)}</a>`).join(', ')}</span>
         <span class="incident-title">${esc(inc.title)}</span>
         <span class="incident-meta">${esc(incidentMeta(inc))}</span>
       </div>${renderFamilyIncidentTimeline(inc)}${inc.aiSummary ? `
@@ -522,7 +535,8 @@ ${consentInitScript()}
   .ih-history { font-size:0.85rem; margin:8px 0 0; }
   .headline { font-size:1.1rem; margin-bottom:24px; }
   ul.member-list, ul.incident-list { list-style:none; padding:0; margin:0; }
-  .member-row a { display:flex; align-items:center; gap:10px; padding:14px 16px; border:1px solid #1f2937; border-radius:8px; margin-bottom:8px; text-decoration:none; color:inherit; }
+  .reference-note { color:#9ca3af; font-size:0.85rem; margin:16px 0 8px; }
+  .member-row a, .member-row .member-plain { display:flex; align-items:center; gap:10px; padding:14px 16px; border:1px solid #1f2937; border-radius:8px; margin-bottom:8px; text-decoration:none; color:inherit; }
   .member-details { display:flex; flex:1; flex-direction:column; gap:2px; min-width:0; }
   .member-name { font-weight:600; }
   .member-measurements, .member-checked { color:#9ca3af; font-size:0.8rem; }
@@ -597,7 +611,7 @@ ${ALERT_CTA_CSS}  .cta-member { display:flex; align-items:center; justify-conten
 <h1>${STATUS_EMOJI[headline]} Is ${esc(family.name)} Down?</h1>
 <p class="headline">${esc(pageDesc)}</p>
 <ul class="member-list">${rows}</ul>
-${summarySection}
+${referenceSection}${summarySection}
 ${monthlyReportSection}
 ${alertSection}
 ${extCtaSection}
@@ -756,6 +770,7 @@ export default async function handler(req: Request) {
       return { id, name: resolvedName(id, slug), slug, status: 'unknown' as const }
     })
     let incidents: FamilyIncident[] = []
+    let referenceComponents: Array<{ name: string; status: MemberStatus['status'] }> = []
     let communityReports: CommunityReport[] = []
     let summary: FamilySummary | null = null
     // #1243 — the NEWEST unresolved incident id across the family, taken from the RAW worker payload
@@ -782,6 +797,14 @@ export default async function handler(req: Request) {
               // #1292 — read them if the upstream carries them, so the row's guard is wired rather
               // than latent. Absent on every other source.
               derived?: 'status_history'; derivedDay?: string
+              timeline?: Array<{ stage: string; text: string | null; at: string }>
+            }>
+            // #1669 — console/dashboard components and their incidents; shown, never counted.
+            referenceComponents?: Array<{ id: string; name: string; status: string }>
+            referenceIncidents?: Array<{
+              id: string; title: string; status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
+              startedAt: string; resolvedAt?: string | null; duration: string | null
+              componentNames?: string[]
               timeline?: Array<{ stage: string; text: string | null; at: string }>
             }>
             // #1614 — records older than the live feed reaches; the 30-day summary only.
@@ -916,6 +939,21 @@ export default async function handler(req: Request) {
         // Ongoing incidents (any non-'resolved' status) always rank above resolved ones, regardless of
         // startedAt — a currently-active incident is the thing a visitor most needs to see, even if a
         // shorter incident on another member resolved more recently. Newest-first within each group.
+        for (const id of family.members) {
+          const s = byId.get(id)
+          if (s?.incidentSourceStale) continue
+          for (const inc of s?.referenceIncidents ?? []) {
+            const startedMs = new Date(inc.startedAt).getTime()
+            if (Number.isNaN(startedMs) || startedMs < cutoff) continue
+            if (byIncidentId.has(inc.id)) continue
+            byIncidentId.set(inc.id, {
+              component: (inc.componentNames ?? []).join(', '), members: [], title: inc.title, status: inc.status,
+              startedAt: inc.startedAt, resolvedAt: inc.resolvedAt, duration: inc.duration, timeline: inc.timeline,
+            })
+          }
+        }
+        referenceComponents = family.members.flatMap((id) =>
+          (byId.get(id)?.referenceComponents ?? []).map((c) => ({ name: c.name, status: normalizeStatus(c.status) })))
         incidents = Array.from(byIncidentId.values())
           .sort((a, b) => {
             const aOngoing = a.status === 'resolved' ? 0 : 1
@@ -953,7 +991,7 @@ export default async function handler(req: Request) {
       console.warn(`[is-down-group/${familyKey}] status fetch failed:`, err instanceof Error ? err.message : err)
     }
 
-    const html = renderGroupPage(family, members, incidents, summary, communityReports, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken)
+    const html = renderGroupPage(family, members, incidents, summary, communityReports, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken, referenceComponents)
     const csp = await cspForHtml(html, { enforce: true })
     // Mirrors is-down.ts's fallback semantics: a fetch failure renders "unknown" for every member
     // (never a fabricated status), and the 503 + no-store tells caches/crawlers not to trust or cache

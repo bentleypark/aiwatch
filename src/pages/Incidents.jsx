@@ -12,6 +12,7 @@ import { groupIncidents } from '../utils/incidentGrouping'
 import { incidentNote } from '../utils/incidentNote'
 import { getResolvedTime, getContextualTime, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService } from '../utils/archiveMerge'
+import { mergeReferenceRows } from '../utils/referenceIncidents'
 import { filterIncidentList } from '../utils/incidentFilter'
 import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
@@ -19,6 +20,11 @@ import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
 import { trackEvent } from '../utils/analytics'
 import { INCIDENT_PERIODS } from '../utils/hashRoute'
+
+const toReferenceRow = (r) => ({
+  ...r,
+  status: r.status === 'resolved' ? 'resolved' : r.status === 'monitoring' ? 'monitoring' : 'ongoing',
+})
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -405,6 +411,7 @@ export default function Incidents({ filters } = {}) {
           if (entry.fromArchive) entry.id = `${entry.serviceId}:${rawId}`
         }
       }
+      mergeReferenceRows(incMap, services, toReferenceRow)
       return [...incMap.values()]
     },
     [services, serviceFilter, archives, archiveMonths]

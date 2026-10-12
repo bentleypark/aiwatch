@@ -178,6 +178,14 @@ The fix widens the SERVICE scope to what the card represents, rather than annota
 - **A partial scope warns.** A component that is in the page's component tree (so its chip renders, and the `displayComponentIds` drift-warn stays silent) but carries no `componentsUptime` entry — `showUptime` turned off, or a young component without a backfilled series — would otherwise be skipped silently, publishing the healthy members' figure as `official`. That is #1177 re-created by its own fix, so `parseInstatusUptime` warns once per missing member. It cannot self-heal: the same result feeds `todayWeightedOutageSec` → `daily:{date}` → the 90-day `history:` archive.
 - **Narrowing `displayComponentIds` to the badge component was the alternative** — it removes the contradiction too, by deleting the information #761/#911 added and contradicting the card's own copy ("Per-component breakdown from the official status page").
 
+### A component that is not a service — reference incidents (#1669)
+
+A developer console is listed on the provider's page but is not a monitored service, so it gets no card, Score, alert or service count. `referenceComponentIds` names such a component on the service whose page carries it (`claude` → Claude Console). An incident tagged **only** to those ids is moved out of `incidents` into `referenceIncidents`, with the component's current status in `referenceComponents`; an incident tagged to it and to a service component stays a counted incident. The motivating case: a Console-only `major` (2026-10-07) reached no surface at all.
+
+Identification needs the component tags on every cycle, which Statuspage's `incidents.json` carries. A page whose API carries no tags (turbopuffer's incident.io feed, tagged only through the page HTML) would let an incident move between `incidents` and `referenceIncidents` from one cycle to the next, so it is not opted in.
+
+Where they show: the dashboard Incidents page and the Overview Recent Incidents panel (labelled `Provider · Component`), and the `/is-claude-down` family page (component row + incidents). Never on a service card, service detail or single is-down page. Every counting consumer reads `incidents`; `reference-incidents.test.ts` pins that no worker module but the producer, its type and operator suppression names the new field.
+
 ## Status page URL selection
 
 `apiUrl` (the machine-readable fetch endpoint) and `statusUrl` (the human-facing link) can differ. When selecting `apiUrl`, **verify it is reachable from Cloudflare Workers** — some providers host their status page on a custom domain that blocks Workers IPs while the canonical Atlassian/incident.io host remains accessible.

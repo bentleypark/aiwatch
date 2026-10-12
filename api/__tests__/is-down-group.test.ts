@@ -1997,3 +1997,64 @@ describe('is-down-group.ts — 30-day summary includes records past the feed dep
     expect(html).not.toContain('average recovery: 1h 0m')
   })
 })
+
+// #1669 — a console component is not a family member: listed apart, never in the headline or the summary.
+describe('is-down-group.ts — reference components (#1669)', () => {
+  const CONSOLE = 'Claude Console (platform.claude.com)'
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+  const consoleIncident = {
+    id: '978mjkgw6mh7', title: 'Elevated errors on platform.claude.com', status: 'monitoring', startedAt: hoursAgo(5),
+    duration: null, componentNames: [CONSOLE],
+  }
+  const services = () => [
+    {
+      id: 'claude', name: 'Claude API', status: 'operational', incidents: [],
+      referenceComponents: [{ id: '0qbwn08sd68x', name: CONSOLE, status: 'degraded' }],
+      referenceIncidents: [consoleIncident],
+    },
+    { id: 'claudeai', name: 'claude.ai', status: 'operational', incidents: [] },
+    { id: 'claudecode', name: 'Claude Code', status: 'operational', incidents: [] },
+  ]
+
+  it('lists the Console row and its incident, labelled with the component, not a member link', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(services() as never))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('not monitored services, not counted above')
+    expect(html).toContain(`<span class="member-name">${CONSOLE}</span>`)
+    expect(html).toContain(`<span class="incident-service">${CONSOLE}</span>`)
+    expect(html).toContain('Elevated errors on platform.claude.com')
+  })
+
+  it('drops a reference incident older than the 7-day window', async () => {
+    const old = { ...consoleIncident, id: 'old-1', title: 'Old console outage', status: 'resolved', startedAt: hoursAgo(24 * 9) }
+    const svcs = services()
+    svcs[0].referenceIncidents = [old]
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(svcs as never))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('Old console outage')
+  })
+
+  it('lists none for a member whose source is unreadable', async () => {
+    const svcs = services()
+    Object.assign(svcs[0], { incidentSourceStale: true })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(svcs as never))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).not.toContain('Elevated errors on platform.claude.com')
+  })
+
+  it('a member row for the same incident id keeps its member link', async () => {
+    const svcs = services()
+    svcs[1].incidents = [{ ...consoleIncident, title: 'Elevated errors on platform.claude.com' }] as never
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(svcs as never))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('<span class="incident-service"><a href="/is-claude-ai-down">claude.ai</a></span>')
+    expect(html).not.toContain(`<span class="incident-service">${CONSOLE}</span>`)
+  })
+
+  it('a degraded Console does not move the family headline or the 30-day summary', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(services() as never))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain('<title>Is Anthropic (Claude) Down? Operational')
+    expect(html).toContain('0 incidents across monitored services')
+  })
+})

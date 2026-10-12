@@ -151,6 +151,12 @@ export interface ServiceStatus {
   // days (`attachRecordedIncidentHistory`, services.ts). Read by the live Score and the is-down 30-day
   // figures; alerts, withdrawal and AI analysis read `incidents` as current state and never see these.
   incidentsBeyondFeed?: Incident[]
+  // #1669 — incidents tagged only to `ServiceConfig.referenceComponentIds` (a console or dashboard, not a
+  // service). Shown in incident logs and on the provider page, never counted: alerts, fallback, Score,
+  // the monthly archive and AI analysis read `incidents` and never see these.
+  referenceIncidents?: Incident[]
+  // #1669 — the current status of those components, for the provider page.
+  referenceComponents?: ServiceComponent[]
   // #1614 — the oldest page-wide row of a capped Statuspage-compatible `incidents.json`
   // (`cappedFeedDepthStart`). Absent when the feed returned its whole history.
   feedDepthStart?: string
@@ -487,6 +493,9 @@ export interface ServiceConfig {
   // Fireworks/turbopuffer age-in queue, these never age into scope regardless of age. A new exclusion is
   // therefore a reviewed diff here, not a silent audit suppression.
   rosterAuditExclude?: string[]
+  // #1669 — page component ids that are not a service (a developer console, a dashboard). An incident
+  // tagged ONLY to these ids goes to `ServiceStatus.referenceIncidents`, never `incidents`.
+  referenceComponentIds?: string[]
   // #1518 — set when this service's uptime scope is PERMANENTLY pinned to one (or a few) anchor
   // component(s) on a page whose OWN roster is structurally unbounded — a per-model catalog
   // (`displayAllComponents`: cohere/groq's incident.io pages, bfl's Atlassian one) rather than a curated

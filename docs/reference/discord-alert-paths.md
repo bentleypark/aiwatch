@@ -14,6 +14,8 @@ tags: [worker, alerts, discord]
 1. **Operator** — the `*/5` cron posts to the single `env.DISCORD_WEBHOOK_URL` secret (always on for the operator).
 2. **Per-user** — a visitor's own Discord webhook (Settings → Alerts), delivered **server-side** by the same cron via `deliverToSubscribers` (`worker/src/webhook-subscriptions.ts`) — tab-independent (#486 PR3 replaced the old browser relay). A Slack channel added through "Add to Slack" (#1581) is a `type: 'slack'` row in the same store: `deliverToSubscribers` converts the entry and posts it itself (`worker/src/slack-message.ts`), and the channel's welcome message carries the manage link (`/slack/manage`). Unsubscribing there posts one goodbye message to the channel before the subscription is deleted (#1590); a failed post does not block the unsubscribe.
 
+Neither path alerts on a **reference incident** (#1669 — a console/dashboard component such as Claude Console): `buildIncidentAlerts` reads `incidents`, and those live in `referenceIncidents`. Whether a reference incident should ever alert is an open decision, not an omission. See [status-determination.md](status-determination.md#a-component-that-is-not-a-service--reference-incidents-1669).
+
 ### Provider change alerts (#1570)
 
 Operator-only. Hourly at `:00`, `provider-changes.ts` posts one embed per new pricing / billing / deprecation / breaking / limits entry from the OpenAI API changelog and the Claude Platform release notes, with a `TWEET DRAFT` built only from the entry's own sentences and an X search link. A launch announcement carrying the new model's first price is labelled `new model pricing`, not a price change. Never reaches the per-user path.

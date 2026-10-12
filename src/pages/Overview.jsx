@@ -28,6 +28,7 @@ import EmptyState from '../components/EmptyState'
 import { showRecoveredChip } from '../utils/liveIncident'
 import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
+import { mergeReferenceRows } from '../utils/referenceIncidents'
 
 // ── Status color maps ────────────────────────────────────────
 
@@ -812,6 +813,7 @@ export default function Overview() {
       }
     }
   }
+  mergeReferenceRows(incMap, services)
   // Apply flap grouping (#496): BetterStack services emit many same-title incidents per day
   // with unique IDs (Fireworks, Together, Mistral). groupIncidents() collapses ≥2 same-title
   // incidents on the same local day into one group row, preventing them from filling the panel.

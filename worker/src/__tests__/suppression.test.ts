@@ -82,6 +82,13 @@ describe('applySuppressions', () => {
     expect(out[0]).toBe(services[0])
   })
 
+  it('#1669 — also removes a suppressed reference incident', () => {
+    const services = [{ ...svc('openai', [REAL]), referenceIncidents: [FEDRAMP] }]
+    const out = applySuppressions(services, [{ scope: 'incident', incId: 'fr-1' }])
+    expect(out[0].referenceIncidents).toEqual([])
+    expect(out[0].incidents.map((i) => i.id)).toEqual(['real-1'])
+  })
+
   it('empty list returns input array unchanged', () => {
     const services = [svc('openai', [FEDRAMP])]
     expect(applySuppressions(services, [])).toBe(services)

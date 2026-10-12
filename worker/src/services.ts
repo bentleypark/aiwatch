@@ -119,7 +119,7 @@ export const SERVICES: ServiceConfig[] = [
   // status.claude.com page, so a Claude-Code-only incident cross-attributed to Claude API — at ANY incident
   // status, and (the #1090 half) whether or not Claude API was itself degraded at the time. See
   // filterByComponentStatus. claudeai/claudecode are keyword-scoped and do NOT set this.
-  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp', scopeIncidentsToComponent: true },
+  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp', scopeIncidentsToComponent: true, referenceComponentIds: ['0qbwn08sd68x'] },
   // displayComponentIds (#606 Cat B): the curated openai surfaces of the shared status.openai.com page
   // (incident.io) — the breakdown's allowlist, kept apart from chatgpt's and codex's so one page's
   // three cards never show each other's components. componentsUrl sources the list from
@@ -502,7 +502,7 @@ export const SERVICES: ServiceConfig[] = [
   // Badge/uptime worst-of over claude.ai + Claude Cowork (bpp5gb3hpjcl): Cowork is a mode of the Claude
   // desktop app this card already covers via 'claude desktop'. 'cowork' keeps a Cowork-only incident
   // visible on the card whose badge it now moves (the #379 trade-off noted on claudecode).
-  // rosterAuditExclude: Console, API, Code, Government — sibling cards' or out of scope on this page.
+  // rosterAuditExclude: API, Code (sibling cards), Console (a `claude` reference component, #1669), Government (out of scope).
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop', 'cowork'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc', statusComponentIds: ['rwppv331jlwc', 'bpp5gb3hpjcl'], rosterAuditExclude: ['0qbwn08sd68x', 'k8w3r06qmzrp', 'yyzkbfz2thpt', '0scnb50nvy53'] },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'], statusSourceDeactivated: true }, // #800 — status source dead since ~2026-06-18 (#689), no replacement; suppresses recurring dead-source alerts. ALERT SUPPRESSION ONLY — nothing published to readers may key off this flag (#1268): it is a hand-written claim that goes stale the moment the page comes back, and what we tell readers about a status source has to come from tracking that source. REMOVE when the page comes back. FYI the response shape has already moved once — 401 "page inactive" when #800 shipped, 302 → characteraistatus.statuspage.io/page-deleted → 200 HTML as of 2026-08-20.
@@ -1423,6 +1423,22 @@ export function incidentTagsOwnBadge(inc: Incident, config: ServiceConfig): bool
   if (!canIdBypass(config) || !inc.componentIds?.length) return false
   const badgeIds = config.statusComponentIds!
   return inc.componentIds.some((id) => badgeIds.includes(id))
+}
+
+/** #1669 — incidents tagged ONLY to `config.referenceComponentIds`. Untagged ⇒ never reference. */
+export function referenceIncidentsOf(
+  incidents: Incident[],
+  config: ServiceConfig,
+  pageComponents: Array<{ id: string; name: string }>,
+): Incident[] {
+  const ids = config.referenceComponentIds
+  if (!ids?.length) return []
+  const names = new Set(pageComponents.filter((c) => ids.includes(c.id)).map((c) => c.name.toLowerCase()))
+  return incidents.filter((inc) => {
+    const tagged = inc.componentNames ?? []
+    if (tagged.length === 0 || !tagged.every((n) => names.has(n.toLowerCase()))) return false
+    return (inc.componentIds ?? []).every((id) => ids.includes(id))
+  })
 }
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -2843,6 +2859,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       }
 
       let filtered = filterIncidents(incidents, config)
+      const referenceIncidents = referenceIncidentsOf(incidents, config, summaryData.components ?? [])
+      const referenceComponents: ServiceComponent[] = (summaryData.components ?? [])
+        .filter((c) => config.referenceComponentIds?.includes(c.id))
+        .map((c) => ({ id: c.id, name: c.name, status: normalizeStatus(c.status) }))
 
       // #606 Cat B / #693 follow-up — source the component list from componentsUrl (components.json, a
       // SUPERSET on shared pages like status.openai.com) when set, else summary.json. This list is NOT
@@ -3054,6 +3074,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // OPEN + warn; #1090's scoping does NOT consult `unjudgeable`, so for an opting-in service the
       // prefix fallback keeps judging (and a sibling-tagged incident is still dropped) — see its doc.
       filtered = filterByComponentStatus(filtered, svcStatus, config, breakdownComponents ?? [])
+      const referenceIds = new Set(referenceIncidents.map((i) => i.id))
+      filtered = filtered.filter((i) => !referenceIds.has(i.id))
 
       // Track component ID misses for migration detection (#135).
       // Primary statusComponentId drives the alerted-on tracker. Additional ids
@@ -3146,6 +3168,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         ...base,
         status: svcStatus,
         incidents: filtered,
+        ...(referenceIncidents.length > 0 ? { referenceIncidents } : {}),
+        ...(referenceComponents.length > 0 ? { referenceComponents } : {}),
         ...(feedDepthStart ? { feedDepthStart } : {}),
         ...(components.length > 0 ? { components } : {}),
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete } : {}),

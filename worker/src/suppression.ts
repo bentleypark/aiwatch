@@ -80,8 +80,15 @@ export function applySuppressions(services: ServiceStatus[], list: SuppressionEn
     const kept = incidents.filter((inc) => !isSuppressed(inc, svc.id, list))
     const beyond = svc.incidentsBeyondFeed
     const keptBeyond = beyond?.filter((inc) => !isSuppressed(inc, svc.id, list))
-    if (kept.length === incidents.length && keptBeyond?.length === beyond?.length) return svc
-    return { ...svc, incidents: kept, ...(keptBeyond ? { incidentsBeyondFeed: keptBeyond } : {}) }
+    const reference = svc.referenceIncidents
+    const keptReference = reference?.filter((inc) => !isSuppressed(inc, svc.id, list))
+    if (kept.length === incidents.length && keptBeyond?.length === beyond?.length && keptReference?.length === reference?.length) return svc
+    return {
+      ...svc,
+      incidents: kept,
+      ...(keptBeyond ? { incidentsBeyondFeed: keptBeyond } : {}),
+      ...(keptReference ? { referenceIncidents: keptReference } : {}),
+    }
   })
 }
 
