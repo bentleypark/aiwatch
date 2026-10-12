@@ -28,7 +28,38 @@ describe('#857 turbopuffer vector service config', () => {
     // point the badge/calendar at a single region (and activate the Atlassian-only parseUptimeData).
     expect(s!.statusComponentId, 'turbopuffer must have no statusComponentId (region-only page)').toBeUndefined()
     expect(s!.statusComponentIds).toBeUndefined()
-    expect(s!.displayComponentIds, 'no per-component breakdown for v1 (regions belong on a Region card)').toBeUndefined()
+  })
+
+  it('#1673 — the breakdown lists every region, in page order, and not the Dashboard', () => {
+    const s = SERVICES.find((x) => x.id === 'turbopuffer')!
+    expect(s.displayComponentIds).toEqual([
+      '01KMGBMBN21AW19JHKPFJJJFN1', // gcp-asia-northeast3
+      '01K0Q28Y80TDVJ2HYNEJ99W98G', // gcp-asia-southeast1
+      '01K0Q28Y80K7Y1SSEX7Z2NYXNK', // gcp-europe-west3
+      '01K0Q28Y80NZ19ARGHR79HTKZJ', // gcp-northamerica-northeast2
+      '01K0Q1X4P70458SR04MTQ2CA7F', // gcp-us-central1
+      '01K0Q28Y80TXNQD9N86J2EXSRT', // gcp-us-east4
+      '01K0Q28Y80N7CW8FF73CEVK0YD', // gcp-us-west1
+      '01M4H3T50F41JZN21BTJ5746QM', // aws-ap-southeast-1
+      '01K0Q28Y8010Y0QES8NQ9TSA0N', // aws-ap-southeast-2
+      '01K0Q28Y8002ZDVXC1HEM8WBRA', // aws-eu-central-1
+      '01KMGBMBN2VKMTFD9T6WBBY1DQ', // aws-eu-west-1
+      '01K0Q28Y80F4SGGMEYYG7G9GWZ', // aws-us-east-1
+      '01K0Q28Y80DA6WT9WN08K0N96C', // aws-us-east-2
+      '01K0Q28Y801TPC8YT7PS1CXVMR', // aws-us-west-2
+      '01KMGBMBN2JWWWC92RADN719MQ', // aws-ap-south-1
+      '01KMGBMBN2JJYP251E9JA8WB1H', // aws-eu-west-2
+      '01M1EB2MF3HY0FGY4G4XKG6NWD', // aws-ca-central-1
+      '01M1ENXV57AJASWNHCRYDGS5N8', // aws-sa-east-1
+      '01M1ENXV5779G7VTW967EJHE5H', // gcp-us-east1
+      '01M1ENXV572CR9QK3M3RB2236R', // gcp-europe-west1
+    ])
+  })
+
+  it('#1673 — every region in the uptime roster is also in the breakdown', () => {
+    const s = SERVICES.find((x) => x.id === 'turbopuffer')!
+    const missing = (s.incidentIoComponentId as string[]).filter((id) => !(s.displayComponentIds ?? []).includes(id))
+    expect(missing).toEqual([])
   })
 
   it('turbopuffer sources official uptime from incident.io (the #857 uptime regression guard)', () => {

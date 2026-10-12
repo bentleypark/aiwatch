@@ -63,6 +63,7 @@ const MULTI = atlassian.filter((s) => uptimeScopeOf(s).length > 1)
 
 /** Every service carrying page components the badge scope excludes. */
 const WITH_OFF_SCOPE = atlassian
+  .filter((s) => uptimeScopeOf(s).length > 0)
   .map((s) => ({ s, off: (s.displayComponentIds ?? []).filter((id) => !uptimeScopeOf(s).includes(id)) }))
   .filter(({ off }) => off.length > 0)
 
