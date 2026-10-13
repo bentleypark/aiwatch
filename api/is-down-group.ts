@@ -15,6 +15,7 @@ import { buildShareUrl } from './_is-down/share-url'
 import { audienceBeaconScript } from './_shared/audience-beacon'
 import { historyLinkAttrs, historyClickBeacon } from './_shared/history-link'
 import { cspForHtml } from './_shared/csp-hash'
+import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
@@ -780,9 +781,11 @@ export default async function handler(req: Request) {
     let shareIncidentStartedMs = -Infinity
     let isFallback = true
     try {
-      const res = await fetch(`${WORKER_API}/api/status/cached?series=0`, { signal: AbortSignal.timeout(5000) })
-      if (res.ok) {
-        const data = await res.json() as {
+      const statusFetch = await hedgedJsonFetch(`${WORKER_API}/api/status/cached?series=0`)
+      if (statusFetch.ok && statusFetch.attempt === 2) console.warn(`[is-down-group/${familyKey}] status fetch answered by the hedged second request`)
+      if (!statusFetch.ok) console.warn(`[is-down-group/${familyKey}] status fetch failed: ${statusFetch.reason}`)
+      if (statusFetch.ok) {
+        const data = statusFetch.data as {
           services: Array<{
             id: string; name: string; status: string; lastChecked?: string
             uptime30d?: number | null; aiwatchScore?: number | null; scoreGrade?: string | null

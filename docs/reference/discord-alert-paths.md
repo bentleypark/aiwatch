@@ -235,6 +235,12 @@ both through `api/_shared/edge-fallback-alert.ts`. Their triggers differ: is-dow
 status read leaves no service data (the same flag that makes the response a 503), while the reports
 proxy alerts both when the upstream is unreachable and when it ANSWERS with a 5xx it passes through.
 
+**#1531 Part 5 — the status read is hedged.** `api/is-down.ts` and `api/is-down-group.ts` read
+`/api/status/cached` through `api/_shared/hedged-fetch.ts`: a second request starts at 2.5 s if the
+first has not finished, the first success wins, and both are abandoned at the same 5 s as before. A
+`worker_timeout` alert now means neither request finished within 5 s, and a request the second one
+rescued sends no alert.
+
 **#1368 — it never fired.** The production `EDGE_ALERT_TOKEN` was measured empty on 2026-09-08, and
 the guard returned silently on a falsy token in every environment — correct for local and preview,
 catastrophic in production, and indistinguishable between them. What established "never fired" was an

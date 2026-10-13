@@ -92,10 +92,7 @@ describe('is-down.ts cache-header divergence (#378)', () => {
       throw new Error('upstream-side mock not configured for this case')
     })
 
-    // Worker timeout, in the shape `AbortSignal.timeout()` actually rejects with (#1368). The
-    // previous mock used `AbortError`, which the classifier keyed on — so the test certified a label
-    // a real timeout could not reach.
-    fetchMock.mockRejectedValueOnce(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }))
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'))
     await handler(makeReq('claude-api'))
     // Worker non-2xx
     fetchMock.mockResolvedValueOnce(new Response('upstream', { status: 502 }))
@@ -105,11 +102,6 @@ describe('is-down.ts cache-header divergence (#378)', () => {
       status: 200, headers: { 'Content-Type': 'application/json' },
     }))
     await handler(makeReq('gemini'))
-    // #1531 — headers arrive, then the timeout fires while the body is still streaming.
-    fetchMock.mockResolvedValueOnce(Object.assign(new Response('{}', { status: 200 }), {
-      json: () => Promise.reject(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })),
-    }))
-    await handler(makeReq('chatgpt'))
     // Genuinely malformed body stays parse_error.
     fetchMock.mockResolvedValueOnce(new Response('{not json', { status: 200 }))
     await handler(makeReq('cursor'))
@@ -120,12 +112,29 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     // pages into ONE dedup window: a single Discord line per five minutes for a fleet-wide outage,
     // everything else suppressed — with every test still green.
     expect(alerts).toEqual([
-      { surface: 'is-down', slug: 'claude-api', reason: 'worker_timeout' },
+      { surface: 'is-down', slug: 'claude-api', reason: 'worker_unreachable' },
       { surface: 'is-down', slug: 'openai-api', reason: 'worker_http_502' },
       { surface: 'is-down', slug: 'gemini', reason: 'service_missing' },
-      { surface: 'is-down', slug: 'chatgpt', reason: 'worker_timeout' },
       { surface: 'is-down', slug: 'cursor', reason: 'parse_error' },
     ])
+  })
+
+  it('a stalled first status request is answered by the hedged second one, not the fallback (#1531 Part 5)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fetchMock
+        .mockImplementationOnce((_u, init) => new Promise((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        }))
+        .mockResolvedValueOnce(makeWorkerSuccess())
+      const pending = handler(makeReq('claude-api'))
+      await vi.advanceTimersByTimeAsync(5000)
+      const res = await pending
+      expect(res.status).toBe(200)
+      expect(fetchMock.mock.calls.filter(([u]) => String(u).includes('/api/status/cached'))).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('requests the cached payload without the time series it never reads (#1531)', async () => {

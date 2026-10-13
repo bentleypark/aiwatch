@@ -73,6 +73,24 @@ describe('is-down-group.ts', () => {
     expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('series')).toBe('0')
   })
 
+  it('a stalled first status request is answered by the hedged second one, not the fallback (#1531 Part 5)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fetchMock = vi.spyOn(globalThis, 'fetch')
+        .mockImplementationOnce((_u, init) => new Promise((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        }))
+        .mockResolvedValueOnce(statusResponse([
+          { id: 'claude', name: 'Claude API', status: 'operational' }, { id: 'claudeai', name: 'claude.ai', status: 'operational' }, { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+        ]))
+      const pending = handler(makeReq('claude'))
+      await vi.advanceTimersByTimeAsync(5000)
+      expect((await pending).status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('404s for an unknown family', async () => {
     const res = await handler(makeReq('gemini'))
     expect(res.status).toBe(404)

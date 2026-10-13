@@ -5,6 +5,7 @@ import { getSEOContent } from './_is-down/seo-content'
 import { renderPage } from './_is-down/html-template'
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
+import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { computeRankPosition } from './_is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
 import { buildSupplyChainNote, type SupplyChainBannerLike, type SupplyChainNote } from './_is-down/supply-chain-note'
@@ -30,14 +31,6 @@ function readEnv(name: string): string | undefined {
 const workerApi = readEnv('VERCEL_ENV') === 'production'
   ? WORKER_API
   : readEnv('AIWATCH_WORKER_API') || WORKER_API
-// #1368 — `AbortSignal.timeout()` rejects with TimeoutError; AbortError is what an explicit
-// `AbortController.abort()` produces. Both are accepted because the caller cannot tell which
-// the running engine emits, and keying on one of them mislabels a real timeout.
-function isAbortTimeout(err: unknown): boolean {
-  const name = (err as { name?: unknown } | null)?.name
-  return name === 'TimeoutError' || name === 'AbortError'
-}
-
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
 const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8); #880 — voyageai un-excluded (embeddings sibling Jina added, tier 9)
 
@@ -108,13 +101,12 @@ export default async function handler(req: Request) {
     // overwritten below before use.
     let fallbackReason: string = 'unknown'
 
-    const result = await Promise.allSettled([
-      fetch(`${workerApi}/api/status/cached?series=0`, { signal: AbortSignal.timeout(5000) }),
-    ])
+    const statusFetch = await hedgedJsonFetch(`${workerApi}/api/status/cached?series=0`)
+    if (statusFetch.ok && statusFetch.attempt === 2) console.warn(`[is-down/${slug}] status fetch answered by the hedged second request`)
 
-    if (result[0].status === 'fulfilled' && result[0].value.ok) {
+    if (statusFetch.ok) {
       try {
-        const data = await result[0].value.json() as {
+        const data = statusFetch.data as {
           services: Array<{
             id: string; name: string; category: string; status: string
             latency: number | null; uptime30d: number | null; uptimeSource?: string
@@ -473,19 +465,12 @@ export default async function handler(req: Request) {
         // #1053 — cross-provider upstream note (the dependent's OWN claim; see upstream-note.ts).
         upstreamNote = buildUpstreamNote(data.upstreamLinks, entry.id)
       } catch (parseErr) {
-        // #1531 — the timeout signal also covers the body read, so a slow transfer lands here.
-        const timedOut = isAbortTimeout(parseErr)
-        fallbackReason = timedOut ? 'worker_timeout' : 'parse_error'
-        console.error(`[is-down/${slug}] ${timedOut ? 'body read timeout' : 'JSON parse failed'}:`, parseErr instanceof Error ? parseErr.message : parseErr)
+        fallbackReason = 'parse_error'
+        console.error(`[is-down/${slug}] status payload unreadable:`, parseErr instanceof Error ? parseErr.message : parseErr)
       }
-    } else if (result[0].status === 'fulfilled' && !result[0].value.ok) {
-      fallbackReason = `worker_http_${result[0].value.status}`
-      console.error(`[is-down/${slug}] API returned HTTP ${result[0].value.status}`)
-    } else if (result[0].status === 'rejected') {
-      const err = result[0].reason
-      const timedOut = isAbortTimeout(err)
-      fallbackReason = timedOut ? 'worker_timeout' : 'worker_unreachable'
-      console.error(`[is-down/${slug}] API fetch ${timedOut ? 'timeout' : 'failed'}:`, err?.message)
+    } else {
+      fallbackReason = statusFetch.reason
+      console.error(`[is-down/${slug}] status fetch failed: ${statusFetch.reason}`)
     }
 
     // Region recommendation (refs #422 Phase 2). regionStatusOf returns null
