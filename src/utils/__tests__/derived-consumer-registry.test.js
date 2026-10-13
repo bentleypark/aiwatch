@@ -114,6 +114,7 @@ const SAFE = {
   'worker/src/incident-text.ts': 'skips resolved and derived (#1623) — a cause must be the provider\'s own live text',
   'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved and derived',
   'worker/src/platform-monitor.ts': 'active incidents only, from non-Better-Stack sources',
+  'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type',
   'worker/src/report.ts': 'floors the crowd-report window at the earliest active start; a #1623 today-row\'s start is clamped inside its own local day',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — a #1623 today-row is one, and no time is read',
   'src/utils/regionStatus.js': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
@@ -257,6 +258,7 @@ const RB_SAFE = {
 
   // Reads nothing that could be wrong either way.
   'worker/src/platform-monitor.ts': 'reads Atlassian\'s OWN meta-status response, not our Incident type at all — a structural regex match, not a real consumer',
+  'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type — a structural regex match',
   'worker/src/parse-failure-log.ts': 'counts SOURCE-READ failures by reason; reads no incident field at all',
   'src/locales/en.js': 'a flat key→string copy map; the match is a dotted i18n KEY, not a field read',
   'src/locales/ko.js': 'a flat key→string copy map; the match is a dotted i18n KEY, not a field read',
@@ -329,6 +331,7 @@ const SU_SAFE = {
   'worker/src/incident-text.ts': 'skips resolved — a cause must be live',
   'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved',
   'worker/src/platform-monitor.ts': 'reads Atlassian\'s own meta-status response, not our Incident type',
+  'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type',
   'worker/src/report.ts': 'active incidents only',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — active only',
   'src/utils/regionStatus.js': 'active incidents only',
@@ -410,7 +413,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // incidents and is SAFE on all three axes.
     // 76 → 77: #1622 moved the Incidents list filter into src/utils/incidentFilter.js, SAFE on all three.
     // 77 → 78: #1623 added src/utils/groupLabels.js, SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(78)
+    // 78 → 79: #1686 added worker/src/infra-status.ts, which reads third-party status responses; SAFE on all three.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(79)
   })
 
   it('leaves none unclassified', () => {
@@ -464,7 +468,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(78)
+    expect(all.length).toBe(79)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -510,7 +514,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(78)
+    expect(all.length).toBe(79)
   })
 
   it('leaves none unclassified for startUnknown', () => {

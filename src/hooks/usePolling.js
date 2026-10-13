@@ -4,6 +4,8 @@
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext, createElement } from 'react'
 import { resolveApiUrl, cachedUrlFor } from '../utils/apiUrl'
+import { startApiTiming, noteHeaders, finishApiTiming } from '../utils/apiTiming'
+
 const POLL_INTERVAL = 60_000 // 60s
 
 // Worker API URL — defaults to local dev (8788, matches `npm run dev:worker`),
@@ -778,7 +780,9 @@ function usePollingInternal() {
     controllerRef.current = controller
     if (mode === 'refresh') refreshingRef.current = true
     previousController?.abort()
-    const timer = setTimeout(() => controller.abort(), 15000)
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; controller.abort() }, 15000)
+    const timing = startApiTiming()
 
     const loadStart = Date.now()
     const isInitial = mode === 'initial' && !hasDataRef.current
@@ -811,8 +815,13 @@ function usePollingInternal() {
         res = await fetch(API_URL, { signal: controller.signal })
       }
       clearTimeout(timer)
-      if (!res.ok) throw new Error(`Worker responded ${res.status}`)
+      noteHeaders(timing, res)
+      if (!res.ok) {
+        finishApiTiming(timing, { outcome: 'error' })
+        throw new Error(`Worker responded ${res.status}`)
+      }
       const data = await res.json()
+      finishApiTiming(timing, { outcome: 'ok' })
       const services = Array.isArray(data.services) ? data.services : Array.isArray(data) ? data : []
       if (services.length === 0) throw new Error('Empty response')
       const merged = mergeWithMock(services)
@@ -845,6 +854,8 @@ function usePollingInternal() {
       }
     } catch (err) {
       clearTimeout(timer)
+      if (err?.name === 'AbortError') finishApiTiming(timing, { outcome: timedOut ? 'timeout' : 'pending' })
+      else finishApiTiming(timing, { outcome: 'error' })
       if (err?.name === 'AbortError') {
         // Only reset refresh state if OUR controller was aborted (not a previous one)
         if (controller.signal.aborted && isRefresh && !cancelledRef.current) {

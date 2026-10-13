@@ -2163,6 +2163,8 @@ import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type P
 import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
+import { checkInfraStatus, runInfraStatusCycle } from './infra-status'
+import { parseRumBatch, recordRumSamples, evaluateRum, applyRumVerdict, withServerTiming } from './rum'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -3070,7 +3072,7 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
 // #1501 — per-isolate rate limit for the cron-heartbeat check that `fetch` runs.
 const cronWatchdogThrottle = createWatchdogThrottle(WATCHDOG_INTERVAL_MS)
 
-export default {
+const workerExport = {
   async scheduled(event: ScheduledEvent, rawEnv: Env, ctx: ExecutionContext): Promise<void> {
     // Use the scheduled trigger time (not wall-clock) so time-of-day checks like
     // `minutes === 0` remain accurate even when cronAlertCheck takes 60+ seconds.
@@ -3246,6 +3248,13 @@ export default {
           }
         } catch (err) {
           console.warn('[cron] platform monitor failed:', err instanceof Error ? err.message : err)
+        }
+        // #1686 — the platforms AIWatch itself runs on (operator channel only).
+        try {
+          const webhook = env.DISCORD_WEBHOOK_URL
+          await runInfraStatusCycle(env.STATUS_CACHE, (embed) => sendDiscordAlert(webhook, embed), await checkInfraStatus())
+        } catch (err) {
+          console.warn('[cron] #1686 infra status failed:', err instanceof Error ? err.message : err)
         }
       }
 
@@ -4690,6 +4699,11 @@ export default {
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const startedAt = Date.now()
+    return withServerTiming(request, startedAt, await workerExport.handleFetch(request, env, ctx))
+  },
+
+  async handleFetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     const origin = request.headers.get('Origin') ?? ''
     const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
@@ -4781,6 +4795,32 @@ export default {
         } catch (err) {
           if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
           console.error('[history-click] ingest error:', err instanceof Error ? err.message : err)
+          return new Response(null, { status: 500, headers: cors })
+        }
+      }
+    }
+
+    // #1686 — real-user /api/status timing from the dashboard → WAE + the operator latency alert.
+    if (url.pathname === '/api/rum') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
+      if (request.method === 'POST') {
+        if (!matchOrigin(origin, env.ALLOWED_ORIGIN)) return new Response(null, { status: 403, headers: cors })
+        try {
+          const samples = parseRumBatch(await request.json())
+          if (!samples) return new Response(null, { status: 400, headers: cors })
+          const cf = request.cf as { colo?: unknown; country?: unknown } | undefined
+          const colo = typeof cf?.colo === 'string' ? cf.colo : 'UNK'
+          const country = typeof cf?.country === 'string' ? cf.country : 'XX'
+          recordRumSamples(env.ANALYTICS, samples, colo, country)
+          const webhook = env.DISCORD_WEBHOOK_URL
+          if (env.STATUS_CACHE && webhook) {
+            ctx.waitUntil(applyRumVerdict(env.STATUS_CACHE, (embed) => sendDiscordAlert(webhook, embed), evaluateRum(samples), colo, country)
+              .catch((err) => console.warn('[rum] verdict failed:', err instanceof Error ? err.message : err)))
+          }
+          return new Response(null, { status: 204, headers: cors })
+        } catch (err) {
+          if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
+          console.error('[rum] ingest error:', err instanceof Error ? err.message : err)
           return new Response(null, { status: 500, headers: cors })
         }
       }
@@ -6382,3 +6422,4 @@ export default {
     await handleMistralEmail(message, env, ctx)
   },
 }
+export default workerExport

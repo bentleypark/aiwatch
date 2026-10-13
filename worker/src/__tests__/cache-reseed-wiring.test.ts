@@ -187,6 +187,22 @@ describe('behavior — the real scheduled() handler persists whatever it live-fe
     expect(puts.length, 'no CACHE_KEY write should happen on a fresh, unchanged snapshot').toBe(0)
   }, TEST_TIMEOUT_MS)
 
+  it('#1686 — the cron reads AIWatch\'s own platforms and alerts the operator when one is affected', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === 'https://www.cloudflarestatus.com/api/v2/summary.json') {
+        return new Response(JSON.stringify({ components: [{ id: '57srcl8zcn7c', status: 'degraded_performance' }], incidents: [] }), { status: 200 })
+      }
+      return new Response('', { status: 503 })
+    })
+    const fresh = JSON.stringify({ services: OPERATIONAL, upstreamFeeds: [], cachedAt: new Date().toISOString() })
+    await runCron(fresh)
+    const webhookBodies = fetchSpy.mock.calls
+      .filter(([u]) => String(u) === 'https://example.invalid/hook')
+      .map(([, init]) => String((init as RequestInit).body))
+    expect(webhookBodies.some((b) => b.includes('AIWatch infrastructure — Cloudflare degraded'))).toBe(true)
+  }, TEST_TIMEOUT_MS)
+
   it('DOES write when the cached snapshot is stale-but-present — the #1371 fix', async () => {
     // Inverted from what this asserted before #1371, and the inversion IS the fix. The old contract
     // ("only a genuine miss qualifies") is what let the key run out its TTL: on a stale tick the cron
