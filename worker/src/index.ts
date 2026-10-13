@@ -1115,6 +1115,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // incident we ACTUALLY announced produces one — `alertedNewMap` is built from live incidents only,
   // and a withdrawn incident is by definition absent from those, so the markers are re-read here.
   const withdrawalAlerts: AlertCandidate[] = []
+  let withdrawnIncIds: Set<string> | null = null
   try {
     // `logExpired` on the CRON only: a tombstone that ages out never notified anyone, which is #1106
     // recurring, and the 5-min cadence bounds the line. The /feed handler leaves it off (request path).
@@ -1126,6 +1127,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     // slot for the whole hour. Placed BEFORE the alert build so an exception there can't skip this
     // durability chore; it re-reads the roster itself and cannot throw.
     await refreshWithdrawnKey(env.STATUS_CACHE, withdrawnTombstones, scheduledTimeMs)
+    withdrawnIncIds = new Set(withdrawnTombstones.map((w) => w.incId))
     const announcedWithdrawnIds = new Set<string>()
     await Promise.all(withdrawnTombstones.map(async (w) => {
       // Read failure → treat as NOT announced → stay silent. A withdrawal notice is only correct when
@@ -2118,6 +2120,17 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     }
   }
 
+  // #1118 — announced, never closed, missing from a card it was announced on. After every send, so this cycle's markers exist.
+  if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && withdrawnIncIds) {
+    const webhook = env.DISCORD_WEBHOOK_URL
+    const gone = await runGoneCheck(env.STATUS_CACHE, (embed) => sendDiscordAlert(webhook, embed), scored, withdrawnIncIds, Date.now(), new Set(SERVICES.filter((c) => c.azureRssUrl).map((c) => c.id)))
+    if (gone && (gone.candidates > 0 || gone.skipped > 0)) {
+      console.log('[cron] #1118 announced-but-gone —', `candidates=${gone.candidates}`, `pending=${gone.pending}`, `skipped=${gone.skipped}`, `reported=${gone.outcomes.reported}`, `resolved=${gone.outcomes.resolved}`, `suppressed=${gone.outcomes.suppressed}`, `withdrawn=${gone.outcomes.withdrawn}`, `unverified=${gone.outcomes.unverified}`)
+    } else if (!gone) {
+      console.warn('[cron] #1118 announced-but-gone check did not run (key listing or evaluation failed)')
+    }
+  }
+
   const operational = scored.filter(s => s.status === 'operational').length
   // #1233 — `issues` used to be `total − operational`, which silently counted an unreadable source as
   // an issue. Count the affected directly and report the unreadable separately, so the three numbers
@@ -2164,6 +2177,7 @@ import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
 import { checkInfraStatus, runInfraStatusCycle } from './infra-status'
+import { runGoneCheck } from './alerted-gone'
 import { parseRumBatch, recordRumSamples, evaluateRum, applyRumVerdict, withServerTiming } from './rum'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
