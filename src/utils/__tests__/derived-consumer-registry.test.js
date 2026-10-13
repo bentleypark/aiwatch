@@ -115,6 +115,7 @@ const SAFE = {
   'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved and derived',
   'worker/src/platform-monitor.ts': 'active incidents only, from non-Better-Stack sources',
   'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type',
+  'worker/src/alerted-gone.ts': 'tests only whether an announced incident id is on a card and reads title + finalStatus of an accumulator row (#1118); no start, duration or resolution time',
   'worker/src/report.ts': 'floors the crowd-report window at the earliest active start; a #1623 today-row\'s start is clamped inside its own local day',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — a #1623 today-row is one, and no time is read',
   'src/utils/regionStatus.js': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
@@ -245,6 +246,7 @@ const RB_SAFE = {
   // Id/title-keyed operator actions and downstream-of-an-already-fixed-gate reads — none make an
   // independent freshness judgment of their own.
   'worker/src/suppression.ts': 'matches by id/title, which a retainedBridge entry carries normally — not a freshness judgment',
+  'worker/src/alerted-gone.ts': 'counts a bridged entry as carried: a ghost is shown on the card, so it is not the dropped-from-the-card case #1118 reports (pinned in alerted-gone.test.ts; #1384 KNOWN LIMIT 1)',
   'worker/src/overrides.ts': 'operator-pinned durations keyed on an explicit incident id an operator typed — not a freshness judgment',
   'worker/src/alert-feed.ts': 'only relays alerts buildIncidentAlerts already decided to send — inherits that fix, no independent leak (verified round 8)',
   'worker/src/upstream-feed.ts': 'non-carded upstream feeds; never sees a service incident list',
@@ -332,6 +334,7 @@ const SU_SAFE = {
   'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved',
   'worker/src/platform-monitor.ts': 'reads Atlassian\'s own meta-status response, not our Incident type',
   'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type',
+  'worker/src/alerted-gone.ts': 'tests only whether an announced incident id is listed on a card (#1118); it never reads a start, an elapsed time or a resolution time',
   'worker/src/report.ts': 'active incidents only',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — active only',
   'src/utils/regionStatus.js': 'active incidents only',
@@ -414,7 +417,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 76 → 77: #1622 moved the Incidents list filter into src/utils/incidentFilter.js, SAFE on all three.
     // 77 → 78: #1623 added src/utils/groupLabels.js, SAFE on all three.
     // 78 → 79: #1686 added worker/src/infra-status.ts, which reads third-party status responses; SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(79)
+    // 79 → 80: #1118 added worker/src/alerted-gone.ts, which tests an incident id against a card's list; SAFE on all three.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(80)
   })
 
   it('leaves none unclassified', () => {
@@ -468,7 +472,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(79)
+    expect(all.length).toBe(80)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -514,7 +518,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(79)
+    expect(all.length).toBe(80)
   })
 
   it('leaves none unclassified for startUnknown', () => {

@@ -59,6 +59,10 @@ describe('#1118 servicesMissing — judged per card, not across all of them', ()
   it('names the announced services whose own list lacks the incident, even when a sibling carries it', () => {
     expect(servicesMissing('i', ['openai', 'chatgpt'], by(svc('openai'), svc('chatgpt', {}, ['i'])))).toEqual(['openai'])
   })
+  it('a retained-bridge entry listed on the card counts as carried: it is shown, so it is not a drop', () => {
+    const bridged = { ...svc('windsurf'), incidents: [{ id: 'i', status: 'investigating', retainedBridge: true }] } as unknown as ServiceStatus
+    expect(servicesMissing('i', ['windsurf'], by(bridged))).toEqual([])
+  })
   it('is empty when every announced card carries it', () => {
     expect(servicesMissing('i', ['a', 'b'], by(svc('a', {}, ['i']), svc('b', {}, ['i'])))).toEqual([])
   })
