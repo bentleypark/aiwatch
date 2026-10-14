@@ -1,12 +1,14 @@
 /**
  * #1489 — one Analytics Engine row per `fetchAllServices` run: which path ran it, how long it took,
  * which services came back without a freshly read uptime figure, and how the run's fetches failed. The
- * before/after measure for changes to how the status fetch spends its connections.
+ * before/after measure for changes to how the status fetch spends its connections. Beside it, rows in
+ * `STATUS_FETCH_LEG_INDEX` split the same fetches by leg and timeout.
  */
 import type { ServiceStatus } from './types'
 import type { FetchRunStats } from './utils'
 
 export const STATUS_FETCH_RUN_INDEX = 'status-fetch-run'
+export const STATUS_FETCH_LEG_INDEX = 'status-fetch-leg'
 
 export type StatusFetchRoute = 'cron' | 'live'
 
@@ -33,6 +35,19 @@ export function recordStatusFetchRun(
       ],
       indexes: [STATUS_FETCH_RUN_INDEX],
     })
+    // One row per leg and timeout that made a fetch, index `status-fetch-leg`. blob1 route, blob2 leg.
+    // doubles: count, timeout (ms), answered, timeouts, non-2xx, other errors, summed and maximum time to
+    // headers of the answered, then the answered count per fifth of the timeout used (`budgetShareBucket`).
+    for (const l of fetchStats.legs ?? []) {
+      analytics.writeDataPoint({
+        blobs: [route, l.leg],
+        doubles: [
+          1, l.budgetMs, l.answered, l.timeouts, l.httpErrors, l.otherErrors, l.answeredMs, l.maxAnsweredMs,
+          ...l.answeredByBudgetShare,
+        ],
+        indexes: [STATUS_FETCH_LEG_INDEX],
+      })
+    }
   } catch (err) {
     console.warn('[wae] status-fetch-run write failed:', err instanceof Error ? err.message : err)
   }

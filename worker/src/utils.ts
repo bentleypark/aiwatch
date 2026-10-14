@@ -1312,38 +1312,94 @@ export interface FetchRunStats {
   otherErrors: number
   waitingAtStartAnswered: number
   waitingAtStartTimeouts: number
+  /** Present on every real tracker's `stats()`. */
+  legs?: FetchLegStats[]
+}
+
+export type FetchLeg = 'summary' | 'incidents' | 'components' | 'showcase' | 'html' | 'other'
+
+/** Which leg of a page's fetch chain a URL belongs to, read off the path. Anything unrecognised is `other`. */
+export function fetchLegOf(url: string): FetchLeg {
+  let path: string
+  try { path = new URL(url).pathname } catch { return 'other' }
+  if (path.endsWith('/uptime_showcase')) return 'showcase'
+  if (path.endsWith('/api/v2/summary.json')) return 'summary'
+  if (path.endsWith('/api/v2/incidents.json')) return 'incidents'
+  if (path.endsWith('/api/v2/components.json')) return 'components'
+  return path === '/' ? 'html' : 'other'
+}
+
+/** Which fifth of its timeout an answer used: 0 is under 20%, 4 is 80% or more. */
+export const BUDGET_SHARE_BUCKETS = 5
+export function budgetShareBucket(elapsedMs: number, budgetMs: number): number {
+  if (!(budgetMs > 0)) return 0
+  return Math.min(BUDGET_SHARE_BUCKETS - 1, Math.max(0, Math.floor((elapsedMs / budgetMs) * BUDGET_SHARE_BUCKETS)))
+}
+
+/** One leg at one timeout. */
+export interface FetchLegStats {
+  leg: FetchLeg
+  /** The timeout the fetch was given; 0 when the caller did not say. */
+  budgetMs: number
+  answered: number
+  timeouts: number
+  httpErrors: number
+  otherErrors: number
+  /** Time to response headers, summed and maximised over the answered fetches. */
+  answeredMs: number
+  maxAnsweredMs: number
+  answeredByBudgetShare: number[]
+}
+
+function emptyLeg(leg: FetchLeg, budgetMs: number): FetchLegStats {
+  return { leg, budgetMs, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, answeredMs: 0, maxAnsweredMs: 0, answeredByBudgetShare: Array<number>(BUDGET_SHARE_BUCKETS).fill(0) }
 }
 
 export interface FetchTracker {
-  track(send: () => Promise<Response>): Promise<Response>
+  track(send: () => Promise<Response>, url?: string, budgetMs?: number): Promise<Response>
   stats(): FetchRunStats
 }
 
-export function createFetchTracker(): FetchTracker {
+export function createFetchTracker(now: () => number = Date.now): FetchTracker {
   let inFlight = 0
   const stats: FetchRunStats = { maxInFlight: 0, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, waitingAtStartAnswered: 0, waitingAtStartTimeouts: 0 }
+  const legs = new Map<string, FetchLegStats>()
   return {
-    async track(send) {
+    async track(send, url, budgetMs = 0) {
+      const name = url ? fetchLegOf(url) : 'other'
+      const key = `${name}@${budgetMs}`
+      let leg = legs.get(key)
+      if (!leg) { leg = emptyLeg(name, budgetMs); legs.set(key, leg) }
       const othersWaiting = inFlight
+      const startedAt = now()
       inFlight++
       stats.maxInFlight = Math.max(stats.maxInFlight, inFlight)
       try {
         const res = await send()
+        const elapsed = now() - startedAt
         stats.answered++
         stats.waitingAtStartAnswered += othersWaiting
-        if (!res.ok) stats.httpErrors++
+        leg.answered++
+        leg.answeredMs += elapsed
+        leg.maxAnsweredMs = Math.max(leg.maxAnsweredMs, elapsed)
+        leg.answeredByBudgetShare[budgetShareBucket(elapsed, budgetMs)]++
+        if (!res.ok) { stats.httpErrors++; leg.httpErrors++ }
         return res
       } catch (err) {
         if ((err as { name?: unknown } | null)?.name === 'AbortError') {
           stats.timeouts++
           stats.waitingAtStartTimeouts += othersWaiting
-        } else stats.otherErrors++
+          leg.timeouts++
+        } else { stats.otherErrors++; leg.otherErrors++ }
         throw err
       } finally {
         inFlight--
       }
     },
-    stats: () => ({ ...stats }),
+    stats: () => ({
+      ...stats,
+      legs: [...legs.values()].map((l) => ({ ...l, answeredByBudgetShare: [...l.answeredByBudgetShare] })),
+    }),
   }
 }
 
@@ -1362,7 +1418,7 @@ export async function fetchWithTimeout(
       clearTimeout(timer)
     }
   }
-  return tracker ? tracker.track(send) : send()
+  return tracker ? tracker.track(send, url, timeoutMs) : send()
 }
 
 export function fetchTracked(
