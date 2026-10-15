@@ -834,7 +834,7 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
   // single statusComponentId badge (so the badge is unchanged; statusComponentIds plural absent).
-  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, voyageai: 2, pinecone: 6, twelvelabs: 11 }
+  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, voyageai: 2, pinecone: 6, twelvelabs: 20 }
 
   it('single-owner services carry the curated displayComponentIds count, keep their badge statusComponentId, and have no worst-of statusComponentIds', () => {
     for (const [id, count] of Object.entries(SINGLE_OWNER_COUNT)) {

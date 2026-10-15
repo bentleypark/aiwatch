@@ -420,9 +420,11 @@ export const SERVICES: ServiceConfig[] = [
   // statuspage.ts covers it, no new parser. Single-owner page → no incidentKeywords needed.
   // Category inference (not video-gen: Twelve Labs is search/embed/analyze, not generation).
   // EXCLUDE_FALLBACK: no API_TIER; video understanding has no clean substitute.
-  // displayComponentIds (#606): all 11 individual API surfaces (Search/Embed/Analyze/Index/Video
-  // list) under the API group, verified against the live components.json 2026-09-01. Excludes
-  // Platform/Playground/Dashboard (non-API surfaces). Embed API - Marengo3.5 Sync/Async added
+  // displayComponentIds (#606): the individual API surfaces (Search/Embed/Analyze/Index/Video list)
+  // under the APIs group, plus the 7 Knowledge Store / Responses APIs of the separate Jockey group
+  // (created 2026-10-14; the group header is not listed), read from the live summary.json 2026-10-15.
+  // componentGroups mirror the page's own APIs and Jockey groups.
+  // Excludes Platform/Playground/Dashboard (non-API surfaces). Embed API - Marengo3.5 Sync/Async added
   // 2026-08-31 (new-component alert, display-only per #606 convention); '2k0gnkk2kjmz' dropped in the
   // same pass — no longer present on the page (was silently logging a breakdown-drift warning).
   // #983 — Twelve Labs' Statuspage auto-monitor opens a BRAND-NEW incident per component blip, all
@@ -433,7 +435,7 @@ export const SERVICES: ServiceConfig[] = [
   // them into one ×N row; `flapSuppression` then dedups a repeat within the 60-min window (#283).
   // The provider's REAL, human-written incidents use distinct titles ("Search API failure", "API
   // server failure") and never match this anchored pattern.
-  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', 'j21c5rdfj8kf', '91lzwtn6071h', 'p1hx7t867896', '3ng4ddpvmv3r'], autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
+  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', 'j21c5rdfj8kf', '91lzwtn6071h', 'p1hx7t867896', '3ng4ddpvmv3r', '12vp1vm9smc2', 'qkmbnw1n5mgh', 'j86pqszy5w90', '27kd6568skjp', '3pksbw640gn9', 'rgbmm56z696d', 'sjbv0n38bs7n', 'cns848tdzn22', 'jzy4m39608m3'], componentGroups: { 'mrclkkqtj01j': 'APIs', '2zsl201s8df5': 'APIs', 'jnvb5r3v74q1': 'APIs', '751304vy1s9x': 'APIs', 'hr353rqqmwmk': 'APIs', 'yklrkrhkd1by': 'APIs', '3t1cjx55dyrf': 'APIs', 'j21c5rdfj8kf': 'APIs', '91lzwtn6071h': 'APIs', 'p1hx7t867896': 'APIs', '3ng4ddpvmv3r': 'APIs', '12vp1vm9smc2': 'APIs', 'qkmbnw1n5mgh': 'APIs', 'j86pqszy5w90': 'Jockey', '27kd6568skjp': 'Jockey', '3pksbw640gn9': 'Jockey', 'rgbmm56z696d': 'Jockey', 'sjbv0n38bs7n': 'Jockey', 'cns848tdzn22': 'Jockey', 'jzy4m39608m3': 'Jockey' }, autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
   // LangSmith (#561) — LangChain's hosted observability/eval platform on an incident.io page. Since #1066
   // that page is a "global"/multi-region page whose Atlassian v2 compat API returns `components: []`, so
   // it is NO LONGER covered by statuspage.ts directly — `incidentIoGlobalPage` routes it through
