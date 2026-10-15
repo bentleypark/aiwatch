@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import workerModule from '../index'
-import { recordStatusFetchRun, STATUS_FETCH_RUN_INDEX, STATUS_FETCH_LEG_INDEX } from '../status-fetch-run'
+import { recordStatusFetchRun, STATUS_FETCH_RUN_INDEX, STATUS_FETCH_LEG_INDEX, statusFetchLegIndex } from '../status-fetch-run'
 import type { FetchLegStats } from '../utils'
 import type { ServiceStatus } from '../types'
 
@@ -34,7 +34,15 @@ type Point = { blobs: string[]; doubles: number[]; indexes: string[] }
 const rowsOf = (writeDataPoint: ReturnType<typeof vi.fn>, index: string) =>
   writeDataPoint.mock.calls.map(([point]) => point as Point).filter((point) => point.indexes[0] === index)
 const runRows = (writeDataPoint: ReturnType<typeof vi.fn>) => rowsOf(writeDataPoint, STATUS_FETCH_RUN_INDEX)
-const legRows = (writeDataPoint: ReturnType<typeof vi.fn>) => rowsOf(writeDataPoint, STATUS_FETCH_LEG_INDEX)
+const legRows = (writeDataPoint: ReturnType<typeof vi.fn>) =>
+  writeDataPoint.mock.calls.map(([point]) => point as Point).filter((point) => point.indexes[0].startsWith(`${STATUS_FETCH_LEG_INDEX}:`))
+
+/** Analytics Engine samples per index: no two points of one run may share one. */
+function expectOwnIndexes(rows: Point[]) {
+  const indexes = rows.map((r) => r.indexes[0])
+  expect(new Set(indexes).size).toBe(indexes.length)
+  expect(indexes.every((i) => new TextEncoder().encode(i).length <= 96)).toBe(true)
+}
 
 const leg = (over: Partial<FetchLegStats> & Pick<FetchLegStats, 'leg' | 'budgetMs'>): FetchLegStats => ({
   answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, answeredMs: 0, maxAnsweredMs: 0, answeredByBudgetShare: [0, 0, 0, 0, 0], ...over,
@@ -81,7 +89,14 @@ describe('#1489 status-fetch-run metric', () => {
     expect(rows[1].doubles).toEqual([1, 3000, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0])
     expect(rows[2].doubles).toEqual([1, 5000, 1, 0, 0, 0, 4100, 4100, 0, 0, 0, 0, 1])
     expect(rows.every((r) => r.doubles.length <= 20)).toBe(true)
+    expect(rows.map((r) => r.indexes[0])).toEqual(['status-fetch-leg:summary@8000', 'status-fetch-leg:showcase@3000', 'status-fetch-leg:html@5000', 'status-fetch-leg:html@8000'])
+    expectOwnIndexes(rows)
     expect(runRows(writeDataPoint)).toHaveLength(1)
+  })
+
+  it('the leg index names the leg and the timeout', () => {
+    expect(statusFetchLegIndex({ leg: 'html', budgetMs: 5000 })).toBe('status-fetch-leg:html@5000')
+    expect(statusFetchLegIndex({ leg: 'other', budgetMs: 0 })).toBe('status-fetch-leg:other@0')
   })
 
   it('writes the run row alone when the stats carry no legs', () => {
@@ -116,6 +131,7 @@ describe('#1489 status-fetch-run metric', () => {
     expect(rows[0].doubles[1]).toBeLessThanOrEqual(elapsed)
     expect(rows[0].doubles[3]).toBeGreaterThan(0)
     expectLegsAddUp(writeDataPoint)
+    expectOwnIndexes(legRows(writeDataPoint))
     expect(legRows(writeDataPoint).every((r) => r.blobs[0] === rows[0].blobs[0])).toBe(true)
     expect(legRows(writeDataPoint).map((r) => r.blobs[1])).toEqual(expect.arrayContaining(['summary', 'incidents']))
   }, 60_000)
@@ -138,6 +154,7 @@ describe('#1489 status-fetch-run metric', () => {
     expect(rows[0].doubles[1]).toBeLessThanOrEqual(elapsed)
     expect(rows[0].doubles[3]).toBeGreaterThan(0)
     expectLegsAddUp(writeDataPoint)
+    expectOwnIndexes(legRows(writeDataPoint))
     expect(legRows(writeDataPoint).every((r) => r.blobs[0] === rows[0].blobs[0])).toBe(true)
     expect(legRows(writeDataPoint).map((r) => r.blobs[1])).toEqual(expect.arrayContaining(['summary', 'incidents']))
   }, 60_000)
