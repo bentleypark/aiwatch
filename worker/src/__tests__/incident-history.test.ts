@@ -90,7 +90,7 @@ describe('buildHistoryRecord', () => {
   const NOW = '2026-06-29T11:00:00.000Z'
 
   it('builds a record for a resolved incident, measuring duration to inc.resolvedAt (not now)', () => {
-    const rec = buildHistoryRecord(svc, baseInc, null, NOW)!
+    const rec = buildHistoryRecord(svc, baseInc, null, NOW, [])!
     expect(rec).not.toBeNull()
     expect(rec.resolvedAt).toBe('2026-06-29T10:40:00.000Z') // inc.resolvedAt, NOT now
     expect(rec.durationMin).toBe(40)
@@ -99,19 +99,19 @@ describe('buildHistoryRecord', () => {
   })
 
   it('records a monitoring incident too (service already operational, may get no later edge), using now', () => {
-    const rec = buildHistoryRecord(svc, { ...baseInc, status: 'monitoring', resolvedAt: null }, null, NOW)!
+    const rec = buildHistoryRecord(svc, { ...baseInc, status: 'monitoring', resolvedAt: null }, null, NOW, [])!
     expect(rec).not.toBeNull()
     expect(rec.resolvedAt).toBe(NOW) // no resolvedAt yet → falls back to now
     expect(rec.durationMin).toBe(60)
   })
 
   it('skips still-diagnosing incidents (investigating/identified) at a recovery edge', () => {
-    expect(buildHistoryRecord(svc, { ...baseInc, status: 'investigating' }, null, NOW)).toBeNull()
-    expect(buildHistoryRecord(svc, { ...baseInc, status: 'identified' }, null, NOW)).toBeNull()
+    expect(buildHistoryRecord(svc, { ...baseInc, status: 'investigating' }, null, NOW, [])).toBeNull()
+    expect(buildHistoryRecord(svc, { ...baseInc, status: 'identified' }, null, NOW, [])).toBeNull()
   })
 
   it('skips when startedAt is missing (cannot measure duration)', () => {
-    expect(buildHistoryRecord(svc, { ...baseInc, startedAt: undefined }, null, NOW)).toBeNull()
+    expect(buildHistoryRecord(svc, { ...baseInc, startedAt: undefined }, null, NOW, [])).toBeNull()
   })
 
   // #1328 - the corpus has NO TTL and `predictedSummary` is replayed into later prompts as
@@ -121,14 +121,14 @@ describe('buildHistoryRecord', () => {
   // later "let's store the whole prose" edit has to argue with a red test.
   it('stores only the durable half - progress never reaches the no-TTL corpus (#1328)', () => {
     const analysis = { estimatedRecoveryHours: 1, summary: 'Network errors', progress: 'Currently investigating, no improvement yet.', model: 'gemma' }
-    const rec = buildHistoryRecord(svc, baseInc, analysis, NOW)!
+    const rec = buildHistoryRecord(svc, baseInc, analysis, NOW, [])!
     expect(rec.predictedSummary).toBe('Network errors')
     expect(JSON.stringify(rec)).not.toContain('Currently investigating')
   })
 
   it('joins prediction fields from the analysis and round-trips affectedScope', () => {
     const analysis = { estimatedRecoveryHours: 1, summary: 'Network errors', affectedScope: ['Messages API', 'Streaming'], model: 'gemma' }
-    const rec = buildHistoryRecord(svc, baseInc, analysis, NOW)!
+    const rec = buildHistoryRecord(svc, baseInc, analysis, NOW, [])!
     expect(rec.predictedRecoveryHours).toBe(1)
     expect(rec.predictedSummary).toBe('Network errors')
     expect(rec.affectedScope).toEqual(['Messages API', 'Streaming'])
@@ -136,7 +136,7 @@ describe('buildHistoryRecord', () => {
   })
 
   it('omits predicted fields when no analysis (actual-only record)', () => {
-    const rec = buildHistoryRecord(svc, baseInc, null, NOW)!
+    const rec = buildHistoryRecord(svc, baseInc, null, NOW, [])!
     expect(rec.predictedRecoveryHours).toBeUndefined()
     expect(rec.predictedSummary).toBeUndefined()
     expect(rec.affectedScope).toBeUndefined()
@@ -144,14 +144,14 @@ describe('buildHistoryRecord', () => {
   })
 
   it('normalizes an off-union model value to omitted (defensive)', () => {
-    const rec = buildHistoryRecord(svc, baseInc, { model: 'claude-sonnet-4-20250514' }, NOW)!
+    const rec = buildHistoryRecord(svc, baseInc, { model: 'claude-sonnet-4-20250514' }, NOW, [])!
     expect(rec.model).toBeUndefined()
   })
 
   it('length-caps title and summary so the stored value stays bounded', () => {
     const longTitle = 'x'.repeat(500)
     const longSummary = 'y'.repeat(900)
-    const rec = buildHistoryRecord(svc, { ...baseInc, title: longTitle }, { summary: longSummary }, NOW)!
+    const rec = buildHistoryRecord(svc, { ...baseInc, title: longTitle }, { summary: longSummary }, NOW, [])!
     expect(rec.title.length).toBe(200)
     expect(rec.predictedSummary!.length).toBe(500)
   })
@@ -164,7 +164,7 @@ describe('appendIncidentHistoryBatch', () => {
       rec({ incId: 'a' }), rec({ incId: 'b' }), rec({ incId: 'c' }),
     ])
     expect(ok).toBe(true)
-    expect(kv.put).toHaveBeenCalledTimes(1) // batched — not one put per record
+    expect(kv.put.mock.calls.filter(c => c[0] === 'incident:history:claude')).toHaveLength(1) // batched — not one put per record
     const stored = JSON.parse(kv._store.get('incident:history:claude')!) as IncidentHistoryRecord[]
     expect(stored.map(r => r.incId)).toEqual(['a', 'b', 'c'])
   })
@@ -211,7 +211,7 @@ describe('appendIncidentHistoryBatch', () => {
     kv.put.mockClear()
     const ok = await appendIncidentHistoryBatch(kv, 'claude', [rec({ incId: 'c' })])
     expect(ok).toBe(false)
-    expect(kv.put).not.toHaveBeenCalled()                 // did NOT overwrite
+    expect(kv.put.mock.calls.filter(c => c[0] === 'incident:history:claude')).toHaveLength(0) // did NOT overwrite
     expect(kv._store.get('incident:history:claude')).toBe(before) // prior corpus intact
   })
 })
@@ -493,13 +493,13 @@ describe('#1003 regression — the Pinecone false win', () => {
   const reanalyzed = { estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 4, summary: 'freshness lag' }
 
   it('stores the FIRST estimate in the durable corpus, not the inflated one', () => {
-    const r = buildHistoryRecord(svc, pineconeInc, reanalyzed, '2026-07-13T08:32:00.000Z')
+    const r = buildHistoryRecord(svc, pineconeInc, reanalyzed, '2026-07-13T08:32:00.000Z', [])
     expect(r?.predictedRecoveryHours).toBe(4)
     expect(r?.durationMin).toBe(295)
   })
 
   it('reports the honest near-miss instead of "faster than ~15h est."', () => {
-    const r = buildHistoryRecord(svc, pineconeInc, reanalyzed, '2026-07-13T08:32:00.000Z')!
+    const r = buildHistoryRecord(svc, pineconeInc, reanalyzed, '2026-07-13T08:32:00.000Z', [])!
     expect(accuracyOf(r)).toBe('under-predicted')
     expect(predictedVsActualText(r)).toBe('4h 55m (over ~4h est.)')
     expect(resolvedPredictionLine(reanalyzed, pineconeInc)).toBe('🎯 AI prediction: 4h 55m (over ~4h est.)')
@@ -507,7 +507,7 @@ describe('#1003 regression — the Pinecone false win', () => {
 
   it('would have scored it as a win before the fix (guards the regression)', () => {
     // Same incident, analysis WITHOUT the carried first estimate = the pre-#1003 shape.
-    const preFix = buildHistoryRecord(svc, pineconeInc, { estimatedRecoveryHours: 15 }, '2026-07-13T08:32:00.000Z')!
+    const preFix = buildHistoryRecord(svc, pineconeInc, { estimatedRecoveryHours: 15 }, '2026-07-13T08:32:00.000Z', [])!
     expect(predictedVsActualText(preFix)).toBe('4h 55m (faster than ~15h est.)')
   })
 })

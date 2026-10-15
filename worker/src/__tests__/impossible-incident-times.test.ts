@@ -198,7 +198,7 @@ describe('#1390 correctIncidentIoImpossibleTimes — the repair', () => {
       const [out] = correctIncidentIoImpossibleTimes([inc()], html)
       expect(out.duration).toBeNull()
       expect(out.startUnknown).toBe(true)
-      expect(buildHistoryRecord({ id: 'turbopuffer', provider: 'turbopuffer', category: 'api' }, { ...out, status: 'resolved' }, null, '2025-12-17T00:00:00Z')).toBeNull()
+      expect(buildHistoryRecord({ id: 'turbopuffer', provider: 'turbopuffer', category: 'api' }, { ...out, status: 'resolved' }, null, '2025-12-17T00:00:00Z', [])).toBeNull()
     } finally { warn.mockRestore() }
   })
 
@@ -238,7 +238,7 @@ describe('#1390 buildHistoryRecord — the no-TTL corpus refuses an impossible r
     try {
       const anchored = { ...inc(), startedAt: '2025-12-14T21:28:00Z', startUnknown: true, duration: null, status: 'resolved' }
       expect(isTimeOrderImpossible(anchored.startedAt, anchored.resolvedAt), 'premise: it is NOT impossible any more').toBe(false)
-      expect(buildHistoryRecord(svc, anchored, null, now)).toBeNull()
+      expect(buildHistoryRecord(svc, anchored, null, now, [])).toBeNull()
     } finally { warn.mockRestore() }
   })
 
@@ -248,7 +248,7 @@ describe('#1390 buildHistoryRecord — the no-TTL corpus refuses an impossible r
     // `findSimilarHistory` — in a store with no TTL.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      expect(buildHistoryRecord(svc, { ...inc(), status: 'resolved' }, null, now)).toBeNull()
+      expect(buildHistoryRecord(svc, { ...inc(), status: 'resolved' }, null, now, [])).toBeNull()
       expect(warn.mock.calls.flat().join(' ')).toContain('refusing to write a 0-minute record')
     } finally { warn.mockRestore() }
   })
@@ -256,7 +256,7 @@ describe('#1390 buildHistoryRecord — the no-TTL corpus refuses an impossible r
   it('still records the same incident once its times are repaired', () => {
     // The guard must not be a blanket drop: a repaired record is exactly what the corpus wants.
     const repaired = { ...inc(), startedAt: '2025-12-14T19:00:00Z', status: 'resolved' }
-    const rec = buildHistoryRecord(svc, repaired, null, now)
+    const rec = buildHistoryRecord(svc, repaired, null, now, [])
     expect(rec?.durationMin).toBe(148)
   })
 
@@ -264,7 +264,7 @@ describe('#1390 buildHistoryRecord — the no-TTL corpus refuses an impossible r
     // `durationMin` rounds, so a genuinely sub-minute incident is legitimately 0 and must stay. Gating
     // on `durationMin > 0` instead of on the ORDER would have dropped it.
     const quick = { ...inc(), startedAt: '2026-09-04T16:35:00Z', resolvedAt: '2026-09-04T16:35:20Z', status: 'resolved' }
-    expect(buildHistoryRecord(svc, quick, null, now)?.durationMin).toBe(0)
+    expect(buildHistoryRecord(svc, quick, null, now, [])?.durationMin).toBe(0)
   })
 })
 

@@ -8,6 +8,7 @@ import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily, type ProbeDailyData } from './probe-archival'
 import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
+import type { SnapshotCoverage } from './prediction-snapshot'
 import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
 import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth } from './monthly-archive'
@@ -92,6 +93,8 @@ export interface DailySummaryData {
   // #827 Feature 1 — AI recovery-prediction accuracy aggregated across the durable incident:history
   // corpus (predicted vs actual). Absent/empty until the corpus accumulates resolved incidents.
   accuracy?: AccuracyStats | null
+  /** #1695 — share of the last day's resolved forecasts that kept the snapshot they were made from. */
+  snapshotCoverage?: SnapshotCoverage | null
   // Confirmed per-user subscriptions by channel type; `slack` is set from #1581 on.
   // #548 — newToday is the signed day-over-day delta of confirmed subscribers (null = no prior baseline).
   webhookCounts?: { discord: number; slack?: number; newToday?: number | null; newTodayByType?: { discord: number; slack: number } | null }
@@ -232,6 +235,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   // #827 Feature 1 — AI recovery-prediction accuracy (predicted vs actual, across the durable corpus)
   const accuracyLine = formatAccuracyLine(data.accuracy)
   if (accuracyLine) lines.push(accuracyLine)
+  const snapshotLine = formatSnapshotCoverageLine(data.snapshotCoverage)
+  if (snapshotLine) lines.push(snapshotLine)
 
   // Section 4: Uptime Best/Worst — only services that report an official uptime%. #713: services with
   // no official uptime now leave `uptime30d` null (no estimate), so the null check alone excludes them.
@@ -582,6 +587,12 @@ export function formatAccuracyLine(accuracy: AccuracyStats | null | undefined): 
     + `\n   On-target: ${pct}% — actual recovery landed within the predicted time`
     + `\n   Typical miss: ${errStr} off the estimate`
     + `\n   Bias: ${bias}`
+}
+
+/** #1695 — one line, omitted when no forecast resolved in the window (no "0 of 0"). */
+export function formatSnapshotCoverageLine(coverage: SnapshotCoverage | null | undefined): string {
+  if (!coverage || coverage.forecasts === 0) return ''
+  return `\n📸 Prediction snapshots: ${coverage.withSnapshot} of ${coverage.forecasts} resolved forecast${coverage.forecasts === 1 ? '' : 's'} (24h)`
 }
 
 /**

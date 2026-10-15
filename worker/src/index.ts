@@ -21,8 +21,9 @@ import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
 import { rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
 import { recordRestoreObservations, type RestoreObservation } from './uptime-archive-trace'
-import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
-import { markIncidentResolved, isMarkableOnStatusEdge } from './recovery-mark'
+import { appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
+import { markIncidentResolved, isMarkableOnStatusEdge, buildResolvedRecord } from './recovery-mark'
+import { buildPredictionSnapshot, summarizeSnapshotCoverage, type SnapshotCoverage } from './prediction-snapshot'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { checkUptimeLiveness } from './uptime-liveness'
 import { runMistralPublicApiProbe } from './mistral-public-api'
@@ -1417,7 +1418,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
                 // rewritten analysis, keep its original bound).
                 const written = skipWrite
                   ? null
-                  : await putAnalysis(env.STATUS_CACHE, svc.id, inc.id, attempt.result, parseAnalysis(stickyRaw), 3600)
+                  : await putAnalysis(env.STATUS_CACHE, svc.id, inc.id, attempt.result, parseAnalysis(stickyRaw), 3600, attempt.snapshot ?? null)
                 // Section only when the sticky prior stands, or the write actually landed (as before:
                 // an embed advertising an analysis no reader can fetch is worse than none).
                 const analysis = skipWrite ? attempt.result : (written?.ok ? written.pinned : null)
@@ -1592,7 +1593,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         // existed) with the actual outcome. buildHistoryRecord gates terminal states + measures
         // duration to inc.resolvedAt; null = skip. Collected here, written once below.
         if (svc) {
-          const rec = buildHistoryRecord(svc, inc, analysis, now)
+          const rec = await buildResolvedRecord(env.STATUS_CACHE, svc, inc, analysis, now)
           if (rec) historyRecords.push(rec)
         }
       }))
@@ -1657,7 +1658,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
             // three surfaces effectively never appeared while Discord and /feed worked fine.
             const analysis = await markIncidentResolved(env.STATUS_CACHE, svc.id, inc, now)
             // #847 — durable corpus record joining prediction + actual outcome (best-effort, idempotent).
-            const rec = buildHistoryRecord(svc, inc, analysis, now)
+            const rec = await buildResolvedRecord(env.STATUS_CACHE, svc, inc, analysis, now)
             if (rec) records.push(rec)
             // #846 — ONE prediction line for the embed: primary service, primary incident.
             if (svcId === primaryId && incId === primaryIncId && !recoverySection) {
@@ -2316,11 +2317,12 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
 
   const { service, incident } = active
   const similar = findSimilarIncidents(incident.title, service.incidents ?? [])
+  const promptNow = Date.now()
   const prompt = buildAnalysisPrompt(service.name, {
     // #533 Phase 2 — buildAnalysisPrompt's param has no `id` (unused by the prompt); drop the excess key.
     title: incident.title, status: incident.status,
     startedAt: incident.startedAt, impact: incident.impact, timeline: incident.timeline,
-  }, similar)
+  }, similar, undefined, [], promptNow)
   const timelineAt = incident.timeline?.at(-1)?.at ?? ''
 
   // #955 — the operator reaches for this endpoint precisely WHEN the automated path is broken,
@@ -2336,7 +2338,12 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
       const failure: AnalysisFailureKind | null = result
         ? null
         : outcome.kind === 'transient' ? 'transient' : outcome.kind === 'aborted' ? 'aborted' : 'permanent'
-      attempt = { result, failure, attempts: { gemma: 0, sonnet: 1 } }
+      attempt = {
+        result,
+        ...(result && { snapshot: buildPredictionSnapshot(incident, result, { now: promptNow, historyMatches: 0 }) }),
+        failure,
+        attempts: { gemma: 0, sonnet: 1 },
+      }
     } else {
       // Gemma path: go via analyzeIncidentDetailed (tries Gemma first, falls back to Sonnet).
       // The operator picked 'gemma' explicitly, but if Workers AI returns null we'd
@@ -2384,7 +2391,7 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
   // #1003 — an operator re-analysis re-estimates a live incident too, so it must not rewrite the
   // scoring baseline: `putAnalysis` pins the first estimate exactly as the cron's paths do.
   const prior = parseAnalysis(await env.STATUS_CACHE.get(key).catch(() => null))
-  const written = await putAnalysis(env.STATUS_CACHE, svcId, incidentId, analysis, prior, ttl)
+  const written = await putAnalysis(env.STATUS_CACHE, svcId, incidentId, analysis, prior, ttl, attempt.snapshot ?? null)
   if (!written.ok) return json(502, { ok: false, error: 'KV write failed', detail: written.error })
 
   return json(200, { ok: true, wrote: key, ttl, analysis: written.pinned })
@@ -4402,9 +4409,11 @@ const workerExport = {
             // corpus (predicted vs actual). Bounded read (one GET per service, once/day), like
             // reportCounts above; null on failure → section omitted.
             let accuracy: AccuracyStats | null = null
+            let snapshotCoverage: SnapshotCoverage | null = null
             try {
               const allHistory = (await Promise.all(SERVICES.map(s => readIncidentHistory(env.STATUS_CACHE, s.id)))).flat()
               accuracy = summarizeAccuracy(allHistory)
+              snapshotCoverage = summarizeSnapshotCoverage(allHistory, now.getTime())
             } catch (err) {
               console.warn('[daily-summary] accuracy aggregate failed:', err instanceof Error ? err.message : err)
             }
@@ -4457,6 +4466,7 @@ const workerExport = {
               pushCount,
               referralCounts,
               accuracy,
+              snapshotCoverage,
               webhookCounts,
               fanoutCounts,
               guardSkips,

@@ -5,6 +5,7 @@ import type { Incident, ServiceStatus } from './types'
 import { sanitize, kvPut, kvDel, type KVLike } from './utils'
 import { collapseXaiRegionalIncidents } from './xai-regions'
 import { findSimilarHistory, formatDurationMin, accuracyOf, readIncidentHistory, type IncidentHistoryRecord } from './incident-history'
+import { buildPredictionSnapshot, appendPredictionSnapshot, type PredictionSnapshot } from './prediction-snapshot'
 import { callAnthropicMessages, type AnthropicOutcome } from './anthropic'
 
 // Workers AI model ID for the Gemma primary path. Exported so monthly-narrative.ts
@@ -334,10 +335,12 @@ export async function putAnalysis(
   analysis: AIAnalysisResult,
   prior: PriorEstimate | null,
   ttlSec: number,
+  snapshot: PredictionSnapshot | null,
 ): Promise<PutAnalysisResult> {
   const pinned = await pinFirstEstimate(kv, svcId, incId, analysis, prior)
   try {
     await kv.put(analysisKey(svcId, incId), JSON.stringify(pinned), { expirationTtl: ttlSec })
+    if (snapshot) await appendPredictionSnapshot(kv, svcId, incId, snapshot)
     return { pinned, ok: true }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
@@ -688,6 +691,8 @@ export interface AttemptCounter { gemma: number; sonnet: number }
 
 export interface AnalysisAttempt {
   result: AIAnalysisResult | null
+  /** #1695 — what this analysis was made from; present iff `result` is. Persist it with `putAnalysis`. */
+  snapshot?: PredictionSnapshot
   /** null iff `result` is non-null. */
   failure: AnalysisFailureKind | null
   attempts: AttemptCounter
@@ -735,7 +740,9 @@ export async function analyzeIncidentDetailed(
 ): Promise<AnalysisAttempt> {
   const similar = findSimilarIncidents(currentIncident.title, allIncidents)
   const similarHistory = findSimilarHistory({ title: currentIncident.title }, historyRecords, 3, currentIncident.id)
-  const prompt = buildAnalysisPrompt(serviceName, currentIncident, similar, prevPrediction, similarHistory)
+  const promptNow = Date.now()
+  const prompt = buildAnalysisPrompt(serviceName, currentIncident, similar, prevPrediction, similarHistory, promptNow)
+  const snapshotOf = (result: AIAnalysisResult) => buildPredictionSnapshot(currentIncident, result, { now: promptNow, historyMatches: similarHistory.length })
   const timelineAt = currentIncident.timeline?.at(-1)?.at ?? ''
   const attempts = counter
   const snapshot = () => ({ ...attempts })
@@ -751,7 +758,7 @@ export async function analyzeIncidentDetailed(
       const result = await analyzeWithGemma(ai, prompt, currentIncident.id, timelineAt)
       if (result) {
         console.log(`[ai-analysis] Gemma success for ${serviceName}`)
-        return { result, failure: null, attempts: snapshot() }
+        return { result, snapshot: snapshotOf(result), failure: null, attempts: snapshot() }
       }
       console.warn(`[ai-analysis] Gemma returned unparseable response for ${serviceName}, falling back to Sonnet`)
     } catch (err) {
@@ -777,7 +784,7 @@ export async function analyzeIncidentDetailed(
   attempts.sonnet++
   try {
     const { result, outcome } = await analyzeWithSonnetDetailed(apiKey, prompt, currentIncident.id, timelineAt, signal)
-    if (result) return { result, failure: null, attempts: snapshot() }
+    if (result) return { result, snapshot: snapshotOf(result), failure: null, attempts: snapshot() }
     // outcome.kind === 'ok' here means a 200 whose body held no parseable JSON — the same
     // prompt would reproduce it, so it is permanent, not worth a retry.
     const failure: AnalysisFailureKind =
@@ -1281,7 +1288,7 @@ export async function refreshOrReanalyze(
           // incident resolution (resolvedAt write overwrites this key with 2h TTL).
           if (parsed.sticky === true) {
             parsed._lastRefresh = new Date(now).toISOString()
-            await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
+            await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600, null)
             analyzedIncidents.set(inc.id, key)
             result.refreshed.push(svc.id)
             continue
@@ -1305,7 +1312,7 @@ export async function refreshOrReanalyze(
             if (parsed.timelineHash && hashTime === latestTime && !recoveryExceeded) {
               // No new timeline updates — just refresh TTL, skip API call
               parsed._lastRefresh = new Date(now).toISOString()
-              await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
+              await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600, null)
               analyzedIncidents.set(inc.id, key)
               result.refreshed.push(svc.id)
               continue
@@ -1318,7 +1325,7 @@ export async function refreshOrReanalyze(
                 // Update timelineHash to avoid rechecking, but skip API call
                 parsed.timelineHash = latestTimelineAt
                 parsed._lastRefresh = new Date(now).toISOString()
-                await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
+                await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600, null)
                 analyzedIncidents.set(inc.id, key)
                 result.refreshed.push(svc.id)
                 continue
@@ -1346,7 +1353,7 @@ export async function refreshOrReanalyze(
                 // #1003 — this overwrite is exactly where the original prediction used to die. A
                 // re-analysis run hours into an incident is hindsight-inflated by construction;
                 // carry the pre-inflation estimate forward so resolution still grades against it.
-                await putAnalysis(kv, svc.id, inc.id, attempt.result, parsed, 3600)
+                await putAnalysis(kv, svc.id, inc.id, attempt.result, parsed, 3600, attempt.snapshot ?? null)
                 analyzedIncidents.set(inc.id, key)
                 result.reanalyzed.push(svc.id)
               } else {
@@ -1354,7 +1361,7 @@ export async function refreshOrReanalyze(
                 // usable analysis, so retrying every cycle costs nothing extra.
                 console.warn(`[ai] time-based re-analysis produced nothing (${attempt.failure}) for ${svc.id}:${inc.id}, keeping old`)
                 parsed._lastRefresh = new Date(now).toISOString()
-                await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
+                await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600, null)
                 result.refreshed.push(svc.id)
               }
             } catch (err) {
@@ -1363,7 +1370,7 @@ export async function refreshOrReanalyze(
               await recordUsage(kv, now, { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } }, svc.id)
               // Keep old analysis on failure
               parsed._lastRefresh = new Date(now).toISOString()
-              await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
+              await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600, null)
               result.refreshed.push(svc.id)
             }
             continue
@@ -1379,7 +1386,7 @@ export async function refreshOrReanalyze(
           const elapsed = now - new Date(lastRefresh).getTime()
           if (elapsed >= 1_800_000) {
             parsed._lastRefresh = new Date(now).toISOString()
-            await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
+            await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600, null)
             result.refreshed.push(svc.id)
           }
           continue
@@ -1400,7 +1407,7 @@ export async function refreshOrReanalyze(
           // the pinned sibling's didn't, its next fresh analysis would adopt a hindsight-inflated
           // estimate as "the first" — the same bug, one service over. `prior = sibling` so the sibling's
           // FIRST estimate wins over its (possibly re-analyzed, inflated) current one.
-          await putAnalysis(kv, svc.id, inc.id, sibling, sibling, 3600)
+          await putAnalysis(kv, svc.id, inc.id, sibling, sibling, 3600, null)
           analyzedIncidents.set(inc.id, key)
           result.reanalyzed.push(svc.id)
           continue
@@ -1447,7 +1454,7 @@ export async function refreshOrReanalyze(
           // key may have LAPSED mid-incident (cap exhaustion; see `firstEstimateKey`), in which case
           // this estimate was made hours in and is NOT a hindsight-free baseline. `pinFirstEstimate`
           // reads the durable key, so the original bound still wins when one was ever pinned.
-          await putAnalysis(kv, svc.id, inc.id, attempt.result, null, 3600)
+          await putAnalysis(kv, svc.id, inc.id, attempt.result, null, 3600, attempt.snapshot ?? null)
           analyzedIncidents.set(inc.id, key)
           result.reanalyzed.push(svc.id)
         } else {

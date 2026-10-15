@@ -101,7 +101,7 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  red one as a demand to rewrite true prose. The rest is in code-review-policy.md, on demand.
  *  46_208 → 46_226 (#1686): the directory layout names two new worker modules, infra-status.ts and
  *  rum.ts, on the existing monitoring line; what they do is in directory-map.md. */
-export const BUDGET_CHARS = 46_233
+export const BUDGET_CHARS = 46_314
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatFeedClientLine, formatSubscribedFeedsLine, buildDailySummary, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAudienceScreenRow, AUDIENCE_SCREEN_TOP_N, formatAiUsageSection } from '../daily-summary'
+import { formatFeedClientLine, formatSubscribedFeedsLine, buildDailySummary, formatSnapshotCoverageLine, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatBadgeTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAudienceScreenRow, AUDIENCE_SCREEN_TOP_N, formatAiUsageSection } from '../daily-summary'
 import { BADGE_UNKNOWN_SERVICE, clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from '../api-traffic'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
@@ -1455,3 +1455,21 @@ describe('#820 Reddit source-dead warning', () => {
     expect(out).not.toContain('Reddit source DOWN')
   })
 })
+
+describe('formatSnapshotCoverageLine (#1695)', () => {
+  it('states how many of the last day\'s resolved forecasts kept their snapshot', () => {
+    expect(formatSnapshotCoverageLine({ forecasts: 4, withSnapshot: 3 })).toContain('Prediction snapshots: 3 of 4 resolved forecasts (24h)')
+    expect(formatSnapshotCoverageLine({ forecasts: 1, withSnapshot: 0 })).toContain('0 of 1 resolved forecast (24h)')
+  })
+  it('is empty when no forecast resolved in the window (never "0 of 0") or the figure is unavailable', () => {
+    expect(formatSnapshotCoverageLine({ forecasts: 0, withSnapshot: 0 })).toBe('')
+    expect(formatSnapshotCoverageLine(null)).toBe('')
+    expect(formatSnapshotCoverageLine(undefined)).toBe('')
+  })
+  it('appears in the full daily summary only when a forecast resolved', () => {
+    const minimal = { services: [makeSvc()], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    expect(buildDailySummary({ ...minimal, snapshotCoverage: { forecasts: 2, withSnapshot: 1 } })).toContain('Prediction snapshots: 1 of 2')
+    expect(buildDailySummary({ ...minimal, snapshotCoverage: { forecasts: 0, withSnapshot: 0 } })).not.toContain('Prediction snapshots')
+  })
+})
+

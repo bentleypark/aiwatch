@@ -20,6 +20,7 @@
 import type { KVLike } from './utils'
 import { kvPut, isTimeOrderImpossible } from './utils'
 import type { Incident } from './types'
+import { appendLedger, type PredictionSnapshot } from './prediction-snapshot'
 
 /** One durable resolved-incident record. `predicted*`/`affectedScope`/`model`
  *  are present only when an AI analysis existed at resolution time — a record is
@@ -45,6 +46,8 @@ export interface IncidentHistoryRecord {
   predictedSummary?: string
   affectedScope?: string[]
   model?: 'gemma' | 'sonnet'
+  /** #1695 — what each analysis of this incident was made from. Absent on records written before it. */
+  predictionSnapshots?: PredictionSnapshot[]
 }
 
 /** Rolling per-service durable history key (no TTL). */
@@ -147,6 +150,7 @@ export function buildHistoryRecord(
   inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null; derived?: string; startUnknown?: boolean },
   analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; summary?: string; affectedScope?: string[]; model?: string } | null,
   now: string,
+  snapshots: PredictionSnapshot[],
 ): IncidentHistoryRecord | null {
   if (!inc.startedAt) return null
   if (inc.status !== 'resolved' && inc.status !== 'monitoring') return null
@@ -197,6 +201,7 @@ export function buildHistoryRecord(
     ...(analysis?.summary && { predictedSummary: analysis.summary.slice(0, MAX_SUMMARY) }),
     ...(analysis?.affectedScope?.length ? { affectedScope: analysis.affectedScope } : {}),
     ...normalizeModel(analysis?.model),
+    ...(snapshots.length > 0 && { predictionSnapshots: snapshots }),
   }
 }
 
@@ -212,7 +217,8 @@ export function buildHistoryRecord(
  * most-recent HISTORY_CAP (newest last); records whose svcId doesn't match are
  * ignored (guards against a mixed-service batch). Best-effort — returns false
  * (and logs) on any KV error or corrupt value rather than throwing, so the
- * caller's recovery flow is never aborted.
+ * caller's recovery flow is never aborted. The corpus write is followed by the per-service monthly
+ * ledger write (`appendLedger`); the result is false if either failed.
  */
 export async function appendIncidentHistoryBatch(
   kv: KVLike,
@@ -220,6 +226,16 @@ export async function appendIncidentHistoryBatch(
   records: IncidentHistoryRecord[],
 ): Promise<boolean> {
   if (records.length === 0) return true
+  const corpusOk = await appendToCorpus(kv, svcId, records)
+  const ledgerOk = await appendLedger(kv, svcId, records)
+  return corpusOk && ledgerOk
+}
+
+async function appendToCorpus(
+  kv: KVLike,
+  svcId: string,
+  records: IncidentHistoryRecord[],
+): Promise<boolean> {
   const key = historyKey(svcId)
   try {
     // NOTE: a get THROW must NOT be swallowed to null here — unlike a genuine miss, treating a

@@ -28,6 +28,8 @@
 
 import { analysisKey, parseAnalysis, putAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { formatDuration, kvDel, kvPut, type KVLike } from './utils'
+import { buildHistoryRecord, type IncidentHistoryRecord } from './incident-history'
+import { readPredictionSnapshots } from './prediction-snapshot'
 
 /** How long a resolved incident stays visible on the read surfaces. Deliberately ONE constant for BOTH
  *  the `recovered:` marker and the resolved `ai:analysis:` value: the banner and the modal's verdict are
@@ -154,6 +156,22 @@ export async function markIncidentResolved(
     { ...analysis, resolvedAt: inc.resolvedAt ?? now },
     analysis,
     RESOLVED_TTL_S,
+    null,
   )
   return pinned
+}
+
+/**
+ * #1695 — the durable record of a resolved incident, with the snapshots its analyses were made from.
+ * Both cron resolution paths call this rather than `buildHistoryRecord`, so they read the same snapshots
+ * (the half-migration #1003 describes).
+ */
+export async function buildResolvedRecord(
+  kv: KVLike,
+  svc: Parameters<typeof buildHistoryRecord>[0],
+  inc: Parameters<typeof buildHistoryRecord>[1],
+  analysis: Parameters<typeof buildHistoryRecord>[2],
+  now: string,
+): Promise<IncidentHistoryRecord | null> {
+  return buildHistoryRecord(svc, inc, analysis, now, await readPredictionSnapshots(kv, svc.id, inc.id))
 }

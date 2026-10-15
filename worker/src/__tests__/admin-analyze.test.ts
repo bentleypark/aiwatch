@@ -263,6 +263,22 @@ describe('POST /api/admin/analyze (#299)', () => {
     expect(usage.sonnet).toBe(1)
   })
 
+  it('#1695 — an operator analysis keeps the snapshot it was made from, on the Sonnet path and the Gemma path', async () => {
+    const sonnetBody = JSON.stringify({ content: [{ type: 'text', text: JSON.stringify({ summary: 's', estimatedRecovery: '1–2h', affectedScope: ['API'], needsFallback: false }) }] })
+    const gemmaText = JSON.stringify({ summary: 'g', estimatedRecovery: '2–3h', affectedScope: ['API'], needsFallback: false })
+    for (const [model, expected] of [['sonnet', 'sonnet'], ['gemma', 'gemma']] as const) {
+      const { kv, store } = makeKV()
+      seedServicesLatest(store, [makeService()])
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(sonnetBody, { status: 200, headers: { 'Content-Type': 'application/json' } })))
+      const env = { ...envWith({ adminKey: 'k', anthropicKey: 'sk-test', kv }), AI: { run: vi.fn().mockResolvedValue({ response: gemmaText }) } } as unknown as Parameters<typeof workerModule.fetch>[1]
+      const res = await workerModule.fetch(req({ svcId: 'chatgpt', incidentId: 'inc-abc', model }, { 'X-Admin-Key': 'k' }), env, {} as ExecutionContext)
+      expect(res.status).toBe(200)
+      const snaps = JSON.parse(store['ai:snaps:chatgpt:inc-abc'])
+      expect(snaps, `${model} path wrote no snapshot`).toHaveLength(1)
+      expect(snaps[0]).toMatchObject({ model: expected, stage: 'investigating', updates: 1, impact: 'major' })
+    }
+  })
+
   it('#1003 — an operator re-analysis does NOT move the scoring baseline', async () => {
     // The manual twin of the cron's re-analysis: an operator re-runs analysis on a live 4h-old incident
     // and the model returns a hindsight-inflated 15h. The first estimate (4h) must survive, in both the
