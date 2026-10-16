@@ -20,6 +20,7 @@ import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { groupIncidents } from '../utils/incidentGrouping'
+import { incidentNote } from '../utils/incidentNote'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
@@ -376,18 +377,14 @@ export function GroupIncidentItem({ group, lang, t }) {
 export function IncidentItem({ incident, lang, t, hideStatus = false }) {
   const [expanded, setExpanded] = useState(false)
   const barCls = hideStatus ? 'bg-[var(--border-hi)]' : INC_BAR_CLASS[incidentDisplayStatus(incident)] ?? INC_BAR_CLASS.resolved
-  // #1292 — a status_history-derived incident has an empty timeline, so this row is inert and the
-  // full `incidents.derived.note` explanation is NOT reachable here; the Incidents page, whose rows
-  // are unconditionally clickable, is where it renders. Not wired as a dead prop, which would read as
-  // handled. What this row does carry is `incidentDurationText`'s qualifier, so the day total is not
-  // shown as one continuous outage with no explanation available at all.
   const hasTimeline = (incident.timeline ?? []).length > 0
+  const expandable = hasTimeline || incident.derived === 'status_history'
   return (
     <div style={{ marginBottom: '8px' }}>
       <div
-        className={`flex gap-2.5 items-start ${hasTimeline ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors' : ''}`}
+        className={`flex gap-2.5 items-start ${expandable ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors' : ''}`}
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
-        onClick={hasTimeline ? () => setExpanded((v) => !v) : undefined}
+        onClick={expandable ? () => setExpanded((v) => !v) : undefined}
       >
         {(() => {
           // #406: align the displayed date with the sort axis (`getLatestActivity`).
@@ -411,7 +408,7 @@ export function IncidentItem({ incident, lang, t, hideStatus = false }) {
             <div className="text-[12px] font-medium text-[var(--text0)] truncate" style={{ marginBottom: '2px' }}>
               {(incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName)} — {incident.title}
             </div>
-            {hasTimeline && expanded && (
+            {expandable && expanded && (
               <span className="shrink-0 text-[9px] text-[var(--text2)]">▾</span>
             )}
           </div>
@@ -426,6 +423,7 @@ export function IncidentItem({ incident, lang, t, hideStatus = false }) {
             title={`${incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName} — ${incident.title}`}
             subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}  ·  ${incidentDurationText(incident, t, incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}`}
             timeline={incident.timeline}
+            note={incidentNote(incident, t)}
             onClose={() => setExpanded(false)}
             hideHeader
             t={t}

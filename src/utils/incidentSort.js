@@ -398,10 +398,9 @@ export function compareGroupedRows(a, b) {
  * The duration text for an incident row, qualified when the number is a DAY TOTAL (#1292).
  *
  * A `status_history`-derived incident's `duration` is one day's summed downtime, not a single outage's
- * length, and only the Incidents page can show the full `incidents.derived.note` explanation — the
- * other two render an inert row (empty timeline, nothing to expand). Without a qualifier those two
- * print a bare "17h 18m" that reads as one continuous outage, while the is-down card for the same
- * incident already says "down 17h 18m that day".
+ * length, and the full `incidents.derived.note` explanation sits behind a click. Without a qualifier
+ * the collapsed row prints a bare "17h 18m" that reads as one continuous outage, while the is-down
+ * card for the same incident already says "down 17h 18m that day".
  *
  * #1390 — a RESOLVED incident with no duration is not ongoing, and saying "Ongoing" about something
  * that has recovered is the worst of the three things it could say. The condition is deliberately the
