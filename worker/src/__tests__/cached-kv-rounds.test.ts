@@ -28,6 +28,8 @@ const SERVICES = [
   },
 ] as unknown as ServiceStatus[]
 
+const BASELINE = { n: 12, medianMin: 40, p80Min: 90, since: '2026-07-12' }
+
 function makeEnv() {
   const store = new Map<string, string>([
     ['services:latest', JSON.stringify({ services: SERVICES, cachedAt: iso(0) })],
@@ -37,6 +39,7 @@ function makeEnv() {
     ['security:seen:osv:X', '1'],
     ['probe:summaries', JSON.stringify([])],
     ['probe:24h', JSON.stringify({ snapshots: [] })],
+    ['incident:recovery-baseline', JSON.stringify({ claude: BASELINE })],
   ])
   let rounds = 0
   let queue: Array<() => void> = []
@@ -76,7 +79,7 @@ async function get(query: string) {
 }
 
 const WAVE_READS = [
-  'ai:analysis:claude:inc-live', 'alert:feed:recent', 'list:security:seen:', 'probe:summaries', 'report:feed:claude',
+  'ai:analysis:claude:inc-live', 'alert:feed:recent', 'incident:recovery-baseline', 'list:security:seen:', 'probe:summaries', 'report:feed:claude',
 ]
 const DEPENDENT_READS = [
   'ai:analysis:gemini:inc-marker', 'ai:analysis:openai:inc-done',
@@ -93,12 +96,14 @@ describe('/api/status/cached sequential KV round trips (#1531 part 3)', () => {
     expect(inRound(3)).toEqual(DEPENDENT_READS)
     expect(Object.keys(body.aiAnalysis as object).sort()).toEqual(['claude', 'openai'])
     expect(body.recentlyRecovered).toEqual({ gemini: ['inc-marker'], openai: ['inc-done'] })
+    expect(body.recoveryBaseline).toEqual({ claude: BASELINE })
   }, 60_000)
 
   it('the default response reads its time series in the same wave', async () => {
-    const { inRound, lastRound } = await get('')
+    const { body, inRound, lastRound } = await get('')
     expect(lastRound).toBe(3)
     expect(inRound(2)).toEqual([...WAVE_READS, 'probe:24h'].sort())
     expect(inRound(3)).toEqual(DEPENDENT_READS)
+    expect(body.recoveryBaseline).toEqual({ claude: BASELINE })
   }, 60_000)
 })

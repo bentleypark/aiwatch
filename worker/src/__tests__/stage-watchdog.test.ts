@@ -76,7 +76,7 @@ describe('/api/status/cached stage watchdog (#1531)', () => {
     expect(lines).toHaveLength(1)
     expect(lines[0]).toMatchObject({ route: 'status-cached', pending: ['alert-feed'] })
     expect(Object.keys((lines[0] as { done: object }).done).sort())
-      .toEqual(['analyses', 'edge-cache', 'probe-summaries', 'report-feed', 'security', 'snapshot'])
+      .toEqual(['analyses', 'edge-cache', 'probe-summaries', 'recovery-baseline', 'report-feed', 'security', 'snapshot'])
     release()
     expect((await res).status).toBe(200)
   })

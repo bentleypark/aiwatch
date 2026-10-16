@@ -304,3 +304,41 @@ test.describe('AnalysisModal — mixed sibling-shared + service-private', () => 
     await expect(privateSection.getByText('claude.ai')).toHaveCount(0)
   })
 })
+
+// #1697 — the service's past recovery times sit under its analyses, and only for a service the
+// payload carries a baseline for.
+test.describe('AnalysisModal — past recovery times (#1697)', () => {
+  const BASELINE = { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' }
+
+  for (const [label, payload, count] of [
+    ['shown with a baseline', { ...MOCK, recoveryBaseline: { together: BASELINE } }, 1],
+    ['hidden without one', MOCK, 0],
+  ]) {
+    test(label, async ({ page }) => {
+      await page.route('**/api/status', (route) => route.fulfill({ json: payload }))
+      await page.route('**/api/status/cached', (route) => route.fulfill({ json: payload }))
+      await page.goto('/')
+      await expect(page.getByText('Together AI').first()).toBeVisible({ timeout: 20000 })
+      await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+      const modal = page.locator('.fixed.inset-0').last()
+      await expect(modal).toBeVisible()
+      const line = modal.locator('[data-recovery-baseline="together"]')
+      await expect(line).toHaveCount(count)
+      if (count) await expect(line).toHaveText(/📊 (Past incidents on this service: median 40m, 80% resolved within 1h 30m \(based on 41 recorded incidents since 2026-07-12\)|이 서비스의 과거 인시던트: 중앙값 40m, 80%가 1h 30m 안에 복구 \(2026-07-12 이후 기록된 인시던트 41건 기준\))/)
+    })
+  }
+})
+
+test('#1697 — a service on a shared card and its own card gets its past recovery times once', async ({ page }) => {
+  const BASELINE = { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' }
+  const payload = { ...MIXED_MOCK, recoveryBaseline: { claude: BASELINE, claudeai: BASELINE } }
+  await page.route('**/api/status', (route) => route.fulfill({ json: payload }))
+  await page.route('**/api/status/cached', (route) => route.fulfill({ json: payload }))
+  await page.goto('/')
+  await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
+  await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+  const modal = page.locator('.fixed.inset-0').last()
+  await expect(modal).toBeVisible()
+  await expect(modal.locator('[data-recovery-baseline="claude"]')).toHaveCount(1)
+  await expect(modal.locator('[data-recovery-baseline="claudeai"]')).toHaveText(/^📊 claude\.ai — /)
+})

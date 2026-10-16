@@ -760,6 +760,7 @@ function usePollingInternal() {
     probeServiceIds: [],
     aiAnalysis: {},
     recentlyRecovered: {},
+    recoveryBaseline: {},
     securityAlerts: [],
     reportFeed: {},
     supplyChainBanner: null, // #574/#1000 — AWS region degraded + a dependent degraded that NAMES that region; null otherwise
@@ -847,6 +848,7 @@ function usePollingInternal() {
           probeServiceIds,
           aiAnalysis: data.aiAnalysis ?? {},
           recentlyRecovered: data.recentlyRecovered ?? {},
+          recoveryBaseline: data.recoveryBaseline ?? {},
           securityAlerts: data.securityAlerts ?? [],
           reportFeed: data.reportFeed ?? {},
           supplyChainBanner: data.supplyChainBanner ?? null,

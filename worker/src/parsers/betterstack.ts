@@ -58,6 +58,16 @@ const FUTURE_PUBDATE_BUFFER_MS = 60_000  // clock-skew tolerance
 // updates far sooner; the rare genuine multi-day outage gets an explicit resolution post anyway.
 const STALE_ONGOING_MS = 7 * 86_400_000
 
+/** #1697 — the title `parseRssIncidents` gives every incident it reconstructs from feed items. Its
+ *  duration spans the first to the last item, not an editorial incident record. */
+export function feedEventTitle(component: string, resolved: boolean): string {
+  return `${component} — ${resolved ? 'recovered' : 'down'}`
+}
+
+export function isFeedEventTitle(title: string): boolean {
+  return / — (recovered|down)$/.test(title)
+}
+
 export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
   const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
   if (!items) return []
@@ -125,7 +135,7 @@ export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
 
     incidents.push({
       id: groupKey.split('/').pop() ?? groupKey,
-      title: `${component} — ${resolved ? 'recovered' : 'down'}`,
+      title: feedEventTitle(component, resolved),
       status: resolved ? 'resolved' : 'investigating',
       impact: mapBetterStackImpact(severityText),
       startedAt,

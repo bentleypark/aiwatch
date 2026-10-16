@@ -48,6 +48,8 @@ export interface IncidentHistoryRecord {
   model?: 'gemma' | 'sonnet'
   /** #1695 — what each analysis of this incident was made from. Absent on records written before it. */
   predictionSnapshots?: PredictionSnapshot[]
+  /** #1697 — `Incident.autoMonitor` at resolution. Absent on records written before it. */
+  autoMonitor?: true
 }
 
 /** Rolling per-service durable history key (no TTL). */
@@ -147,7 +149,7 @@ const MAX_SUMMARY = 500
  */
 export function buildHistoryRecord(
   svc: { id: string; provider: string; category: 'api' | 'app' | 'agent' },
-  inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null; derived?: string; startUnknown?: boolean },
+  inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null; derived?: string; startUnknown?: boolean; autoMonitor?: boolean },
   analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; summary?: string; affectedScope?: string[]; model?: string } | null,
   now: string,
   snapshots: PredictionSnapshot[],
@@ -202,6 +204,7 @@ export function buildHistoryRecord(
     ...(analysis?.affectedScope?.length ? { affectedScope: analysis.affectedScope } : {}),
     ...normalizeModel(analysis?.model),
     ...(snapshots.length > 0 && { predictionSnapshots: snapshots }),
+    ...(inc.autoMonitor && { autoMonitor: true as const }),
   }
 }
 

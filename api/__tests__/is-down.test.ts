@@ -190,6 +190,20 @@ describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => 
     expect(html).toContain('2h 44m (over ~1h est.)')
   })
 
+  it('#1697 — shows this service\'s past recovery times from recoveryBaseline, and nothing for a service absent from it', async () => {
+    const body = JSON.parse(await makeWorkerResolved().text())
+    body.recoveryBaseline = { claude: { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' } }
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const shown = await (await handler(makeReq('claude-api'))).text()
+    expect(shown).toContain('📊 Past incidents on this service: median 40m, 80% resolved within 1h 30m (based on 41 recorded incidents since 2026-07-12)')
+
+    body.recoveryBaseline = { openai: { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' } }
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const hidden = await (await handler(makeReq('claude-api'))).text()
+    expect(hidden).toContain('Predicted vs actual:')
+    expect(hidden).not.toContain('data-recovery-baseline')
+  })
+
   // Review finding #1 — `target` is undefined on the service_missing config-drift path, but
   // `aiAnalysis` can still carry an entry for the slug. The startedAt lookup must optional-chain
   // `target?.incidents`; the buggy `target.incidents` threw a TypeError that the JSON-parse catch

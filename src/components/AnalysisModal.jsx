@@ -4,6 +4,7 @@ import { isDisplayAffected, displayStatusOf } from '../utils/statusDisplay'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
 import { computePredictionOutcome, verdictLabel, estimateExceeded, exceededRecoveryText } from '../utils/predictionAccuracy'
 import { hasLiveIncident, readsResolved } from '../utils/liveIncident'
+import { recoveryBaselineText } from '../utils/recoveryBaseline'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -29,7 +30,7 @@ export function groupWorstStatus(svcs) {
   return 'operational'
 }
 
-export default function AnalysisModal({ aiAnalysis, services, onClose }) {
+export default function AnalysisModal({ aiAnalysis, recoveryBaseline, services, onClose }) {
   const { t, lang } = useLang()
   // aiAnalysis: Record<svcId, AIAnalysisResult[]>
   //
@@ -99,6 +100,8 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
   if (groups.length === 0) return null
 
   const totalCount = groups.reduce((sum, g) => sum + g.analyses.length, 0)
+  const baselineCardOf = new Map()
+  groups.forEach((g, gi) => g.svcIds.forEach(id => { if (!baselineCardOf.has(id)) baselineCardOf.set(id, gi) }))
 
   return (
     <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -126,7 +129,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
 
         {/* Analysis entries — grouped by service */}
         <div style={{ padding: '16px' }}>
-          {groups.map(({ svcIds, analyses }) => {
+          {groups.map(({ svcIds, analyses }, gi) => {
             const svcs = svcIds.map(id => services.find(s => s.id === id)).filter(Boolean)
             if (svcs.length === 0) return null
             const worstStatus = groupWorstStatus(svcs)
@@ -249,6 +252,13 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                     </div>
                   )
                 })}
+
+                {/* #1697 — computed from our own incident records, not by the model. */}
+                {svcs.filter(s => recoveryBaseline?.[s.id] && baselineCardOf.get(s.id) === gi).map(s => (
+                  <div key={s.id} data-recovery-baseline={s.id} className="mono text-[10px] text-[var(--text2)]" style={{ marginTop: '8px' }}>
+                    📊 {svcs.length > 1 ? `${s.name} — ` : ''}{recoveryBaselineText(recoveryBaseline[s.id], lang)}
+                  </div>
+                ))}
 
                 {/* Contextual fallback recommendation — per category for the service group.
                     #641 — only render when we actually have a recommendation; no

@@ -118,6 +118,7 @@ const SAFE = {
   'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type',
   'worker/src/alerted-gone.ts': 'tests only whether an announced incident id is on a card and reads title + finalStatus of an accumulator row (#1118); no start, duration or resolution time',
   'worker/src/prediction-snapshot.ts': 'stores the minutes a live incident had been open when it was analysed (#1695); it reaches a reader only inside a history record or ledger entry, and buildHistoryRecord refuses a derived incident',
+  'worker/src/recovery-baseline.ts': 'reads only incident:history records (#1697), and buildHistoryRecord refuses a derived incident',
   'worker/src/report.ts': 'floors the crowd-report window at the earliest active start; a #1623 today-row\'s start is clamped inside its own local day',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — a #1623 today-row is one, and no time is read',
   'src/utils/regionStatus.js': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
@@ -251,6 +252,7 @@ const RB_SAFE = {
   'worker/src/suppression.ts': 'matches by id/title, which a retainedBridge entry carries normally — not a freshness judgment',
   'worker/src/alerted-gone.ts': 'counts a bridged entry as carried: a ghost is shown on the card, so it is not the dropped-from-the-card case #1118 reports (pinned in alerted-gone.test.ts; #1384 KNOWN LIMIT 1)',
   'worker/src/prediction-snapshot.ts': 'builds a snapshot of the one incident the analysis call hands it and lists no incidents, so a bridged entry is not a case it can mishandle — not a freshness judgment (#1695)',
+  'worker/src/recovery-baseline.ts': 'summarises resolved history records (#1697), deduplicated by incident id — not a freshness judgment',
   'worker/src/overrides.ts': 'operator-pinned durations keyed on an explicit incident id an operator typed — not a freshness judgment',
   'worker/src/alert-feed.ts': 'only relays alerts buildIncidentAlerts already decided to send — inherits that fix, no independent leak (verified round 8)',
   'worker/src/upstream-feed.ts': 'non-carded upstream feeds; never sees a service incident list',
@@ -341,6 +343,7 @@ const SU_SAFE = {
   'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type',
   'worker/src/alerted-gone.ts': 'tests only whether an announced incident id is listed on a card (#1118); it never reads a start, an elapsed time or a resolution time',
   'worker/src/prediction-snapshot.ts': 'a startUnknown incident is refused by buildHistoryRecord, so no snapshot of it reaches the corpus or the ledger (#1695)',
+  'worker/src/recovery-baseline.ts': 'reads only incident:history records, which buildHistoryRecord writes only with a trustworthy start; a zero-length legacy record is excluded (#1697)',
   'worker/src/report.ts': 'active incidents only',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — active only',
   'src/utils/regionStatus.js': 'active incidents only',
@@ -426,7 +429,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 79 → 80: #1118 added worker/src/alerted-gone.ts, which tests an incident id against a card's list; SAFE on all three.
     // 80 → 81: #1695 added worker/src/prediction-snapshot.ts, which records one incident's analysis-time inputs; SAFE on all three.
     // 81 → 82: #1698 added worker/src/incident-presence.ts, which concatenates incidents and referenceIncidents.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(82)
+    // 82 → 83: #1697 added worker/src/recovery-baseline.ts, which summarises history records; SAFE on all three.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(83)
   })
 
   it('leaves none unclassified', () => {
@@ -480,7 +484,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(82)
+    expect(all.length).toBe(83)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -526,7 +530,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(82)
+    expect(all.length).toBe(83)
   })
 
   it('leaves none unclassified for startUnknown', () => {

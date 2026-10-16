@@ -1,6 +1,7 @@
 // AI Analysis — Hybrid: Gemma 4 (Workers AI) primary + Claude Sonnet fallback
 // Triggered only when incidents are detected (not on every cron cycle)
 
+import { recoveryBaselineText, type RecoveryBaseline } from './recovery-baseline-text'
 import type { Incident, ServiceStatus } from './types'
 import { sanitize, kvPut, kvDel, type KVLike } from './utils'
 import { collapseXaiRegionalIncidents } from './xai-regions'
@@ -373,7 +374,7 @@ export const PROGRESS_EMBED_MAX = 200
  * by a prior cycle's refreshOrReanalyze, used when releasing a held alert) — emit a byte-identical
  * section. `div` is the embed section divider. Both the operator embed and the per-user relay carry it.
  */
-export function formatAnalysisEmbedSection(analysis: AIAnalysisResult, div: string): string {
+export function formatAnalysisEmbedSection(analysis: AIAnalysisResult, div: string, baseline: RecoveryBaseline | undefined): string {
   const scope = analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''
   // #1328 — this section is only ever built for a NEW-incident alert, i.e. an active incident, so
   // both halves belong here. Rendering `progress` keeps the reader's text whole now that the model
@@ -386,7 +387,8 @@ export function formatAnalysisEmbedSection(analysis: AIAnalysisResult, div: stri
   // against `description.length` — they get squeezed out first (the `#1182 … dropped (embed cap)`
   // path). The cap is the prompt's own contract: one sentence.
   const progress = analysis.progress ? `\n${analysis.progress.slice(0, PROGRESS_EMBED_MAX)}` : ''
-  return `\n${div}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}${progress}\n⏱ Est. recovery: ${formatRecoveryDisplay(analysis.estimatedRecovery)}${scope}`
+  const past = baseline ? `\n📊 ${recoveryBaselineText(baseline)}` : ''
+  return `\n${div}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}${progress}\n⏱ Est. recovery: ${formatRecoveryDisplay(analysis.estimatedRecovery)}${past}${scope}`
 }
 
 /**

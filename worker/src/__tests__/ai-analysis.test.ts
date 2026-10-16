@@ -2529,7 +2529,7 @@ describe('formatAnalysisEmbedSection (#882)', () => {
   }
 
   it('renders the 🤖 AI ANALYSIS section with summary, recovery, and scope', () => {
-    const out = formatAnalysisEmbedSection(base, DIV)
+    const out = formatAnalysisEmbedSection(base, DIV, undefined)
     expect(out).toContain('🤖 **AI ANALYSIS** [Beta]')
     expect(out).toContain('OCR API degraded — new failure type.')
     expect(out).toContain('⏱ Est. recovery: 5–15m')
@@ -2538,19 +2538,24 @@ describe('formatAnalysisEmbedSection (#882)', () => {
   })
 
   it('omits the Scope line when affectedScope is empty', () => {
-    const out = formatAnalysisEmbedSection({ ...base, affectedScope: [] }, DIV)
+    const out = formatAnalysisEmbedSection({ ...base, affectedScope: [] }, DIV, undefined)
     expect(out).not.toContain('📡 Scope:')
   })
 
+  it('#1697 — puts the service\'s past recovery times right under the estimate', () => {
+    const out = formatAnalysisEmbedSection(base, DIV, { n: 50, medianMin: 85, p80Min: 182, since: '2026-08-07' })
+    expect(out).toContain('⏱ Est. recovery: 5–15m\n📊 Past incidents on this service: median 1h 25m, 80% resolved within 3h 2m (based on 50 recorded incidents since 2026-08-07)\n📡 Scope:')
+  })
+
   it('maps N/A recovery to the friendly phrase (shared formatRecoveryDisplay)', () => {
-    const out = formatAnalysisEmbedSection({ ...base, estimatedRecovery: 'N/A' }, DIV)
+    const out = formatAnalysisEmbedSection({ ...base, estimatedRecovery: 'N/A' }, DIV, undefined)
     expect(out).toContain('⏱ Est. recovery: Exceeded typical pattern')
   })
 
   it('is byte-identical to the legacy inline template (KV path == inline-success path)', () => {
     const a = base
     const legacy = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${a.summary}\n⏱ Est. recovery: ${formatRecoveryDisplay(a.estimatedRecovery)}${a.affectedScope.length > 0 ? `\n📡 Scope: ${a.affectedScope.join(', ')}` : ''}`
-    expect(formatAnalysisEmbedSection(a, DIV)).toBe(legacy)
+    expect(formatAnalysisEmbedSection(a, DIV, undefined)).toBe(legacy)
   })
 })
 
@@ -2590,7 +2595,7 @@ describe('summary/progress split (#1328)', () => {
     // Parity: `summary` is one sentence shorter now, so a surface that renders it alone on a live
     // incident would silently lose the status clause readers already had.
     const a = parseAnalysisResponse(body(), 'inc-1', 'gemma', '')!
-    const section = formatAnalysisEmbedSection(a, '---')
+    const section = formatAnalysisEmbedSection(a, '---', undefined)
     expect(section).toContain('Elevated error rates on the Messages API.')
     expect(section).toContain('Currently investigating, no improvement yet.')
   })
@@ -2604,14 +2609,14 @@ describe('summary/progress split (#1328)', () => {
     // fixture passes for any bound below the fixture length, so 200 could drift to 900 unnoticed.
     expect(PROGRESS_EMBED_MAX).toBe(200)
     const a = parseAnalysisResponse(body({ progress: 'x'.repeat(900) }), 'inc-1', 'gemma', '')!
-    const section = formatAnalysisEmbedSection(a, '---')
+    const section = formatAnalysisEmbedSection(a, '---', undefined)
     expect(a.progress!.length).toBe(900)                       // stored in full...
     expect(section.match(/x+/)![0].length).toBe(PROGRESS_EMBED_MAX)  // ...truncated only at the embed
   })
 
   it('the embed is byte-identical to the old output for a progress-less analysis', () => {
     const a = parseAnalysisResponse(body({ progress: undefined }), 'inc-1', 'gemma', '')!
-    expect(formatAnalysisEmbedSection(a, '---'))
+    expect(formatAnalysisEmbedSection(a, '---', undefined))
       .toBe('\n---\n\u{1F916} **AI ANALYSIS** [Beta]\nElevated error rates on the Messages API.\n\u23F1 Est. recovery: 30m\u20131h\n\u{1F4E1} Scope: Messages API')
   })
 

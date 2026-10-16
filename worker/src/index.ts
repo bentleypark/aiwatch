@@ -22,6 +22,7 @@ import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
 import { rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
 import { recordRestoreObservations, type RestoreObservation } from './uptime-archive-trace'
+import { readRecoveryBaselines, rebuildRecoveryBaselines } from './recovery-baseline'
 import { appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved, isMarkableOnStatusEdge, buildResolvedRecord } from './recovery-mark'
 import { buildPredictionSnapshot, summarizeSnapshotCoverage, type SnapshotCoverage } from './prediction-snapshot'
@@ -1389,8 +1390,10 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
             if (p && typeof p.summary === 'string' && p.summary.length > 0) existing = p
           } catch { existing = null }
         }
+        // #1697 — this service's past recovery times, shown under the estimate.
+        const baseline = (await readRecoveryBaselines(env.STATUS_CACHE))[svc.id]
         if (existing) {
-          analysisSection = formatAnalysisEmbedSection(existing, DIV)
+          analysisSection = formatAnalysisEmbedSection(existing, DIV, baseline)
         } else if (firstSight) {
           // Only run the inline call on the incident's FIRST sighting; on later held cycles the
           // KV-first read above + refreshOrReanalyze's backfill supply the section (no duplicate spend).
@@ -1425,7 +1428,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
                 // Section only when the sticky prior stands, or the write actually landed (as before:
                 // an embed advertising an analysis no reader can fetch is worse than none).
                 const analysis = skipWrite ? attempt.result : (written?.ok ? written.pinned : null)
-                if (analysis) analysisSection = formatAnalysisEmbedSection(analysis, DIV)
+                if (analysis) analysisSection = formatAnalysisEmbedSection(analysis, DIV, baseline)
               } else {
                 console.warn(`[cron] inline AI analysis produced nothing (${attempt.failure}) for ${svc.id}:${inc.id}`)
               }
@@ -4414,9 +4417,12 @@ const workerExport = {
             let accuracy: AccuracyStats | null = null
             let snapshotCoverage: SnapshotCoverage | null = null
             try {
-              const allHistory = (await Promise.all(SERVICES.map(s => readIncidentHistory(env.STATUS_CACHE, s.id)))).flat()
+              const historyBySvc = new Map(await Promise.all(SERVICES.map(async (s) => [s.id, await readIncidentHistory(env.STATUS_CACHE, s.id)] as const)))
+              const allHistory = [...historyBySvc.values()].flat()
               accuracy = summarizeAccuracy(allHistory)
               snapshotCoverage = summarizeSnapshotCoverage(allHistory, now.getTime())
+              const baselineOutcome = await rebuildRecoveryBaselines(env.STATUS_CACHE, historyBySvc, SERVICES)
+              if (baselineOutcome !== 'written') console.warn(`[daily-summary] #1697 recovery baselines NOT rewritten — ${baselineOutcome}`)
             } catch (err) {
               console.warn('[daily-summary] accuracy aggregate failed:', err instanceof Error ? err.message : err)
             }
@@ -5392,7 +5398,14 @@ const workerExport = {
               } catch (err) { console.warn('[rss] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
             }),
         ))
-        if (Object.keys(analysis).length > 0) feedAiAnalysis = analysis
+        if (Object.keys(analysis).length > 0) {
+          // #1697 — read only when an analysis will render, so a quiet poll spends no extra KV read.
+          const baselines = await readRecoveryBaselines(env.STATUS_CACHE!)
+          for (const [svcId, list] of Object.entries(analysis)) {
+            if (baselines[svcId]) for (const a of list) a.recoveryBaseline = baselines[svcId]
+          }
+          feedAiAnalysis = analysis
+        }
         // #793 — orphan-resolution guard. Stamp `feed:active-emitted:{incId}` for each active item that
         // is actually SERVED this render (not held by the #759 AI-hold, via the shared isActiveItemHeld
         // predicate); then read those markers for RESOLVED incidents → servedActive. buildRssFeed
@@ -6065,6 +6078,7 @@ const workerExport = {
           // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
           const reportFeedRead = watchdog.track('report-feed', buildReportFeedMap(env.STATUS_CACHE!, cached.services))
           const probeSummariesRead = watchdog.track('probe-summaries', readProbeSummaries(env.STATUS_CACHE, 'status-cached'))
+          const recoveryBaselineRead = watchdog.track('recovery-baseline', readRecoveryBaselines(env.STATUS_CACHE!))
 
           const probeRaw = await seriesRead
           await analysesRead
@@ -6072,6 +6086,7 @@ const workerExport = {
           const alertFeed = await alertFeedRead
           const reportFeed = await reportFeedRead
           const cachedProbeSummaries = await probeSummariesRead
+          const recoveryBaseline = await recoveryBaselineRead
           if (probeRaw) {
             try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
           }
@@ -6112,6 +6127,7 @@ const workerExport = {
             ...(alertFeed.length > 0 ? { alertFeed } : {}),
             ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
             ...(supplyChainBanner ? { supplyChainBanner } : {}),
+            ...(Object.keys(recoveryBaseline).length > 0 ? { recoveryBaseline } : {}),
             upstreamLinks,
           }), {
             status: 200,
@@ -6383,6 +6399,8 @@ const workerExport = {
       const alertFeed = env.STATUS_CACHE ? await readAlertFeed(env.STATUS_CACHE) : []
       // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
       const reportFeed = env.STATUS_CACHE ? await buildReportFeedMap(env.STATUS_CACHE, servicesWithScore) : {}
+      // #1697 — both endpoints emit it: the dashboard polls this one after its cached first load.
+      const recoveryBaseline = env.STATUS_CACHE ? await readRecoveryBaselines(env.STATUS_CACHE) : {}
       // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
       const supplyChainBanner = buildSupplyChainBanner(servicesWithScore)
       // #1053 — cross-provider upstream links (a dependent's own incident blames a provider that is
@@ -6400,6 +6418,7 @@ const workerExport = {
         ...(alertFeed.length > 0 ? { alertFeed } : {}),
         ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
         ...(supplyChainBanner ? { supplyChainBanner } : {}),
+        ...(Object.keys(recoveryBaseline).length > 0 ? { recoveryBaseline } : {}),
         upstreamLinks,
       }), {
         status: 200,

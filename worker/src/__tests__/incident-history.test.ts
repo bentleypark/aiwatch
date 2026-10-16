@@ -114,6 +114,11 @@ describe('buildHistoryRecord', () => {
     expect(buildHistoryRecord(svc, { ...baseInc, startedAt: undefined }, null, NOW, [])).toBeNull()
   })
 
+  it('#1697 — carries the auto-monitor tag, and omits the field on an untagged incident', () => {
+    expect(buildHistoryRecord(svc, { ...baseInc, autoMonitor: true }, null, NOW, [])!.autoMonitor).toBe(true)
+    expect(buildHistoryRecord(svc, baseInc, null, NOW, [])!).not.toHaveProperty('autoMonitor')
+  })
+
   // #1328 - the corpus has NO TTL and `predictedSummary` is replayed into later prompts as
   // `Prior read: "..."` by `buildHistorySection`, so what lands here outlives the incident by design.
   // The perishable half must not: "currently investigating" is noise as grounding for a future

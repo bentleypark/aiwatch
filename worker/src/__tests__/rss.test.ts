@@ -789,6 +789,15 @@ describe('buildRssFeed — AI analysis block (#724)', () => {
     expect(xml).toContain('Est. recovery: Exceeded typical pattern')
   })
 
+  it('#1697 — renders the service\'s past recovery times under the estimate, and nothing without them', () => {
+    const baseline = { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' }
+    const map: RssAiAnalysisMap = { claude: [{ ...analysisMap.claude[0], recoveryBaseline: baseline }] }
+    const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW, map)
+    expect(xml).toContain('📊 Past incidents on this service: median 40m, 80% resolved within 1h 30m (based on 41 recorded incidents since 2026-07-12)')
+    const without = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW, analysisMap)
+    expect(without).not.toContain('Past incidents on this service')
+  })
+
   it('omits the AI block when no analysis is present', () => {
     const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW)
     expect(xml).not.toContain('🤖 AI analysis')

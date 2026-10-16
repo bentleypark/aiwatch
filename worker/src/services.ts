@@ -1434,7 +1434,7 @@ export function existedInMonth(addedAt: string | undefined, monthEndDate: string
 /** #983 — does this incident's title match one of the provider's machine-emitted auto-monitor titles?
  *  Pure. Exact (anchored) patterns only — see `ServiceConfig.autoMonitorTitles`. A service with no
  *  patterns can never tag, so this is opt-in per service. Unit-tested. */
-export function isAutoMonitorIncident(inc: Incident, config: ServiceConfig): boolean {
+export function isAutoMonitorIncident(inc: Pick<Incident, 'title'>, config: Pick<ServiceConfig, 'autoMonitorTitles'>): boolean {
   const patterns = config.autoMonitorTitles
   if (!patterns || patterns.length === 0) return false
   const title = inc.title.trim()

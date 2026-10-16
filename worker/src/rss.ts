@@ -11,6 +11,7 @@ import { escapeXml } from './badge'
 import { getGroupedFallbacks, formatFallbackGroups } from './fallback'
 import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE, OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
+import { recoveryBaselineText, type RecoveryBaseline } from './recovery-baseline-text'
 import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, formatDuration, severityEmoji, impactLabel } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
 import { withdrawalHold, liveIncidentIds, type WithdrawnIncident } from './withdrawn'
@@ -36,6 +37,8 @@ export interface RssAiAnalysis {
   // #1003 — the first, hindsight-free estimate; what the resolved comparison is actually scored
   // against (re-analysis ratchets `estimatedRecoveryHours` up once an incident outruns it).
   firstEstimatedRecoveryHours?: number
+  // #1697 — this service's past recovery times; rendered under the estimate on the active item.
+  recoveryBaseline?: RecoveryBaseline
 }
 export type RssAiAnalysisMap = Record<string, RssAiAnalysis[]>
 
@@ -471,6 +474,7 @@ function descHtml(
     const detail = [`Est. recovery: ${escHtml(formatRecoveryDisplay(a.estimatedRecovery))}`]
     if (a.affectedScope.length > 0) detail.push(`Scope: ${escHtml(defuseAutolinkDomain(a.affectedScope.join(', ')))}`)
     lines.push(`<p>${detail.join(' · ')}</p>`)
+    if (a.recoveryBaseline) lines.push(`<p>📊 ${escHtml(recoveryBaselineText(a.recoveryBaseline))}</p>`)
   }
   if (opts.fallbackText) {
     lines.push(FEED_DIV) // #760 — divider before the fallback block

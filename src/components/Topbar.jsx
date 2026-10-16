@@ -33,7 +33,7 @@ function HamburgerIcon() {
 export default function Topbar({ onMenuToggle }) {
   const { page, setPage } = usePage()
   const { lang, t } = useLang()
-  const { services, lastUpdated, refresh, refreshing, aiAnalysis } = usePolling()
+  const { services, lastUpdated, refresh, refreshing, aiAnalysis, recoveryBaseline } = usePolling()
   const stars = useGitHubStars()
   const isSettings = page.name === 'settings'
   const [showAnalysis, setShowAnalysis] = useState(false)
@@ -182,7 +182,7 @@ export default function Topbar({ onMenuToggle }) {
         </button>
       </div>
       {showAnalysis && hasAnalysis && (
-        <AnalysisModal aiAnalysis={aiAnalysis} services={services} onClose={() => setShowAnalysis(false)} />
+        <AnalysisModal aiAnalysis={aiAnalysis} recoveryBaseline={recoveryBaseline} services={services} onClose={() => setShowAnalysis(false)} />
       )}
     </div>
   )

@@ -3,6 +3,7 @@
 import { SLUG_TO_SERVICE } from './_is-down/slug-map'
 import { getSEOContent } from './_is-down/seo-content'
 import { renderPage } from './_is-down/html-template'
+import type { RecoveryBaseline } from '../worker/src/recovery-baseline-text'
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
@@ -95,6 +96,7 @@ export default async function handler(req: Request) {
     // #574 — supply-chain note for THIS service (set if it's in the banner's affectedNow/mayBeAffected).
     let supplyChainNote: SupplyChainNote | null = null
     let upstreamNote: UpstreamNote | null = null
+    let recoveryBaseline: RecoveryBaseline | null = null
     // Track the precise reason for the fallback render so the Discord alert can
     // distinguish operational classes (timeout vs HTTP failure vs missing service
     // vs JSON parse error). Defaults to a generic label that should never ship —
@@ -131,6 +133,7 @@ export default async function handler(req: Request) {
           // #1053 — cross-provider upstream links (a dependent's own incident blames a provider that is
           // itself down). Optional: a worker predating #1053 omits the key entirely (deploy skew).
           upstreamLinks?: UpstreamLinkLike[]
+          recoveryBaseline?: Record<string, RecoveryBaseline>
         }
         const allServices = data.services ?? []
 
@@ -479,6 +482,7 @@ export default async function handler(req: Request) {
         supplyChainNote = buildSupplyChainNote(data.supplyChainBanner, entry.id)
         // #1053 — cross-provider upstream note (the dependent's OWN claim; see upstream-note.ts).
         upstreamNote = buildUpstreamNote(data.upstreamLinks, entry.id)
+        recoveryBaseline = data.recoveryBaseline?.[entry.id] ?? null
       } catch (parseErr) {
         fallbackReason = 'parse_error'
         console.error(`[is-down/${slug}] status payload unreadable:`, parseErr instanceof Error ? parseErr.message : parseErr)
@@ -532,7 +536,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT
