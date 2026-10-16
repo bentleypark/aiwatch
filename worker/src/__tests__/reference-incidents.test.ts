@@ -349,16 +349,15 @@ describe('#1669 referenceIncidentsOf', () => {
 })
 
 // The decision #1669 rests on: nothing COUNTS a reference incident. Counting readers read `incidents`;
-// this pins that no worker module but the producer (services.ts), its type (types.ts), operator
-// suppression and the #1698 presence primitive reads the new field.
+// this pins which worker modules read the new field.
 describe('#1669 referenceIncidents has no counting reader in the worker', () => {
-  it('is referenced only by services.ts, types.ts, suppression.ts and incident-presence.ts', () => {
+  it('is referenced only by the pinned set of worker modules', () => {
     const dir = join(__dirname, '..')
     const readers = readdirSync(dir, { recursive: true, encoding: 'utf8' })
       .filter((f) => f.endsWith('.ts') && !f.includes('__tests__'))
       .filter((f) => readFileSync(join(dir, f), 'utf8').includes('referenceIncidents'))
       .sort()
-    expect(readers).toEqual(['incident-presence.ts', 'services.ts', 'suppression.ts', 'types.ts'])
+    expect(readers).toEqual(['ext-claude.ts', 'incident-presence.ts', 'services.ts', 'suppression.ts', 'types.ts'])
   })
 
   it('#1698 pageIncidents is imported only by the "still on the page?" consumers', () => {

@@ -1,6 +1,7 @@
 import type { ServiceStatus, Incident } from './types'
 import { isUnreadableStatus } from './status-verdict'
 import { getFallbacks } from './fallback'
+import type { LatestReportSummary } from './latest-report'
 
 // Lite projection for the Claude-only Chrome extension (#837).
 //
@@ -57,11 +58,22 @@ export interface ExtClaudeService {
   fallback: Array<{ name: string; score: number | null }>
   incidents: ExtClaudeIncident[]
   reports: ExtClaudeReports
+  /** #1711 — the components this surface's status is the worst of (claude.ai: claude.ai + Claude Cowork);
+   *  empty when the surface has a single one. */
+  components: Array<{ name: string; status: string }>
+}
+
+/** #1711 — Anthropic components that are not services (#1669): shown with a not-counted label only. */
+export interface ExtClaudeReference {
+  components: Array<{ name: string; status: string }>
+  incidents: ExtClaudeIncident[]
 }
 
 export interface ExtClaudePayload {
   services: ExtClaudeService[]
   cachedAt: string | null
+  reference: ExtClaudeReference
+  latestReport: LatestReportSummary | null
 }
 
 // KV-derived inputs the handler resolves and injects, kept OUT of the pure builder so
@@ -72,6 +84,7 @@ export interface ExtClaudeContext {
   reportFeedMap?: Record<string, Array<{ cat: string; ts: number; desc?: string }>>
   // AI summary keyed `${svcId}:${incId}` for active incidents (present when ai:analysis exists).
   aiSummaryMap?: Record<string, string>
+  latestReport?: LatestReportSummary | null
 }
 
 const RECENT_REPORTS_CAP = 5
@@ -87,14 +100,14 @@ export function isExtClaudeRequest(searchParams: URLSearchParams): boolean {
 // Surfaced incident phases for the popup's "current issue" list. Matches the cached
 // endpoint's AI-analysis filter: resolved = done, monitoring = recovery confirmed —
 // both excluded so the popup shows only incidents that are actually ongoing.
-function activeIncidents(svc: ScoredService): Incident[] {
+function activeIncidents(list: Incident[] | undefined): Incident[] {
   // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) unresolved at
   // migration time never resolves for the life of the finite migration bridge, so without this
   // exclusion the extension popup would show a stale ghost from a retiring source as the "current
   // issue" indefinitely. Currently inert (Replicate is not in `EXT_CLAUDE_IDS`) — not a durable
   // reason, so excluded here directly rather than relying on that list never changing (round-9
   // structural pass, #1384).
-  return (svc.incidents ?? []).filter((i) => i.status !== 'resolved' && i.status !== 'monitoring' && !i.retainedBridge)
+  return (list ?? []).filter((i) => i.status !== 'resolved' && i.status !== 'monitoring' && !i.retainedBridge)
 }
 
 // Build the projection: filter to the three Anthropic surfaces (preserving
@@ -110,13 +123,25 @@ export function buildExtClaudePayload(
 ): ExtClaudePayload {
   const byId = new Map(scoredAll.map((s) => [s.id, s]))
   const services: ExtClaudeService[] = []
+  const reference: ExtClaudeReference = { components: [], incidents: [] }
+  const seenRef = new Set<string>()
   for (const id of EXT_CLAUDE_IDS) {
     const svc = byId.get(id)
     if (!svc) continue
-    const incidents: ExtClaudeIncident[] = activeIncidents(svc).map((i) => {
+    const incidents: ExtClaudeIncident[] = activeIncidents(svc.incidents).map((i) => {
       const aiSummary = ctx.aiSummaryMap?.[`${svc.id}:${i.id}`]
       return { id: i.id, title: i.title, status: i.status, impact: i.impact, ...(aiSummary ? { aiSummary } : {}) }
     })
+    for (const c of svc.referenceComponents ?? []) {
+      if (seenRef.has(`c:${c.id}`)) continue
+      seenRef.add(`c:${c.id}`)
+      reference.components.push({ name: c.name, status: c.status })
+    }
+    for (const i of activeIncidents(svc.referenceIncidents)) {
+      if (seenRef.has(`i:${i.id}`)) continue
+      seenRef.add(`i:${i.id}`)
+      reference.incidents.push({ id: i.id, title: i.title, status: i.status, impact: i.impact })
+    }
     const gated = ctx.reportFeedMap?.[svc.id] ?? []
     const reports: ExtClaudeReports = {
       count: gated.length,
@@ -138,7 +163,8 @@ export function buildExtClaudePayload(
       fallback: isUnreadableStatus(svc.status) ? [] : getFallbacks(svc.id, svc.category, scoredAll),
       incidents,
       reports,
+      components: (svc.components ?? []).length > 1 ? svc.components!.map((c) => ({ name: c.name, status: c.status })) : [],
     })
   }
-  return { services, cachedAt }
+  return { services, cachedAt, reference, latestReport: ctx.latestReport ?? null }
 }

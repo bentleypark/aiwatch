@@ -91,7 +91,7 @@ Every clickable inbound link **we** emit is UTM-tagged so GA4 (and the `#842-B` 
 | `reddit` | `social` | `outage` | Reddit promote links (`appendUtm`, reddit.ts) | **`reddit`** (#1055 — was `direct`) |
 | `bsky` | `social` | `outage` | Bluesky reply-assist link in the operator incident alert (`appendUtm`, alerts.ts) | **`bsky`** (#1417) — also by referrer host `bsky.app`/`go.bsky.app` |
 | **`discord`** | **`notification`** | **`outage`** | **#936 — Discord alert "View on AIWatch" (operator dashboard + per-user is-down, `appendUtm`)** | `feed` |
-| **`extension`** | **`referral`** | — | **#936 — Chrome extension deep links + dashboard (`withExtUtm`, extension/config.js)** | `owned` |
+| **`extension`** | **`referral`** | — | **#936 — Chrome extension deep links + dashboard (`withExtUtm`, extension/config.js); #1711 — the monthly-report link adds `utm_content=monthly_report`** | `owned` |
 | **`statusline`** | **`referral`** | — | **#936 — statusline OSC-8 links (`appendUtm`, statusline.ts)** | `owned` |
 
 `appendUtm` (worker `utils.ts`) inserts the query **before** the `#` on a hash-routed dashboard link (`ai-watch.dev/?utm…#claude`) so GA4's `location.search` sees it. The extension can't import worker code, so it carries its own `withExtUtm`. `owned` = our always-on client surfaces (existing users returning), distinct from new inbound (`x`/`search`/`feed`).

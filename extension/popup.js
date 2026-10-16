@@ -15,6 +15,8 @@ import {
   fallbackText,
   shouldShowFallback,
   isDownPath,
+  monthLabel,
+  monthlyRowText,
 } from './lib/render.js'
 
 const STORAGE_KEY = 'aiwatch:status'
@@ -65,6 +67,49 @@ function fallbackNode(fallback) {
   return wrap
 }
 
+function componentNode(c, className) {
+  const row = el('div', className)
+  row.appendChild(el('span', `dot ${c.status || 'unknown'}`))
+  row.appendChild(el('span', 'component-name', c.name))
+  row.appendChild(el('span', 'component-status', statusLabel(c.status)))
+  return row
+}
+
+// #1711 — Anthropic components that are not services (#1669): outside the cards, never counted.
+function referenceNode(reference) {
+  const components = (reference && reference.components) || []
+  const incidents = (reference && reference.incidents) || []
+  if (components.length === 0 && incidents.length === 0) return null
+  const wrap = el('section', 'reference')
+  wrap.appendChild(el('div', 'reference-note', 'Other Anthropic components · not monitored, not counted above'))
+  for (const c of components) wrap.appendChild(componentNode(c, 'reference-row'))
+  for (const inc of incidents) wrap.appendChild(incidentNode(inc))
+  return wrap
+}
+
+// #1711 — the latest published monthly report, collapsed by default.
+function monthlyNode(report, services) {
+  const label = monthLabel(report && report.month)
+  if (!label || !Array.isArray(report.services) || report.services.length === 0) return null
+  const names = new Map(services.map((s) => [s.id, s.name]))
+  const box = el('details', 'monthly')
+  box.appendChild(el('summary', null, `📊 ${label} report`))
+  for (const row of report.services) {
+    const text = monthlyRowText(row)
+    if (!text) continue
+    const line = el('div', 'monthly-row')
+    line.appendChild(el('span', 'monthly-name', names.get(row.id) || row.id))
+    line.appendChild(el('span', 'monthly-figures', text))
+    box.appendChild(line)
+  }
+  const link = el('a', 'monthly-link', 'Read the full report →')
+  link.href = withExtUtm(report.url, 'monthly_report')
+  link.target = '_blank'
+  link.rel = 'noopener'
+  box.appendChild(link)
+  return box
+}
+
 function cardNode(svc, now) {
   const card = el('div', 'card')
   const head = el('div', 'card-head')
@@ -95,6 +140,8 @@ function cardNode(svc, now) {
   scoreEl.title = 'AIWatch reliability Score (0–100): uptime, incidents, recovery & responsiveness. Higher is better.'
   sub.appendChild(scoreEl)
   card.appendChild(sub)
+
+  for (const c of svc.components || []) card.appendChild(componentNode(c, 'subcomponent'))
 
   for (const inc of svc.incidents || []) card.appendChild(incidentNode(inc))
   if (svc.reports && svc.reports.count > 0) card.appendChild(reportsNode(svc.reports, now))
@@ -127,6 +174,10 @@ function render(stored) {
     main.appendChild(el('p', 'muted', 'Status unavailable — retrying…'))
   } else {
     for (const svc of services) main.appendChild(cardNode(svc, now))
+    const ref = referenceNode(payload.reference)
+    if (ref) main.appendChild(ref)
+    const monthly = monthlyNode(payload.latestReport, services)
+    if (monthly) main.appendChild(monthly)
   }
 
   // "Checked HH:MM" = when the extension last POLLED (client fetchedAt), local time. This is

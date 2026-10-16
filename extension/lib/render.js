@@ -127,3 +127,25 @@ export function isDownPath(id) {
   const slug = IS_DOWN_SLUG[id]
   return slug ? `/is-${slug}-down` : null
 }
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+// #1711 — "2026-09" → "September 2026"; anything else → '' (caller omits the section).
+export function monthLabel(month) {
+  const m = /^(\d{4})-(\d{2})$/.exec(month || '')
+  const name = m && MONTHS[Number(m[2]) - 1]
+  return name ? `${name} ${m[1]}` : ''
+}
+
+// #1711 — one surface's row in the monthly summary, in the report's own units: "9 incidents · 11h 27m down".
+export function monthlyRowText(row) {
+  const parts = []
+  if (Number.isFinite(row && row.incidents)) parts.push(`${row.incidents} incident${row.incidents === 1 ? '' : 's'}`)
+  const min = row && row.downtimeMin
+  if (Number.isFinite(min) && min > 0) {
+    const h = Math.floor(min / 60)
+    const m = Math.round(min % 60)
+    parts.push(`${h === 0 ? `${m}m` : m === 0 ? `${h}h` : `${h}h ${m}m`} down`)
+  }
+  return parts.join(' · ')
+}

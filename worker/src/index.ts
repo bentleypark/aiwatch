@@ -45,6 +45,7 @@ import { handleSlackOAuthRoute, handleSlackManageRequest, slackManageNotice } fr
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest, isStatuslinePreset, renderStatuslineBrief, buildStatuslineDownResponse, buildStatuslinePresetResponse, STATUSLINE_BRIEF_UNKNOWN } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
+import { readLatestReportSummary, refreshLatestReportSummary, isReportPublished } from './latest-report'
 import type { FeedTrafficCounts, StatuslineTrafficCounts } from './api-traffic'
 import { EXT_INDEX, PLUGIN_MONITOR_INDEX, PLUGIN_BRIEF_INDEX, recordCacheReadOutcome, recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, readFeedPolls, readExtPolls, readPluginPolls, readStatuslinePolls, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
@@ -3552,6 +3553,12 @@ const workerExport = {
         }
       }
 
+      // #1711 — hourly: offer the extension the newest monthly report once its page is published.
+      if (env.STATUS_CACHE && now.getUTCMinutes() < 5) {
+        const outcome = await refreshLatestReportSummary(env.STATUS_CACHE, now, EXT_CLAUDE_IDS, (url) => isReportPublished(url))
+        if (outcome === 'written' || outcome === 'unreadable' || outcome === 'write-failed') console.log(`[cron] #1711 latest report summary: ${outcome}`)
+      }
+
       // #1518 — incident.io roster audit, daily UTC 06:00-06:04. Reads each incident.io page's LIVE
       // `component_uptimes`, not a recorded snapshot, so an aged-in id still out of scope (an outage on
       // it is invisible in the reported uptime) is caught the day it happens rather than on a human's
@@ -5947,7 +5954,8 @@ const workerExport = {
                   console.warn('[ext-claude] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
                 }
               })))
-          const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData.cachedAt, { reportFeedMap: extReportFeed, aiSummaryMap: extAiSummary })), {
+          const latestReport = await readLatestReportSummary(env.STATUS_CACHE)
+          const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData.cachedAt, { reportFeedMap: extReportFeed, aiSummaryMap: extAiSummary, latestReport })), {
             headers: {
               'Content-Type': 'application/json',
               // Public, unauthenticated GET — extension fetches bypass CORS via MV3

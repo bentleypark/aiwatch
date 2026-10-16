@@ -130,7 +130,7 @@ describe('buildExtClaudePayload (#837)', () => {
 
   it('payload is lite — each service carries only the projected keys', () => {
     const out = buildExtClaudePayload(scoredSet(), 't')
-    expect(Object.keys(out.services[0]).sort()).toEqual(['fallback', 'grade', 'id', 'incidents', 'name', 'reports', 'score', 'status', 'uptime30d'])
+    expect(Object.keys(out.services[0]).sort()).toEqual(['components', 'fallback', 'grade', 'id', 'incidents', 'name', 'reports', 'score', 'status', 'uptime30d'])
     // heavy ServiceStatus fields must not leak
     expect(out.services[0]).not.toHaveProperty('aiwatchScore')
     expect(out.services[0]).not.toHaveProperty('provider')
@@ -152,7 +152,7 @@ describe('buildExtClaudePayload (#837)', () => {
   })
 
   it('empty scored set → empty services + passthrough cachedAt', () => {
-    expect(buildExtClaudePayload([], null)).toEqual({ services: [], cachedAt: null })
+    expect(buildExtClaudePayload([], null)).toEqual({ services: [], cachedAt: null, reference: { components: [], incidents: [] }, latestReport: null })
     expect(buildExtClaudePayload([], 't').services).toEqual([])
   })
 
@@ -259,5 +259,48 @@ describe('/api/status/cached ext-claude routing contract (#837)', () => {
     expect(dispatch('src=statusline-compact', c)).toBe('lite')
     expect(dispatch('src=dashboard', c)).toBe('full')
     expect(dispatch('', c)).toBe('full')
+  })
+})
+
+describe('buildExtClaudePayload — Cowork, Console and the latest report (#1711)', () => {
+  const COWORK = { id: 'bpp5gb3hpjcl', name: 'Claude Cowork', status: 'degraded' as const }
+  const CLAUDEAI_OWN = { id: 'rwppv331jlwc', name: 'claude.ai', status: 'operational' as const }
+  const CONSOLE = { id: '0qbwn08sd68x', name: 'Claude Console (platform.claude.com)', status: 'down' as const }
+  const inc = (id: string, status: string) => ({ id, title: `Console ${id}`, status, impact: 'major', startedAt: 't', duration: null, timeline: [] })
+
+  function set() {
+    return scoredSet().map((s) =>
+      s.id === 'claudeai' ? { ...s, components: [CLAUDEAI_OWN, COWORK] }
+        : s.id === 'claude' ? { ...s, referenceComponents: [CONSOLE], referenceIncidents: [inc('c-live', 'investigating'), inc('c-done', 'resolved'), inc('c-mon', 'monitoring')] }
+          : s.id === 'claudecode' ? { ...s, referenceComponents: [CONSOLE], referenceIncidents: [inc('c-live', 'investigating')] }
+            : s) as ScoredService[]
+  }
+
+  it('lists every component of a multi-component surface, so claude.ai itself is distinguishable from Cowork', () => {
+    const out = buildExtClaudePayload(set(), 't')
+    expect(out.services.find((s) => s.id === 'claudeai')!.components).toEqual([
+      { name: 'claude.ai', status: 'operational' },
+      { name: 'Claude Cowork', status: 'degraded' },
+    ])
+    expect(out.services.find((s) => s.id === 'claude')!.components).toEqual([])
+  })
+
+  it('emits nothing for a single-component surface', () => {
+    const single = scoredSet().map((s) => (s.id === 'claudeai' ? { ...s, components: [CLAUDEAI_OWN] } : s)) as ScoredService[]
+    expect(buildExtClaudePayload(single, 't').services.find((s) => s.id === 'claudeai')!.components).toEqual([])
+  })
+
+  it('carries Console as a reference component with its active incidents, once each, outside the services', () => {
+    const out = buildExtClaudePayload(set(), 't')
+    expect(out.reference.components).toEqual([{ name: 'Claude Console (platform.claude.com)', status: 'down' }])
+    expect(out.reference.incidents.map((i) => i.id)).toEqual(['c-live'])
+    expect(out.services.find((s) => s.id === 'claude')!.incidents).toEqual([])
+    expect(out.services.find((s) => s.id === 'claude')!.status).toBe('down')
+  })
+
+  it('passes the latest published report through, and null without one', () => {
+    const latestReport = { month: '2026-08', url: 'https://ai-watch.dev/reports/2026-08/', services: [{ id: 'claude', incidents: 18, downtimeMin: 600 }] }
+    expect(buildExtClaudePayload(set(), 't', { latestReport }).latestReport).toEqual(latestReport)
+    expect(buildExtClaudePayload(set(), 't').latestReport).toBeNull()
   })
 })

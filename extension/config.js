@@ -9,7 +9,8 @@ export const WORKER_BASE = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 export const SITE_BASE = 'https://ai-watch.dev'
 
 // The lite projection the extension polls (PR1 #841): the 3 Anthropic surfaces +
-// status/score/grade/fallback + active incidents + gated crowd reports (~0.6 KB).
+// status/score/grade/fallback + active incidents + gated crowd reports, plus components, the Console
+// and the latest report (#1711) (~1.2 KB).
 export const STATUS_URL = `${WORKER_BASE}/api/status/cached?src=ext-claude`
 export const REPORT_URL = `${WORKER_BASE}/api/report-issue`
 // Per-surface "Is X Down?" deep links are built from SITE_BASE + render.js isDownPath();
@@ -19,8 +20,8 @@ export const REPORT_URL = `${WORKER_BASE}/api/report-issue`
 // instead of collapsing to (direct) — the extension carries no HTTP referrer. It's an always-on
 // product surface, not an outage campaign, so source+medium only (no utm_campaign). Kept in plain JS
 // here because the extension bundle cannot import the worker's appendUtm.
-export function withExtUtm(url) {
-  return `${url}${url.includes('?') ? '&' : '?'}utm_source=extension&utm_medium=referral`
+export function withExtUtm(url, content) {
+  return `${url}${url.includes('?') ? '&' : '?'}utm_source=extension&utm_medium=referral${content ? `&utm_content=${encodeURIComponent(content)}` : ''}`
 }
 
 // Poll cadence — 2 min (AIWatch data updates on the */5 cron; 2 min catches an

@@ -11,7 +11,24 @@ import {
   fallbackText,
   shouldShowFallback,
   isDownPath,
+  monthLabel,
+  monthlyRowText,
 } from './render.js'
+
+describe('monthly summary helpers (#1711)', () => {
+  it('names the report month and rejects anything else', () => {
+    expect(monthLabel('2026-09')).toBe('September 2026')
+    expect(monthLabel('2026-13')).toBe('')
+    expect(monthLabel(undefined)).toBe('')
+  })
+  it('renders a row in the report\'s units and drops missing figures', () => {
+    expect(monthlyRowText({ incidents: 9, downtimeMin: 687 })).toBe('9 incidents · 11h 27m down')
+    expect(monthlyRowText({ incidents: 1, downtimeMin: 60 })).toBe('1 incident · 1h down')
+    expect(monthlyRowText({ incidents: 7, downtimeMin: null })).toBe('7 incidents')
+    expect(monthlyRowText({ incidents: 0, downtimeMin: 0 })).toBe('0 incidents')
+    expect(monthlyRowText({ incidents: null, downtimeMin: null })).toBe('')
+  })
+})
 
 describe('worstStatus (#837)', () => {
   it('returns the worst across surfaces (down > degraded > operational)', () => {

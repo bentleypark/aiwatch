@@ -19,4 +19,10 @@ describe('withExtUtm (#936)', () => {
       'https://ai-watch.dev/is-openai-down?e=down&utm_source=extension&utm_medium=referral',
     )
   })
+
+  it('#1711 — tags the link with utm_content when given one', () => {
+    expect(withExtUtm('https://ai-watch.dev/reports/2026-08/', 'monthly_report')).toBe(
+      'https://ai-watch.dev/reports/2026-08/?utm_source=extension&utm_medium=referral&utm_content=monthly_report',
+    )
+  })
 })

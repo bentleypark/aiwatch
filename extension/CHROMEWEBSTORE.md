@@ -5,7 +5,7 @@
 
 ## Identity
 - **Name (store + `manifest.name`):** AIWatch — Claude Status & Down Detector  — keyword-rich for CWS search ("claude down detector" / "is claude down"). The in-app title stays clean: `action.default_title` (toolbar tooltip) + the popup header are "AIWatch — Claude Status", not the long store name.
-- **Version:** 1.0.2 (`extension/manifest.json`)
+- **Version:** 1.1.0 (`extension/manifest.json`)
 - **Category:** Developer Tools
 - **Primary purpose:** Show the live operational status of Anthropic's Claude surfaces
   (Claude API, claude.ai, Claude Code) in the toolbar, with a one-click issue report.
@@ -21,6 +21,8 @@ A colored dot (green / amber / red) shows the current worst-case status at a gla
 • Active incidents, with an AI-written summary of what's happening
 • A recommended fallback to switch to when a service is down
 • Community reports + one-click "Report an issue"
+• claude.ai and Claude Cowork shown separately, and the Claude Console listed on its own
+• A summary of the latest published AIWatch monthly reliability report
 
 Hit a problem? One click sends an anonymous report that feeds AIWatch's crowd-corroboration signal — it never overrides official status on its own.
 
@@ -83,6 +85,10 @@ No `tabs`, no `<all_urls>`, no content scripts, no `scripting`, no remote code.
 - [ ] `manifest.json` version bumped if re-submitting.
 
 ## Version history
+- **1.1.0** (#1711) — The claude.ai card lists claude.ai's and Claude Cowork's statuses; Claude Console's status and
+  active incidents appear outside the cards, labelled as not monitored and not counted; a collapsed
+  summary of the latest published monthly report (incidents and downtime per surface) links to it.
+  No permission / data-handling change.
 - **1.0.2** (#1233) — Reads the new `unknown` status ("AIWatch could not read this provider's status
   source"). The toolbar badge paints it NEUTRAL instead of skipping it, and the popup no longer
   recommends switching away from a service whose status could not be confirmed. No permission /
