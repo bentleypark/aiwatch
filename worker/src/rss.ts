@@ -14,6 +14,7 @@ import { formatRecoveryDisplay } from './ai-analysis'
 import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, formatDuration, severityEmoji, impactLabel } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
 import { withdrawalHold, liveIncidentIds, type WithdrawnIncident } from './withdrawn'
+import { pageIncidents } from './incident-presence'
 
 const SITE = 'https://ai-watch.dev'
 
@@ -594,8 +595,8 @@ export function buildFeedWithMeta(
   // #793 — incIds whose ACTIVE item has actually been served in a prior /feed response (the
   // `feed:active-emitted:{incId}` markers, read by the handler). When provided, a resolved incident
   // NOT in this set is suppressed (its outage was never announced → don't emit an orphan "Resolved"
-  // item). Absent → fail-open (emit every resolved item, the pre-#793 behavior), so direct callers /
-  // unit tests that don't thread it are unaffected.
+  // item). Absent → fail-open (emit every resolved counted item, the pre-#793 behavior); a
+  // reference incident (#1669) is never emitted without it (#1701).
   servedActive?: Set<string>,
   // #1106 — tombstones for incidents the provider DELETED from its status page (see withdrawn.ts).
   // They are rendered from here rather than from `services` because that is the point: the incident
@@ -613,8 +614,12 @@ export function buildFeedWithMeta(
   // base row. Sort by each item's own pubDate (resolution time for resolved items).
   type Entry = { svc: ServiceStatus; incident: Incident; kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string }
   const items: Entry[] = []
+  const countedAnywhere = new Set(services.flatMap((s) => (s.incidents ?? []).map((i) => i.id)))
   for (const svc of sources) {
-    for (const incident of svc.incidents ?? []) {
+    const counted = new Set((svc.incidents ?? []).map((i) => i.id))
+    for (const incident of pageIncidents(svc)) {
+      // #1701 — a reference incident only ever closes a thread /feed opened while it was counted.
+      if (!counted.has(incident.id) && (countedAnywhere.has(incident.id) || !(incident.status === 'resolved' && servedActive?.has(incident.id)))) continue
       if (incident.status === 'resolved') {
         // #1292 — never emit a `status_history`-derived resolved item. It is synthesized already
         // closed, so it was never announced as active and a lone "Resolved" is an orphan by

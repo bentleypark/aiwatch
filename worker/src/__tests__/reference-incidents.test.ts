@@ -367,6 +367,6 @@ describe('#1669 referenceIncidents has no counting reader in the worker', () => 
       .filter((f) => f.endsWith('.ts') && !f.includes('__tests__'))
       .filter((f) => readFileSync(join(dir, f), 'utf8').includes("from './incident-presence'"))
       .sort()
-    expect(importers).toEqual(['alerted-gone.ts', 'alerts.ts', 'index.ts', 'monthly-archive.ts', 'withdrawn.ts'])
+    expect(importers).toEqual(['alerted-gone.ts', 'alerts.ts', 'index.ts', 'monthly-archive.ts', 'rss.ts', 'withdrawn.ts'])
   })
 })

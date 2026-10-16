@@ -5366,13 +5366,14 @@ const workerExport = {
         if (Object.keys(firstSeen).length > 0) feedFirstSeen = firstSeen
         const analysis: RssAiAnalysisMap = {}
         await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
-          (svc.incidents ?? [])
+          pageIncidents(svc)
             // #827 F4 — also load RESOLVED analyses (still present for 2h post-resolution) so the
             // resolved feed item can render "predicted vs actual". `monitoring` stays excluded (#724).
             // #1292 — and a `status_history`-derived incident never had an analysis (it is synthesized
             // already closed and never reaches `/feed`), so probing it is a permanently-absent KV read
             // on every poll. The sibling `feed:active-emitted` probe below filters it for the same reason.
             .filter((i) => i.status !== 'monitoring' && i.derived !== 'status_history')
+            .filter((i) => i.status === 'resolved' || (svc.incidents ?? []).includes(i))
             .map(async (inc) => {
               const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
               if (!raw) return
@@ -5422,7 +5423,7 @@ const workerExport = {
         ))
         const servedActive = new Set<string>()
         await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
-          (svc.incidents ?? [])
+          pageIncidents(svc)
             // #1292 — a `status_history`-derived incident was never ACTIVE (it is synthesized already
             // closed), so its `feed:active-emitted` marker can never exist. Probing it would be one
             // permanently-absent KV read per incident per poll — up to 20 per BetterStack service, on
@@ -5432,13 +5433,16 @@ const workerExport = {
             .filter((i) => i.status === 'resolved' && i.derived !== 'status_history')
             .map(async (inc) => {
               // Clean miss (null) → leave OUT → buildRssFeed suppresses the orphan resolved item.
-              // A KV throw is indistinguishable from "never served", so fail OPEN (add → emit the
-              // resolved) — dropping a legit recovery notice is worse than letting one orphan through.
+              // A KV throw is indistinguishable from "never served". For a COUNTED incident, fail OPEN
+              // (add → emit the resolved) — dropping a legit recovery notice is worse than letting one
+              // orphan through. For a REFERENCE incident (#1701), fail CLOSED: /feed never opens one, and a
+              // served one is emitted on the next poll that reads its marker.
               try {
                 if (await env.STATUS_CACHE!.get(`feed:active-emitted:${inc.id}`)) servedActive.add(inc.id)
               } catch (err) {
-                console.warn('[rss] #793 active-emitted read failed — failing open (emit resolved):', inc.id, err instanceof Error ? err.message : err)
-                servedActive.add(inc.id)
+                const counted = (svc.incidents ?? []).includes(inc)
+                console.warn(`[rss] #793 active-emitted read failed — ${counted ? 'failing open (emit resolved)' : 'reference incident, not emitting until a read succeeds (#1701)'}:`, inc.id, err instanceof Error ? err.message : err)
+                if (counted) servedActive.add(inc.id)
               }
             }),
         ))
