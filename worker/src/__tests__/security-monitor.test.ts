@@ -430,12 +430,12 @@ describe('fetchOSVAlerts — two-phase flow (#323)', () => {
     expect(mock).toHaveBeenCalledTimes(1)
   })
 
-  it('marks an old published advisory seen without alerting when its record was recently modified (#1696)', async () => {
+  it('marks an old reviewed advisory ignored without alerting when its record was recently modified (#1696)', async () => {
     const nowISO = new Date().toISOString()
     const oldPublished = new Date(Date.now() - 10 * 86400 * 1000).toISOString()
     const mock = stubFetchByUrl({
       'querybatch': { results: [{ vulns: [{ id: 'GHSA-republished-old', modified: nowISO }] }] },
-      'GHSA-republished-old': { id: 'GHSA-republished-old', modified: nowISO, published: oldPublished, summary: 'Old advisory' },
+      'GHSA-republished-old': { id: 'GHSA-republished-old', modified: nowISO, published: oldPublished, summary: 'Old advisory', database_specific: { github_reviewed_at: oldPublished } },
     })
     const entries = new Map<string, string>()
     const kv = {
@@ -448,39 +448,145 @@ describe('fetchOSVAlerts — two-phase flow (#323)', () => {
     expect(mock).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps a recently published advisory eligible when it was modified in the scan window', async () => {
-    const nowISO = new Date().toISOString()
-    const mock = stubFetchByUrl({
-      'querybatch': { results: [{ vulns: [{ id: 'GHSA-recent-published', modified: nowISO }] }] },
-      'GHSA-recent-published': { id: 'GHSA-recent-published', modified: nowISO, published: nowISO, summary: 'Recent advisory' },
+  describe('an advisory already tracked by the OSV timeline (#291) that is modified more than 7 days after its review', () => {
+    const ID = 'GHSA-tracked-fix'
+    const trackedFixture = (withSeen: boolean) => {
+      const now = Date.now()
+      const nowISO = new Date(now).toISOString()
+      const detectedAt = new Date(now - 7.5 * 86400 * 1000).toISOString()
+      stubFetchByUrl({
+        'querybatch': { results: [{ vulns: [{ id: ID, modified: nowISO }] }] },
+        [ID]: {
+          id: ID, modified: nowISO, published: new Date(now - 8 * 86400 * 1000).toISOString(), summary: 'Tracked advisory',
+          database_specific: { severity: 'HIGH', github_reviewed_at: new Date(now - 8 * 86400 * 1000).toISOString() },
+          affected: [{ package: { name: 'openai', ecosystem: 'PyPI' }, ranges: [{ type: 'ECOSYSTEM', events: [{ introduced: '1.0.0' }, { fixed: '1.2.3' }] }] }],
+        },
+      })
+      const store = new Map<string, string>()
+      if (withSeen) store.set(`security:seen:osv:${ID}`, '{}')
+      store.set(osvTimelineKey(ID), JSON.stringify({
+        vulnId: ID, createdAt: detectedAt, lastSeen: detectedAt,
+        entries: [{ stage: 'detected', at: detectedAt, severity: 'high' }],
+      }))
+      const kv = {
+        async get(key: string) { return store.get(key) ?? null },
+        async put(key: string, value: string) { store.set(key, value) },
+      } as unknown as KVNamespace
+      return { kv, store, nowISO }
+    }
+
+    it.each([true, false])('still records fix_released on the timeline path, in the cron order (alert path first), seen marker present=%s', async (withSeen) => {
+      const { kv, store, nowISO } = trackedFixture(withSeen)
+
+      await fetchOSVAlerts(kv)
+      const plans = await planOsvTimelineCycle(await fetchOSVAlerts(), async (key) => store.get(key) ?? null, nowISO)
+
+      expect(plans.map((p) => p.next.entries.at(-1)?.stage)).toEqual(['fix_released'])
     })
 
-    await expect(fetchOSVAlerts(null)).resolves.toMatchObject([{ id: 'GHSA-recent-published' }])
-    expect(mock).toHaveBeenCalledTimes(2)
+    it('is not alerted as a new finding even when its seen marker has expired', async () => {
+      const { kv, store } = trackedFixture(false)
+
+      await expect(fetchOSVAlerts(kv)).resolves.toEqual([])
+      expect(store.get(`security:ignored:osv:${ID}`)).toBe('1')
+    })
   })
 
-  it('keeps an advisory with an unreadable published timestamp eligible', async () => {
-    const nowISO = new Date().toISOString()
-    const mock = stubFetchByUrl({
-      'querybatch': { results: [{ vulns: [{ id: 'GHSA-unreadable-published', modified: nowISO }] }] },
-      'GHSA-unreadable-published': { id: 'GHSA-unreadable-published', modified: nowISO, published: 'not-a-date', summary: 'Unreadable date' },
+  describe('the review date decides whether a re-modified advisory is a first sighting (#1696)', () => {
+    const DAY = 86400 * 1000
+    const run = async (id: string, published: number, reviewed: string | undefined) => {
+      const now = Date.now()
+      const nowISO = new Date(now).toISOString()
+      stubFetchByUrl({
+        'querybatch': { results: [{ vulns: [{ id, modified: nowISO }] }] },
+        [id]: {
+          id, modified: nowISO, published: new Date(now - published * DAY).toISOString(), summary: 'Reviewed advisory',
+          database_specific: reviewed === undefined ? {} : { github_reviewed_at: Number.isNaN(Number(reviewed)) ? reviewed : new Date(now - Number(reviewed) * DAY).toISOString() },
+        },
+      })
+      const store = new Map<string, string>()
+      const kv = {
+        async get(key: string) { return store.get(key) ?? null },
+        async put(key: string, value: string) { store.set(key, value) },
+      } as unknown as KVNamespace
+      return { alerts: await fetchOSVAlerts(kv), store }
+    }
+
+    it('is still a first sighting: published 36 days ago, reviewed 1 day ago', async () => {
+      const { alerts, store } = await run('GHSA-reviewed-late', 36, '1')
+
+      expect(alerts.map((a) => a.id)).toEqual(['GHSA-reviewed-late'])
+      expect(store.has('security:ignored:osv:GHSA-reviewed-late')).toBe(false)
     })
 
-    await expect(fetchOSVAlerts(null)).resolves.toMatchObject([{ id: 'GHSA-unreadable-published' }])
-    expect(mock).toHaveBeenCalledTimes(2)
+    it('is stale when it was reviewed long ago as well', async () => {
+      const { alerts, store } = await run('GHSA-reviewed-old', 600, '400')
+
+      expect(alerts).toEqual([])
+      expect(store.get('security:ignored:osv:GHSA-reviewed-old')).toBe('1')
+    })
+
+    it('is never filtered when the review date is unreadable', async () => {
+      const { alerts, store } = await run('GHSA-bad-review-date', 600, 'not-a-date')
+
+      expect(alerts.map((a) => a.id)).toEqual(['GHSA-bad-review-date'])
+      expect(store.has('security:ignored:osv:GHSA-bad-review-date')).toBe(false)
+    })
+
+    it('is never filtered without a review date: a record from another database (PYSEC) can enter OSV months after its back-dated publication', async () => {
+      const { alerts, store } = await run('PYSEC-2025-211', 147, undefined)
+
+      expect(alerts.map((a) => a.id)).toEqual(['PYSEC-2025-211'])
+      expect(store.has('security:ignored:osv:PYSEC-2025-211')).toBe(false)
+    })
   })
 
-  it('does not refetch a published-before-window advisory for timeline tracking', async () => {
-    const nowISO = new Date().toISOString()
-    const mock = stubFetchByUrl({
-      'querybatch': { results: [{ vulns: [{ id: 'GHSA-republished-old', modified: nowISO }] }] },
-    })
+  it('lets a new advisory through once a burst of old republications has been marked', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const now = Date.now()
+    const nowISO = new Date(now).toISOString()
+    const oldPublished = new Date(now - 700 * 86400 * 1000).toISOString()
+    const oldIds = Array.from({ length: 15 }, (_, i) => `GHSA-old-${i}`)
+    const newIds = Array.from({ length: 3 }, (_, i) => `GHSA-new-${i}`)
+    const results: Array<{ vulns?: Array<{ id: string; modified: string }> }> = OSV_PACKAGES.map(() => ({}))
+    results[OSV_PACKAGES.findIndex((p) => p.name === 'transformers')] = { vulns: oldIds.map((id) => ({ id, modified: nowISO })) }
+    results[OSV_PACKAGES.findIndex((p) => p.name === 'openai' && p.ecosystem === 'npm')] = { vulns: newIds.map((id) => ({ id, modified: nowISO })) }
+    const docs: Record<string, unknown> = {}
+    for (const id of oldIds) docs[id] = { id, modified: nowISO, published: oldPublished, summary: id, database_specific: { github_reviewed_at: oldPublished } }
+    for (const id of newIds) docs[id] = { id, modified: nowISO, published: nowISO, summary: id }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('querybatch')) return resp({ results })
+      return resp(docs[url.split('/').pop()!])
+    }))
+    const store = new Map<string, string>()
     const kv = {
-      async get(key: string) { return key === 'security:ignored:osv:GHSA-republished-old' ? '1' : null },
+      async get(key: string) { return store.get(key) ?? null },
+      async put(key: string, value: string) { store.set(key, value) },
     } as unknown as KVNamespace
 
-    await expect(fetchOSVAlerts(kv, { includeSeen: true })).resolves.toEqual([])
-    expect(mock).toHaveBeenCalledTimes(1)
+    const alerted: string[] = []
+    for (let cycle = 0; cycle < 3; cycle++) {
+      for (const a of await fetchOSVAlerts(kv)) { alerted.push(a.id); store.set(`security:seen:osv:${a.id}`, '{}') }
+    }
+
+    expect(alerted.sort()).toEqual(newIds)
+  })
+
+  it('does not count an ignored old advisory as an HTTP failure in the dropped-fetch warning', async () => {
+    const nowISO = new Date().toISOString()
+    stubFetchByUrl({
+      'querybatch': { results: [{ vulns: [{ id: 'GHSA-republished-old', modified: nowISO }] }] },
+      'GHSA-republished-old': { id: 'GHSA-republished-old', modified: nowISO, published: new Date(Date.now() - 10 * 86400 * 1000).toISOString(), summary: 'Old advisory', database_specific: { github_reviewed_at: new Date(Date.now() - 10 * 86400 * 1000).toISOString() } },
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const kv = { async get() { return null }, async put() {} } as unknown as KVNamespace
+
+    await fetchOSVAlerts(kv)
+
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('dropped')
+    warn.mockRestore()
   })
 
   it('drops a single failed detail fetch without failing the batch', async () => {

@@ -234,7 +234,6 @@ export const OSV_PACKAGES = [
 
 interface OSVVuln {
   id: string
-  published?: string
   summary?: string
   details?: string
   severity?: Array<{ type: string; score: string }>
@@ -246,12 +245,13 @@ interface OSVVuln {
       events: Array<{ introduced?: string; fixed?: string }>
     }>
   }>
-  database_specific?: { severity?: string; cwe_ids?: string[] }
+  database_specific?: { severity?: string; cwe_ids?: string[]; github_reviewed_at?: string }
   modified: string
 }
 
 const OSV_WINDOW_MS = 7 * 86400 * 1000
-const OSV_IGNORED_PUBLISHED_PREFIX = 'security:ignored:osv:'
+const OSV_IGNORED_PREFIX = 'security:ignored:osv:'
+const OSV_IGNORED = 'ignored' as const
 
 // Map OSV severity text label to our severity level
 const SEVERITY_TEXT_MAP: Record<string, SecurityAlert['severity']> = {
@@ -328,8 +328,8 @@ export async function listOSVCandidates(): Promise<OSVCandidate[]> {
 export async function fetchOSVVulnDetails(
   candidate: OSVCandidate,
   kv: KVNamespace | null = null,
-  publishedCutoffMs = Date.now() - OSV_WINDOW_MS,
-): Promise<SecurityAlert | null> {
+  reviewedCutoffMs = Date.now() - OSV_WINDOW_MS,
+): Promise<SecurityAlert | null | typeof OSV_IGNORED> {
   const res = await fetch(`https://api.osv.dev/v1/vulns/${candidate.id}`, {
     headers: { 'User-Agent': 'AIWatch/1.0 (ai-watch.dev; security monitoring)' },
     signal: AbortSignal.timeout(8000),
@@ -342,16 +342,14 @@ export async function fetchOSVVulnDetails(
   }
 
   const v = await res.json() as OSVVuln
-  const publishedMs = v.published ? Date.parse(v.published) : Number.NaN
-  if (Number.isFinite(publishedMs) && publishedMs < publishedCutoffMs) {
-    if (kv) {
-      try {
-        await kv.put(`${OSV_IGNORED_PUBLISHED_PREFIX}${v.id}`, '1', { expirationTtl: 604800 })
-      } catch (err) {
-        console.error('[security] Failed to mark old OSV advisory as seen:', v.id, err instanceof Error ? err.message : err)
-      }
+  const reviewedMs = v.database_specific?.github_reviewed_at ? Date.parse(v.database_specific.github_reviewed_at) : Number.NaN
+  if (kv && reviewedMs < reviewedCutoffMs) {
+    try {
+      await kv.put(`${OSV_IGNORED_PREFIX}${v.id}`, '1', { expirationTtl: 604800 })
+    } catch (err) {
+      console.error('[security] Failed to mark old OSV advisory as ignored:', v.id, err instanceof Error ? err.message : err)
     }
-    return null
+    return OSV_IGNORED
   }
   const pkg = OSV_PACKAGES[candidate.packageIndex]
   if (!pkg) {
@@ -387,7 +385,7 @@ export async function fetchOSVVulnDetails(
 // Cap per-cycle detail fetches to protect the Workers subrequest budget on first
 // deploy, KV wipe, or post-outage catch-up (where `unseen` can be a large batch).
 // Over-cap vulns aren't lost — surfaced alerts are seen-marked in the caller, and
-// an old published advisory gets its ignore marker only after its detail fetch.
+// an old reviewed advisory gets its ignore marker only after its detail fetch.
 // Truncated candidates therefore stay unseen and re-appear next cycle.
 const OSV_MAX_DETAIL_FETCH = 15
 
@@ -395,11 +393,8 @@ const OSV_MAX_DETAIL_FETCH = 15
 // GET /v1/vulns/{id} per candidate to get summary/severity/references/affected.
 // Dedup runs between phases so vulns already marked seen by a prior cron cycle
 // skip the per-vuln detail fetch.
-// `kv = null` default is for test ergonomics; production always passes env.STATUS_CACHE.
-export async function fetchOSVAlerts(
-  kv: KVNamespace | null = null,
-  { includeSeen = false }: { includeSeen?: boolean } = {},
-): Promise<SecurityAlert[]> {
+// Production passes env.STATUS_CACHE on the alert path; the OSV timeline (#291) passes none, which skips both the dedup and the review-date filter.
+export async function fetchOSVAlerts(kv: KVNamespace | null = null): Promise<SecurityAlert[]> {
   const candidates = await listOSVCandidates()
   if (candidates.length === 0) return []
 
@@ -409,7 +404,7 @@ export async function fetchOSVAlerts(
     const seenFlags = await Promise.allSettled(
       candidates.map(c => Promise.all([
         kv.get(`security:seen:osv:${c.id}`),
-        kv.get(`${OSV_IGNORED_PUBLISHED_PREFIX}${c.id}`),
+        kv.get(`${OSV_IGNORED_PREFIX}${c.id}`),
       ])),
     )
     unseen = candidates.filter((c, i) => {
@@ -425,9 +420,7 @@ export async function fetchOSVAlerts(
       }
       if (r?.status !== 'fulfilled') return true
       const [seen, ignored] = r.value
-      if (ignored) return false
-      if (!seen) return true
-      return includeSeen
+      return !seen && !ignored
     })
   }
   if (unseen.length === 0) return []
@@ -438,19 +431,23 @@ export async function fetchOSVAlerts(
   }
 
   // Phase 2 — parallel per-vuln detail fetch. allSettled so one failure doesn't drop the batch.
-  const publishedCutoffMs = Date.now() - OSV_WINDOW_MS
-  const settled = await Promise.allSettled(unseen.map(candidate => fetchOSVVulnDetails(candidate, kv, publishedCutoffMs)))
+  const reviewedCutoffMs = Date.now() - OSV_WINDOW_MS
+  const settled = await Promise.allSettled(unseen.map(candidate => fetchOSVVulnDetails(candidate, kv, reviewedCutoffMs)))
   const alerts: SecurityAlert[] = []
   let droppedHttp = 0
   let droppedThrew = 0
+  let ignoredOld = 0
   for (const r of settled) {
-    if (r.status === 'fulfilled' && r.value) alerts.push(r.value)
-    else if (r.status === 'fulfilled') droppedHttp++  // null → HTTP error already logged in fetchOSVVulnDetails
-    else {
+    if (r.status === 'fulfilled') {
+      if (r.value === OSV_IGNORED) ignoredOld++
+      else if (r.value) alerts.push(r.value)
+      else droppedHttp++  // null → HTTP error already logged in fetchOSVVulnDetails
+    } else {
       droppedThrew++
       console.error('[security] OSV.dev vuln fetch threw:', r.reason instanceof Error ? r.reason.message : r.reason)
     }
   }
+  if (ignoredOld > 0) console.log(`[security] OSV ignored ${ignoredOld}/${unseen.length} advisories reviewed before the ${OSV_WINDOW_MS / 86400000}-day window`)
   // Single aggregate line so a scatter of per-id HTTP errors produces one actionable signal.
   if (droppedHttp + droppedThrew > 0) {
     console.warn(`[security] OSV detail fetch dropped ${droppedHttp + droppedThrew}/${unseen.length} (http=${droppedHttp}, threw=${droppedThrew})`)

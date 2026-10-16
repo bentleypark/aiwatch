@@ -66,6 +66,13 @@ describe('#1418 Reddit scan cadence — through scheduled()', () => {
     expect(vi.mocked(fetchOSVAlerts)).toHaveBeenCalled()
   })
 
+  it('the hourly OSV timeline reads OSV without a KV, so the review-date filter (#1696) never reaches it', async () => {
+    await runAt('2026-08-12T12:02:00.000Z')
+    const calls = vi.mocked(fetchOSVAlerts).mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls.every((args) => args.length === 0)).toBe(true)
+  })
+
   it('an off-slot tick scans nothing', async () => {
     await runAt('2026-08-12T12:07:00.000Z')
     expect(vi.mocked(detectRedditPosts)).not.toHaveBeenCalled()

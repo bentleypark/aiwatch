@@ -3516,7 +3516,7 @@ const workerExport = {
         // not just the new-this-hour ones. Writes only on stage transitions, so
         // steady-state KV cost is near zero.
         try {
-          const osvAlerts = await fetchOSVAlerts(env.STATUS_CACHE, { includeSeen: true })
+          const osvAlerts = await fetchOSVAlerts()
           const plans = await planOsvTimelineCycle(
             osvAlerts,
             (key) => env.STATUS_CACHE.get(key).catch(() => null),
