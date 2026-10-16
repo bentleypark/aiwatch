@@ -567,15 +567,16 @@ export function formatAudienceScreenRow(byScreen: AudienceByScreen | null | unde
 }
 
 /** #827 Feature 1 — AI recovery-prediction accuracy, rendered as a labeled multi-line block so an
- *  operator can read it cold weeks later without decoding jargon. Three plain-language lines, all
+ *  operator can read it cold weeks later without decoding jargon. Plain-language lines, all
  *  anchored on the predicted recovery estimate (its upper bound):
- *    - On-target % = share that recovered within the predicted time (accuracyOf 'accurate' band)
+ *    - Recovered by the estimate = accurate + overPredicted; Took longer = underPredicted (sums to 100%)
  *    - Typical miss = median absolute distance from the estimate (how far off when wrong-ish)
  *    - Bias        = whether the model leans optimistic (under) or cautious (over)
  *  Empty until the corpus has ≥1 predicted+resolved incident → the whole block is omitted (no "0%"). */
 export function formatAccuracyLine(accuracy: AccuracyStats | null | undefined): string {
   if (!accuracy || accuracy.total === 0) return ''
-  const pct = Math.round(accuracy.hitRate * 100)
+  const byBound = accuracy.accurate + accuracy.overPredicted
+  const byPct = Math.round((byBound / accuracy.total) * 100)
   const err = accuracy.medianAbsErrorHours
   const errStr = err < 1 ? `${Math.round(err * 60)}m` : `${err.toFixed(1)}h`
   const bias = accuracy.underPredicted > accuracy.overPredicted
@@ -584,7 +585,8 @@ export function formatAccuracyLine(accuracy: AccuracyStats | null | undefined): 
       ? 'over-estimates (recovered faster than predicted)'
       : 'balanced (no consistent over/under lean)'
   return `\n🎯 **AI Recovery Prediction Accuracy** (${accuracy.total} forecast${accuracy.total === 1 ? '' : 's'} scored)`
-    + `\n   On-target: ${pct}% — actual recovery landed within the predicted time`
+    + `\n   Recovered by the estimated time: ${byBound} of ${accuracy.total} (${byPct}%)`
+    + `\n   Took longer than the estimate: ${accuracy.underPredicted} of ${accuracy.total} (${100 - byPct}%)`
     + `\n   Typical miss: ${errStr} off the estimate`
     + `\n   Bias: ${bias}`
 }
