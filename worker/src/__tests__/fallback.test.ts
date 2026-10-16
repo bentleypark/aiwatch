@@ -935,6 +935,43 @@ describe('#1062 facet B — capability routing on a secondary-component outage',
     { id: 'assemblyai', category: 'api', name: 'AssemblyAI', status: 'operational', aiwatchScore: 90 },
   ]
 
+  // #1698 — OpenRouter publishes TTS and STT as separate components, with its REAL names.
+  describe('openrouter (#1698) — a TTS-only or STT-only outage recommends that half of the Voice tier', () => {
+    const names = ['Chat (/api/v1/chat/completions)', 'Video (/api/v1/videos)', 'Image (/api/v1/image)', 'TTS (/api/v1/audio/speech)', 'STT (/api/v1/audio/transcriptions)', 'Embeddings (/api/v1/embeddings)']
+    const openrouter = (down: string[]) => ({
+      id: 'openrouter', category: 'api', name: 'OpenRouter', status: 'degraded', aiwatchScore: 83,
+      components: names.map((name) => ({ name, status: down.some((d) => name.startsWith(d)) ? 'degraded' : 'operational' })),
+    })
+    const recommended = (down: string[], candidates = pool) => getFallbacks('openrouter', 'api', [openrouter(down), ...candidates]).map((f) => f.name)
+
+    it('TTS down → text-to-speech services only', () => {
+      expect(recommended(['TTS'])).not.toContain('AssemblyAI')
+      expect(recommended(['TTS'])).toContain('ElevenLabs')
+    })
+    it('STT down → speech-to-text services only', () => {
+      const ttsFirst = pool.map((p) => (p.id === 'elevenlabs' ? { ...p, aiwatchScore: 99 } : p))
+      expect(recommended(['STT'], ttsFirst)).not.toContain('ElevenLabs')
+      expect(recommended(['STT'], ttsFirst)).toContain('AssemblyAI')
+    })
+    it('both down → the whole Voice tier', () => {
+      expect(recommended(['TTS', 'STT'])).toEqual(['AssemblyAI', 'Deepgram'])
+    })
+    it('a concurrent general-audio outage (OpenAI Audio) gets its own group', () => {
+      const audio = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }])
+      const groups = getGroupedFallbacks(['openai', 'openrouter'], [audio, openrouter(['TTS']), ...pool])
+      expect(groups.map((g) => g.label)).toEqual(['Audio / speech', 'Text to speech'])
+    })
+    it('both halves down shares one group with a concurrent general-audio outage', () => {
+      const audio = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }])
+      const groups = getGroupedFallbacks(['openai', 'openrouter'], [audio, openrouter(['TTS', 'STT']), ...pool])
+      expect(groups.map((g) => [g.label, g.fallbacks.length])).toEqual([['Audio / speech', 2]])
+    })
+    it('the routed group is labelled by the half that is down', () => {
+      const groups = getGroupedFallbacks(['openrouter'], [openrouter(['TTS']), ...pool])
+      expect(groups.map((g) => g.label)).toEqual(['Text to speech'])
+    })
+  })
+
   // #761 — Mistral joins this path (its Nuxt page now yields components[]). Pinned with Mistral's REAL
   // component names, so a rename upstream fails here rather than silently reverting to LLM peers.
   describe('mistral (#761) — the Nuxt-derived snapshot drives the same routing', () => {
@@ -1041,7 +1078,7 @@ describe('#1062 facet B — capability routing on a secondary-component outage',
   })
 
   it('OpenAI Audio-only outage → recommends the Voice tier (top-2 by Score; NOT STT/TTS-gated)', () => {
-    // Routed audio is NOT facet-A gated: openai is untagged in SERVICE_CAPABILITY, so all 3 Voice
+    // OpenAI's 'Audio' names neither half, so capabilityTagsOf leaves it untagged: all 3 Voice
     // services are eligible and it reduces to top-2 by Score. AssemblyAI(90) > Deepgram(85) > ElevenLabs(80).
     // Exact assertion (not `.every`, which passes vacuously on []) so an audio-route regression to empty fails.
     const services = [openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'down' }]), ...pool]
@@ -1353,7 +1390,7 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
   })
 
   it('#1129 — a tagged and an untagged routed Voice anchor split into two groups, answer is order-independent', () => {
-    // The routed pool depends on the anchor's own SERVICE_CAPABILITY tag (facet A), so the group key
+    // The routed pool depends on the anchor's own capabilityTagsOf tag (facet A), so the group key
     // encodes it (`routed:4:tts` vs `routed:4:`). A TAGGED ElevenLabs (tts) anchor and an UNTAGGED
     // OpenAI-'Audio' anchor therefore render two honest groups instead of one whose contents array order
     // decided — and the tagged anchor can no longer be answered with AssemblyAI (stt), the pairing #1062

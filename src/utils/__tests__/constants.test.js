@@ -478,7 +478,7 @@ describe('#1062 facet B — frontend capability routing on a secondary-component
 
   it('#1129 — a tagged + untagged routed Voice anchor split into two groups, order-independent', () => {
     // Frontend mirror of worker fallback.test.ts #1129: the group key encodes the anchor's own
-    // SERVICE_CAPABILITY tag, so a TAGGED ElevenLabs (tts) anchor and an UNTAGGED OpenAI-'Audio' anchor
+    // capabilityTagsOf tag, so a TAGGED ElevenLabs (tts) anchor and an UNTAGGED OpenAI-'Audio' anchor
     // render two honest groups instead of one whose contents array order decided — the tagged anchor can
     // no longer be answered with AssemblyAI (stt). Overview passes the WHOLE affected board, so this
     // co-anchoring is reachable with no shared incident.
@@ -936,5 +936,32 @@ describe('getFallbacks — fallbackSuppressed (#880)', () => {
     const src = jina({ fallbackSuppressed: true })
     expect(getFallbacks(src, [src, voyage])).toEqual([])
     expect(getGroupedFallbacks([src], [src, voyage])).toEqual([])
+  })
+})
+
+describe('#1698 — an OpenRouter TTS-only or STT-only outage recommends that half of the Voice tier', () => {
+  const names = ['Chat (/api/v1/chat/completions)', 'TTS (/api/v1/audio/speech)', 'STT (/api/v1/audio/transcriptions)']
+  const openrouter = (down) => ({
+    id: 'openrouter', category: 'api', status: 'degraded', aiwatchScore: 83, incidents: [],
+    components: names.map((name) => ({ name, status: name.startsWith(down) ? 'degraded' : 'operational' })),
+  })
+  const voice = [
+    { id: 'elevenlabs', category: 'api', status: 'operational', aiwatchScore: 99, incidents: [] },
+    { id: 'assemblyai', category: 'api', status: 'operational', aiwatchScore: 98, incidents: [] },
+  ]
+  it('TTS down → no speech-to-text service', () => {
+    const svc = openrouter('TTS')
+    expect(getFallbacks(svc, [svc, ...voice]).map((f) => f.id)).toEqual(['elevenlabs'])
+  })
+  it('STT down → no text-to-speech service', () => {
+    const svc = openrouter('STT')
+    expect(getFallbacks(svc, [svc, ...voice]).map((f) => f.id)).toEqual(['assemblyai'])
+  })
+  it('a concurrent general-audio outage (OpenAI Audio) gets its own group', () => {
+    const audio = { id: 'openai', category: 'api', status: 'degraded', aiwatchScore: 90, incidents: [],
+      components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }] }
+    const tts = openrouter('TTS')
+    const groups = getGroupedFallbacks([audio, tts], [audio, tts, ...voice])
+    expect(groups.map((g) => g.label)).toEqual(['Audio / speech', 'Text to speech'])
   })
 })

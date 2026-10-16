@@ -165,9 +165,7 @@ export function isSpecializedSubTier(tier: number): boolean {
 // `isSpecializedSubTier`'s same-tier gate alone still cross-recommended STT↔TTS (ElevenLabs down →
 // AssemblyAI). Each tag is AIWatch's MODELLING of a service's primary substitutable capability, not a
 // claim about the vendor's full API surface: `elevenlabs:['tts']` (text-to-speech), `assemblyai:['stt']`
-// (transcription), `deepgram:['stt','tts']` (both). A service ABSENT from this map is not capability-
-// gated — tier proximity governs it exactly as before, so this narrows nothing outside the listed
-// services. Keep the three copies in lockstep with src/utils/constants.js + the api/is-down.ts inline
+// (transcription), `deepgram:['stt','tts']` (both). Keep the three copies in lockstep with src/utils/constants.js + the api/is-down.ts inline
 // copy: api-tier-sync.test.ts deep-equals the DATA on all three and asserts the is-down filter WIRING;
 // the 3-line sharesCapability body is kept identical by hand.
 export const SERVICE_CAPABILITY: Record<string, string[]> = {
@@ -181,8 +179,8 @@ export const SERVICE_CAPABILITY: Record<string, string[]> = {
 // tag the pair is NOT capability-gated (returns true → tier logic alone decides), so this is a no-op for
 // every tier without SERVICE_CAPABILITY entries. (The empty-candidate-set → suppress consequence is
 // getFallbacks' emergent behavior; it lives at the call-site comment + docs, not on this pure predicate.)
-export function sharesCapability(a: string, b: string): boolean {
-  const ca = SERVICE_CAPABILITY[a]
+export function sharesCapability(a: string, b: string, aTags: string[] | undefined = SERVICE_CAPABILITY[a]): boolean {
+  const ca = aTags
   const cb = SERVICE_CAPABILITY[b]
   if (!ca || !cb) return true
   return ca.some((c) => cb.includes(c))
@@ -217,10 +215,8 @@ export const CAPABILITY_TIER: Record<string, number> = {
   image: 7, // Stability / FLUX
   video: 5, // Runway / Luma
   embeddings: 9, // Voyage / Jina (#880) — an embeddings-only OpenAI/Cohere/Mistral outage routes here
-  // Voice tier. NB facet A's STT/TTS gate does NOT apply to a routed audio outage: the routed source
-  // (e.g. OpenAI) is untagged in SERVICE_CAPABILITY, so sharesCapability(source, voice-svc) is always
-  // true and ALL Voice services are eligible. That is acceptable here — OpenAI's 'Audio' component
-  // covers both Whisper (STT) and TTS, so recommending the whole Voice tier is correct, not a facet-A miss.
+  // Voice tier. An audio outage is STT/TTS-gated only when its degraded component names the half
+  // (capabilityTagsOf, #1698); OpenAI's 'Audio' names neither, so the whole Voice tier is eligible.
   audio: 4,
 }
 // Sentinel: a single secondary-capability outage whose capability has no available peer tier → emit
@@ -239,7 +235,7 @@ export const CAPABILITY_LABEL: Record<string, string> = {
   embeddings: 'Embeddings',
 }
 
-// #1129 — a finer label for a ROUTED audio group, keyed by the anchor's `SERVICE_CAPABILITY` sub-tag.
+// #1129 — a finer label for a ROUTED audio group, keyed by the anchor's `capabilityTagsOf` sub-tag.
 // The routed group label is otherwise the CAPABILITY ('Audio / speech'), which is identical for a TTS
 // and an STT anchor — yet #1129 splits those into two separate pools, so two concurrent Voice outages
 // render two same-labelled groups (the visible-duplication the split created). Naming the sub-tag
@@ -325,6 +321,26 @@ export function routedCapability(svc: FallbackCandidate | undefined): string | n
   if (degraded.size !== 1) return null
   const cap = [...degraded][0]
   return cap !== 'llm' && cap in CAPABILITY_TIER ? cap : null
+}
+
+// #1698 — a component whose name says which half of speech it is.
+export const COMPONENT_AUDIO_TAG: Array<[RegExp, string]> = [
+  [/\btts\b/i, 'tts'],
+  [/\bstt\b|transcri/i, 'stt'],
+]
+
+/** #1698 — the capability tags this service's outage stands for: its own SERVICE_CAPABILITY entry, else
+ *  the one tag its degraded components name (undefined if none or both). */
+export function capabilityTagsOf(svc: FallbackCandidate | undefined): string[] | undefined {
+  if (!svc) return undefined
+  if (SERVICE_CAPABILITY[svc.id]) return SERVICE_CAPABILITY[svc.id]
+  const tags = new Set<string>()
+  for (const c of svc.components ?? []) {
+    if (c.status === 'operational') continue
+    const tag = COMPONENT_AUDIO_TAG.find(([re]) => re.test(c.name))?.[1]
+    if (tag) tags.add(tag)
+  }
+  return tags.size === 1 ? [...tags] : undefined
 }
 
 // #1062 facet B — the tier a service's fallback group is drawn from + LABELLED by: the routed capability
@@ -468,8 +484,10 @@ export function getFallbacks(
   if (services.find(s => s.id === serviceId)?.fallbackSuppressed) return []
   // #1062 facet B — if the outage is a single secondary-capability component (e.g. OpenAI 'Images'),
   // route candidates to that capability's tier; if it has no peer tier (realtime), suppress.
-  const routed = routingTier(services.find(s => s.id === serviceId))
+  const source = services.find(s => s.id === serviceId)
+  const routed = routingTier(source)
   if (routed === ROUTE_SUPPRESS) return []
+  const sourceTags = capabilityTagsOf(source)
   const sourceTier = routed ?? tierFor(serviceId)
   // #859 — for a specialized sub-tier source, restrict candidates to the SAME tier (no cross-tier bleed).
   const sameTierOnly = isSpecializedSubTier(sourceTier)
@@ -521,7 +539,7 @@ export function getFallbacks(
       // its capability (OpenAI), which the tier-distance sort ranks after the dedicated sibling.
       && (!sameTierOnly || admittedBySubTier(s.id))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
-      && sharesCapability(serviceId, s.id))
+      && sharesCapability(serviceId, s.id, sourceTags))
   const picked = orderForFallback(eligible, sourceTier).slice(0, 2)
   // #1119 — a routed outage that finds NOBODY is indistinguishable, on every surface, from an outage
   // that never routed: both render nothing. That silence is what let this bug live for weeks. Every
@@ -603,7 +621,7 @@ export function getGroupedFallbacks(
     // so a routed OpenAI-'Images' outage groups + labels as Image, not the source's LLM tier.
     // #1119 — the key groups anchors that draw from the same POOL. A ROUTED anchor's pool is determined
     // by its routed tier (`inSourceTier`, no category, no facet-C widening) AND, per facet A, by the
-    // anchor's own `SERVICE_CAPABILITY` tag (#1129) — the key encodes both. So routed anchors at one
+    // anchor's own `capabilityTagsOf` tag (#1129) — the key encodes both. So routed anchors at one
     // tier share a key across categories ONLY when their tags also match:
     // `openai` (api) and `chatgpt` (app) read the SAME status page and route together on one image
     // incident (both untagged → same key), and under the old `category:tierLabel` key they produced two
@@ -623,7 +641,7 @@ export function getGroupedFallbacks(
     // anchoring and candidacy are exact complements (anchor = non-operational OR carrying an incident;
     // candidate = operational AND clean), so a co-anchor is never in the other's pool to begin with.
     //
-    // #1129 — the routed pool ALSO depends on the anchor's own `SERVICE_CAPABILITY` tag via
+    // #1129 — the routed pool ALSO depends on the anchor's own `capabilityTagsOf` tag via
     // `sharesCapability` (facet A: a tagged `elevenlabs` tts source excludes `assemblyai` stt), so the
     // key encodes that tag too. Without it a TAGGED and an UNTAGGED routed Voice anchor (ElevenLabs tts
     // vs OpenAI `Audio` / Mistral `Audio API` / a ChatGPT `Voice Mode`) shared one `routed:4` group whose
@@ -631,7 +649,7 @@ export function getGroupedFallbacks(
     // tier (ElevenLabs TTS → AssemblyAI STT). Two same-tagged anchors (both untagged, or both tts) still
     // share a group; only a tag DIFFERENCE splits them, into two honestly-answered groups.
     const routed = routingTier(svc)
-    if (routed !== null && routed > 0) return `routed:${routed}:${(SERVICE_CAPABILITY[svc.id] ?? []).join('|')}`
+    if (routed !== null && routed > 0) return `routed:${routed}:${(capabilityTagsOf(svc) ?? []).join('|')}`
     const tierLabel = tierLabelFor(effectiveTierFor(svc))
     return tierLabel ? `${svc.category}:${tierLabel}` : svc.category
   }
@@ -666,11 +684,11 @@ export function getGroupedFallbacks(
     // #1062 facet B — a routed group is labelled by the affected CAPABILITY ("Image generation"), so the
     // recommendation self-describes WHY it switched; a non-routed group keeps its tier/category label.
     const cap = routedCapability(svc)
-    // #1129 — when a routed AUDIO group's anchor carries a single SERVICE_CAPABILITY sub-tag, label by
+    // #1129 — when a routed AUDIO group's anchor carries a single capabilityTagsOf sub-tag, label by
     // that sub-tag ('Text to speech' / 'Speech to text') instead of the shared 'Audio / speech', so two
     // split Voice groups don't render as duplicate labels. Untagged (openai audio) and both-tagged
     // (deepgram) fall through to the capability label. Guarded on cap === 'audio' — see CAPABILITY_TAG_LABEL.
-    const tags = SERVICE_CAPABILITY[svc.id] ?? []
+    const tags = capabilityTagsOf(svc) ?? []
     const subLabel = cap === 'audio' && tags.length === 1 ? CAPABILITY_TAG_LABEL[tags[0]] : undefined
     const label = cap ? (subLabel ?? CAPABILITY_LABEL[cap]) : (tierLabelFor(effectiveTierFor(svc)) || CATEGORY_LABEL[svc.category] || svc.category)
     resolved.push({ label, ...(cap ? { capability: cap } : {}), fallbacks: fbs })

@@ -4,6 +4,7 @@ import { ALERTED_NEW_TTL_S, parseAlertedRoster } from './alerts'
 import { PHANTOM_PRUNE_AFTER_MISSED_RUNS, type MonthlyIncidentEntry, type MonthlyIncidents } from './monthly-archive'
 import { isSuppressedByIdTitle, readSuppressionsFreshOrNull, type SuppressionEntry } from './suppression'
 import type { ServiceStatus } from './types'
+import { pageIncidents, type PageCarrier } from './incident-presence'
 import { kvPut } from './utils'
 import { liveIncidentIds } from './withdrawn'
 
@@ -32,12 +33,12 @@ export function goneAlertedIds(
   return [...announced].filter((id) => !closed.has(id) && !owned.has(id))
 }
 
-type Carrier = Pick<ServiceStatus, 'incidents' | 'status' | 'sourceDead' | 'sourceUnknown' | 'liveIncidentsActiveOnly' | 'incidentSourceStale'>
+type Carrier = PageCarrier & Pick<ServiceStatus, 'status' | 'sourceDead' | 'sourceUnknown' | 'liveIncidentsActiveOnly' | 'incidentSourceStale'>
 
 /** The announced services whose own list does not carry the incident. A service absent from this
  *  cycle's list counts as missing. */
 export function servicesMissing(incId: string, svcIds: readonly string[], byId: ReadonlyMap<string, Carrier>): string[] {
-  return svcIds.filter((id) => !byId.get(id)?.incidents?.some((i) => i.id === incId))
+  return svcIds.filter((id) => { const s = byId.get(id); return !s || !pageIncidents(s).some((i) => i.id === incId) })
 }
 
 /** Every one of these services was read this cycle, from a list that shows resolved incidents. */

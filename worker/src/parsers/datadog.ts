@@ -20,7 +20,7 @@
 //     (the cap is in the page's JS bundle, not in `config.json`); ours is that same reach capped at
 //     30. See {@link recordReachDays}.
 
-import type { Incident, TimelineEntry } from '../types'
+import type { Incident, ServiceComponent, TimelineEntry } from '../types'
 import { formatDuration } from '../utils'
 import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
@@ -53,6 +53,10 @@ export interface DatadogStatusPage {
   uptimeWindowDays: number | null
   /** #1017 — today's UTC-day weighted outage seconds, over the SAME intervals as `uptime30d`. */
   todayWeightedOutageSec: number
+  /** #1698 — the scoped group's leaves: the #606 breakdown. */
+  components: ServiceComponent[]
+  /** #1698 — every leaf on the page, in or out of scope. */
+  pageComponents: ServiceComponent[]
 }
 
 export type DatadogParseResult =
@@ -455,8 +459,14 @@ export function parseDatadogStatusPage(
       uptime30d,
       uptimeWindowDays: windowDays !== null && windowDays < WINDOW_DAYS ? windowDays : null,
       todayWeightedOutageSec,
+      components: scoped.map(toServiceComponent),
+      pageComponents: flattened.leaves.map(toServiceComponent),
     },
   }
+}
+
+function toServiceComponent(leaf: Leaf): ServiceComponent {
+  return { id: leaf.id, name: leaf.name, status: STATUS_VERDICT[leaf.status] }
 }
 
 /** Floor, like every other source — never round 99.998% up to a clean 100%. */

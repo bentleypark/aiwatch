@@ -255,14 +255,14 @@ export default async function handler(req: Request) {
         // #1062 — inline mirror of worker/src/fallback.ts SERVICE_CAPABILITY / sharesCapability. The Voice
         // tier (4) mixes STT/TTS (AIWatch models elevenlabs=tts, assemblyai=stt, deepgram=both — the
         // primary substitutable capability, not the vendor's full surface), so the same-tier gate alone
-        // still cross-recommended STT↔TTS. A service absent from the map is not capability-gated.
+        // still cross-recommended STT↔TTS.
         // api-tier-sync.test.ts deep-equals this DATA block vs the worker copy AND asserts the filter still
         // calls sharesCapability below; the 3-line body is kept identical to the worker copy by hand.
         const SERVICE_CAPABILITY: Record<string, string[]> = {
           elevenlabs: ['tts'], assemblyai: ['stt'], deepgram: ['stt', 'tts'], fishaudio: ['tts'],
         }
-        const sharesCapability = (a: string, b: string): boolean => {
-          const ca = SERVICE_CAPABILITY[a], cb = SERVICE_CAPABILITY[b]
+        const sharesCapability = (a: string, b: string, aTags: string[] | undefined = SERVICE_CAPABILITY[a]): boolean => {
+          const ca = aTags, cb = SERVICE_CAPABILITY[b]
           if (!ca || !cb) return true
           return ca.some(c => cb.includes(c))
         }
@@ -299,6 +299,21 @@ export default async function handler(req: Request) {
           return cap in CAPABILITY_TIER ? CAPABILITY_TIER[cap] : ROUTE_SUPPRESS
         }
         const routed = routingTier(target)
+        // #1698 — inline mirror of worker capabilityTagsOf / COMPONENT_AUDIO_TAG.
+        const COMPONENT_AUDIO_TAG: Array<[RegExp, string]> = [
+          [/\btts\b/i, 'tts'],
+          [/\bstt\b|transcri/i, 'stt'],
+        ]
+        const targetTags = ((): string[] | undefined => {
+          if (SERVICE_CAPABILITY[entry.id]) return SERVICE_CAPABILITY[entry.id]
+          const tags = new Set<string>()
+          for (const c of target?.components ?? []) {
+            if (c.status === 'operational') continue
+            const tag = COMPONENT_AUDIO_TAG.find(([re]) => re.test(c.name))?.[1]
+            if (tag) tags.add(tag)
+          }
+          return tags.size === 1 ? [...tags] : undefined
+        })()
         // #1062 facet B — human label for a routed outage's capability, so the is-down "🔄 Alternatives"
         // heading reads "Alternatives for image generation" (self-describing). Derived by inverting
         // CAPABILITY_TIER on the routed tier (injective); undefined when the outage does not route.
@@ -427,7 +442,7 @@ export default async function handler(req: Request) {
               // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
               && (!sameTierOnly || admittedBySubTier(s.id))
               // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
-              && sharesCapability(entry.id, s.id)))
+              && sharesCapability(entry.id, s.id, targetTags)))
             .slice(0, 2)
             .map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status }))
         }

@@ -77,7 +77,7 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
 
     expect(urls).toEqual(['https://status.openrouter.ai/config.json'])
     expect(service.status).toBe('operational')
-    expect(service.incidents).toHaveLength(4)
+    expect(service.incidents).toHaveLength(2)
     expect(service.incidents[0].id).toMatch(/^datadog:/)
     // The migration must not demote openrouter to the no-official-uptime path: that would drop its
     // 40-point Uptime component and move it out of the high-confidence ranking table (#1186).
@@ -114,6 +114,7 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
     const service = await fetchService(openrouter, undefined, undefined, {})
     expect(service.status).toBe('down')
     expect(service.incidents).toEqual([])
+    expect(service.components).toBeUndefined()
   })
 
   it('does not publish "operational, no incidents" when the document is unreadable', async () => {
@@ -225,5 +226,63 @@ describe('#1403 Datadog Worker wiring — what each outcome publishes', () => {
 
     expect(trackingStore).toEqual({ openrouter: { failCount: 1, failCountAt: expect.any(String), sourceReadFailure: { source: 'datadog-config', phase: 'transport', httpStatus: 200, errorKind: 'network' } } })
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'status_source_read_failure', serviceId: 'openrouter', source: 'datadog-config', phase: 'transport', httpStatus: 200, errorKind: 'network', latencyMs: expect.any(Number) }))
+  })
+})
+
+describe('#1698 Datadog arm — component breakdown and website incidents as reference', () => {
+  const WEB_ID = '2347916e-1f82-448c-b07d-8cfbbad57322'
+
+  it('publishes the API group as the breakdown, without the website leaf', async () => {
+    stubFetch(() => new Response(FIXTURE_RAW, { status: 200 }))
+    const service = await fetchService(openrouter, undefined, undefined, {})
+    expect(service.components?.map((c) => c.name)).toEqual([
+      'Chat (/api/v1/chat/completions)', 'Video (/api/v1/videos)', 'Image (/api/v1/image)',
+      'TTS (/api/v1/audio/speech)', 'STT (/api/v1/audio/transcriptions)', 'Embeddings (/api/v1/embeddings)',
+    ])
+  })
+
+  it('moves website-only incidents to referenceIncidents and keeps API ones counted', async () => {
+    stubFetch(() => new Response(FIXTURE_RAW, { status: 200 }))
+    const service = await fetchService(openrouter, undefined, undefined, {})
+    expect(service.incidents.map((i) => i.id).sort()).toEqual([
+      'datadog:2a3d415a-1eed-417f-b269-6e308a7f7990', 'datadog:a80f04f9-7b2a-4094-bd45-e42dd5c2ed8a',
+    ])
+    expect(service.referenceIncidents?.map((i) => i.id).sort()).toEqual([
+      'datadog:7aed8b9f-0e35-479d-bf9a-42f033c08b66', 'datadog:bf70341f-5692-41cc-8076-573b9407e356',
+    ])
+    expect(service.referenceComponents).toEqual([
+      { id: WEB_ID, name: 'Web & Application Services', status: 'operational' },
+    ])
+  })
+
+  it('counts an incident that touches the website AND an API component', async () => {
+    const doc = structuredClone(FIXTURE)
+    const web = doc.incidents.find((i: { id: string }) => i.id === '7aed8b9f-0e35-479d-bf9a-42f033c08b66')
+    web.componentsAffected.push({ id: '9fb5ccff-e128-455a-be20-59572f8d363a', name: 'Chat (/api/v1/chat/completions)', status: 'operational', type: 'Component' })
+    stubFetch(() => new Response(JSON.stringify(doc), { status: 200 }))
+    const service = await fetchService(openrouter, undefined, undefined, {})
+    expect(service.incidents.map((i) => i.id)).toContain('datadog:7aed8b9f-0e35-479d-bf9a-42f033c08b66')
+    expect(service.referenceIncidents?.map((i) => i.id)).toEqual(['datadog:bf70341f-5692-41cc-8076-573b9407e356'])
+  })
+
+  it('maps each breakdown row to its own status', async () => {
+    const group = openrouter.datadogComponentGroupId
+    stubFetch(() => new Response(JSON.stringify({
+      created: '2026-01-01T00:00:00Z',
+      components: [{
+        id: group, name: 'API - Gateway', type: 'ComponentGroup',
+        components: [
+          { id: 'c0', name: 'Chat', position: 0, status: 'major_outage', type: 'Component' },
+          { id: 'c1', name: 'Video', position: 1, status: 'partial_outage', type: 'Component' },
+          { id: 'c2', name: 'Image', position: 2, status: 'operational', type: 'Component' },
+        ],
+      }],
+      incidents: [],
+      maintenances: null,
+    }), { status: 200 }))
+    const service = await fetchService(openrouter, undefined, undefined, {})
+    expect(service.components?.map((c) => [c.name, c.status])).toEqual([
+      ['Chat', 'down'], ['Video', 'degraded'], ['Image', 'operational'],
+    ])
   })
 })

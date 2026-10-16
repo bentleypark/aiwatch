@@ -267,7 +267,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   service-groups.ts  # Fine service taxonomy (llm/voice/inference/…) → /api/v1/status `group` (mirror of frontend SERVICE_CATEGORIES, sync-tested) (#1068)
   upstream-link.ts   # Cross-provider upstream link (#1053) — a dependent's own incident names a provider that is itself down
   upstream-feed.ts   # Non-carded upstream feeds (#1072) — GitHub platform status read ONLY by upstream-link; no card/Score/uptime
-  incident-text.ts   # Shared "which incidents can be a CAUSE + their searchable text" primitive (#1053; supply-chain + upstream-link)
+  incident-text.ts incident-presence.ts # Incident primitives: can it be a CAUSE + its text (#1053); still on the page? (#1698)
   withdrawn.ts       # Provider-DELETED incident tombstones (#1106) — the only material the Discord/RSS withdrawal notices render from
   withdrawal-log.ts  # Durable record that a withdrawal happened + whether its notice went out (#1106 Part 5) — every other trace expires within a week
   uptime-showcase.ts # Atlassian's lazy uptime endpoint (#1389)

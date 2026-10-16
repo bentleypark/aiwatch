@@ -82,6 +82,7 @@ const APPLIERS = {
 
 /** Carries the tag across a boundary. Must not test it — must not DROP it. */
 const FORWARDERS = {
+  'worker/src/incident-presence.ts': 'pageIncidents concatenates incidents and referenceIncidents unchanged (#1698)',
   'worker/src/index.ts': 'persists on /api/v1/status/:id; skips permanently-absent KV probes on /feed',
   'src/utils/archiveMerge.js': 'archive entry → live incident shape',
 }
@@ -182,6 +183,7 @@ const RB_APPLIERS = {
 /** Carries the tag across a boundary. Must not test it — must not DROP it, where dropping would hide
  *  the incident from a surface that legitimately wants to keep showing it (display/score). */
 const RB_FORWARDERS = {
+  'worker/src/incident-presence.ts': 'pageIncidents concatenates incidents and referenceIncidents unchanged (#1698)',
   'worker/src/index.ts': '/api/status serializes the whole Incident (including the tag) for SPA/is-down display — the accepted KNOWN LIMIT 1 surface; the judgment call sites this file feeds already route through the now-fixed functions above',
   'src/utils/archiveMerge.js': 'archive entry → live incident shape — moot in practice: a MonthlyIncidentEntry (the archive shape) never carries the tag in the first place (see the SAFE reason on archive-patch.ts below), so there is nothing to forward or drop',
 }
@@ -306,6 +308,7 @@ const SU_FORWARDERS = {
 /** Cannot be reached by an anchored incident, or reads nothing it could get wrong. Each reason is a
  *  property of the CODE, not a recollection — if one stops holding, its file moves to SU_APPLIERS. */
 const SU_SAFE = {
+  'worker/src/incident-presence.ts': 'pageIncidents concatenates two lists; reads no time and no duration (#1698)',
   'worker/src/mistral-public-api.ts': 'reads only the length of the public API\'s `incidents` array; builds no incident and never reads the startUnknown flag',
   // Producers. `parsers/incident-io.ts` stamps the flag on its own anchored path; #1480's zero-length
   // case is stamped once in `services.ts`, over every parser's output. No parser stamps it itself.
@@ -422,7 +425,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 78 → 79: #1686 added worker/src/infra-status.ts, which reads third-party status responses; SAFE on all three.
     // 79 → 80: #1118 added worker/src/alerted-gone.ts, which tests an incident id against a card's list; SAFE on all three.
     // 80 → 81: #1695 added worker/src/prediction-snapshot.ts, which records one incident's analysis-time inputs; SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(81)
+    // 81 → 82: #1698 added worker/src/incident-presence.ts, which concatenates incidents and referenceIncidents.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(82)
   })
 
   it('leaves none unclassified', () => {
@@ -476,7 +480,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(81)
+    expect(all.length).toBe(82)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -522,7 +526,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(81)
+    expect(all.length).toBe(82)
   })
 
   it('leaves none unclassified for startUnknown', () => {

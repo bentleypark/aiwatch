@@ -19,6 +19,7 @@
 
 import type { MonthlyIncidents } from './monthly-archive'
 import type { ServiceStatus } from './types'
+import { pageIncidents, type PageCarrier } from './incident-presence'
 import { kvPut } from './utils'
 import type { KVLike } from './utils'
 
@@ -201,9 +202,9 @@ export function withdrawalHold(
 }
 
 /** The `liveIncidentIdsAnywhere` argument above, built once per cycle from the full service list. */
-export function liveIncidentIds(services: ReadonlyArray<Pick<ServiceStatus, 'incidents'>>): Set<string> {
+export function liveIncidentIds(services: ReadonlyArray<PageCarrier>): Set<string> {
   const ids = new Set<string>()
-  for (const s of services) for (const i of s.incidents ?? []) ids.add(i.id)
+  for (const s of services) for (const i of pageIncidents(s)) ids.add(i.id)
   return ids
 }
 

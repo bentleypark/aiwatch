@@ -249,8 +249,7 @@ export function isSpecializedSubTier(tier) {
 // #1062 — MIRROR of worker/src/fallback.ts SERVICE_CAPABILITY. Capability sub-tags for services whose
 // fallback TIER is not internally substitutable: the Voice tier (4) mixes STT/TTS, which do not
 // substitute for each other. Each tag is AIWatch's modelling of a service's primary substitutable
-// capability (not a claim about the vendor's full API surface). A service absent from this map is
-// governed by tier proximity alone (unchanged). Data parity pinned by api-tier-sync.test.ts (deep-equal
+// capability (not a claim about the vendor's full API surface). Data parity pinned by api-tier-sync.test.ts (deep-equal
 // vs the worker copy); this getFallbacks wiring is pinned by the constants.test.js facet-A tests.
 export const SERVICE_CAPABILITY = {
   elevenlabs: ['tts'],
@@ -260,9 +259,9 @@ export const SERVICE_CAPABILITY = {
 }
 
 // #1062 — two services are mutually substitutable only if they share ≥1 capability. EITHER lacking a tag
-// → not capability-gated (true → tier logic alone decides), so it's a no-op outside the listed services.
-export function sharesCapability(a, b) {
-  const ca = SERVICE_CAPABILITY[a]
+// → not capability-gated (true → tier logic alone decides).
+export function sharesCapability(a, b, aTags = SERVICE_CAPABILITY[a]) {
+  const ca = aTags
   const cb = SERVICE_CAPABILITY[b]
   if (!ca || !cb) return true
   return ca.some((c) => cb.includes(c))
@@ -303,7 +302,7 @@ export const CAPABILITY_LABEL = {
 }
 
 // #1129 — MIRROR of worker CAPABILITY_TAG_LABEL. A finer label for a ROUTED audio group, keyed by the
-// anchor's SERVICE_CAPABILITY sub-tag. The routed label is otherwise the capability ('Audio / speech'),
+// anchor's capabilityTagsOf sub-tag. The routed label is otherwise the capability ('Audio / speech'),
 // identical for a TTS and an STT anchor — but #1129 splits those into two pools, so two concurrent Voice
 // outages would render two same-labelled groups. Naming the sub-tag ('Text to speech') removes that
 // duplication and self-describes which half is down. Audio-only, applied ONLY when the routed cap is
@@ -356,6 +355,23 @@ export function routedCapability(service) {
   if (degraded.size !== 1) return null
   const cap = [...degraded][0]
   return cap !== 'llm' && cap in CAPABILITY_TIER ? cap : null
+}
+
+// #1698 — MIRROR of worker COMPONENT_AUDIO_TAG / capabilityTagsOf.
+export const COMPONENT_AUDIO_TAG = [
+  [/\btts\b/i, 'tts'],
+  [/\bstt\b|transcri/i, 'stt'],
+]
+export function capabilityTagsOf(service) {
+  if (!service) return undefined
+  if (SERVICE_CAPABILITY[service.id]) return SERVICE_CAPABILITY[service.id]
+  const tags = new Set()
+  for (const c of service.components ?? []) {
+    if (c.status === 'operational') continue
+    const tag = COMPONENT_AUDIO_TAG.find(([re]) => re.test(c.name))?.[1]
+    if (tag) tags.add(tag)
+  }
+  return tags.size === 1 ? [...tags] : undefined
 }
 
 // #1062 facet B — the tier a service's fallback group is drawn from + labelled by (routed capability
@@ -512,7 +528,7 @@ export function getFallbacks(service, allServices) {
       // its capability (OpenAI), ranked after the dedicated sibling by tier distance.
       && (!sameTierOnly || admittedBySubTier(s.id))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
-      && sharesCapability(service.id, s.id))
+      && sharesCapability(service.id, s.id, capabilityTagsOf(service)))
   return orderForFallback(eligible, sourceTier)
     .slice(0, 2)
     .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
@@ -570,7 +586,7 @@ export function getGroupedFallbacks(affected, allServices) {
     if (EXCLUDE_FALLBACK.includes(svc.id)) continue
     // #1119 — MIRROR of worker groupKeyOf (see there for the full rule): the key groups anchors that
     // draw from the same pool. A ROUTED anchor's pool depends on its routed tier AND on its own
-    // SERVICE_CAPABILITY tag (#1129, facet A), so the key encodes both: routed anchors at one tier share
+    // capabilityTagsOf tag (#1129, facet A), so the key encodes both: routed anchors at one tier share
     // a key across categories (`openai` + `chatgpt` route together off one status page and otherwise
     // produce two identical groups, collapsing perGroup 2→1) ONLY when their tags also match. A routed
     // and a NON-routed anchor at the same tier stay separate on purpose: their pools differ (facet C
@@ -582,7 +598,7 @@ export function getGroupedFallbacks(affected, allServices) {
     const routed = routingTier(svc)
     const isRouted = routed !== null && routed > 0
     const tierLabel = isRouted ? null : tierLabelFor(effectiveTierFor(svc))
-    const groupKey = isRouted ? `routed:${routed}:${(SERVICE_CAPABILITY[svc.id] ?? []).join('|')}` : (tierLabel ? `${svc.category}:${tierLabel}` : svc.category)
+    const groupKey = isRouted ? `routed:${routed}:${(capabilityTagsOf(svc) ?? []).join('|')}` : (tierLabel ? `${svc.category}:${tierLabel}` : svc.category)
     if (seenGroups.has(groupKey)) continue
     // #554 — selection parity with the worker: keep only the live-clean guard (getFallbacks
     // already enforces it; nonOperationalIds is a defensive backstop). No same-provider exclusion.
@@ -592,11 +608,11 @@ export function getGroupedFallbacks(affected, allServices) {
     // #1062 facet B — a routed group is labelled by the affected CAPABILITY ("Image generation") so the
     // recommendation self-describes WHY it switched; a non-routed group keeps its tier/category label.
     const cap = routedCapability(svc)
-    // #1129 — a routed AUDIO group is labelled by the anchor's single SERVICE_CAPABILITY sub-tag
+    // #1129 — a routed AUDIO group is labelled by the anchor's single capabilityTagsOf sub-tag
     // ('Text to speech' / 'Speech to text') instead of the shared 'Audio / speech', so two split Voice
     // groups don't render as duplicate labels. Untagged / both-tagged anchors fall through to the
     // capability label. Guarded on cap === 'audio' — see CAPABILITY_TAG_LABEL. MIRROR of the worker.
-    const tags = SERVICE_CAPABILITY[svc.id] ?? []
+    const tags = capabilityTagsOf(svc) ?? []
     const subLabel = cap === 'audio' && tags.length === 1 ? CAPABILITY_TAG_LABEL[tags[0]] : undefined
     const label = cap ? (subLabel ?? CAPABILITY_LABEL[cap]) : (tierLabel || CATEGORY_LABEL[svc.category] || svc.category)
     resolved.push({ category: svc.category, label, capability: cap || undefined, candidates })

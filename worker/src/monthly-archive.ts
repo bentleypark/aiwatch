@@ -17,6 +17,7 @@ import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
+import { pageIncidents } from './incident-presence'
 import { incidentDay, normalizeIncidentTimes } from './utils'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
@@ -440,12 +441,14 @@ export function prunePhantomIncidents(
   if (!data?.services || typeof data.services !== 'object') return data
 
   const liveBySvc = new Map<string, Incident[]>()
+  const onPageBySvc = new Map<string, Incident[]>()
   // #1510 — services whose THIS-CYCLE live list only ever lists active incidents (Mistral's
   // active-incident overlay, when its scrape feed is unreadable — `grep -n liveIncidentsActiveOnly
   // worker/src/types.ts` for why absence from a list like that is not evidence of deletion).
   const activeOnlySvcIds = new Set<string>()
   for (const svc of services) {
     liveBySvc.set(svc.id, svc.incidents ?? [])
+    onPageBySvc.set(svc.id, pageIncidents(svc))
     if (svc.liveIncidentsActiveOnly) activeOnlySvcIds.add(svc.id)
   }
 
@@ -476,7 +479,7 @@ export function prunePhantomIncidents(
     // a round-5 review found a resolved bridged row pushing the watermark back to a date the new
     // source's own (often shallow) feed never covered, satisfying guard 3 for an unrelated,
     // genuinely-unresolved incident that had simply fallen outside that shallow feed.
-    const liveIds = new Set(live.map((i) => i?.id).filter(Boolean).map(String))
+    const liveIds = new Set((onPageBySvc.get(svcId) ?? []).map((i) => i?.id).filter(Boolean).map(String))
     // Earliest start among live incidents that are actual evidence about the CURRENT feed's reach —
     // excludes `retainedBridge` per the note above, in addition to `status_history` (already excluded
     // from `live` itself). Compared as ISO strings, which sort lexicographically. Non-ISO values are
@@ -654,8 +657,11 @@ export function accumulateMonthlyIncidents(
   const result = prunePhantomIncidents(base, services, suppressions)
 
   for (const svc of services) {
-    const incidents = (svc.incidents ?? []).filter(
-      i => incidentDay(i).startsWith(period) // #1292 — a derived incident's month comes from its day
+    const counted = new Set((svc.incidents ?? []).map((i) => i.id))
+    const banked = new Set(result.services[svc.id]?.incidentIds ?? [])
+    const incidents = pageIncidents(svc).filter(
+      i => (counted.has(i.id) || banked.has(i.id))
+        && incidentDay(i).startsWith(period) // #1292 — a derived incident's month comes from its day
         // #1623 — today's synthesized row is live state until its day closes.
         && !(i.derived === 'status_history' && i.accruing),
     )

@@ -19,11 +19,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares, CAPABILITY_TIER as workerCapTier, capabilityOfComponent as workerCapOf, COMPONENT_CAPABILITY as workerCompCap, CAPABILITY_LABEL as workerCapLabel, CAPABILITY_TAG_LABEL as workerCapTagLabel, routedCapability as workerRoutedCap, routingTier as workerRoutingTier, CAPABILITY_PROVIDERS as workerCapProv, isCapabilityProvider as workerIsCapProv } from '../fallback'
+import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares, CAPABILITY_TIER as workerCapTier, capabilityOfComponent as workerCapOf, COMPONENT_CAPABILITY as workerCompCap, CAPABILITY_LABEL as workerCapLabel, CAPABILITY_TAG_LABEL as workerCapTagLabel, routedCapability as workerRoutedCap, routingTier as workerRoutingTier, CAPABILITY_PROVIDERS as workerCapProv, isCapabilityProvider as workerIsCapProv, COMPONENT_AUDIO_TAG as workerAudioTag, capabilityTagsOf as workerTagsOf } from '../fallback'
 // Vitest resolves cross-package paths via the repo root; this works because frontend `src/` and
 // worker `src/` share a single repo with one node_modules. The import is data-only (no runtime
 // side effects from constants.js — no environment variables are read at module load).
-import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares, CAPABILITY_TIER as frontendCapTier, capabilityOfComponent as frontendCapOf, COMPONENT_CAPABILITY as frontendCompCap, CAPABILITY_LABEL as frontendCapLabel, CAPABILITY_TAG_LABEL as frontendCapTagLabel, routedCapability as frontendRoutedCap, CAPABILITY_PROVIDERS as frontendCapProv, isCapabilityProvider as frontendIsCapProv } from '../../../src/utils/constants'
+import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares, CAPABILITY_TIER as frontendCapTier, capabilityOfComponent as frontendCapOf, COMPONENT_CAPABILITY as frontendCompCap, CAPABILITY_LABEL as frontendCapLabel, CAPABILITY_TAG_LABEL as frontendCapTagLabel, routedCapability as frontendRoutedCap, CAPABILITY_PROVIDERS as frontendCapProv, isCapabilityProvider as frontendIsCapProv, COMPONENT_AUDIO_TAG as frontendAudioTag, capabilityTagsOf as frontendTagsOf } from '../../../src/utils/constants'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 
@@ -234,8 +234,8 @@ describe('SERVICE_CAPABILITY cross-mirror sync (#1062)', () => {
     // Edge surface so a silent removal of the clause (re-opening the STT↔TTS cross-recommendation on
     // is-down) fails CI. Regex-level because the Edge module can't be imported here (see file header).
     const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
-    expect(/sharesCapability\(\s*entry\.id\s*,\s*s\.id\s*\)/.test(isDownSource),
-      'api/is-down.ts fallback filter no longer calls sharesCapability(entry.id, s.id)').toBe(true)
+    expect(/sharesCapability\(\s*entry\.id\s*,\s*s\.id\s*,\s*targetTags\s*\)/.test(isDownSource),
+      'api/is-down.ts fallback filter no longer calls sharesCapability(entry.id, s.id, targetTags)').toBe(true)
   })
 })
 
@@ -342,6 +342,33 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     // suppressed cap (embeddings/realtime) would never render, signalling a mistake.
     for (const cap of Object.keys(workerCapLabel)) {
       expect(cap in workerCapTier, `CAPABILITY_LABEL has '${cap}' but it has no CAPABILITY_TIER entry`).toBe(true)
+    }
+  })
+
+  it('#1698 — COMPONENT_AUDIO_TAG worker ≡ frontend ≡ is-down literal, and capabilityTagsOf agrees worker↔frontend', () => {
+    const shape = (list: Array<[RegExp, string]>) => list.map(([re, tag]) => [re.source, re.flags, tag])
+    expect(shape(workerAudioTag)).toEqual(shape(frontendAudioTag as Array<[RegExp, string]>))
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    for (const [re, tag] of workerAudioTag) {
+      const pair = `[/${re.source}/${re.flags}, '${tag}']`
+      expect(isDownSource.includes(pair), `api/is-down.ts COMPONENT_AUDIO_TAG missing exact pair ${pair}`).toBe(true)
+    }
+    expect(isDownSource.includes('if (SERVICE_CAPABILITY[entry.id]) return SERVICE_CAPABILITY[entry.id]'), 'is-down targetTags lost the own-tag-first return').toBe(true)
+    expect(isDownSource.includes('return tags.size === 1 ? [...tags] : undefined'), 'is-down targetTags lost the single-tag rule').toBe(true)
+    const comps = (arr: Array<[string, string]>) => arr.map(([name, status]) => ({ name, status }))
+    const fixtures = [
+      { id: 'openrouter', components: comps([['Chat', 'operational'], ['TTS (/api/v1/audio/speech)', 'degraded']]) },
+      { id: 'openrouter', components: comps([['Chat', 'operational'], ['STT (/api/v1/audio/transcriptions)', 'degraded']]) },
+      { id: 'openrouter', components: comps([['TTS (/api/v1/audio/speech)', 'degraded'], ['STT (/api/v1/audio/transcriptions)', 'degraded']]) },
+      { id: 'openai', components: comps([['Chat Completions', 'operational'], ['Audio', 'degraded']]) },
+      { id: 'openai', components: comps([['Chat Completions', 'operational'], ['Images', 'down']]) },
+      { id: 'elevenlabs' },
+      { id: 'claude' },
+    ]
+    for (const f of fixtures) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const svc = { category: 'api', status: 'degraded', ...f } as any
+      expect(frontendTagsOf(svc), `capabilityTagsOf worker/frontend divergence for ${JSON.stringify(f)}`).toEqual(workerTagsOf(svc))
     }
   })
 

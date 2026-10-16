@@ -308,12 +308,13 @@ export const SERVICES: ServiceConfig[] = [
   // fine, and its 15h28m degradation on 2026-08-28 — a notice the provider ends with "Inference is
   // unaffected" — was the whole published uptime deficit before the scope. Same
   // treatment cohere/groq/together/cerebras give `Website` via componentDenylist and mistral gives
-  // `le chat` + `console` via incidentExclude. It stays in the incident list; it just does not move
-  // the API's badge or its percentage. Naming the GROUP rather than its six members means a seventh
+  // `le chat` + `console` via incidentExclude. #1698 — an incident tagged only to it is a
+  // `referenceIncidents` entry (#1669). Naming the GROUP rather than its six members means a seventh
   // API component joins the scope on its own — there is no drift detector on this path to catch a
   // stale list (see `datadogComponentGroupId`).
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, datadogStatusUrl: 'https://status.openrouter.ai',
-    datadogComponentGroupId: '62d944d3-1acb-471b-81a0-099b3da0164f' }, // API - Gateway
+    datadogComponentGroupId: '62d944d3-1acb-471b-81a0-099b3da0164f', // API - Gateway
+    referenceComponentIds: ['2347916e-1f82-448c-b07d-8cfbbad57322'] }, // #1698 — Web & Application Services
   // Voice & Speech AI
   // The curated availability surfaces, as ONE list: the #606 breakdown card, the #379 worst-of badge
   // and the uptime scope all read it.
@@ -2623,10 +2624,16 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
       }
       resetFetchFailure(trackingStore, config.id)
+      const referenceIncidents = referenceIncidentsOf(parsed.page.incidents, config, parsed.page.pageComponents)
+      const referenceIds = new Set(referenceIncidents.map((i) => i.id))
+      const referenceComponents = parsed.page.pageComponents.filter((c) => config.referenceComponentIds?.includes(c.id))
       return {
         ...base,
         status: parsed.page.status,
-        incidents: parsed.page.incidents,
+        incidents: parsed.page.incidents.filter((i) => !referenceIds.has(i.id)),
+        ...(referenceIncidents.length > 0 ? { referenceIncidents } : {}),
+        ...(referenceComponents.length > 0 ? { referenceComponents } : {}),
+        ...(parsed.page.components.length >= 2 ? { components: parsed.page.components } : {}),
         // #1006 — the PROVIDER's own published records, computed by us over a trailing 30 days with
         // the /methodology weights. Not a copy of a figure on their page: they publish none.
         // #713 — a page whose records establish no window publishes NO uptime, and therefore no

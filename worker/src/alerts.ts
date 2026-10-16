@@ -31,6 +31,7 @@ import { regionStatusOf } from '../../api/_is-down/region-status'
 import { SERVICE_ID_TO_SLUG, FAMILY_GROUPS } from '../../api/_is-down/slug-map'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
+import { pageIncidents } from './incident-presence'
 import { withdrawalHold, liveIncidentIds, type WithdrawalHold, type WithdrawnIncident } from './withdrawn'
 
 // #283: Discord alert flap suppression for BetterStack auto-recovery noise.
@@ -631,10 +632,12 @@ export function buildIncidentAlerts(
   const resolvedIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; firstSvc: ScoredService }>()
 
   for (const svc of services) {
-    for (const inc of svc.incidents ?? []) {
+    const counted = new Set((svc.incidents ?? []).map((i) => i.id))
+    for (const inc of pageIncidents(svc)) {
+      if (!counted.has(inc.id) && !alertedNewMap.get(inc.id)?.has(svc.id)) continue
       if (suppressedIncIds.has(inc.id)) continue // #283 flap suppression — skip both new + resolved
-      // #1224 — the cron's per-incident loop gates its marker reads + hold on this SAME function, so
-      // widening it here widens that gate too, by construction.
+      // #1224 — the cron's per-incident loop gates its marker reads + hold on this SAME function and
+      // walks the same `pageIncidents`, so widening it here widens that gate too, by construction.
       if (!canIncidentStillAlert(inc, now)) continue
 
       // #545: per-service (not per-incident) — only services NOT yet alerted for this incident.

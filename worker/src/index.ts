@@ -10,6 +10,7 @@ import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
 import { createReadCensus, formatCensus } from './kv-read-census'
 import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
+import { pageIncidents } from './incident-presence'
 import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
 import { fallbackEmbedSection } from './fallback'
@@ -1000,7 +1001,9 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   const runNowMs = Date.now()
   for (const svc of scored) {
     const config = SERVICES.find(c => c.id === svc.id)
-    for (const inc of svc.incidents ?? []) {
+    const counted = new Set((svc.incidents ?? []).map((i) => i.id))
+    for (const inc of pageIncidents(svc)) {
+      if (!counted.has(inc.id) && inc.status !== 'resolved') continue
       // One clock per incident: the flap-escape (#983) and the first-seen hold window (#835) must
       // agree on "now", and re-reading Date.now() between them would let them disagree by ms.
       const nowMs = Date.now()
@@ -1649,7 +1652,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         const svc = scored.find(s => s.id === svcId)
         for (const incId of incIds) {
           try {
-            const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : undefined
+            const inc = svc ? pageIncidents(svc).find(i => i.id === incId) : undefined
             if (!svc || !inc) continue
             // #1003 — THIS is the path a normal incident resolution takes, and it never wrote the two
             // things the read surfaces need: the `recovered:` marker (the "Recently Resolved" banner)

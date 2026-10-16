@@ -44,7 +44,7 @@ only monitored service with ZERO same-tier candidates — tier 3 also holds `bed
 `fallback.ts` or [fallback-tiers.md](fallback-tiers.md); those files record only *un*-exclusions.)
 It still needs no sibling: tier 3 is BELOW the specialized range, so candidates come from the
 nearest tiers by distance instead — which at distance 1 means tier 2 AND tier 4, since `openrouter`
-carries no `SERVICE_CAPABILITY` tag and so passes `sharesCapability` against the Voice tier too.
+carries no `capabilityTagsOf` tag (unless a degraded TTS/STT component names one, #1698) and so passes `sharesCapability` against the Voice tier too.
 The picks that surface are Score-ordered across that pool. What makes them defensible is not the
 tier arithmetic but a fact about this service: several tier-2 members are OpenRouter's own upstream
 providers (Groq, Cerebras, Together, Fireworks and DeepSeek all appear in its public
