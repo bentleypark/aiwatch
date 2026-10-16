@@ -26,6 +26,7 @@ import { appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText,
 import { markIncidentResolved, isMarkableOnStatusEdge, buildResolvedRecord } from './recovery-mark'
 import { buildPredictionSnapshot, summarizeSnapshotCoverage, type SnapshotCoverage } from './prediction-snapshot'
 import { checkPersistentFetchFailures } from './persistent-failure'
+import { recordDiscordSend } from './discord-send-log'
 import { checkUptimeLiveness } from './uptime-liveness'
 import { runMistralPublicApiProbe } from './mistral-public-api'
 import { handleMistralEmail } from './mistral-email'
@@ -646,11 +647,19 @@ function computeUptime(history: Record<string, DailyCounters>): Record<string, n
   return result
 }
 
-import { sanitize } from './utils'
+import { sanitize, type KVLike } from './utils'
 
 // ── Discord Webhook Alerts (Cron-based, no isolate concurrency) ──
 
+let discordSendLogKv: KVLike | undefined
+
 async function sendDiscordAlert(webhookUrl: string, embed: { title: string; description: string; color: number }): Promise<boolean> {
+  const ok = await postDiscordEmbed(webhookUrl, embed)
+  await recordDiscordSend(discordSendLogKv, { title: embed.title, ok })
+  return ok
+}
+
+async function postDiscordEmbed(webhookUrl: string, embed: { title: string; description: string; color: number }): Promise<boolean> {
   try {
     const resp = await fetch(webhookUrl, {
       method: 'POST',
@@ -3118,6 +3127,7 @@ const workerExport = {
     const env: Env = new Proxy(rawEnv, {
       get: (target, prop) => (prop === 'STATUS_CACHE' && censusedKv) ? censusedKv : Reflect.get(target, prop),
     })
+    discordSendLogKv = env.STATUS_CACHE
     // #1224 Phase 2 — the census line must survive every way this handler can exit. It cannot
     // sit at the end: `if (!env.DISCORD_WEBHOOK_URL) return` below is a real early return, and a
     // throw from the unguarded `cronAlertCheck` await is another. Both are the ANOMALOUS runs
@@ -4731,6 +4741,7 @@ const workerExport = {
   },
 
   async handleFetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    discordSendLogKv = env.STATUS_CACHE
     const url = new URL(request.url)
     const origin = request.headers.get('Origin') ?? ''
     const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)

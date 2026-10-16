@@ -268,8 +268,9 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   upstream-link.ts   # Cross-provider upstream link (#1053) — a dependent's own incident names a provider that is itself down
   upstream-feed.ts   # Non-carded upstream feeds (#1072) — GitHub platform status read ONLY by upstream-link; no card/Score/uptime
   incident-text.ts incident-presence.ts # Incident primitives: can it be a CAUSE + its text (#1053); still on the page? (#1698)
-  withdrawn.ts       # Provider-DELETED incident tombstones (#1106) — the only material the Discord/RSS withdrawal notices render from
-  withdrawal-log.ts  # Durable record that a withdrawal happened + whether its notice went out (#1106 Part 5) — every other trace expires within a week
+  withdrawn.ts       # Provider-DELETED incident tombstones (#1106)
+  withdrawal-log.ts  # Durable record that a withdrawal happened + whether its notice went out (#1106 Part 5)
+  discord-send-log.ts # One KV key per operator Discord embed
   uptime-showcase.ts # Atlassian's lazy uptime endpoint (#1389)
   cron-heartbeat.ts  # Cron watchdog (#1501)
   uptime-liveness.ts # Alert when a service stops publishing uptime (#1389/#957)

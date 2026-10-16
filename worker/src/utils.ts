@@ -185,12 +185,12 @@ export function isAllowedAlertWebhook(webhookUrl: string): boolean {
 
 export interface KVLike {
   get(key: string): Promise<string | null>
-  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>
+  put(key: string, value: string, opts?: { expirationTtl?: number; metadata?: unknown }): Promise<void>
   delete(key: string): Promise<void>
 }
 
 /** Safe KV write with error logging. Returns true on success, false on failure. */
-export async function kvPut(kv: KVLike | KVNamespace, key: string, value: string, opts?: { expirationTtl?: number }): Promise<boolean> {
+export async function kvPut(kv: KVLike | KVNamespace, key: string, value: string, opts?: { expirationTtl?: number; metadata?: unknown }): Promise<boolean> {
   try {
     await kv.put(key, value, opts)
     return true
