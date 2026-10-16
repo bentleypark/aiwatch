@@ -430,6 +430,59 @@ describe('fetchOSVAlerts — two-phase flow (#323)', () => {
     expect(mock).toHaveBeenCalledTimes(1)
   })
 
+  it('marks an old published advisory seen without alerting when its record was recently modified (#1696)', async () => {
+    const nowISO = new Date().toISOString()
+    const oldPublished = new Date(Date.now() - 10 * 86400 * 1000).toISOString()
+    const mock = stubFetchByUrl({
+      'querybatch': { results: [{ vulns: [{ id: 'GHSA-republished-old', modified: nowISO }] }] },
+      'GHSA-republished-old': { id: 'GHSA-republished-old', modified: nowISO, published: oldPublished, summary: 'Old advisory' },
+    })
+    const entries = new Map<string, string>()
+    const kv = {
+      async get(key: string) { return entries.get(key) ?? null },
+      async put(key: string, value: string) { entries.set(key, value) },
+    } as unknown as KVNamespace
+
+    await expect(fetchOSVAlerts(kv)).resolves.toEqual([])
+    expect(entries.get('security:ignored:osv:GHSA-republished-old')).toBe('1')
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a recently published advisory eligible when it was modified in the scan window', async () => {
+    const nowISO = new Date().toISOString()
+    const mock = stubFetchByUrl({
+      'querybatch': { results: [{ vulns: [{ id: 'GHSA-recent-published', modified: nowISO }] }] },
+      'GHSA-recent-published': { id: 'GHSA-recent-published', modified: nowISO, published: nowISO, summary: 'Recent advisory' },
+    })
+
+    await expect(fetchOSVAlerts(null)).resolves.toMatchObject([{ id: 'GHSA-recent-published' }])
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an advisory with an unreadable published timestamp eligible', async () => {
+    const nowISO = new Date().toISOString()
+    const mock = stubFetchByUrl({
+      'querybatch': { results: [{ vulns: [{ id: 'GHSA-unreadable-published', modified: nowISO }] }] },
+      'GHSA-unreadable-published': { id: 'GHSA-unreadable-published', modified: nowISO, published: 'not-a-date', summary: 'Unreadable date' },
+    })
+
+    await expect(fetchOSVAlerts(null)).resolves.toMatchObject([{ id: 'GHSA-unreadable-published' }])
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not refetch a published-before-window advisory for timeline tracking', async () => {
+    const nowISO = new Date().toISOString()
+    const mock = stubFetchByUrl({
+      'querybatch': { results: [{ vulns: [{ id: 'GHSA-republished-old', modified: nowISO }] }] },
+    })
+    const kv = {
+      async get(key: string) { return key === 'security:ignored:osv:GHSA-republished-old' ? '1' : null },
+    } as unknown as KVNamespace
+
+    await expect(fetchOSVAlerts(kv, { includeSeen: true })).resolves.toEqual([])
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
   it('drops a single failed detail fetch without failing the batch', async () => {
     const nowISO = new Date().toISOString()
     // Route the successful detail but leave 'GHSA-broken' unmocked so it throws.

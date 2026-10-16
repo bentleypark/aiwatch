@@ -459,6 +459,7 @@ describe('buildSecuritySummary', () => {
       { name: 'security:seen:hn:12345' },
       { name: 'security:seen:hn:67890' },
       { name: 'security:seen:osv:GHSA-abc' },
+      { name: 'security:ignored:osv:GHSA-republished-old' },
       { name: 'security:seen:nvd:CVE-2025-52882' }, // #949 first-party CVE
     ]
     const result = buildSecuritySummary(keys, ['Some highlight'])
