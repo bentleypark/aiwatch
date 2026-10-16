@@ -188,6 +188,13 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      table's own column header says "Uptime." Name it "Component Reliability" (or qualify it, e.g. "on the
      separate Component Reliability measure") so it isn't read as the same figure as the **30-Day Uptime**
      table.
+     (5) *A reason why the 30-Day Uptime did not move with an incident is a claim to check, not a default.*
+     Read (a) the components the service's uptime is computed over, from the uptime path its source takes in
+     `worker/src/services.ts`, and (b) the components the incident tagged, the status each went through, and
+     what the record the uptime is computed from holds for those components on those days. A bare "the
+     uptime and the incident do not cover the same scope" is not a reason: the 2026-09 draft said that of
+     Black Forest Labs' EU incident, when the incident had also tagged an in-scope component, which was
+     only marked degraded and so left no outage in the source record.
    - **No redundancy — two overlaps the aiwatch-reports#54/#55 gate CANNOT see (both recurring critiques).** The mechanical
      **aiwatch-reports#54** gate flags a repeated SERVICE in a slot; it is blind to a repeated STORY or FRAMING.
      (1) *Cross-section, within this report.* Each section has a distinct job (Summary = terse headline,
