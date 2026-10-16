@@ -8,10 +8,10 @@ import type { ServiceConfig } from '../types'
 const DAY = 86_400_000
 const esc = (o: unknown) => JSON.stringify(o).replace(/"/g, '\\"')
 
-/** A turbopuffer/fireworks-shaped config: a LIST `incidentIoComponentId`, no statusComponentId(s) at
+/** A turbopuffer-shaped config: a LIST `incidentIoComponentId`, no statusComponentId(s) at
  *  all — the exact roster shape #957 closes the gap for. Kept small (3 ids) and synthetic rather than
- *  spread from the real turbopuffer/fireworks config, so the test does not silently drift if either
- *  service's real id roster changes. */
+ *  spread from the real turbopuffer config, so the test does not silently drift if its real id roster
+ *  changes. */
 function multiIoConfig(overrides: Partial<ServiceConfig> = {}): ServiceConfig {
   return {
     id: 'test-multi-io',

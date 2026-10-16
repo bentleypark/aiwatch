@@ -573,14 +573,14 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
     expect(svc.uptime30d).toBe(96.66)
   })
 
-  // The FALLBACK arm of the same expression. `uptimeScope` is `statusComponentIds ?? incidentIoComponentId`,
+  // The FALLBACK arm of the same expression. `incidentIoUptimeScopeOf` is `statusComponentIds ?? incidentIoComponentId`,
   // while the Atlassian branch ~60 lines above reads `statusComponentIds ?? statusComponentId` — two
   // near-identical expressions one screen apart, so harmonising them looks like tidying. It is not: these
   // services set NO `statusComponentId`, so under that edit the scope resolves to `undefined`,
   // `computeIncidentIoUptime` matches nothing and returns null, and each card silently loses its headline
   // uptime AND (per #713) has its Score Uptime component withheld and rescaled. Derived from SERVICES
   // rather than listed, so a service that later drops its `statusComponentId` joins the guard by itself.
-  const IO_PRIMARY_ONLY = SERVICES.filter((s) => s.incidentIoComponentId && !s.statusComponentId && !s.statusComponentIds)
+  const IO_PRIMARY_ONLY = SERVICES.filter((s) => s.incidentIoComponentId && !s.statusComponentId && !s.statusComponentIds && !s.uptimeOverPageComponents)
   it('the guard below covers a non-empty set — an empty filter would pass vacuously', () => {
     expect(IO_PRIMARY_ONLY.length).toBeGreaterThan(0)
   })

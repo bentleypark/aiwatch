@@ -18,7 +18,7 @@ import {
   type StoredRootlyFeed,
 } from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoAllComponentUptimes, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -192,15 +192,9 @@ export const SERVICES: ServiceConfig[] = [
   // page component minus componentDenylist, via `resolveSvcComponents`) — chosen because a hand-
   // maintained breakdown id list would go stale the way cerebras' did pre-#992 (Fireworks' components are all
   // per-model and the roster churns).
-  // `incidentIoComponentId` IS also a hand-maintained list here (mirrors turbopuffer's no-canonical-
-  // component shape), but ONLY for the uptime worst-of via `computeIncidentIoUptime` — not the full
-  // roster above.
-  // #1518 — the roster audit reports a page component that has aged past 30 days without being added
-  // here, at its next daily run.
-  // Accepted tradeoffs: a model this list omits contributes no
-  // uptime signal until it's added (real, not fabricated — matches the "no invented
-  // value" rule, #713); a REMOVED id from this shorter list still warns via
-  // `computeIncidentIoUptime`'s `resolved < ids.length` log.
+  // #1709 — uptime is the worst-of every component the page lists (`uptimeOverPageComponents`), so a model
+  // that ships or retires needs no edit here. `incidentIoComponentId` is only the anchor that selects the
+  // incident.io uptime branch.
   // holdShortIncidents, NOT flapSuppression: live incident.io titles ("Service Degradation for one of
   // our models on Serverless", observed 2026-08-02) carry no "— down/recovered" suffix, so
   // `isFlapNotice`'s title regex never matches on this platform — flapSuppression would be silently
@@ -208,7 +202,7 @@ export const SERVICES: ServiceConfig[] = [
   // Discord New+Resolved pair apiece. holdShortIncidents (the mistral/langfuse mechanism, #792/#929)
   // holds on impact alone — real incident.io `impact` (not BetterStack's hardcoded null) still lets
   // `major`/`critical` through immediately, only non-major short blips get the ~9min hold.
-  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: ['01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KVEMZE3M15ZV46ZEB7X88H61', '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8', '01M03TGQ7XTQ8HAKZ8MDQ44HH5', '01M0VEYRP3Q4KM0RDEFG6EBBZC', '01M0VEYRP3YY99KM87D9CNZ7MG', '01M1DFY7G1ZJQNNZWX0Y0APVX6', '01M1DFY7G1JXWQQQ852G0PAQCP', '01M29PF3FR517GWQBY4BHZMV8A', '01M2JY35857CPRZTJ3KQ2WS4Z4', '01M2JZVTP49S02KF06H66DCNXC', '01M2JY3585G7CDGZGT5111H7JQ', '01M2JY3585ZHHE7A9JDG6PR7B3', '01M2JY3585D3XN71ARM3AP8VA8'], componentsUrl: 'https://status.fireworks.ai/api/v2/components.json', displayAllComponents: true, holdShortIncidents: true },
+  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: 'https://status.fireworks.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.fireworks.ai/incidents', incidentIoComponentId: '01KTM9PHXTQ0YX1ZM3TRVACTK8', uptimeOverPageComponents: true, componentsUrl: 'https://status.fireworks.ai/api/v2/components.json', displayAllComponents: true, holdShortIncidents: true },
   // Cerebras Inference (#391, #992) — Atlassian Statuspage, single-tenant, per-model. Its model lineup
   // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
   // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
@@ -1196,9 +1190,8 @@ export function uptimeScopeOf(
 }
 
 /**
- * #1518 — the incident.io UPTIME scope, the SAME expression the `fetchService` call site computes
- * (`grep 'const uptimeScope' worker/src/services.ts`): `statusComponentIds ?? incidentIoComponentId`,
- * normalized to an array. Deliberately a separate reader from `uptimeScopeOf` above, which is the
+ * #1518 — the incident.io UPTIME scope as an id list (`incidentIoUptimeScopeFor` below adds the
+ * `uptimeOverPageComponents` case): `statusComponentIds ?? incidentIoComponentId`, normalized to an array. Deliberately a separate reader from `uptimeScopeOf` above, which is the
  * ATLASSIAN branch's own scope (`statusComponentId`-gated) — the two branches decide their uptime scope
  * from different fields and folding them into one function would make a change to either branch's
  * fallback silently reach the other.
@@ -1209,13 +1202,23 @@ export function incidentIoUptimeScopeOf(config: Pick<ServiceConfig, 'statusCompo
   return Array.isArray(scope) ? scope : [scope]
 }
 
+/** #1709 — the incident.io uptime scope for ONE fetch: every component the page lists in `component_uptimes`
+ *  that has a `data_available_since`, when `uptimeOverPageComponents`; else `incidentIoUptimeScopeOf`. */
+export function incidentIoUptimeScopeFor(
+  config: Pick<ServiceConfig, 'statusComponentIds' | 'incidentIoComponentId' | 'uptimeOverPageComponents'>,
+  html: string,
+): string[] {
+  if (!config.uptimeOverPageComponents) return incidentIoUptimeScopeOf(config)
+  return parseIncidentIoAllComponentUptimes(html).filter((e) => e.dataAvailableSince !== null).map((e) => e.id)
+}
+
 /**
  * #1518 — every incident.io service GROUPED by the page it shares (`statusUrl`), for the roster audit:
  * `scopeIds` is the UNION of every co-located service's uptime scope (openai/chatgpt/codex share one
  * page, so a component in codex's scope must not read as "out of scope" when auditing openai's), and
  * `excludeIds` is likewise the union of every co-located service's `rosterAuditExclude`. `services` are
  * the AIWatch service ids/names sharing the page, for attributing an alert to who should read it.
- * `fixedScope` is true when ANY co-located service sets `rosterAuditFixedScope` — in practice these are
+ * `fixedScope` is true when ANY co-located service sets `rosterAuditFixedScope` or `uptimeOverPageComponents` — in practice these are
  * single-tenant pages, so "any" and "every" coincide; the (b) aged-in check skips the whole page rather
  * than needing an exclude entry per model the provider ever ships.
  */
@@ -1236,7 +1239,7 @@ export function rosterAuditPages(services: ServiceConfig[] = SERVICES): RosterAu
     page.services.push({ id: s.id, name: s.name })
     page.scopeIds.push(...incidentIoUptimeScopeOf(s))
     page.excludeIds.push(...(s.rosterAuditExclude ?? []))
-    if (s.rosterAuditFixedScope) page.fixedScope = true
+    if (s.rosterAuditFixedScope || s.uptimeOverPageComponents) page.fixedScope = true
   }
   for (const page of byPage.values()) {
     page.scopeIds = [...new Set(page.scopeIds)]
@@ -3040,7 +3043,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // components (incl. ones absent from summary.json), so the group calendar can be more complete
       // than the summary.json-sourced badge.
       const ioDailyImpact = (uptimeHtml && config.incidentIoComponentId)
-        ? parseIncidentIoComponentImpacts(uptimeHtml, config.statusComponentIds ?? config.incidentIoComponentId)
+        ? parseIncidentIoComponentImpacts(uptimeHtml, incidentIoUptimeScopeFor(config, uptimeHtml))
         : null
       // Statuspage uptimeData is the preferred per-day source — but ONLY when it actually produced
       // days. For an incident.io service, parseUptimeData(incident.io HTML) returns an EMPTY map, which
@@ -3095,8 +3098,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         // only the API component — so a partial outage on Run Ingestion showed up in the incident list
         // while uptime sat at a spotless 100%. The old 90-day published figure happened to be low enough
         // that nobody noticed; computing an honest 30 days made the mismatch visible.
-        // `incidentIoComponentId` still identifies which figure the PAGE displays (uptimeReported).
-        const uptimeScope = config.statusComponentIds ?? config.incidentIoComponentId
+        // `incidentIoComponentId` still identifies which figure the PAGE displays (uptimeReported), except under `uptimeOverPageComponents`.
+        const uptimeScope = incidentIoUptimeScopeFor(config, uptimeHtml)
         const io = computeIncidentIoUptime(uptimeHtml, uptimeScope, Date.now())
         if (io) {
           uptimeValue = io.pct
@@ -3106,7 +3109,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // The figure is honest for the days it covers — surface WHICH, rather than passing a short
           // window off as a 30-day one. Absent when the window is whole.
           if (io.days < UPTIME_WINDOW_DAYS) uptimeWindow = io.days
-          const reported = parseIncidentIoReportedUptime(uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
+          const reported = config.uptimeOverPageComponents ? null : parseIncidentIoReportedUptime(uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
           // Shown whenever it differs at all — no "meaningful gap" threshold. A cutoff would be an
           // editorial judgement made from one day's snapshot, and it would give the reader an invisible
           // rule ("why does LangSmith show two numbers and OpenAI one?"). A near-identical pair is not

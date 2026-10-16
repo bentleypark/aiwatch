@@ -287,7 +287,7 @@ export function computeIncidentIoUptime(
     worstTodaySec = Math.max(worstTodaySec, result.todayWeightedOutageSec)
   }
 
-  // A multi-id config (turbopuffer/fireworks) losing ALL of its ids in one cycle is a stronger signal
+  // A multi-id config (turbopuffer) losing ALL of its ids in one cycle is a stronger signal
   // than a single-id config resolving nothing (which stays silent — "this page doesn't track that
   // component" is the ordinary, expected reason there). For N>1 ids configured together, expecting
   // SOME subset to keep resolving, a simultaneous total loss reads as an upstream reorg/rotation the
@@ -687,7 +687,7 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
       }>
       // Filter to the target component(s); worst-of per day across them (loop below escalates).
       const mine = impacts.filter((i) => idSet.has(i.component_id))
-      // Mirrors computeIncidentIoUptime's total-loss warn: a multi-id config (turbopuffer/fireworks)
+      // Mirrors computeIncidentIoUptime's total-loss warn: a multi-id config (turbopuffer)
       // matching NONE of its ids against a non-empty impacts array is a stronger signal than a single-id
       // config resolving nothing (silently normal there — "this page just has no impacts for it"). Total
       // loss across several configured ids reads as an upstream reorg/rotation, and unlike the uptime

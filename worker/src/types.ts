@@ -484,6 +484,9 @@ export interface ServiceConfig {
   // The tuple forbids `[]`, which would be silently truthy: it passes the `needsHtml` gate, runs the
   // parser over zero ids, and yields null — reinstating the exact silent uptime drop #857 fixed.
   incidentIoComponentId?: string | [string, ...string[]]
+  /** #1709 — uptime is the worst-of every component the incident.io page lists in `component_uptimes`, instead of
+   *  an id list. `incidentIoComponentId` stays a single anchor id. */
+  uptimeOverPageComponents?: true
   /** #367 → #1006 — the incident.io GROUP aggregate id (e.g. OpenAI's "APIs" group). Its role changed:
    *  it no longer feeds `uptime30d` (that is computed from component_impacts over a common 30 days now).
    *  It identifies the number the page actually DISPLAYS for this service — status.openai.com shows the
@@ -496,7 +499,7 @@ export interface ServiceConfig {
   // is. Spans both roster-audited platforms (incident.io, Atlassian) — the check itself is
   // platform-agnostic; only its age SOURCE differs per platform (Rootly/Mistral is NOT audited: no
   // per-component age signal survived verification, see discord-alert-paths.md). Unlike the
-  // Fireworks/turbopuffer age-in queue, these never age into scope regardless of age. A new exclusion is
+  // turbopuffer age-in queue, these never age into scope regardless of age. A new exclusion is
   // therefore a reviewed diff here, not a silent audit suppression.
   rosterAuditExclude?: string[]
   // #1669 — page component ids that are not a service (a developer console, a dashboard). An incident
@@ -505,7 +508,7 @@ export interface ServiceConfig {
   // #1518 — set when this service's uptime scope is PERMANENTLY pinned to one (or a few) anchor
   // component(s) on a page whose OWN roster is structurally unbounded — a per-model catalog
   // (`displayAllComponents`: cohere/groq's incident.io pages, bfl's Atlassian one) rather than a curated
-  // allowlist meant to grow (fireworks/turbopuffer). Skips the (b) aged-in-out-of-scope check for the
+  // allowlist meant to grow (turbopuffer). Skips the (b) aged-in-out-of-scope check for the
   // WHOLE page: `rosterAuditExclude` cannot express this — the excluded set would need a new entry for
   // every model the page could ever add, exactly the hand-maintained-roster trap #992's
   // `displayAllComponents` already avoids for the breakdown.

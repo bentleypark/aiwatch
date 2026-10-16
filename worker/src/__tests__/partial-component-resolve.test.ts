@@ -576,18 +576,21 @@ describe('PARTIAL_COMPONENT_SERVICES roster', () => {
     expect(ids).toContain('copilot')
   })
 
-  // #957 — turbopuffer/fireworks configure a LIST `incidentIoComponentId` with no `statusComponentId`/
+  // #957 — turbopuffer configures a LIST `incidentIoComponentId` with no `statusComponentId`/
   // `statusComponentIds` at all, so every existing signal (#135/#379/#606) was structurally exempt from
   // them. This is the roster that closes that gap.
   it('includes the incidentIoComponentId-list services with no statusComponentIds (#957)', () => {
     const ids = PARTIAL_COMPONENT_SERVICES.map((s) => s.id)
     expect(ids).toContain('turbopuffer')
-    expect(ids).toContain('fireworks')
+  })
+
+  it('leaves out a service whose uptime scope is the whole page — it has no ids to go missing (#1709)', () => {
+    expect(PARTIAL_COMPONENT_SERVICES.map((s) => s.id)).not.toContain('fireworks')
   })
 
   it('names the field each uptime entry actually resolves from', () => {
     const uptime = (id: string) => PARTIAL_COMPONENT_SERVICES.find((s) => s.id === id && s.scope === 'uptime')?.field
-    expect(uptime('fireworks')).toBe('incidentIoComponentId')
+    expect(uptime('turbopuffer')).toBe('incidentIoComponentId')
     expect(uptime('openai')).toBe('statusComponentIds')
   })
 

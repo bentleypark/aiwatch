@@ -863,7 +863,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     }
   })
 
-  it('#1198 — fireworks migrated off BetterStack to the incident.io compat API (overall-indicator badge, dynamic breakdown, worst-of uptime over a stable id subset)', () => {
+  it('#1198 — fireworks migrated off BetterStack to the incident.io compat API (overall-indicator badge, dynamic breakdown, worst-of uptime over every page component)', () => {
     const svc = SERVICES.find((s) => s.id === 'fireworks')!
     expect(svc.betterStackUrl).toBeUndefined()
     expect(svc.rssFeedUrl).toBeUndefined()
@@ -877,18 +877,9 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(svc.statusComponentIds).toBeUndefined()
     expect(svc.displayAllComponents).toBe(true)
     expect(svc.componentDenylist).toBeUndefined()
-    // incidentIoComponentId IS set — but only for the uptime worst-of (mirrors turbopuffer's
-    // no-canonical-component shape), NOT every page component: deliberately scoped to ids old enough
-    // that a brand-new model can't pin the uptime window down to its own age (see the config comment).
-    // Pinned by value so a roster change fails here and has to be made on purpose (drop, replace, add).
-    expect(svc.incidentIoComponentId).toEqual([
-      '01KTM9PHXTQ0YX1ZM3TRVACTK8', '01KVEMZE3M15ZV46ZEB7X88H61',
-      '01KYQSPPP8VB3N85P4Y2A01RSR', '01KYQSPPP80JDA3M7X73DNKHHD', '01KYQT4MDWSVEMPWCVPC90ZSA8',
-      '01M03TGQ7XTQ8HAKZ8MDQ44HH5', '01M0VEYRP3Q4KM0RDEFG6EBBZC', '01M0VEYRP3YY99KM87D9CNZ7MG',
-      '01M1DFY7G1ZJQNNZWX0Y0APVX6', '01M1DFY7G1JXWQQQ852G0PAQCP', '01M29PF3FR517GWQBY4BHZMV8A',
-      '01M2JY35857CPRZTJ3KQ2WS4Z4', '01M2JZVTP49S02KF06H66DCNXC', '01M2JY3585G7CDGZGT5111H7JQ',
-      '01M2JY3585ZHHE7A9JDG6PR7B3', '01M2JY3585D3XN71ARM3AP8VA8',
-    ])
+    // #1709 — uptime is the worst-of every component the page lists, with a single anchor id.
+    expect(svc.incidentIoComponentId).toBe('01KTM9PHXTQ0YX1ZM3TRVACTK8')
+    expect(svc.uptimeOverPageComponents).toBe(true)
     // holdShortIncidents, NOT flapSuppression: incident.io titles carry no "— down/recovered" suffix,
     // so flapSuppression's isFlapNotice title regex would never match — see alerts.test.ts for the
     // behavioral coverage (a real per-model blip must still be held, using the real SERVICES config).

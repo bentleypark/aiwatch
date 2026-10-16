@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { rosterAuditPages, incidentIoUptimeScopeOf } from '../services'
 import type { ServiceConfig } from '../types'
 
-describe('incidentIoUptimeScopeOf (#1518 — the same expression fetchService computes uptime over)', () => {
+describe('incidentIoUptimeScopeOf (#1518)', () => {
   it('prefers statusComponentIds over incidentIoComponentId when both are set', () => {
     expect(incidentIoUptimeScopeOf({ statusComponentIds: ['A', 'B'], incidentIoComponentId: 'C' })).toEqual(['A', 'B'])
   })
@@ -21,11 +21,16 @@ describe('incidentIoUptimeScopeOf (#1518 — the same expression fetchService co
 })
 
 describe('rosterAuditPages (#1518 — grouping by shared status page)', () => {
-  it('puts aged Fireworks models (GLM #1561, Deepseek V4.1 Flash) in the uptime scope', () => {
+  it('skips the aged-in check for Fireworks, whose uptime scope is the whole page (#1709)', () => {
     const fireworks = rosterAuditPages().find((page) => page.statusUrl === 'https://status.fireworks.ai')!
-    const ids = ['01M1DFY7G1ZJQNNZWX0Y0APVX6', '01M1DFY7G1JXWQQQ852G0PAQCP', '01M29PF3FR517GWQBY4BHZMV8A']
 
-    expect(fireworks.scopeIds).toEqual(expect.arrayContaining(ids))
+    expect(fireworks.fixedScope).toBe(true)
+  })
+
+  it('treats any page-wide uptime scope as fixed, without a second flag (#1709)', () => {
+    const cfg = { id: 'x', name: 'X', provider: 'X', category: 'api', statusUrl: 'https://status.x.example', apiUrl: 'https://status.x.example/api/v2/summary.json', incidentIoComponentId: 'ANCHOR', uptimeOverPageComponents: true } as ServiceConfig
+
+    expect(rosterAuditPages([cfg])[0].fixedScope).toBe(true)
   })
 
   it('groups the real openai/chatgpt/codex config onto one page with the union of their scopes', () => {

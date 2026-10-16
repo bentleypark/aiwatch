@@ -19,6 +19,7 @@ function uptimeScopeDescriptor(s: ServiceConfig): string {
   if (s.cloudflareStatusComponentIds) return 'none'
   if (s.datadogStatusUrl) return `datadog group ${s.datadogComponentGroupId}`
   if (s.apiUrl) {
+    if (s.uptimeOverPageComponents) return 'incident.io page components'
     if (s.incidentIoComponentId) return `incident.io ${[s.statusComponentIds ?? s.incidentIoComponentId].flat().join(',')}`
     if (s.uptimeOverLiveComponents) return 'atlassian live components'
     const atlassian = uptimeScopeOf(s)
@@ -53,7 +54,7 @@ describe('#1679 — every service\'s uptime scope is pinned', () => {
         "deepseekapp": "flashduty 01KY4ND2PNYT9FY5W4ZH80VGJ4,01KY4ND2PN1CCNW2MFT5VW713H,01KY4ND2PNJ6MFA4VJ0DSN6M2J,01KY4ND2PNNFFY6QKV67WFJW8N,01KY4ND2PN6EFSJ4RDYDJYPMNK",
         "elevenlabs": "incident.io 01JP2RQVGDHPEEDAFM5KV2MH9P,01JYDTNNSJBT4X90MAC47YPM9S,01JY3H5SJJZNC33AYMAE4SK4TH,01JY3H5SJJD2BMSGSW5FZE08ST,01JY3H5SJJJG47J60JPKX882H8,01JY3H5SJJFKTXYQHG5A8Z1KYH,01JJM5RKYAEWNM3XYRHXM8FJQ3",
         "fal": "instatus name API",
-        "fireworks": "incident.io 01KTM9PHXTQ0YX1ZM3TRVACTK8,01KVEMZE3M15ZV46ZEB7X88H61,01KYQSPPP8VB3N85P4Y2A01RSR,01KYQSPPP80JDA3M7X73DNKHHD,01KYQT4MDWSVEMPWCVPC90ZSA8,01M03TGQ7XTQ8HAKZ8MDQ44HH5,01M0VEYRP3Q4KM0RDEFG6EBBZC,01M0VEYRP3YY99KM87D9CNZ7MG,01M1DFY7G1ZJQNNZWX0Y0APVX6,01M1DFY7G1JXWQQQ852G0PAQCP,01M29PF3FR517GWQBY4BHZMV8A,01M2JY35857CPRZTJ3KQ2WS4Z4,01M2JZVTP49S02KF06H66DCNXC,01M2JY3585G7CDGZGT5111H7JQ,01M2JY3585ZHHE7A9JDG6PR7B3,01M2JY3585D3XN71ARM3AP8VA8",
+        "fireworks": "incident.io page components",
         "fishaudio": "betterstack all page resources",
         "gemini": "none",
         "grok": "none",

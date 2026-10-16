@@ -88,7 +88,7 @@ The third member of the component-drift family, and the one the other two could 
 
 **Coverage and body.** The roster (`PARTIAL_COMPONENT_SERVICES`) is derived from `SERVICES` via two pure predicates, with separate badge and uptime records for a dual-configured service. `formatPartialResolveAlert` names the actual scope field and only renders the `viaSummary`/`#1175` claim for badge records. The Discord send gates its 24h dedup key on success (`sendDiscordAlert` returns `false` rather than throwing, so an unconditional write would swallow the page on a 429), matching #500/#992. Pure fns plus the `fetchService`/cron wiring are unit-tested in `partial-component-resolve.test.ts`.
 
-**#957 — a second, independent resolution source feeds the SAME mechanism, tagged by `scope`.** A service with no `statusComponentId`/`statusComponentIds` (turbopuffer, fireworks) has `uptimeScope` in `services.ts` fall back to `config.incidentIoComponentId` — the id list `computeIncidentIoUptime` (worker/src/parsers/incident-io.ts) then reads and, since #957, also returns as `missing: string[]` when some but not all resolve against the page's `component_uptimes[].data_available_since` (an incident.io ULID rotation or page reorg the worst-of previously absorbed silently, reporting a number computed only over the ids that survived — the function had already warned about this via `console.warn`, write-only, before #957 routed it to Discord). `fetchService` reports it via the SAME `trackPartialResolve` the badge-side block uses, tagged `scope: 'uptime'`.
+**#957 — a second, independent resolution source feeds the SAME mechanism, tagged by `scope`.** A service with no `statusComponentId`/`statusComponentIds` and no `uptimeOverPageComponents` (turbopuffer) has `uptimeScope` in `services.ts` fall back to `config.incidentIoComponentId` — the id list `computeIncidentIoUptime` (worker/src/parsers/incident-io.ts) then reads and, since #957, also returns as `missing: string[]` when some but not all resolve against the page's `component_uptimes[].data_available_since` (an incident.io ULID rotation or page reorg the worst-of previously absorbed silently, reporting a number computed only over the ids that survived — the function had already warned about this via `console.warn`, write-only, before #957 routed it to Discord). `fetchService` reports it via the SAME `trackPartialResolve` the badge-side block uses, tagged `scope: 'uptime'`.
 
 **Dual-configured services.** Their uptime scope is `statusComponentIds`, while the badge reads `breakdownComponents`; a component can therefore resolve for the badge but be absent from `component_uptimes`. Uptime observations use a separate KV and dedup key and name `statusComponentIds`, so they cannot merge with a simultaneous badge observation or direct the operator to the wrong field.
 
@@ -152,11 +152,11 @@ miscounting one), not any single sentence in it.
 - **`rosterAuditFixedScope`, not a list** — cohere, groq and bfl's per-model catalogs, structurally
   unbounded (`displayAllComponents`, the same reason #992's own detector avoids a hand-maintained list
   for these pages), so no finite exclude list would stay correct; see the flag's own docblock in
-  `types.ts`.
+  `types.ts`. `uptimeOverPageComponents` (fireworks) implies it: that scope is every component the page lists, so nothing can be out of scope, and it has no ids for the #957 alert to watch.
 
 **Scope and grouping.** `rosterAuditPages` groups every service with an `incidentIoComponentId` by the
 status page it shares (`statusUrl`), then unions each co-located service's uptime scope
-(`statusComponentIds ?? incidentIoComponentId` — the same expression `fetchService` computes uptime
+(`incidentIoUptimeScopeOf` — the id-list scope `fetchService` computes uptime
 over) and its `rosterAuditExclude`. Page-level, not service-level, because a component in codex's scope
 must not read as "out of scope" when auditing openai on the shared `status.openai.com` page.
 `rosterAuditExclude` names a component that is out of scope ON PURPOSE, at any age, for a reason
