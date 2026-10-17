@@ -508,6 +508,7 @@ export function buildAnalysisPrompt(
 
   // Include timeline updates for richer re-analysis context (most recent entries, line-safe truncation)
   const timelineLines = (currentIncident.timeline ?? [])
+    .filter(t => currentIncident.status === 'resolved' || t.stage !== 'resolved')
     .slice(-10)
     .map(t => `- [${sanitize(t.stage).slice(0, 20)}] ${sanitize(t.at).slice(0, 30)}: ${sanitize(t.text ?? '').slice(0, 200)}`)
   let timelineText = ''

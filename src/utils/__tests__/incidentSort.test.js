@@ -834,3 +834,31 @@ describe('#1622 — a status_history day row as displayed', () => {
     expect(getContextualTime(row(), t).label).toBe('Resolved')
   })
 })
+
+// #1350 — a merged group whose first member recovered: still active, no resolvedAt, but carrying a
+// `resolved` row from that member. getResolvedTime would return that row; the status gates in the
+// callers are what keep it off the time axis.
+describe('partially-resolved merged group (#1350)', () => {
+  const t = (key) => key
+  const partial = makeIncident({
+    status: 'investigating',
+    startedAt: '2026-09-03T13:30:00Z',
+    timeline: [
+      { stage: 'investigating', at: '2026-09-03T13:30:00Z' },
+      { stage: 'resolved', at: '2026-09-03T17:04:59Z' },
+      { stage: 'investigating', at: '2026-09-03T17:06:00Z' },
+    ],
+  })
+
+  it('getContextualTime labels the last update, not the member resolution', () => {
+    expect(getContextualTime(partial, t)).toEqual({
+      label: 'incidents.time.updated',
+      date: '2026-09-03T17:06:00Z',
+      dayOnly: false,
+    })
+  })
+
+  it('getLatestActivity sorts by the last update, not the member resolution', () => {
+    expect(getLatestActivity(partial)).toBe(new Date('2026-09-03T17:06:00Z').getTime())
+  })
+})

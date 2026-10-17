@@ -356,6 +356,42 @@ describe('buildAnalysisPrompt', () => {
     expect(prompt).toContain('Errors have gone down')
   })
 
+  describe('#1350 — a partially-resolved merged group', () => {
+    const timeline = [
+      { stage: 'investigating', text: 'Grok is experiencing issues.', at: '2026-09-03T13:30:00Z' },
+      { stage: 'resolved', text: 'We have resolved the situation.', at: '2026-09-03T17:04:59Z' },
+    ]
+    const promptFor = (status: string) => buildAnalysisPrompt(
+      'Grok',
+      { title: 'Grok is experiencing issues [iOS, Web]', status, startedAt: '2026-09-03T13:30:00Z', impact: 'major', timeline },
+      [],
+    )
+
+    it('drops the recovered member\'s resolved row while the incident is still active', () => {
+      const prompt = promptFor('investigating')
+      expect(prompt).toContain('Grok is experiencing issues.')
+      expect(prompt).not.toContain('[resolved]')
+    })
+
+    it('keeps the resolved row once the incident itself is resolved', () => {
+      expect(promptFor('resolved')).toContain('- [resolved] 2026-09-03T17:04:59Z: We have resolved the situation.')
+    })
+
+    it('fills the 10-row window with active rows instead of losing one to a dropped resolved row', () => {
+      const rows = [
+        ...Array.from({ length: 10 }, (_, i) => ({ stage: 'investigating', text: `update ${i}`, at: `2026-09-03T13:${String(i).padStart(2, '0')}:00Z` })),
+        { stage: 'resolved', text: 'member recovered', at: '2026-09-03T14:00:00Z' },
+      ]
+      const prompt = buildAnalysisPrompt(
+        'Grok',
+        { title: 'Grok is experiencing issues', status: 'investigating', startedAt: '2026-09-03T13:00:00Z', impact: 'major', timeline: rows },
+        [],
+      )
+      expect(prompt).toContain('update 0')
+      expect(prompt).toContain('update 9')
+    })
+  })
+
   it('omits timeline section when no timeline provided', () => {
     const prompt = buildAnalysisPrompt(
       'Test',
