@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderDelegatedListeners, resolveBeaconSvcId, buildMetaDescription, renderPage, alertCtaTitle, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
+import { enhanceFaqAnswer, renderDelegatedListeners, resolveBeaconSvcId, buildMetaDescription, renderPage, alertCtaTitle, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
 import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/utils/predictionAccuracy'
 import { getSEOContent } from '../_is-down/seo-content'
 import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
@@ -848,3 +848,59 @@ describe('no is-down insight claims AIWatch estimates uptime (#713/#1006)', () =
     ), 'the pattern must match the real sentence this guards').toBe(true)
   })
 })
+
+// #1028 — the alternatives FAQ answer carries ONE list: the live recommendation when there is one (the
+// same list the alternatives card renders), else the curated static answer. Appending the static answer
+// to the live sentence put two different service lists in one paragraph.
+describe('enhanceFaqAnswer — one list per answer (#1028)', () => {
+  const faq = { q: 'What are alternatives to Groq?', a: 'For hosted open-model inference, Together AI, Fireworks AI, and Cerebras are alternatives AIWatch also tracks.' }
+  const live = [{ name: 'Cohere API', score: 89 }, { name: 'Perplexity', score: null }]
+
+  it('a live list replaces the static answer', () => {
+    expect(enhanceFaqAnswer(faq, live)).toBe('Based on current AIWatch data, the top-ranked alternatives right now are Cohere API (Score: 89) and Perplexity. AIWatch shows the current availability of every service it tracks.')
+  })
+
+  it('a single live alternative reads in the singular', () => {
+    expect(enhanceFaqAnswer(faq, live.slice(0, 1))).toBe('Based on current AIWatch data, the top-ranked alternative right now is Cohere API (Score: 89). AIWatch shows the current availability of every service it tracks.')
+  })
+
+  it('a capability-routed list names the capability it substitutes', () => {
+    expect(enhanceFaqAnswer(faq, live, 'Image generation')).toBe('Based on current AIWatch data, the top-ranked alternatives for image generation right now are Cohere API (Score: 89) and Perplexity. AIWatch shows the current availability of every service it tracks.')
+  })
+
+  it('no live list → the static answer, unchanged', () => {
+    expect(enhanceFaqAnswer(faq, [])).toBe(faq.a)
+  })
+
+  it('a question that is not about alternatives keeps its static answer', () => {
+    const other = { q: 'How do I check Groq status?', a: 'On this page.' }
+    expect(enhanceFaqAnswer(other, live)).toBe(other.a)
+  })
+
+  it('a question that only mentions alternatives keeps its static answer (Jina: why none is suggested)', () => {
+    const seo = getSEOContent('jina')!
+    const why = seo.faqs.find((f) => f.q.startsWith('Why is no alternative suggested'))!
+    expect(enhanceFaqAnswer(why, live)).toBe(why.a)
+  })
+
+  it('every phrasing of the alternatives question takes the live list', () => {
+    for (const q of ['What are alternatives to Groq?', 'What are the alternatives to Groq?', 'What alternatives are there to Gemini?', 'What can I use instead of OpenRouter?', 'What should I do when Claude API is down?']) {
+      expect(enhanceFaqAnswer({ q, a: 'static' }, live), q).not.toBe('static')
+    }
+  })
+
+  it('the rendered page and its FAQPage JSON-LD both carry the live answer, not the static one', () => {
+    const seo = getSEOContent('groq')!
+    const staticAnswer = seo.faqs.find((f) => /alternatives/i.test(f.q))!.a
+    const html = renderPage('groq', null, seo, [{ id: 'cohere', name: 'Cohere API', score: 89, status: 'operational' }])
+    expect(html.split('the top-ranked alternative right now is Cohere API (Score: 89).').length - 1).toBe(2)
+    expect(html).not.toContain(staticAnswer)
+  })
+
+  it('a capability-routed page carries the capability into both FAQ renders', () => {
+    const seo = getSEOContent('chatgpt')!
+    const html = renderPage('chatgpt', null, seo, [{ id: 'stability', name: 'Stability AI', score: 80, status: 'operational' }], undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'Image generation')
+    expect(html.split('the top-ranked alternative for image generation right now is Stability AI (Score: 80).').length - 1).toBe(2)
+  })
+})
+

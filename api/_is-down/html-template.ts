@@ -567,7 +567,7 @@ ${consentInitScript()}
 
 ${renderJsonLd(slug, seo, service)}
 ${renderBreadcrumbJsonLd(slug, seo)}
-${renderFaqJsonLd(seo, fallbacks)}
+${renderFaqJsonLd(seo, fallbacks, fallbackCapabilityLabel)}
 
 <style>
 :root{color-scheme:dark}
@@ -698,7 +698,7 @@ ${renderIncidents(service)}
 ${renderReportFeed(reports, seo)}
 ${renderDescription(seo, service)}
 ${renderErrors(seo)}
-${renderFAQ(seo, fallbacks)}
+${renderFAQ(seo, fallbacks, fallbackCapabilityLabel)}
 ${renderFallbacks(seo, fallbacks, service?.id, fallbackCapabilityLabel)}
 ${renderShareButtons(seo, service, canonical, ogImageUrl, aiInsight)}
 ${renderBadgeEmbed(slug, seo)}
@@ -833,22 +833,24 @@ export function linkifyFaqAnswer(text: string): string {
   return out
 }
 
-function enhanceFaqAnswer(faq: { q: string; a: string }, fallbacks: Fallback[]): string {
-  if (fallbacks.length > 0 && /what should i do|alternative|instead/i.test(faq.q)) {
+export function enhanceFaqAnswer(faq: { q: string; a: string }, fallbacks: Pick<Fallback, 'name' | 'score'>[], capabilityLabel?: string): string {
+  if (fallbacks.length > 0 && /^(what are (the )?alternatives to|what alternatives are there to|what can i use instead of|what should i do when)\b/i.test(faq.q)) {
     const fbList = fallbacks.map(fb => `${fb.name}${fb.score != null ? ` (Score: ${fb.score})` : ''}`).join(' and ')
-    return `Based on current AIWatch data, ${fbList} ${fallbacks.length === 1 ? 'is' : 'are'} the most reliable alternative${fallbacks.length === 1 ? '' : 's'} right now. ${faq.a}`
+    const scope = capabilityLabel ? ` for ${capabilityLabel.toLowerCase()}` : ''
+    const lead = fallbacks.length === 1 ? `the top-ranked alternative${scope} right now is` : `the top-ranked alternatives${scope} right now are`
+    return `Based on current AIWatch data, ${lead} ${fbList}. AIWatch shows the current availability of every service it tracks.`
   }
   return faq.a
 }
 
-function renderFaqJsonLd(seo: ServiceSEO, fallbacks: Fallback[]): string {
+function renderFaqJsonLd(seo: ServiceSEO, fallbacks: Fallback[], capabilityLabel?: string): string {
   const data = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
     'mainEntity': seo.faqs.map(f => ({
       '@type': 'Question',
       'name': f.q,
-      'acceptedAnswer': { '@type': 'Answer', 'text': enhanceFaqAnswer(f, fallbacks) },
+      'acceptedAnswer': { '@type': 'Answer', 'text': enhanceFaqAnswer(f, fallbacks, capabilityLabel) },
     })),
   }
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
@@ -1788,10 +1790,10 @@ export function renderErrors(seo: ServiceSEO): string {
 <div class="card">${renderErrorList(seo.errors)}</div>`
 }
 
-function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[]): string {
+function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[], capabilityLabel?: string): string {
   if (seo.faqs.length === 0) return ''
   const items = seo.faqs.map(f => {
-    const answer = enhanceFaqAnswer(f, fallbacks)
+    const answer = enhanceFaqAnswer(f, fallbacks, capabilityLabel)
     return `<div class="faq-item">
 <p class="faq-q">${esc(f.q)}</p>
 <p class="faq-a">${linkifyFaqAnswer(answer)}</p>

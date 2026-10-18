@@ -182,7 +182,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Junie down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Junie every 5 minutes via the JetBrains Cloud Platform status feed and shows real-time operational status.' },
       { q: 'Why are Junie\'s AI features not working?', a: 'Junie may be down due to JetBrains-specific issues or an upstream model provider outage.' },
-      { q: 'What are alternatives to Junie?', a: 'When Junie is down, Cursor, Claude Code, GitHub Copilot, Codex, or Windsurf (Devin Desktop) are alternative AI coding agents. AIWatch shows which are currently operational and recommends the highest-scored alternative.' },
+      { q: 'What are alternatives to Junie?', a: 'When Junie is down, Cursor, Claude Code, GitHub Copilot, Codex, or Windsurf (Devin Desktop) are alternative AI coding agents. AIWatch shows which are currently operational.' },
       { q: 'Does Junie work in every JetBrains IDE?', a: 'No — JetBrains ships the Junie plugin for a subset of its IDEs, each with its own minimum version. Check JetBrains\' documentation for the one you use.' },
     ],
   },
@@ -195,7 +195,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Mistral API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Mistral every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
       { q: 'How do I check Mistral status?', a: 'You can check Mistral status on this page, on the official Mistral status page at status.mistral.ai, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to Mistral?', a: 'When Mistral is down, Cohere, Groq, Together AI, or OpenAI are alternative LLM APIs. AIWatch provides real-time fallback recommendations.' },
+      { q: 'What are alternatives to Mistral?', a: 'OpenAI, Claude, or Gemini are alternative LLM APIs AIWatch also tracks. AIWatch shows current availability for each.' },
       { q: 'Does Mistral downtime affect Le Chat?', a: 'It can. Le Chat is now called Mistral Vibe, and Mistral has resolved incidents whose fix covered both its API services and the app. Mistral\'s status page lists Vibe as its own component, while this page tracks the API components only, so a Vibe-only incident is not shown here.' },
     ],
   },
@@ -217,7 +217,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Groq Cloud down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Groq every 5 minutes and shows real-time operational status, uptime, and response time data.' },
       { q: 'Why is Groq slow today?', a: 'Check this page for any active incidents, and the AIWatch dashboard for probe-based response time trends.' },
-      { q: 'What are alternatives to Groq?', a: 'For low-latency inference, Together AI and Fireworks AI are the closest alternatives. For general LLM API, OpenAI or Claude work as fallbacks. AIWatch ranks current availability.' },
+      { q: 'What are alternatives to Groq?', a: 'For hosted open-model inference, Together AI, Fireworks AI, and Cerebras are alternatives AIWatch also tracks. AIWatch shows current availability for each.' },
       { q: 'How do I check Groq status?', a: 'You can check Groq status on this page, on the official Groq status page at groqstatus.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -252,7 +252,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Cerebras Inference down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cerebras every 5 minutes — taking the worst status across all model components — and shows real-time operational status.' },
       { q: 'How do I check Cerebras status?', a: 'You can check Cerebras status on this page, on the official status page at status.cerebras.ai, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to Cerebras Inference?', a: 'Groq Cloud, Together AI, and Fireworks AI offer comparable high-throughput hosted inference for open-source models. AIWatch shows current availability and reliability rankings so you can pick the healthiest option.' },
+      { q: 'What are alternatives to Cerebras Inference?', a: 'Groq Cloud, Together AI, and Fireworks AI offer hosted inference for open-source models. AIWatch shows current availability for each.' },
       { q: 'Why is one Cerebras model down but not others?', a: 'Cerebras publishes per-model status components, so a rollout or capacity issue can affect just one model (e.g. GPT-OSS-120B) while the rest stay operational. AIWatch surfaces the worst-of, so the service shows degraded even if only one model is affected.' },
     ],
   },
@@ -264,7 +264,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Perplexity down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Perplexity every 5 minutes and shows real-time operational status.' },
       { q: 'Why is Perplexity not working?', a: 'Perplexity may be experiencing search index issues, LLM backend outages, or rate limiting. Check this page for any active incidents.' },
-      { q: 'What are alternatives to Perplexity?', a: 'For AI-powered search, ChatGPT (with browsing), Claude, or Gemini are alternatives. AIWatch shows current availability for each.' },
+      { q: 'What are alternatives to Perplexity?', a: 'For search-grounded answers over an API, the OpenAI, Claude, and Gemini APIs offer web search. AIWatch shows current availability for each.' },
       { q: 'How do I check Perplexity status?', a: 'You can check Perplexity status on this page, on the official Perplexity status page at status.perplexity.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -280,7 +280,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is the SpaceXAI Grok API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the SpaceXAI API every 5 minutes and shows real-time operational status.' },
       { q: 'Is this the same as the Grok app?', a: 'No. This page tracks the developer API (api.x.ai). The consumer Grok app (iOS/Android/Web) has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
       { q: 'How do I check SpaceXAI API status?', a: 'You can check SpaceXAI status on this page, on the official SpaceXAI status page at status.x.ai, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to the SpaceXAI API?', a: 'For general LLM API, OpenAI, Claude, or Gemini are mature alternatives. None match Grok\'s real-time X integration, but AIWatch shows current availability for each.' },
+      { q: 'What are alternatives to the SpaceXAI API?', a: 'For a general LLM API, OpenAI, Claude, or Gemini are alternatives AIWatch also tracks. AIWatch shows current availability for each.' },
     ],
   },
   // Grok (#1165/#1585) — SpaceXAI's consumer surfaces, the api-vs-app split mirror of DeepSeek
@@ -341,7 +341,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is ElevenLabs down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors ElevenLabs every 5 minutes and shows real-time operational status.' },
       { q: 'Why is ElevenLabs voice generation failing?', a: 'ElevenLabs may be experiencing TTS API issues, capacity limits, or specific model unavailability. Check this page for active incidents.' },
-      { q: 'What are alternatives to ElevenLabs?', a: 'For text-to-speech, AssemblyAI and Deepgram offer alternative voice APIs. AIWatch shows current availability for each voice service.' },
+      { q: 'What are alternatives to ElevenLabs?', a: 'For text-to-speech, Deepgram and Fish Audio are alternatives AIWatch also tracks. AIWatch shows current availability for each voice service.' },
       { q: 'How do I check ElevenLabs status?', a: 'You can check ElevenLabs status on this page, on the official ElevenLabs status page at status.elevenlabs.io, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -352,7 +352,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is AssemblyAI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors AssemblyAI every 5 minutes and shows real-time operational status.' },
       { q: 'Why is AssemblyAI transcription failing?', a: 'AssemblyAI may be experiencing async or real-time API issues. Check this page for active incidents and the official status page for component-level detail.' },
-      { q: 'What are alternatives to AssemblyAI?', a: 'For speech-to-text, Deepgram and ElevenLabs (via STT features) are alternatives. AIWatch shows current availability for each speech service.' },
+      { q: 'What are alternatives to AssemblyAI?', a: 'For speech-to-text, Deepgram is an alternative AIWatch also tracks. AIWatch shows current availability for each speech service.' },
       { q: 'How do I check AssemblyAI status?', a: 'You can check AssemblyAI status on this page, on the official AssemblyAI status page at status.assemblyai.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -364,7 +364,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Deepgram down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Deepgram every 5 minutes and shows real-time operational status.' },
       { q: 'Why is Deepgram streaming not working?', a: 'Deepgram streaming may be affected by regional network issues or capacity constraints. Check this page for active incidents.' },
-      { q: 'What are alternatives to Deepgram?', a: 'For speech-to-text, AssemblyAI and ElevenLabs are alternatives. AIWatch shows current availability for each.' },
+      { q: 'What are alternatives to Deepgram?', a: 'For speech-to-text, AssemblyAI is an alternative; for text-to-speech, ElevenLabs and Fish Audio. AIWatch shows current availability for each.' },
       { q: 'How do I check Deepgram status?', a: 'You can check Deepgram status on this page, on the official Deepgram status page at status.deepgram.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -413,7 +413,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is fal.ai down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors fal.ai every 5 minutes and shows real-time operational status.' },
       { q: 'Why is my fal.ai request slow or queued?', a: 'fal requests can queue during GPU capacity spikes. Check this page for active platform incidents; if the platform is healthy, the issue may be specific to the model you are calling.' },
-      { q: 'What are alternatives to fal.ai?', a: 'For serverless model inference, Replicate and Modal are the closest alternatives; Hugging Face Inference also hosts many of the same open models. AIWatch shows current availability across providers.' },
+      { q: 'What are alternatives to fal.ai?', a: 'For serverless model inference, Replicate and Modal are alternatives. AIWatch shows current availability across providers.' },
       { q: 'How do I check fal.ai status?', a: 'You can check fal.ai status on this page, on the official fal status page at status.fal.ai, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -425,7 +425,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Pinecone down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Pinecone every 5 minutes and shows real-time operational status.' },
       { q: 'Why is Pinecone slow today?', a: 'Pinecone latency can be affected by region-specific issues, index size, or query patterns. Check this page for active incidents.' },
-      { q: 'What are alternatives to Pinecone?', a: 'For vector search, Voyage AI offers embeddings + reranking, and self-hosted options like Qdrant, Weaviate, and pgvector are mature. AIWatch shows current availability.' },
+      { q: 'What are alternatives to Pinecone?', a: 'For vector search, turbopuffer is a managed vector database AIWatch also tracks. AIWatch shows current availability.' },
       { q: 'How do I check Pinecone status?', a: 'You can check Pinecone status on this page, on the official Pinecone status page at status.pinecone.io, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -437,7 +437,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is turbopuffer down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors turbopuffer every 5 minutes and shows real-time operational status.' },
       { q: 'Why is turbopuffer slow today?', a: 'turbopuffer latency can be affected by region-specific issues, namespace size, or query patterns. Check this page for active incidents.' },
-      { q: 'What are alternatives to turbopuffer?', a: 'For vector search, Pinecone is a fully-managed vector database, and self-hosted options like Qdrant, Weaviate, and pgvector are mature. AIWatch shows current availability.' },
+      { q: 'What are alternatives to turbopuffer?', a: 'For vector search, Pinecone is a fully-managed vector database AIWatch also tracks. AIWatch shows current availability.' },
       { q: 'How do I check turbopuffer status?', a: 'You can check turbopuffer status on this page, on the official turbopuffer status page at status.turbopuffer.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -494,7 +494,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Modal down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Modal every 5 minutes and shows real-time operational status.' },
       { q: 'Why is my Modal function failing?', a: 'Function-level failures may not show as platform incidents. Check this page for platform status, and the official Modal logs for function-specific issues.' },
-      { q: 'What are alternatives to Modal?', a: 'For serverless ML, Replicate, Hugging Face Spaces, and Beam Cloud are alternatives. AIWatch shows current availability across inference providers.' },
+      { q: 'What are alternatives to Modal?', a: 'For serverless ML, Replicate and Hugging Face Spaces are alternatives. AIWatch shows current availability across inference providers.' },
       { q: 'How do I check Modal status?', a: 'You can check Modal status on this page, on the official Modal status page at status.modal.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -507,7 +507,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is LangChain down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors LangSmith every 5 minutes and shows real-time operational status.' },
       { q: 'Is LangChain the same as LangSmith?', a: 'LangChain is the open-source framework; LangSmith is LangChain\'s hosted observability and evaluation platform with its own status page. This page tracks the LangSmith platform.' },
       { q: 'Why are my LangSmith traces not showing up?', a: 'Missing traces can indicate a run-ingestion incident even when the app loads. Check this page for active ingestion incidents, then verify your API key and project configuration.' },
-      { q: 'What are alternatives to LangSmith?', a: 'For LLM observability, Langfuse, Helicone, and Phoenix (Arize) are alternatives. AIWatch shows current availability across the AI stack.' },
+      { q: 'What are alternatives to LangSmith?', a: 'For LLM observability, Langfuse and Helicone are alternatives. AIWatch shows current availability across the AI stack.' },
       { q: 'How do I check LangSmith status?', a: 'You can check status on this page, on the official LangSmith status page at status.smith.langchain.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -543,7 +543,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Runway down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Runway every 5 minutes and shows real-time operational status.' },
       { q: 'Why are my Runway video generations failing?', a: 'Failed or stuck generations can indicate a Public API or Backend incident even when the app loads. Check this page for active incidents, then verify your API key and credit balance.' },
-      { q: 'What are alternatives to Runway?', a: 'For generative video, Luma Dream Machine, Pika, and Kling are alternatives; for image generation, Stability AI and Replicate. AIWatch shows current availability across the AI stack.' },
+      { q: 'What are alternatives to Runway?', a: 'For generative video, Luma Dream Machine is an alternative; for image generation, Stability AI and Replicate. AIWatch shows current availability across the AI stack.' },
       { q: 'How do I check Runway status?', a: 'You can check status on this page, on the official Runway status page at status.runwayml.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -556,7 +556,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is Luma down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Luma (Dream Machine) every 5 minutes and shows real-time operational status.' },
       { q: 'Is Luma the same as Dream Machine?', a: 'Dream Machine is Luma AI\'s video-generation product (powered by the Ray and UNI-1 models). This page tracks the Luma / Dream Machine status.' },
       { q: 'Why are my Dream Machine video generations failing?', a: 'Failed or stuck generations can indicate an API or model incident even when the app loads. Check this page for active incidents, then verify your API key and credit balance.' },
-      { q: 'What are alternatives to Luma?', a: 'For generative video, Runway is an alternative AIWatch also tracks; Kling and Pika are others. AIWatch shows current availability across the AI stack.' },
+      { q: 'What are alternatives to Luma?', a: 'For generative video, Runway is an alternative AIWatch also tracks. AIWatch shows current availability across the AI stack.' },
       { q: 'How do I check Luma / Dream Machine status?', a: 'You can check status on this page, on the official Luma status page at status.lumalabs.ai, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
