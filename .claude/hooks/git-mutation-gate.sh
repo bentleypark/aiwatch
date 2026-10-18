@@ -88,6 +88,9 @@ methodology_reminder=0
 # Pre-initialized like its siblings above: assigned only inside the git-commit branch, but
 # dereferenced unconditionally below — under `set -u` a non-commit op would otherwise leave it unset.
 truncated_id=""
+# #1723 — a service's config or parser changed but its is-down copy did not: the copy describes the
+# status source and component scope, and drifted that way before (#1028).
+seo_reminder=0
 if [ "$op" = "git-commit" ]; then
   HCWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
   [ -n "$HCWD" ] && cd "$HCWD" 2>/dev/null || true
@@ -112,6 +115,13 @@ if [ "$op" = "git-commit" ]; then
     printf '%s\n' "$names" | grep -qE '^api/_methodology/html-template\.ts$' && methodology_changed=1
     if [ "$statusdet_changed" = 1 ] && [ "$methodology_changed" = 0 ]; then
       methodology_reminder=1
+    fi
+    config_changed=0
+    printf '%s\n' "$names" | grep -vE '(__tests__|\.test\.)' | grep -qE '^worker/src/services\.ts$|^worker/src/parsers/.*\.ts$' && config_changed=1
+    seo_changed=0
+    printf '%s\n' "$names" | grep -qE '^api/_is-down/seo-content\.ts$' && seo_changed=1
+    if [ "$config_changed" = 1 ] && [ "$seo_changed" = 0 ]; then
+      seo_reminder=1
     fi
     # Truncated-id guard (#1053 retro). A backtick-quoted identifier truncated with a `…` (U+2026)
     # cannot be verified against its source, and — recorded as evidence — invites a SPLICE: #1053's
@@ -151,13 +161,16 @@ fi
 if [ "$methodology_reminder" -eq 1 ]; then
   warnings+=("🔗 ${op}: docs/reference/status-determination.md changed but api/_methodology/html-template.ts is NOT in this commit. The public /methodology §2 \"STATUS DETERMINATION\" cards mirror these rules and are a recurring sync miss (#934/#937). Verify the §2 cards still match — update them in THIS commit if the rule changed user-visibly.")
 fi
+if [ "$seo_reminder" -eq 1 ]; then
+  warnings+=("🔎 ${op}: worker/src/services.ts or a parser changed but api/_is-down/seo-content.ts is NOT in this commit. Re-read the is-down copy of each service whose config or parser changed — its status-source and component-scope sentences describe that config (#1028/#1723).")
+fi
 if [ -n "${truncated_id// /}" ]; then
   warnings+=("✂️ ${op}: a truncated identifier is recorded in an added backtick — ${truncated_id}(#1053). A \`…\`-elided id can't be checked against its source and invites a splice (#1053 shipped a chimera \`#f2c4fda9…c3310\`, one incident's head + another's tail). Record the FULL id, or if you don't need the id here (titles/timestamps usually justify a fixture, not ids) drop it. Keep the fact in one place a test asserts.")
 fi
 
 # Soft warning: surface PreToolUse additionalContext, allow the tool to proceed.
 msg="$(printf '%s\n' "${warnings[@]}")"
-note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}; docs_reminder=${docs_reminder}; methodology_reminder=${methodology_reminder}; truncated_id=$([ -n "${truncated_id// /}" ] && echo 1 || echo 0)"
+note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}; docs_reminder=${docs_reminder}; methodology_reminder=${methodology_reminder}; seo_reminder=${seo_reminder}; truncated_id=$([ -n "${truncated_id// /}" ] && echo 1 || echo 0)"
 audit "warn" "$note"
 # jq -Rs . turns raw stdin into a properly-escaped JSON string literal.
 esc="$(printf '%s' "$msg" | jq -Rs . 2>/dev/null)"

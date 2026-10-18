@@ -161,6 +161,11 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 19. `api/_is-down/html-template.ts` — if needed
 20. `vercel.json` — add rewrite rule `/is-{service}-down`
 21. `public/sitemap.xml` — add URL entry (`lastmod` is auto-bumped to build date by `scripts/bump-sitemap-lastmod.mjs` via `prebuild` hook — #337 — so any placeholder date works for the initial commit)
+21a. `api/_is-down/seo-content.ts` — the page's copy. Write it from the vendor's own pages and the config, and check each of these (#1028):
+    - **Vendor and ownership**, **delivery forms** (API / web / desktop / CLI / IDE — no single-form claim where several exist) and **current product names**.
+    - **Status source and component scope** match the service's entry in `worker/src/services.ts`.
+    - **FAQ alternatives** name only monitored services of the same capability. A live recommendation replaces the static answer (`enhanceFaqAnswer`), so the static one is what a reader sees when nothing is recommended.
+    - **A frequency, comparative or market sentence stays only if** AIWatch's own record shows it, the vendor's own page says it, or it states a first-party-backed causal structure (then as "can"). Otherwise delete it, do not reword it weaker. `npm run lint:seo-copy` fails on the listed words unless the whole sentence is in its `BACKED` list with a source, for that page; it does not see claims built from ordinary words ("share infrastructure", "same backend"), so read for those too.
 
 ## Reports site (aiwatch-reports) — commit + push to deploy (GitHub Pages auto-build)
 22. `README.md` — service count, category breakdown (e.g., "N LLM APIs, N voice & inference")

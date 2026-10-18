@@ -137,9 +137,9 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   'openai-api': {
     displayName: 'OpenAI',
-    description: 'OpenAI API provides access to OpenAI\'s language, image, and audio models used by millions of developers. It serves both the ChatGPT consumer product and enterprise API integrations.',
+    description: 'OpenAI API provides access to OpenAI\'s language, image, and audio models. It serves both the ChatGPT consumer product and enterprise API integrations.',
     insight: 'OpenAI API and ChatGPT are monitored separately by AIWatch. An API outage may not affect ChatGPT and vice versa.',
-    whenDown: 'When OpenAI API is down, applications using language, embedding, or image generation models will fail. This affects thousands of third-party apps, chatbots, and developer tools that rely on OpenAI as their backend.',
+    whenDown: 'When OpenAI API is down, applications using language, embedding, or image generation models will fail. This affects third-party apps, chatbots, and developer tools that rely on OpenAI as their backend.',
     faqs: [
       { q: 'Is OpenAI API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors OpenAI API every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
       { q: 'Is this affecting ChatGPT too?', a: 'OpenAI API and ChatGPT are tracked separately. Check the AIWatch dashboard at ai-watch.dev to see if both are affected or just one.' },

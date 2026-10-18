@@ -11,6 +11,7 @@ additionalContext   # Claude Code hookSpecificOutput field
 stop_hook_active     # Claude Code Stop-hook input field
 docs_reminder        # our workflow-hook reminder id (shell-emitted string, documented not defined as identifier)
 methodology_reminder # ditto — workflow-hook reminder id
+seo_reminder         # ditto — workflow-hook reminder id (#1723)
 truncated_id         # workflow-hooks.md descriptor for the …-truncated-identifier guard, not a symbol
 
 # — Anthropic Managed-Agents API fields (parallel-agents.md) —

@@ -221,3 +221,47 @@ test('truncated-id: does NOT fire on a non-commit mutation (git push) even with 
     assert.ok(!msg.includes(TRUNC_MARKER), `push must not fire; got:\n${msg}`)
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+// #1723 — a service's config or parser changed, its is-down copy did not.
+const SEO_MARKER = 'api/_is-down/seo-content.ts is NOT in this commit'
+const SEO = 'api/_is-down/seo-content.ts'
+
+for (const path of ['worker/src/services.ts', 'worker/src/parsers/statuspage.ts']) {
+  test(`seo: FIRES when ${path} is staged without seo-content.ts`, () => {
+    const dir = makeRepo()
+    try {
+      stage(dir, path)
+      const msg = runHook(dir)
+      assert.ok(msg.includes(SEO_MARKER), `expected seo reminder; got:\n${msg}`)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+}
+
+test('seo: SILENT when seo-content.ts is staged alongside services.ts', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/services.ts')
+    stage(dir, SEO)
+    const msg = runHook(dir)
+    assert.ok(!msg.includes(SEO_MARKER), `expected NO seo reminder; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('seo: SILENT on a parser test file and on an unrelated worker file', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/parsers/__tests__/statuspage.test.ts')
+    stage(dir, 'worker/src/score.ts')
+    const msg = runHook(dir)
+    assert.ok(!msg.includes(SEO_MARKER), `expected NO seo reminder; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('seo: does NOT fire on a non-commit mutation (git push) even with services.ts staged', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/services.ts')
+    const msg = runHook(dir, 'git push origin HEAD')
+    assert.ok(!msg.includes(SEO_MARKER), `push must not fire; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
