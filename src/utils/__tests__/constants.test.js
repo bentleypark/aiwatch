@@ -332,30 +332,30 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
 
   it('a lone medium candidate gets a fair shot alongside 1-2 high peers (comparable pool sizes)', () => {
     const services = [
-      v('mistral', 'Mistral API', 95, 'high'),
+      v('deepseek', 'DeepSeek API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
-      v('xai', 'SpaceXAI API', 60, 'medium'),
+      v('kimi', 'Kimi (Moonshot AI)', 60, 'medium'),
     ]
-    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'SpaceXAI API'])
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['DeepSeek API', 'Kimi (Moonshot AI)'])
   })
 
   it('a lone medium candidate is NOT guaranteed a slot once high outnumbers it 3-to-1 or more', () => {
     const services = [
-      v('mistral', 'Mistral API', 95, 'high'),
+      v('deepseek', 'DeepSeek API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
       v('groq', 'Groq Cloud', 85, 'high'),
-      v('xai', 'SpaceXAI API', 60, 'medium'),
+      v('kimi', 'Kimi (Moonshot AI)', 60, 'medium'),
     ]
-    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
   })
 
   it('#402/#1027 guard restored: a low-confidence (score-withheld) candidate never displaces a real-scored peer', () => {
     const services = [
-      v('mistral', 'Mistral API', 95, 'high'),
+      v('deepseek', 'DeepSeek API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
       v('groq', 'Groq Cloud', null, 'low'),
     ]
-    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
   })
 
   it('a candidate with an unrecognized scoreConfidence value sinks below high/medium, never vanishes', () => {
@@ -363,11 +363,11 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
     // the interleave, so any OTHER scoreConfidence value (a legacy/future value) was bucketed but never
     // pushed to the result — silently dropped instead of sunk.
     const services = [
-      v('mistral', 'Mistral API', 95, 'high'),
+      v('deepseek', 'DeepSeek API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
       v('groq', 'Groq Cloud', 99, 'insufficient'), // would win #1 on raw Score alone
     ]
-    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
   })
 
   it('an unrecognized-confidence candidate DOES surface when nothing better exists (sink, not exclusion)', () => {
@@ -865,8 +865,8 @@ describe('#1119 — frontend mirror: a ROUTED outage crosses the category bounda
 
   it('a non-routed LLM source keeps CROSS-TIER fill (separates "relax when routed" from "relax always")', () => {
     // API_TIER maps category↔tier ~1:1 today, so a non-routed APP source can't tell the tier pin apart
-    // from the category filter. This case can: mistral is tier 2, its peers are tier 1.
-    const src = { id: 'mistral', category: 'api', name: 'Mistral API', status: 'degraded', aiwatchScore: 76, incidents: [] }
+    // from the category filter. This case can: deepseek is tier 2, its peers are tier 1.
+    const src = { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'degraded', aiwatchScore: 76, incidents: [] }
     expect(getFallbacks(src, [src, ...pool]).map(f => f.id)).toEqual(['claude', 'gemini'])
   })
 

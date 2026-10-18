@@ -5,6 +5,7 @@
 // This pins the canonical category order so a re-introduction fails the build.
 import { describe, it, expect } from 'vitest'
 import { MOCK_SERVICES } from './usePolling'
+import { SERVICE_CATEGORIES, SERVICE_AND_APP_IDS, API_TIER } from '../utils/constants'
 
 describe('MOCK_SERVICES order (#796)', () => {
   const cats = MOCK_SERVICES.map((s) => s.category)
@@ -28,5 +29,13 @@ describe('MOCK_SERVICES order (#796)', () => {
   it('leads with the major LLM APIs, not an app', () => {
     expect(MOCK_SERVICES[0].id).toBe('claude')
     expect(MOCK_SERVICES[0].category).toBe('api')
+  })
+
+  it('#1726 — renders the LLM APIs in SERVICE_CATEGORIES order, tier-1 vendors first', () => {
+    const llm = SERVICE_CATEGORIES.llm.ids
+    expect(MOCK_SERVICES.map((s) => s.id).filter((id) => llm.includes(id))).toEqual(llm)
+    expect(SERVICE_AND_APP_IDS.filter((id) => llm.includes(id))).toEqual(llm)
+    const firstOther = llm.findIndex((id) => API_TIER[id] !== 1)
+    expect(llm.slice(firstOther).some((id) => API_TIER[id] === 1)).toBe(false)
   })
 })

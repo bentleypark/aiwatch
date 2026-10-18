@@ -33,8 +33,8 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'ch
 // Exported for the cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) — that test
 // is the only safeguard against drift between the three independent copies of this map (#403).
 export const API_TIER: Record<string, number> = {
-  claude: 1, openai: 1, gemini: 1,
-  mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, xai: 2, perplexity: 2,
+  claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
+  cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
   // Tier 5 = generative Video (#602 / #601 step B). A distinct tier so a degraded video service
@@ -363,8 +363,7 @@ export function effectiveTierFor(svc: FallbackCandidate): number {
 // result is undefined once there are 3+ candidates — not just "which of two ties displays first", but
 // potentially WHICH candidates make the top-2 cut at all.
 //
-// Attempt 2 — "confidence always beats score": in any tier with 2+ high-confidence members (tier 2 —
-// mistral/cohere/groq/together/fireworks/cerebras/deepseek/kimi/perplexity — alongside xai, medium),
+// Attempt 2 — "confidence always beats score": in any tier with 2+ high-confidence members,
 // that STRUCTURALLY excludes every medium candidate from ever being picked, regardless of how good its
 // measured signal is. Reintroduces the "unmeasured ⇒ treated as worse" assumption #1186 exists to
 // remove (the #713 rescale runs GENEROUS, not punitive — see score.ts's #1186 correction).
@@ -374,8 +373,8 @@ export function effectiveTierFor(svc: FallbackCandidate): number {
 // over-corrected: because the top-2 output only ever consumes round 0 (and round 1 only when a tier is
 // exhausted), a SINGLE medium candidate got the SAME one-slot-per-round guarantee as a 9-member high
 // tier — 50% of a 2-slot recommendation to a tier that is 10% of the measured pool, worse than the
-// score.ts rescale it was supposed to correct for. Discovered by testing it against the very tier-2
-// shape named above: xai (medium, lowest score) beat 3 higher-scoring high peers into the #2 slot
+// score.ts rescale it was supposed to correct for. Discovered by testing it against a tier-2 shape
+// where a medium candidate (lowest score) beat 3 higher-scoring high peers into the #2 slot
 // unconditionally. It also gave a `low`-confidence (WITHHELD score, e.g. a probe still warming up —
 // see docs/reference/fallback-tiers.md) candidate its own round-0 slot, defeating the `?? 0` sink that
 // exists specifically so an unscored candidate never displaces a real one (the #402/#1027 guard).

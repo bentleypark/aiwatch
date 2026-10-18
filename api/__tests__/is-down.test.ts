@@ -384,7 +384,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     const payload = new Response(JSON.stringify({
       services: [
         svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
-        svc({ id: 'mistral', name: 'Mistral API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'deepseek', name: 'DeepSeek API', scoreConfidence: 'high', aiwatchScore: 95 }),
         svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
         svc({ id: 'groq', name: 'Groq Cloud', scoreConfidence: 'low', aiwatchScore: null }),
       ],
@@ -394,7 +394,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     const res = await handler(makeReq('together'))
     const html = await res.text()
     const order = bulletOrder(html)
-    expect(order).toEqual(['Mistral API', 'Cohere API'])
+    expect(order).toEqual(['DeepSeek API', 'Cohere API'])
     expect(order).not.toContain('Groq Cloud')
   })
 
@@ -406,7 +406,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     const payload = new Response(JSON.stringify({
       services: [
         svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
-        svc({ id: 'mistral', name: 'Mistral API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'deepseek', name: 'DeepSeek API', scoreConfidence: 'high', aiwatchScore: 95 }),
         svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
         svc({ id: 'groq', name: 'Groq Cloud', scoreConfidence: 'insufficient', aiwatchScore: 99 }), // would win #1 on raw Score alone
       ],
@@ -416,7 +416,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     const res = await handler(makeReq('together'))
     const html = await res.text()
     const order = bulletOrder(html)
-    expect(order).toEqual(['Mistral API', 'Cohere API'])
+    expect(order).toEqual(['DeepSeek API', 'Cohere API'])
     expect(order).not.toContain('Groq Cloud')
   })
 

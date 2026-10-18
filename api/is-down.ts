@@ -230,8 +230,8 @@ export default async function handler(req: Request) {
         // fails CI. The inline copy is necessary because the Edge Function bundle can't pull from
         // worker/src/* (separate compilation surface).
         const API_TIER: Record<string, number> = {
-          claude: 1, openai: 1, gemini: 1,
-          mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, xai: 2, perplexity: 2,
+          claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
+          cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, perplexity: 2,
           bedrock: 3, azureopenai: 3, openrouter: 3,
           elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
           runway: 5, luma: 5, // Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts

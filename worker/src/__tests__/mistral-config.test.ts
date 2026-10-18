@@ -153,8 +153,8 @@ describe('#1381 Mistral (Rootly) service config', () => {
     expect(CAPABILITY_TIER[capabilityOfComponent('Embedding API')]).toBe(9)
   })
 
-  it('stays a tier-2 LLM service eligible for fallback recommendations', () => {
-    expect(API_TIER.mistral).toBe(2)
+  it('is a tier-1 LLM service eligible for fallback recommendations', () => {
+    expect(API_TIER.mistral).toBe(1)
     expect(EXCLUDE_FALLBACK).not.toContain('mistral')
   })
 })

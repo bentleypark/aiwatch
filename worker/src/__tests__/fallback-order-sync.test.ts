@@ -97,27 +97,27 @@ const FIXTURES: Array<{ label: string; sourceTier?: number; candidates: Array<{ 
     label: '2 high + 1 medium (comparable pool sizes — medium competitive)',
     sourceTier: 2,
     candidates: [
-      { id: 'mistral', aiwatchScore: 95, scoreConfidence: 'high' },
+      { id: 'deepseek', aiwatchScore: 95, scoreConfidence: 'high' },
       { id: 'cohere', aiwatchScore: 90, scoreConfidence: 'high' },
-      { id: 'xai', aiwatchScore: 60, scoreConfidence: 'medium' },
+      { id: 'kimi', aiwatchScore: 60, scoreConfidence: 'medium' },
     ],
   },
   {
     label: 'lone medium among 3 high peers (lopsided pool — medium fades out)',
     sourceTier: 2,
     candidates: [
-      { id: 'mistral', aiwatchScore: 95, scoreConfidence: 'high' },
+      { id: 'deepseek', aiwatchScore: 95, scoreConfidence: 'high' },
       { id: 'cohere', aiwatchScore: 90, scoreConfidence: 'high' },
       { id: 'groq', aiwatchScore: 85, scoreConfidence: 'high' },
-      { id: 'xai', aiwatchScore: 60, scoreConfidence: 'medium' },
+      { id: 'kimi', aiwatchScore: 60, scoreConfidence: 'medium' },
     ],
   },
   {
     label: 'the exact A/B/C mix that broke the rejected 0-on-mismatch comparator\'s transitivity',
     sourceTier: 2,
     candidates: [
-      { id: 'mistral', aiwatchScore: 90, scoreConfidence: 'high' },   // A
-      { id: 'xai', aiwatchScore: 95, scoreConfidence: 'medium' },     // B
+      { id: 'deepseek', aiwatchScore: 90, scoreConfidence: 'high' },   // A
+      { id: 'kimi', aiwatchScore: 95, scoreConfidence: 'medium' },     // B
       { id: 'cohere', aiwatchScore: 70, scoreConfidence: 'high' },    // C
     ],
   },
@@ -125,7 +125,7 @@ const FIXTURES: Array<{ label: string; sourceTier?: number; candidates: Array<{ 
     label: 'low (score-withheld) sinks below both high and medium, never displaces a real score',
     sourceTier: 2,
     candidates: [
-      { id: 'mistral', aiwatchScore: 95, scoreConfidence: 'high' },
+      { id: 'deepseek', aiwatchScore: 95, scoreConfidence: 'high' },
       { id: 'cohere', aiwatchScore: 90, scoreConfidence: 'high' },
       { id: 'groq', aiwatchScore: null, scoreConfidence: 'low' },
     ],
@@ -141,7 +141,7 @@ const FIXTURES: Array<{ label: string; sourceTier?: number; candidates: Array<{ 
     label: 'an unrecognized scoreConfidence value sinks below high/medium, never vanishes',
     sourceTier: 2,
     candidates: [
-      { id: 'mistral', aiwatchScore: 95, scoreConfidence: 'high' },
+      { id: 'deepseek', aiwatchScore: 95, scoreConfidence: 'high' },
       { id: 'cohere', aiwatchScore: 90, scoreConfidence: 'high' },
       { id: 'groq', aiwatchScore: 99, scoreConfidence: 'insufficient' }, // would win #1 on raw Score alone
     ],

@@ -20,6 +20,12 @@ const catGroups = Object.entries(SERVICE_CATEGORIES as Record<string, { ids: str
   .filter(([, def]) => Array.isArray(def.ids)) as [string, { ids: string[] }][]
 
 describe('service-groups.ts ≡ SERVICE_CATEGORIES cross-mirror (#1068)', () => {
+  it('#1726 — the live /api/status order lists the LLM APIs in the dashboard order', () => {
+    const ids = SERVICE_CATEGORIES.llm.ids as string[]
+    expect(SERVICES.map((s) => s.id).filter((id) => ids.includes(id))).toEqual(ids)
+    expect(GROUP_MEMBERS.llm).toEqual(ids)
+  })
+
   it('the group SET matches on both sides (no group only in one)', () => {
     expect(Object.keys(GROUP_MEMBERS).sort()).toEqual(catGroups.map(([g]) => g).sort())
   })

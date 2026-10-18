@@ -937,18 +937,18 @@ describe('buildServiceAlerts', () => {
     expect(alerts[0].title).toBe('🟢 OpenAI API — Service Recovered')
   })
 
-  describe('#767 — service-status alerts restricted to a Tier-1 safety net', () => {
-    it('does NOT emit a down alert for a NON-Tier-1 service (incident alerts are canonical)', () => {
+  describe('#767 — service-status alerts restricted to a claude/openai/gemini safety net (TIER1_IDS)', () => {
+    it('does NOT emit a down alert for a service outside TIER1_IDS (incident alerts are canonical)', () => {
       const svc = mockService({ id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', status: 'down' })
       expect(buildServiceAlerts([svc], new Map(), new Map())).toHaveLength(0)
     })
 
-    it('does NOT emit a degraded alert for a NON-Tier-1 service', () => {
+    it('does NOT emit a degraded alert for a service outside TIER1_IDS', () => {
       const svc = mockService({ id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', status: 'degraded' })
       expect(buildServiceAlerts([svc], new Map(), new Map())).toHaveLength(0)
     })
 
-    it('does NOT emit a recovery alert for a NON-Tier-1 service even if a stale alerted-down map entry exists', () => {
+    it('does NOT emit a recovery alert for a service outside TIER1_IDS even if a stale alerted-down map entry exists', () => {
       // Defensive: down/degraded are no longer emitted for non-Tier-1, so the map shouldn't carry
       // them — but if a stale entry lingers, the recovery must still be suppressed.
       const svc = mockService({ id: 'assemblyai', name: 'AssemblyAI', status: 'operational' })

@@ -1,7 +1,7 @@
 // Alert detection logic — pure functions for testability
 // Used by cronAlertCheck in index.ts
 
-import { buildGroupedFallbackText, API_TIER } from './fallback'
+import { buildGroupedFallbackText } from './fallback'
 import { CRON_CADENCE_MS } from './cache-ttl'
 import { isAffectedStatus } from './status-verdict'
 import { sanitize, formatDuration, appendStatusHint, appendUtm, isNonReliabilityAdvisory, severityEmoji, impactLabel } from './utils'
@@ -1052,7 +1052,7 @@ export function buildServiceAlerts(
     // ~1 cron cycle later (the #759 AssemblyAI double: 6:18 "Service Down" → 6:23 "New Incident").
     // So for non-Tier-1 services we drop these entirely and rely on incident alerts; Tier-1
     // (claude/openai/gemini) keeps them so a Tier-1 hard-down with NO parseable incident still pages.
-    if (API_TIER[svc.id] !== 1) continue
+    if (!TIER1_IDS.has(svc.id)) continue
 
     // Suppress status alerts if ongoing incidents exist (incident alert already covers it)
     const hasOngoingIncident = (svc.incidents ?? []).some((i) => i.status !== 'resolved')
@@ -1087,7 +1087,7 @@ export function buildServiceAlerts(
     // — a missing recovery is quieter than a false one — but it is a real gap, and the #1232 episode was
     // multi-hour, so it is the likely case rather than the edge case.
     //
-    // Scope: `buildServiceAlerts` runs for Tier-1 only (`API_TIER === 1`), so this governs
+    // Scope: `buildServiceAlerts` runs for Tier-1 only (`TIER1_IDS`), so this governs
     // claude/openai/gemini; the other services have no status-edge alert at all.
     if (svc.status === 'down' && !hasOngoingIncident) {
       alerts.push({

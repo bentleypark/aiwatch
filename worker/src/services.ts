@@ -139,11 +139,9 @@ export const SERVICES: ServiceConfig[] = [
     rosterAuditExclude: ['01KKAD7C71MCCH3FTREMJH4AAS', '01KTQBYVARFJ5KMCSECM06VKCF', '01KVR95C58GGWHV7RYBT32NP11'],
   },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://aistudio.google.com/status', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
-  { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null,
-    // #677 — AWS Health public events JSON (all regions in one fetch, real start+end timestamps)
-    // replaces the per-region RSS that floored resolved durations to 1m + double-counted incidents.
-    awsHealthApi: { url: 'https://health.aws.amazon.com/public/events', service: 'BEDROCK' } },
-  { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
+  // #1165/#1586 — renamed 'xAI (Grok)' → 'SpaceXAI API': now that Grok's consumer app is its own service
+  // ('grok', in the Apps section below), "(Grok)" on this card would misname the API surface.
+  { id: 'xai', name: 'SpaceXAI API', provider: 'SpaceXAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident', '[Grok'] },
   // #929 — holdShortIncidents: a non-major NEW incident is held ~2 cron cycles before alerting, so a
   // self-resolving flap never fires while a genuine longer incident still alerts. Same knob Langfuse
   // uses (#792), and it reads no source-specific field, so it keeps working across the migration.
@@ -172,6 +170,11 @@ export const SERVICES: ServiceConfig[] = [
   // the raw title and names that component `Console`, so the old entry could not match and
   // "Console Degraded" reached the API card. Pinned by a wiring test against the real title.
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, rootlyFeed: true, incidentExclude: ['console', 'le chat', 'vibe', 'documentation', 'website'], holdShortIncidents: true, displayComponentIds: ['304d5895-4dde-47be-b2e1-b7ebeb28dd4d', '719fdf28-3a3d-48f9-bfe3-7766e55091b4', 'ba3a6e31-16e8-48c1-9a0e-dc09d9f65b68', 'a4b27297-cd30-47b8-8ac0-1d1081fe905a', '4b32fcf7-6173-4456-85ba-048d384ae4a6', '74350cee-8e18-44bb-be49-9a5ae3f8f218', '951414e5-fcd1-4c1d-9f2f-acaf726bd245', '3e804d64-e876-488f-ba91-69913a2d54f9', '7ea6517b-2d19-42f8-b90f-39607552a60b', 'd16850a6-af05-4366-abc2-65d89959305d', '3abd6dd4-8de0-44ad-a65c-e11280a66ca9', '2b40e771-7a56-40b3-8e96-792740c301f4', '974aefe0-ee25-48a2-ac3d-4f12cc788c2d'] },
+  { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null,
+    // #677 — AWS Health public events JSON (all regions in one fetch, real start+end timestamps)
+    // replaces the per-region RSS that floored resolved durations to 1m + double-counted incidents.
+    awsHealthApi: { url: 'https://health.aws.amazon.com/public/events', service: 'BEDROCK' } },
+  { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). The flat API omits the official Endpoints
   // group, so its two stable members are mapped explicitly; ungrouped components fold into Models.
@@ -254,9 +257,6 @@ export const SERVICES: ServiceConfig[] = [
   // same regime every other incident.io service here already runs under — not a perplexity-specific
   // concession.
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: 'https://status.perplexity.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.perplexity.com/incidents', incidentIoComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentId: '01KZSFD424NN3EYBS78TMVWNEK', statusComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6', '01M2R6E5FPASTEW3A3V8TSYHJ0'], displayComponentIds: ['01KZSFD424NN3EYBS78TMVWNEK', '01KZSFD424KQ6VQYV4R0KCA30P', '01M0TRMC3ED1PG4GRRXXMVNNZ6', '01M2R6E5FPASTEW3A3V8TSYHJ0'] },
-  // #1165/#1586 — renamed 'xAI (Grok)' → 'SpaceXAI API': now that Grok's consumer app is its own service
-  // ('grok', in the Apps section below), "(Grok)" on this card would misname the API surface.
-  { id: 'xai', name: 'SpaceXAI API', provider: 'SpaceXAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident', '[Grok'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from
   // the SAME IP succeeds where curl/fetch are reset, so it's a JA3/bot wall, NOT an IP block).

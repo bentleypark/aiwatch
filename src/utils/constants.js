@@ -32,8 +32,8 @@ export const SERVICE_AND_APP_IDS = [
   // app
   'claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok',
   // LLM API
-  'claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq',
-  'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'kimi', 'openrouter',
+  'claude', 'openai', 'gemini', 'xai', 'mistral', 'bedrock', 'azureopenai', 'cohere', 'groq',
+  'together', 'fireworks', 'cerebras', 'perplexity', 'deepseek', 'kimi', 'openrouter',
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram', 'fishaudio',
   // inference / infrastructure
@@ -56,7 +56,7 @@ export const ALL_SERVICE_IDS = [...SERVICE_AND_APP_IDS, ...AGENT_SERVICE_IDS]
 // in src/pages/Overview.jsx — keep in sync).
 export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
-  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'kimi', 'openrouter'] },
+  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'xai', 'mistral', 'bedrock', 'azureopenai', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'deepseek', 'kimi', 'openrouter'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
   voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram', 'fishaudio'] }, // #658 — STT/TTS
   inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'jina', 'pinecone', 'turbopuffer', 'twelvelabs'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone/turbopuffer, #857). Observability (#601) and image (#756) split out to their own categories; vector stays here as a sidebar group (its ≥2-member split is a fallback tier only, #857) — remaining single-service sub-domains stay until they gain siblings
@@ -198,8 +198,8 @@ export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
 // against worker/src/fallback.ts API_TIER. api/is-down.ts inline copy is checked via string-match.
 // All three must move together.
 export const API_TIER = {
-  claude: 1, openai: 1, gemini: 1,
-  mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, xai: 2, perplexity: 2,
+  claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
+  cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
   // Tier 5 = generative Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts.

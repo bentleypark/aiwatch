@@ -159,9 +159,13 @@ describe('getFallbacks', () => {
     expect(result[1].name).toBe('DeepSeek API')
   })
 
+  it('#1726 — a SpaceXAI API outage recommends tier-1 peers over higher-scored tier-2 ones', () => {
+    expect(getFallbacks('xai', 'api', mockServices).map(f => f.name)).toEqual(['Claude API', 'Gemini API'])
+  })
+
   it('T2 service recommends T2 peers first', () => {
-    const result = getFallbacks('mistral', 'api', mockServices)
-    // mistral is T2, should prefer T2 peers (groq, together) over T1 (claude, gemini)
+    const result = getFallbacks('cohere', 'api', mockServices)
+    // cohere is T2, should prefer T2 peers (groq, together) over T1 (claude, gemini)
     expect(result[0].name).toBe('Groq Cloud')
     expect(result[1].name).toBe('Together AI')
   })
@@ -245,27 +249,27 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     // 2 high + 1 medium: virtual positions high=[0.25,0.75], medium=[0.5] → merged [high0(.25),
     // medium(.5), high1(.75)] → top-2 = [high0, medium]. Comparable pool sizes → medium is competitive.
     const services = [
-      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
+      { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
-      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
+      { id: 'kimi', category: 'api', name: 'Kimi (Moonshot AI)', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
     ]
     const result = getFallbacks('together', 'api', services)
-    expect(result.map(f => f.name)).toEqual(['Mistral API', 'SpaceXAI API'])
+    expect(result.map(f => f.name)).toEqual(['DeepSeek API', 'Kimi (Moonshot AI)'])
   })
 
   it('a lone medium candidate is NOT guaranteed a slot once high outnumbers it 3-to-1 or more', () => {
     // 3 high + 1 medium: virtual positions high=[0.167,0.5,0.833], medium=[0.5] → tie with high's
     // MIDDLE member at 0.5, high wins the tie → merged [high0(.167), high1(.5), medium(.5), high2(.833)]
     // → top-2 = [high0, high1]. This is the over-correction attempt-3 (1-per-tier-per-round) got wrong:
-    // it gave xai the #2 slot here unconditionally, ahead of a 90-scoring high peer.
+    // it gave the medium candidate the #2 slot here unconditionally, ahead of a 90-scoring high peer.
     const services = [
-      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
+      { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
       { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 85, scoreConfidence: 'high' as const },
-      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
+      { id: 'kimi', category: 'api', name: 'Kimi (Moonshot AI)', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
     ]
     const result = getFallbacks('together', 'api', services)
-    expect(result.map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+    expect(result.map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
   })
 
   it('a 3-candidate mix that broke the old "0 on confidence mismatch" comparator\'s transitivity now resolves deterministically', () => {
@@ -274,12 +278,12 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     // comparator entirely: high bucket sorted [A(90), C(70)] at positions [0.25, 0.75], medium bucket
     // [B(95)] at position 0.5 → merged [A, B, C].
     const services = [
-      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const }, // A
-      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'medium' as const },       // B
+      { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const }, // A
+      { id: 'kimi', category: 'api', name: 'Kimi (Moonshot AI)', status: 'operational', aiwatchScore: 95, scoreConfidence: 'medium' as const },       // B
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 70, scoreConfidence: 'high' as const },   // C
     ]
     const result = getFallbacks('together', 'api', services)
-    expect(result.map(f => f.name)).toEqual(['Mistral API', 'SpaceXAI API'])
+    expect(result.map(f => f.name)).toEqual(['DeepSeek API', 'Kimi (Moonshot AI)'])
   })
 
   it('#402/#1027 guard restored: a low-confidence (score-withheld) candidate never displaces a real-scored peer', () => {
@@ -288,12 +292,12 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     // it must sink below BOTH high candidates, not claim slot 2 just because it's a distinct
     // confidence tier from them.
     const services = [
-      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
+      { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
       { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: null, scoreConfidence: 'low' as const },
     ]
     const result = getFallbacks('together', 'api', services)
-    expect(result.map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+    expect(result.map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
   })
 
   it('a low-confidence candidate still surfaces when nothing better exists (sink, not exclusion)', () => {
@@ -310,14 +314,14 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     // 'low'/undefined (a legacy KV record predating a future confidence value, e.g. a hypothetical
     // 'insufficient') was bucketed but never pushed to the result — silently dropped instead of sunk.
     const services = [
-      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
+      { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
       { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 99, scoreConfidence: 'insufficient' as unknown as 'low' },
     ]
     const result = getFallbacks('together', 'api', services)
     // groq's score (99) would win #1 on raw Score alone — it must still sink below both real high
     // candidates rather than displace either, but it must APPEAR (not vanish) if there's room.
-    expect(result.map(f => f.name)).toEqual(['Mistral API', 'Cohere API'])
+    expect(result.map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
   })
 
   it('an unrecognized-confidence candidate DOES surface when nothing better exists (sink, not exclusion)', () => {
@@ -1108,7 +1112,7 @@ describe('#1062 facet B — capability routing on a secondary-component outage',
   it('a service without components[] is unaffected (Mistral-style, #761) — default LLM peers', () => {
     const mistral = { id: 'mistral', category: 'api', name: 'Mistral API', status: 'down', aiwatchScore: 76 }
     const result = getFallbacks('mistral', 'api', [mistral, ...pool])
-    // mistral is tier 2 → tier-1 LLM peers by distance; routing is a no-op with no components
+    // mistral is tier 1 → same-tier LLM peers; routing is a no-op with no components
     expect(result.map(f => f.name)).toEqual(['Claude API', 'Gemini API'])
   })
 
@@ -1464,11 +1468,11 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
     // NOTE on the app-category tests around this one: `API_TIER` maps category and tier ~1:1 today
     // (app=21, agent=11, api=1-8), so for a NON-routed app source the tier pin and the category filter
     // select the same set — they document behaviour but cannot tell the two rules apart. THIS case can:
-    // mistral is tier 2 and its peers are tier 1, so it only survives while the non-routed path keeps
+    // deepseek is tier 2 and its peers are tier 1, so it only survives while the non-routed path keeps
     // cross-tier fill. Make the relaxation unconditional and the pool collapses to tier 2 → this fails.
-    const src = { id: 'mistral', category: 'api', name: 'Mistral API', status: 'degraded', aiwatchScore: 76 }
+    const src = { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'degraded', aiwatchScore: 76 }
     expect(routingTier(src)).toBeNull()
-    expect(getFallbacks('mistral', 'api', [src, ...pool]).map(f => f.name)).toEqual(['Claude API', 'Gemini API'])
+    expect(getFallbacks('deepseek', 'api', [src, ...pool]).map(f => f.name)).toEqual(['Claude API', 'Gemini API'])
   })
 
   it('≥2 distinct secondary caps degraded → ambiguous → no routing → in-category', () => {

@@ -309,7 +309,7 @@ describe('#1032 wiring — the mutations that would silently delete the fix', ()
   it('canIdBypass excludes services that lack any one of the three preconditions', () => {
     // exclude but no badge group → unreachable; badge group but no exclude → unreachable.
     expect(SERVICES.filter((s) => s.incidentExclude?.length && !canIdBypass(s)).map((s) => s.id))
-      .toEqual(['claude', 'mistral', 'xai'])
+      .toEqual(['claude', 'xai', 'mistral'])
   })
 
   it('the #1004 names path and the #1032 ids path never both fire for one service', () => {

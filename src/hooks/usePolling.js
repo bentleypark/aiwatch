@@ -133,18 +133,21 @@ export const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational',
-    latency: 280, uptime30d: null,
-    history30d: hist(),
-    history3m: null,
-    incidents: [],
-  },
-  {
-    id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational',
-    latency: 350, uptime30d: null,
-    history30d: hist(),
-    history3m: null,
-    incidents: [],
+    id: 'xai', category: 'api', name: 'SpaceXAI API', provider: 'SpaceXAI', status: 'degraded',
+    latency: 203, uptime30d: 99.75,
+    history30d: hist([24]),
+    history3m: [{ month: '2026-01', uptime: 99.82 }, { month: '2026-02', uptime: 99.79 }, { month: '2026-03', uptime: 99.75 }],
+    incidents: [
+      { id: 'xa-0', title: 'eu-west-1.api.x.ai went down', startedAt: ago(2 * H), duration: null, status: 'investigating',
+        timeline: [
+          { stage: 'investigating', text: 'EU region API endpoint is experiencing errors.', at: ago(2 * H) },
+        ] },
+      { id: 'xa-1', title: 'Authentication Errors', startedAt: ago(2 * D + 14 * H), duration: '22m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'API 인증 오류가 다수 발생 중입니다.', at: ago(2 * D + 14 * H) },
+          { stage: 'resolved', text: '인증 서버 설정 복구.', at: ago(2 * D + 14 * H - 22 * M) },
+        ] },
+    ],
   },
   {
     id: 'mistral', category: 'api', name: 'Mistral API', provider: 'Mistral AI', status: 'operational',
@@ -164,6 +167,20 @@ export const MOCK_SERVICES = [
           { stage: 'resolved', text: '설정 롤백 후 정상화.', at: ago(6 * D + 4 * H - 72 * M) },
         ] },
     ],
+  },
+  {
+    id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational',
+    latency: 280, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
+    id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational',
+    latency: 350, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
   },
   {
     id: 'cohere', category: 'api', name: 'Cohere API', provider: 'Cohere', status: 'operational',
@@ -261,23 +278,6 @@ export const MOCK_SERVICES = [
         timeline: [
           { stage: 'investigating', text: '전체적인 응답 지연이 발생 중입니다.', at: ago(6 * D + 3 * H) },
           { stage: 'resolved', text: '캐시 레이어 복구 후 정상화.', at: ago(6 * D + 3 * H - 50 * M) },
-        ] },
-    ],
-  },
-  {
-    id: 'xai', category: 'api', name: 'SpaceXAI API', provider: 'SpaceXAI', status: 'degraded',
-    latency: 203, uptime30d: 99.75,
-    history30d: hist([24]),
-    history3m: [{ month: '2026-01', uptime: 99.82 }, { month: '2026-02', uptime: 99.79 }, { month: '2026-03', uptime: 99.75 }],
-    incidents: [
-      { id: 'xa-0', title: 'eu-west-1.api.x.ai went down', startedAt: ago(2 * H), duration: null, status: 'investigating',
-        timeline: [
-          { stage: 'investigating', text: 'EU region API endpoint is experiencing errors.', at: ago(2 * H) },
-        ] },
-      { id: 'xa-1', title: 'Authentication Errors', startedAt: ago(2 * D + 14 * H), duration: '22m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: 'API 인증 오류가 다수 발생 중입니다.', at: ago(2 * D + 14 * H) },
-          { stage: 'resolved', text: '인증 서버 설정 복구.', at: ago(2 * D + 14 * H - 22 * M) },
         ] },
     ],
   },
