@@ -40,8 +40,7 @@ members). Adding a sibling is the prerequisite for a category-aware sub-tier. Tr
 
 **The one genuinely EMPTY tier is not a gap, and seeding it would create one.** `openrouter` is the
 only monitored service with ZERO same-tier candidates — tier 3 also holds `bedrock` and
-`azureopenai`, and both sit in `EXCLUDE_FALLBACK`. (No member's exclusion reason is recorded in
-`fallback.ts` or [fallback-tiers.md](fallback-tiers.md); those files record only *un*-exclusions.)
+`azureopenai`, and both sit in `EXCLUDE_FALLBACK`.
 It still needs no sibling: tier 3 is BELOW the specialized range, so candidates come from the
 nearest tiers by distance instead — which at distance 1 means tier 2 AND tier 4, since `openrouter`
 carries no `capabilityTagsOf` tag (unless a degraded TTS/STT component names one, #1698) and so passes `sharesCapability` against the Voice tier too.
