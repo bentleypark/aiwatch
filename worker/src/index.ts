@@ -4857,15 +4857,15 @@ const workerExport = {
       if (request.method === 'POST') {
         if (!matchOrigin(origin, env.ALLOWED_ORIGIN)) return new Response(null, { status: 403, headers: cors })
         try {
-          const samples = parseRumBatch(await request.json())
-          if (!samples) return new Response(null, { status: 400, headers: cors })
+          const batch = parseRumBatch(await request.json())
+          if (!batch) return new Response(null, { status: 400, headers: cors })
           const cf = request.cf as { colo?: unknown; country?: unknown } | undefined
           const colo = typeof cf?.colo === 'string' ? cf.colo : 'UNK'
           const country = typeof cf?.country === 'string' ? cf.country : 'XX'
-          recordRumSamples(env.ANALYTICS, samples, colo, country)
+          recordRumSamples(env.ANALYTICS, batch.samples, colo, country, batch.sessionId)
           const webhook = env.DISCORD_WEBHOOK_URL
           if (env.STATUS_CACHE && webhook) {
-            ctx.waitUntil(applyRumVerdict(env.STATUS_CACHE, (embed) => sendDiscordAlert(webhook, embed), evaluateRum(samples), colo, country)
+            ctx.waitUntil(applyRumVerdict(env.STATUS_CACHE, (embed) => sendDiscordAlert(webhook, embed), evaluateRum(batch.samples), colo, country)
               .catch((err) => console.warn('[rum] verdict failed:', err instanceof Error ? err.message : err)))
           }
           return new Response(null, { status: 204, headers: cors })

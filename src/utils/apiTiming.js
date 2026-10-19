@@ -1,11 +1,21 @@
 // #1686 — how long each /api/status poll took for this user, sent to the Worker in batches of five
 // for the operator's slow-dashboard alert. Anonymous timing values only (the Worker adds the colo and
-// country Cloudflare attaches to the beacon; no identifier is sent or stored). Consent-exempt on the
-// same basis as vitals.js.
+// country Cloudflare attaches to the beacon). Each batch also carries a random id minted once per page
+// load and held only in this module's memory (no storage, no cookie). Sent without a consent check,
+// like vitals.js.
 
 const WORKER_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8788').replace(/\/api\/status$/, '')
 const ENDPOINT = `${WORKER_BASE}/api/rum`
 export const BATCH_SIZE = 5
+
+export function makeSessionId() {
+  const c = globalThis.crypto
+  if (typeof c?.getRandomValues !== 'function') return null
+  const bytes = c.getRandomValues(new Uint8Array(8))
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+const sessionId = makeSessionId()
 
 let buffer = []
 let inflight = null
@@ -21,7 +31,7 @@ function send(samples) {
   if (samples.length === 0) return
   fetch(ENDPOINT, {
     method: 'POST',
-    body: JSON.stringify({ samples }),
+    body: JSON.stringify({ sessionId, samples }),
     headers: { 'Content-Type': 'application/json' },
     keepalive: true,
     mode: 'cors',
@@ -75,6 +85,8 @@ export function finishApiTiming(timing, { outcome }) {
   })
   if (buffer.length >= BATCH_SIZE) flush()
 }
+
+export const getSessionId = () => sessionId
 
 /** Test seam. */
 export function _resetApiTiming() {

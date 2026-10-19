@@ -21,7 +21,7 @@ export function PrivacyContent() {
         · Device type, browser, and operating system<br />
         · Country/region (with IP anonymization)<br /><br />
         We do not collect personally identifiable information such as names or email addresses. Without analytics consent, GA4 operates in cookieless mode under Google Consent Mode v2 — only aggregate, anonymized pings flow, with no client identifier stored.<br /><br />
-        To detect slow loading, anonymous performance timings are recorded with the visitor's country and the Cloudflare data center that served the request. No IP address or identifier is stored.</p>
+        To detect slow loading, anonymous performance timings are recorded with the visitor's country and the Cloudflare data center that served the request. No IP address is stored. Each batch of timings carries a random identifier generated when the page loads and is recorded with them, so slow loads can be grouped by visit. The identifier is kept only in the page's memory, never written to your device, and a reload creates a new one.</p>
       <h3 style={headingStyle}>2. Cookies and Local Storage</h3>
       <p style={paraStyle}>AIWatch uses the following types of browser storage:<br /><br />
         <strong>Analytics cookies (optional)</strong> — when you grant consent, GA4 stores _ga, _ga_&lt;measurement_id&gt;, and _gid cookies for usage analytics. _gcl_au may also appear if Google's tag library is loaded; AIWatch does not use it for advertising. You can opt out via the cookie banner or browser settings; on revoke through the banner, AIWatch removes these cookies immediately, and on the next page load when consent has been revoked through other means.<br /><br />
@@ -74,7 +74,7 @@ export function PrivacyContent() {
         · 기기 종류, 브라우저, 운영체제<br />
         · 국가/지역 정보 (IP 익명화 적용)<br /><br />
         개인을 식별할 수 있는 정보(이름, 이메일 등)는 수집하지 않습니다. 분석 동의를 하지 않은 상태에서는 GA4가 Google Consent Mode v2의 cookieless 모드로 동작하며, 클라이언트 식별자가 저장되지 않은 익명 집계 ping만 전송됩니다.<br /><br />
-        로딩 지연을 감지하기 위해 익명 성능 측정값을 접속 국가 및 요청을 처리한 Cloudflare 데이터센터와 함께 기록합니다. IP 주소와 식별자는 저장하지 않습니다.</p>
+        로딩 지연을 감지하기 위해 익명 성능 측정값을 접속 국가 및 요청을 처리한 Cloudflare 데이터센터와 함께 기록합니다. IP 주소는 저장하지 않습니다. 측정값 묶음마다 페이지를 불러올 때 생성한 무작위 식별자가 함께 기록되어, 느린 로딩을 방문 단위로 묶어 볼 수 있습니다. 이 식별자는 페이지 메모리에만 있고 기기에 저장되지 않으며 새로고침하면 새로 만들어집니다.</p>
       <h3 style={headingStyle}>2. 쿠키 및 로컬 저장소</h3>
       <p style={paraStyle}>AIWatch는 다음 유형의 브라우저 저장소를 사용합니다.<br /><br />
         <strong>분석 쿠키 (선택)</strong> — 동의 시 GA4가 _ga, _ga_&lt;측정_id&gt;, _gid 쿠키를 이용 통계 분석을 위해 저장합니다. Google 태그 라이브러리 로드 시 _gcl_au가 함께 나타날 수 있으나, AIWatch는 이를 광고 목적으로 사용하지 않습니다. 쿠키 배너 또는 브라우저 설정에서 거부할 수 있으며, 배너에서 거부 시 즉시 삭제되고, 다른 방법으로 동의를 철회한 경우 다음 페이지 로드에서 자동 삭제됩니다.<br /><br />

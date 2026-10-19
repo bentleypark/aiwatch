@@ -1,8 +1,9 @@
 // #1686 — real-user `/api/status` timing from the dashboard, for the operator channel only.
 // The dashboard batches one sample per poll and POSTs them to /api/rum. Each sample is written to
-// WAE with the colo and country Cloudflare attached to the beacon (no IP, no identifier). A batch of
-// RUM_WINDOW samples is judged by the 4-of-5 rule derived in #1686; the alert says whether the time
-// went to the network path (the worker answered quickly) or to the worker itself.
+// WAE with the colo and country Cloudflare attached to the beacon and the batch's random per-page-load
+// id (no IP; not kept in KV). A batch of RUM_WINDOW samples is judged by the 4-of-5 rule derived in
+// #1686; the alert says whether the time went to the network path (the worker answered quickly) or to
+// the worker itself.
 
 import { kvPut } from './utils'
 import { ALERT_TTL_S, readInfraContext } from './infra-status'
@@ -23,14 +24,22 @@ export interface RumSample {
   outcome: RumOutcome
 }
 
+export interface RumBatch {
+  samples: RumSample[]
+    sessionId: string | null
+}
+
+const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,32}$/
+
 const OUTCOMES: readonly RumOutcome[] = ['ok', 'timeout', 'error', 'pending']
 const MAX_MS = 600_000
 
 const isMs = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
 const capMs = (v: number): number => Math.round(Math.min(v, MAX_MS))
 
-export function parseRumBatch(body: unknown): RumSample[] | null {
-  const samples = (body as { samples?: unknown })?.samples
+export function parseRumBatch(body: unknown): RumBatch | null {
+  const { samples, sessionId } = (body ?? {}) as { samples?: unknown; sessionId?: unknown }
+  if (sessionId !== undefined && sessionId !== null && (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId))) return null
   if (!Array.isArray(samples) || samples.length === 0 || samples.length > RUM_WINDOW * 2) return null
   const out: RumSample[] = []
   for (const raw of samples) {
@@ -44,7 +53,7 @@ export function parseRumBatch(body: unknown): RumSample[] | null {
       outcome: s.outcome as RumOutcome,
     })
   }
-  return out
+  return { samples: out, sessionId: typeof sessionId === 'string' ? sessionId : null }
 }
 
 export function isSlowSample(s: RumSample): boolean {
@@ -85,12 +94,13 @@ export function recordRumSamples(
   samples: RumSample[],
   colo: string,
   country: string,
+  sessionId: string | null = null,
 ): void {
   if (!analytics) return
   for (const s of samples) {
     try {
       analytics.writeDataPoint({
-        blobs: [colo, country, s.outcome],
+        blobs: [colo, country, s.outcome, sessionId ?? ''],
         doubles: [s.totalMs, s.serverMs ?? -1],
         indexes: [RUM_INDEX],
       })

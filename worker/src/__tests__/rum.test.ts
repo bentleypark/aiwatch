@@ -13,14 +13,31 @@ const SLOW = RUM_SLOW_MS + 5_000
 describe('#1686 parseRumBatch', () => {
   it('accepts a batch and rounds the timings', () => {
     expect(parseRumBatch({ samples: [{ totalMs: 1234.6, serverMs: 12.4, outcome: 'ok' }] }))
-      .toEqual([{ totalMs: 1235, serverMs: 12, outcome: 'ok' }])
+      .toEqual({ samples: [{ totalMs: 1235, serverMs: 12, outcome: 'ok' }], sessionId: null })
   })
   it('caps an oversized timing instead of rejecting the batch', () => {
     const batch = parseRumBatch({ samples: [{ totalMs: 700_000, outcome: 'pending' }, { totalMs: 900, outcome: 'ok' }] })
-    expect(batch?.map((s) => s.totalMs)).toEqual([600_000, 900])
+    expect(batch?.samples.map((s) => s.totalMs)).toEqual([600_000, 900])
   })
   it('keeps a missing worker time as null', () => {
-    expect(parseRumBatch({ samples: [{ totalMs: 5, outcome: 'timeout' }] })?.[0].serverMs).toBeNull()
+    expect(parseRumBatch({ samples: [{ totalMs: 5, outcome: 'timeout' }] })?.samples[0].serverMs).toBeNull()
+  })
+  it('carries a valid session id through', () => {
+    expect(parseRumBatch({ sessionId: '0a1b2c3d4e5f6789', samples: [ok(5)] })?.sessionId).toBe('0a1b2c3d4e5f6789')
+  })
+  it('an older client without an id still parses, with a null id', () => {
+    expect(parseRumBatch({ samples: [ok(5)] })?.sessionId).toBeNull()
+    expect(parseRumBatch({ sessionId: null, samples: [ok(5)] })?.sessionId).toBeNull()
+  })
+  it.each([
+    ['too long', 'a'.repeat(33)],
+    ['too short', 'abc'],
+    ['empty', ''],
+    ['outside the id alphabet', 'abcd efgh!'],
+    ['not a string', 12345678],
+    ['an object', { id: 'abcdefgh' }],
+  ])('rejects a session id that is %s', (_, sessionId) => {
+    expect(parseRumBatch({ sessionId, samples: [ok(5)] })).toBeNull()
   })
   it.each([
     ['no samples', {}],
@@ -30,6 +47,7 @@ describe('#1686 parseRumBatch', () => {
     ['not finite', { samples: [{ totalMs: Infinity, outcome: 'ok' }] }],
     ['unknown outcome', { samples: [{ totalMs: 1, outcome: 'slow' }] }],
     ['bad worker time', { samples: [{ totalMs: 1, serverMs: 'x', outcome: 'ok' }] }],
+    ['no body', null],
   ])('rejects %s', (_, body) => {
     expect(parseRumBatch(body)).toBeNull()
   })
@@ -152,8 +170,14 @@ describe('#1686 recordRumSamples', () => {
   it('writes one data point per sample with colo and country', () => {
     const writeDataPoint = vi.fn()
     recordRumSamples({ writeDataPoint } as never, [ok(1500, 30), { totalMs: 15000, serverMs: null, outcome: 'timeout' }], 'SEA', 'KR')
-    expect(writeDataPoint).toHaveBeenNthCalledWith(1, { blobs: ['SEA', 'KR', 'ok'], doubles: [1500, 30], indexes: [RUM_INDEX] })
-    expect(writeDataPoint).toHaveBeenNthCalledWith(2, { blobs: ['SEA', 'KR', 'timeout'], doubles: [15000, -1], indexes: [RUM_INDEX] })
+    expect(writeDataPoint).toHaveBeenNthCalledWith(1, { blobs: ['SEA', 'KR', 'ok', ''], doubles: [1500, 30], indexes: [RUM_INDEX] })
+    expect(writeDataPoint).toHaveBeenNthCalledWith(2, { blobs: ['SEA', 'KR', 'timeout', ''], doubles: [15000, -1], indexes: [RUM_INDEX] })
+  })
+  it('writes the session id as blob 4, leaving blobs 1-3 where they were', () => {
+    const writeDataPoint = vi.fn()
+    recordRumSamples({ writeDataPoint } as never, [ok(1500, 30), ok(900, 20)], 'SEA', 'KR', '0a1b2c3d4e5f6789')
+    expect(writeDataPoint).toHaveBeenCalledTimes(2)
+    for (const [point] of writeDataPoint.mock.calls) expect(point.blobs).toEqual(['SEA', 'KR', 'ok', '0a1b2c3d4e5f6789'])
   })
 })
 
@@ -191,6 +215,27 @@ describe('#1686 worker wiring', () => {
     )
     expect(res.status).toBe(204)
     expect(writeDataPoint).toHaveBeenCalledWith(expect.objectContaining({ indexes: [RUM_INDEX] }))
+    expect(writeDataPoint.mock.calls[0][0].blobs).toHaveLength(4)
+    expect(writeDataPoint.mock.calls[0][0].blobs[3]).toBe('')
+  })
+  it('/api/rum writes the batch session id into WAE blob 4', async () => {
+    const writeDataPoint = vi.fn()
+    const body = JSON.stringify({ sessionId: '0a1b2c3d4e5f6789', samples: [ok(1500, 30)] })
+    const res = await workerModule.fetch(
+      new Request('https://w.example/api/rum', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://ai-watch.dev' }, body }),
+      env({ ANALYTICS: { writeDataPoint } }), { waitUntil() {} } as never,
+    )
+    expect(res.status).toBe(204)
+    expect(writeDataPoint.mock.calls[0][0].blobs).toEqual(['UNK', 'XX', 'ok', '0a1b2c3d4e5f6789'])
+  })
+  it('/api/rum rejects a batch with a malformed session id and writes nothing', async () => {
+    const writeDataPoint = vi.fn()
+    const res = await workerModule.fetch(
+      new Request('https://w.example/api/rum', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://ai-watch.dev' }, body: JSON.stringify({ sessionId: 'x'.repeat(200), samples: [ok(5)] }) }),
+      env({ ANALYTICS: { writeDataPoint } }), { waitUntil() {} } as never,
+    )
+    expect(res.status).toBe(400)
+    expect(writeDataPoint).not.toHaveBeenCalled()
   })
   it('/api/rum refuses a request from an origin outside the allowlist', async () => {
     const writeDataPoint = vi.fn()
