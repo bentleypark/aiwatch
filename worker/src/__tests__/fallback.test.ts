@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SERVICES } from '../services'
 import { COMPONENT_CAPABILITY, getFallbacks, buildFallbackText, buildGroupedFallbackText, fallbackEmbedSection, getGroupedFallbacks, orderForFallback, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier, routingTier, capabilityOfComponent, effectiveTierFor, CAPABILITY_TIER, isCapabilityProvider, CAPABILITY_PROVIDERS } from '../fallback'
+import { REQUIRED_CAPABILITY, REQUIRED_CAPABILITY_PROVIDERS, meetsRequiredCapability } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -1616,5 +1617,76 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
         expect(appAgentIds.has(id), `CAPABILITY_PROVIDERS.${cap} lists app/agent service "${id}"`).toBe(false)
       }
     }
+  })
+})
+
+describe('#1725 — a source that requires a capability admits only that capability\'s providers', () => {
+  const svc = (id: string, name: string, status = 'operational', aiwatchScore = 90, extra: Record<string, unknown> = {}) =>
+    ({ id, name, category: 'api', status, aiwatchScore, ...extra })
+  const board = [
+    svc('perplexity', 'Perplexity', 'down', 80),
+    svc('cohere', 'Cohere API', 'operational', 89),
+    svc('groq', 'Groq Cloud', 'operational', 84),
+    svc('deepseek', 'DeepSeek API', 'operational', 95),
+    svc('claude', 'Claude API', 'operational', 70),
+    svc('openai', 'OpenAI API', 'operational', 80),
+    svc('gemini', 'Gemini API', 'operational', 60),
+  ]
+
+  it('Perplexity down → search providers only, never a higher-scoring general LLM peer', () => {
+    const names = getFallbacks('perplexity', 'api', board).map((f) => f.name)
+    expect(names).toEqual(['OpenAI API', 'Claude API'])
+  })
+
+  it('every listed provider exists as an api service, and so does the source', () => {
+    const api = new Set(SERVICES.filter((s) => s.category === 'api').map((s) => s.id))
+    for (const id of Object.keys(REQUIRED_CAPABILITY)) expect(api.has(id), `source "${id}"`).toBe(true)
+    for (const [cap, ids] of Object.entries(REQUIRED_CAPABILITY_PROVIDERS)) {
+      for (const id of ids) expect(api.has(id), `${cap} provider "${id}"`).toBe(true)
+    }
+    for (const cap of Object.values(REQUIRED_CAPABILITY)) expect(cap in REQUIRED_CAPABILITY_PROVIDERS, cap).toBe(true)
+  })
+
+  it('a search provider that is down or carries an incident is not offered', () => {
+    const services = board.map((s) =>
+      s.id === 'openai' ? { ...s, status: 'degraded' }
+        : s.id === 'claude' ? { ...s, incidents: [{ id: 'i1', title: 'Elevated errors', status: 'investigating' }] }
+          : s)
+    expect(getFallbacks('perplexity', 'api', services).map((f) => f.name)).toEqual(['Gemini API'])
+  })
+
+  it('no operational search provider → no recommendation, not a fall-through to Cohere/Groq', () => {
+    const services = board.map((s) => (['claude', 'openai', 'gemini'].includes(s.id) ? { ...s, status: 'down' } : s))
+    expect(getFallbacks('perplexity', 'api', services)).toEqual([])
+  })
+
+  it('other LLM sources are unchanged: Groq down still recommends general peers', () => {
+    const services = board.map((s) => (s.id === 'groq' ? { ...s, status: 'down' } : s.id === 'perplexity' ? { ...s, status: 'operational' } : s))
+    const names = getFallbacks('groq', 'api', services).map((f) => f.name)
+    expect(names).toEqual(['DeepSeek API', 'Cohere API'])
+    expect(meetsRequiredCapability('groq', 'cohere')).toBe(true)
+    expect(meetsRequiredCapability('perplexity', 'cohere')).toBe(false)
+  })
+
+  it('a ROUTED Perplexity outage draws from the routed tier, not the search list', () => {
+    const services = [
+      svc('perplexity', 'Perplexity', 'degraded', 80, {
+        components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Embeddings API', status: 'degraded' }],
+      }),
+      svc('voyageai', 'Voyage AI', 'operational', 88),
+      svc('claude', 'Claude API', 'operational', 90),
+    ]
+    expect(getFallbacks('perplexity', 'api', services).map((f) => f.name)).toEqual(['Voyage AI'])
+    expect(getGroupedFallbacks(['perplexity'], services).map((g) => g.label)).toEqual(['Embeddings'])
+  })
+
+  it('grouped: Perplexity and Cohere down together get separate pools, whichever is listed first', () => {
+    const services = board.map((s) => (s.id === 'cohere' ? { ...s, status: 'down' } : s))
+    const forward = getGroupedFallbacks(['perplexity', 'cohere'], services)
+    const reverse = getGroupedFallbacks(['cohere', 'perplexity'], services)
+    const byLabel = (groups: typeof forward) => Object.fromEntries(groups.map((g) => [g.label, g.fallbacks.map((f) => f.name)]))
+    expect(Object.keys(byLabel(forward)).sort()).toEqual(['LLM', 'LLM (web search)'])
+    expect(byLabel(forward)['LLM (web search)']).toEqual(['OpenAI API'])
+    expect(byLabel(reverse)).toEqual(byLabel(forward))
   })
 })

@@ -25,6 +25,9 @@ import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as 
 // side effects from constants.js — no environment variables are read at module load).
 import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares, CAPABILITY_TIER as frontendCapTier, capabilityOfComponent as frontendCapOf, COMPONENT_CAPABILITY as frontendCompCap, CAPABILITY_LABEL as frontendCapLabel, CAPABILITY_TAG_LABEL as frontendCapTagLabel, routedCapability as frontendRoutedCap, CAPABILITY_PROVIDERS as frontendCapProv, isCapabilityProvider as frontendIsCapProv, COMPONENT_AUDIO_TAG as frontendAudioTag, capabilityTagsOf as frontendTagsOf } from '../../../src/utils/constants'
 
+import { REQUIRED_CAPABILITY as workerRequired, REQUIRED_CAPABILITY_PROVIDERS as workerRequiredProviders, REQUIRED_CAPABILITY_LABEL as workerRequiredLabel, meetsRequiredCapability as workerMeetsRequired } from '../fallback'
+import { REQUIRED_CAPABILITY as frontendRequired, REQUIRED_CAPABILITY_PROVIDERS as frontendRequiredProviders, REQUIRED_CAPABILITY_LABEL as frontendRequiredLabel, meetsRequiredCapability as frontendMeetsRequired } from '../../../src/utils/constants'
+
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 
 describe('API_TIER cross-mirror sync (#403)', () => {
@@ -444,5 +447,36 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
       'is-down no longer widens the candidate pool via isCapabilityProvider').toBe(true)
     expect(/!sameTierOnly \|\| admittedBySubTier\(s\.id\)/.test(isDownSource),
       'is-down filter no longer applies the facet-C widening clause').toBe(true)
+  })
+
+  it('worker REQUIRED_CAPABILITY* ≡ frontend, and meetsRequiredCapability agrees over source + candidate pairs (#1725)', () => {
+    expect(workerRequired).toEqual(frontendRequired)
+    expect(workerRequiredProviders).toEqual(frontendRequiredProviders)
+    expect(workerRequiredLabel).toEqual(frontendRequiredLabel)
+    for (const source of ['perplexity', 'groq', 'cohere']) {
+      for (const candidate of ['claude', 'openai', 'gemini', 'xai', 'mistral', 'cohere', 'groq']) {
+        expect(frontendMeetsRequired(source, candidate), `meetsRequiredCapability("${source}","${candidate}") worker/frontend divergence`).toBe(workerMeetsRequired(source, candidate))
+      }
+    }
+    for (const cap of Object.values(workerRequired)) {
+      expect(cap in workerRequiredProviders, `REQUIRED_CAPABILITY needs '${cap}' in REQUIRED_CAPABILITY_PROVIDERS`).toBe(true)
+      expect(cap in workerRequiredLabel, `REQUIRED_CAPABILITY needs '${cap}' in REQUIRED_CAPABILITY_LABEL`).toBe(true)
+    }
+  })
+
+  it('api/is-down.ts inline REQUIRED_CAPABILITY* ≡ canonical + wires meetsRequiredCapability into the filter (#1725)', () => {
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    const req = isDownSource.match(/const REQUIRED_CAPABILITY:\s*Record<[^>]+>\s*=\s*\{([^}]*)\}/)
+    expect(req, 'REQUIRED_CAPABILITY literal not found in api/is-down.ts').not.toBeNull()
+    const inlineReq: Record<string, string> = {}
+    for (const e of req![1].matchAll(/(\w+):\s*'([^']*)'/g)) inlineReq[e[1]] = e[2]
+    expect(inlineReq).toEqual(workerRequired)
+    const prov = isDownSource.match(/const REQUIRED_CAPABILITY_PROVIDERS:\s*Record<[^>]+>\s*=\s*\{([^}]*)\}/)
+    expect(prov, 'REQUIRED_CAPABILITY_PROVIDERS literal not found in api/is-down.ts').not.toBeNull()
+    const inlineProv: Record<string, string[]> = {}
+    for (const e of prov![1].matchAll(/(\w+):\s*\[([^\]]*)\]/g)) inlineProv[e[1]] = [...e[2].matchAll(/'([^']+)'/g)].map(x => x[1])
+    expect(inlineProv).toEqual(workerRequiredProviders)
+    expect(/\(routedCross \|\| meetsRequiredCapability\(entry\.id, s\.id\)\)/.test(isDownSource),
+      'is-down filter no longer applies the required-capability clause').toBe(true)
   })
 })

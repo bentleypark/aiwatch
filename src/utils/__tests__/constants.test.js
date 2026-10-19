@@ -267,6 +267,46 @@ describe('getGroupedFallbacks (#445 multi-category incident alternatives)', () =
   })
 })
 
+describe('#1725 — frontend: a source that requires a capability admits only that capability\'s providers', () => {
+  const svc = (id, name, status = 'operational', aiwatchScore = 90, extra = {}) =>
+    ({ id, name, category: 'api', status, aiwatchScore, incidents: [], ...extra })
+  const board = [
+    svc('perplexity', 'Perplexity', 'down', 80),
+    svc('cohere', 'Cohere API', 'operational', 89),
+    svc('groq', 'Groq Cloud', 'operational', 84),
+    svc('claude', 'Claude API', 'operational', 70),
+    svc('openai', 'OpenAI API', 'operational', 80),
+  ]
+
+  it('Perplexity down → search providers only, never a higher-scoring general LLM peer', () => {
+    expect(getFallbacks(board[0], board).map((f) => f.name)).toEqual(['OpenAI API', 'Claude API'])
+  })
+
+  it('no operational search provider → no recommendation', () => {
+    const services = board.map((s) => (s.id === 'claude' || s.id === 'openai' ? { ...s, status: 'down' } : s))
+    expect(getFallbacks(services[0], services)).toEqual([])
+  })
+
+  it('a ROUTED Perplexity outage draws from the routed tier, not the search list', () => {
+    const perplexity = svc('perplexity', 'Perplexity', 'degraded', 80, {
+      components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Embeddings API', status: 'degraded' }],
+    })
+    const services = [perplexity, svc('voyageai', 'Voyage AI', 'operational', 88), svc('claude', 'Claude API')]
+    expect(getFallbacks(perplexity, services).map((f) => f.name)).toEqual(['Voyage AI'])
+    expect(getGroupedFallbacks([perplexity], services).map((g) => g.label)).toEqual(['Embeddings'])
+  })
+
+  it('grouped: Perplexity and Cohere down together get separate pools, whichever is listed first', () => {
+    const services = board.map((s) => (s.id === 'cohere' ? { ...s, status: 'down' } : s))
+    const [perplexity, cohere] = [services[0], services[1]]
+    const byLabel = (groups) => Object.fromEntries(groups.map((g) => [g.label, g.items.map((f) => f.name)]))
+    const forward = byLabel(getGroupedFallbacks([perplexity, cohere], services))
+    expect(Object.keys(forward).sort()).toEqual(['LLM', 'LLM (web search)'])
+    expect(forward['LLM (web search)']).toEqual(['OpenAI API'])
+    expect(byLabel(getGroupedFallbacks([cohere, perplexity], services))).toEqual(forward)
+  })
+})
+
 describe('#1062 facet A — frontend getFallbacks Voice STT/TTS capability gate', () => {
   // Pins the frontend WIRING (constants.js getFallbacks calls sharesCapability), not just the pure fn /
   // data parity the api-tier-sync test covers — deleting the `&& sharesCapability(...)` filter clause

@@ -332,6 +332,21 @@ export function isCapabilityProvider(candidateId, sourceTier) {
   return cap ? (CAPABILITY_PROVIDERS[cap]?.includes(candidateId) ?? false) : false
 }
 
+// #1725 — MIRROR of worker/src/fallback.ts REQUIRED_CAPABILITY* / meetsRequiredCapability.
+export const REQUIRED_CAPABILITY = {
+  perplexity: 'search',
+}
+export const REQUIRED_CAPABILITY_PROVIDERS = {
+  search: ['claude', 'openai', 'gemini', 'xai', 'mistral'],
+}
+export const REQUIRED_CAPABILITY_LABEL = {
+  search: 'web search',
+}
+export function meetsRequiredCapability(sourceId, candidateId) {
+  const need = REQUIRED_CAPABILITY[sourceId]
+  return need ? (REQUIRED_CAPABILITY_PROVIDERS[need]?.includes(candidateId) ?? false) : true
+}
+
 // #1062 facet B — MIRROR of worker/src/fallback.ts routingTier. When a multi-capability service is
 // non-operational ONLY because a single SECONDARY-capability component is degraded (primary llm/chat
 // surface still operational), route the fallback to that capability's tier. Returns null (default: use
@@ -528,7 +543,9 @@ export function getFallbacks(service, allServices) {
       // its capability (OpenAI), ranked after the dedicated sibling by tier distance.
       && (!sameTierOnly || admittedBySubTier(s.id))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
-      && sharesCapability(service.id, s.id, capabilityTagsOf(service)))
+      && sharesCapability(service.id, s.id, capabilityTagsOf(service))
+      // #1725 — MIRROR: a ROUTED outage draws from the routed tier, where the list does not apply
+      && (routedCross || meetsRequiredCapability(service.id, s.id)))
   return orderForFallback(eligible, sourceTier)
     .slice(0, 2)
     .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
@@ -598,7 +615,9 @@ export function getGroupedFallbacks(affected, allServices) {
     const routed = routingTier(svc)
     const isRouted = routed !== null && routed > 0
     const tierLabel = isRouted ? null : tierLabelFor(effectiveTierFor(svc))
-    const groupKey = isRouted ? `routed:${routed}:${(capabilityTagsOf(svc) ?? []).join('|')}` : (tierLabel ? `${svc.category}:${tierLabel}` : svc.category)
+    const baseKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
+    // #1725 — MIRROR: a source with a required capability has its own pool, so its own group
+    const groupKey = isRouted ? `routed:${routed}:${(capabilityTagsOf(svc) ?? []).join('|')}` : (REQUIRED_CAPABILITY[svc.id] ? `${baseKey}:${REQUIRED_CAPABILITY[svc.id]}` : baseKey)
     if (seenGroups.has(groupKey)) continue
     // #554 — selection parity with the worker: keep only the live-clean guard (getFallbacks
     // already enforces it; nonOperationalIds is a defensive backstop). No same-provider exclusion.
@@ -614,7 +633,9 @@ export function getGroupedFallbacks(affected, allServices) {
     // capability label. Guarded on cap === 'audio' — see CAPABILITY_TAG_LABEL. MIRROR of the worker.
     const tags = capabilityTagsOf(svc) ?? []
     const subLabel = cap === 'audio' && tags.length === 1 ? CAPABILITY_TAG_LABEL[tags[0]] : undefined
-    const label = cap ? (subLabel ?? CAPABILITY_LABEL[cap]) : (tierLabel || CATEGORY_LABEL[svc.category] || svc.category)
+    const need = REQUIRED_CAPABILITY[svc.id]
+    const baseLabel = cap ? (subLabel ?? CAPABILITY_LABEL[cap]) : (tierLabel || CATEGORY_LABEL[svc.category] || svc.category)
+    const label = need && !cap ? `${baseLabel} (${REQUIRED_CAPABILITY_LABEL[need]})` : baseLabel
     resolved.push({ category: svc.category, label, capability: cap || undefined, candidates })
   }
   const perGroup = resolved.length === 1 ? 2 : 1

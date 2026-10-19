@@ -277,6 +277,23 @@ export function isCapabilityProvider(candidateId: string, sourceTier: number): b
   return cap ? (CAPABILITY_PROVIDERS[cap]?.includes(candidateId) ?? false) : false
 }
 
+// #1725 — a source that requires a capability its tier peers may lack (Perplexity → web search): only that
+// capability's providers qualify. Separate from CAPABILITY_PROVIDERS, which widens a specialized tier's
+// pool. Provider evidence: docs/reference/fallback-tiers.md. Mirrors: src/utils/constants.js, api/is-down.ts.
+export const REQUIRED_CAPABILITY: Record<string, string> = {
+  perplexity: 'search',
+}
+export const REQUIRED_CAPABILITY_PROVIDERS: Record<string, string[]> = {
+  search: ['claude', 'openai', 'gemini', 'xai', 'mistral'],
+}
+export const REQUIRED_CAPABILITY_LABEL: Record<string, string> = {
+  search: 'web search',
+}
+export function meetsRequiredCapability(sourceId: string, candidateId: string): boolean {
+  const need = REQUIRED_CAPABILITY[sourceId]
+  return need ? (REQUIRED_CAPABILITY_PROVIDERS[need]?.includes(candidateId) ?? false) : true
+}
+
 // #1062 facet B — when a multi-capability service is non-operational ONLY because a SECONDARY-capability
 // component is degraded (its primary LLM/chat surface still operational), the fallback must route to that
 // capability's tier — recommending LLM peers is wrong (OpenAI 'Images' down does not make Claude, which
@@ -538,7 +555,9 @@ export function getFallbacks(
       // its capability (OpenAI), which the tier-distance sort ranks after the dedicated sibling.
       && (!sameTierOnly || admittedBySubTier(s.id))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
-      && sharesCapability(serviceId, s.id, sourceTags))
+      && sharesCapability(serviceId, s.id, sourceTags)
+      // #1725 — a ROUTED outage draws from the routed tier, where the required-capability list does not apply
+      && (routedCross || meetsRequiredCapability(serviceId, s.id)))
   const picked = orderForFallback(eligible, sourceTier).slice(0, 2)
   // #1119 — a routed outage that finds NOBODY is indistinguishable, on every surface, from an outage
   // that never routed: both render nothing. That silence is what let this bug live for weeks. Every
@@ -650,7 +669,9 @@ export function getGroupedFallbacks(
     const routed = routingTier(svc)
     if (routed !== null && routed > 0) return `routed:${routed}:${(capabilityTagsOf(svc) ?? []).join('|')}`
     const tierLabel = tierLabelFor(effectiveTierFor(svc))
-    return tierLabel ? `${svc.category}:${tierLabel}` : svc.category
+    const base = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
+    // #1725 — a source with a required capability has its own pool, so its own group
+    return REQUIRED_CAPABILITY[svc.id] ? `${base}:${REQUIRED_CAPABILITY[svc.id]}` : base
   }
   // An affected surface anchors a group when it's genuinely having a problem — non-operational OR
   // operational-but-carrying-an-active-incident (#550, the partial-degradation case where status stays
@@ -689,7 +710,9 @@ export function getGroupedFallbacks(
     // (deepgram) fall through to the capability label. Guarded on cap === 'audio' — see CAPABILITY_TAG_LABEL.
     const tags = capabilityTagsOf(svc) ?? []
     const subLabel = cap === 'audio' && tags.length === 1 ? CAPABILITY_TAG_LABEL[tags[0]] : undefined
-    const label = cap ? (subLabel ?? CAPABILITY_LABEL[cap]) : (tierLabelFor(effectiveTierFor(svc)) || CATEGORY_LABEL[svc.category] || svc.category)
+    const need = REQUIRED_CAPABILITY[svc.id]
+    const baseLabel = cap ? (subLabel ?? CAPABILITY_LABEL[cap]) : (tierLabelFor(effectiveTierFor(svc)) || CATEGORY_LABEL[svc.category] || svc.category)
+    const label = need && !cap ? `${baseLabel} (${REQUIRED_CAPABILITY_LABEL[need]})` : baseLabel
     resolved.push({ label, ...(cap ? { capability: cap } : {}), fallbacks: fbs })
   }
   const perGroup = resolved.length <= 1 ? 2 : 1

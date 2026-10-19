@@ -289,6 +289,13 @@ export default async function handler(req: Request) {
           const cap = Object.keys(CAPABILITY_TIER).find(k => CAPABILITY_TIER[k] === srcTier)
           return cap ? (CAPABILITY_PROVIDERS[cap]?.includes(candidateId) ?? false) : false
         }
+        // #1725 — inline mirror of worker/src/fallback.ts REQUIRED_CAPABILITY* / meetsRequiredCapability.
+        const REQUIRED_CAPABILITY: Record<string, string> = { perplexity: 'search' }
+        const REQUIRED_CAPABILITY_PROVIDERS: Record<string, string[]> = { search: ['claude', 'openai', 'gemini', 'xai', 'mistral'] }
+        const meetsRequiredCapability = (sourceId: string, candidateId: string): boolean => {
+          const need = REQUIRED_CAPABILITY[sourceId]
+          return need ? (REQUIRED_CAPABILITY_PROVIDERS[need]?.includes(candidateId) ?? false) : true
+        }
         const ROUTE_SUPPRESS = -1
         const routingTier = (svc?: { components?: Array<{ name: string; status: string }> }): number | null => {
           const comps = svc?.components
@@ -445,7 +452,9 @@ export default async function handler(req: Request) {
               // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
               && (!sameTierOnly || admittedBySubTier(s.id))
               // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
-              && sharesCapability(entry.id, s.id, targetTags)))
+              && sharesCapability(entry.id, s.id, targetTags)
+              // #1725 — a ROUTED outage draws from the routed tier, where the list does not apply
+              && (routedCross || meetsRequiredCapability(entry.id, s.id))))
             .slice(0, 2)
             .map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status }))
         }
