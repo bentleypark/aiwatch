@@ -281,10 +281,6 @@ export const SERVICES: ServiceConfig[] = [
   // Atlassian Statuspage (`.cn` CNAMEs to AtlassianEdge, so a Worker fetch reaches it) shared with the
   // Kimi consumer app (`kimiapp`, below) and Kimi Code (#1690). #1731 — this card is the page's `SaaS`
   // group only (Open API + Open Platform Portal): incidents by exact component name, badge on Open API.
-  //   • NO holdShortIncidents/flapSuppression: a `critical` incident bypasses every hold/flap path
-  //     (alerts.ts), so both are inert here — the Discord flood is prevented instead by
-  //     filterByComponentStatus (#970: an active non-null-impact incident is dropped while Open API is
-  //     operational). Plain LLM at API_TIER 2 (fallback.ts).
   { id: 'kimi', name: 'Kimi API', provider: 'Moonshot AI', category: 'api', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: '8psr5dfdld0s', incidentComponents: KIMI_API_COMPONENTS, displayComponentIds: ['8psr5dfdld0s', 'pjrph68g94yr'], titleMap: KIMI_TITLE_MAP, addedAt: '2026-07-18' },
   // #1403 — OpenRouter migrated its status page from OnlineOrNot to Datadog Status Page (the old
   // React-Router SSR payload is gone; a plain fetch now returns a ~600-byte client-rendered shell).
@@ -568,7 +564,7 @@ export const SERVICES: ServiceConfig[] = [
   // rather than on neither card.
   // rosterAuditExclude: Open API + Open Platform Portal (the `kimi` card) and the page's three group
   // headers. The Kimi Code members are left to age into the audit — their add-or-decline is #1690.
-  { id: 'kimiapp', name: 'Kimi App', provider: 'Moonshot AI', category: 'app', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: 'sttxgsd2bps7', statusComponentIds: KIMI_APP_COMPONENT_IDS, displayComponentIds: KIMI_APP_COMPONENT_IDS, componentGroups: { 'x0zsqgy57b75': 'Models', 'z2zfp65lvb2z': 'Models', 'lk7q3z0fcylp': 'Models', 'p1j9ttb7jwhp': 'Models', '8rkd3yj051gl': 'Models', 'wmn9wzv84k1v': 'Models' }, incidentComponents: KIMI_APP_COMPONENTS, incidentComponentsKeepUntagged: true, autoMonitorTitles: [/^agentic\s*模型错误报警$/i], titleMap: KIMI_TITLE_MAP, rosterAuditExclude: ['8psr5dfdld0s', 'pjrph68g94yr', '01l1n50g13g6', '87jpctq5cp71', 'cyrtlddz0q8c'], addedAt: '2026-10-19' },
+  { id: 'kimiapp', name: 'Kimi App', provider: 'Moonshot AI', category: 'app', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: 'sttxgsd2bps7', statusComponentIds: KIMI_APP_COMPONENT_IDS, displayComponentIds: KIMI_APP_COMPONENT_IDS, componentGroups: { 'x0zsqgy57b75': 'Models', 'z2zfp65lvb2z': 'Models', 'lk7q3z0fcylp': 'Models', 'p1j9ttb7jwhp': 'Models', '8rkd3yj051gl': 'Models', 'wmn9wzv84k1v': 'Models' }, incidentComponents: KIMI_APP_COMPONENTS, incidentComponentsKeepUntagged: true, autoMonitorTitles: [/^agentic\s*模型错误报警$/i, /^搜索请求出现大量报错$/, /^kimi\s*fs服务异常$/i], autoMonitorCriticalHoldable: true, titleMap: KIMI_TITLE_MAP, rosterAuditExclude: ['8psr5dfdld0s', 'pjrph68g94yr', '01l1n50g13g6', '87jpctq5cp71', 'cyrtlddz0q8c'], addedAt: '2026-10-19' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the

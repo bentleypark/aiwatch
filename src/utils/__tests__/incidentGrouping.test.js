@@ -797,9 +797,8 @@ describe('worker-tagged autoMonitor incidents (#983)', () => {
   })
 
   it('a tagged `critical` incident still GROUPS — grouping is display-only, unlike the alert path', () => {
-    // Deliberate asymmetry, pinned so it reads as intent: alerts never hold/suppress a `critical`
-    // (isShortIncidentHoldable / isFlapNotice bail on it first), but the incident history has no
-    // reason to keep four identical rows just because the auto-monitor escalated one of them.
+    // Pinned so it reads as intent: the incident history has no reason to keep four identical rows
+    // just because the auto-monitor escalated one of them.
     const withCritical = [burst[0], { ...burst[1], impact: 'critical' }]
     const rows = groupIncidents(withCritical, TZ)
     expect(rows).toHaveLength(1)

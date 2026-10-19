@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { applyTitleMap, filterIncidents, tagAutoMonitorIncidents, isAutoMonitorIncident, fetchService, SERVICES } from '../services'
+import { shouldHoldNewIncident, FLAP_HOLD_MS } from '../alerts'
 import type { Incident, ServiceConfig } from '../types'
 
 // #989 — Kimi: a non-English (Chinese) Atlassian status source whose auto-monitor opens a fresh `critical`
@@ -182,7 +183,7 @@ describe('autoMonitor tagging of the machine alarm (#989)', () => {
       [
         mkInc({ id: 'a', title: 'Agentic 模型错误报警' }),   // spaced, capital A
         mkInc({ id: 'b', title: 'agentic模型错误报警' }),     // no space, lowercase
-        mkInc({ id: 'c', title: '搜索请求出现大量报错' }),     // search singleton — NOT the machine alarm
+        mkInc({ id: 'c', title: '短信登录异常' }),             // SMS-login singleton — NOT a machine alarm
       ],
       kimiapp,
     )
@@ -208,11 +209,11 @@ describe('fetchService applies tag AND titleMap in the right order (#989 — rea
   })
 
   // Real titles + component tags from status.moonshot.cn incidents.json (2026-10-19), plus the untagged
-  // Agentic alarm (verified 2026-07-18, #989).
+  // Agentic alarm (verified 2026-07-18, #989) and an SMS-login incident (a #989 titleMap title).
   const pageIncidents = [
     spInc('a1', 'Agentic 模型错误报警'),
     spInc('a2', 'agentic模型错误报警'),
-    spInc('h1', '搜索请求出现大量报错', ['Search']),
+    spInc('h1', '短信登录异常', ['Sign In / Sign Up']),
     spInc('f1', 'kimi fs服务异常', ['File uploads']),
     spInc('o1', '开放平台 API 服务异常', ['Open API']),
   ]
@@ -247,7 +248,7 @@ describe('fetchService applies tag AND titleMap in the right order (#989 — rea
 
   it('leaves the human singleton untagged, still title-mapped to English', async () => {
     const svc = await fetchKimi()
-    const human = svc.incidents.find((i) => i.title === 'Elevated search request error rate')
+    const human = svc.incidents.find((i) => i.title === 'SMS login failure')
     expect(human).toBeDefined()
     expect(human!.autoMonitor).toBeUndefined()
   })
@@ -257,5 +258,61 @@ describe('fetchService applies tag AND titleMap in the right order (#989 — rea
     expect(svc.incidents).toHaveLength(4)
     expect(svc.incidents.every((i) => !/[一-鿿]/.test(i.title))).toBe(true)
     expect((await fetchCard(kimi)).incidents.map((i) => i.title)).toEqual(['Open Platform API service disruption'])
+  })
+})
+
+// #1731 — Moonshot files every auto-monitor alarm as `critical`. On `kimiapp` the search alarm's
+// component is in the badge group, so a live one reaches the card; before the flag it alerted on first
+// sight every time (reproduced with this same fixture at Search = major_outage / partial_outage /
+// degraded_performance).
+describe('kimiapp holds Moonshot\'s critical auto-monitor alarms (#1731)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  const T0 = Date.parse('2026-10-19T10:00:00.000Z')
+  const live = (name: string, components: string[]) => ({
+    id: 'live-1', name, status: 'investigating', impact: 'critical',
+    created_at: '2026-10-19T10:00:00.000Z', started_at: '2026-10-19T10:00:00.000Z', resolved_at: null, updated_at: '2026-10-19T10:00:00.000Z',
+    incident_updates: [{ status: 'investigating', body: '搜索请求报错率超过20%，持续超过1分钟', created_at: '2026-10-19T10:00:00.000Z' }],
+    components: components.map((n) => ({ id: `c-${n}`, name: n })),
+  })
+  const onCard = async (name: string) => {
+    const summary = {
+      status: { indicator: 'critical', description: 'Partial outage' },
+      components: [
+        { id: 'sttxgsd2bps7', name: 'Website', status: 'operational' },
+        { id: 'smbb3z35s0jl', name: 'Search', status: 'partial_outage' },
+      ],
+      incidents: [live(name, ['Search'])],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    const svc = await fetchService(kimiapp, { summary: summary as never, incidents: null }, undefined, {})
+    expect(svc.status).toBe('degraded')
+    return svc.incidents.find((i) => i.id === 'live-1')!
+  }
+  const heldAt = (inc: Incident, firstSeenMs: number | null, nowMs: number, config: ServiceConfig = kimiapp) =>
+    shouldHoldNewIncident(config.id, config, inc, { alreadyAlerted: false, firstSeenMs, nowMs })
+
+  it('the live search alarm is tagged, held on first sight and inside FLAP_HOLD_MS, then alerts', async () => {
+    const inc = await onCard('搜索请求出现大量报错')
+    expect(inc.autoMonitor).toBe(true)
+    expect(heldAt(inc, null, T0)).toBe(true)
+    expect(heldAt(inc, T0, T0 + FLAP_HOLD_MS - 1)).toBe(true)
+    expect(heldAt(inc, T0, T0 + FLAP_HOLD_MS)).toBe(false)
+  })
+
+  it('the file-service alarm is tagged too', () => {
+    expect(isAutoMonitorIncident({ title: 'kimi fs服务异常' }, kimiapp)).toBe(true)
+  })
+
+  it('a human-written critical incident on kimiapp still alerts on first sight', async () => {
+    const inc = await onCard('Kimi 服务全面中断')
+    expect(inc.autoMonitor).toBeUndefined()
+    expect(heldAt(inc, null, T0)).toBe(false)
+  })
+
+  it('without the flag, a tagged critical alarm still alerts on first sight', async () => {
+    const inc = await onCard('搜索请求出现大量报错')
+    const { autoMonitorCriticalHoldable: _, ...noFlag } = kimiapp
+    expect(heldAt(inc, null, T0, noFlag as ServiceConfig)).toBe(false)
   })
 })
