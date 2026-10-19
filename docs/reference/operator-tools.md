@@ -88,7 +88,7 @@ IS the remedy (while `incidents:monthly` still exists, 60d).
 `npx tsx scripts/patch-archive-derived-dupes.ts --period YYYY-MM --apply-suppressions` (#1735). It reads the
 current `incident:suppressions`, drops the rows it hides, recomputes only the services that lost a row with the
 archive's own functions (refusing the whole run if any such service's stored figures do not reproduce), and prints the commands to apply
-it — it never writes KV. (The CURRENT month's 90-day view + weekly briefing filter the raw accumulator live — no
+it — it never writes KV. A service whose stored figures predate a change to the aggregation code can be patched anyway with `--accept-drift <id>` (#1731); the drift is printed per service. (The CURRENT month's 90-day view + weekly briefing filter the raw accumulator live — no
 patch needed there.) **Do not rebuild for this:** a rebuild re-snapshots every service in the month from today's
 data — on 2026-10-19 one did it to 37 / 38 scores and reverted #1580's patched uptimes — so a rebuild over a
 stored month now answers `409` unless the body carries `resnapshot: true`.

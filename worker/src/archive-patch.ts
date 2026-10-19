@@ -76,6 +76,8 @@ export interface ArchiveServiceFigures {
 export interface ArchivePatchChange {
   id: string
   removed: string[]
+  /** #1731 — stored figures that did not reproduce, accepted by name for this service. */
+  acceptedDrift?: string[]
   before: ArchiveServiceFigures
   after: ArchiveServiceFigures
   keptList: MonthlyIncidentEntry[]
@@ -347,9 +349,11 @@ export function planSuppressionPatch(
   archive: PatchableArchive,
   window: { startISO: string; endISO: string },
   suppressions: SuppressionEntry[],
+  acceptDrift: ReadonlySet<string> = new Set(),
 ): { changes: ArchivePatchChange[]; refusals: string[] } {
   const changes: ArchivePatchChange[] = []
   const refusals: string[] = []
+  const usedAccept = new Set<string>()
   for (const [id, svc] of Object.entries(archive.services ?? {})) {
     const list = svc.incidentList
     if (!Array.isArray(list) || list.length === 0) continue
@@ -359,12 +363,20 @@ export function planSuppressionPatch(
 
     const stored = storedFigures(svc)
     const drift = figureDiff(stored, figuresFrom(id, svc, entries, window))
-    if (drift.length > 0) {
+    if (drift.length > 0 && !acceptDrift.has(id)) {
       refusals.push(`${id}: stored figures do not reproduce from the stored list — ${drift.join(', ')}`)
       continue
     }
     const kept = entries.filter((e) => !drop.has(e.id))
-    changes.push({ id, removed: [...drop], before: stored, after: figuresFrom(id, svc, kept, window), keptList: kept })
+    const change: ArchivePatchChange = { id, removed: [...drop], before: stored, after: figuresFrom(id, svc, kept, window), keptList: kept }
+    if (drift.length > 0) {
+      change.acceptedDrift = drift
+      usedAccept.add(id)
+    }
+    changes.push(change)
+  }
+  for (const id of acceptDrift) {
+    if (!usedAccept.has(id)) refusals.push(`${id}: named to accept drift, but it has no suppressed row with non-reproducing figures`)
   }
   return { changes, refusals }
 }

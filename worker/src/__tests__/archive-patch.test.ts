@@ -459,6 +459,30 @@ describe('#1735 — planSuppressionPatch', () => {
       .toEqual({ changes: [], refusals: [] })
   })
 
+  it('a service named to accept drift is patched, and its drift is recorded', () => {
+    const arch = archive()
+    arch.services!.kimi.totalDowntimeMin = 1808
+    const { changes, refusals } = planSuppressionPatch(arch, SEPT, supp, new Set(['kimi']))
+    expect(refusals).toEqual([])
+    expect(changes.map((c) => c.id)).toEqual(['kimi'])
+    expect(changes[0].acceptedDrift).toEqual([`totalDowntimeMin 1808→${figuresFrom('kimi', archive().services!.kimi, [search, fs, openApi], SEPT).totalDowntimeMin}`])
+    expect(changes[0].after).toMatchObject({ incidents: 1, totalDowntimeMin: 23 })
+  })
+
+  it('accepting drift for one service does not accept it for another', () => {
+    const arch = archive()
+    arch.services!.kimi.totalDowntimeMin = 1808
+    const { changes, refusals } = planSuppressionPatch(arch, SEPT, supp, new Set(['kimiapp']))
+    expect(changes).toEqual([])
+    expect(refusals.join(' | ')).toMatch(/^kimi: stored figures do not reproduce/)
+    expect(refusals.join(' | ')).toMatch(/kimiapp: named to accept drift, but/)
+  })
+
+  it('a reproducing service carries no acceptedDrift, and naming it to accept drift is refused', () => {
+    expect(planSuppressionPatch(archive(), SEPT, supp).changes[0].acceptedDrift).toBeUndefined()
+    expect(planSuppressionPatch(archive(), SEPT, supp, new Set(['kimi'])).refusals).toEqual(['kimi: named to accept drift, but it has no suppressed row with non-reproducing figures'])
+  })
+
   it('REFUSES a service whose stored figures do not reproduce, and plans nothing for it', () => {
     const arch = archive()
     arch.services!.kimi.totalDowntimeMin = 1808

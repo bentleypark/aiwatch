@@ -26,6 +26,11 @@
  * per-service alternative to `rebuild-archive`, which re-snapshots every service:
  *
  *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-09 --apply-suppressions
+ *
+ * #1731 — `--accept-drift <id>[,<id>]` patches a named service whose stored figures no longer reproduce
+ * under current code; the drift is printed per service:
+ *
+ *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-08 --apply-suppressions --accept-drift kimi
  */
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -85,6 +90,10 @@ function main(argv: string[]): void {
   }
   const window = archivePatch.monthWindow(period)
   let plan: ReturnType<typeof archivePatch.planArchivePatch>
+  if (argv.includes('--accept-drift') && !argv.includes('--apply-suppressions')) {
+    console.error('--accept-drift applies only to --apply-suppressions.')
+    process.exit(2)
+  }
   if (argv.includes('--apply-suppressions')) {
     if (correction) {
       console.error('--apply-suppressions and --correction are separate runs.')
@@ -96,7 +105,13 @@ function main(argv: string[]): void {
       console.error(`${archivePatch.SUPPRESSIONS_KEY}: ${list.length} usable row(s), ${dropped} unusable — refusing to plan against it. Nothing written.`)
       process.exit(1)
     }
-    plan = archivePatch.planSuppressionPatch(archive, window, list)
+    const d = argv.indexOf('--accept-drift')
+    const accept = new Set(d >= 0 ? (argv[d + 1] ?? '').split(',').filter(Boolean) : [])
+    if (d >= 0 && accept.size === 0) {
+      console.error('--accept-drift needs one or more service ids.')
+      process.exit(2)
+    }
+    plan = archivePatch.planSuppressionPatch(archive, window, list, accept)
   } else {
     plan = correction
       ? archivePatch.planRowReplacement(archive, window, correction)
@@ -117,6 +132,7 @@ function main(argv: string[]): void {
       .filter((k) => c.before[k] !== c.after[k])
       .map((k) => `${k} ${String(c.before[k])}→${String(c.after[k])}`)
     console.log(`${c.id}: -${c.removed.length} row(s) | ${moved.join(' | ')}`)
+    if (c.acceptedDrift) console.log(`  ${c.id}: ACCEPTED DRIFT (stored → current code) — ${c.acceptedDrift.join(', ')}`)
   }
 
   const outDir = process.env.ARCHIVE_PATCH_DIR ?? '.'
