@@ -13,11 +13,11 @@
 // operator policy (hide) and source attribution stay orthogonal, and removing a suppression restores
 // the incident with zero code change.
 //
-// Two apply points cover everything (see #904):
+// Apply points (see #904):
 //   1. `fetchAllServices` return — feeds the live `/api/status` list, `scoreFor`, the go-forward
 //      `accumulateMonthlyIncidents`, and the `services:latest` cache in one shot.
-//   2. `buildMonthlyArchive` build-time — filters the ALREADY-STORED `incidents:monthly` accumulator
-//      so a `rebuild-archive` of a past month drops suppressed incidents (rebuild-safe, no KV surgery).
+//   2. `buildMonthlyArchive` build-time — filters the ALREADY-STORED `incidents:monthly` accumulator.
+//   3. A month already archived: `planSuppressionPatch` (archive-patch.ts, #1735).
 
 import type { Incident, ServiceStatus } from './types'
 

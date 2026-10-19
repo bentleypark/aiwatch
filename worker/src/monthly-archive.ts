@@ -1922,8 +1922,7 @@ export async function buildMonthlyArchive(
     // manual, correctness-critical one-shot, so it must see a just-added suppression immediately.
     // #1260 — the CALLER may already have read this list, fail-closed. Reading it again here with the
     // fail-open sibling meant a KV blip applied NO suppressions while the caller's own read succeeded,
-    // so nothing shrank, nothing objected, and the operator's entire reason for the rebuild silently
-    // did not happen. Prefer what the caller consumed.
+    // so nothing shrank and nothing objected. Prefer what the caller consumed.
     const suppressions = suppressionsOverride ?? await readSuppressionsFresh(kv)
     if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
     // #1019 — build-time duration overrides: pin a paperwork-inflated incident's duration to the
@@ -2257,8 +2256,8 @@ export function mergeRebuiltArchive(
  * without the two counters named in the bug report moving. Enumerating the ones we happen to know
  * about is how the first version of this guard missed four of six sources.
  *
- * `incidentIds` is a set rather than a count because a shrink is not always a loss: suppressing an
- * incident is the documented reason to rebuild a past month at all, and it necessarily removes ids.
+ * `incidentIds` is a set rather than a count because a shrink is not always a loss: a suppression
+ * removes ids.
  * The caller subtracts the ids it can explain; whatever is left vanished for a reason nobody chose.
  */
 export interface ArchiveCensus {
@@ -2420,7 +2419,7 @@ export type ArchiveHealth =
 // result that DECREASED, so an equal-and-still-short rebuild is accepted and written — after
 // re-snapshotting score/uptime from current data (`resolveArchiveOfficialUptime`).
 export const ARCHIVE_REBUILD_CAVEAT =
-  '`POST /api/admin/rebuild-archive` re-reads the same source keys, so it only helps while the lost day is still readable — and it re-snapshots score/uptime from CURRENT data into that month. Check before running one.'
+  '`POST /api/admin/rebuild-archive` re-reads the same source keys, so it only helps while the lost day is still readable — and it re-snapshots score/uptime from CURRENT data into that month, so over a stored month it needs `resnapshot: true`. Check before running one.'
 
 export function shortArchiveOf(period: string, daysCollected: number): ShortArchive | null {
   const match = /^(\d{4})-(\d{2})$/.exec(period)

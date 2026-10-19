@@ -133,6 +133,8 @@ describe('month-end cron — a bad duration-override read is announced, never si
 
     expect(archiveWrite(puts).services?.claude?.longestIncidentMin, 'un-corrected, as announced').toBe(800)
     expect(alertBody(fetchSpy), 'the operator must be told the month went out without its overrides').not.toBe('')
+    // #1735 — the month is now stored, so the repair it names must carry the opt-in or it 409s.
+    expect(alertBody(fetchSpy)).toContain('resnapshot: true')
   })
 
   it('does the same for a list that parses but holds an unusable row', async () => {

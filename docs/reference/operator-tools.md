@@ -69,9 +69,8 @@ ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove --scope service-patt
 
 **Where it applies** (all read the single `incident:suppressions` KV key): (1) `fetchAllServices` return —
 covers the live `/api/status` list, `scoreFor`, the go-forward `accumulateMonthlyIncidents`, and the
-`services:latest` cache in one shot; (2) `buildMonthlyArchive` **build-time** — so a
-`POST /api/admin/rebuild-archive` of a PAST month drops the suppressed incident + recomputes
-count/downtime/longest from survivors, **without deleting the accumulator KV** (rebuild-safe). The badge
+`services:latest` cache in one shot; (2) `buildMonthlyArchive` **build-time** — a month archived after
+the suppression excludes it, **without deleting the accumulator KV**. The badge
 is unaffected (suppression runs after status determination — it only removes the incident from the LIST +
 Score inputs).
 
@@ -85,10 +84,14 @@ score/uptime from CURRENT data into that past month. Rebuild when the lost day i
 again; otherwise record the gap and leave the archive alone. For a month never written at all, rebuild
 IS the remedy (while `incidents:monthly` still exists, 60d).
 
-**After adding a suppression for a past month**, run `POST /api/admin/rebuild-archive` for that month so the
-archive + dashboard 90-day history reflect it. (The CURRENT month's 90-day view + weekly briefing filter the
-raw accumulator live — no rebuild needed there.) The rebuild reads the suppression list, so its incident shrink is
-expected and does not count against the guard below.
+**After adding a suppression for a month already archived**, apply it to that archive with
+`npx tsx scripts/patch-archive-derived-dupes.ts --period YYYY-MM --apply-suppressions` (#1735). It reads the
+current `incident:suppressions`, drops the rows it hides, recomputes only the services that lost a row with the
+archive's own functions (refusing the whole run if any such service's stored figures do not reproduce), and prints the commands to apply
+it — it never writes KV. (The CURRENT month's 90-day view + weekly briefing filter the raw accumulator live — no
+patch needed there.) **Do not rebuild for this:** a rebuild re-snapshots every service in the month from today's
+data — on 2026-10-19 one did it to 37 / 38 scores and reverted #1580's patched uptimes — so a rebuild over a
+stored month now answers `409` unless the body carries `resnapshot: true`.
 
 ### The rebuild refuses when it would hold less than what is stored (#1260)
 
@@ -106,6 +109,7 @@ archive, and answers:
 | **`500` `retryable:false`** | an operator list is present but unusable. Retrying never clears it — repair the KV value by hand. Both lists are checked to the same depth (#1274, #1318): a value that does not parse, parses to a non-array, or holds rows the normalizer rejects (a quoted `"18"` for `durationMin`, a suppression row with no `scope`) is refused, with `reason` and `droppedRows` in the body. |
 | **`409`** | the rebuild measurably holds less than what is stored — `regressed` names what, alongside `prior` and `rebuilt`. Incidents the suppression list accounts for are NOT a loss. |
 | **`409`** | the stored archive is unparseable, so the comparison could not be made at all. |
+| **`409`** | an archive is already stored and the body does not carry `resnapshot: true` (#1735). Nothing is built or written. |
 | **`400`** | the month is not a real calendar month, or has not ENDED yet — the current month included (#1274). |
 | **`200`** | otherwise — including a first-ever build of an old month, where nothing is stored and so nothing can be lost. |
 
@@ -115,7 +119,8 @@ archive, and answers:
 
 Widening the census to per-service values was tried and rejected in #1260: it produces false refusals faster than it closes gaps, and a refused rebuild teaches the operator to keep `force` typed, which disarms every guard behind it. The safety property is the unconditional `:prev:` copy below.
 
-`{"force": true}` overrides the `409`s. **Every** overwrite of an existing archive — forced or not —
+`{"resnapshot": true}` is required whenever an archive is already stored (#1735); without it nothing below
+runs. `{"force": true}` overrides the census `409`s. **Every** overwrite of an existing archive — forced or not —
 first copies the prior bytes to `archive:monthly:{period}:prev:{ts}` (90d) and is refused outright if
 that copy fails. The comparison counts presence rather than value (it cannot see a real 99.97%
 replaced by a computed 100%), so the copy, not the comparison, is what makes a mistake recoverable.
@@ -172,8 +177,8 @@ curl -s -X POST https://<worker>/api/admin/duration-override -H "X-Admin-Key: $A
 ```
 
 **Where it applies** (all read the single `incident:duration-overrides` KV key, each right after
-suppression): `buildMonthlyArchive` build-time (rebuild-safe — run `POST /api/admin/rebuild-archive` for a
-past month), the `/api/report` current-month partial (dashboard 30/90-day list), and the weekly briefing.
+suppression): `buildMonthlyArchive` build-time (a month already archived keeps its stored figures; a rebuild
+over it needs `resnapshot: true`, #1735), the `/api/report` current-month partial (dashboard 30/90-day list), and the weekly briefing.
 It recomputes `totalMinutes`/`longestMinutes` from the `durations` map, updates `incidents[].durationMin`,
 and (for a resolved entry) sets `incidents[].resolvedAt = startedAt + durationMin` so the grouped-incident
 row + Uptime calendar span agree. It also lands in the calendar-month `monthlyScore` (#993) — its MTTR

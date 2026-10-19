@@ -61,7 +61,13 @@ function envWith(kv: KVNamespace, adminKey = 'test-admin-key') {
   } as Parameters<typeof workerModule.fetch>[1]
 }
 
+// #1735 — every case below predates the stored-archive gate and exercises a whole-month rebuild, so it
+// opts in by default; `rawReq` sends exactly the body given.
 function req(body: unknown, headers: Record<string, string> = {}): Request {
+  const withOptIn = body && typeof body === 'object' && !('resnapshot' in body) ? { ...body, resnapshot: true } : body
+  return rawReq(withOptIn, headers)
+}
+function rawReq(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request('https://example.com/api/admin/rebuild-archive', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
@@ -221,6 +227,44 @@ describe('POST /api/admin/rebuild-archive', () => {
     // Re-parse the freshly-written value — generatedAt must be later than the original.
     const written = JSON.parse(store['archive:monthly:2026-04'])
     expect(new Date(written.generatedAt).getTime()).toBeGreaterThan(new Date('2026-05-01T00:00:00Z').getTime())
+  })
+
+  // #1735 — 2026-10-19: suppress-then-rebuild of 2026-08 / 2026-09 to correct ONE service moved 37 / 38
+  // scores and reverted #1580's patched uptimes. A stored month is now refused without the opt-in.
+  describe('a stored archive needs resnapshot:true (#1735)', () => {
+    const seeded = () => {
+      const { store, kv } = makeKV()
+      store['services:latest'] = JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' })
+      const stored = JSON.stringify({ period: '2026-04', generatedAt: '2026-05-01T00:00:00Z', daysCollected: 30, services: { claude: { score: 71, grade: 'good' } } })
+      store['archive:monthly:2026-04'] = stored
+      return { store, kv, stored }
+    }
+
+    it('refuses a rebuild over a stored month, writes nothing, and names the per-service tool', async () => {
+      const { store, kv, stored } = seeded()
+      const res = await workerModule.fetch(rawReq({ month: '2026-04', force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+      expect(res.status).toBe(409)
+      const body = await res.json() as { hint: string }
+      expect(body.hint).toMatch(/patch-archive-derived-dupes\.ts/)
+      expect(body.hint).toMatch(/--apply-suppressions/)
+      expect(store['archive:monthly:2026-04']).toBe(stored)
+      expect(Object.keys(store).some((k) => k.includes(':prev:'))).toBe(false)
+    })
+
+    it('resnapshot:true still rebuilds the whole month', async () => {
+      const { store, kv, stored } = seeded()
+      const res = await workerModule.fetch(rawReq({ month: '2026-04', force: true, resnapshot: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+      expect(res.status).toBe(200)
+      expect(store['archive:monthly:2026-04']).not.toBe(stored)
+    })
+
+    it('a month with no stored archive needs no opt-in', async () => {
+      const { store, kv } = makeKV()
+      store['services:latest'] = JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' })
+      const res = await workerModule.fetch(rawReq({ month: '2026-04', force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+      expect(res.status).toBe(200)
+      expect(store['archive:monthly:2026-04']).toBeTruthy()
+    })
   })
 
   // #1260 — the destructive path. `buildMonthlyArchive` reads every day of uptime from `history:{date}`,
@@ -399,10 +443,9 @@ describe('POST /api/admin/rebuild-archive', () => {
     expect(res.status).toBe(200)
   })
 
-  // THE critical one. operator-tools.md tells operators to suppress an incident in a past month and
-  // then rebuild it; `filterSuppressedFromMonthly` necessarily removes that id, so a count-based
-  // guard 409s the documented flow — and an operator who learns the normal path needs `force` will
-  // use it every time, disarming every other guard along with it.
+  // `filterSuppressedFromMonthly` necessarily removes a suppressed id, so a count-based guard would 409
+  // every rebuild after a suppression — and an operator who learns that path needs `force` will use it
+  // every time, disarming every other guard along with it.
   it('allows a rebuild whose only shrink is explained by the suppression list', async () => {
     const month = monthsAgo(1)
     const { kv } = makeKV({

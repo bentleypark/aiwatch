@@ -21,6 +21,11 @@
  * #1664 — `--correction <name>` applies a row replacement from `ROW_REPLACEMENTS` instead:
  *
  *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-09 --correction 2026-09-azureopenai
+ *
+ * #1735 — `--apply-suppressions` drops the rows the current `incident:suppressions` list hides — the
+ * per-service alternative to `rebuild-archive`, which re-snapshots every service:
+ *
+ *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-09 --apply-suppressions
  */
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -79,9 +84,25 @@ function main(argv: string[]): void {
     process.exit(2)
   }
   const window = archivePatch.monthWindow(period)
-  const { changes, refusals } = correction
-    ? archivePatch.planRowReplacement(archive, window, correction)
-    : archivePatch.planArchivePatch(archive, window)
+  let plan: ReturnType<typeof archivePatch.planArchivePatch>
+  if (argv.includes('--apply-suppressions')) {
+    if (correction) {
+      console.error('--apply-suppressions and --correction are separate runs.')
+      process.exit(2)
+    }
+    const { list, dropped } = archivePatch.normalizeSuppressionsCounted(
+      parseOrDie(kvRaw(archivePatch.SUPPRESSIONS_KEY), `wrangler kv key get ${archivePatch.SUPPRESSIONS_KEY}`))
+    if (dropped > 0 || list.length === 0) {
+      console.error(`${archivePatch.SUPPRESSIONS_KEY}: ${list.length} usable row(s), ${dropped} unusable — refusing to plan against it. Nothing written.`)
+      process.exit(1)
+    }
+    plan = archivePatch.planSuppressionPatch(archive, window, list)
+  } else {
+    plan = correction
+      ? archivePatch.planRowReplacement(archive, window, correction)
+      : archivePatch.planArchivePatch(archive, window)
+  }
+  const { changes, refusals } = plan
   for (const r of refusals) console.error(`REFUSED  ${r}`)
   if (refusals.length) {
     console.error(`\nREFUSING THE WHOLE RUN — ${refusals.length} service(s) could not be verified. Nothing written.`)

@@ -22,6 +22,8 @@ import type { MonthlyIncidentEntry } from './monthly-archive'
 import { derivedDayAlreadyBankedFromFeed } from './monthly-archive'
 import { resolveProbeId } from './probe'
 import { SERVICES } from './services'
+import { isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
+export { normalizeSuppressionsCounted, SUPPRESSIONS_KEY } from './suppression'
 import type { Incident, ProbeSummary } from './types'
 import { formatDuration } from './utils'
 
@@ -335,4 +337,34 @@ export function planRowReplacement(
     }],
     refusals: [],
   }
+}
+
+/**
+ * #1735 — drop every stored row the current suppression list hides, behind the same reproduction gate as
+ * `planArchivePatch`. Only services that lose a row change; every other byte of the archive is kept.
+ */
+export function planSuppressionPatch(
+  archive: PatchableArchive,
+  window: { startISO: string; endISO: string },
+  suppressions: SuppressionEntry[],
+): { changes: ArchivePatchChange[]; refusals: string[] } {
+  const changes: ArchivePatchChange[] = []
+  const refusals: string[] = []
+  for (const [id, svc] of Object.entries(archive.services ?? {})) {
+    const list = svc.incidentList
+    if (!Array.isArray(list) || list.length === 0) continue
+    const entries = list as MonthlyIncidentEntry[]
+    const drop = new Set(entries.filter((e) => isSuppressedByIdTitle(e.id, e.title, id, suppressions)).map((e) => e.id))
+    if (drop.size === 0) continue
+
+    const stored = storedFigures(svc)
+    const drift = figureDiff(stored, figuresFrom(id, svc, entries, window))
+    if (drift.length > 0) {
+      refusals.push(`${id}: stored figures do not reproduce from the stored list — ${drift.join(', ')}`)
+      continue
+    }
+    const kept = entries.filter((e) => !drop.has(e.id))
+    changes.push({ id, removed: [...drop], before: stored, after: figuresFrom(id, svc, kept, window), keptList: kept })
+  }
+  return { changes, refusals }
 }

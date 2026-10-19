@@ -2601,6 +2601,7 @@ export async function handleMistralFeedObservation(request: Request, env: Env, c
 interface AdminRebuildArchiveRequest {
   month?: unknown
   force?: unknown
+  resnapshot?: unknown
 }
 
 async function handleAdminRebuildArchive(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
@@ -2676,6 +2677,15 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
         hint: 'inspect the stored value before replacing it; pass force:true to overwrite it regardless',
       })
     }
+  }
+  // #1735 — a rebuild re-snapshots EVERY service's build-day fields from today's data and reverts direct
+  // archive patches (2026-10-19: 37 / 38 scores moved, #1580's uptime corrections undone).
+  if (priorRaw !== null && body.resnapshot !== true) {
+    return json(409, {
+      ok: false,
+      error: 'a stored archive exists, and a rebuild re-snapshots every service in it from today\'s data',
+      hint: 'correct one service with scripts/patch-archive-derived-dupes.ts (--apply-suppressions after adding a suppression); pass resnapshot:true only to rebuild the whole month',
+    })
   }
 
   // Compute scoreData via the same path the (fixed) cron now uses.
@@ -2775,8 +2785,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
   // and they diverge — archival runs inside the traffic-driven `cacheWrite`, not the cron (#988), and
   // `incidents:`/`security:`/`probe-degradation:` expire at 60d, before `history:` does at 90d.
   const nextCensus = archiveContentCensus(archive)
-  // Suppressing an incident is the documented reason to rebuild a past month (operator-tools.md), and
-  // it necessarily removes ids — so a shrink the current suppression list accounts for is not a loss.
+  // A shrink the current suppression list accounts for is not a loss.
   // Decided with the same predicate the build filters by, over the PRIOR archive's own entries, since
   // a pattern suppression matches on title+service rather than on an id.
   // `readSuppressionsFresh` collapses "could not read" into `[]`, which suppression.ts itself flags as
@@ -4015,7 +4024,7 @@ const workerExport = {
                   title: '⚠️ Monthly archive written WITHOUT duration overrides',
                   description: `\`${archiveKey}\` was archived, but \`incident:duration-overrides\` is \`${overrideRead.state}\`,`
                     + ' so any operator-pinned duration is missing and the provider paperwork span was published instead.'
-                    + '\nRepair the KV value, then run `POST /api/admin/rebuild-archive` for this month'
+                    + '\nRepair the KV value, then run `POST /api/admin/rebuild-archive` for this month with `resnapshot: true`'
                     + ' — while `incidents:monthly` still exists (60d).',
                   color: 0xd29922, // amber
                 })

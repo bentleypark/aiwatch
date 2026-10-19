@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   planArchivePatch, applyArchivePatch, figuresFrom, storedFigures, figureDiff, resourceOfDerivedEntry,
-  planRowReplacement, ROW_REPLACEMENTS,
+  planRowReplacement, ROW_REPLACEMENTS, planSuppressionPatch,
 } from '../archive-patch'
 import type { RowReplacement } from '../archive-patch'
 import type { PatchableArchive } from '../archive-patch'
@@ -407,5 +407,63 @@ describe('#1664 — planRowReplacement (2026-09 azureopenai)', () => {
     const { changes } = planRowReplacement(arch, SEPT, spec)
     const out = applyArchivePatch(arch, changes).services!.azureopenai
     expect(figureDiff(storedFigures(out), figuresFrom('azureopenai', out, out.incidentList as MonthlyIncidentEntry[], SEPT))).toEqual([])
+  })
+})
+
+describe('#1735 — planSuppressionPatch', () => {
+  const SEPT = monthWindow('2026-09')
+  const row = (id: string, title: string, day: string, durationMin: number): MonthlyIncidentEntry => ({
+    id, title, startedAt: `2026-09-${day}T10:00:00.000Z`,
+    resolvedAt: new Date(Date.parse(`2026-09-${day}T10:00:00.000Z`) + durationMin * 60_000).toISOString(),
+    durationMin, finalStatus: 'resolved', impact: 'critical',
+  })
+  const service = (id: string, rows: MonthlyIncidentEntry[]): Record<string, unknown> => {
+    const svc: Record<string, unknown> = { incidentList: rows, officialUptime: 99.91, score: 69, grade: 'fair' }
+    return { ...svc, ...figuresFrom(id, svc, rows, SEPT) }
+  }
+  // Real titles from the 2026-09 kimi archive row set.
+  const search = row('136vmqyx3d97', 'Elevated search request error rate', '12', 7)
+  const fs = row('b0yb9hljvczz', 'kimi fs服务异常', '29', 27)
+  const openApi = row('o1', '开放平台 API 服务异常', '18', 23)
+  const supp = [
+    { scope: 'service-pattern' as const, svcId: 'kimi', match: 'elevated search request error rate' },
+    { scope: 'service-pattern' as const, svcId: 'kimi', match: 'kimi fs' },
+  ]
+  const archive = (): PatchableArchive => ({
+    services: { kimi: service('kimi', [search, fs, openApi]), kimiapp: service('kimiapp', [search, fs]) },
+  })
+
+  it('drops only the rows the list hides on the service it names, and recomputes that service', () => {
+    const { changes, refusals } = planSuppressionPatch(archive(), SEPT, supp)
+    expect(refusals).toEqual([])
+    expect(changes.map((c) => c.id)).toEqual(['kimi'])
+    expect(changes[0].removed.sort()).toEqual(['136vmqyx3d97', 'b0yb9hljvczz'])
+    expect(changes[0].keptList).toEqual([openApi])
+    expect(changes[0].after).toMatchObject({ incidents: 1, totalDowntimeMin: 23, longestIncidentMin: 23 })
+  })
+
+  it('leaves every field it does not compute untouched, on the patched service and the others', () => {
+    const before = archive()
+    const after = applyArchivePatch(structuredClone(before), planSuppressionPatch(before, SEPT, supp).changes)
+    expect(after.services!.kimiapp).toEqual(before.services!.kimiapp)
+    expect(after.services!.kimi).toMatchObject({ officialUptime: 99.91, score: 69, grade: 'fair' })
+  })
+
+  it('an incident-scoped suppression drops that id wherever it is stored', () => {
+    const { changes } = planSuppressionPatch(archive(), SEPT, [{ scope: 'incident', incId: 'o1' }])
+    expect(changes.map((c) => [c.id, c.removed])).toEqual([['kimi', ['o1']]])
+  })
+
+  it('nothing to drop → no change', () => {
+    expect(planSuppressionPatch(archive(), SEPT, [{ scope: 'service-pattern', svcId: 'kimi', match: 'no such title' }]))
+      .toEqual({ changes: [], refusals: [] })
+  })
+
+  it('REFUSES a service whose stored figures do not reproduce, and plans nothing for it', () => {
+    const arch = archive()
+    arch.services!.kimi.totalDowntimeMin = 1808
+    const { changes, refusals } = planSuppressionPatch(arch, SEPT, supp)
+    expect(changes).toEqual([])
+    expect(refusals[0]).toMatch(/^kimi: stored figures do not reproduce/)
   })
 })

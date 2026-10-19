@@ -904,8 +904,7 @@ export function feedHttpResponse(
  * #908 — conditional-GET response for the `/api/report` monthly ARCHIVE (JSON): the
  * cross-cutting analog of `feedHttpResponse`, reusing the SAME weak-ETag primitives
  * (`weakFeedEtag`/`isFeedNotModified`) so no third FNV copy is introduced. Purpose:
- * when an operator rebuilds a past-month archive (a #904 suppression / #1019 duration
- * override), the body changes → the weak ETag changes → a browser that cached the old
+ * when an operator rewrites a past-month archive, the body changes → the weak ETag changes → a browser that cached the old
  * archive revalidates and re-fetches instead of serving it.
  *
  * The short `max-age` is load-bearing, NOT redundant with the ETag: a weak ETag layered
