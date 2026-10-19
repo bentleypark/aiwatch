@@ -1945,7 +1945,7 @@ describe('auto-monitor tagged incidents (#983)', () => {
       expect(isShortIncidentHoldable('twelvelabs', {}, mkAm({ impact: 'minor' }))).toBe(true)
     })
 
-    it('never holds `critical` even when tagged — the escape hatch for a genuine broad outage', () => {
+    it('never holds `critical` even when tagged, without autoMonitorCriticalHoldable — the escape hatch for a genuine broad outage', () => {
       expect(isShortIncidentHoldable('twelvelabs', {}, mkAm({ impact: 'critical' }))).toBe(false)
     })
 
@@ -2081,7 +2081,7 @@ describe('auto-monitor tagged incidents (#983)', () => {
       expect(shouldHoldNewIncident('twelvelabs', {}, mkAm(), outlived)).toBe(false)
     })
 
-    it('a tagged `critical` incident alerts immediately, never held', () => {
+    it('a tagged `critical` incident alerts immediately, never held, without autoMonitorCriticalHoldable', () => {
       expect(shouldHoldNewIncident('twelvelabs', {}, mkAm({ impact: 'critical' }), firstSight)).toBe(false)
     })
   })

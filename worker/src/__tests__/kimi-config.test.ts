@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { applyTitleMap, filterIncidents, tagAutoMonitorIncidents, isAutoMonitorIncident, fetchService, SERVICES } from '../services'
+import { shouldHoldNewIncident, FLAP_HOLD_MS } from '../alerts'
 import type { Incident, ServiceConfig } from '../types'
 
-// #989 — Kimi (Moonshot AI): a non-English (Chinese) Atlassian status source whose auto-monitor opens a
-// fresh `critical` incident per model-error blip. Three mechanisms cooperate: titleMap (Chinese→English),
-// autoMonitorTitles (UI grouping + Score exclusion), and the badge/display component split.
+// #989 — Kimi: a non-English (Chinese) Atlassian status source whose auto-monitor opens a fresh `critical`
+// incident per model-error blip. #1731 — one page, two cards: `kimi` (API) and `kimiapp` (consumer app).
 
 const kimi = SERVICES.find((s) => s.id === 'kimi')!
+const kimiapp = SERVICES.find((s) => s.id === 'kimiapp')!
 
 function mkInc(overrides: Partial<Incident> = {}): Incident {
   return {
@@ -22,43 +23,68 @@ function mkInc(overrides: Partial<Incident> = {}): Incident {
   }
 }
 
-describe('kimi config shape (#989)', () => {
-  it('is registered as an api-category LLM with a stamped addedAt', () => {
-    expect(kimi).toBeTruthy()
+describe('kimi config shape (#989/#1731)', () => {
+  it('splits status.moonshot.cn: kimi = the SaaS group (api), kimiapp = the Kimi group (app)', () => {
     expect(kimi.category).toBe('api')
+    expect(kimiapp.category).toBe('app')
     expect(kimi.addedAt).toBeTruthy()
+    expect(kimiapp.addedAt).toBeTruthy()
+    expect(kimi.incidentComponentsKeepUntagged).toBeUndefined()
+    expect(kimiapp.incidentComponentsKeepUntagged).toBe(true)
+    const api = new Set(kimi.incidentComponents!.map((n) => n.toLowerCase()))
+    expect(kimiapp.incidentComponents!.filter((n) => api.has(n.toLowerCase()))).toEqual([])
   })
 
-  it('drives the badge off the single Open API component; model components are display-only', () => {
-    expect(kimi.statusComponentId).toBe('8psr5dfdld0s') // Open API (has uptimeData, ~100%)
-    // No statusComponentIds → the model components can NEVER flip the badge to `down` (a 1–9min blip
-    // would otherwise drag status-edge alerts + cache refresh). They live in displayComponentIds only.
+  // status.moonshot.cn components.json, 2026-10-19 (id, name, group header id).
+  const PAGE = [
+    ['8psr5dfdld0s', 'Open API', '87jpctq5cp71'], ['pjrph68g94yr', 'Open Platform Portal', '87jpctq5cp71'],
+    ['sttxgsd2bps7', 'Website', '01l1n50g13g6'], ['ckrtmmv96r2z', 'Sign In / Sign Up', '01l1n50g13g6'],
+    ['x3z9ydzr6ywk', 'File uploads', '01l1n50g13g6'], ['smbb3z35s0jl', 'Search', '01l1n50g13g6'],
+    ['rf64wcbxt3r2', 'API Service', '01l1n50g13g6'], ['x0zsqgy57b75', 'Model', '01l1n50g13g6'],
+    ['8rkd3yj051gl', 'Vision Model', '01l1n50g13g6'], ['lk7q3z0fcylp', 'Thinking Model', '01l1n50g13g6'],
+    ['p1j9ttb7jwhp', 'Text Model', '01l1n50g13g6'], ['wmn9wzv84k1v', 'Research Model', '01l1n50g13g6'],
+    ['z2zfp65lvb2z', 'K2 Model', '01l1n50g13g6'],
+  ] as const
+  const GROUP_HEADERS = ['87jpctq5cp71', '01l1n50g13g6', 'cyrtlddz0q8c'] // SaaS, Kimi, Kimi Code
+  const nameOf = new Map<string, string>(PAGE.map(([id, name]) => [id, name]))
+
+  it('each card names exactly its group members, and its ids are those same components', () => {
+    const members = (group: string) => PAGE.filter(([, , g]) => g === group)
+    expect(kimi.incidentComponents).toEqual(members('87jpctq5cp71').map(([, n]) => n))
+    expect(kimi.displayComponentIds).toEqual(members('87jpctq5cp71').map(([id]) => id))
+    expect(kimiapp.incidentComponents).toEqual(members('01l1n50g13g6').map(([, n]) => n))
+    expect(kimiapp.statusComponentIds!.map((id) => nameOf.get(id))).toEqual(kimiapp.incidentComponents)
+  })
+
+  it('kimiapp keeps the sibling card and every group header out of its roster audit', () => {
+    const expected = [...kimi.displayComponentIds!, ...GROUP_HEADERS]
+    expect([...kimiapp.rosterAuditExclude!].sort()).toEqual(expected.sort())
+  })
+
+  it('kimi badges the single Open API component; kimiapp badges the worst-of its group', () => {
+    expect(kimi.statusComponentId).toBe('8psr5dfdld0s')
     expect(kimi.statusComponentIds).toBeUndefined()
-    expect(kimi.displayComponentIds).toHaveLength(8)
-    expect(kimi.displayComponentIds).toContain('8psr5dfdld0s') // badge included in the breakdown (openai pattern)
+    expect(kimi.displayComponentIds).toEqual(['8psr5dfdld0s', 'pjrph68g94yr'])
+    expect(kimiapp.statusComponentIds).toHaveLength(kimiapp.incidentComponents!.length)
+    expect(kimiapp.statusComponentIds).toContain(kimiapp.statusComponentId)
+    expect(kimiapp.displayComponentIds).toEqual(kimiapp.statusComponentIds)
+    expect(kimiapp.statusComponentIds).not.toContain('8psr5dfdld0s')
   })
 
-  it('folds the six model components under a "Models" group, leaving Open API + API Service as surfaces', () => {
-    const groups = kimi.componentGroups!
-    expect(groups).toBeTruthy()
-    // Open API (badge) + API Service stay ungrouped surface rows.
-    expect(groups['8psr5dfdld0s']).toBeUndefined()
-    expect(groups['rf64wcbxt3r2']).toBeUndefined()
-    // Every OTHER displayComponentId is a model folded into "Models".
-    const modelIds = kimi.displayComponentIds!.filter((id) => id !== '8psr5dfdld0s' && id !== 'rf64wcbxt3r2')
-    expect(modelIds).toHaveLength(6)
-    expect(modelIds.every((id) => groups[id] === 'Models')).toBe(true)
+  it('kimiapp folds the six model components under "Models"', () => {
+    const groups = kimiapp.componentGroups!
+    expect(Object.values(groups).filter((g) => g === 'Models')).toHaveLength(6)
+    expect(Object.keys(groups).every((id) => kimiapp.displayComponentIds!.includes(id))).toBe(true)
   })
 
-  it('carries a titleMap and autoMonitorTitles, but NOT holdShortIncidents (inert for critical)', () => {
-    expect(kimi.titleMap).toBeTruthy()
-    expect(Object.keys(kimi.titleMap!)).toHaveLength(5)
-    expect(kimi.autoMonitorTitles?.length).toBeGreaterThan(0)
-    // holdShortIncidents / flapSuppression are deliberately unset: `critical` bypasses every hold/flap
-    // path (alerts.ts), so setting them would be cargo-cult. The Discord flood is prevented by
-    // filterByComponentStatus (#970) instead; grouping + Score-exclusion come from the autoMonitor tag.
-    expect(kimi.holdShortIncidents).toBeUndefined()
-    expect(kimi.flapSuppression).toBeUndefined()
+  it('the machine alarm is tagged on kimiapp only; neither card sets holdShortIncidents (inert for critical)', () => {
+    expect(kimiapp.autoMonitorTitles?.length).toBeGreaterThan(0)
+    expect(kimi.autoMonitorTitles).toBeUndefined()
+    expect(kimi.titleMap).toBe(kimiapp.titleMap)
+    for (const c of [kimi, kimiapp]) {
+      expect(c.holdShortIncidents).toBeUndefined()
+      expect(c.flapSuppression).toBeUndefined()
+    }
   })
 })
 
@@ -80,7 +106,7 @@ describe('applyTitleMap (#989)', () => {
     // Pin the two sets together: a title the tagger stamps `autoMonitor` MUST translate, or Chinese
     // leaks to Discord/dashboard. Drive real machine variants through the map and assert no CJK remains.
     for (const t of ['Agentic 模型错误报警', 'agentic模型错误报警']) {
-      expect(isAutoMonitorIncident(mkInc({ title: t }), kimi)).toBe(true)          // tagger matches
+      expect(isAutoMonitorIncident(mkInc({ title: t }), kimiapp)).toBe(true)          // tagger matches
       expect(/[㐀-鿿]/.test(applyTitleMap([mkInc({ title: t })], kimi)[0].title)).toBe(false) // …and it translated
     }
   })
@@ -157,9 +183,9 @@ describe('autoMonitor tagging of the machine alarm (#989)', () => {
       [
         mkInc({ id: 'a', title: 'Agentic 模型错误报警' }),   // spaced, capital A
         mkInc({ id: 'b', title: 'agentic模型错误报警' }),     // no space, lowercase
-        mkInc({ id: 'c', title: '搜索请求出现大量报错' }),     // search singleton — NOT the machine alarm
+        mkInc({ id: 'c', title: '短信登录异常' }),             // SMS-login singleton — NOT a machine alarm
       ],
-      kimi,
+      kimiapp,
     )
     expect(tagged[0].autoMonitor).toBe(true)
     expect(tagged[1].autoMonitor).toBe(true)
@@ -174,27 +200,44 @@ describe('autoMonitor tagging of the machine alarm (#989)', () => {
 describe('fetchService applies tag AND titleMap in the right order (#989 — real call path)', () => {
   afterEach(() => { vi.restoreAllMocks() })
 
-  const spInc = (id: string, name: string) => ({
+  const spInc = (id: string, name: string, components: string[] = []) => ({
     id, name, status: 'resolved', impact: 'critical',
     created_at: '2026-07-12T10:00:00.000Z', started_at: '2026-07-12T10:00:00.000Z',
     resolved_at: '2026-07-12T10:04:00.000Z', updated_at: '2026-07-12T10:04:00.000Z',
     incident_updates: [{ status: 'resolved', body: 'Error rate returned to normal.', created_at: '2026-07-12T10:04:00.000Z' }],
-    components: [] as unknown[], // the Moonshot auto-monitor attaches to no component (verified live)
+    components: components.map((n) => ({ id: `c-${n}`, name: n })),
   })
 
-  const fetchKimi = () => {
+  // Real titles + component tags from status.moonshot.cn incidents.json (2026-10-19), plus the untagged
+  // Agentic alarm (verified 2026-07-18, #989) and an SMS-login incident (a #989 titleMap title).
+  const pageIncidents = [
+    spInc('a1', 'Agentic 模型错误报警'),
+    spInc('a2', 'agentic模型错误报警'),
+    spInc('h1', '短信登录异常', ['Sign In / Sign Up']),
+    spInc('f1', 'kimi fs服务异常', ['File uploads']),
+    spInc('o1', '开放平台 API 服务异常', ['Open API']),
+  ]
+  const fetchCard = (config: ServiceConfig) => {
     const summary = {
       status: { indicator: 'none', description: 'All Systems Operational' },
-      components: [{ id: '8psr5dfdld0s', name: 'Open API', status: 'operational' }],
-      incidents: [
-        spInc('a1', 'Agentic 模型错误报警'),   // machine, spaced
-        spInc('a2', 'agentic模型错误报警'),     // machine, no-space lowercase
-        spInc('h1', '搜索请求出现大量报错'),     // human singleton
+      components: [
+        { id: '8psr5dfdld0s', name: 'Open API', status: 'operational' },
+        { id: 'sttxgsd2bps7', name: 'Website', status: 'operational' },
+        { id: 'smbb3z35s0jl', name: 'Search', status: 'operational' },
       ],
+      incidents: pageIncidents,
     }
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
-    return fetchService(kimi, { summary: summary as never, incidents: null }, undefined, {})
+    return fetchService(config, { summary: summary as never, incidents: null }, undefined, {})
   }
+  const fetchKimi = () => fetchCard(kimiapp)
+
+  it('each page incident lands on exactly one card: Open API on kimi, the rest (untagged included) on kimiapp', async () => {
+    const api = (await fetchCard(kimi)).incidents.map((i) => i.id).sort()
+    const app = (await fetchCard(kimiapp)).incidents.map((i) => i.id).sort()
+    expect(api).toEqual(['o1'])
+    expect(app).toEqual(['a1', 'a2', 'f1', 'h1'])
+  })
 
   it('tags the machine alarm as autoMonitor=true AND renders its title in English', async () => {
     const svc = await fetchKimi()
@@ -205,14 +248,71 @@ describe('fetchService applies tag AND titleMap in the right order (#989 — rea
 
   it('leaves the human singleton untagged, still title-mapped to English', async () => {
     const svc = await fetchKimi()
-    const human = svc.incidents.find((i) => i.title === 'Elevated search request error rate')
+    const human = svc.incidents.find((i) => i.title === 'SMS login failure')
     expect(human).toBeDefined()
     expect(human!.autoMonitor).toBeUndefined()
   })
 
   it('leaks NO Chinese text into any served title (titleMap actually ran)', async () => {
     const svc = await fetchKimi()
-    expect(svc.incidents).toHaveLength(3)
+    expect(svc.incidents).toHaveLength(4)
     expect(svc.incidents.every((i) => !/[一-鿿]/.test(i.title))).toBe(true)
+    expect((await fetchCard(kimi)).incidents.map((i) => i.title)).toEqual(['Open Platform API service disruption'])
+  })
+})
+
+// #1731 — Moonshot files every auto-monitor alarm as `critical`. On `kimiapp` the search alarm's
+// component is in the badge group, so a live one reaches the card; before the flag it alerted on first
+// sight every time (reproduced with this same fixture at Search = major_outage / partial_outage /
+// degraded_performance).
+describe('kimiapp holds Moonshot\'s critical auto-monitor alarms (#1731)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  const T0 = Date.parse('2026-10-19T10:00:00.000Z')
+  const live = (name: string, components: string[]) => ({
+    id: 'live-1', name, status: 'investigating', impact: 'critical',
+    created_at: '2026-10-19T10:00:00.000Z', started_at: '2026-10-19T10:00:00.000Z', resolved_at: null, updated_at: '2026-10-19T10:00:00.000Z',
+    incident_updates: [{ status: 'investigating', body: '搜索请求报错率超过20%，持续超过1分钟', created_at: '2026-10-19T10:00:00.000Z' }],
+    components: components.map((n) => ({ id: `c-${n}`, name: n })),
+  })
+  const onCard = async (name: string) => {
+    const summary = {
+      status: { indicator: 'critical', description: 'Partial outage' },
+      components: [
+        { id: 'sttxgsd2bps7', name: 'Website', status: 'operational' },
+        { id: 'smbb3z35s0jl', name: 'Search', status: 'partial_outage' },
+      ],
+      incidents: [live(name, ['Search'])],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    const svc = await fetchService(kimiapp, { summary: summary as never, incidents: null }, undefined, {})
+    expect(svc.status).toBe('degraded')
+    return svc.incidents.find((i) => i.id === 'live-1')!
+  }
+  const heldAt = (inc: Incident, firstSeenMs: number | null, nowMs: number, config: ServiceConfig = kimiapp) =>
+    shouldHoldNewIncident(config.id, config, inc, { alreadyAlerted: false, firstSeenMs, nowMs })
+
+  it('the live search alarm is tagged, held on first sight and inside FLAP_HOLD_MS, then alerts', async () => {
+    const inc = await onCard('搜索请求出现大量报错')
+    expect(inc.autoMonitor).toBe(true)
+    expect(heldAt(inc, null, T0)).toBe(true)
+    expect(heldAt(inc, T0, T0 + FLAP_HOLD_MS - 1)).toBe(true)
+    expect(heldAt(inc, T0, T0 + FLAP_HOLD_MS)).toBe(false)
+  })
+
+  it('the file-service alarm is tagged too', () => {
+    expect(isAutoMonitorIncident({ title: 'kimi fs服务异常' }, kimiapp)).toBe(true)
+  })
+
+  it('a human-written critical incident on kimiapp still alerts on first sight', async () => {
+    const inc = await onCard('Kimi 服务全面中断')
+    expect(inc.autoMonitor).toBeUndefined()
+    expect(heldAt(inc, null, T0)).toBe(false)
+  })
+
+  it('without the flag, a tagged critical alarm still alerts on first sight', async () => {
+    const inc = await onCard('搜索请求出现大量报错')
+    const { autoMonitorCriticalHoldable: _, ...noFlag } = kimiapp
+    expect(heldAt(inc, null, T0, noFlag as ServiceConfig)).toBe(false)
   })
 })

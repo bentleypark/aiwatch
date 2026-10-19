@@ -113,6 +113,13 @@ export function servicesByStatusSource(): Record<string, string[]> {
   return out
 }
 
+// #1731 — status.moonshot.cn's groups, split between the two Kimi cards. Names feed `incidentComponents`
+// (exact match); the app's ids feed its badge, uptime and breakdown.
+const KIMI_API_COMPONENTS = ['Open API', 'Open Platform Portal']
+const KIMI_APP_COMPONENTS = ['Website', 'Sign In / Sign Up', 'File uploads', 'Search', 'API Service', 'Model', 'Vision Model', 'Thinking Model', 'Text Model', 'Research Model', 'K2 Model']
+const KIMI_APP_COMPONENT_IDS = ['sttxgsd2bps7', 'ckrtmmv96r2z', 'x3z9ydzr6ywk', 'smbb3z35s0jl', 'rf64wcbxt3r2', 'x0zsqgy57b75', '8rkd3yj051gl', 'lk7q3z0fcylp', 'p1j9ttb7jwhp', 'wmn9wzv84k1v', 'z2zfp65lvb2z']
+const KIMI_TITLE_MAP: Record<string, string> = { 'Agentic 模型错误报警': 'Agentic model error alert', 'agentic模型错误报警': 'Agentic model error alert', '搜索请求出现大量报错': 'Elevated search request error rate', '短信登录异常': 'SMS login failure', 'deep research workflow错误率异常': 'Deep Research workflow error rate anomaly', '开放平台 API 服务异常': 'Open Platform API service disruption', 'kimi fs服务异常': 'Kimi file service disruption', '二维码登录异常': 'QR code login failure' }
+
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
   // #934/#1090 — scopeIncidentsToComponent: claude is EXCLUDE-only (no positive incidentKeywords) on the shared
@@ -270,24 +277,11 @@ export const SERVICES: ServiceConfig[] = [
   // no longer appears in component_uptimes/component_impacts, so uptime silently went null). Worst-of
   // across both models, mirroring how a multi-component API surface is scored elsewhere.
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'], incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: ['01KY4MVS8BM3F9JSYWACGQVG7A', '01KY4MVS8BSBSVW6053QJ37RJE'] },
-  // #989 — Kimi (Moonshot AI). Atlassian Statuspage, data-rich (verified 2026-07-18: x-statuspage-version
-  // header + window.uptimeData for the badge component). `.cn` is a CNAME to Statuspage (AtlassianEdge)
-  // so a Worker fetch reaches it — no China-network risk, no mirror needed.
-  //   • the model components are display-only
-  //     (displayComponentIds, #606) — NOT the badge, so a model-component change can't flip the card
-  //     (which would drag status-edge alerts + cache refresh). componentGroups folds the six `* Model`
-  //     components under one collapsible "Models" header; Open API + API Service stay as ungrouped
-  //     surface rows.
-  //   • The auto-monitor opens frequent `critical` incidents titled `Agentic 模型错误报警` that attach to
-  //     no component (verified 2026-07-18) and carry paperwork-inflated durations (recorded hours vs
-  //     minutes of real impact — the #1019 pattern). autoMonitorTitles tags them → grouped in the UI;
-  //     #1505 — they count toward downtime and the Score like any other row. titleMap renders the Chinese titles English on every surface.
-  //   • NO holdShortIncidents/flapSuppression: a `critical` incident bypasses every hold/flap path
-  //     (alerts.ts), so both are inert here — the Discord flood is prevented instead by
-  //     filterByComponentStatus (#970: an active non-null-impact incident is dropped while Open API is
-  //     operational). Plain LLM at API_TIER 2 (fallback.ts); the fallback capability nuance is tracked
-  //     on #1062 (unbuilt) — no per-service entry needed here.
-  { id: 'kimi', name: 'Kimi (Moonshot AI)', provider: 'Moonshot AI', category: 'api', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: '8psr5dfdld0s', displayComponentIds: ['8psr5dfdld0s', 'rf64wcbxt3r2', 'x0zsqgy57b75', 'z2zfp65lvb2z', 'lk7q3z0fcylp', 'p1j9ttb7jwhp', '8rkd3yj051gl', 'wmn9wzv84k1v'], componentGroups: { 'x0zsqgy57b75': 'Models', 'z2zfp65lvb2z': 'Models', 'lk7q3z0fcylp': 'Models', 'p1j9ttb7jwhp': 'Models', '8rkd3yj051gl': 'Models', 'wmn9wzv84k1v': 'Models' }, autoMonitorTitles: [/^agentic\s*模型错误报警$/i], titleMap: { 'Agentic 模型错误报警': 'Agentic model error alert', 'agentic模型错误报警': 'Agentic model error alert', '搜索请求出现大量报错': 'Elevated search request error rate', '短信登录异常': 'SMS login failure', 'deep research workflow错误率异常': 'Deep Research workflow error rate anomaly' }, addedAt: '2026-07-18' },
+  // #989 — Kimi API (Moonshot AI's developer platform, platform.kimi.com). status.moonshot.cn is an
+  // Atlassian Statuspage (`.cn` CNAMEs to AtlassianEdge, so a Worker fetch reaches it) shared with the
+  // Kimi consumer app (`kimiapp`, below) and Kimi Code (#1690). #1731 — this card is the page's `SaaS`
+  // group only (Open API + Open Platform Portal): incidents by exact component name, badge on Open API.
+  { id: 'kimi', name: 'Kimi API', provider: 'Moonshot AI', category: 'api', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: '8psr5dfdld0s', incidentComponents: KIMI_API_COMPONENTS, displayComponentIds: ['8psr5dfdld0s', 'pjrph68g94yr'], titleMap: KIMI_TITLE_MAP, addedAt: '2026-07-18' },
   // #1403 — OpenRouter migrated its status page from OnlineOrNot to Datadog Status Page (the old
   // React-Router SSR payload is gone; a plain fetch now returns a ~600-byte client-rendered shell).
   // No `retainIncidentHistoryUntil` bridge here, unlike replicate (below): this page BACKFILLED its
@@ -564,6 +558,13 @@ export const SERVICES: ServiceConfig[] = [
   // pointed at. The `incidentKeywords` filter above is why its merged title must keep a `Grok (`
   // marker; see the title note in `mergeSurfaceGroup`.
   { id: 'grok', name: 'Grok', provider: 'SpaceXAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok (', 'grok in x', '[grok build]', '[grok.com]'], addedAt: '2026-07-26' },
+  // #1731 — Kimi consumer app (www.kimi.com), the api-vs-app split mirror of `kimi` (same page): the
+  // page's `Kimi` group. Badge + uptime = worst-of the group's members; the six model components fold
+  // under "Models". `incidentComponentsKeepUntagged`: an incident that names no component lands here
+  // rather than on neither card.
+  // rosterAuditExclude: Open API + Open Platform Portal (the `kimi` card) and the page's three group
+  // headers. The Kimi Code members are left to age into the audit — their add-or-decline is #1690.
+  { id: 'kimiapp', name: 'Kimi App', provider: 'Moonshot AI', category: 'app', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: 'sttxgsd2bps7', statusComponentIds: KIMI_APP_COMPONENT_IDS, displayComponentIds: KIMI_APP_COMPONENT_IDS, componentGroups: { 'x0zsqgy57b75': 'Models', 'z2zfp65lvb2z': 'Models', 'lk7q3z0fcylp': 'Models', 'p1j9ttb7jwhp': 'Models', '8rkd3yj051gl': 'Models', 'wmn9wzv84k1v': 'Models' }, incidentComponents: KIMI_APP_COMPONENTS, incidentComponentsKeepUntagged: true, autoMonitorTitles: [/^agentic\s*模型错误报警$/i, /^搜索请求出现大量报错$/, /^kimi\s*fs服务异常$/i], autoMonitorCriticalHoldable: true, titleMap: KIMI_TITLE_MAP, rosterAuditExclude: ['8psr5dfdld0s', 'pjrph68g94yr', '01l1n50g13g6', '87jpctq5cp71', 'cyrtlddz0q8c'], addedAt: '2026-10-19' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the
@@ -1555,6 +1556,7 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
     // matches nothing → dropped. Takes precedence over
     // incidentKeywords (a service sets one or the other).
     if (incidentComponents && incidentComponents.length > 0) {
+      if (config.incidentComponentsKeepUntagged && (inc.componentNames ?? []).length === 0) return true
       const allow = new Set(incidentComponents.map((n) => n.toLowerCase()))
       return (inc.componentNames ?? []).some((n) => allow.has(n.toLowerCase()))
     }

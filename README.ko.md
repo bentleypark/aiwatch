@@ -12,7 +12,7 @@
 
 [English](README.md) | **한국어**
 
-**47개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
+**48개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
 
 **[대시보드](https://ai-watch.dev)** · **[랜딩 페이지](https://ai-watch.dev/intro)**
 
@@ -21,9 +21,9 @@
 | ![AIWatch 대시보드](docs/screenshot.png?v=3) | ![AIWatch 모바일](docs/screenshot-mobile.png?v=1) |
 
 **공유**
-[![X에 공유](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%2047%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81%20%28Claude%2C%20ChatGPT%2C%20Gemini%20%EC%99%B8%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
-[![Reddit에 공유](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%2047%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81)
-[![Hacker News에 공유](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2047%20AI%20services)
+[![X에 공유](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%2048%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81%20%28Claude%2C%20ChatGPT%2C%20Gemini%20%EC%99%B8%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
+[![Reddit에 공유](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%2048%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81)
+[![Hacker News에 공유](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2048%20AI%20services)
 [![LinkedIn에 공유](https://img.shields.io/badge/Share-LinkedIn-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
 
 ## 🛰️ 라이브 데모
@@ -32,7 +32,7 @@
 
 ## 주요 기능
 
-- **실시간 상태 모니터링** — 47개 AI 서비스의 정상 / 성능 저하 / 장애 상태
+- **실시간 상태 모니터링** — 48개 AI 서비스의 정상 / 성능 저하 / 장애 상태
 - **PWA 지원** — 홈 화면 추가, Service Worker 오프라인 캐시
 - **지연시간 측정** — 36개 probe 대상 서비스의 엔드포인트 직접 RTT 측정, probe 대상이 아닌 서비스는 레이턴시 미표시
 - **24시간 지연시간 추세** — Chart.js 라인 차트 (5분 간격 probe 스냅샷)
@@ -51,7 +51,7 @@
 - **리전별 가용성** — SpaceXAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
-- **Is X Down SEO 페이지** — 45개 서비스 (Bedrock/Azure OpenAI 제외한 모든 모니터링 대상), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위 (대시보드와 동일한 동률 표기), 대체 서비스 추천
+- **Is X Down SEO 페이지** — 46개 서비스 (Bedrock/Azure OpenAI 제외한 모든 모니터링 대상), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위 (대시보드와 동일한 동률 표기), 대체 서비스 추천
 - **헬스체크 프로빙** — 서비스 엔드포인트 직접 RTT 측정 (36개 probe 대상) + 연속 스파이크 조기 장애 감지 및 RTT 저하 추적
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 하이브리드 AI 자동 분석 (Gemma 4 primary + Sonnet fallback): 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
@@ -65,7 +65,7 @@
 
 ## 모니터링 서비스
 
-대시보드 카테고리 분류 기준(총 47개 — 사이드바 필터 / Overview 섹션과 동일).
+대시보드 카테고리 분류 기준(총 48개 — 사이드바 필터 / Overview 섹션과 동일).
 
 ### LLM API (16개)
 
@@ -83,7 +83,7 @@
 | Perplexity | Perplexity AI | incident.io (Atlassian 호환) |
 | SpaceXAI API | SpaceXAI | RSS 피드 |
 | DeepSeek API | DeepSeek | Flashduty (브라우저 렌더 피드) |
-| Kimi (Moonshot AI) | Moonshot AI | Atlassian Statuspage (중국어 제목 → 영어) |
+| Kimi API | Moonshot AI | Atlassian Statuspage (중국어 제목 → 영어) |
 | OpenRouter | OpenRouter | Datadog Status Page (`config.json`) |
 | Amazon Bedrock | AWS | AWS Health Dashboard |
 | Azure OpenAI | Microsoft | Azure Status RSS |
@@ -144,7 +144,7 @@
 | Stability AI | Stability AI | incident.io (Atlassian 호환) |
 | Black Forest Labs (FLUX) | Black Forest Labs | Atlassian Statuspage |
 
-### AI 앱 (5개)
+### AI 앱 (6개)
 
 | 서비스 | 제공업체 |
 |--------|----------|
@@ -153,6 +153,7 @@
 | Character.AI | Character AI |
 | DeepSeek App | DeepSeek |
 | Grok | SpaceXAI |
+| Kimi App | Moonshot AI |
 
 ## 기술 스택
 
@@ -172,7 +173,7 @@
 브라우저 (React SPA, 60초 폴링)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → 병렬 fetch (47개 서비스) → 정규화
+  ├── GET /api/status    → 병렬 fetch (48개 서비스) → 정규화
   ├── GET /api/uptime    → 일별 가동률 이력
   └── POST /api/alert   → Discord Webhook 프록시 (SSRF 보호)
   ↓
@@ -341,7 +342,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `perplexity` | Perplexity | `langsmith` | LangChain (LangSmith) |
 | `xai` | SpaceXAI API | `helicone` | Helicone |
 | `deepseek` | DeepSeek API | `langfuse` | Langfuse |
-| `kimi` | Kimi (Moonshot AI) | `runway` | Runway |
+| `kimi` | Kimi API | `runway` | Runway |
 | `openrouter` | OpenRouter | `luma` | Luma (Dream Machine) |
 | `claudecode` | Claude Code | `stability` | Stability AI |
 | `codex` | Codex | `bfl` | Black Forest Labs (FLUX) |
@@ -350,11 +351,11 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `windsurf` | Windsurf (Devin Desktop) | `characterai` | Character.AI |
 | `junie` | Junie | `deepseekapp` | DeepSeek App |
 | `grok` | Grok | `fishaudio` | Fish Audio |
-| `jina` | Jina AI | | |
+| `jina` | Jina AI | `kimiapp` | Kimi App |
 
 ## Claude Code Statusline 통합
 
-Claude API, OpenAI, Gemini, GitHub Copilot 등 47개 AI 서비스의 장애 여부를 [Claude Code 스테이터스라인](https://docs.claude.com/en/docs/claude-code/statusline)에 직접 표시합니다. 추천 프리셋은 항상 표시되는 클릭 가능한 **AIWatch** 라벨을 유지합니다 — 모두 정상이면 `AIWatch 🟢`, 장애 시 `AIWatch 🔴 Claude API`, 라벨 cmd/ctrl+클릭 시 대시보드 열림. 정상일 때 공간을 비우고 싶으면 [프리셋 페이지](https://ai-watch.dev/#statusline)의 minimalist 프리셋을 쓰면 됩니다.
+Claude API, OpenAI, Gemini, GitHub Copilot 등 48개 AI 서비스의 장애 여부를 [Claude Code 스테이터스라인](https://docs.claude.com/en/docs/claude-code/statusline)에 직접 표시합니다. 추천 프리셋은 항상 표시되는 클릭 가능한 **AIWatch** 라벨을 유지합니다 — 모두 정상이면 `AIWatch 🟢`, 장애 시 `AIWatch 🔴 Claude API`, 라벨 cmd/ctrl+클릭 시 대시보드 열림. 정상일 때 공간을 비우고 싶으면 [프리셋 페이지](https://ai-watch.dev/#statusline)의 minimalist 프리셋을 쓰면 됩니다.
 
 가장 빠른 설정 — `~/.claude/settings.json`에 추가:
 
@@ -401,7 +402,7 @@ src/                   # React 19 SPA (Vite, 라우터 없음 — App.jsx의 has
 api/                   # 헬퍼는 `_` 접두 디렉터리에, 핸들러는 edge 런타임에 —
                        # 따라서 둘 다 Hobby 12-Serverless-Function 한도에 계산되지 않음 (#862/#867)
   intro.ts             # 랜딩 페이지 (/intro)                _intro/       # SSR 템플릿
-  is-down.ts           # "Is X Down?" SSR 페이지 (45개 서비스)   _is-down/  # slug-map, seo-content, 템플릿
+  is-down.ts           # "Is X Down?" SSR 페이지 (46개 서비스)   _is-down/  # slug-map, seo-content, 템플릿
   methodology.ts       # "How AIWatch Works" (/methodology)  _methodology/
   plugin.ts            # Claude Code 플러그인 랜딩            _plugin/
   badges.ts            # 상태 배지 갤러리 (/badges)          _badges/

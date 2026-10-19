@@ -64,6 +64,7 @@ describe('#1679 — every service\'s uptime scope is pinned', () => {
         "jina": "atlassian fc5zn3rkh5bd,v6lh7spvvvf5,7b9xrr2ksh44,67hcttb83zzv,skb1snhyjd6h,phbgjfg719q6,d52c7tz1hnpd,b2tt4jb1x7pz,d7nnpf4sr394,dwcjc0rgg6hn,cm0h2r8mw593,3f6qdtwq4yv6,lbtxhdqvr205,yxvtk6kpvycp,895s37lq7d5q",
         "junie": "incident.io 01KX3EN535A0SKSZK3S84949V1",
         "kimi": "atlassian 8psr5dfdld0s",
+        "kimiapp": "atlassian sttxgsd2bps7,ckrtmmv96r2z,x3z9ydzr6ywk,smbb3z35s0jl,rf64wcbxt3r2,x0zsqgy57b75,8rkd3yj051gl,lk7q3z0fcylp,p1j9ttb7jwhp,wmn9wzv84k1v,z2zfp65lvb2z",
         "langfuse": "incident.io 01KS5BHY7AKJD8YEM4MFYMB35Z,01KS5BHY7AX99XYA7AS7AAP7QG,01KS5BHY7AH52EZHZQ9TYD53TY",
         "langsmith": "incident.io 01KX6FV0RR5XXJ0SM3NXZRKMBY,01KX6FV0RRSSTKC5V2GPAMCEQR,01KX6FV0RRKA56PXCRWEHJTMXM",
         "luma": "betterstack all page resources",

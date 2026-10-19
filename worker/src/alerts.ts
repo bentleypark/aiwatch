@@ -94,9 +94,7 @@ const FLAP_TITLE_RE = /\s*—\s*(down|recovered)\s*$/
 // title allowlist) is a flap by construction, with NO "— down/recovered" suffix and often
 // `impact: 'major'` — Statuspage derives impact from component status, so a 6-minute single-component
 // blip reads `major`. Tagging is opt-in per service and the patterns are anchored, so this cannot
-// reach a human-written incident. `critical` is still never treated as a flap on ANY path: it is the
-// one level a status page never assigns by auto-monitor alone, so it stays the escape hatch that
-// guarantees a genuine broad outage alerts immediately.
+// reach a human-written incident. `critical` is still never treated as a flap on ANY path.
 export function isFlapNotice(inc: Incident): boolean {
   if (inc.impact === 'critical') return false  // real broad outage → never a flap (alert immediately)
   if (inc.autoMonitor) return true             // #983 — machine-emitted; impact is component-derived
@@ -277,22 +275,21 @@ export function markerReadPlan(inc: Incident, nowMs: number): { alertable: boole
 // incident only as it's already resolving → a New+Resolved Discord double-alert for a blip the live
 // dashboard never reflected. A sub-window blip that self-resolves never alerts (no New, and no
 // Resolved via the alertedNewMap.has guard in buildIncidentAlerts' resolved branch); a genuinely
-// ongoing incident alerts once it survives ~2 cycles (FLAP_HOLD_MS, #835). `major`/`critical` (real
-// broad outage) and Tier-1 (claude/openai/gemini) always alert immediately. Pure — unit-tested.
+// ongoing incident alerts once it survives ~2 cycles (FLAP_HOLD_MS, #835). Tier-1
+// (claude/openai/gemini) always alerts immediately. Pure — unit-tested.
 // NOTE: unlike isFlapNotice (which excludes only `major` because the "— down/recovered" title regex
 // already screens out a real critical incident), this path has no title guard, so it must exclude
 // BOTH severe levels — a Langfuse statuspage incident maps `critical` through (parsers/statuspage.ts).
 // #983 — `autoMonitor` is a SECOND opt-in into this hold, independent of `holdShortIncidents`: the tag
 // itself declares the incident machine-emitted, so the `major` guard below (which reads impact as a
-// human severity judgement) does not apply to it. `critical` is checked FIRST so it out-ranks the tag
-// on every path — a tagged `critical` incident still alerts immediately.
+// human severity judgement) does not apply to it.
 export function isShortIncidentHoldable(
   svcId: string,
-  config: { holdShortIncidents?: boolean },
+  config: { holdShortIncidents?: boolean; autoMonitorCriticalHoldable?: true },
   inc: Incident,
 ): boolean {
   if (TIER1_IDS.has(svcId)) return false
-  if (inc.impact === 'critical') return false
+  if (inc.impact === 'critical' && !(inc.autoMonitor && config.autoMonitorCriticalHoldable)) return false
   if (inc.autoMonitor) return true
   if (!config.holdShortIncidents) return false
   if (inc.impact === 'major') return false
@@ -309,7 +306,7 @@ export const FLAP_HOLD_MS = 9 * 60 * 1000
 
 export function shouldHoldNewIncident(
   svcId: string,
-  config: { flapSuppression?: boolean; holdShortIncidents?: boolean },
+  config: { flapSuppression?: boolean; holdShortIncidents?: boolean; autoMonitorCriticalHoldable?: true },
   inc: Incident,
   // firstSeenMs: epoch ms the incident was first held (from the pending:new marker), or null on first
   // sight. nowMs: current time. A KV read error should pass firstSeenMs=0 (age huge → not held → fire),

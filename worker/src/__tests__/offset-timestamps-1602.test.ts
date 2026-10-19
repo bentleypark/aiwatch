@@ -49,7 +49,7 @@ describe('fetchService normalizes Statuspage offset timestamps (#1602)', () => {
 
   const fetchWith = (id: string, componentId: string, incidents: Array<{ id: string; started: string; resolved: string }>) => {
     const config = SERVICES.find((s) => s.id === id)!
-    const component = { id: componentId, name: 'API', status: 'operational' }
+    const component = { id: componentId, name: id === 'kimi' ? 'Open API' : 'API', status: 'operational' }
     const summary = {
       status: { indicator: 'none', description: 'All Systems Operational' },
       components: [component],

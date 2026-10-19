@@ -65,8 +65,8 @@ describe('summarizeRecoveryHistory', () => {
     expect(summarizeRecoveryHistory(list, [], { autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i] })).toBeNull()
   })
 
-  it('excludes a pre-stamp record stored under its titleMap translation (kimi)', () => {
-    const kimi = SERVICES.find((c) => c.id === 'kimi')!
+  it('excludes a pre-stamp record stored under its titleMap translation (kimiapp)', () => {
+    const kimi = SERVICES.find((c) => c.id === 'kimiapp')!
     const list = [...ten().slice(1), rec(0, 10, { title: kimi.titleMap!['Agentic 模型错误报警'] })]
     expect(summarizeRecoveryHistory(list, [], kimi)).toBeNull()
   })

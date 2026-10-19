@@ -390,6 +390,9 @@ export interface ServiceConfig {
   // 'AI Platform' can't collide with the sibling 'AI Platform China'. Takes precedence over
   // incidentKeywords; an untagged incident (no componentNames) matches nothing and is dropped.
   incidentComponents?: string[]
+  // #1731 — with `incidentComponents`, also keep an incident that names no component (instead of
+  // dropping it). Set on at most one card per shared page, or an untagged incident lands on several.
+  incidentComponentsKeepUntagged?: true
   // #880 — component NAMES an outage must touch for this service to recommend an alternative
   // (`fallbackSuppressedFor`). Badge, incidents and Score still cover the whole page.
   fallbackComponents?: string[]
@@ -530,15 +533,17 @@ export interface ServiceConfig {
   // Distinct from flapSuppression (which only holds the BetterStack "— down/recovered" title shape).
   // See isShortIncidentHoldable() in alerts.ts. `major` + Tier-1 always alert immediately.
   holdShortIncidents?: boolean
+  // #1731 — a page whose auto-monitor files every alarm as `critical` (Moonshot): an `autoMonitor`
+  // incident on it is hold-eligible despite `critical`. Untagged `critical` still alerts immediately.
+  autoMonitorCriticalHoldable?: true
   // #983 — EXACT-match patterns for this provider's machine-emitted incident titles. A matching
-  // incident gets `Incident.autoMonitor = true` (see tagAutoMonitorIncidents in services.ts), which
-  // makes it hold-eligible + flap-suppressible REGARDLESS of `impact`, and groupable in the UI.
+  // incident gets `Incident.autoMonitor = true` (see tagAutoMonitorIncidents in services.ts); what the
+  // tag changes on the alert path is isShortIncidentHoldable / isFlapNotice in alerts.ts.
   // Needed for a page whose auto-monitor opens a brand-new incident per blip under one fixed title
   // (Twelve Labs: "Some API features are experiencing issues" ×4 on 2026-07-09, 5–16m each, 3 of
   // them `impact: 'major'` purely because one sub-component read `major_outage`).
   // Anchor every pattern (`^…$`): a substring match would swallow the provider's real, human-written
-  // incidents, which use distinct titles ("Search API failure", "API server failure"). `critical` is
-  // never held/suppressed even when tagged, so a genuine broad outage always alerts immediately.
+  // incidents, which use distinct titles ("Search API failure", "API server failure").
   autoMonitorTitles?: RegExp[]
   // #989 — rewrite a non-English incident title to English. Moonshot's status page is Atlassian with
   // rich data, but every incident title is Chinese; `sanitize()` passes non-ASCII through untouched, so

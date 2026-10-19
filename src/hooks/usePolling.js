@@ -302,25 +302,12 @@ export const MOCK_SERVICES = [
     ],
   },
   {
-    // #989 — Kimi (Moonshot AI). Badge = Open API (operational, ~100%); the recurring `Agentic model
-    // error alert` rows are the provider auto-monitor's machine blips — titleMap-translated from Chinese,
-    // autoMonitor-tagged so the UI groups them.
-    id: 'kimi', category: 'api', name: 'Kimi (Moonshot AI)', provider: 'Moonshot AI', status: 'operational',
+    // #989/#1731 — Kimi API: the SaaS group of status.moonshot.cn (badge = Open API).
+    id: 'kimi', category: 'api', name: 'Kimi API', provider: 'Moonshot AI', status: 'operational',
     latency: 145, uptime30d: 99.98,
     history30d: hist([]),
     history3m: [{ month: '2026-05', uptime: 99.99 }, { month: '2026-06', uptime: 99.96 }, { month: '2026-07', uptime: 99.98 }],
-    incidents: [
-      { id: 'km-1', title: 'Agentic model error alert', startedAt: ago(1 * D + 3 * H), duration: '4m', status: 'resolved', impact: 'critical', autoMonitor: true,
-        timeline: [
-          { stage: 'investigating', text: 'Automated monitor detected an elevated Agentic model error rate.', at: ago(1 * D + 3 * H) },
-          { stage: 'resolved', text: 'Error rate returned to normal.', at: ago(1 * D + 3 * H - 4 * M) },
-        ] },
-      { id: 'km-2', title: 'Agentic model error alert', startedAt: ago(2 * D + 5 * H), duration: '2m', status: 'resolved', impact: 'critical', autoMonitor: true,
-        timeline: [
-          { stage: 'investigating', text: 'Automated monitor detected an elevated Agentic model error rate.', at: ago(2 * D + 5 * H) },
-          { stage: 'resolved', text: 'Error rate returned to normal.', at: ago(2 * D + 5 * H - 2 * M) },
-        ] },
-    ],
+    incidents: [],
   },
   {
     id: 'openrouter', category: 'api', name: 'OpenRouter', provider: 'OpenRouter', status: 'operational',
@@ -599,6 +586,26 @@ export const MOCK_SERVICES = [
     history30d: hist(),
     history3m: null,
     incidents: [],
+  },
+  {
+    // #1731 — Kimi App: the Kimi group of status.moonshot.cn. The `Agentic model error alert` rows are the
+    // provider auto-monitor's machine blips — titleMap-translated from Chinese, autoMonitor-tagged.
+    id: 'kimiapp', category: 'app', name: 'Kimi App', provider: 'Moonshot AI', status: 'operational',
+    latency: null, uptime30d: 99.80,
+    history30d: hist([]),
+    history3m: null,
+    incidents: [
+      { id: 'km-1', title: 'Agentic model error alert', startedAt: ago(1 * D + 3 * H), duration: '4m', status: 'resolved', impact: 'critical', autoMonitor: true,
+        timeline: [
+          { stage: 'investigating', text: 'Automated monitor detected an elevated Agentic model error rate.', at: ago(1 * D + 3 * H) },
+          { stage: 'resolved', text: 'Error rate returned to normal.', at: ago(1 * D + 3 * H - 4 * M) },
+        ] },
+      { id: 'km-2', title: 'Agentic model error alert', startedAt: ago(2 * D + 5 * H), duration: '2m', status: 'resolved', impact: 'critical', autoMonitor: true,
+        timeline: [
+          { stage: 'investigating', text: 'Automated monitor detected an elevated Agentic model error rate.', at: ago(2 * D + 5 * H) },
+          { stage: 'resolved', text: 'Error rate returned to normal.', at: ago(2 * D + 5 * H - 2 * M) },
+        ] },
+    ],
   },
   // ── Coding Agents ──
   {

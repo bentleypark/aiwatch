@@ -22,7 +22,7 @@ export const GROUP_MEMBERS: Record<ServiceGroup, readonly string[]> = {
   observability: ['langsmith', 'helicone', 'langfuse'],
   video: ['runway', 'luma'],
   image: ['stability', 'bfl'],
-  apps: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok'],
+  apps: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok', 'kimiapp'],
 }
 
 /** The dashboard's English `filter.<group>` labels (src/locales/en.js), pinned by service-groups-sync.test.ts. */

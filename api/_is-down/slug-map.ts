@@ -36,7 +36,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // API-only page since Grok also names the separate app; the combined label moved to FAMILY_GROUPS.xai.
   'xai-api':         { id: 'xai',        name: 'SpaceXAI API',     provider: 'SpaceXAI',    category: 'api', group: 'llm' },
   'deepseek':        { id: 'deepseek',   name: 'DeepSeek API',     provider: 'DeepSeek',    category: 'api', group: 'llm' },
-  'kimi':            { id: 'kimi',       name: 'Kimi (Moonshot AI)', provider: 'Moonshot AI', category: 'api', group: 'llm' },
+  'kimi':            { id: 'kimi',       name: 'Kimi API',         provider: 'Moonshot AI', category: 'api', group: 'llm' },
   'openrouter':      { id: 'openrouter', name: 'OpenRouter',       provider: 'OpenRouter',  category: 'api', group: 'llm' },
   // Voice & speech AI (#263)
   'elevenlabs':      { id: 'elevenlabs', name: 'ElevenLabs',       provider: 'ElevenLabs',  category: 'api', group: 'voice' },
@@ -84,6 +84,8 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // Grok (#1165/#1586/#1585) — SpaceXAI's consumer surfaces, the api-vs-app split mirror of DeepSeek
   // API↔DeepSeek App above. Slug == worker id ('grok'), no override needed.
   'grok':            { id: 'grok',        name: 'Grok',            provider: 'SpaceXAI',     category: 'app', group: 'apps' },
+  // #1731 — Kimi consumer app (www.kimi.com), the api-vs-app split mirror of 'kimi'.
+  'kimi-app':        { id: 'kimiapp',     name: 'Kimi App',        provider: 'Moonshot AI',  category: 'app', group: 'apps' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
   // distinct from the deprecated 2023 Codex code-generation API.
   'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent', group: 'agents' },
@@ -117,7 +119,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'perplexity':     ['openai-api', 'claude-api', 'gemini'],
   'xai-api':        ['openai-api', 'claude-api', 'gemini'],
   'deepseek':       ['deepseek-app', 'mistral', 'groq', 'openai-api'],
-  'kimi':           ['deepseek', 'mistral', 'openai-api', 'claude-api'],
+  'kimi':           ['kimi-app', 'deepseek', 'mistral', 'openai-api'],
   'openrouter':     ['openai-api', 'claude-api', 'mistral'],
   // Voice — same category
   'elevenlabs':     ['fish-audio', 'deepgram', 'assemblyai'],
@@ -145,6 +147,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'character-ai':   ['chatgpt', 'claude-ai', 'gemini'],
   'deepseek-app':   ['deepseek', 'chatgpt', 'claude-ai', 'character-ai'],
   'grok':           ['chatgpt', 'claude-ai', 'deepseek-app', 'character-ai'],
+  'kimi-app':       ['kimi', 'chatgpt', 'claude-ai', 'deepseek-app'],
 }
 
 // Reverse lookup: service ID → URL slug (for internal linking)
@@ -224,7 +227,7 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://devin.ai/desktop',
   junie: 'https://junie.jetbrains.com', claudecode: 'https://claude.com/product/claude-code', codex: 'https://developers.openai.com/codex',
   // Apps
-  chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com', grok: 'https://grok.com',
+  chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com', grok: 'https://grok.com', kimiapp: 'https://www.kimi.com',
 }
 
 /** Disclosed outbound referral URL for a recommended alternative (appends a `ref` param so the
