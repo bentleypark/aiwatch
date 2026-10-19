@@ -67,7 +67,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   gemini: {
     displayName: 'Gemini',
     description: 'Gemini is Google\'s multimodal AI model API, capable of processing text, images, audio, and video. It powers Google AI Studio and is available through the Vertex AI platform for enterprise applications.',
-    insight: 'Google does not publish official uptime percentages for Gemini on their public status pages, making independent monitoring especially valuable. AIWatch tracks Gemini through Google AI Studio status (aistudio.google.com/status) and Google Cloud incident feeds in parallel so both the direct API and Vertex surfaces are covered.',
+    insight: 'Google does not publish official uptime percentages for Gemini on their public status pages. AIWatch tracks Gemini through Google AI Studio status (aistudio.google.com/status) and Google Cloud incident feeds in parallel so both the direct API and Vertex surfaces are covered.',
     whenDown: 'When Gemini API is down, applications using Google\'s AI models will fail to process requests. This affects both direct API users and services built on Google AI Studio or Vertex AI.',
     faqs: [
       { q: 'Is Gemini API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Gemini API every 5 minutes using Google AI Studio status data and Google Cloud incident feeds.' },
@@ -259,7 +259,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   perplexity: {
     displayName: 'Perplexity',
     description: 'Perplexity is an AI-powered answer engine combining LLMs with real-time web search. It offers consumer search at perplexity.ai and an API for developers to access its search-augmented generation capabilities.',
-    insight: 'Perplexity moved its status page to incident.io in September 2026, which publishes per-component outage records. AIWatch computes its own 30-day uptime from those records rather than copying the figure the page shows, so the two can differ.',
+    insight: 'Perplexity moved its status page to incident.io in September 2026, which publishes per-component outage records.',
     whenDown: 'When Perplexity is down, both the consumer search interface (perplexity.ai) and the developer API will fail to return answers. Apps built on Perplexity API for search-augmented generation will lose their search capability.',
     faqs: [
       { q: 'Is Perplexity down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Perplexity every 5 minutes and shows real-time operational status.' },
@@ -514,7 +514,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   helicone: {
     displayName: 'Helicone',
     description: 'Helicone is an open-source LLM observability and gateway platform. Developers route LLM requests through it to log, monitor, cache, and analyze usage, latency, and cost across providers.',
-    insight: 'AIWatch tracks Helicone via its Better Stack status page (official uptime + incident history), so a gateway or logging-pipeline degradation is reflected with real availability numbers rather than a binary up/down.',
     whenDown: 'When Helicone is down, requests proxied through its gateway can fail or stall, and logging/analytics ingestion stops — so teams lose live observability into their LLM traffic, and a hard gateway outage can break the request path itself if not bypassed.',
     faqs: [
       { q: 'Is Helicone down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Helicone every 5 minutes and shows real-time operational status.' },

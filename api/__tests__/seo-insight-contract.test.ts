@@ -9,7 +9,7 @@ import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
  * or truncated insight fails here, omitting one stays a deliberate edit rather than an accident, and
  * the render path keeps a pin now that the per-page e2e assertion is gone.
  */
-const OMITTED = ['claude-api', 'cohere', 'fireworks', 'elevenlabs', 'assemblyai', 'stability', 'voyageai', 'deepseek-app', 'character-ai', 'modal', 'groq']
+const OMITTED = ['claude-api', 'cohere', 'fireworks', 'elevenlabs', 'assemblyai', 'stability', 'voyageai', 'deepseek-app', 'character-ai', 'modal', 'groq', 'helicone']
 
 describe('is-down insight contract', () => {
   it('an insight that exists carries real copy', () => {
