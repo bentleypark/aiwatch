@@ -30,8 +30,6 @@ const BACKED: Record<string, { slugs: string[]; source: string }> = {
     { slugs: ['claude-code', 'claude-ai'], source: AIWATCH_SHARED_IDS },
   'An API-level outage will typically affect claude.ai as well.':
     { slugs: ['claude-ai'], source: AIWATCH_SHARED_IDS },
-  'Moonshot runs an automated monitor that opens a fresh incident per short model-error blip, so Kimi\'s status page can list frequent brief "Agentic model" alerts even while the Open API gateway stays operational.':
-    { slugs: ['kimi'], source: 'AIWatch record: the auto-monitor incidents on the kimi card (PR #1724)' },
   'The DeepSeek API is often affected by the same incident, since DeepSeek files many outages against both Web and API; check the DeepSeek API page as well.':
     { slugs: ['deepseek-app'], source: 'AIWatch record, production /api/status 2026-10-18: 12 of 17 deepseekapp incidents share their id with deepseek (PR #1724)' },
 }
@@ -98,10 +96,10 @@ describe('seo copy lint (#1723)', () => {
   })
 
   it('a clause added to a backed sentence fails, since the match is on the whole sentence', () => {
-    const kimi = Object.keys(BACKED).find((s) => s.startsWith('Moonshot runs'))!
-    const widened = kimi.replace('blip,', 'blip (often just a few minutes),')
-    expect(widened).not.toBe(kimi)
-    expect(unbackedClaims([widened], 'kimi')).toEqual([widened])
+    const [backed, { slugs }] = Object.entries(BACKED)[0]
+    const widened = backed.replace(/\.$/, ', often within minutes.')
+    expect(widened).not.toBe(backed)
+    expect(unbackedClaims([widened], slugs[0])).toEqual([widened])
   })
 
   it.each([

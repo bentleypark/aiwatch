@@ -390,6 +390,9 @@ export interface ServiceConfig {
   // 'AI Platform' can't collide with the sibling 'AI Platform China'. Takes precedence over
   // incidentKeywords; an untagged incident (no componentNames) matches nothing and is dropped.
   incidentComponents?: string[]
+  // #1731 — with `incidentComponents`, also keep an incident that names no component (instead of
+  // dropping it). Set on at most one card per shared page, or an untagged incident lands on several.
+  incidentComponentsKeepUntagged?: true
   // #880 — component NAMES an outage must touch for this service to recommend an alternative
   // (`fallbackSuppressedFor`). Badge, incidents and Score still cover the whole page.
   fallbackComponents?: string[]

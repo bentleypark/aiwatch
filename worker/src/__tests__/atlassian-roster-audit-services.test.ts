@@ -7,7 +7,7 @@ import type { ServiceConfig } from '../types'
 describe('atlassianRosterAuditServices (#1518 — the Atlassian-branch equivalent of rosterAuditPages)', () => {
   it('matches exactly the real multi-id Atlassian services, none of the incident.io ones', () => {
     const ids = atlassianRosterAuditServices().map((s) => s.id).sort()
-    expect(ids).toEqual(['bfl', 'claudeai', 'copilot', 'cursor', 'jina', 'runway', 'windsurf'])
+    expect(ids).toEqual(['bfl', 'claudeai', 'copilot', 'cursor', 'jina', 'kimiapp', 'runway', 'windsurf'])
   })
 
   it('excludes a service with a single-id statusComponentIds list', () => {

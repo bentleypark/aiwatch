@@ -47,6 +47,7 @@ export const STATUS_URL = {
   chatgpt:     'https://status.openai.com',
   deepseekapp: 'https://status.deepseek.com',
   grok:        'https://status.x.ai',
+  kimiapp:     'https://status.moonshot.cn',
   claudecode:  'https://status.claude.com',
   copilot:     'https://githubstatus.com',
   cursor:      'https://status.cursor.com',

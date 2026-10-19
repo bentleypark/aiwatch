@@ -174,6 +174,7 @@ export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
   copilot: 'github-copilot',
   langsmith: 'langchain',
   deepseekapp: 'deepseek-app',
+  kimiapp: 'kimi-app', // #1731
   bfl: 'flux', // #756
   fishaudio: 'fish-audio', // #1549
   // #1164 — /is-claude-down and /is-openai-down were repurposed as provider-family group pages; the

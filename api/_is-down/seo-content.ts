@@ -310,15 +310,15 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     ],
   },
   kimi: {
-    displayName: 'Kimi (Moonshot AI)',
-    description: 'Kimi is the AI assistant and API from Moonshot AI, a Chinese AI lab whose models include the agentic K2 family. The Kimi Open API exposes chat, vision, and reasoning models to developers, and is OpenAI-API-compatible.',
-    insight: 'Moonshot runs an automated monitor that opens a fresh incident per short model-error blip, so Kimi\'s status page can list frequent brief "Agentic model" alerts even while the Open API gateway stays operational. AIWatch drives Kimi\'s badge off the Open API component and groups those machine-generated alerts, so a 3-minute blip does not read as a full outage. Incident titles are published in Chinese; AIWatch renders them in English.',
-    whenDown: 'When the Kimi API is down, applications using Moonshot\'s long-context or K2 agentic models will fail.',
+    displayName: 'Kimi API',
+    description: 'Kimi API is the developer platform from Moonshot AI, a Chinese AI lab, at platform.kimi.com. It serves the Kimi models and is compatible with the OpenAI and Anthropic API formats.',
+    insight: 'The Moonshot status page covers both the Kimi API and the Kimi app. This page tracks the API components only; the Kimi app has its own page.',
+    whenDown: 'When the Kimi API is down, applications calling Moonshot\'s models through the API will fail.',
     faqs: [
-      { q: 'Is Kimi (Moonshot AI) down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the Kimi Open API every 5 minutes and shows real-time operational status.' },
-      { q: 'Why does Kimi show frequent short incidents?', a: 'Moonshot\'s automated monitor opens a new incident for each brief spike in model error rates. These are grouped on AIWatch and do not affect the Open API availability badge, which tracks the developer API gateway.' },
-      { q: 'What are alternatives to Kimi?', a: 'DeepSeek, Mistral, OpenAI, and Claude are alternatives depending on your needs.' },
-      { q: 'How do I check Kimi status?', a: 'You can check Kimi status on this page, on the official Moonshot status page at status.moonshot.cn, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'Is Kimi API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the Kimi Open API every 5 minutes and shows real-time operational status.' },
+      { q: 'Is this the same as the Kimi app?', a: 'No. This page tracks the developer API (platform.kimi.com). The Kimi app at kimi.com has its own page, because Moonshot\'s status page lists the two under separate components.' },
+      { q: 'What are alternatives to Kimi API?', a: 'DeepSeek, Mistral, OpenAI, and Claude are alternatives depending on your needs.' },
+      { q: 'How do I check Kimi API status?', a: 'You can check Kimi API status on this page, on the official Moonshot status page at status.moonshot.cn, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
   openrouter: {
@@ -582,6 +582,19 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is this the same as the DeepSeek API?', a: 'No. This page tracks the consumer chat app (chat.deepseek.com and the mobile apps). The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
       { q: 'Why is the DeepSeek App not loading?', a: 'The DeepSeek App may be experiencing high traffic, a backend incident, or maintenance. Check this page for current status and recent incident history.' },
       { q: 'What are alternatives to the DeepSeek App?', a: 'When the DeepSeek App is down, ChatGPT, claude.ai, or Grok are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
+    ],
+  },
+  // #1731 — Kimi consumer app, the api-vs-app split mirror of 'kimi' above.
+  'kimi-app': {
+    displayName: 'Kimi App',
+    description: 'Kimi is the AI assistant from Moonshot AI, available at kimi.com and as mobile and desktop apps. This page tracks the consumer app; the Kimi API for developers is monitored separately.',
+    whenDown: 'When the Kimi app is down, chat, search, file uploads, or sign-in at kimi.com and in the Kimi apps may fail. Apps built on the Kimi API are tracked on a separate page.',
+    faqs: [
+      { q: 'Is Kimi down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the Kimi app every 5 minutes and shows real-time operational status.' },
+      { q: 'Why does Kimi show frequent short incidents?', a: 'Moonshot\'s status page opens an incident for short error spikes on individual components, such as search. This page\'s status follows the worst of the app\'s components, and those incidents also count in the Incidents part of the AIWatch Score.' },
+      { q: 'Does a Kimi app outage affect the Kimi API?', a: 'Not necessarily. Moonshot\'s status page lists the API under separate components, and the Kimi API has its own page on AIWatch.' },
+      { q: 'What are alternatives to Kimi?', a: 'ChatGPT, claude.ai, and DeepSeek App are other AI apps AIWatch tracks. AIWatch shows current availability for each.' },
+      { q: 'How do I check Kimi status?', a: 'You can check Kimi status on this page, on the official Moonshot status page at status.moonshot.cn, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
   // Coding agents (#294) — "OpenAI Codex" on this page means the current coding
