@@ -56,9 +56,14 @@ function feedForScope(ids: string[], over: Partial<RootlyFeed> = {}): RootlyFeed
 }
 
 describe('parseRootlyTimestamp', () => {
-  it('parses the form the incident page actually renders', () => {
+  it('parses the v2 incident-page form, with "at"', () => {
     expect(parseRootlyTimestamp('September 4, 2026 at 10:00 PM UTC')).toBe(Date.UTC(2026, 8, 4, 22, 0))
     expect(parseRootlyTimestamp('September 5, 2026 at 05:48 AM UTC')).toBe(Date.UTC(2026, 8, 5, 5, 48))
+  })
+
+  it('parses the v3 form, which has no "at"', () => {
+    expect(parseRootlyTimestamp('Aug 9, 2026 4:30 PM UTC')).toBe(Date.UTC(2026, 7, 9, 16, 30))
+    expect(parseRootlyTimestamp('Aug 9, 2026 3:35 PM UTC')).toBe(Date.UTC(2026, 7, 9, 15, 35))
   })
 
   it('handles the 12-hour edge cases both ways', () => {
@@ -66,8 +71,8 @@ describe('parseRootlyTimestamp', () => {
     expect(parseRootlyTimestamp('July 2, 2026 at 12:30 PM UTC')).toBe(Date.UTC(2026, 6, 2, 12, 30))
   })
 
-  it('REJECTS the history-list form, which omits the year', () => {
-    // The list renders "September 4 at 10:00 PM UTC". Accepting it would mean guessing a year, and
+  it('REJECTS a form that omits the year', () => {
+    // "September 4 at 10:00 PM UTC" — the v2 history list. Accepting it would mean guessing a year, and
     // the guess is wrong across a New Year boundary — which is why normalization reads incident
     // pages instead of list rows.
     expect(parseRootlyTimestamp('September 4 at 10:00 PM UTC')).toBeNull()
@@ -247,7 +252,7 @@ describe('isStorableRootlyFeed', () => {
   })
 
   it('REFUSES a placeholder component list — the scraper ran and read nothing', () => {
-    // The shape the scraper emits when its status regex misses. It PARSES, and stored it becomes
+    // A placeholder component list. It PARSES, and stored it becomes
     // `unknown` for the KV TTL over a good feed — the #1256 failure mode, which is why this clause
     // is here rather than a `components.length` check alone.
     expect(isStorableRootlyFeed({
@@ -308,7 +313,7 @@ describe('isStorableRootlyFeed', () => {
     const short = feedForScope(scope, {
       uptime: scope.map((id, i) => ({
         componentId: id, barCount: 91, unreadBars: 0,
-        // One component came back short: 2 impacted days seen, 1 retrieved.
+        // One component: 2 impacted days seen, 1 parsed.
         coverage: i === 0 ? { impacted: 2, fetched: 1 } : { impacted: 0, fetched: 0 },
         days: i === 0
           ? [{ date: 'Sep 5, 2026', label: 'x', segments: [{ cls: 'bg-gray-700', width: 30 }] }]
@@ -316,7 +321,7 @@ describe('isStorableRootlyFeed', () => {
       })),
     })
     expect(isStorableRootlyFeed(short, scope, GATE_NOW)).toBe(false)
-    // Control: the identical feed with the tooltip retrieved IS storable, so the refusal above is
+    // Control: the identical feed with the tooltip parsed IS storable, so the refusal above is
     // the coverage gap and not some other property of the fixture.
     expect(isStorableRootlyFeed(feedForScope(scope), scope, GATE_NOW)).toBe(true)
   })
@@ -423,7 +428,7 @@ describe('mapRootlyComponentStatus', () => {
     expect(mapRootlyComponentStatus('Operational')).toBe('operational')
   })
 
-  it('maps the word an affected component actually renders', () => {
+  it('maps "Affected", a word the v2 page rendered', () => {
     expect(mapRootlyComponentStatus('Affected')).toBe('degraded')
     expect(mapRootlyComponentStatus('affected')).toBe('degraded')
   })
@@ -457,6 +462,11 @@ describe('the two status vocabularies stay in step (#1476)', () => {
     for (const word of COMPONENT_STATES_WORDS) {
       expect(mapRootlyComponentStatus(word), `scraper can emit "${word}"`).not.toBeNull()
     }
+  })
+
+  it('refuses what the scraper emits for an icon colour it cannot map', async () => {
+    const { readV3ComponentStatus } = await import('../../../../scripts/scrape-mistral-status.mjs')
+    expect(mapRootlyComponentStatus(readV3ComponentStatus('w-5 text-tangerine-11'))).toBeNull()
   })
 })
 
@@ -527,12 +537,12 @@ describe('rootlyOverallStatus', () => {
 })
 
 // ── Uptime chart ────────────────────────────────────────────────────────────────────────────────
-// Segment classes and widths below are REAL: the Aug 28 Console day is the only `bg-red-500` in the
-// 90-day window across all 14 components, and the Aug 12 Embedding day is a representative gray one.
+// Segment classes and widths below were read off the page.
 
 describe('rootlySegmentImpact', () => {
-  it('maps the two classes the page actually draws', () => {
+  it('maps each segment class it knows', () => {
     expect(rootlySegmentImpact('bg-red-500')).toBe('major')
+    expect(rootlySegmentImpact('bg-red-v2-12')).toBe('minor')
     expect(rootlySegmentImpact('bg-gray-700')).toBe('minor')
   })
 
@@ -546,7 +556,7 @@ describe('rootlySegmentImpact', () => {
 })
 
 describe('parseRootlyDay', () => {
-  it('parses the ABBREVIATED month the tooltip renders', () => {
+  it('parses an ABBREVIATED month', () => {
     expect(parseRootlyDay('Aug 12, 2026')).toBe('2026-08-12')
     expect(parseRootlyDay('Sep 5, 2026')).toBe('2026-09-05')
   })
@@ -635,7 +645,7 @@ describe('computeRootlyUptime', () => {
   })
 
   it('WITHHOLDS the figure when a tooltip was lost — a gap here inflates', () => {
-    // The live case: 429s cost 3 of 93 tooltips. Every gap fails toward "no downtime", so a partial
+    // Every gap fails toward "no downtime", so a partial
     // read must not be published as a measurement.
     const r = computeRootlyUptime([comp({ coverage: { impacted: 4, fetched: 3 } })], undefined, NOW)
     expect(r.pct).toBeNull()
@@ -900,7 +910,7 @@ describe('rootlyWindowCutoffDay', () => {
   })
 })
 
-/** ISO day → the abbreviated form the chart tooltips publish, which `parseRootlyDay` reads. */
+/** ISO day → an abbreviated tooltip date, one of the two forms `parseRootlyDay` reads. */
 function fmt(isoDay: string): string {
   const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   const [y, m, d] = isoDay.split('-').map(Number)
@@ -988,9 +998,7 @@ describe('#1381 the gate accepts what the scraper actually emits', () => {
   it('and the gate REFUSES a chart the DERIVATION came back short on', async () => {
     // The control, and it drops the field from the `chart` the scraper is given rather than from the
     // entry it produced. That distinction is the whole finding: the earlier version mutated the
-    // finished entry, so a producer that silently defaulted a missing input passed it. `chart` is
-    // what `page.evaluate` returns — the one part of this pipeline no test executes, which is
-    // exactly why the assertion has to start there.
+    // finished entry, so a producer that silently defaulted a missing input passed it.
     const { buildUptimeEntry } = await import('../../../../scripts/scrape-mistral-status.mjs')
     const full = { componentId: 'c1', barCount: 91, unreadBars: 0, impacted: [] as number[] }
     for (const drop of ['unreadBars', 'barCount', 'componentId'] as const) {

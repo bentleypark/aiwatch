@@ -2153,8 +2153,8 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
   }
 
   const norm = normalizeRootlyIncidents(stored.feed)
-  // The uptime chart is read in the SAME scrape as the incidents, because it is the only place this
-  // source states severity — the incident titles carry none (verified across all 93 impacted days).
+  // The uptime chart is read in the SAME scrape as the incidents: each incident takes its impact from
+  // the chart day that names it, because the incident titles carry no severity.
   const up = computeRootlyUptime(stored.feed.uptime ?? [], config.displayComponentIds, Date.parse(now))
   // Filter BEFORE attributing. `incidentExclude` drops the page's non-API incidents,
   // and those components are outside `displayComponentIds`, so their chart days never enter
@@ -2217,7 +2217,7 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
     // for, so the guard was unreachable. An unreadable feed becomes `unknown` at the CALLER, which
     // ships no incidents at all.
     incidents: attributed.incidents,
-    // COMPUTED over the trailing 30 days from the chart's own per-day segments, weighted with the
+    // COMPUTED over the trailing 30 days from the chart's per-day downtime, weighted with the
     // SHARED table (major 1.0 / minor 0.3), so a Rootly figure is comparable with every other
     // source (#259/#1006). Withheld entirely when the read was incomplete — see computeRootlyUptime.
     // #1017 — `todayWeightedOutageSec` rides the SAME object as `uptime30d`, one spread, so the two
@@ -2227,9 +2227,7 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
       ? {
           uptime30d: up.pct,
           uptimeSource: 'official' as const,
-          // Rootly v3 now publishes the provider's official 90-day percentage. The field name is a
-          // legacy API contract, so disclose the actual window instead of labelling it as 30 days.
-          ...(up.windowDays != null && up.windowDays !== 30 ? { uptimeWindowDays: up.windowDays } : {}),
+          ...(up.windowDays != null && up.windowDays < 30 ? { uptimeWindowDays: up.windowDays } : {}),
           ...(todaySec != null ? { todayWeightedOutageSec: todaySec } : {}),
         }
       : {}),
@@ -2239,7 +2237,7 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
     // #1390 — same as Flashduty: `up.days` IS Rootly's own per-day record, so the calendar owns every
     // day. Stating it here is what keeps `days === 30` from deciding for this service the next time
     // someone touches its `calendarDays`.
-    ...(up.pct != null && up.dailyImpactAvailable !== false && Object.keys(up.days).length > 0
+    ...(up.pct != null && Object.keys(up.days).length > 0
       ? { dailyImpact: rootlyDayImpactMap(up.days), dailyImpactComplete: true }
       : {}),
     ...(components.length >= 2 ? { components } : {}),

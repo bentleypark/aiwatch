@@ -85,7 +85,7 @@ export function recordMistralFeedObservation(
   if (!analytics) return
   try {
     analytics.writeDataPoint({
-      // blob1 source, blob2 delivery, blob3 incident coverage; all fixed vocabularies.
+      // blob1 source, blob2 delivery, blob3 incident coverage, blob4 failure class; all fixed vocabularies.
       blobs: [MISTRAL_FEED_OBSERVATION_SOURCE, observation.delivery, observation.coverage, observation.failure ?? 'none'],
       // count, listed, fetched, missing, page-available, lost uptime tooltips.
       doubles: [1, observation.listed, observation.fetched, observation.missing, observation.available, observation.uptimeLostTooltips],
@@ -105,10 +105,6 @@ interface PageContractKv {
 /**
  * Count only adjacent, independently completed scraper runs. Any other terminal observation clears
  * the streak, so a Cloudflare challenge cannot be relabelled as a Rootly contract migration.
- *
- * The weekly marker is a reminder cadence, not a delay: the first alert is sent on confirmation
- * #2. A contract drift needs a code change and normally cannot self-heal; repeating it every run
- * would turn a useful alert into hourly noise while the repair is in progress.
  */
 export async function observeMistralPageContract(
   kv: PageContractKv,
@@ -117,6 +113,7 @@ export async function observeMistralPageContract(
 ): Promise<{ consecutive: number; alerted: boolean }> {
   if (observation.failure !== 'page-contract') {
     await kv.delete(MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY)
+    if (observation.delivery === 'stored') await kv.delete(MISTRAL_PAGE_CONTRACT_ALERT_KEY)
     return { consecutive: 0, alerted: false }
   }
 
