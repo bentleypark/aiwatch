@@ -1,5 +1,5 @@
 // #1725 — the inline is-down mirror of the worker's meetsRequiredCapability: Perplexity's alternatives are
-// search-capable providers only, and the FAQ answer names the same services as the card.
+// search-capable providers only.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down'
 import { spyFetchWithEmptyReportFeed } from './fetch-stub'
@@ -28,7 +28,7 @@ describe('is-down.ts — required capability (#1725)', () => {
   beforeEach(() => { fetchMock = spyFetchWithEmptyReportFeed() })
   afterEach(() => { fetchMock.mockRestore() })
 
-  it('Perplexity down → the card and the FAQ answer name search providers, not Cohere or Groq', async () => {
+  it('Perplexity down → the card names search providers, not Cohere or Groq; the FAQ answer stays as written', async () => {
     fetchMock.mockResolvedValueOnce(payload(board()))
     const html = await (await handler(req('perplexity'))).text()
     const start = html.indexOf('🔄 Alternatives')
@@ -38,7 +38,8 @@ describe('is-down.ts — required capability (#1725)', () => {
     expect(card).toContain('Gemini API')
     expect(card).not.toContain('Cohere')
     expect(card).not.toContain('Groq')
-    expect(html).toContain('the top-ranked alternatives right now are Claude API (Score: 70) and Gemini API (Score: 60)')
+    expect(html).not.toContain('top-ranked alternative')
+    expect(html).toContain('For search-grounded answers over an API, the OpenAI, Claude, and Gemini APIs offer web search.')
   })
 
   it('no operational search provider → no alternatives card, never Cohere or Groq', async () => {

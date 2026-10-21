@@ -461,6 +461,7 @@ export function renderPage(
   // #1697 — this service's past recovery times, from /api/status/cached's `recoveryBaseline`. Absent
   // below the worker's floor of 10 qualifying incidents, or from a worker that predates it.
   recoveryBaseline?: RecoveryBaseline | null,
+  fallbacksUnavailable = false,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -567,7 +568,7 @@ ${consentInitScript()}
 
 ${renderJsonLd(slug, seo, service)}
 ${renderBreadcrumbJsonLd(slug, seo)}
-${renderFaqJsonLd(seo, fallbacks, fallbackCapabilityLabel)}
+${renderFaqJsonLd(seo)}
 
 <style>
 :root{color-scheme:dark}
@@ -698,8 +699,8 @@ ${renderIncidents(service)}
 ${renderReportFeed(reports, seo)}
 ${renderDescription(seo, service)}
 ${renderErrors(seo)}
-${renderFAQ(seo, fallbacks, fallbackCapabilityLabel)}
-${renderFallbacks(seo, fallbacks, service?.id, fallbackCapabilityLabel)}
+${renderFAQ(seo)}
+${renderFallbacks(seo, fallbacks, service?.id, fallbackCapabilityLabel, fallbacksUnavailable)}
 ${renderShareButtons(seo, service, canonical, ogImageUrl, aiInsight)}
 ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
@@ -833,24 +834,14 @@ export function linkifyFaqAnswer(text: string): string {
   return out
 }
 
-export function enhanceFaqAnswer(faq: { q: string; a: string }, fallbacks: Pick<Fallback, 'name' | 'score'>[], capabilityLabel?: string): string {
-  if (fallbacks.length > 0 && /^(what are (the )?alternatives to|what alternatives are there to|what can i use instead of|what should i do when)\b/i.test(faq.q)) {
-    const fbList = fallbacks.map(fb => `${fb.name}${fb.score != null ? ` (Score: ${fb.score})` : ''}`).join(' and ')
-    const scope = capabilityLabel ? ` for ${capabilityLabel.toLowerCase()}` : ''
-    const lead = fallbacks.length === 1 ? `the top-ranked alternative${scope} right now is` : `the top-ranked alternatives${scope} right now are`
-    return `Based on current AIWatch data, ${lead} ${fbList}. AIWatch shows the current availability of every service it tracks.`
-  }
-  return faq.a
-}
-
-function renderFaqJsonLd(seo: ServiceSEO, fallbacks: Fallback[], capabilityLabel?: string): string {
+function renderFaqJsonLd(seo: ServiceSEO): string {
   const data = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
     'mainEntity': seo.faqs.map(f => ({
       '@type': 'Question',
       'name': f.q,
-      'acceptedAnswer': { '@type': 'Answer', 'text': enhanceFaqAnswer(f, fallbacks, capabilityLabel) },
+      'acceptedAnswer': { '@type': 'Answer', 'text': f.a },
     })),
   }
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
@@ -1631,7 +1622,11 @@ export function renderIncidents(service: ServiceData | null): string {
   const incidents = Array.isArray(service?.incidents) ? service.incidents : []
   // #591 — a stale-source service must still render the section (to say "unavailable"), even if its
   // frozen incident array is empty; only a non-stale service with no incidents renders nothing.
-  if (!service || (incidents.length === 0 && !service.incidentSourceStale)) return ''
+  if (!service) {
+    return `<h2>Recent Incidents</h2>
+<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">Recent incidents can&rsquo;t be shown right now &mdash; AIWatch could not load current status data.</p></div>`
+  }
+  if (incidents.length === 0 && !service.incidentSourceStale) return ''
 
   // 7-day window to match the dashboard ServiceDetails "Incident History" (both surfaces
   // share the same recency horizon; #incident-history-collapse).
@@ -1790,13 +1785,12 @@ export function renderErrors(seo: ServiceSEO): string {
 <div class="card">${renderErrorList(seo.errors)}</div>`
 }
 
-function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[], capabilityLabel?: string): string {
+function renderFAQ(seo: ServiceSEO): string {
   if (seo.faqs.length === 0) return ''
   const items = seo.faqs.map(f => {
-    const answer = enhanceFaqAnswer(f, fallbacks, capabilityLabel)
     return `<div class="faq-item">
 <p class="faq-q">${esc(f.q)}</p>
-<p class="faq-a">${linkifyFaqAnswer(answer)}</p>
+<p class="faq-a">${linkifyFaqAnswer(f.a)}</p>
 </div>`
   }).join('\n')
 
@@ -1804,7 +1798,11 @@ function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[], capabilityLabel?: str
 <div class="card">${items}</div>`
 }
 
-function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string, capabilityLabel?: string): string {
+function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string, capabilityLabel?: string, unavailable = false): string {
+  if (fallbacks.length === 0 && unavailable) {
+    return `<h2>Alternatives When ${esc(seo.displayName)} is Down</h2>
+<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">Alternatives can&rsquo;t be shown right now &mdash; AIWatch could not load current status data.</p></div>`
+  }
   if (fallbacks.length === 0) return ''
   let anyOutbound = false
   const items = fallbacks.map(f => {

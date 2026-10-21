@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { enhanceFaqAnswer, renderDelegatedListeners, resolveBeaconSvcId, buildMetaDescription, renderPage, alertCtaTitle, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import handler from '../is-down'
+import { spyFetchWithEmptyReportFeed } from './fetch-stub'
+import { renderDelegatedListeners, resolveBeaconSvcId, buildMetaDescription, renderPage, alertCtaTitle, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
 import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/utils/predictionAccuracy'
 import { getSEOContent } from '../_is-down/seo-content'
 import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
@@ -849,58 +851,79 @@ describe('no is-down insight claims AIWatch estimates uptime (#713/#1006)', () =
   })
 })
 
-// #1028 — the alternatives FAQ answer carries ONE list: the live recommendation when there is one (the
-// same list the alternatives card renders), else the curated static answer. Appending the static answer
-// to the live sentence put two different service lists in one paragraph.
-describe('enhanceFaqAnswer — one list per answer (#1028)', () => {
-  const faq = { q: 'What are alternatives to Groq?', a: 'For hosted open-model inference, Together AI, Fireworks AI, and Cerebras are alternatives AIWatch also tracks.' }
-  const live = [{ name: 'Cohere API', score: 89 }, { name: 'Perplexity', score: null }]
+// #1742 — the FAQ is static copy: the alternatives answer is the curated one whatever the live list holds,
+// and the live list renders only in the alternatives card. When the status data could not be loaded, the
+// live sections say so instead of disappearing.
+describe('is-down static copy vs live sections (#1742)', () => {
+  const groq = {
+    id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', status: 'operational',
+    latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
+    incidents: [], aiwatchScore: null, scoreGrade: null,
+  }
+  const live = [{ id: 'cohere', name: 'Cohere API', score: 89, status: 'operational' }]
+  const seo = getSEOContent('groq')!
+  const staticAnswer = seo.faqs.find((f) => /^What are alternatives to/.test(f.q))!.a
+  const faqJsonLd = (html: string) => JSON.parse(html.match(/<script type="application\/ld\+json">(\{"@context":"https:\/\/schema.org","@type":"FAQPage".*?)<\/script>/)![1])
+  const incidentsUnavailable = 'Recent incidents can&rsquo;t be shown right now'
+  const alternativesUnavailable = 'Alternatives can&rsquo;t be shown right now'
 
-  it('a live list replaces the static answer', () => {
-    expect(enhanceFaqAnswer(faq, live)).toBe('Based on current AIWatch data, the top-ranked alternatives right now are Cohere API (Score: 89) and Perplexity. AIWatch shows the current availability of every service it tracks.')
+  it('the alternatives FAQ answer stays static next to a live alternatives card, in the page and its FAQPage JSON-LD', () => {
+    const html = renderPage('groq', groq as never, seo, live as never)
+    expect(html).toContain('Alternatives When')
+    expect(html).toContain('Cohere API')
+    expect(html).not.toContain('top-ranked alternative')
+    const ld = faqJsonLd(html)
+    expect(ld.mainEntity.map((e: { acceptedAnswer: { text: string } }) => e.acceptedAnswer.text)).toEqual(seo.faqs.map((f) => f.a))
+    expect(html).toContain(`<p class="faq-a">${staticAnswer}</p>`)
   })
 
-  it('a single live alternative reads in the singular', () => {
-    expect(enhanceFaqAnswer(faq, live.slice(0, 1))).toBe('Based on current AIWatch data, the top-ranked alternative right now is Cohere API (Score: 89). AIWatch shows the current availability of every service it tracks.')
+  it('status data loaded with nothing to list: neither section renders, and neither claims to be unavailable', () => {
+    const html = renderPage('groq', groq as never, seo, [] as never)
+    expect(html).not.toContain(incidentsUnavailable)
+    expect(html).not.toContain(alternativesUnavailable)
+    expect(html).not.toContain('Alternatives When')
+    expect(html).not.toContain('<h2>Recent Incidents')
+  })
+})
+
+describe('is-down handler — which live sections say they could not load (#1742)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { fetchMock = spyFetchWithEmptyReportFeed() })
+  afterEach(() => { fetchMock.mockRestore() })
+  const req = (slug: string) => new Request(`https://ai-watch.dev/api/is-down?slug=${slug}`)
+  const svc = (id: string, name: string) => ({ id, name, category: 'api', status: 'operational', latency: 1, uptime30d: 99.9, lastChecked: new Date().toISOString(), incidents: [], aiwatchScore: 90, scoreGrade: 'excellent', scoreConfidence: 'high' })
+  const ok = (services: unknown[]) => new Response(JSON.stringify({ services, aiAnalysis: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+
+  it('status fetch failed: incidents and alternatives each say they could not load', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'))
+    const html = await (await handler(req('groq'))).text()
+    expect(html).toContain('Recent incidents can&rsquo;t be shown right now')
+    expect(html).toContain('Alternatives can&rsquo;t be shown right now')
   })
 
-  it('a capability-routed list names the capability it substitutes', () => {
-    expect(enhanceFaqAnswer(faq, live, 'Image generation')).toBe('Based on current AIWatch data, the top-ranked alternatives for image generation right now are Cohere API (Score: 89) and Perplexity. AIWatch shows the current availability of every service it tracks.')
+  it('status fetch failed on a page that never recommends alternatives: no alternatives section at all', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'))
+    const html = await (await handler(req('replicate'))).text()
+    expect(html).toContain('Recent incidents can&rsquo;t be shown right now')
+    expect(html).not.toContain('Alternatives can&rsquo;t be shown right now')
+    expect(html).not.toContain('Alternatives When')
   })
 
-  it('no live list → the static answer, unchanged', () => {
-    expect(enhanceFaqAnswer(faq, [])).toBe(faq.a)
+  it('status loaded but its processing threw after this service was read: no could-not-load line on the 200 page', async () => {
+    const res = new Response(JSON.stringify({ services: [svc('groq', 'Groq Cloud')], aiAnalysis: {}, supplyChainBanner: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(res)
+    const page = await handler(req('groq'))
+    const html = await page.text()
+    expect(page.status).toBe(200)
+    expect(html).not.toContain('Alternatives can&rsquo;t be shown right now')
   })
 
-  it('a question that is not about alternatives keeps its static answer', () => {
-    const other = { q: 'How do I check Groq status?', a: 'On this page.' }
-    expect(enhanceFaqAnswer(other, live)).toBe(other.a)
-  })
-
-  it('a question that only mentions alternatives keeps its static answer (Jina: why none is suggested)', () => {
-    const seo = getSEOContent('jina')!
-    const why = seo.faqs.find((f) => f.q.startsWith('Why is no alternative suggested'))!
-    expect(enhanceFaqAnswer(why, live)).toBe(why.a)
-  })
-
-  it('every phrasing of the alternatives question takes the live list', () => {
-    for (const q of ['What are alternatives to Groq?', 'What are the alternatives to Groq?', 'What alternatives are there to Gemini?', 'What can I use instead of OpenRouter?', 'What should I do when Claude API is down?']) {
-      expect(enhanceFaqAnswer({ q, a: 'static' }, live), q).not.toBe('static')
-    }
-  })
-
-  it('the rendered page and its FAQPage JSON-LD both carry the live answer, not the static one', () => {
-    const seo = getSEOContent('groq')!
-    const staticAnswer = seo.faqs.find((f) => /alternatives/i.test(f.q))!.a
-    const html = renderPage('groq', null, seo, [{ id: 'cohere', name: 'Cohere API', score: 89, status: 'operational' }])
-    expect(html.split('the top-ranked alternative right now is Cohere API (Score: 89).').length - 1).toBe(2)
-    expect(html).not.toContain(staticAnswer)
-  })
-
-  it('a capability-routed page carries the capability into both FAQ renders', () => {
-    const seo = getSEOContent('chatgpt')!
-    const html = renderPage('chatgpt', null, seo, [{ id: 'stability', name: 'Stability AI', score: 80, status: 'operational' }], undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'Image generation')
-    expect(html.split('the top-ranked alternative for image generation right now is Stability AI (Score: 80).').length - 1).toBe(2)
+  it('status loaded but this service missing from it: the computed alternatives still render', async () => {
+    fetchMock.mockResolvedValueOnce(ok([svc('openai', 'OpenAI API')]))
+    const html = await (await handler(req('claude-api'))).text()
+    expect(html).toContain('Alternatives When')
+    expect(html).toContain('OpenAI API')
+    expect(html).not.toContain('Alternatives can&rsquo;t be shown right now')
   })
 })
 

@@ -511,8 +511,8 @@ describe('renderPage — stale incident source (#591)', () => {
 })
 
 describe('renderIncidents — 7-day window + grouping', () => {
-  it('returns empty string when service is null or incidents array is empty', () => {
-    expect(renderIncidents(null)).toBe('')
+  it('says the incidents could not be loaded when service is null; renders nothing when the incidents array is empty', () => {
+    expect(renderIncidents(null)).toContain('Recent incidents can&rsquo;t be shown right now')
     expect(renderIncidents(mkService({ incidents: [] }))).toBe('')
   })
 
