@@ -269,7 +269,7 @@ const MONTH_LOOKUP: Record<string, number> = (() => {
  */
 export function parseRootlyTimestamp(text: string): number | null {
   if (typeof text !== 'string') return null
-  const m = /^\s*([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})\s+at\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s+UTC\s*$/.exec(text)
+  const m = /^\s*([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\s+at)?\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s+UTC\s*$/.exec(text)
   if (!m) return null
   const month = MONTH_LOOKUP[m[1].toLowerCase()]
   if (month === undefined) return null
@@ -524,6 +524,10 @@ export interface RootlyUptimeComponent {
    */
   unreadBars: number
   days: RootlyUptimeDay[]
+  /** Rootly v3's own published percentage, used as-is over its disclosed 90-day window. */
+  officialUptimePct?: number
+  /** The provider-disclosed window that produced `officialUptimePct`; only 90 is accepted. */
+  officialWindowDays?: number
 }
 
 /**
@@ -623,6 +627,8 @@ export interface RootlyUptimeResult {
   /** Scoped components whose chart carried no day bars. Non-zero forces `pct` to null: no bars is a
    *  component we did not read, not one with nothing to report. */
   unreadableComponents: number
+  /** False when the provider supplied only a rolling percentage, not a compatible daily record. */
+  dailyImpactAvailable?: boolean
   /**
    * `YYYY-MM-DD` → one entry per impacted COMPONENT-day, each carrying its OWN component's impact.
    *
@@ -655,10 +661,10 @@ export interface RootlyUptimeResult {
  * indistinguishable from a clean one.
  */
 export function rootlyTodayWeightedOutageSec(
-  result: Pick<RootlyUptimeResult, 'pct' | 'days'>,
+  result: Pick<RootlyUptimeResult, 'pct' | 'days' | 'dailyImpactAvailable'>,
   nowMs: number,
 ): number | null {
-  if (result.pct == null) return null
+  if (result.pct == null || result.dailyImpactAvailable === false) return null
   const entries = result.days[new Date(nowMs).toISOString().slice(0, 10)]
   if (!entries || entries.length === 0) return 0
   return Math.round(86400 * Math.max(...entries.map((e) => e.fraction)))
@@ -701,6 +707,30 @@ export function computeRootlyUptime(
   // because the alternative publishes a percentage computed over whichever components arrived.
   const present = new Set(components.map((c) => c.componentId))
   const missingComponents = scopeIds?.length ? scopeIds.filter((id) => !present.has(id)).length : 0
+
+  // Rootly v3 no longer exposes the minute-level segments that the legacy reader weighed. Its cards
+  // instead publish an official 90-day percentage. Do not mix the two forms: a partly migrated
+  // payload would otherwise use a different denominator for whichever component happened to arrive.
+  const official = scope.length > 0 && scope.every((c) =>
+    Number.isFinite(c.officialUptimePct) && c.officialUptimePct! >= 0 && c.officialUptimePct! <= 100
+      && c.officialWindowDays === 90)
+  if (official) {
+    const pct = Math.min(...scope.map((c) => c.officialUptimePct!))
+    const complete = missingComponents === 0
+    return {
+      pct: complete ? pct : null,
+      windowDays: complete ? 90 : null,
+      unreadableDays: 0,
+      unreadBars: 0,
+      incompleteComponents: 0,
+      missingComponents,
+      unreadableComponents: 0,
+      dailyImpactAvailable: false,
+      // v3 does not publish a compatible per-day severity/duration record. Keeping this empty is
+      // intentional: manufacturing clean days would corrupt the calendar and incident attribution.
+      days: {},
+    }
+  }
   const cutoffDay = rootlyWindowCutoffDay(nowMs, windowDays)
 
   let unreadableDays = 0

@@ -86,6 +86,21 @@ describe('#1381 — fetchService reads the Rootly feed', () => {
     expect(svc.sourceUnknown, 'and it is not an unknown reading either').toBeUndefined()
   })
 
+  it('uses Rootly v3\'s official 90-day percentage and discloses its window', async () => {
+    const v3 = feed({
+      uptime: SCOPE.map((id, i) => ({
+        componentId: id, barCount: 91, unreadBars: 0, coverage: { impacted: 0, fetched: 0 }, days: [],
+        officialUptimePct: i === 0 ? 94.36 : 100, officialWindowDays: 90,
+      })),
+    })
+    const { kv } = kvWith(JSON.stringify({ fetchedAt: new Date().toISOString(), feed: v3 }))
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.uptime30d).toBe(94.36)
+    expect(svc.uptimeWindowDays).toBe(90)
+    expect(svc.dailyImpact).toBeUndefined()
+    expect(svc.todayWeightedOutageSec).toBeUndefined()
+  })
+
   it('an ABSENT feed publishes `unknown`, not a green pill, and never fetches the challenged page', async () => {
     // Round 5: `base` says `operational`, so a feed-ONLY service with an expired key published a
     // green badge for a service we have no reading of at all — a realistic state against a 3h TTL
@@ -429,8 +444,20 @@ describe('#1557 — an incident the chart cannot attribute still scores', () => 
   // the 15 charted components; 09-21 "Availability drop for Mistral OCR 4" has a red segment.
   beforeEach(() => vi.useFakeTimers({ now: new Date('2026-10-01T04:00:00Z'), toFake: ['Date'] }))
 
+  // The capture predates Rootly v3's component-id rotation. It is still valuable for its incident
+  // and chart semantics, so remap its positional API roster to the current configured scope rather
+  // than letting an unrelated roster migration turn this into a gate-refusal test.
+  const remappedCapture = () => ({
+    ...storedFeed20261001,
+    feed: {
+      ...storedFeed20261001.feed,
+      components: storedFeed20261001.feed.components.map((c, i) => ({ ...c, id: SCOPE[i] ?? c.id })),
+      uptime: storedFeed20261001.feed.uptime?.map((u, i) => ({ ...u, componentId: SCOPE[i] ?? u.componentId })),
+    },
+  })
+
   it('the published list keeps null; the live Score counts the uncharted incidents as minor', async () => {
-    const { kv } = kvWith(JSON.stringify(storedFeed20261001))
+    const { kv } = kvWith(JSON.stringify(remappedCapture()))
     const svc = await fetchService(mistral, undefined, kv as never, {})
     const byTitle = (t: string) => svc.incidents.find((i) => i.title === t)
     expect(byTitle('Elevated error rate on some of our services')?.impact).toBeNull()

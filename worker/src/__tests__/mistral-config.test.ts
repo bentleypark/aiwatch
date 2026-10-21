@@ -19,7 +19,7 @@
 //      live proof this seam is real: `/embed/i` still matches "Embedding API" and "Completion API"
 //      still falls through to `llm`, so routing held — but nothing except this test would have said so.
 //
-// Ids/names read from the live status.mistral.ai page on 2026-09-10.
+// Ids/names read from the Rootly v3 status.mistral.ai page on 2026-10-21.
 // Mirrors fal-config.test.ts (#758) / kimi-config.test.ts (#989).
 
 import { describe, it, expect } from 'vitest'
@@ -29,24 +29,24 @@ import { API_TIER, EXCLUDE_FALLBACK, capabilityOfComponent, CAPABILITY_TIER } fr
 // The 13 API components, in the order the config lists them. The page also carries non-API
 // components, which are deliberately absent from this list — see below.
 const API_GROUP: Array<[string, string]> = [
-  ['304d5895-4dde-47be-b2e1-b7ebeb28dd4d', 'Agents API'],
-  ['719fdf28-3a3d-48f9-bfe3-7766e55091b4', 'Audio API'],
-  ['ba3a6e31-16e8-48c1-9a0e-dc09d9f65b68', 'Batch API'],
-  ['a4b27297-cd30-47b8-8ac0-1d1081fe905a', 'Completion API'],
-  ['4b32fcf7-6173-4456-85ba-048d384ae4a6', 'Conversations API'],
-  ['74350cee-8e18-44bb-be49-9a5ae3f8f218', 'Embedding API'],
-  ['951414e5-fcd1-4c1d-9f2f-acaf726bd245', 'Files API'],
-  ['3e804d64-e876-488f-ba91-69913a2d54f9', 'Fine-Tuning API'],
-  ['7ea6517b-2d19-42f8-b90f-39607552a60b', 'Integrations API'],
-  ['d16850a6-af05-4366-abc2-65d89959305d', 'OCR API'],
-  ['3abd6dd4-8de0-44ad-a65c-e11280a66ca9', 'Prompts API'],
-  ['2b40e771-7a56-40b3-8e96-792740c301f4', 'Skills API'],
-  ['974aefe0-ee25-48a2-ac3d-4f12cc788c2d', 'Workflows API'],
+  ['38c479d8-b68b-4259-8361-0f52c7cc5abd', 'Completion API'],
+  ['ca6957e1-6702-46d6-a315-c5c2705ea904', 'Embedding API'],
+  ['02854346-5ace-4d07-8060-fbce92868dee', 'OCR API'],
+  ['040448d1-a48a-46a2-b902-738630eb3dc0', 'Agents API'],
+  ['54557689-02de-44ef-93a0-b1623fd0e2d8', 'Conversations API'],
+  ['1682e120-dca1-4fea-b344-e2f8dd12ebd9', 'Fine-Tuning API'],
+  ['42f444f1-0899-4c61-8700-4deff117fbb9', 'Audio API'],
+  ['f1e6b7cd-e1fc-44ab-8b7e-f3cfde127193', 'Integrations API'],
+  ['dd45369c-fe82-4a81-b177-248cecec6fd8', 'Files API'],
+  ['9bee7300-775f-4cb7-b181-d4efa024c4ca', 'Batch API'],
+  ['ba78005e-a0b7-498b-8688-dd3529e9780c', 'Workflows API'],
+  ['5550b7f7-8d2b-4a86-89d7-d842c94f365a', 'Prompts API'],
+  ['9f221a35-eb8a-411d-8767-3686dbd7881d', 'Skills API'],
 ]
 
 // Not an API surface, so it stays out of the breakdown for the same reason the old "Services" group
 // did — the card is an API-surface card.
-const CONSOLE_ID = '219bff35-e3ad-4684-a5d2-d26dc3826792'
+const CONSOLE_ID = 'e08a5be3-c333-4874-9a51-01c2683fe9dd'
 
 describe('#1381 Mistral (Rootly) service config', () => {
   const svc = () => SERVICES.find((x) => x.id === 'mistral')!

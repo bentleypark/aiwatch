@@ -176,7 +176,7 @@ export const SERVICES: ServiceConfig[] = [
   // `le console` for the Instatus page, which appended the component to the title; Rootly publishes
   // the raw title and names that component `Console`, so the old entry could not match and
   // "Console Degraded" reached the API card. Pinned by a wiring test against the real title.
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, rootlyFeed: true, incidentExclude: ['console', 'le chat', 'vibe', 'documentation', 'website'], holdShortIncidents: true, displayComponentIds: ['304d5895-4dde-47be-b2e1-b7ebeb28dd4d', '719fdf28-3a3d-48f9-bfe3-7766e55091b4', 'ba3a6e31-16e8-48c1-9a0e-dc09d9f65b68', 'a4b27297-cd30-47b8-8ac0-1d1081fe905a', '4b32fcf7-6173-4456-85ba-048d384ae4a6', '74350cee-8e18-44bb-be49-9a5ae3f8f218', '951414e5-fcd1-4c1d-9f2f-acaf726bd245', '3e804d64-e876-488f-ba91-69913a2d54f9', '7ea6517b-2d19-42f8-b90f-39607552a60b', 'd16850a6-af05-4366-abc2-65d89959305d', '3abd6dd4-8de0-44ad-a65c-e11280a66ca9', '2b40e771-7a56-40b3-8e96-792740c301f4', '974aefe0-ee25-48a2-ac3d-4f12cc788c2d'] },
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, rootlyFeed: true, incidentExclude: ['console', 'le chat', 'vibe', 'documentation', 'website'], holdShortIncidents: true, displayComponentIds: ['38c479d8-b68b-4259-8361-0f52c7cc5abd', 'ca6957e1-6702-46d6-a315-c5c2705ea904', '02854346-5ace-4d07-8060-fbce92868dee', '040448d1-a48a-46a2-b902-738630eb3dc0', '54557689-02de-44ef-93a0-b1623fd0e2d8', '1682e120-dca1-4fea-b344-e2f8dd12ebd9', '42f444f1-0899-4c61-8700-4deff117fbb9', 'f1e6b7cd-e1fc-44ab-8b7e-f3cfde127193', 'dd45369c-fe82-4a81-b177-248cecec6fd8', '9bee7300-775f-4cb7-b181-d4efa024c4ca', 'ba78005e-a0b7-498b-8688-dd3529e9780c', '5550b7f7-8d2b-4a86-89d7-d842c94f365a', '9f221a35-eb8a-411d-8767-3686dbd7881d'] },
   { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null,
     // #677 — AWS Health public events JSON (all regions in one fetch, real start+end timestamps)
     // replaces the per-region RSS that floored resolved durations to 1m + double-counted incidents.
@@ -2227,7 +2227,9 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
       ? {
           uptime30d: up.pct,
           uptimeSource: 'official' as const,
-          ...(up.windowDays != null && up.windowDays < 30 ? { uptimeWindowDays: up.windowDays } : {}),
+          // Rootly v3 now publishes the provider's official 90-day percentage. The field name is a
+          // legacy API contract, so disclose the actual window instead of labelling it as 30 days.
+          ...(up.windowDays != null && up.windowDays !== 30 ? { uptimeWindowDays: up.windowDays } : {}),
           ...(todaySec != null ? { todayWeightedOutageSec: todaySec } : {}),
         }
       : {}),
@@ -2237,7 +2239,7 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
     // #1390 — same as Flashduty: `up.days` IS Rootly's own per-day record, so the calendar owns every
     // day. Stating it here is what keeps `days === 30` from deciding for this service the next time
     // someone touches its `calendarDays`.
-    ...(up.pct != null && Object.keys(up.days).length > 0
+    ...(up.pct != null && up.dailyImpactAvailable !== false && Object.keys(up.days).length > 0
       ? { dailyImpact: rootlyDayImpactMap(up.days), dailyImpactComplete: true }
       : {}),
     ...(components.length >= 2 ? { components } : {}),

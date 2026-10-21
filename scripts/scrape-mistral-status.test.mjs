@@ -5,7 +5,7 @@ import { Window } from 'happy-dom'
 import {
   withRetry, buildUptimeEntry, envPositiveInt, readComponentRow, readComponents, parseUpdateRows, readIncidentPage,
   buildMistralFeedObservation, reportMistralFeedObservation, runWithMistralFeedObservation, deliverMistralFeed,
-  isCloudflareChallenge,
+  isCloudflareChallenge, readOfficialUptime, isRootlyV3OfficialPeriod, parseV3UpdateText,
 } from './scrape-mistral-status.mjs'
 
 // #1381 — `withRetry` is the only pure thing in the scraper, and it is the part that decides whether a
@@ -170,6 +170,31 @@ test('buildMistralFeedObservation makes a pre-coverage failure observable withou
   assert.deepEqual(buildMistralFeedObservation(undefined, 'not-posted'), { delivery: 'not-posted' })
 })
 
+test('buildMistralFeedObservation labels only an explicit Rootly contract failure', () => {
+  assert.deepEqual(buildMistralFeedObservation({ failure: 'page-contract' }, 'not-posted'),
+    { delivery: 'not-posted', failure: 'page-contract' })
+})
+
+test('reads Rootly v3 official uptime as a bounded percentage', () => {
+  assert.equal(readOfficialUptime('99.66% uptime'), 99.66)
+  assert.equal(readOfficialUptime('100% uptime'), 100)
+  assert.equal(readOfficialUptime('99.66% availability'), null)
+  assert.equal(readOfficialUptime('101% uptime'), null)
+})
+
+test('recognises only the documented Rootly v3 official-period header', () => {
+  assert.equal(isRootlyV3OfficialPeriod('Jul 23, 2026 - Today'), true)
+  assert.equal(isRootlyV3OfficialPeriod('Jul 23, 2026 - Oct 21, 2026'), false)
+  assert.equal(isRootlyV3OfficialPeriod('not a Rootly period'), false)
+})
+
+test('reads Rootly v3 packed update text without guessing its fields', () => {
+  assert.deepEqual(parseV3UpdateText('Oct 13, 2026 8:06 AM UTC Fixed the root cause. Resolved'), {
+    at: 'Oct 13, 2026 8:06 AM UTC', body: 'Fixed the root cause.', status: 'Resolved',
+  })
+  assert.equal(parseV3UpdateText('Oct 13, 2026 Fixed'), null)
+})
+
 test('reportMistralFeedObservation is fail-soft and uses the internal diagnostic endpoint', async () => {
   const calls = []
   await reportMistralFeedObservation('https://worker.example/', 'secret', { delivery: 'stored', listed: 1, fetched: 1, available: 1, uptimeLostTooltips: 0 }, async (url, init) => {
@@ -213,11 +238,11 @@ test('runWithMistralFeedObservation reports a partial payload after a stored fee
   ]])
 })
 
-test('runWithMistralFeedObservation reports an unavailable run before rethrowing its scraper error', async () => {
+test('runWithMistralFeedObservation keeps a selector timeout out of the page-contract alert path', async () => {
   const reports = []
   await assert.rejects(
-    runWithMistralFeedObservation('https://worker.example', 'secret', async () => { throw new Error('browser blocked') }, async (...args) => reports.push(args)),
-    /browser blocked/,
+    runWithMistralFeedObservation('https://worker.example', 'secret', async () => { throw new Error('page.waitForSelector: Timeout 60000ms exceeded') }, async (...args) => reports.push(args)),
+    /Timeout 60000ms/,
   )
   assert.deepEqual(reports, [['https://worker.example', 'secret', { delivery: 'not-posted' }]])
 })
