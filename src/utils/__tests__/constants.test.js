@@ -273,7 +273,7 @@ describe('#1725 — frontend: a source that requires a capability admits only th
   const board = [
     svc('perplexity', 'Perplexity', 'down', 80),
     svc('cohere', 'Cohere API', 'operational', 89),
-    svc('groq', 'Groq Cloud', 'operational', 84),
+    svc('groq', 'GroqCloud', 'operational', 84),
     svc('claude', 'Claude API', 'operational', 70),
     svc('openai', 'OpenAI API', 'operational', 80),
   ]
@@ -383,7 +383,7 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
     const services = [
       v('deepseek', 'DeepSeek API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
-      v('groq', 'Groq Cloud', 85, 'high'),
+      v('groq', 'GroqCloud', 85, 'high'),
       v('kimi', 'Kimi (Moonshot AI)', 60, 'medium'),
     ]
     expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
@@ -393,7 +393,7 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
     const services = [
       v('deepseek', 'DeepSeek API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
-      v('groq', 'Groq Cloud', null, 'low'),
+      v('groq', 'GroqCloud', null, 'low'),
     ]
     expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
   })
@@ -405,14 +405,14 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
     const services = [
       v('deepseek', 'DeepSeek API', 95, 'high'),
       v('cohere', 'Cohere API', 90, 'high'),
-      v('groq', 'Groq Cloud', 99, 'insufficient'), // would win #1 on raw Score alone
+      v('groq', 'GroqCloud', 99, 'insufficient'), // would win #1 on raw Score alone
     ]
     expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['DeepSeek API', 'Cohere API'])
   })
 
   it('an unrecognized-confidence candidate DOES surface when nothing better exists (sink, not exclusion)', () => {
-    const services = [v('groq', 'Groq Cloud', 99, 'insufficient')]
-    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['Groq Cloud'])
+    const services = [v('groq', 'GroqCloud', 99, 'insufficient')]
+    expect(getFallbacks({ id: 'together', category: 'api' }, services).map(f => f.name)).toEqual(['GroqCloud'])
   })
 })
 

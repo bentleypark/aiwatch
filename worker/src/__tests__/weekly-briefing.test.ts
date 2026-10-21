@@ -81,7 +81,7 @@ describe('buildStabilityChanges (#733 — live official uptime vs prev-week snap
       groq: { ok: 1, total: 1, officialUptime: 99.0 },
       mistral: { ok: 1, total: 1, officialUptime: 99.5 },
     }
-    const names = { groq: 'Groq Cloud', mistral: 'Mistral API' }
+    const names = { groq: 'GroqCloud', mistral: 'Mistral API' }
     const result = buildStabilityChanges(currentUptime, prevWeek, names)
     expect(result).toHaveLength(2)
     expect(result[0].serviceId).toBe('mistral') // declined first
@@ -121,7 +121,7 @@ describe('buildWeeklyBriefing', () => {
         { serviceId: 'openai', serviceName: 'OpenAI API', count: 2, totalDurationMin: 45 },
       ],
       stabilityChanges: [
-        { serviceId: 'groq', serviceName: 'Groq Cloud', prevUptime: 99.2, currUptime: 99.8 },
+        { serviceId: 'groq', serviceName: 'GroqCloud', prevUptime: 99.2, currUptime: 99.8 },
         { serviceId: 'mistral', serviceName: 'Mistral API', prevUptime: 99.9, currUptime: 98.1 },
       ],
     }
@@ -135,7 +135,7 @@ describe('buildWeeklyBriefing', () => {
     expect(result).toContain('8 incident records across 2 services')
     expect(result).toContain('Mistral API (6)')
     expect(result).toContain('2h 45m')
-    expect(result).toContain('Improved: Groq Cloud')
+    expect(result).toContain('Improved: GroqCloud')
     expect(result).toContain('Declined: Mistral API')
   })
 

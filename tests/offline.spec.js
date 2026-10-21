@@ -49,7 +49,7 @@ test.describe('Offline / API failure (dev mode)', () => {
     await expect(page.locator('main').getByText('Claude API').filter({ visible: true }).first()).toBeVisible({ timeout: 15000 })
 
     // Verify key services from mock data are present
-    const services = ['Claude API', 'ChatGPT', 'Gemini API', 'Groq Cloud', 'Cursor']
+    const services = ['Claude API', 'ChatGPT', 'Gemini API', 'GroqCloud', 'Cursor']
     for (const name of services) {
       await expect(page.locator('main button').filter({ hasText: name }).first()).toBeVisible()
     }

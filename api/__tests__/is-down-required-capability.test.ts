@@ -14,7 +14,7 @@ const svc = (id: string, name: string, status: string, score: number, extra: Rec
 const board = (overrides: Record<string, string> = {}) => [
   svc('perplexity', 'Perplexity', 'down', 80),
   svc('cohere', 'Cohere API', overrides.cohere ?? 'operational', 95),
-  svc('groq', 'Groq Cloud', overrides.groq ?? 'operational', 94),
+  svc('groq', 'GroqCloud', overrides.groq ?? 'operational', 94),
   svc('claude', 'Claude API', overrides.claude ?? 'operational', 70),
   svc('gemini', 'Gemini API', overrides.gemini ?? 'operational', 60),
 ]

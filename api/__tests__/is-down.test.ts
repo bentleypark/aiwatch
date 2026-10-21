@@ -386,7 +386,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
         svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
         svc({ id: 'deepseek', name: 'DeepSeek API', scoreConfidence: 'high', aiwatchScore: 95 }),
         svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
-        svc({ id: 'groq', name: 'Groq Cloud', scoreConfidence: 'low', aiwatchScore: null }),
+        svc({ id: 'groq', name: 'GroqCloud', scoreConfidence: 'low', aiwatchScore: null }),
       ],
       aiAnalysis: {},
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -395,7 +395,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     const html = await res.text()
     const order = bulletOrder(html)
     expect(order).toEqual(['DeepSeek API', 'Cohere API'])
-    expect(order).not.toContain('Groq Cloud')
+    expect(order).not.toContain('GroqCloud')
   })
 
   it('a candidate with an unrecognized scoreConfidence value sinks below high/medium, never vanishes', async () => {
@@ -408,7 +408,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
         svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
         svc({ id: 'deepseek', name: 'DeepSeek API', scoreConfidence: 'high', aiwatchScore: 95 }),
         svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
-        svc({ id: 'groq', name: 'Groq Cloud', scoreConfidence: 'insufficient', aiwatchScore: 99 }), // would win #1 on raw Score alone
+        svc({ id: 'groq', name: 'GroqCloud', scoreConfidence: 'insufficient', aiwatchScore: 99 }), // would win #1 on raw Score alone
       ],
       aiAnalysis: {},
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -417,7 +417,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     const html = await res.text()
     const order = bulletOrder(html)
     expect(order).toEqual(['DeepSeek API', 'Cohere API'])
-    expect(order).not.toContain('Groq Cloud')
+    expect(order).not.toContain('GroqCloud')
   })
 
   it('#1384 — a retainedBridge ghost does not disqualify an otherwise-healthy candidate', async () => {

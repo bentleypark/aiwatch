@@ -46,6 +46,13 @@ describe('feed slug ↔ api/is-down slug-map sync', () => {
     }
   })
 
+  it('every slug-map name matches the worker service name', () => {
+    const workerName = new Map(SERVICES.map((s) => [s.id, s.name]))
+    for (const entry of Object.values(SLUG_TO_SERVICE)) {
+      expect(entry.name, `slug-map '${entry.id}'`).toBe(workerName.get(entry.id))
+    }
+  })
+
   it('every slug-map service ID is a real worker service', () => {
     const workerIds = new Set(SERVICES.map((s) => s.id))
     for (const id of Object.keys(SERVICE_ID_TO_SLUG)) {

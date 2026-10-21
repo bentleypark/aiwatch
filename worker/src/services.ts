@@ -192,7 +192,7 @@ export const SERVICES: ServiceConfig[] = [
   // #1518 — rosterAuditFixedScope: same shape as cohere above — uptime reads the `API` anchor id
   // forever, the per-model catalog is unbounded (20 components live 2026-09-27, all older than 30 days
   // already, including a `Website` id that is not a model at all).
-  { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'], rosterAuditFixedScope: true },
+  { id: 'groq', name: 'GroqCloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'], rosterAuditFixedScope: true },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true, componentDenylist: ['Website'] },
   // #1198 — migrated off BetterStack (dead: /index.json and /feed both 404) onto the incident.io
   // Statuspage-compat API, same shape as cohere/groq above. Fireworks sets no `statusComponent`/

@@ -25,7 +25,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // Phase B — LLM APIs (#263)
   'mistral':         { id: 'mistral',    name: 'Mistral API',      provider: 'Mistral AI',  category: 'api', group: 'llm' },
   'cohere':          { id: 'cohere',     name: 'Cohere API',       provider: 'Cohere',      category: 'api', group: 'llm' },
-  'groq':            { id: 'groq',       name: 'Groq Cloud',       provider: 'Groq',        category: 'api', group: 'llm' },
+  'groq':            { id: 'groq',       name: 'GroqCloud',       provider: 'Groq',        category: 'api', group: 'llm' },
   'together':        { id: 'together',   name: 'Together AI',      provider: 'Together',    category: 'api', group: 'llm' },
   'fireworks':       { id: 'fireworks',  name: 'Fireworks AI',     provider: 'Fireworks',   category: 'api', group: 'llm' },
   'cerebras':        { id: 'cerebras',   name: 'Cerebras Inference', provider: 'Cerebras',  category: 'api', group: 'llm' },

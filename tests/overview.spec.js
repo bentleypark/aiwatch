@@ -17,7 +17,7 @@ test.describe('Overview page', () => {
     const serviceNames = [
       'claude.ai', 'ChatGPT', 'Character.AI',
       'Claude API', 'OpenAI API', 'Gemini API', 'Amazon Bedrock', 'Azure OpenAI',
-      'Mistral API', 'Cohere API', 'Groq Cloud', 'Together AI', 'Perplexity',
+      'Mistral API', 'Cohere API', 'GroqCloud', 'Together AI', 'Perplexity',
       'SpaceXAI API', 'DeepSeek API', 'OpenRouter',
       'Hugging Face', 'Replicate', 'ElevenLabs', 'Pinecone', 'Stability AI',
       'Claude Code', 'GitHub Copilot', 'Cursor', 'Windsurf',

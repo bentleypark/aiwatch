@@ -77,7 +77,7 @@ Grouped by the dashboard's category taxonomy (48 total — sidebar filters / Ove
 | Gemini API | Google | Google Cloud incidents.json |
 | Mistral API | Mistral AI | Rootly (browser-rendered) |
 | Cohere API | Cohere | incident.io (Atlassian compat) |
-| Groq Cloud | Groq | incident.io (Atlassian compat) |
+| GroqCloud | Groq | incident.io (Atlassian compat) |
 | Together AI | Together | Better Stack RSS + uptime API |
 | Fireworks AI | Fireworks | incident.io (Atlassian compat) |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
@@ -336,7 +336,7 @@ Every monitored service — the same ids `/api/v1/status` returns.
 | `azureopenai` | Azure OpenAI | `replicate` | Replicate |
 | `mistral` | Mistral API | `fal` | fal.ai |
 | `cohere` | Cohere API | `modal` | Modal |
-| `groq` | Groq Cloud | `voyageai` | Voyage AI |
+| `groq` | GroqCloud | `voyageai` | Voyage AI |
 | `together` | Together AI | `pinecone` | Pinecone |
 | `fireworks` | Fireworks AI | `turbopuffer` | turbopuffer |
 | `cerebras` | Cerebras Inference | `twelvelabs` | Twelve Labs |
