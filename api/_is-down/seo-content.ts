@@ -336,7 +336,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   // Voice & Speech AI (#263)
   elevenlabs: {
     displayName: 'ElevenLabs',
-    description: 'ElevenLabs provides text-to-speech and voice cloning APIs used in audiobooks, podcasts, conversational AI, and accessibility apps.',
+    description: 'ElevenLabs provides text-to-speech, speech-to-text, and voice cloning APIs used in audiobooks, podcasts, conversational AI, and accessibility apps.',
     whenDown: 'When ElevenLabs is down, applications relying on text-to-speech generation, voice cloning, or conversational voice agents will fail. Audiobook pipelines, podcast generators, and voice-first apps lose their primary capability.',
     faqs: [
       { q: 'Is ElevenLabs down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors ElevenLabs every 5 minutes and shows real-time operational status.' },
@@ -348,17 +348,17 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   assemblyai: {
     displayName: 'AssemblyAI',
     description: 'AssemblyAI provides production-grade speech-to-text APIs with features like speaker diarization, sentiment analysis, and topic detection.',
-    whenDown: 'When AssemblyAI is down, applications submitting transcription jobs (async or real-time) will fail. Meeting recorders, captioning services, and call analytics pipelines will queue or drop work.',
+    whenDown: 'When AssemblyAI is down, applications submitting transcription jobs (asynchronous or streaming) will fail. Meeting recorders, captioning services, and call analytics pipelines will queue or drop work.',
     faqs: [
       { q: 'Is AssemblyAI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors AssemblyAI every 5 minutes and shows real-time operational status.' },
-      { q: 'Why is AssemblyAI transcription failing?', a: 'AssemblyAI may be experiencing async or real-time API issues. Check this page for active incidents and the official status page for component-level detail.' },
+      { q: 'Why is AssemblyAI transcription failing?', a: 'AssemblyAI may be experiencing asynchronous or streaming API issues. Check this page for active incidents and the official status page for component-level detail.' },
       { q: 'What are alternatives to AssemblyAI?', a: 'For speech-to-text, Deepgram is an alternative AIWatch also tracks. AIWatch shows current availability for each speech service.' },
       { q: 'How do I check AssemblyAI status?', a: 'You can check AssemblyAI status on this page, on the official AssemblyAI status page at status.assemblyai.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
   deepgram: {
     displayName: 'Deepgram',
-    description: 'Deepgram provides fast, accurate speech-to-text APIs optimized for streaming use cases like real-time captions, voice agents, and live transcription.',
+    description: 'Deepgram provides speech-to-text, text-to-speech, and voice agent APIs built for real-time use cases like voice agents and live transcription.',
     insight: 'AIWatch tracks Deepgram\'s overall API availability via probe-based health checks alongside official status.',
     whenDown: 'When Deepgram is down, applications using real-time transcription for voice agents, live captions, or contact center streaming will lose their core functionality. Batch transcription jobs may queue but live UX breaks immediately.',
     faqs: [
@@ -370,8 +370,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   'fish-audio': {
     displayName: 'Fish Audio',
-    description: 'Fish Audio provides text-to-speech and voice cloning APIs, served through its Platform API and Text-to-Speech API.',
-    insight: 'AIWatch tracks Fish Audio\'s status page (Better Stack) — the Platform API, the Text-to-Speech API, and each TTS model it lists — so an outage of a single model shows up even while the API itself answers.',
+    description: 'Fish Audio provides text-to-speech, voice cloning, and speech-to-text APIs, served through its Platform API and Text-to-Speech API.',
     whenDown: 'When Fish Audio is down, text-to-speech generation and voice cloning requests fail, so voice agents, narration pipelines, and apps that synthesize speech on demand lose their audio output.',
     faqs: [
       { q: 'Is Fish Audio down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Fish Audio every 5 minutes and shows real-time operational status.' },
@@ -383,8 +382,8 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   // Inference & infrastructure (#263)
   huggingface: {
     displayName: 'Hugging Face',
-    description: 'Hugging Face hosts an open-source AI model hub plus Inference API endpoints, datasets, and Spaces (deployed apps).',
-    insight: 'Hugging Face has multiple distinct services that can fail independently.',
+    description: 'Hugging Face hosts an open-source AI model hub plus Inference Providers, Inference Endpoints, datasets, and Spaces (deployed apps).',
+    insight: 'Hugging Face has multiple distinct services that can fail independently. Its status page does not list Inference Providers as a component, so an Inference Providers outage shows here only if Hugging Face posts an incident for it.',
     whenDown: 'When Hugging Face is down, apps loading models programmatically or using hosted inference endpoints will fail.',
     faqs: [
       { q: 'Is Hugging Face down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Hugging Face every 5 minutes and shows real-time operational status.' },
@@ -395,7 +394,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   replicate: {
     displayName: 'Replicate',
-    description: 'Replicate runs open-source models (FLUX, Stable Diffusion, Llama, Whisper, etc.) via a simple HTTP API with per-second billing.',
+    description: 'Replicate runs AI models via a simple HTTP API, billing most of them by the second of compute time.',
     insight: 'Replicate is now monitored through Cloudflare Status. AIWatch uses the exact Replicate component for its current health and only active or resolved incidents explicitly attached to that component; page-wide Cloudflare incidents and title matches are not attributed to Replicate. Cloudflare Status publishes no uptime data for this service, so AIWatch shows no uptime percentage for it.',
     whenDown: 'When Replicate is down, apps using its API for image generation, video synthesis, audio transcription, or custom model inference will fail.',
     faqs: [
@@ -407,8 +406,8 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   fal: {
     displayName: 'fal.ai',
-    description: 'fal.ai is a serverless generative-media inference platform that runs image, video, audio, and 3D models (FLUX, Kling, Hailuo, and 600+ others) over a single fast API on dedicated GPU infrastructure. It is built for real-time creative tools where low-latency generation matters.',
-    insight: 'fal runs hundreds of models on a shared serverless engine, so a single model can degrade without taking down the whole platform. AIWatch monitors the platform API component most relevant to API consumers — a Dashboard- or Website-only issue may not trigger an API incident.',
+    description: 'fal.ai is a serverless generative-media inference platform that runs image, video, audio, and 3D models over a single fast API. It is built for real-time creative tools where low-latency generation matters.',
+    insight: 'fal runs its models on a shared serverless engine, so a single model can degrade without taking down the whole platform.',
     whenDown: 'When fal.ai is down, apps calling its inference API for image, video, audio, or 3D generation will see failed or queued requests. Real-time creative tools built on fal lose their generation backend until it recovers.',
     faqs: [
       { q: 'Is fal.ai down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors fal.ai every 5 minutes and shows real-time operational status.' },
@@ -420,7 +419,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   pinecone: {
     displayName: 'Pinecone',
     description: 'Pinecone is a fully-managed vector database for production-grade similarity search and retrieval-augmented generation (RAG).',
-    insight: 'Pinecone is region-specific — outages can affect specific environments (us-east-1, eu-west-1, etc.) without breaking the global platform. AIWatch tracks Pinecone\'s primary status; for region-specific issues check the official status page for component breakdowns.',
+    insight: 'Pinecone is region-specific — outages can affect specific environments (us-east-1, eu-west-1, etc.) without breaking the global platform.',
     whenDown: 'When Pinecone is down, applications relying on vector search for RAG, semantic search, or recommendations will fail. AI agents that depend on long-term memory or knowledge retrieval will lose context.',
     faqs: [
       { q: 'Is Pinecone down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Pinecone every 5 minutes and shows real-time operational status.' },
@@ -431,7 +430,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   turbopuffer: {
     displayName: 'turbopuffer',
-    description: 'turbopuffer is a serverless vector-search database built directly on object storage. It powers retrieval-augmented generation (RAG), semantic search, and AI agent memory, and is used as the retrieval backend for products like Cursor\'s codebase index.',
+    description: 'turbopuffer is a serverless vector and full-text search database built directly on object storage. It powers retrieval-augmented generation (RAG), semantic search, and AI agent memory.',
     insight: 'turbopuffer is region-specific — its status page lists each region (aws-us-east-1, gcp-us-central1, etc.) as its own component alongside an overall status, so an outage can affect one region without breaking the platform.',
     whenDown: 'When turbopuffer is down, applications relying on vector search for RAG, semantic search, or recommendations will fail. AI agents and code tools that depend on long-term memory or knowledge retrieval will lose context until service recovers.',
     faqs: [
@@ -448,14 +447,13 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Stability AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Stability AI every 5 minutes and shows real-time operational status.' },
       { q: 'Why is Stable Diffusion API failing?', a: 'Stability may be experiencing API capacity issues, specific model degradation, or upstream infrastructure issues. Check this page for active incidents.' },
-      { q: 'What are alternatives to Stability AI?', a: 'For image generation, Replicate hosts FLUX and other image models, and OpenAI provides DALL-E via the API. AIWatch shows current availability.' },
+      { q: 'What are alternatives to Stability AI?', a: 'For image generation, Replicate hosts FLUX and other image models, and OpenAI provides image generation via the API. AIWatch shows current availability.' },
       { q: 'How do I check Stability AI status?', a: 'You can check Stability status on this page, on the official Stability status page at status.stability.ai, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
   flux: {
     displayName: 'Black Forest Labs (FLUX)',
-    description: 'Black Forest Labs develops the FLUX family of image-generation models (FLUX.1, FLUX.1 Kontext, FLUX.2) and provides API access at api.bfl.ai for text-to-image generation, editing, and finetuning.',
-    insight: 'Black Forest Labs publishes per-model-tier status (FLUX.1 [pro]/[dev], Kontext, FLUX.2) on its Atlassian status page. AIWatch scopes the badge to the developer-facing API surface and the overall image-generation group, so a single model-tier blip does not flip the service status unless the API or the whole image group degrades.',
+    description: 'Black Forest Labs develops the FLUX family of generative models and provides API access at api.bfl.ai for image and video generation and editing.',
     whenDown: 'When FLUX is down, apps generating or editing images via api.bfl.ai will fail. Creative pipelines and design tools that integrate the FLUX API lose their generation capability until service recovers.',
     faqs: [
       { q: 'Is FLUX down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Black Forest Labs every 5 minutes and shows real-time operational status.' },
@@ -470,7 +468,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     whenDown: 'When Voyage AI is down, RAG pipelines using its embeddings for search or reranking for relevance will degrade — searches may continue using stale embeddings but reranking quality will drop without the API.',
     faqs: [
       { q: 'Is Voyage AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Voyage AI every 5 minutes and shows real-time operational status.' },
-      { q: 'How do I check Voyage AI status?', a: 'You can check Voyage status on this page, on the official Voyage status page (statuspage.io), or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'How do I check Voyage AI status?', a: 'You can check Voyage status on this page, on the official Voyage status page at status.voyageai.com, or on the AIWatch dashboard at ai-watch.dev.' },
       { q: 'What are alternatives to Voyage AI?', a: 'For embeddings and reranking, Jina AI and Cohere offer similar capabilities. OpenAI provides general-purpose embeddings as well. AIWatch shows current availability.' },
       { q: 'Does Voyage AI downtime affect RAG search?', a: 'Yes — both initial embedding and rerank steps depend on Voyage. Pipelines without cached embeddings or fallback rerankers will degrade. Check this page for current status.' },
     ],
@@ -478,13 +476,13 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   jina: {
     displayName: 'Jina AI',
     description: 'Jina AI provides embedding and reranking APIs (jina-embeddings, jina-reranker) for retrieval-augmented generation (RAG) and semantic search, plus the Reader (r.jina.ai) and Search (s.jina.ai) endpoints.',
-    insight: 'Jina AI posts an automated latency incident per model on its Atlassian status page, and AIWatch tracks every one of those models.',
+    insight: 'Jina AI posts an automated latency incident per model on its Atlassian status page.',
     whenDown: 'When Jina AI is down, RAG pipelines that embed queries or rerank results through its API will degrade — new documents cannot be indexed and search relevance drops until the API recovers.',
     faqs: [
       { q: 'Is Jina AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Jina AI every 5 minutes and shows real-time operational status.' },
       { q: 'How do I check Jina AI status?', a: 'You can check Jina AI status on this page, on the official Jina AI status page at status.jina.ai, or on the AIWatch dashboard at ai-watch.dev.' },
       { q: 'What are alternatives to Jina AI?', a: 'For embeddings and reranking, Voyage AI and Cohere offer similar capabilities. OpenAI provides general-purpose embeddings as well. AIWatch shows current availability.' },
-      { q: 'Why is no alternative suggested during some Jina AI outages?', a: 'During a Jina AI outage, AIWatch suggests Voyage AI when a text-embedding or reranker model is affected. An outage of r.jina.ai, s.jina.ai, CLIP or the code-embedding models is shown on this page without a suggestion.' },
+      { q: 'Why is no alternative suggested during some Jina AI outages?', a: 'During a Jina AI outage, AIWatch suggests Voyage AI only when a text-embedding or reranker model is affected. An outage of any other Jina AI component is shown on this page without a suggestion.' },
     ],
   },
   modal: {
@@ -501,7 +499,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   langchain: {
     displayName: 'LangChain (LangSmith)',
     description: 'LangSmith is LangChain\'s hosted observability, evaluation, and prompt-management platform for LLM applications and agents. Developers use it to trace runs, debug chains, evaluate prompts, and monitor agents in production.',
-    insight: 'AIWatch tracks LangSmith\'s load-bearing surfaces — run ingestion, API, and the web application — using a worst-of badge, so a tracing-ingestion outage is reflected even when the marketing site is fine. Billing, sandboxes, and PromptHub are excluded from the status signal to avoid non-availability noise.',
     whenDown: 'When LangSmith is down, trace ingestion stalls so production runs stop appearing in dashboards, evaluations and prompt experiments fail to record, and teams lose live observability into their agents — though the underlying LLM calls themselves can keep working.',
     faqs: [
       { q: 'Is LangChain down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors LangSmith every 5 minutes and shows real-time operational status.' },
@@ -525,7 +522,6 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   langfuse: {
     displayName: 'Langfuse',
     description: 'Langfuse is an open-source LLM engineering platform for tracing, evaluation, prompt management, and metrics. Developers use it to debug and monitor LLM applications and agents in production.',
-    insight: 'AIWatch tracks Langfuse via its incident.io status page (ingestion, public API, and prompts surfaces), using a worst-of badge so a trace-ingestion incident is reflected even when other surfaces are healthy.',
     whenDown: 'When Langfuse is down, trace ingestion stalls so runs stop appearing, prompt and evaluation workflows fail to record, and teams lose live observability into their LLM apps — though the underlying LLM calls can keep working.',
     faqs: [
       { q: 'Is Langfuse down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Langfuse every 5 minutes and shows real-time operational status.' },
@@ -536,9 +532,8 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   runway: {
     displayName: 'Runway',
-    description: 'Runway is a hosted generative-video AI platform (Gen-4 video, Act-Two character animation) used to generate and edit video from text and image prompts. Developers reach it through the web app and the Public API.',
-    insight: 'AIWatch tracks Runway\'s availability surfaces — Public API, App, and Backend — using a worst-of badge, so an API or backend outage is reflected even when the marketing site loads. Billing and Support are excluded from the status signal to avoid non-availability noise.',
-    whenDown: 'When Runway is down, video-generation jobs (Gen-4, Act-Two) queue or fail, the editor stops rendering, and API requests return errors — so production pipelines that depend on generated video stall until it recovers.',
+    description: 'Runway is a hosted generative-video AI platform used to generate and edit video from text and image prompts. Developers reach it through the web app and its API.',
+    whenDown: 'When Runway is down, video-generation jobs queue or fail, the editor stops rendering, and API requests return errors — so production pipelines that depend on generated video stall until it recovers.',
     faqs: [
       { q: 'Is Runway down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Runway every 5 minutes and shows real-time operational status.' },
       { q: 'Why are my Runway video generations failing?', a: 'Failed or stuck generations can indicate a Public API or Backend incident even when the app loads. Check this page for active incidents, then verify your API key and credit balance.' },
@@ -548,12 +543,11 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   luma: {
     displayName: 'Luma (Dream Machine)',
-    description: 'Luma AI\'s Dream Machine is a generative-video AI (models Ray and UNI-1) that creates and extends video from text and image prompts, via the web app and the Dream Machine API.',
-    insight: 'AIWatch tracks Luma\'s status page (Better Stack) — the Dream Machine API, Ray, and UNI-1 surfaces — so an API or model outage is reflected in real time.',
+    description: 'Luma AI\'s Dream Machine is a generative-video AI that creates and extends video from text and image prompts, via the web app and Luma\'s API.',
     whenDown: 'When Luma is down, Dream Machine generations queue or fail and the editor stops rendering, so production pipelines that depend on Luma-generated video stall until it recovers.',
     faqs: [
       { q: 'Is Luma down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Luma (Dream Machine) every 5 minutes and shows real-time operational status.' },
-      { q: 'Is Luma the same as Dream Machine?', a: 'Dream Machine is Luma AI\'s video-generation product (powered by the Ray and UNI-1 models). This page tracks the Luma / Dream Machine status.' },
+      { q: 'Is Luma the same as Dream Machine?', a: 'Dream Machine is Luma AI\'s video-generation product. This page tracks the Luma / Dream Machine status.' },
       { q: 'Why are my Dream Machine video generations failing?', a: 'Failed or stuck generations can indicate an API or model incident even when the app loads. Check this page for active incidents, then verify your API key and credit balance.' },
       { q: 'What are alternatives to Luma?', a: 'For generative video, Runway is an alternative AIWatch also tracks. AIWatch shows current availability across the AI stack.' },
       { q: 'How do I check Luma / Dream Machine status?', a: 'You can check status on this page, on the official Luma status page at status.lumalabs.ai, or on the AIWatch dashboard at ai-watch.dev.' },
@@ -614,7 +608,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   twelvelabs: {
     displayName: 'Twelve Labs',
     description: 'Twelve Labs is a video understanding AI platform that provides search, embed, and analyze capabilities over video using the Marengo and Pegasus foundation models. It enables developers to build applications that can search within videos, generate embeddings, and analyze video content.',
-    insight: 'Twelve Labs is a video understanding API focused on search, embed, and analyze workflows — not video generation. It uses a custom Atlassian Statuspage (status.twelvelabs.io).',
+    insight: 'Twelve Labs is a video understanding API focused on search, embed, and analyze workflows — not video generation. It uses an Atlassian Statuspage (status.twelvelabs.io).',
     whenDown: 'When Twelve Labs API is down, applications relying on video search, embedding, or analysis capabilities will be unable to process video content. Video indexing tasks and search queries will fail or timeout.',
     faqs: [
       { q: 'Is Twelve Labs API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Twelve Labs every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
