@@ -126,7 +126,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   'claude-ai': {
     displayName: 'claude.ai',
     description: 'claude.ai is Anthropic\'s AI assistant, available on the web, on iOS and Android, and as desktop apps. It provides direct access to Claude models for conversations, document analysis, coding assistance, and creative tasks — no API key required.',
-    insight: 'claude.ai shares Anthropic\'s status page with Claude API and Claude Code, but is tracked as a separate component. An API-level outage will typically affect claude.ai as well. However, claude.ai can experience app-specific issues (login, file upload, rendering) independently of the API. AIWatch monitors the claude.ai component separately for accurate status reporting.',
+    insight: 'claude.ai shares Anthropic\'s status page with Claude API and Claude Code, but has its own component there. An API-level outage will typically affect claude.ai as well. However, claude.ai can experience app-specific issues (login, file upload, rendering) independently of the API. This page follows the claude.ai and Claude Cowork components on that status page.',
     whenDown: 'When claude.ai is down, users cannot access conversations, file uploads, or artifact generation. Claude API and Claude Code may still function independently if the issue is client-specific.',
     faqs: [
       { q: 'Is claude.ai down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors claude.ai every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
@@ -229,7 +229,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Together AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Together AI every 5 minutes and shows real-time operational status.' },
       { q: 'Why does Together AI list so many incidents?', a: 'Together reports per-model incidents, so a single underlying issue can produce multiple entries. AIWatch groups concurrent incidents in alerts; check the official status page for per-model detail.' },
-      { q: 'What are alternatives to Together AI?', a: 'Fireworks AI, Groq Cloud, and Hugging Face Inference are alternative open-source model platforms. AIWatch shows current availability across all of them.' },
+      { q: 'What are alternatives to Together AI?', a: 'Fireworks AI, Groq Cloud, and Cerebras are alternative open-source model platforms. AIWatch shows current availability across all of them.' },
       { q: 'How do I check Together AI status?', a: 'You can check Together status on this page, on the official Together status page at status.together.ai, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -240,7 +240,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Fireworks AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Fireworks every 5 minutes and shows real-time operational status.' },
       { q: 'How do I check Fireworks AI status?', a: 'You can check Fireworks status on this page, on the official Fireworks status page at status.fireworks.ai, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to Fireworks AI?', a: 'Together AI, Groq Cloud, and Hugging Face Inference offer similar hosted open-source model inference. AIWatch shows current availability and reliability rankings.' },
+      { q: 'What are alternatives to Fireworks AI?', a: 'Together AI, Groq Cloud, and Cerebras offer similar hosted open-source model inference. AIWatch shows current availability and reliability rankings.' },
       { q: 'Is Fireworks faster than Together AI?', a: 'Check AIWatch ranking at ai-watch.dev/#ranking to compare uptime and probe response times.' },
     ],
   },
@@ -300,7 +300,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   deepseek: {
     displayName: 'DeepSeek',
     description: 'DeepSeek API provides access to DeepSeek\'s language models. DeepSeek is a Chinese AI lab.',
-    insight: 'DeepSeek migrated their status page to Flashduty in May 2026. The platform blocks plain server requests, so AIWatch reads DeepSeek\'s official Flashduty status feed via a browser-rendered fetch — live incident coverage is current again, complemented by a direct API latency probe.',
+    insight: 'DeepSeek migrated their status page to Flashduty in May 2026. The platform blocks plain server requests, so AIWatch reads DeepSeek\'s official Flashduty status feed via a browser-rendered fetch, alongside a direct API latency probe.',
     whenDown: 'When DeepSeek API is down, applications relying on its models will fail.',
     faqs: [
       { q: 'Is DeepSeek API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors DeepSeek every 5 minutes and shows real-time operational status.' },
@@ -400,7 +400,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Replicate down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Replicate every 5 minutes and shows real-time operational status.' },
       { q: 'Why is my Replicate prediction stuck?', a: 'Replicate predictions can queue during capacity spikes. Check this page for active platform incidents; if the platform is healthy, the issue may be specific to your chosen model.' },
-      { q: 'What are alternatives to Replicate?', a: 'For image generation, Stability AI offers direct API access. For general inference, Hugging Face Inference or Modal are alternatives. AIWatch shows current availability.' },
+      { q: 'What are alternatives to Replicate?', a: 'For image generation, Stability AI offers direct API access. For general inference, Modal is an alternative. AIWatch shows current availability.' },
       { q: 'How do I check Replicate status?', a: 'You can check Replicate status on this page, on Cloudflare Status, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },

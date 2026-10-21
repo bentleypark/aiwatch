@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { renderPage } from '../_is-down/html-template'
 import { getSEOContent } from '../_is-down/seo-content'
 import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
+import { SERVICES } from '../../worker/src/services'
 
 /**
  * #1028 — `insight` became optional, so the e2e guard that used to require the label on every page
@@ -94,5 +95,27 @@ describe('is-down app copy (#1028 apps batch)', () => {
 
   it('claude.ai lists its desktop apps among the ways to use it', () => {
     expect(getSEOContent('claude-ai')!.description).toMatch(/desktop/i)
+  })
+})
+
+describe('is-down AIWatch feature claims (#1028)', () => {
+  const allCopy = (slug: string) => {
+    const seo = getSEOContent(slug)!
+    return [seo.description, seo.insight ?? '', seo.whenDown, ...seo.faqs.map((f) => f.a)].join('\n')
+  }
+
+  it('no page names Hugging Face Inference as an alternative — its status page does not list Inference Providers, so AIWatch cannot show their availability', () => {
+    const offenders = Object.keys(SLUG_TO_SERVICE).filter((slug) => getSEOContent(slug) && /Hugging Face Inference/.test(allCopy(slug)))
+    expect(offenders).toEqual([])
+  })
+
+  it('claude.ai names Claude Cowork, which is in its status badge', () => {
+    const claudeai = SERVICES.find((s) => s.id === 'claudeai')!
+    expect(claudeai.statusComponentIds).toContain('bpp5gb3hpjcl')
+    expect(getSEOContent('claude-ai')!.insight).toMatch(/Claude Cowork/)
+  })
+
+  it('DeepSeek does not claim its incident coverage is current — the feed can expire and fall back to a frozen source', () => {
+    expect(allCopy('deepseek')).not.toMatch(/coverage is current/i)
   })
 })
