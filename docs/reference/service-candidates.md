@@ -41,16 +41,13 @@ members). Adding a sibling is the prerequisite for a category-aware sub-tier. Tr
 **The one genuinely EMPTY tier is not a gap, and seeding it would create one.** `openrouter` is the
 only monitored service with ZERO same-tier candidates — tier 3 also holds `bedrock` and
 `azureopenai`, and both sit in `EXCLUDE_FALLBACK`.
-It still needs no sibling: tier 3 is BELOW the specialized range, so candidates come from the
-nearest non-specialized tiers by distance instead ([fallback-tiers.md](fallback-tiers.md)).
-What makes them defensible is not the
-tier arithmetic but a fact about this service: several LLM-tier members are OpenRouter's own upstream
+It still needs no sibling: its substitutes are listed by use (#1753, [fallback-tiers.md](fallback-tiers.md)).
+What makes its open-model group defensible is a fact about this service: several LLM-tier members are OpenRouter's own upstream
 providers (Groq, Cerebras, Together, Fireworks and DeepSeek all appear in its public
 `/api/v1/providers` list, 106 providers, checked 2026-09-15), so "the gateway is down, go direct to
-the backend it was already calling" is sound advice for whoever was routing to one of them. Giving
-`openrouter` a dedicated sub-tier would move it into the 4-10 range and trip the `sameTierOnly` trap
-above, turning that into no recommendation at all. Router/gateway candidates (Portkey, Requesty,
-LiteLLM, Vercel AI Gateway) are therefore **additive at best** — do not file them as a #601-style gap.
+the backend it was already calling" is sound advice for whoever was routing to one of them.
+Router/gateway candidates (Portkey, Requesty,
+LiteLLM, Vercel AI Gateway) are therefore **additive at best** — do not file them as a #601-style gap (open question: #1755).
 
 ## Pick order
 

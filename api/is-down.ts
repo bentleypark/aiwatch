@@ -4,6 +4,7 @@ import { SLUG_TO_SERVICE } from './_is-down/slug-map'
 import { getSEOContent } from './_is-down/seo-content'
 import { renderPage } from './_is-down/html-template'
 import type { RecoveryBaseline } from '../worker/src/recovery-baseline-text'
+import { substituteGroupsFor, pickSubstitutes } from './_shared/substitutes'
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
@@ -87,6 +88,8 @@ export default async function handler(req: Request) {
     // #1062 facet B — set when the outage ROUTES to a capability tier (OpenAI 'Images' down → image tier),
     // so the Alternatives block heading names the affected capability ("… for image generation").
     let fallbackCapabilityLabel: string | undefined
+    // #1753 — a listed service's substitutes, one entry per use (the card's subheadings).
+    let fallbackGroups: Array<{ use: string; items: typeof fallbacks }> | undefined
     let aiInsight: { summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null = null
     // #926 — the worker returns ONE analysis per active incident (aiAnalysis: Record<svcId, AIAnalysisResult[]>).
     // Keep the FULL array for the visible AI Analysis card (parity with the dashboard AnalysisModal, which
@@ -425,7 +428,22 @@ export default async function handler(req: Request) {
             }
             return result
           }
-          fallbacks = orderForFallback(allServices
+          const isLiveCandidate = (s: (typeof allServices)[number]) => s.status === 'operational'
+            // #1384 — a `retainedBridge` entry (worker/src/services.ts `mergeRetainedIncidentHistory`)
+            // unresolved at migration time never resolves for the life of the finite migration
+            // bridge, so without this exclusion a candidate could be permanently unrecommendable as
+            // a fallback over a stale ghost from a retiring source (the SAME gap found and fixed in
+            // worker/src/fallback.ts's `hasActiveIncident` — this is is-down's own parallel copy of
+            // that check, round-9 structural pass).
+            && !(s.incidents ?? []).some(i => (i as { status?: string; retainedBridge?: boolean }).status !== 'resolved' && !(i as { retainedBridge?: boolean }).retainedBridge)
+            && !s.incidentSourceStale
+          const listed = substituteGroupsFor(entry.id, fallbackCapabilityLabel ?? null)
+          if (listed) {
+            const clean = allServices.filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id && isLiveCandidate(s))
+            fallbackGroups = pickSubstitutes(listed, clean, (inGroup) => orderForFallback(inGroup))
+              .map(({ group, items }) => ({ use: group.use, items: items.map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status })) }))
+            fallbacks = fallbackGroups.flatMap(g => g.items)
+          } else fallbacks = orderForFallback(allServices
             // #550 — exclude candidates with an unresolved incident even if status is still 'operational'.
             // Deliberately BROADER than BOTH `hasLiveIncident` (_is-down/html-template.ts), which excludes
             // `monitoring`, AND worker `fallback.ts`'s own gate, which exempts #811 advisory titles. Not a
@@ -440,15 +458,7 @@ export default async function handler(req: Request) {
             // otherwise log six "no API_TIER" false alarms on EVERY view (#402/#403 breadcrumb).
             .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id
               && (routedCross ? inSourceTier(s.id) : s.category === entry.category)
-              && s.status === 'operational'
-              // #1384 — a `retainedBridge` entry (worker/src/services.ts `mergeRetainedIncidentHistory`)
-              // unresolved at migration time never resolves for the life of the finite migration
-              // bridge, so without this exclusion a candidate could be permanently unrecommendable as
-              // a fallback over a stale ghost from a retiring source (the SAME gap found and fixed in
-              // worker/src/fallback.ts's `hasActiveIncident` — this is is-down's own parallel copy of
-              // that check, round-9 structural pass).
-              && !(s.incidents ?? []).some(i => (i as { status?: string; retainedBridge?: boolean }).status !== 'resolved' && !(i as { retainedBridge?: boolean }).retainedBridge)
-              && !s.incidentSourceStale
+              && isLiveCandidate(s)
               // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
               && (sameTierOnly ? admittedBySubTier(s.id) : !(tierFor(s.id) >= 4 && tierFor(s.id) <= 10))
               // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
@@ -545,7 +555,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline, serviceData === null && !EXCLUDE_FALLBACK.includes(entry.id))
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline, serviceData === null && !EXCLUDE_FALLBACK.includes(entry.id), fallbackGroups)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT

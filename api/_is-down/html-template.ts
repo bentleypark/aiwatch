@@ -462,6 +462,8 @@ export function renderPage(
   // below the worker's floor of 10 qualifying incidents, or from a worker that predates it.
   recoveryBaseline?: RecoveryBaseline | null,
   fallbacksUnavailable = false,
+  // #1753 — a listed service's substitutes, one entry per use; rendered under "For <use>" subheadings.
+  fallbackGroups?: Array<{ use: string; items: Fallback[] }>,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -631,6 +633,7 @@ ${ERRORS_CSS}
 .fallback-score{font-size:12px;color:#8b949e}
 .fallback-try{display:inline-block;padding:5px 11px;border:1px solid #2ea043;color:#3fb950;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
 .fallback-try:hover{background:#2ea043;color:#fff}
+.fallback-use{font-size:12px;color:#8b949e;margin:14px 2px 4px}.fallback-use:first-child{margin-top:2px}
 .fallback-disclosure{font-size:11px;color:#8b949e;opacity:0.85;margin:10px 2px 0}
 .footer{text-align:center;padding:32px 0;font-size:13px;color:#484f58;border-top:1px solid rgba(255,255,255,0.07);margin-top:40px}
 ${ALERT_CTA_CSS}
@@ -690,7 +693,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
-${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service), recoveryBaseline ?? undefined)}
+${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service), recoveryBaseline ?? undefined, fallbackGroups)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderUpstreamNote(upstreamNote, seo.displayName)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
@@ -700,7 +703,7 @@ ${renderReportFeed(reports, seo)}
 ${renderDescription(seo, service)}
 ${renderErrors(seo)}
 ${renderFAQ(seo)}
-${renderFallbacks(seo, fallbacks, service?.id, fallbackCapabilityLabel, fallbacksUnavailable)}
+${renderFallbacks(seo, fallbacks, service?.id, fallbackCapabilityLabel, fallbacksUnavailable, fallbackGroups)}
 ${renderShareButtons(seo, service, canonical, ogImageUrl, aiInsight)}
 ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
@@ -892,7 +895,7 @@ export function hasLiveIncident(service: ServiceData | null | undefined): boolea
 // true and collapse `isResolved` back to the badge — re-shipping this bug silently at a second call
 // site, with no type error. Same reason `filterByComponentStatus` takes `components` required (#970),
 // and the exact class `debugging_optional_param_reempties_derived_set` records as recurring.
-function renderAIInsight(insight: AIInsight | AIInsight[] | null | undefined, serviceStatus: string | undefined, fallbacks: Fallback[] | undefined, capabilityLabel: string | undefined, ongoing: boolean, baseline: RecoveryBaseline | undefined): string {
+function renderAIInsight(insight: AIInsight | AIInsight[] | null | undefined, serviceStatus: string | undefined, fallbacks: Fallback[] | undefined, capabilityLabel: string | undefined, ongoing: boolean, baseline: RecoveryBaseline | undefined, groups?: Array<{ use: string; items: Fallback[] }>): string {
   if (!insight) return ''
   const list = Array.isArray(insight) ? insight : [insight]
   if (list.length === 0) return ''
@@ -930,10 +933,13 @@ function renderAIInsight(insight: AIInsight | AIInsight[] | null | undefined, se
   // outlives the wire incident list. Gated on the STATUS, not on the service record: `serviceStatus` is
   // already `assertableStatus(service)` (it resolves the unreadable case for the caller), and this
   // function never receives the record itself.
+  const sections = groups
+    ? groups.map(g => ({ label: g.use as string | undefined, items: g.items }))
+    : [{ label: capabilityLabel, items: fallbacks ?? [] }]
   const fallbackHtml = anyNeedsFallback && serviceStatus !== 'operational' && serviceStatus !== 'unknown' && fallbacks && fallbacks.length > 0
     ? `<div style="margin-top:8px;padding:8px 10px;background:#0d1117;border-radius:6px;border-left:3px solid #d29922">
-<span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives${capabilityLabel ? ` for ${esc(capabilityLabel.toLowerCase())}` : ''}</span>
-${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')}
+${sections.map(s => `<span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives${s.label ? ` for ${esc(lowerFirst(s.label))}` : ''}</span>
+${s.items.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')}`).join('\n')}
 </div>`
     : ''
   const bodies = list.map((ins, idx) => renderInsightBody(ins, multi, idx)).join('')
@@ -1798,14 +1804,16 @@ function renderFAQ(seo: ServiceSEO): string {
 <div class="card">${items}</div>`
 }
 
-function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string, capabilityLabel?: string, unavailable = false): string {
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1)
+
+function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string, capabilityLabel?: string, unavailable = false, groups?: Array<{ use: string; items: Fallback[] }>): string {
   if (fallbacks.length === 0 && unavailable) {
     return `<h2>Alternatives When ${esc(seo.displayName)} is Down</h2>
 <div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">Alternatives can&rsquo;t be shown right now &mdash; AIWatch could not load current status data.</p></div>`
   }
   if (fallbacks.length === 0) return ''
   let anyOutbound = false
-  const items = fallbacks.map(f => {
+  const renderItem = (f: Fallback) => {
     const scoreText = f.score != null ? `Score: ${f.score}` : ''
     const color = statusColor(f.status)
     const label = statusLabel(f.status)
@@ -1833,9 +1841,12 @@ function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string
 </div>
 ${tryBtn}
 </div>`
-  }).join('\n')
+  }
+  const items = groups
+    ? groups.map(g => `<p class="fallback-use">For ${esc(g.use)}</p>\n${g.items.map(renderItem).join('\n')}`).join('\n')
+    : fallbacks.map(renderItem).join('\n')
 
-  return `<h2>${capabilityLabel ? `Alternatives for ${esc(capabilityLabel.toLowerCase())} when ${esc(seo.displayName)} is Down` : `Alternatives When ${esc(seo.displayName)} is Down`}</h2>
+  return `<h2>${capabilityLabel ? `Alternatives for ${esc(lowerFirst(capabilityLabel))} when ${esc(seo.displayName)} is Down` : `Alternatives When ${esc(seo.displayName)} is Down`}</h2>
 <div class="card">
 ${items}
 ${anyOutbound ? `<p class="mono fallback-disclosure">Open &#8599; goes to the provider site &middot; ranked by AIWatch Score, not paid.</p>` : ''}

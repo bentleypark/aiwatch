@@ -1,3 +1,6 @@
+import { SUBSTITUTES, substituteFaqAnswer } from '../_shared/substitutes'
+import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE } from './slug-map'
+
 // Per-service SEO content for "Is X Down?" pages
 
 export interface ServiceSEO {
@@ -11,6 +14,10 @@ export interface ServiceSEO {
     items: Array<{ message: string; side?: 'provider' | 'yours'; meaning: string; fix: string }>
   }
 }
+
+// #1753 — the alternatives answer of a listed service is generated from the same list the card reads.
+const serviceName = (id: string) => SLUG_TO_SERVICE[SERVICE_ID_TO_SLUG[id]]?.name ?? id
+const substitutesAnswer = (id: string, displayName: string) => substituteFaqAnswer(displayName, SUBSTITUTES[id], serviceName)
 
 const SEO_CONTENT: Record<string, ServiceSEO> = {
   // #1164 — keyed by URL slug (matches SLUG_TO_SERVICE); 'claude'/'openai' moved to
@@ -207,7 +214,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is Cohere API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cohere every 5 minutes and shows real-time operational status.' },
       { q: 'How do I check Cohere status?', a: 'You can check Cohere status on this page, on the official Cohere status page at status.cohere.com, or on the AIWatch dashboard at ai-watch.dev.' },
       { q: 'Are Cohere embeddings affected during incidents?', a: 'Cohere\'s status page lists its embed models as components separate from its generative models. Check this page for the current overall status, and the official status page for component-level breakdowns.' },
-      { q: 'What can I use instead of Cohere?', a: 'When Cohere is down, Voyage AI is a strong alternative for embeddings and reranking. For chat and generation, OpenAI, Mistral, or Groq are options. AIWatch shows current availability.' },
+      { q: 'What can I use instead of Cohere?', a: substitutesAnswer('cohere', 'Cohere') },
     ],
   },
   groq: {
@@ -305,7 +312,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is DeepSeek API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors DeepSeek every 5 minutes and shows real-time operational status.' },
       { q: 'Why is DeepSeek slow today?', a: 'Check this page for active incidents, and the AIWatch dashboard for probe response times.' },
-      { q: 'What are alternatives to DeepSeek?', a: 'Mistral, Groq, OpenAI, and Claude are alternatives depending on your needs.' },
+      { q: 'What are alternatives to DeepSeek?', a: substitutesAnswer('deepseek', 'DeepSeek') },
       { q: 'How do I check DeepSeek status?', a: 'You can check DeepSeek status on this page, on the official DeepSeek status page at status.deepseek.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -317,7 +324,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Kimi API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the Kimi Open API every 5 minutes and shows real-time operational status.' },
       { q: 'Is this the same as the Kimi app?', a: 'No. This page tracks the developer API (platform.kimi.com). The Kimi app at kimi.com has its own page, because Moonshot\'s status page lists the two under separate components.' },
-      { q: 'What are alternatives to Kimi API?', a: 'DeepSeek, Mistral, OpenAI, and Claude are alternatives depending on your needs.' },
+      { q: 'What are alternatives to Kimi API?', a: substitutesAnswer('kimi', 'Kimi API') },
       { q: 'How do I check Kimi API status?', a: 'You can check Kimi API status on this page, on the official Moonshot status page at status.moonshot.cn, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -329,7 +336,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is OpenRouter down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors OpenRouter every 5 minutes and shows real-time operational status.' },
       { q: 'Why is OpenRouter not working?', a: 'OpenRouter may be experiencing gateway issues or its upstream model providers may be having outages. Check this page and the AIWatch dashboard to see which underlying providers are affected.' },
-      { q: 'What can I use instead of OpenRouter?', a: 'When OpenRouter is down, you can call upstream providers directly (OpenAI, Claude, Mistral, etc.). AIWatch shows current availability for each provider.' },
+      { q: 'What can I use instead of OpenRouter?', a: substitutesAnswer('openrouter', 'OpenRouter') },
       { q: 'How do I check OpenRouter status?', a: 'You can check OpenRouter status on this page, on the official OpenRouter status page at status.openrouter.ai, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },

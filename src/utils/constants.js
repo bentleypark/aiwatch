@@ -1,5 +1,6 @@
 import { regionStatusOf } from './regionStatus'
 import { isDisplayAffected } from './statusDisplay'
+import { substituteGroupsFor, pickSubstitutes, flattenSubstitutes } from '../../api/_shared/substitutes'
 
 export const VALID_THEMES = ['dark', 'light', 'system']
 
@@ -222,7 +223,7 @@ export const API_TIER = {
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
 // promoted here so the sync test can compare both copies via a single import without parsing JSX.
 export const TIER_LABEL = {
-  1: 'LLM', 1.5: 'Model API', 2: 'LLM Hosting', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
+  1: 'LLM', 1.5: 'LLM', 2: 'LLM Hosting', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
   11: 'Coding Agent', // #1027 — single tier for all coding agents (was CLI/IDE/Plugin Agent)
   21: 'AI Apps',
 }
@@ -514,6 +515,8 @@ export function orderForFallback(candidates, sourceTier) {
  * @param {object[]} allServices - All services (needs .id, .category, .status, .incidents, .aiwatchScore)
  * @returns {{ id: string, name: string, aiwatchScore: number | null }[]}
  */
+const isLiveCandidate = (s) => s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
+
 export function getFallbacks(service, allServices) {
   if (!service || !Array.isArray(allServices) || EXCLUDE_FALLBACK.includes(service.id)) return []
   if (service.fallbackSuppressed) return [] // #880 — the worker's verdict: outage outside the fallback scope
@@ -521,6 +524,8 @@ export function getFallbacks(service, allServices) {
   // capability's tier; a secondary cap with no peer tier (realtime) suppresses.
   const routed = routingTier(service)
   if (routed === ROUTE_SUPPRESS) return []
+  const listed = substituteFallbacks(service, allServices)
+  if (listed) return flattenSubstitutes(listed)
   const sourceTier = routed ?? tierFor(service.id)
   // #859 — specialized sub-tier source → same-tier candidates only (no cross-tier bleed)
   const sameTierOnly = isSpecializedSubTier(sourceTier)
@@ -540,7 +545,7 @@ export function getFallbacks(service, allServices) {
     // services and `tierFor`'s warn-once keeps meaning "someone forgot a tier entry" (#402/#403).
     .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== service.id
       && (routedCross ? inSourceTier(s.id) : s.category === service.category)
-      && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
+      && isLiveCandidate(s)
       // #1062 facet C — a specialized sub-tier (Image/Video/Voice) also admits the multimodal providers of
       // its capability (OpenAI), ranked after the dedicated sibling by tier distance.
       && (sameTierOnly ? admittedBySubTier(s.id) : !isSpecializedSubTier(tierFor(s.id)))
@@ -551,6 +556,17 @@ export function getFallbacks(service, allServices) {
   return orderForFallback(eligible, sourceTier)
     .slice(0, 2)
     .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
+}
+
+// #1753 — MIRROR of worker substituteFallbacks: a listed service's substitutes per group, or null.
+export function substituteFallbacks(service, allServices) {
+  const groups = substituteGroupsFor(service.id, routedCapability(service))
+  if (!groups) return null
+  if (service.fallbackSuppressed || routingTier(service) === ROUTE_SUPPRESS) return []
+  const clean = allServices.filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== service.id
+    && isLiveCandidate(s))
+  return pickSubstitutes(groups, clean, (inGroup) => orderForFallback(inGroup, tierFor(service.id)))
+    .map(({ group, items }) => ({ group, items: items.map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null })) }))
 }
 
 const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
@@ -601,8 +617,20 @@ export function getGroupedFallbacks(affected, allServices) {
   // First-non-empty-per-key wins; numGroups is the count of rendered groups.
   const seenGroups = new Set()
   const resolved = []
-  for (const svc of affected) {
+  // #1753 — MIRROR: unlisted anchors resolve first.
+  const listedOf = new Map(affected.map(s => [s.id, substituteFallbacks(s, allServices)]))
+  for (const svc of [...affected.filter(s => !listedOf.get(s.id)), ...affected.filter(s => listedOf.get(s.id))]) {
     if (EXCLUDE_FALLBACK.includes(svc.id)) continue
+    const listed = listedOf.get(svc.id)
+    if (listed) {
+      for (const { group, items } of listed) {
+        const key = `${svc.category}:${group.label}`
+        if (seenGroups.has(key)) continue
+        seenGroups.add(key)
+        resolved.push({ category: svc.category, label: group.label, candidates: items })
+      }
+      continue
+    }
     // #1119 — MIRROR of worker groupKeyOf (see there for the full rule): the key groups anchors that
     // draw from the same pool. A ROUTED anchor's pool depends on its routed tier AND on its own
     // capabilityTagsOf tag (#1129, facet A), so the key encodes both: routed anchors at one tier share

@@ -885,18 +885,18 @@ describe('buildRssFeed — fallback ranking parity with Discord (#724)', () => {
   it('orders the fallback block by the same getFallbacks ranking when services carry aiwatchScore', () => {
     // services:latest has no aiwatchScore, so the feed handler attaches it before calling buildRssFeed.
     // With scores present, the fallback line must match getFallbacks() (the Discord/dashboard oracle).
-    const down = { ...service({ id: 'cohere', name: 'Cohere', category: 'api', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
+    const down = { ...service({ id: 'together', name: 'Together AI', category: 'api', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
     const candidates = [
       { ...service({ id: 'groq', name: 'GroqCloud', category: 'api', status: 'operational' }), aiwatchScore: 50 },
-      { ...service({ id: 'mistral', name: 'Mistral API', category: 'api', status: 'operational' }), aiwatchScore: 92 },
+      { ...service({ id: 'fireworks', name: 'Fireworks AI', category: 'api', status: 'operational' }), aiwatchScore: 92 },
     ]
     const all = [down, ...candidates] as ServiceStatus[]
-    const expected = getFallbacks('cohere', 'api', all).map((f) => f.name)
-    expect(expected.length).toBeGreaterThan(0)
+    const expected = getFallbacks('together', 'api', all).map((f) => f.name)
+    expect(expected).toEqual(['Fireworks AI', 'GroqCloud'])
     const xml = buildRssFeed(all, { scope: 'all' }, NOW)
-    const tryLine = xml.split('\n').find((l) => l.includes('• Model API:')) ?? ''
+    const tryLine = xml.split('\n').find((l) => l.includes('• LLM Hosting:')) ?? ''
     // the feed's candidate order matches getFallbacks exactly (proves scored services are used)
-    expect(tryLine).toContain(`• Model API: ${expected.join(' · ')}`)
+    expect(tryLine).toContain(`• LLM Hosting: ${expected.join(' · ')}`)
   })
 })
 
@@ -1573,10 +1573,10 @@ describe('feed titles follow the Discord alert titles (#1674)', () => {
 
   it('the fallback lines print no score, so a score change that keeps the order leaves the item unchanged (#768)', () => {
     const render = (groqScore: number) => {
-      const down = { ...service({ id: 'cohere', name: 'Cohere', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
+      const down = { ...service({ id: 'together', name: 'Together AI', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
       const alts = [
         { ...service({ id: 'groq', name: 'GroqCloud', status: 'operational' }), aiwatchScore: groqScore },
-        { ...service({ id: 'mistral', name: 'Mistral API', status: 'operational' }), aiwatchScore: 99 },
+        { ...service({ id: 'fireworks', name: 'Fireworks AI', status: 'operational' }), aiwatchScore: 99 },
       ]
       return buildRssFeed([down, ...alts] as ServiceStatus[], { scope: 'all' }, NOW)
     }

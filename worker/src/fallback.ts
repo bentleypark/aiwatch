@@ -2,6 +2,7 @@
 
 import { isNonReliabilityAdvisory } from './utils'
 import { isAffectedStatus, asServiceStatus } from './status-verdict'
+import { substituteGroupsFor, pickSubstitutes, flattenSubstitutes, type SubstituteGroup } from '../../api/_shared/substitutes'
 
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 // #756 — stability un-excluded now that the image category has ≥2 members (Stability + FLUX recommend
@@ -502,6 +503,8 @@ export function getFallbacks(
   const source = services.find(s => s.id === serviceId)
   const routed = routingTier(source)
   if (routed === ROUTE_SUPPRESS) return []
+  const listed = substituteFallbacks(serviceId, services)
+  if (listed) return flattenSubstitutes(listed).map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))
   const sourceTags = capabilityTagsOf(source)
   const sourceTier = routed ?? tierFor(serviceId)
   // #859 — for a specialized sub-tier source, restrict candidates to the SAME tier (no cross-tier bleed).
@@ -549,7 +552,7 @@ export function getFallbacks(
     // per-REQUEST, so it would be false alarms on every routed page view, drowning the real signal.
     .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== serviceId
       && (routedCross ? inSourceTier(s.id) : s.category === category)
-      && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
+      && isLiveCandidate(s)
       // #1062 facet C — a specialized sub-tier (Image/Video/Voice) also admits the multimodal providers of
       // its capability (OpenAI), which the tier-distance sort ranks after the dedicated sibling.
       && (sameTierOnly ? admittedBySubTier(s.id) : !isSpecializedSubTier(tierFor(s.id)))
@@ -570,6 +573,23 @@ export function getFallbacks(
     }
   }
   return picked.map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))
+}
+
+const isLiveCandidate = (s: FallbackCandidate) => s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
+
+// #1753 — a listed service's substitutes, per group, or null when it has no list. Same live-clean gate as
+// getFallbacks; tier routing does not apply inside a list.
+export function substituteFallbacks(
+  serviceId: string,
+  services: FallbackCandidate[],
+): Array<{ group: SubstituteGroup; items: FallbackCandidate[] }> | null {
+  const source = services.find(s => s.id === serviceId)
+  const groups = substituteGroupsFor(serviceId, routedCapability(source))
+  if (!groups) return null
+  if (source?.fallbackSuppressed || routingTier(source) === ROUTE_SUPPRESS) return []
+  const clean = services.filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== serviceId
+    && isLiveCandidate(s))
+  return pickSubstitutes(groups, clean, (inGroup) => orderForFallback(inGroup, tierFor(serviceId)))
 }
 
 export function buildFallbackText(fallbacks: Array<{ name: string; score: number | null }>): string {
@@ -594,7 +614,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 // Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
 // Overview.jsx imports from there so there is no third inline copy to drift against.
 export const TIER_LABEL: Record<number, string> = {
-  1: 'LLM', 1.5: 'Model API', 2: 'LLM Hosting', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
+  1: 'LLM', 1.5: 'LLM', 2: 'LLM Hosting', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
   11: 'Coding Agent', // #1027 — single tier for all coding agents (matches CATEGORY_LABEL[agent])
   21: 'AI Apps', // matches CATEGORY_LABEL[app] so the existing buildGroupedFallbackText copy stays consistent
 }
@@ -694,7 +714,20 @@ export function getGroupedFallbacks(
   // First-NON-EMPTY-per-key wins; numGroups is the count of rendered groups.
   const resolved: Array<{ label: string; capability?: string; fallbacks: Array<{ name: string; score: number | null }> }> = []
   const seen = new Set<string>()
-  for (const svc of eligible) {
+  // #1753 — unlisted anchors resolve first, so a key a listed group shares with one is answered the same
+  // way whichever comes first in the array.
+  const listedOf = new Map(eligible.map(s => [s.id, substituteFallbacks(s.id, services)]))
+  for (const svc of [...eligible.filter(s => !listedOf.get(s.id)), ...eligible.filter(s => listedOf.get(s.id))]) {
+    const listed = listedOf.get(svc.id)
+    if (listed) {
+      for (const { group, items } of listed) {
+        const key = `${svc.category}:${group.label}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        resolved.push({ label: group.label, fallbacks: items.map(s => ({ name: s.name, score: s.aiwatchScore ?? null })) })
+      }
+      continue
+    }
     const key = groupKeyOf(svc)
     if (seen.has(key)) continue
     const fbs = getFallbacks(svc.id, svc.category, services)

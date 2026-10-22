@@ -301,8 +301,8 @@ describe('#1725 — frontend: a source that requires a capability admits only th
     const [perplexity, cohere] = [services[0], services[1]]
     const byLabel = (groups) => Object.fromEntries(groups.map((g) => [g.label, g.items.map((f) => f.name)]))
     const forward = byLabel(getGroupedFallbacks([perplexity, cohere], services))
-    expect(Object.keys(forward).sort()).toEqual(['Model API', 'Model API (web search)'])
-    expect(forward['Model API (web search)']).toEqual(['OpenAI API'])
+    expect(Object.keys(forward).sort()).toEqual(['LLM', 'LLM (web search)'])
+    expect(forward['LLM (web search)']).toEqual(['OpenAI API'])
     expect(byLabel(getGroupedFallbacks([cohere, perplexity], services))).toEqual(forward)
   })
 })
@@ -429,35 +429,10 @@ describe('#1748 — frontend: open-model hosts are split from the model-vendor A
     expect(getFallbacks({ id: 'claude', category: 'api' }, [svc('groq', 'GroqCloud', 99), svc('deepseek', 'DeepSeek API', 50)]).map(f => f.name)).toEqual(['DeepSeek API', 'GroqCloud'])
   })
 
-  it('vendors sit between tier 1 and the hosts: OpenRouter gets a host before a higher-scored vendor', () => {
-    expect(getFallbacks({ id: 'openrouter', category: 'api' }, [svc('kimi', 'Kimi API', 99), svc('fireworks', 'Fireworks AI', 50)]).map(f => f.name)).toEqual(['Fireworks AI', 'Kimi API'])
-  })
-
-  it('with a frontier LLM and a vendor both down, each is answered from its own pool whatever the order', () => {
-    const down = (id, name) => ({ ...svc(id, name, 80), status: 'down' })
-    const services = [down('claude', 'Claude API'), down('cohere', 'Cohere API'), svc('openai', 'OpenAI API', 70), svc('deepseek', 'DeepSeek API', 95), svc('kimi', 'Kimi API', 94)]
-    for (const order of [['claude', 'cohere'], ['cohere', 'claude']]) {
-      const affected = order.map(id => services.find(s => s.id === id))
-      const names = getGroupedFallbacks(affected, services).map(g => g.items.map(f => f.name))
-      expect(names, order.join(',')).toContainEqual(['OpenAI API'])
-      expect(names, order.join(',')).toContainEqual(['DeepSeek API'])
-    }
-  })
-
-  it('with a host and a vendor both down, each is answered from its own pool whatever the order', () => {
-    const down = (id, name) => ({ ...svc(id, name, 80), status: 'down' })
-    const services = [down('together', 'Together AI'), down('cohere', 'Cohere API'), svc('kimi', 'Kimi API', 95), svc('deepseek', 'DeepSeek API', 94), svc('groq', 'GroqCloud', 85), svc('cerebras', 'Cerebras Inference', 84)]
-    for (const order of [['together', 'cohere'], ['cohere', 'together']]) {
-      const affected = order.map(id => services.find(s => s.id === id))
-      const names = getGroupedFallbacks(affected, services).map(g => g.items.map(f => f.name))
-      expect(names, order.join(',')).toContainEqual(['GroqCloud'])
-      expect(names, order.join(',')).toContainEqual(['Kimi API'])
-    }
-  })
-
   it('a non-specialized source never draws a specialized sub-tier candidate', () => {
     const services = [svc('fishaudio', 'Fish Audio', 99), svc('fireworks', 'Fireworks AI', 50)]
-    expect(getFallbacks({ id: 'openrouter', category: 'api' }, services).map(f => f.name)).toEqual(['Fireworks AI'])
+    expect(getFallbacks({ id: 'groq', category: 'api' }, services).map(f => f.name)).toEqual(['Fireworks AI'])
+    expect(getFallbacks({ id: 'groq', category: 'api' }, [svc('fishaudio', 'Fish Audio', 99)])).toEqual([])
   })
 })
 
@@ -949,8 +924,8 @@ describe('#1119 — frontend mirror: a ROUTED outage crosses the category bounda
 
   it('a non-routed LLM source keeps CROSS-TIER fill (separates "relax when routed" from "relax always")', () => {
     // API_TIER maps category↔tier ~1:1 today, so a non-routed APP source can't tell the tier pin apart
-    // from the category filter. This case can: deepseek is tier 1.5, its peers are tier 1.
-    const src = { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'degraded', aiwatchScore: 76, incidents: [] }
+    // from the category filter. This case can: groq is tier 2, its peers are tier 1.
+    const src = { id: 'groq', category: 'api', name: 'GroqCloud', status: 'degraded', aiwatchScore: 76, incidents: [] }
     expect(getFallbacks(src, [src, ...pool]).map(f => f.id)).toEqual(['claude', 'gemini'])
   })
 
@@ -1047,5 +1022,69 @@ describe('#1698 — an OpenRouter TTS-only or STT-only outage recommends that ha
     const tts = openrouter('TTS')
     const groups = getGroupedFallbacks([audio, tts], [audio, tts, ...voice])
     expect(groups.map((g) => g.label)).toEqual(['Audio / speech', 'Text to speech'])
+  })
+})
+
+describe('#1753 — frontend: listed services recommend their substitute lists', () => {
+  const svc = (id, name, aiwatchScore, extra = {}) => ({ id, category: 'api', name, status: 'operational', aiwatchScore, scoreConfidence: 'high', ...extra })
+  const down = (id, name, extra = {}) => svc(id, name, 50, { status: 'down', ...extra })
+  const board = [
+    svc('groq', 'GroqCloud', 99), svc('cerebras', 'Cerebras Inference', 98), svc('together', 'Together AI', 60), svc('fireworks', 'Fireworks AI', 70),
+    svc('claude', 'Claude API', 90), svc('openai', 'OpenAI API', 85), svc('kimi', 'Kimi API', 97), svc('voyageai', 'Voyage AI', 80), svc('jina', 'Jina AI', 75),
+  ]
+
+  it('DeepSeek recommends a host serving its models and a general LLM API, not the higher-scored hosts or vendors', () => {
+    const deepseek = down('deepseek', 'DeepSeek API')
+    expect(getFallbacks(deepseek, [deepseek, ...board]).map(f => f.name)).toEqual(['Fireworks AI', 'Claude API'])
+  })
+
+  it('a listed candidate with an active incident or a stale source is never recommended', () => {
+    const deepseek = down('deepseek', 'DeepSeek API')
+    const incident = { id: 'i', title: 'Elevated errors', status: 'investigating', impact: 'major', startedAt: '2026-10-22T00:00:00Z' }
+    const pool = board.filter(s => !['together', 'fireworks'].includes(s.id))
+      .map(s => s.id === 'claude' ? { ...s, incidents: [incident] } : s.id === 'openai' ? { ...s, incidentSourceStale: true } : s)
+    expect(getFallbacks(deepseek, [deepseek, ...pool])).toEqual([])
+  })
+
+  it('a Cohere rerank-only outage is answered from its list, embeddings and reranking included', () => {
+    const cohere = down('cohere', 'Cohere API', { components: [{ name: 'rerank-v4.0-pro', status: 'major_outage' }, { name: 'command-a-03-2025', status: 'operational' }] })
+    expect(getGroupedFallbacks([cohere], [cohere, ...board]).map(g => [g.label, g.items.map(f => f.name)])).toEqual([['LLM', ['Claude API']], ['Embeddings', ['Voyage AI']]])
+  })
+
+  it('a shared LLM key is answered by the unlisted anchor, whichever comes first', () => {
+    const ids = [['deepseek', 'DeepSeek API'], ['claude', 'Claude API'], ['gemini', 'Gemini API'], ['xai', 'SpaceXAI API'], ['mistral', 'Mistral API'], ['together', 'Together AI'], ['fireworks', 'Fireworks AI']]
+    const downs = ids.map(([id, name]) => down(id, name))
+    const all = [...downs, svc('openai', 'OpenAI API', 85), svc('kimi', 'Kimi API', 97)]
+    const llm = (order) => getGroupedFallbacks(order, all).find(g => g.label === 'LLM')?.items.map(f => f.name)
+    expect(llm([downs[1], downs[0]])).toEqual(['OpenAI API', 'Kimi API'])
+    expect(llm([downs[0], downs[1]])).toEqual(['OpenAI API', 'Kimi API'])
+  })
+
+  it('a Cohere and an OpenAI embeddings outage together render one Embeddings group', () => {
+    const embedDown = (id, name, component) => down(id, name, { components: [{ name: component, status: 'major_outage' }, { name: 'Chat', status: 'operational' }] })
+    const cohere = embedDown('cohere', 'Cohere API', 'embed-v4.0')
+    const openai = embedDown('openai', 'OpenAI API', 'Embeddings')
+    const all = [cohere, openai, ...board.filter(s => s.id !== 'openai')]
+    for (const order of [[openai, cohere], [cohere, openai]]) {
+      expect(getGroupedFallbacks(order, all).map(g => [g.label, g.items.map(f => f.name)])).toEqual([['Embeddings', ['Voyage AI', 'Jina AI']]])
+    }
+  })
+
+  it('a listed service whose outage routes to a suppressed capability recommends nothing', () => {
+    const cohere = down('cohere', 'Cohere API', { components: [{ name: 'Realtime API', status: 'major_outage' }, { name: 'command-a-03-2025', status: 'operational' }] })
+    expect(getFallbacks(cohere, [cohere, ...board])).toEqual([])
+    expect(getGroupedFallbacks([cohere], [cohere, ...board])).toEqual([])
+  })
+
+  it('Claude and Cohere down together render one LLM group, whichever comes first', () => {
+    const cohere = down('cohere', 'Cohere API')
+    const claude = down('claude', 'Claude API')
+    const all = [cohere, claude, ...board.filter(s => s.id !== 'claude')]
+    const forward = getGroupedFallbacks([claude, cohere], all)
+    const reverse = getGroupedFallbacks([cohere, claude], all)
+    expect(forward.map(g => g.label)).toEqual(['LLM', 'Embeddings'])
+    expect(forward.find(g => g.label === 'LLM').items.map(f => f.name)).toEqual(['OpenAI API'])
+    expect(reverse).toHaveLength(forward.length)
+    expect(reverse).toEqual(expect.arrayContaining(forward))
   })
 })

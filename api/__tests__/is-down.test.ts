@@ -439,15 +439,121 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
   it('#1748 — a non-specialized source never lists a specialized sub-tier candidate', async () => {
     const payload = new Response(JSON.stringify({
       services: [
-        svc({ id: 'openrouter', name: 'OpenRouter', status: 'down', scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 'r-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'groq', name: 'GroqCloud', status: 'down', scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 'r-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
         svc({ id: 'fishaudio', name: 'Fish Audio', scoreConfidence: 'high', aiwatchScore: 99 }),
         svc({ id: 'fireworks', name: 'Fireworks AI', scoreConfidence: 'high', aiwatchScore: 50 }),
       ],
       aiAnalysis: {},
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     fetchMock.mockResolvedValueOnce(payload)
-    const html = await (await handler(makeReq('openrouter'))).text()
+    const html = await (await handler(makeReq('groq'))).text()
     expect(bulletOrder(html)).toEqual(['Fireworks AI'])
+  })
+
+  it('#1753 — a listed service renders its substitutes under one subheading per use', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'deepseek', name: 'DeepSeek API', status: 'down', scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 'd-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'groq', name: 'GroqCloud', scoreConfidence: 'high', aiwatchScore: 99 }),
+        svc({ id: 'together', name: 'Together AI', scoreConfidence: 'high', aiwatchScore: 60 }),
+        svc({ id: 'fireworks', name: 'Fireworks AI', scoreConfidence: 'high', aiwatchScore: 70 }),
+        svc({ id: 'kimi', name: 'Kimi API', scoreConfidence: 'high', aiwatchScore: 97 }),
+        svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 85 }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const html = await (await handler(makeReq('deepseek'))).text()
+    expect([...html.matchAll(/class="fallback-use">([^<]+)/g)].map(m => m[1])).toEqual(['For the same DeepSeek models on another host', 'For another LLM API'])
+    expect(bulletOrder(html)).toEqual(['Fireworks AI', 'Together AI', 'OpenAI API'])
+  })
+
+  it('#1753 — a Cohere rerank-only outage lists embeddings and reranking substitutes', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'cohere', name: 'Cohere API', status: 'degraded', scoreConfidence: 'high', aiwatchScore: 80,
+          components: [{ id: 'c1', name: 'rerank-v4.0-pro', status: 'major_outage' }, { id: 'c2', name: 'command-a-03-2025', status: 'operational' }],
+          incidents: [{ id: 'c-1', title: 'Rerank errors', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'voyageai', name: 'Voyage AI', scoreConfidence: 'high', aiwatchScore: 80 }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const html = await (await handler(makeReq('cohere'))).text()
+    expect([...html.matchAll(/class="fallback-use">([^<]+)/g)].map(m => m[1])).toEqual(['For chat and generation', 'For embeddings and reranking'])
+    expect(bulletOrder(html)).toEqual(['OpenAI API', 'Voyage AI'])
+  })
+
+  it.each([
+    ['an embeddings-only outage', [{ id: 'c1', name: 'embed-v4.0', status: 'major_outage' }, { id: 'c2', name: 'command-a-03-2025', status: 'operational' }], 'for embeddings', 'Voyage AI', 'Alternatives for embeddings when Cohere is Down'],
+    ['a whole-service outage', [], 'for chat and generation', 'OpenAI API', 'Alternatives When Cohere is Down'],
+  ])('#1753 — on %s the AI Analysis alternatives name the use they answer', async (_case, components, label, first, heading) => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'cohere', name: 'Cohere API', status: 'degraded', scoreConfidence: 'high', aiwatchScore: 80, components,
+          incidents: [{ id: 'c-1', title: 'Errors', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'voyageai', name: 'Voyage AI', scoreConfidence: 'high', aiwatchScore: 80 }),
+      ],
+      aiAnalysis: { cohere: [{ summary: 'S.', estimatedRecovery: '1h', affectedScope: ['API'], needsFallback: true, analyzedAt: now, incidentId: 'c-1' }] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const html = await (await handler(makeReq('cohere'))).text()
+    expect(html).toContain(`🔄 Alternatives ${label}</span>`)
+    expect(html).toMatch(new RegExp(`🔄 Alternatives ${label}</span>[\\s\\S]{0,200}• ${first}`))
+    expect(html).toContain(`<h2>${heading}</h2>`)
+  })
+
+  it('#1753 — on a Cohere rerank-only outage the AI Analysis alternatives include each use', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'cohere', name: 'Cohere API', status: 'degraded', scoreConfidence: 'high', aiwatchScore: 80,
+          components: [{ id: 'c1', name: 'rerank-v4.0-pro', status: 'major_outage' }, { id: 'c2', name: 'command-a-03-2025', status: 'operational' }],
+          incidents: [{ id: 'c-1', title: 'Rerank errors', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'voyageai', name: 'Voyage AI', scoreConfidence: 'high', aiwatchScore: 80 }),
+      ],
+      aiAnalysis: { cohere: [{ summary: 'S.', estimatedRecovery: '1h', affectedScope: ['API'], needsFallback: true, analyzedAt: now, incidentId: 'c-1' }] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const html = await (await handler(makeReq('cohere'))).text()
+    expect(html).toMatch(/🔄 Alternatives for chat and generation<\/span>\s*<div[^>]*>• OpenAI API/)
+    expect(html).toMatch(/🔄 Alternatives for embeddings and reranking<\/span>\s*<div[^>]*>• Voyage AI/)
+  })
+
+  it('#1753 — the AI Analysis alternatives keep a provider name\'s capitals', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'deepseek', name: 'DeepSeek API', status: 'down', scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 'd-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'together', name: 'Together AI', scoreConfidence: 'high', aiwatchScore: 60 }),
+      ],
+      aiAnalysis: { deepseek: [{ summary: 'S.', estimatedRecovery: '1h', affectedScope: ['API'], needsFallback: true, analyzedAt: now, incidentId: 'd-1' }] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const html = await (await handler(makeReq('deepseek'))).text()
+    expect(html).toContain('🔄 Alternatives for the same DeepSeek models on another host</span>')
+  })
+
+  it('#1753 — a listed candidate with an active incident or a stale source is not listed', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'deepseek', name: 'DeepSeek API', status: 'down', scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 'd-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'claude', name: 'Claude API', scoreConfidence: 'high', aiwatchScore: 95, incidents: [{ id: 'c-1', title: 'Errors', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 90, incidentSourceStale: true }),
+        svc({ id: 'gemini', name: 'Gemini API', scoreConfidence: 'high', aiwatchScore: 70 }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const html = await (await handler(makeReq('deepseek'))).text()
+    expect(bulletOrder(html)).toEqual(['Gemini API'])
+  })
+
+  it('#1753 — the FAQ alternatives answer names the same list the card reads', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ services: [], aiAnalysis: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const html = await (await handler(makeReq('deepseek'))).text()
+    expect(html).toContain('For the same DeepSeek models on another host: Together AI or Fireworks AI.')
   })
 
   it('#1384 — a retainedBridge ghost does not disqualify an otherwise-healthy candidate', async () => {
