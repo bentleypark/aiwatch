@@ -96,6 +96,7 @@ const SAFE = {
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/datadog.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/incident-io.ts': 'producer — parses an upstream payload',
+  'worker/src/parsers/incident-io-proxy.ts': 'renders the provider\'s incident feed into page text for incident-io.ts to parse (#1752); it reads no measured field and stamps none',
   'worker/src/parsers/statuspage.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/aws.ts': 'producer — parses an upstream payload',
   'worker/src/parsers/aistudio.ts': 'producer — parses an upstream payload',
@@ -200,6 +201,7 @@ const RB_SAFE = {
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
   'worker/src/parsers/datadog.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
   'worker/src/parsers/incident-io.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
+  'worker/src/parsers/incident-io-proxy.ts': 'renders the provider\'s incident feed into page text (#1752); it reads no incident and makes no freshness judgment',
   'worker/src/parsers/statuspage.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
   'worker/src/parsers/aws.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
   'worker/src/parsers/aistudio.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
@@ -317,6 +319,7 @@ const SU_SAFE = {
   // Producers. `parsers/incident-io.ts` stamps the flag on its own anchored path; #1480's zero-length
   // case is stamped once in `services.ts`, over every parser's output. No parser stamps it itself.
   'worker/src/parsers/incident-io.ts': 'PRODUCES it — correctIncidentIoImpossibleTimes is where the flag is stamped and where the repair is attempted first',
+  'worker/src/parsers/incident-io-proxy.ts': 'renders the provider\'s incident feed into page text (#1752); it derives no elapsed time and stamps no flag — the repair above runs on what it renders',
   'worker/src/parsers/betterstack.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/datadog.ts': 'producer — parses an upstream payload, never stamps startUnknown',
@@ -434,7 +437,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 81 → 82: #1698 added worker/src/incident-presence.ts, which concatenates incidents and referenceIncidents.
     // 82 → 83: #1697 added worker/src/recovery-baseline.ts, which summarises history records; SAFE on all three.
     // 83 → 84: #1711 added worker/src/latest-report.ts, which copies archive totals; SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(84)
+    // 84 → 85: #1752 added worker/src/parsers/incident-io-proxy.ts, which renders the incident feed into page text; SAFE on all three.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(85)
   })
 
   it('leaves none unclassified', () => {
@@ -488,7 +492,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(84)
+    expect(all.length).toBe(85)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -534,7 +538,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(84)
+    expect(all.length).toBe(85)
   })
 
   it('leaves none unclassified for startUnknown', () => {
