@@ -42,10 +42,9 @@ members). Adding a sibling is the prerequisite for a category-aware sub-tier. Tr
 only monitored service with ZERO same-tier candidates — tier 3 also holds `bedrock` and
 `azureopenai`, and both sit in `EXCLUDE_FALLBACK`.
 It still needs no sibling: tier 3 is BELOW the specialized range, so candidates come from the
-nearest tiers by distance instead — which at distance 1 means tier 2 AND tier 4, since `openrouter`
-carries no `capabilityTagsOf` tag (unless a degraded TTS/STT component names one, #1698) and so passes `sharesCapability` against the Voice tier too.
-The picks that surface are Score-ordered across that pool. What makes them defensible is not the
-tier arithmetic but a fact about this service: several tier-2 members are OpenRouter's own upstream
+nearest non-specialized tiers by distance instead ([fallback-tiers.md](fallback-tiers.md)).
+What makes them defensible is not the
+tier arithmetic but a fact about this service: several LLM-tier members are OpenRouter's own upstream
 providers (Groq, Cerebras, Together, Fireworks and DeepSeek all appear in its public
 `/api/v1/providers` list, 106 providers, checked 2026-09-15), so "the gateway is down, go direct to
 the backend it was already calling" is sound advice for whoever was routing to one of them. Giving

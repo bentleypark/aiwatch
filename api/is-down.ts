@@ -231,7 +231,8 @@ export default async function handler(req: Request) {
         // worker/src/* (separate compilation surface).
         const API_TIER: Record<string, number> = {
           claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
-          cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, perplexity: 2,
+          cohere: 1.5, deepseek: 1.5, kimi: 1.5, perplexity: 1.5,
+          groq: 2, together: 2, fireworks: 2, cerebras: 2,
           bedrock: 3, azureopenai: 3, openrouter: 3,
           elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
           runway: 5, luma: 5, // Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts
@@ -333,9 +334,8 @@ export default async function handler(req: Request) {
         }
         if (!EXCLUDE_FALLBACK.includes(entry.id) && routed !== ROUTE_SUPPRESS && !target?.fallbackSuppressed) { // #880
           const sourceTier = routed ?? tierFor(entry.id)
-          // #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 /
-          // Vector 8) recommends its OWN tier only (no cross-tier bleed); LLM tiers 1-3 keep cross-tier
-          // fill. Mirror of worker/src/fallback.ts isSpecializedSubTier (range 4-10). Inline here like tierFor.
+          // #859 — a specialized non-LLM API sub-tier recommends its OWN tier only (no cross-tier bleed); LLM tiers 1-3 keep cross-tier
+          // fill among themselves (#1748). Mirror of worker/src/fallback.ts isSpecializedSubTier (range 4-10). Inline here like tierFor.
           const sameTierOnly = sourceTier >= 4 && sourceTier <= 10
           const inSourceTier = (id: string) => tierFor(id) === sourceTier
           const admittedBySubTier = (id: string) => inSourceTier(id) || isCapabilityProvider(id, sourceTier)
@@ -450,7 +450,7 @@ export default async function handler(req: Request) {
               && !(s.incidents ?? []).some(i => (i as { status?: string; retainedBridge?: boolean }).status !== 'resolved' && !(i as { retainedBridge?: boolean }).retainedBridge)
               && !s.incidentSourceStale
               // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
-              && (!sameTierOnly || admittedBySubTier(s.id))
+              && (sameTierOnly ? admittedBySubTier(s.id) : !(tierFor(s.id) >= 4 && tierFor(s.id) <= 10))
               // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
               && sharesCapability(entry.id, s.id, targetTags)
               // #1725 — a ROUTED outage draws from the routed tier, where the list does not apply

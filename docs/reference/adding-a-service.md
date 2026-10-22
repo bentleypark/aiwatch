@@ -47,7 +47,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 2. `worker/src/probe.ts` — add `ProbeTarget` if API endpoint exists for RTT measurement
 3. `worker/src/fallback.ts` — update ALL of:
    - `EXCLUDE_FALLBACK` — remove if fallback-eligible
-   - `API_TIER` — add tier number (API: 1=Major LLM, 2=LLM, 3=Infra, 4=Voice; agents: 11=CLI, 12=IDE, 13=Plugin)
+   - `API_TIER` — add tier number (membership and what each tier means: [fallback-tiers.md](fallback-tiers.md))
    - `TIER_LABEL` — add label if new tier introduced
    - `buildGroupedFallbackText` uses tier-based grouping — verify Discord alerts show correct labels
 4. `worker/src/__tests__/` — update probe target count test, fallback tests, add service-specific tests

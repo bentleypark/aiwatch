@@ -894,9 +894,9 @@ describe('buildRssFeed — fallback ranking parity with Discord (#724)', () => {
     const expected = getFallbacks('cohere', 'api', all).map((f) => f.name)
     expect(expected.length).toBeGreaterThan(0)
     const xml = buildRssFeed(all, { scope: 'all' }, NOW)
-    const tryLine = xml.split('\n').find((l) => l.includes('• LLM:')) ?? ''
+    const tryLine = xml.split('\n').find((l) => l.includes('• Model API:')) ?? ''
     // the feed's candidate order matches getFallbacks exactly (proves scored services are used)
-    expect(tryLine).toContain(`• LLM: ${expected.join(' · ')}`)
+    expect(tryLine).toContain(`• Model API: ${expected.join(' · ')}`)
   })
 })
 

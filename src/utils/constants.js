@@ -200,7 +200,8 @@ export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
 // All three must move together.
 export const API_TIER = {
   claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
-  cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, perplexity: 2,
+  cohere: 1.5, deepseek: 1.5, kimi: 1.5, perplexity: 1.5,
+  groq: 2, together: 2, fireworks: 2, cerebras: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
   // Tier 5 = generative Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts.
@@ -221,7 +222,7 @@ export const API_TIER = {
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
 // promoted here so the sync test can compare both copies via a single import without parsing JSX.
 export const TIER_LABEL = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
+  1: 'LLM', 1.5: 'Model API', 2: 'LLM Hosting', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
   11: 'Coding Agent', // #1027 — single tier for all coding agents (was CLI/IDE/Plugin Agent)
   21: 'AI Apps',
 }
@@ -542,7 +543,7 @@ export function getFallbacks(service, allServices) {
       && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
       // #1062 facet C — a specialized sub-tier (Image/Video/Voice) also admits the multimodal providers of
       // its capability (OpenAI), ranked after the dedicated sibling by tier distance.
-      && (!sameTierOnly || admittedBySubTier(s.id))
+      && (sameTierOnly ? admittedBySubTier(s.id) : !isSpecializedSubTier(tierFor(s.id)))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
       && sharesCapability(service.id, s.id, capabilityTagsOf(service))
       // #1725 — MIRROR: a ROUTED outage draws from the routed tier, where the list does not apply

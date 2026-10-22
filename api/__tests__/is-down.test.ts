@@ -383,19 +383,19 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
   it('a low-confidence (score-withheld) candidate never displaces a real-scored peer', async () => {
     const payload = new Response(JSON.stringify({
       services: [
-        svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
-        svc({ id: 'deepseek', name: 'DeepSeek API', scoreConfidence: 'high', aiwatchScore: 95 }),
-        svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
-        svc({ id: 'groq', name: 'Groq Cloud', scoreConfidence: 'low', aiwatchScore: null }),
+        svc({ id: 'claude', name: 'Claude API', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 'c-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'gemini', name: 'Gemini API', scoreConfidence: 'high', aiwatchScore: 90 }),
+        svc({ id: 'xai', name: 'SpaceXAI API', scoreConfidence: 'low', aiwatchScore: null }),
       ],
       aiAnalysis: {},
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     fetchMock.mockResolvedValueOnce(payload)
-    const res = await handler(makeReq('together'))
+    const res = await handler(makeReq('claude-api'))
     const html = await res.text()
     const order = bulletOrder(html)
-    expect(order).toEqual(['DeepSeek API', 'Cohere API'])
-    expect(order).not.toContain('Groq Cloud')
+    expect(order).toEqual(['OpenAI API', 'Gemini API'])
+    expect(order).not.toContain('SpaceXAI API')
   })
 
   it('a candidate with an unrecognized scoreConfidence value sinks below high/medium, never vanishes', async () => {
@@ -405,19 +405,49 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     // rendered — silently dropped instead of sunk.
     const payload = new Response(JSON.stringify({
       services: [
-        svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
-        svc({ id: 'deepseek', name: 'DeepSeek API', scoreConfidence: 'high', aiwatchScore: 95 }),
-        svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 90 }),
-        svc({ id: 'groq', name: 'Groq Cloud', scoreConfidence: 'insufficient', aiwatchScore: 99 }), // would win #1 on raw Score alone
+        svc({ id: 'claude', name: 'Claude API', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 'c-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'gemini', name: 'Gemini API', scoreConfidence: 'high', aiwatchScore: 90 }),
+        svc({ id: 'xai', name: 'SpaceXAI API', scoreConfidence: 'insufficient', aiwatchScore: 99 }), // would win #1 on raw Score alone
       ],
       aiAnalysis: {},
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     fetchMock.mockResolvedValueOnce(payload)
-    const res = await handler(makeReq('together'))
+    const res = await handler(makeReq('claude-api'))
     const html = await res.text()
     const order = bulletOrder(html)
-    expect(order).toEqual(['DeepSeek API', 'Cohere API'])
-    expect(order).not.toContain('Groq Cloud')
+    expect(order).toEqual(['OpenAI API', 'Gemini API'])
+    expect(order).not.toContain('SpaceXAI API')
+  })
+
+  it('#1748 — a host outage lists other hosts even when vendors score higher', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'together', name: 'Together AI', status: 'down', scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 't-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'cohere', name: 'Cohere API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'kimi', name: 'Kimi API', scoreConfidence: 'high', aiwatchScore: 95 }),
+        svc({ id: 'fireworks', name: 'Fireworks AI', scoreConfidence: 'high', aiwatchScore: 80 }),
+        svc({ id: 'cerebras', name: 'Cerebras Inference', scoreConfidence: 'high', aiwatchScore: 84 }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const html = await (await handler(makeReq('together'))).text()
+    expect(bulletOrder(html)).toEqual(['Cerebras Inference', 'Fireworks AI'])
+  })
+
+  it('#1748 — a non-specialized source never lists a specialized sub-tier candidate', async () => {
+    const payload = new Response(JSON.stringify({
+      services: [
+        svc({ id: 'openrouter', name: 'OpenRouter', status: 'down', scoreConfidence: 'high', aiwatchScore: 80, incidents: [{ id: 'r-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
+        svc({ id: 'fishaudio', name: 'Fish Audio', scoreConfidence: 'high', aiwatchScore: 99 }),
+        svc({ id: 'fireworks', name: 'Fireworks AI', scoreConfidence: 'high', aiwatchScore: 50 }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const html = await (await handler(makeReq('openrouter'))).text()
+    expect(bulletOrder(html)).toEqual(['Fireworks AI'])
   })
 
   it('#1384 — a retainedBridge ghost does not disqualify an otherwise-healthy candidate', async () => {

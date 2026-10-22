@@ -65,7 +65,7 @@ describe('API_TIER cross-mirror sync (#403)', () => {
     const blockMatch = isDownSource.match(/const API_TIER:\s*Record<[^>]+>\s*=\s*\{([\s\S]*?)\n\s*\}/)
     const block = blockMatch![1]
     for (const [id, expectedTier] of Object.entries(workerTier)) {
-      const re = new RegExp(`(^|\\s|,)${id}:\\s*(\\d+)`)
+      const re = new RegExp(`(^|\\s|,)${id}:\\s*(\\d+(?:\\.\\d+)?)`)
       const m = block.match(re)
       expect(m, `key "${id}" not found in api/is-down.ts API_TIER`).not.toBeNull()
       expect(Number(m![2]), `tier mismatch for "${id}": worker=${expectedTier}, is-down=${m![2]}`).toBe(expectedTier)
@@ -445,7 +445,7 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     // rather than a bare call site: that is the single place the widening can be dropped.
     expect(/const admittedBySubTier = \(id: string\) => inSourceTier\(id\) \|\| isCapabilityProvider\(id, sourceTier\)/.test(isDownSource),
       'is-down no longer widens the candidate pool via isCapabilityProvider').toBe(true)
-    expect(/!sameTierOnly \|\| admittedBySubTier\(s\.id\)/.test(isDownSource),
+    expect(/sameTierOnly \? admittedBySubTier\(s\.id\) :/.test(isDownSource),
       'is-down filter no longer applies the facet-C widening clause').toBe(true)
   })
 

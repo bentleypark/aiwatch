@@ -34,7 +34,8 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'ch
 // is the only safeguard against drift between the three independent copies of this map (#403).
 export const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
-  cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, kimi: 2, perplexity: 2,
+  cohere: 1.5, deepseek: 1.5, kimi: 1.5, perplexity: 1.5,
+  groq: 2, together: 2, fireworks: 2, cerebras: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
   // Tier 5 = generative Video (#602 / #601 step B). A distinct tier so a degraded video service
@@ -146,9 +147,7 @@ function hasActiveIncident(s: FallbackCandidate): boolean {
 }
 
 // #859 — a specialized non-LLM API sub-tier only recommends its OWN tier. Cross-tier fill (fill top-2
-// by tier distance) is correct for the LLM tiers (1 Major LLM / 2 LLM / 3 Infra-router: any LLM API
-// substitutes another) but wrong for the specialized sub-tiers — Voice (4) / Video (5) / Observability
-// (6) / Image (7) / Vector (8) are NOT mutually substitutable, so a degraded vector DB must not be
+// by tier distance) is correct for the LLM tiers but wrong for the specialized sub-tiers, which are NOT mutually substitutable, so a degraded vector DB must not be
 // offered an image model as its 2nd recommendation (the exact reason these were split into their own
 // tiers in #601/#602/#756/#857). Range 4–10 covers the current + near-future API sub-tiers; agents
 // (11) and apps (21) are separate CATEGORIES (filtered by `category` in getFallbacks) and keep
@@ -553,7 +552,7 @@ export function getFallbacks(
       && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
       // #1062 facet C — a specialized sub-tier (Image/Video/Voice) also admits the multimodal providers of
       // its capability (OpenAI), which the tier-distance sort ranks after the dedicated sibling.
-      && (!sameTierOnly || admittedBySubTier(s.id))
+      && (sameTierOnly ? admittedBySubTier(s.id) : !isSpecializedSubTier(tierFor(s.id)))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
       && sharesCapability(serviceId, s.id, sourceTags)
       // #1725 — a ROUTED outage draws from the routed tier, where the required-capability list does not apply
@@ -595,7 +594,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 // Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
 // Overview.jsx imports from there so there is no third inline copy to drift against.
 export const TIER_LABEL: Record<number, string> = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
+  1: 'LLM', 1.5: 'Model API', 2: 'LLM Hosting', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
   11: 'Coding Agent', // #1027 — single tier for all coding agents (matches CATEGORY_LABEL[agent])
   21: 'AI Apps', // matches CATEGORY_LABEL[app] so the existing buildGroupedFallbackText copy stays consistent
 }
