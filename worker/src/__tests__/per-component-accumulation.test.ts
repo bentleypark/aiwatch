@@ -22,6 +22,27 @@ describe('accumulateComponentCounters (#605)', () => {
     })
   })
 
+  it('qualifies a name with its group only when two components in the snapshot share it', () => {
+    const entry: { ok: number; total: number; components?: Record<string, { ok: number; total: number; name: string }> } = { ok: 0, total: 0 }
+    accumulateComponentCounters(entry, [
+      { id: 'a1', name: 'Other APIs', group: 'ElevenAPI', status: 'operational' },
+      { id: 'a2', name: 'Other APIs', group: 'ElevenAgents', status: 'degraded' },
+      { id: 'c1', name: 'All features', group: 'ElevenCreative', status: 'operational' },
+    ])
+    expect(Object.fromEntries(Object.entries(entry.components!).map(([id, c]) => [id, c.name]))).toEqual({
+      a1: 'ElevenAPI / Other APIs', a2: 'ElevenAgents / Other APIs', c1: 'All features',
+    })
+  })
+
+  it('leaves a shared name alone when the components carry no group', () => {
+    const entry: { ok: number; total: number; components?: Record<string, { ok: number; total: number; name: string }> } = { ok: 0, total: 0 }
+    accumulateComponentCounters(entry, [
+      { id: 'x1', name: 'API', status: 'operational' },
+      { id: 'x2', name: 'API', status: 'operational' },
+    ])
+    expect(Object.values(entry.components!).map((c) => c.name)).toEqual(['API', 'API'])
+  })
+
   it('is a no-op when the service has no components', () => {
     const entry: { ok: number; total: number; components?: Record<string, { ok: number; total: number; name: string }> } = { ok: 5, total: 5 }
     accumulateComponentCounters(entry, undefined)

@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
+import { fetchAllServices, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverridesCounted, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, type DurationOverride } from './overrides'
@@ -212,18 +212,19 @@ interface DailyCounters {
  *  uptime% for the report (component-level reliability rankings). */
 export function accumulateComponentCounters(
   entry: DailyCounters[string],
-  components: ReadonlyArray<{ id: string; name: string; status: string }> | undefined,
+  components: ReadonlyArray<{ id: string; name: string; status: string; group?: string }> | undefined,
 ): void {
   if (!components || components.length === 0) return
   const comps = (entry.components ??= {})
   for (const c of components) {
-    const cc = (comps[c.id] ??= { ok: 0, total: 0, name: c.name })
+    const name = c.group && components.some((o) => o.id !== c.id && o.name === c.name) ? `${c.group} / ${c.name}` : c.name
+    const cc = (comps[c.id] ??= { ok: 0, total: 0, name })
     cc.total++
     // Per-component uptime stays a strict operational-only count — deliberately NOT impact-gated
     // like the service-level counter (#733): `Incident.impact` is service-scoped, not per-component,
     // so there's no per-component impact to gate on. Component granularity is its own signal.
     if (c.status === 'operational') cc.ok++
-    cc.name = c.name // keep the latest display name (status pages rename components)
+    cc.name = name // keep the latest display name (status pages rename components)
   }
 }
 
@@ -3587,8 +3588,8 @@ const workerExport = {
       if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCHours() === 6 && now.getUTCMinutes() < 5) {
         for (const page of rosterAuditPages()) {
           try {
-            const [pageRes, apiRes] = await Promise.all([
-              fetchWithTimeout(page.statusUrl, 8000),
+            const [html, apiRes] = await Promise.all([
+              fetchRosterAuditHtml(page.statusUrl, (u) => fetchWithTimeout(u, 8000)),
               // Names are cosmetic (the alert falls back to the bare id) — a single page's config
               // JSON isn't known here without re-deriving apiUrl per service, so this reads it off the
               // FIRST co-located service that has one; a page with none just alerts by id.
@@ -3597,17 +3598,12 @@ const workerExport = {
                 return svc?.apiUrl ? fetchWithTimeout(svc.apiUrl, 8000) : null
               })(),
             ])
-            if (!pageRes.ok) {
-              console.warn(`[cron] roster audit: ${page.statusUrl} returned HTTP ${pageRes.status} — skipping this page this cycle`)
-              pageRes.body?.cancel()
-              continue
-            }
-            const html = await pageRes.text()
+            if (html === null) continue
             const entries = parseIncidentIoAllComponentUptimes(html)
             if (entries.length === 0) {
               // A 200 that yields no entries is not a genuinely component-free page — every real
               // incident.io page carries `component_uptimes` — it is the same "read succeeded, payload
-              // unusable" case `!pageRes.ok` handles above. Treating it as a clean audit would WRITE an
+              // unusable" case. Treating it as a clean audit would WRITE an
               // empty seen-set (below), and every standing finding would re-alert in full the next time
               // parsing recovers — the whole-value-rewrite failure mode this codebase fails closed on
               // elsewhere. Skip the page entirely rather than touch its KV state on an unreadable cycle.

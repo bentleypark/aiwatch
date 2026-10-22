@@ -510,14 +510,13 @@ function isMaintenanceStatus(status: string | null | undefined): boolean {
  * #1066 — reconstruct a summary.json-shaped `StatuspageResponse` from an incident.io "global"/multi-
  * region page's RSC payload.
  *
- * Returns null when the load-bearing data is unreadable — NO component catalog, or the `incidents` array
- * (which drives live component status) is present-but-unparseable. The caller (fetchService) then treats
+ * Returns null when the page cannot be rebuilt. The caller (fetchService) then treats
  * this like an unreadable source: it does NOT fabricate an operational badge from the empty reconstruction
  * — it flags `sourceUnknown` + trackFetchFailure, so the badge withholds (→ `unknown` after the strike
  * threshold, the #1004 display rule), the #713 no-invention rule. A missing/`[]` `incidents` array is a
  * VALID "no active incidents" state (not a failure); only a present-but-unparseable one withholds.
  *
- * Components: every `{"component":{component_id,name,…}}` entry, default `operational`, overridden by the
+ * Components: every `{component_id,name,…}` object (standalone or a group member), default `operational`, overridden by the
  * worst live status any ACTIVE (non-resolved) incident reports for it via `affected_components`.
  *
  * Incidents: the UNION of `incident_links` (the FULL ~90-day history — id/name/status/published_at/
@@ -534,7 +533,7 @@ export function parseIncidentIoGlobalPage(html: string): StatuspageResponse | nu
 
   // 1) Component catalog: id → display name. `[^{}]` keeps the match inside a single component object.
   const nameById = new Map<string, string>()
-  const compRe = /"component":\{"component_id":"([0-9A-Z]{26})"[^{}]*?"name":"([^"]+)"\}/g
+  const compRe = /\{"component_id":"([0-9A-Z]{26})"[^{}]*?"name":"([^"]+)"[^{}]*\}/g
   for (let m = compRe.exec(s); m !== null; m = compRe.exec(s)) nameById.set(m[1], m[2])
   if (nameById.size === 0) return null // no components on the page → withhold (shape change / not this format)
 
@@ -556,6 +555,7 @@ export function parseIncidentIoGlobalPage(html: string): StatuspageResponse | nu
   }
   const links = parseRscArray<RscIncidentLink>(s, 'incident_links')
   const impactsByIncident = collectImpactsByIncident(s)
+  if (!s.includes('"component_uptimes":[')) return null
 
   // 3) Live component status = worst-of the current_status any ACTIVE detailed incident reports for it. A
   //    resolved incident reports current_status:"operational", so it never degrades the badge.
@@ -664,6 +664,8 @@ export function parseIncidentIoGlobalPage(html: string): StatuspageResponse | nu
       }
     })
     .filter((inc): inc is NonNullable<typeof inc> => inc !== null) // drop un-timeable incidents (guard above)
+
+  incidents.sort((a, b) => (Number(b.status !== 'resolved') - Number(a.status !== 'resolved')) || Date.parse(b.created_at) - Date.parse(a.created_at))
 
   return { status: { indicator, description: '' }, components, incidents }
 }

@@ -639,7 +639,7 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
 
 describe('displayComponentIds config sanity (#606)', () => {
   // Exact curated counts — guards against a careless edit truncating the list
-  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 7 }
+  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 8 }
 
   it('elevenlabs computes uptime over the same components its card shows (#1434)', () => {
     for (const [id, count] of Object.entries(EXPECTED_COUNT)) {
@@ -675,7 +675,7 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   it('#685 — surfaces a degraded ElevenCreative in the elevenlabs breakdown (no more all-green-while-badge-degraded)', () => {
     const elevenlabs = SERVICES.find((s) => s.id === 'elevenlabs')!
-    const CREATIVE = '01JJM5RKYAEWNM3XYRHXM8FJQ3'
+    const CREATIVE = '01M52EJT2ZR0TCK0EARKESJ8NW'
     expect(elevenlabs.statusComponentIds, 'ElevenCreative must be curated in (the #685 fix)').toContain(CREATIVE)
     // Summary where every curated component is operational EXCEPT ElevenCreative (degraded) — the exact
     // shape that previously rendered all-green while the badge (overall indicator) read degraded.
@@ -688,7 +688,7 @@ describe('displayComponentIds config sanity (#606)', () => {
       })),
     }
     const out = resolveSvcComponents(elevenlabs, summary)
-    expect(out).toHaveLength(7)
+    expect(out).toHaveLength(elevenlabs.statusComponentIds!.length)
     const creative = out.find((c) => c.id === CREATIVE)
     expect(creative, 'ElevenCreative now appears in the breakdown').toBeDefined()
     expect(creative!.name).toBe('ElevenCreative')

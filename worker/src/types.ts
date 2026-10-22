@@ -398,11 +398,15 @@ export interface ServiceConfig {
   fallbackComponents?: string[]
   incidentIoBaseUrl?: string
   // #1066 — this apiUrl is an incident.io "global"/multi-region page whose Atlassian v2 compat API
-  // returns `components: []` (the live data is only in the page-root RSC). When set, fetchService
+  // returns `components: []` (the live data is in the page RSC). When set, fetchService
   // reconstructs the summary.json shape (components + indicator + incidents) from that HTML via
   // parseIncidentIoGlobalPage, so the rest of the pipeline runs unchanged. Requires statusUrl to point
   // at the RSC page (apiUrl's baseUrl minus /api/v2).
   incidentIoGlobalPage?: boolean
+  // #1752 — the page-root HTML does not embed the page data, so it is read from the page's own
+  // `/proxy` JSON endpoints and rendered back into RSC text (parsers/incident-io-proxy.ts). Implies
+  // `incidentIoGlobalPage`: this page's summary.json is `components: []` as well.
+  incidentIoProxy?: boolean
   statusComponent?: string
   statusComponentId?: string
   // #934/#1090 — opt-in: on a SHARED status page, an EXCLUDE-ONLY service (no positive

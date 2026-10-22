@@ -18,6 +18,7 @@ import {
   type StoredRootlyFeed,
 } from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
+import { fetchIncidentIoProxyHtml } from './parsers/incident-io-proxy'
 import { computeIncidentIoUptime, parseIncidentIoAllComponentUptimes, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
@@ -306,16 +307,20 @@ export const SERVICES: ServiceConfig[] = [
   // Voice & Speech AI
   // The curated availability surfaces, as ONE list: the #606 breakdown card, the #379 worst-of badge
   // and the uptime scope all read it.
-  // #685 — ElevenCreative (01JJM5RKYAEWNM3XYRHXM8FJQ3) is the ONLY component reflecting Dubbing health
+  // #685 — ElevenCreative (01M52EJT2ZR0TCK0EARKESJ8NW) carries Dubbing incidents
   // (a Voice-domain product within the ElevenCreative suite; no standalone Dubbing component exists). It
   // was previously omitted, so a Dubbing/ElevenCreative degradation flipped the badge while the
-  // breakdown stayed all-operational — a visible contradiction. The row label reads
-  // 'ElevenCreative' (broader suite), the accepted trade-off since no finer-grained component exists.
-  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], statusComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', statusComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'],
-    // #1518 — "Other"/"Quality"/"UI"/"Integrations" read as non-core-API surfaces by name, distinct from the 7
-    // product surfaces (TTS/STT/Conversations/Telephony/other-API-endpoints/RAG/ElevenCreative) already
-    // in scope. Flag for re-review if any of these four ever carries a real incident.
-    rosterAuditExclude: ['01JJM5RKYA9JEH292W21YBXGNJ', '01JY3H5SJJR949SZ8K1ZR9F7FT', '01JY3H5SJJN08K456SBNE0Y947', '01KX3Y9AN8ZJT82MA125Z5ZACC'],
+  // breakdown stayed all-operational — a visible contradiction. The row label is the page's own
+  // component name, "All features" under the ElevenCreative group.
+  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoGlobalPage: true, incidentIoProxy: true, incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01M52E23077QGJZHKBM2FBBPFM', incidentExclude: ['webpage'], statusComponentId: '01M52E23077QGJZHKBM2FBBPFM', statusComponentIds: ['01M52E23077QGJZHKBM2FBBPFM', '01M52E2F2T3TJB9ADTV9MXEQBF', '01M52E4R81RBEYD94QJACM67BQ', '01M52E62M8B3MCBHBPM40YK3SS', '01M52E6REJ3EKRW049FBMB41JC', '01M52E96AXD6XR10MMFMREWYFQ', '01M52EBPDWQ9E2DJR8DJ7YT767', '01M52EJT2ZR0TCK0EARKESJ8NW'],
+    componentGroups: {
+      '01M52E23077QGJZHKBM2FBBPFM': 'ElevenAPI', '01M52E2F2T3TJB9ADTV9MXEQBF': 'ElevenAPI', '01M52E4R81RBEYD94QJACM67BQ': 'ElevenAPI',
+      '01M52E62M8B3MCBHBPM40YK3SS': 'ElevenAgents', '01M52E6REJ3EKRW049FBMB41JC': 'ElevenAgents', '01M52E96AXD6XR10MMFMREWYFQ': 'ElevenAgents', '01M52EBPDWQ9E2DJR8DJ7YT767': 'ElevenAgents',
+      '01M52EJT2ZR0TCK0EARKESJ8NW': 'ElevenCreative',
+    },
+    // #1518 — the page components outside the scope above. Flag for re-review if any of these ever carries a
+    // real incident.
+    rosterAuditExclude: ['01M52EA7NHXRC1YGSRG47C2D57', '01M52EGBQ24XDEGJTJW1JZW9F3', '01M52EHH7PCX9F1P1YTMH1ZMDT'],
   },
   // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
   // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
@@ -2040,6 +2045,31 @@ async function fetchWithRetry(
 // Pre-fetching deduplicates these, saving 6 subrequests (36→30 base) and freeing
 // budget for incident text enrichment scraping.
 
+const readsProxy = (statusUrl: string) => SERVICES.some((s) => s.statusUrl === statusUrl && s.incidentIoProxy)
+
+export async function fetchRosterAuditHtml(statusUrl: string, fetcher: (url: string) => Promise<Response>): Promise<string | null> {
+  if (readsProxy(statusUrl)) return fetchIncidentIoProxyHtml(statusUrl, fetcher)
+  const res = await fetcher(statusUrl)
+  if (!res.ok) {
+    console.warn(`[cron] roster audit: ${statusUrl} returned HTTP ${res.status} — skipping this page this cycle`)
+    res.body?.cancel()
+    return null
+  }
+  return res.text()
+}
+
+export async function fetchPrefetchHtml(statusUrl: string, tracker: FetchTracker): Promise<string | undefined> {
+  if (readsProxy(statusUrl)) {
+    return (await fetchIncidentIoProxyHtml(statusUrl, (u) => fetchTracked(u, 5000, undefined, tracker))) ?? undefined
+  }
+  try {
+    const htmlRes = await fetchTracked(statusUrl, 5000, undefined, tracker)
+    if (htmlRes.ok) return await htmlRes.text()
+    htmlRes.body?.cancel()
+  } catch (err) { console.warn(`[prefetch] HTML fetch failed for ${statusUrl}:`, err instanceof Error ? err.message : err) }
+  return undefined
+}
+
 interface PrefetchedData {
   summary: StatuspageResponse
   incidents: StatuspageResponse | null
@@ -2772,7 +2802,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       }
 
       // #1066 — incident.io "global"/multi-region pages (LangSmith migrated to one) serve `components: []`
-      // from the Atlassian v2 compat API; the live data is only in the page-root RSC (`uptimeHtml`). Rebuild
+      // from the Atlassian v2 compat API; the live data is in the page RSC (`uptimeHtml`). Rebuild
       // a summary.json-shaped object from that HTML so everything below (status resolution, incident parse,
       // calendar, the #135 miss-tracker) runs unchanged. Done here, before the incidents parse, so the
       // rebuilt `incidents` are what parseIncidents reads.
@@ -2783,7 +2813,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // — exactly what a prefetch miss already cost when the payload was inline in that same HTML.
       const uptimeTimelines = prefetched?.uptimeTimelines
       if (config.incidentIoGlobalPage) {
-        if (!uptimeHtml) {
+        if (!uptimeHtml && config.incidentIoProxy) {
+          uptimeHtml = (await fetchIncidentIoProxyHtml(config.statusUrl, (u) => fetchTracked(u, 5000, undefined, tracker))) ?? undefined
+        } else if (!uptimeHtml) {
           try {
             const htmlRes = await fetchTracked(config.statusUrl, 5000, undefined, tracker)
             if (htmlRes.ok) uptimeHtml = await htmlRes.text()
@@ -2795,8 +2827,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           summaryData = rebuilt
           rawIncData = rebuilt
         } else {
-          // Reconstruction failed (no component catalog, or the load-bearing `incidents` array was
-          // present-but-unparseable) — the source is UNREADABLE. Do NOT leave the empty summary.json in
+          // Reconstruction failed — the source is UNREADABLE. Do NOT leave the empty summary.json in
           // place: with statusComponentIds set + `components: []`, resolveSvcStatus finds no match and
           // returns the overall indicator (`none`) = a fabricated OPERATIONAL badge during a possible
           // outage. Instead flag `sourceUnknown` + trackFetchFailure — the same path a 5xx summary takes
@@ -4523,14 +4554,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       // Fetch status page HTML for uptimeData/component_uptimes parsing
       const statusUrl = baseUrl.replace('/api/v2', '')
       const needsHtml = SERVICES.some((s) => s.apiUrl === apiUrl && (s.statusComponentId || s.incidentIoComponentId))
-      let uptimeHtml: string | undefined
-      if (needsHtml) {
-        try {
-          const htmlRes = await fetchTracked(statusUrl, 5000, undefined, tracker)
-          if (htmlRes.ok) uptimeHtml = await htmlRes.text()
-          else htmlRes.body?.cancel()
-        } catch (err) { console.warn(`[prefetch] HTML fetch failed for ${statusUrl}:`, err instanceof Error ? err.message : err) }
-      }
+      const uptimeHtml = needsHtml ? await fetchPrefetchHtml(statusUrl, tracker) : undefined
       // #1389 — the page moved its uptime timelines to `/uptime_showcase`. Gated on the page's own
       // structural marker rather than on a list of which providers rolled the change out: that list is
       // Atlassian's deploy schedule, not ours, and a stale copy of it is what makes the next rollout

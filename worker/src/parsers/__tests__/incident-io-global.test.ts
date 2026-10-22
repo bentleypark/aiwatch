@@ -199,6 +199,8 @@ describe('parseIncidentIoGlobalPage (#1066)', () => {
   it('returns null when the page carries no component catalog (shape change / wrong format)', () => {
     expect(parseIncidentIoGlobalPage('<html>not incident.io</html>')).toBeNull()
     expect(parseIncidentIoGlobalPage('')).toBeNull()
+    // a page that carries its data but lists no component — the catalog guard itself, not the data guard
+    expect(parseIncidentIoGlobalPage('<script>self.__next_f.push([1,"\\"component_uptimes\\":[]"])</script>')).toBeNull()
   })
 })
 
@@ -317,7 +319,7 @@ describe('parseIncidentIoGlobalPage — fail-safe (#1066/#713)', () => {
   it('returns null when the `incidents` array is present but unparseable (withhold, not fabricate)', () => {
     // Component catalog is fine, but the load-bearing `incidents` array is corrupt → must withhold so the
     // caller flags sourceUnknown instead of showing an all-operational badge during a possible outage.
-    const broken = `<script>self.__next_f.push([1,"x:[{${comp(API, 'LangSmith API')}}],` +
+    const broken = `<script>self.__next_f.push([1,"x:[{${comp(API, 'LangSmith API')}}],\\"component_uptimes\\":[],` +
       `\\"incidents\\":[{\\"id\\":\\"BAD\\",\\"status\\":\\"investigating\\",\\"affected_\`corrupt"])</script>`
     expect(parseIncidentIoGlobalPage(broken)).toBeNull()
   })
