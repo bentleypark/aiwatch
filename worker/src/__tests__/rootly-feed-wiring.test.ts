@@ -86,6 +86,27 @@ describe('#1381 — fetchService reads the Rootly feed', () => {
     expect(svc.sourceUnknown, 'and it is not an unknown reading either').toBeUndefined()
   })
 
+  it('computes the 30-day figure from v3 day tooltips instead of copying the page\'s 90-day percentage', async () => {
+    // Shape as `readV3Chart` emits it: minutes as a share of the day, on the v3 impacted colour.
+    const v3 = feed({
+      uptime: SCOPE.map((id, i) => ({
+        componentId: id, barCount: 91, unreadBars: 0,
+        coverage: { impacted: i === 0 ? 1 : 0, fetched: i === 0 ? 1 : 0 },
+        days: i === 0 ? [{
+          date: 'September 4, 2026',
+          segments: [{ cls: 'bg-red-v2-12', width: (144 / 1440) * 100 }],
+          label: 'Degraded OCR 4.1 Availability',
+        }] : [],
+      })),
+    })
+    const { kv } = kvWith(JSON.stringify({ fetchedAt: new Date().toISOString(), feed: v3 }))
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.uptime30d).toBe(99.9)
+    expect(svc.uptimeSource).toBe('official')
+    expect(svc.uptimeWindowDays).toBeUndefined()
+    expect(svc.incidents.find((i) => i.title === 'Degraded OCR 4.1 Availability')?.impact).toBe('minor')
+  })
+
   it('an ABSENT feed publishes `unknown`, not a green pill, and never fetches the challenged page', async () => {
     // Round 5: `base` says `operational`, so a feed-ONLY service with an expired key published a
     // green badge for a service we have no reading of at all — a realistic state against a 3h TTL
@@ -429,8 +450,25 @@ describe('#1557 — an incident the chart cannot attribute still scores', () => 
   // the 15 charted components; 09-21 "Availability drop for Mistral OCR 4" has a red segment.
   beforeEach(() => vi.useFakeTimers({ now: new Date('2026-10-01T04:00:00Z'), toFake: ['Date'] }))
 
+  // The capture predates Rootly v3's component-id rotation. Its scoped components are re-keyed BY NAME
+  // to the current configured ids; Console and Vibe are not API components and keep their old ids.
+  const SCOPE_NAMES = ['Completion API', 'Embedding API', 'OCR API', 'Agents API', 'Conversations API', 'Fine-Tuning API',
+    'Audio API', 'Integrations API', 'Files API', 'Batch API', 'Workflows API', 'Prompts API', 'Skills API']
+  const remappedCapture = () => {
+    const nameOf = new Map(storedFeed20261001.feed.components.map((c) => [c.id, c.name]))
+    const rekey = (id: string) => { const i = SCOPE_NAMES.indexOf(nameOf.get(id) ?? ''); return i >= 0 ? SCOPE[i] : id }
+    return {
+      ...storedFeed20261001,
+      feed: {
+        ...storedFeed20261001.feed,
+        components: storedFeed20261001.feed.components.map((c) => ({ ...c, id: rekey(c.id) })),
+        uptime: storedFeed20261001.feed.uptime?.map((u) => ({ ...u, componentId: rekey(u.componentId) })),
+      },
+    }
+  }
+
   it('the published list keeps null; the live Score counts the uncharted incidents as minor', async () => {
-    const { kv } = kvWith(JSON.stringify(storedFeed20261001))
+    const { kv } = kvWith(JSON.stringify(remappedCapture()))
     const svc = await fetchService(mistral, undefined, kv as never, {})
     const byTitle = (t: string) => svc.incidents.find((i) => i.title === t)
     expect(byTitle('Elevated error rate on some of our services')?.impact).toBeNull()

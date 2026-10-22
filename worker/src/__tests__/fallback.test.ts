@@ -6,7 +6,7 @@ import { REQUIRED_CAPABILITY, REQUIRED_CAPABILITY_PROVIDERS, meetsRequiredCapabi
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
   { id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 72 },
-  { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 93 },
+  { id: 'groq', category: 'api', name: 'GroqCloud', status: 'operational', aiwatchScore: 93 },
   { id: 'together', category: 'api', name: 'Together AI', status: 'operational', aiwatchScore: 89 },
   { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 78 },
   { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 76 },
@@ -43,13 +43,13 @@ describe('getFallbacks', () => {
     // status !== 'resolved'"). together's only incident is resolved, so it stays eligible.
     const services = [
       { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 76 },
-      { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 93, incidents: [{ status: 'investigating' }] },
+      { id: 'groq', category: 'api', name: 'GroqCloud', status: 'operational', aiwatchScore: 93, incidents: [{ status: 'investigating' }] },
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 92, incidents: [{ status: 'identified' }] },
       { id: 'fireworks', category: 'api', name: 'Fireworks AI', status: 'operational', aiwatchScore: 91, incidents: [{ status: 'monitoring' }] },
       { id: 'together', category: 'api', name: 'Together AI', status: 'operational', aiwatchScore: 89, incidents: [{ status: 'resolved' }] },
     ]
     const result = getFallbacks('mistral', 'api', services)
-    expect(result.find(f => f.name === 'Groq Cloud')).toBeUndefined()    // investigating → dropped
+    expect(result.find(f => f.name === 'GroqCloud')).toBeUndefined()    // investigating → dropped
     expect(result.find(f => f.name === 'Cohere API')).toBeUndefined()    // identified → dropped
     expect(result.find(f => f.name === 'Fireworks AI')).toBeUndefined()  // monitoring → dropped
     expect(result.find(f => f.name === 'Together AI')).toBeDefined()     // only a resolved incident → eligible
@@ -62,10 +62,10 @@ describe('getFallbacks', () => {
     // retiring source, even though its real, current status source shows it healthy.
     const services = [
       { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 76 },
-      { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 93, incidents: [{ status: 'investigating', retainedBridge: true }] },
+      { id: 'groq', category: 'api', name: 'GroqCloud', status: 'operational', aiwatchScore: 93, incidents: [{ status: 'investigating', retainedBridge: true }] },
     ]
     const result = getFallbacks('mistral', 'api', services)
-    expect(result.find(f => f.name === 'Groq Cloud')).toBeDefined()
+    expect(result.find(f => f.name === 'GroqCloud')).toBeDefined()
   })
 
   it('#811 — a non-reliability ADVISORY (Claude model-access suspension) does NOT disqualify an operational candidate', () => {
@@ -167,7 +167,7 @@ describe('getFallbacks', () => {
   it('Fireworks AI appears as T2 fallback when higher-score T2 peers are down', () => {
     const services = [
       { id: 'together', category: 'api', name: 'Together AI', status: 'degraded', aiwatchScore: 89 },
-      { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'degraded', aiwatchScore: 93 },
+      { id: 'groq', category: 'api', name: 'GroqCloud', status: 'degraded', aiwatchScore: 93 },
       { id: 'fireworks', category: 'api', name: 'Fireworks AI', status: 'operational', aiwatchScore: 85 },
       { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 76 },
       { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 90 },
@@ -419,10 +419,10 @@ describe('#1062 facet A — Voice tier STT/TTS capability gating', () => {
 describe('buildFallbackText', () => {
   it('formats fallback list with scores', () => {
     const text = buildFallbackText([
-      { name: 'Groq Cloud', score: 93 },
+      { name: 'GroqCloud', score: 93 },
       { name: 'Together AI', score: 89 },
     ])
-    expect(text).toBe('👉 Suggested fallback: Groq Cloud (Score 93) · Together AI (Score 89)')
+    expect(text).toBe('👉 Suggested fallback: GroqCloud (Score 93) · Together AI (Score 89)')
   })
 
   it('formats fallback without score', () => {
@@ -1669,7 +1669,7 @@ describe('#1725 — a source that requires a capability admits only that capabil
   const board = [
     svc('perplexity', 'Perplexity', 'down', 80),
     svc('cohere', 'Cohere API', 'operational', 89),
-    svc('groq', 'Groq Cloud', 'operational', 84),
+    svc('groq', 'GroqCloud', 'operational', 84),
     svc('deepseek', 'DeepSeek API', 'operational', 95),
     svc('claude', 'Claude API', 'operational', 70),
     svc('openai', 'OpenAI API', 'operational', 80),

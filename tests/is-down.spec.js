@@ -26,7 +26,7 @@ const PAGES = [
   // Phase B — representative samples per category (#263)
   // Skip exhaustive 19-page coverage to keep CI fast; spot-check covers each parser/branch
   { slug: 'mistral', title: 'Is Mistral Down?', displayName: 'Mistral' },         // Instatus parser
-  { slug: 'groq', title: 'Is Groq Cloud Down?', displayName: 'Groq Cloud' },      // low-latency LLM, official uptime
+  { slug: 'groq', title: 'Is GroqCloud Down?', displayName: 'GroqCloud' },      // low-latency LLM, official uptime
   { slug: 'elevenlabs', title: 'Is ElevenLabs Down?', displayName: 'ElevenLabs' }, // estimate source, voice
   { slug: 'replicate', title: 'Is Replicate Down?', displayName: 'Replicate' },   // EXCLUDE_FALLBACK
   { slug: 'pinecone', title: 'Is Pinecone Down?', displayName: 'Pinecone' },      // top-ranked vector DB

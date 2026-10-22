@@ -273,7 +273,7 @@ describe('#1725 — frontend: a source that requires a capability admits only th
   const board = [
     svc('perplexity', 'Perplexity', 'down', 80),
     svc('cohere', 'Cohere API', 'operational', 89),
-    svc('groq', 'Groq Cloud', 'operational', 84),
+    svc('groq', 'GroqCloud', 'operational', 84),
     svc('claude', 'Claude API', 'operational', 70),
     svc('openai', 'OpenAI API', 'operational', 80),
   ]

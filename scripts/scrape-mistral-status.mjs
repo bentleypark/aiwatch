@@ -19,8 +19,9 @@
 // Copying that launch here returns 403 every time.
 //
 // This script only READS and forwards. Every interpretation — timestamp parsing, the 30-day window,
-// status mapping, duration, what counts as storable — lives in worker/src/parsers/rootly.ts, where
-// unit tests pin it. In particular this file does NOT parse dates: the page publishes them only as
+// status-word mapping, severity weighting, what counts as storable — lives in worker/src/parsers/rootly.ts,
+// where unit tests pin it. The two readings made here are the ones the page publishes only as markup: an
+// icon colour becomes a status word, and a day tooltip's minutes become a share of the day. In particular this file does NOT parse dates: the page publishes them only as
 // English prose, and a second hand-written parser here would drift from the Worker's. It bounds its
 // work by COUNT instead and lets the Worker decide what falls inside the window.
 //
@@ -35,17 +36,14 @@ const STATUS_URL = 'https://status.mistral.ai/'
 // so at that rate a 30-day window needs ~72. This bounds a run whose page grew; whether it bounds it
 // too tightly is not judged here — `rootlyWindowTruncated` measures that from each feed instead.
 const DEFAULT_MAX_INCIDENTS = 80
-// Gap between requests. Two paces were measured on the live page (2026-09-10): 150ms earned 429s and
-// lost 3 of 93 tooltips; 700ms lost none. The Worker withholds the uptime figure on ANY loss, so the
-// default is the one that was measured to lose nothing rather than a midpoint nobody tested.
+// Gap between incident-page requests.
 const DEFAULT_PACE_MS = 700
 
 /**
  * Retry a navigation/read with linear backoff.
  *
  * Not optional politeness: reads from this page are lossy under rate limiting, and a run without this
- * silently under-reports incidents, which reads downstream as a quieter month. The measured rates are
- * on `computeRootlyUptime` in worker/src/parsers/rootly.ts.
+ * silently under-reports incidents, which reads downstream as a quieter month.
  */
 /** An env override that must be a positive number, or the run stops. Absent falls back to the
  *  default; present-but-unusable is an operator error, and continuing would publish a feed that
@@ -70,9 +68,7 @@ export async function withRetry(fn, { attempts = 4, delayMs = 300, sleep, rateLi
       lastErr = err
       if (i < attempts) {
         // A 429 means "you are going too fast", so the linear backoff a timeout deserves is the wrong
-        // response — it spends the next slot on another rejection. Measured: a full run (93 tooltips
-        // plus incident pages) earns 429s, and those were the losses that made the uptime figure be
-        // withheld. Backing off an order of magnitude further is what turns them into successes.
+        // response — it spends the next slot on another rejection.
         const rateLimited = /\b429\b/.test(String(err?.message ?? ''))
         await wait(rateLimited ? rateLimitMs * i : delayMs * i)
       }
@@ -90,7 +86,7 @@ export async function withRetry(fn, { attempts = 4, delayMs = 300, sleep, rateLi
  * blind-chart state it exists to refuse stayed published as a fabricated 100%. Nothing could observe
  * the pushed shape, which is the actual defect; the missing field was the symptom.
  *
- * `chart` is what `page.evaluate` returns per `turbo-frame`; `days` and `fetched` are the tooltip
+ * `chart` is what `readV3Chart` returns per component card; `days` and `fetched` are the tooltip
  * results accumulated around it.
  */
 export function buildUptimeEntry(chart, days, fetched) {
@@ -108,6 +104,14 @@ export function buildUptimeEntry(chart, days, fetched) {
   }
 }
 
+/** A page that rendered, but no longer satisfies the deliberately narrow Rootly v3 contract. */
+export class MistralPageContractError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'MistralPageContractError'
+  }
+}
+
 /** Build the bounded terminal diagnostic sent after EVERY runnable Action execution.
  *
  * The Worker derives `partial` from listed/fetched itself. The scraper reports only measurements it
@@ -115,7 +119,7 @@ export function buildUptimeEntry(chart, days, fetched) {
  * a usable payload retains no page counters and is explicitly `unavailable` at the Worker.
  */
 export function buildMistralFeedObservation(payload, delivery) {
-  if (!payload?.coverage) return { delivery }
+  if (!payload?.coverage) return { delivery, ...(payload?.failure === 'page-contract' ? { failure: 'page-contract' } : {}) }
   const uptimeLostTooltips = Array.isArray(payload.uptime)
     ? payload.uptime.reduce((total, chart) => total + (chart.coverage.impacted - chart.coverage.fetched), 0)
     : 0
@@ -169,22 +173,29 @@ export async function runWithMistralFeedObservation(workerUrl, token, run, repor
   const state = { payload: undefined, delivery: 'not-posted' }
   try {
     return await run(state)
+  } catch (err) {
+    if (err instanceof MistralPageContractError) state.payload = { failure: 'page-contract' }
+    throw err
   } finally {
     await report(workerUrl, token, buildMistralFeedObservation(state.payload, state.delivery))
   }
 }
 
-/**
- * Status words this reader accepts. A row whose text matches none of them yields `{name: null,
- * status: null}`.
- *
- * Every word here must be one `mapRootlyComponentStatus` accepts, since the Worker maps what this
- * emits; `rootly.test.ts` holds that.
- */
-const COMPONENT_STATES = /\b(Operational|Affected|Degraded|Partial Outage|Major Outage|Under Maintenance|Maintenance)\b/
+/** The component icon's colour class → the status word `mapRootlyComponentStatus` reads. */
+const V3_ICON_STATUS = [[/\btext-pothos-/, 'Operational'], [/\btext-amber-/, 'Degraded'], [/\btext-red-/, 'Major Outage']]
 
-/** The same words, for the cross-side test — read off the regex so the two cannot diverge. */
-export const COMPONENT_STATES_WORDS = COMPONENT_STATES.source.replace(/^\\b\(|\)\\b$/g, '').split('|')
+export const COMPONENT_STATES_WORDS = V3_ICON_STATUS.map((entry) => String(entry[1]))
+
+export function readV3ComponentStatus(iconClass) {
+  const hit = V3_ICON_STATUS.find(([re]) => re.test(String(iconClass ?? '')))
+  return hit ? String(hit[1]) : 'Unknown'
+}
+
+/** The error a navigation response deserves when it is not the real page, or null when it is. */
+export function navigationFailure(response, url) {
+  if (isCloudflareChallenge(response?.headers())) return new Error(`cf-mitigated: challenge — served for ${url}; skipping the wait (#1510)`)
+  return response?.ok() ? null : new Error(`HTTP ${response?.status() ?? 'none'} from ${url}`)
+}
 
 /**
  * Whether a navigation response is Cloudflare's managed challenge interstitial, not the real page.
@@ -200,25 +211,130 @@ export function isCloudflareChallenge(headers) {
 }
 
 /**
- * One component row's text → `{name, status}`; nulls when no status word is found. `status` is the
- * matched word; `name` is what precedes it, whitespace-collapsed.
+ * The roster and every day bar, as verbatim strings.
  *
- * Separated from the DOM query so the vocabulary is testable. Which element counts as a row is still
- * decided in the browser, and no test reaches that.
+ * Serialized into the browser by `page.evaluate`, so it closes over NOTHING. v3 renders each day's
+ * tooltip inline (hidden), so no request is needed to read a day — and the cards lazy-load, so the
+ * caller compares `cards.length` to `expected` (the page's own component index) before trusting it.
  */
-export function readComponentRow(text) {
-  const flat = text.replace(/\s+/g, ' ')
-  const m = COMPONENT_STATES.exec(flat)
-  return { name: m ? flat.slice(0, m.index).trim() : null, status: m ? m[1] : null }
+export function readV3Roster(doc = document) {
+  const section = doc.querySelector('[data-testid="status-page-section-system-status"]')
+  let expected = 0
+  try {
+    expected = JSON.parse(section?.getAttribute('data-status-pages--v3--system-status-component-index-value') || '[]')
+      .filter((entry) => entry?.type === 'component').length
+  } catch { expected = 0 }
+  const cards = [...doc.querySelectorAll('[data-component-id]')].map((card) => ({
+    id: card.getAttribute('data-component-id'),
+    name: (card.querySelector('h3')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    iconClass: card.querySelector('[data-uptime-loading="icon"] span')?.className ?? '',
+    bars: [...card.querySelectorAll('[data-uptime-loading="bar"]')].map((bar) => {
+      const tip = bar.parentElement?.querySelector('[data-uptime-day-tooltip]')
+      return {
+        cls: String(bar.className ?? ''),
+        text: (tip?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        statuses: [...(tip?.querySelectorAll('span[title]') ?? [])].map((el) => el.getAttribute('title')),
+        titles: [...(tip?.querySelectorAll('a') ?? [])].map((a) => (a.getAttribute('title') || a.textContent || '').replace(/\s+/g, ' ').trim()),
+      }
+    }),
+  }))
+  return { expected, cards }
 }
 
-/** Rows → components, logging each row whose status word could not be read: its id and the row text. */
-export function readComponents(rows, warn = console.warn) {
-  return rows.map((r) => {
-    const read = readComponentRow(r.text)
-    if (read.status === null) warn(`[scrape] unreadable component row ${r.id}: ${r.text.replace(/\s+/g, ' ').trim().slice(0, 120)}`)
-    return { id: r.id, ...read }
+const V3_BAR_CLEAN = 'bg-pothos-10'
+const V3_BAR_IMPACTED = 'bg-red-v2-12'
+const V3_BAR_NO_DATA = 'bg-dove-grey-5'
+const MINUTES_PER_DAY = 1440
+
+/** "July 24, 2026 Impacted 1h 5m Related …" → the day and its downtime; null without a duration after `Impacted`. */
+export function parseV3DayTooltip(text) {
+  const m = /^([A-Z][a-z]+ \d{1,2}, \d{4}) Impacted (?:(\d+)h)? ?(?:(\d+)m)?(?: Related .+)?$/.exec(String(text ?? ''))
+  if (!m || (m[2] === undefined && m[3] === undefined)) return null
+  return { date: m[1], minutes: Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0) }
+}
+
+/**
+ * One component's day bars → what `buildUptimeEntry` consumes.
+ *
+ * A bar is judged by its colour AND its tooltip, so either drifting alone lands in `unreadBars`
+ * instead of reading as a clean day. `No data` bars are the days before the component existed; they
+ * are not days of the window, so `barCount` excludes them — but one AFTER data began is unread.
+ */
+export function readV3Chart(card) {
+  const impacted = []
+  const days = []
+  let started = false
+  let leading = 0
+  let unreadBars = 0
+  card.bars.forEach((bar, i) => {
+    const classes = new Set(bar.cls.split(/\s+/))
+    if (classes.has(V3_BAR_NO_DATA) && /No data$/.test(bar.text) && !started) { leading++; return }
+    started = true
+    if (classes.has(V3_BAR_CLEAN) && /No incidents$/.test(bar.text)) return
+    if (!classes.has(V3_BAR_IMPACTED)) { unreadBars++; return }
+    impacted.push(i)
+    const day = bar.statuses.length === 1 ? parseV3DayTooltip(bar.text) : null
+    if (!day) return
+    days.push({
+      date: day.date,
+      segments: [{ cls: V3_BAR_IMPACTED, width: Math.min(100, (day.minutes / MINUTES_PER_DAY) * 100) }],
+      label: bar.titles.join(' | '),
+    })
   })
+  return { chart: { componentId: card.id, barCount: card.bars.length - leading, unreadBars, impacted }, days, fetched: days.length }
+}
+
+const V3_SECTION = '[data-testid="status-page-section-system-status"]'
+
+/**
+ * Navigate and wait for the marker that proves the real page rendered. A challenge or non-2xx is a
+ * plain failure; a 2xx page that never shows the marker is the PAGE changing.
+ */
+export async function gotoReadable(page, url, readySelector) {
+  const failure = navigationFailure(await withRetry(() => page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })), url)
+  if (failure) throw failure
+  await page.waitForSelector(readySelector, { state: 'attached', timeout: 60000 })
+    .catch((err) => { throw new MistralPageContractError(`${url} never rendered ${readySelector}: ${err?.message ?? err}`) })
+}
+
+/**
+ * Scroll until the page's own component index is satisfied. The cards lazy-load, so a partial load
+ * must not become a narrower, falsely clean API scope. A roster that loads short is a failed read;
+ * only an unreadable index, no cards at all, or surplus cards say the page itself changed.
+ */
+export async function loadV3Roster(page, attempts = 20) {
+  let roster
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    roster = await page.evaluate(readV3Roster)
+    if (roster.expected > 0 && roster.cards.length >= roster.expected) break
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    await page.waitForTimeout(500)
+  }
+  if (roster.expected === 0 || roster.cards.length === 0 || roster.cards.length > roster.expected) {
+    throw new MistralPageContractError(`v3 component roster disagrees with its index: ${roster.cards.length}/${roster.expected}`)
+  }
+  if (roster.cards.length < roster.expected) throw new Error(`v3 component roster loaded short: ${roster.cards.length}/${roster.expected}`)
+  if (roster.cards.some((c) => !c.id || !c.name)) throw new MistralPageContractError('v3 component card has no id or name')
+  return roster
+}
+
+/** The history page's incident URLs; links present but none matching the incident path is the PAGE changing. */
+export async function readHistoryUrls(page) {
+  const urls = await page.evaluate(readIncidentLinks)
+  if (urls.length === 0) throw new MistralPageContractError('v3 history page has incident links but none match /incidents/<uuid>')
+  return urls
+}
+
+/** Distinct incident URLs on the history page, newest first, as absolute same-origin URLs. */
+export function readIncidentLinks(doc = document) {
+  const base = doc.location.href
+  const urls = []
+  for (const a of doc.querySelectorAll('a[href*="/incidents/"]')) {
+    let url
+    try { url = new URL(a.getAttribute('href'), base) } catch { continue }
+    if (url.origin === new URL(base).origin && /^\/incidents\/[0-9a-f-]{36}$/.test(url.pathname)) urls.push(url.href)
+  }
+  return [...new Set(urls)]
 }
 
 /**
@@ -236,8 +352,12 @@ export function readIncidentPage(doc = document) {
   const heading = [...doc.querySelectorAll('main h3')].find((h) => h.textContent.trim() === 'Updates')
   // Rows come from EVERY container under the updates panel, not just the first: a layout that splits
   // them across two blocks would otherwise lose one silently, with every counter reading clean.
+  const v3Rows = [...(heading?.parentElement?.children ?? [])].filter((el) => el.tagName === 'UL')
+    .flatMap((ul) => [...ul.children])
+    .map((li) => ['.text-eyebrow', '.status-page-markdown-content', '[data-role="label"]']
+      .map((sel) => li.querySelector(sel)?.textContent ?? ''))
   const panel = heading?.parentElement?.nextElementSibling
-  const rows = [...(panel?.children ?? [])].flatMap((container) =>
+  const rows = v3Rows.length > 0 ? v3Rows : [...(panel?.children ?? [])].flatMap((container) =>
     [...container.children].map((row) =>
       // The row's content column, read per element.
       [...(row.lastElementChild?.children ?? [])].map((cell) => cell.textContent)))
@@ -247,7 +367,10 @@ export function readIncidentPage(doc = document) {
 /** The four status words the page renders; anything else is not an update row. */
 const ROOTLY_STATUSES = new Set(['Resolved', 'Identified', 'Investigating', 'Monitoring'])
 /** "September 21, 2026 at 10:12 PM UTC" — shape only; `parseRootlyTimestamp` does the reading. */
-const ROOTLY_STAMP = /^[A-Z][a-z]+ \d{1,2}, \d{4} at \d{1,2}:\d{2} (?:AM|PM) UTC$/
+const ROOTLY_STAMP = /^[A-Z][a-z]+ \d{1,2}, \d{4}(?: at)? \d{1,2}:\d{2} (?:AM|PM) UTC$/
+
+/** v3 appends "(54 minutes earlier)" to every update after the first. */
+const stripAge = (text) => text.replace(/ \([^()]*earlier\)$/, '')
 
 /**
  * Turn each update row's cell texts into `{status, at, body}`, or refuse the lot.
@@ -268,9 +391,9 @@ export function parseUpdateRows(rows) {
     const texts = (Array.isArray(cells) ? cells : [])
       .map((c) => String(c ?? '').replace(/\s+/g, ' ').trim())
     const status = texts.find((c) => ROOTLY_STATUSES.has(c))
-    const at = texts.find((c) => ROOTLY_STAMP.test(c))
-    if (!status || !at) { dropped++; continue }
-    updates.push({ status, at, body: texts.filter((c) => c !== status && c !== at).join(' ').trim() })
+    const cell = texts.find((c) => ROOTLY_STAMP.test(stripAge(c)))
+    if (!status || !cell) { dropped++; continue }
+    updates.push({ status, at: stripAge(cell), body: texts.filter((c) => c !== status && c !== cell).join(' ').trim() })
   }
   return dropped > 0 ? { updates: [], dropped } : { updates, dropped }
 }
@@ -297,97 +420,26 @@ async function main() {
     // preinstalled Chrome, so no browser download and no `playwright install` step.
       browser = await chromium.launch({ headless: false, channel: 'chrome' })
     const page = await (await browser.newContext()).newPage()
-    const gotoResponse = await withRetry(() => page.goto(STATUS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }))
-    // #1510 — a served challenge is a normal (403) response, not a thrown error, so it survives
-    // `withRetry` and would otherwise fall through to the 60s wait below and time out there instead.
-    if (isCloudflareChallenge(gotoResponse?.headers())) {
-      throw new Error('cf-mitigated: challenge — served to this run; skipping the chart wait (#1510)')
+    await gotoReadable(page, STATUS_URL, V3_SECTION)
+    const roster = await loadV3Roster(page)
+    const components = roster.cards.map((c) => ({ id: c.id, name: c.name, status: readV3ComponentStatus(c.iconClass) }))
+    const uptime = roster.cards.map((card) => {
+      const { chart, days, fetched } = readV3Chart(card)
+      return buildUptimeEntry(chart, days, fetched)
+    })
+    for (const u of uptime) {
+      if (u.unreadBars > 0 || u.coverage.fetched < u.coverage.impacted) console.warn(`[scrape] unreadable day bars on ${u.componentId}: unread=${u.unreadBars} impacted=${u.coverage.impacted} read=${u.coverage.fetched}`)
     }
-    // Wait for the real page, not a fixed delay: the uptime charts are what proves the challenge
-    // cleared, and an interstitial has none.
-    //
-    // `state: 'attached'`, NOT the default 'visible'. A `turbo-frame` has no box of its own, so
-    // Playwright never calls one visible — the default timed out after 60s having resolved all 14
-    // elements every poll. Presence in the DOM is the actual signal here.
-    await page.waitForSelector('turbo-frame[id^="uptime-chart-"]', { state: 'attached', timeout: 60000 })
-
-    const componentRows = await page.evaluate(() =>
-      [...document.querySelectorAll('turbo-frame[id^="uptime-chart-"]')].map((f) => ({
-        id: f.id.replace('uptime-chart-', ''),
-        text: (f.closest('div')?.parentElement)?.textContent ?? '',
-      })))
-    const components = readComponents(componentRows)
-
-    // ── Uptime charts ──────────────────────────────────────────────────────────────────────────
-    // Read BEFORE navigating away: the charts live on the main page. Only the impacted bars need a
-    // tooltip (the bar fill says which), so this is a handful of requests per component rather than
-    // 91. Retrieval is lossy, so each component reports impacted-vs-fetched and the Worker withholds
-    // the uptime figure when they differ — a lost tooltip must never read as a clean day.
-    const uptime = []
-    const charts = await page.evaluate(() => [...document.querySelectorAll('turbo-frame[id^="uptime-chart-"]')].map((f) => {
-      const ctrl = f.querySelector('[data-controller*="uptime-chart"]');
-      const bars = [...f.querySelectorAll('rect')]
-        .filter((r) => !r.hasAttribute('data-status-pages--v2--uptime-chart-component-target'));
-      const filled = bars.map((r, i) => ({ i, fill: ((r.getAttribute('style') || '').match(/fill:\s*([^;]+)/) || [])[1] }));
-      return {
-        componentId: f.id.replace('uptime-chart-', ''),
-        since: ctrl ? ctrl.getAttribute('data-status-pages--v2--uptime-chart-component-since-value') : null,
-        barCount: bars.length,
-        // EVERY bar carries a fill — a clean day is `3CB878`. So a bar whose fill we could not read
-        // is a day we did not read, and reporting it as "not impacted" is the one direction this
-        // source must never fail in. Counted, not skipped: if the inline-style shape drifts, every
-        // bar lands here at once and `impacted` would otherwise read as a spotless window.
-        unreadBars: filled.filter((b) => !b.fill).length,
-        impacted: filled.filter((b) => b.fill && !/3CB878/i.test(b.fill)).map((b) => b.i),
-      };
-    }))
-
-    for (const chart of charts) {
-      if (!chart.since) { console.warn(`[scrape] chart ${chart.componentId} has no window start — skipped`); continue }
-      const days = []
-      let fetched = 0
-      for (const idx of chart.impacted) {
-        const url = `/uptime-chart-tooltip?resource_id=${chart.componentId}&resource_type=service`
-          + `&since=${encodeURIComponent(chart.since)}&published=true&active_day_index=${idx}`
-        try {
-          const day = await withRetry(async () => {
-            const r = await page.evaluate(async (u) => {
-              const res = await fetch(u)
-              if (!res.ok) return { ok: false, status: res.status }
-              return { ok: true, html: await res.text() }
-            }, url)
-            if (!r.ok) throw new Error(`HTTP ${r.status}`)
-            const html = r.html
-            const date = (html.match(/>([A-Z][a-z]{2} \d{1,2}, \d{4}) \(UTC\)</) || [])[1] || null
-            const segments = [...html.matchAll(/rounded-full (bg-[a-z0-9-]+)"\s+style="left:\s*[\d.]+%;\s*width:\s*([\d.]+)%/g)]
-              .map((m) => ({ cls: m[1], width: Number(m[2]) }))
-            const label = html.replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ')
-              .replace(/\s+/g, ' ').trim()
-              .replace(/^[A-Z][a-z]{2} \d{1,2}, \d{4} \(UTC\)\s*/, '')
-            if (!date || segments.length === 0) throw new Error('unreadable tooltip')
-            return { date, segments, label }
-          }, { attempts: 4, delayMs: 300 })
-          days.push(day)
-          fetched++
-        } catch (err) {
-          console.warn(`[scrape] tooltip failed ${chart.componentId} idx=${idx}: ${err?.message ?? err}`)
-        }
-        await new Promise((r) => setTimeout(r, paceMs))
-      }
-      uptime.push(buildUptimeEntry(chart, days, fetched))
+    for (const c of components) {
+      if (c.status === 'Unknown') console.warn(`[scrape] unmapped component icon on ${c.name}: ${roster.cards.find((card) => card.id === c.id)?.iconClass}`)
     }
-    const lostTooltips = uptime.reduce((a, u) => a + (u.coverage.impacted - u.coverage.fetched), 0)
-    console.log(`[scrape] uptime charts=${uptime.length} impactedDays=${uptime.reduce((a, u) => a + u.coverage.impacted, 0)} lost=${lostTooltips}`)
+    console.log(`[scrape] uptime charts=${uptime.length} impactedDays=${uptime.reduce((a, u) => a + u.coverage.impacted, 0)}`)
 
     const today = new Date().toISOString().slice(0, 10)
-    await withRetry(() => page.goto(`${STATUS_URL}history?date=${today}`, { waitUntil: 'domcontentloaded', timeout: 45000 }))
-    await page.waitForSelector('[data-status-pages--clickable-card-url-value]', { state: 'attached', timeout: 60000 })
+    await gotoReadable(page, `${STATUS_URL}history?date=${today}`, 'a[href*="/incidents/"]')
 
     // Newest-first, as the page orders them.
-    const allUrls = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-status-pages--clickable-card-url-value]')]
-        .map((c) => c.getAttribute('data-status-pages--clickable-card-url-value'))
-        .filter(Boolean))
+    const allUrls = await readHistoryUrls(page)
     const urls = allUrls.slice(0, maxIncidents)
     if (allUrls.length > urls.length) {
       // The cap bit — expected on most runs, since the page carries a longer tail than the window

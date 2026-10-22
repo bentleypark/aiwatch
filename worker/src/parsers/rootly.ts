@@ -11,14 +11,14 @@
 // functions a test can pin rather than DOM code running in a browser nobody can assert on.
 //
 // The scraper sends timestamps VERBATIM. It has to: the page carries no machine-readable time
-// anywhere — no `<time>` element, no ISO string, no data attribute, on either the history list or an
-// incident page (verified 2026-09-10). The only form published is English prose, "September 4, 2026
-// at 10:00 PM UTC". Parsing that is a hand-written parser over source text, which is exactly the
+// anywhere — no `<time>` element, no ISO string, no date attribute, on an incident page (verified on
+// v3, 2026-10-21). It is English prose: "September 4, 2026 at 10:00 PM UTC" on v2, "Aug 9, 2026 4:30
+// PM UTC" on v3. Parsing that is a hand-written parser over source text, which is exactly the
 // shape #1224 warns decays; the mitigation is that a failure here is COUNTED and surfaced
 // (`unparsedTimestamps`) instead of silently yielding an incident with no start.
 //
-// The history LIST omits the year ("September 4 at 10:00 PM UTC") — only the incident PAGE carries
-// it. That is why normalization consumes incident pages rather than list rows: a year inferred from
+// The history LIST carries no year and no day of month (v3: a month header and clock times) — only the
+// incident PAGE carries a full date. That is why normalization consumes incident pages rather than list rows: a year inferred from
 // a month header is a second hand-written parser, and it would be wrong for exactly one week a year.
 import type { Incident, TimelineEntry } from '../types'
 import { formatDuration, isNonReliabilityAdvisory } from '../utils'
@@ -29,11 +29,11 @@ export interface RootlyFeedIncident {
   /** UUID from the incident page URL (`/incidents/<uuid>`); stable, and our dedup key. */
   id: string
   title: string
-  /** Update entries, newest first as the page renders them. */
+  /** Update entries, newest first. */
   updates: Array<{
-    /** "Resolved" | "Identified" | "Investigating" | "Monitoring", as rendered. */
+    /** "Resolved" | "Identified" | "Investigating" | "Monitoring". */
     status: string
-    /** "September 5, 2026 at 05:48 AM UTC", as rendered. */
+    /** "September 5, 2026 at 05:48 AM UTC" (v2) or "Aug 9, 2026 4:30 PM UTC" (v3), verbatim. */
     at: string
     body: string
   }>
@@ -54,14 +54,14 @@ export interface RootlyFeed {
    * redefinition of `listed` because the two answer different questions, and collapsing them into
    * one field is what made this wrong in both directions across two review rounds: post-cap, a
    * truncated run reports `fetched === listed` and looks complete; pre-cap, `fetched < listed`
-   * holds on every healthy run (the page carries ~154 incidents and the cap is 80 BY DESIGN — a
-   * 30-day window needs ~72), so the diagnostic that reads it fires always and means nothing.
+   * holds on every healthy run (the page carries more incidents than the cap, which is 80 BY DESIGN),
+   * so the diagnostic that reads it fires always and means nothing.
    * Optional: a feed written before this was added simply cannot answer the truncation question.
    */
   coverage: { listed: number; fetched: number; available?: number }
   /**
-   * The uptime chart, per component. Present from the same scrape as the incidents, because the
-   * severity an incident needs is only here — the titles carry none. Optional only for feeds written
+   * The uptime chart, per component. Present from the same scrape as the incidents, which take their
+   * impact from it. Optional only for feeds written
    * before it was added; `isStorableRootlyFeed` refuses a feed without it, because a feed that cannot
    * produce a figure scores HIGHER than one that produces a bad figure (see the gate).
    */
@@ -93,8 +93,7 @@ export function rootlyWindowCutoffDay(nowMs: number, windowDays = 30): string {
  * Did the scraper's incident cap cost us any of the 30-day window?
  *
  * NOT the same question as "did the cap bite". The cap bites on every run by design: the history
- * page carries a long tail (~154 incidents over ~64 days, measured 2026-09-10) and `MAX_INCIDENTS`
- * is 80, of which a 30-day window needs ~72. What matters is whether the OLDEST incident we
+ * page carries more incidents than `MAX_INCIDENTS` (80). What matters is whether the OLDEST incident we
  * actually read still reaches back past the window edge. If it does, everything inside the window
  * is in hand and the untouched tail is irrelevant; if it does not, the cap ate real days and the
  * incident count is silently low — the shape that reads downstream as a quiet month.
@@ -156,11 +155,10 @@ export function isStorableRootlyFeed(
   // `!detail.title` guard provided before it had to allow a genuinely empty title through.
   if (f.incidents.length > 0 && f.incidents.every((i) => !(i?.title ?? '').trim())) return false
 
-  // Components are read from the main page, which is the one request that must have succeeded for
-  // anything else to have been attempted. An empty list means the page did not render for us.
+  // An empty component list means the page did not render for us.
   if (f.components.length === 0) return false
-  // ...and neither did a list of placeholders. The scraper emits `{name: null, status: null}` when
-  // its status regex misses, which is the "ran, read nothing" shape this gate exists to refuse — it
+  // ...and neither did a list of unmapped statuses. The scraper emits status `Unknown` when it cannot
+  // map a component's icon colour, which is the "ran, read nothing" shape this gate exists to refuse — it
   // parses, and downstream it becomes `unknown` for the KV TTL, over a good feed.
   //
   // Judged against the SCOPE when the caller supplies one, because "any one component read" and
@@ -177,7 +175,7 @@ export function isStorableRootlyFeed(
   if (scopeIds?.length ? !scopeIds.every(readable) : !readable()) return false
 
   // And the uptime must be COMPUTABLE. This is the same #1256 argument one level further in: a feed
-  // whose tooltips came back short parses fine and looks authoritative, and storing it over a good
+  // with an unreadable day tooltip parses fine and looks authoritative, and storing it over a good
   // one does not merely lose a figure — it publishes a HIGHER score than the figure it replaced.
   // `computeRootlyUptime` withholds `uptime30d` on any gap (every gap on this source fails toward
   // "no downtime"), and `score.ts` then drops the 40-point Uptime component and rescales the other
@@ -192,10 +190,8 @@ export function isStorableRootlyFeed(
   // `unknown`, the honest reading of "no complete scrape in three hours".
   //
   // Two costs, both accepted. An uptime-only failure also holds back the components and incidents in
-  // the same push — the one observed cause is rate limiting, which is uncorrelated with whether
-  // Mistral is actually down. And "until a clean scrape lands" is optimistic for the causes that are
-  // NOT transient: an unrecognized segment class, a chart dropped for a missing `since`, or a
-  // `barCount: 0` component all reproduce on every cycle, so those refuse permanently and the
+  // the same push. And "until a clean scrape lands" is optimistic for the causes that are
+  // NOT transient: an unrecognized segment class or a `barCount: 0` component all reproduce on every cycle, so those refuse permanently and the
   // service sits at `unknown` until someone ships a change. That is the same property
   // `normalizeRootlyIncidents` records about itself, and it is the correct direction here too — but
   // it means a refusal that persists past a few hours is a code signal, not a retry signal.
@@ -241,11 +237,8 @@ const MONTHS: Record<string, number> = {
 /**
  * Full names AND their three-letter forms — ONE month vocabulary for both parsers.
  *
- * The incident pages render "September" and the chart tooltips render "Sep", and an earlier cut gave
- * each parser its own table. That is two hand-written parsers over one page which are free to
- * disagree, and they did: the scraper forwards any `[A-Z][a-z]+ D, YYYY at …`, so the day Rootly
- * unifies its two surfaces on the short form, every incident would forward and then be DROPPED here
- * while `coverage` still read complete.
+ * The incident pages and the day tooltips have each rendered months in a different form, and a
+ * separate table per parser would be free to disagree with the other.
  */
 const MONTH_LOOKUP: Record<string, number> = (() => {
   const out: Record<string, number> = {}
@@ -269,7 +262,7 @@ const MONTH_LOOKUP: Record<string, number> = (() => {
  */
 export function parseRootlyTimestamp(text: string): number | null {
   if (typeof text !== 'string') return null
-  const m = /^\s*([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})\s+at\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s+UTC\s*$/.exec(text)
+  const m = /^\s*([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\s+at)?\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s+UTC\s*$/.exec(text)
   if (!m) return null
   const month = MONTH_LOOKUP[m[1].toLowerCase()]
   if (month === undefined) return null
@@ -288,7 +281,7 @@ export function parseRootlyTimestamp(text: string): number | null {
 }
 
 /**
- * A component's RENDERED status word → our three-state.
+ * A component's status word → our three-state.
  *
  * Returns null on anything unrecognized, and the caller must not coerce that to `operational`. An
  * unknown word means "we do not know", which is a different thing from "fine".
@@ -418,8 +411,8 @@ export interface NormalizeResult {
  * Degraded", "US Endpoint Service Degradation", "Console Degraded" — with no "Outage"/"Major"/
  * "Critical" anywhere, INCLUDING the one day whose uptime tooltip drew a `bg-red-500` segment
  * (titled "Elevated error rate…"). So the title does not carry severity, and inventing a mapping
- * from it would encode a distinction the source does not make. Severity lives in the uptime chart's
- * segment classes instead, which is a different payload and a different part of #1381.
+ * from it would encode a distinction the source does not make. Impact is attached from the uptime chart
+ * instead (`attachRootlyImpact`), which is a different payload and a different part of #1381.
  */
 export function normalizeRootlyIncidents(feed: RootlyFeed): NormalizeResult {
   const incidents: Incident[] = []
@@ -488,27 +481,24 @@ export function normalizeRootlyIncidents(feed: RootlyFeed): NormalizeResult {
 }
 
 // ── Uptime chart ────────────────────────────────────────────────────────────────────────────────
-// The severity the incident titles do NOT carry lives here. Across all 93 impacted days on the 14
-// components (2026-09-10) every title read as a degradation — including the single day whose tooltip
-// drew a `bg-red-500` segment, titled "Elevated error rate…". So the chart is the only place the
-// source distinguishes a full outage from a partial one, and an incident's `impact` is derived by
-// joining it to its component-day here rather than guessed from words.
+// An incident's `impact` is derived by joining it to its component-day here rather than guessed from
+// its title.
 
-/** One impacted day, verbatim from the `/uptime-chart-tooltip` fragment. */
+/** One impacted day, as the scraper assembles it from the day's tooltip. */
 export interface RootlyUptimeDay {
-  /** "Aug 12, 2026" — the tooltip renders ABBREVIATED months, unlike the incident pages. */
+  /** "Aug 12, 2026" or "August 12, 2026" — `parseRootlyDay` reads both. */
   date: string
-  /** Segment class + width as a share of the day. Green segments are the healthy remainder. */
+  /** Segment class + width as a share of the day. */
   segments: Array<{ cls: string; width: number }>
-  /** The tooltip's text, e.g. "Batch API Degraded". Joins a day to the incidents that caused it. */
+  /** The titles of the incidents the tooltip names. Joins a day to the incidents that caused it. */
   label: string
 }
 
 export interface RootlyUptimeComponent {
   componentId: string
-  /** Day bars the chart rendered (91 observed) — the page's coverage, not ours. */
+  /** Day bars the chart rendered with data, a leading No-data run excluded — the page's coverage, not ours. */
   barCount: number
-  /** Bars the page drew as impacted, vs tooltips we actually retrieved. */
+  /** Bars the page drew as impacted, vs tooltips that parsed into a day. */
   coverage: { impacted: number; fetched: number }
   /**
    * Bars whose fill the scrape could not read at all.
@@ -530,13 +520,16 @@ export interface RootlyUptimeComponent {
  * Segment class → our impact level, reusing the SHARED weight vocabulary rather than a private one,
  * so a Rootly day weighs the same as an Atlassian or incident.io day (#259/#1006).
  *
- * Returns null on an unrecognized class. Only these two were observed; calling a third one healthy
+ * Returns null on an unrecognized class. v3 draws every impacted day `bg-red-v2-12` and publishes no
+ * severity of its own, so that class reads as `ROOTLY_DEFAULT_IMPACT` (#1557). Any other class is not
+ * guessed: calling a third one healthy
  * would understate downtime and calling it major would overstate it, so the caller treats the day as
  * unreadable and withholds the figure instead of picking.
  */
 export function rootlySegmentImpact(cls: string): 'major' | 'minor' | null {
   if (cls === 'bg-red-500') return 'major'
   if (cls === 'bg-gray-700') return 'minor'
+  if (cls === 'bg-red-v2-12') return ROOTLY_DEFAULT_IMPACT
   return null
 }
 
@@ -615,7 +608,7 @@ export interface RootlyUptimeResult {
    *  colour alone. Whole-chart, not window-scoped, unlike `unreadableDays`. Non-zero forces `pct`
    *  to null. */
   unreadBars: number
-  /** Components in scope whose tooltips were not all retrieved. Non-zero forces `pct` to null. */
+  /** Components in scope with an impacted bar whose tooltip did not parse. Non-zero forces `pct` to null. */
   incompleteComponents: number
   /** Configured components with no chart in the payload at all. Non-zero forces `pct` to null —
    *  a denominator over the components that happened to arrive is not the scope's uptime. */
@@ -811,7 +804,7 @@ export function attachRootlyImpact(
     if (entries.length === 0) {
       // An incident that STARTED before the window has no chart day to match, because the chart only
       // keeps in-window days — that is the window working, not a lost read. Counting it made the
-      // diagnostic this feeds fire on every healthy run: the incident feed spans ~64 days while the
+      // diagnostic this feeds fire on every healthy run: the incident feed spans more than 30 days while the
       // uptime read spans 30, so out-of-window incidents are permanent. `unattributed` means "a day
       // the uptime read COVERS, whose incident we still could not match" and nothing else.
       if (day >= cutoffDay) unattributed++

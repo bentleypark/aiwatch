@@ -887,7 +887,7 @@ describe('buildRssFeed — fallback ranking parity with Discord (#724)', () => {
     // With scores present, the fallback line must match getFallbacks() (the Discord/dashboard oracle).
     const down = { ...service({ id: 'cohere', name: 'Cohere', category: 'api', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
     const candidates = [
-      { ...service({ id: 'groq', name: 'Groq Cloud', category: 'api', status: 'operational' }), aiwatchScore: 50 },
+      { ...service({ id: 'groq', name: 'GroqCloud', category: 'api', status: 'operational' }), aiwatchScore: 50 },
       { ...service({ id: 'mistral', name: 'Mistral API', category: 'api', status: 'operational' }), aiwatchScore: 92 },
     ]
     const all = [down, ...candidates] as ServiceStatus[]
@@ -1575,7 +1575,7 @@ describe('feed titles follow the Discord alert titles (#1674)', () => {
     const render = (groqScore: number) => {
       const down = { ...service({ id: 'cohere', name: 'Cohere', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
       const alts = [
-        { ...service({ id: 'groq', name: 'Groq Cloud', status: 'operational' }), aiwatchScore: groqScore },
+        { ...service({ id: 'groq', name: 'GroqCloud', status: 'operational' }), aiwatchScore: groqScore },
         { ...service({ id: 'mistral', name: 'Mistral API', status: 'operational' }), aiwatchScore: 99 },
       ]
       return buildRssFeed([down, ...alts] as ServiceStatus[], { scope: 'all' }, NOW)

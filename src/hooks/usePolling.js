@@ -197,7 +197,7 @@ export const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'groq', category: 'api', name: 'Groq Cloud', provider: 'Groq', status: 'operational',
+    id: 'groq', category: 'api', name: 'GroqCloud', provider: 'Groq', status: 'operational',
     latency: 52, uptime30d: 99.95,
     history30d: hist(),
     history3m: [{ month: '2026-01', uptime: 99.98 }, { month: '2026-02', uptime: 99.97 }, { month: '2026-03', uptime: 99.95 }],

@@ -856,7 +856,7 @@ describe('no is-down insight claims AIWatch estimates uptime (#713/#1006)', () =
 // live sections say so instead of disappearing.
 describe('is-down static copy vs live sections (#1742)', () => {
   const groq = {
-    id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', status: 'operational',
+    id: 'groq', name: 'GroqCloud', provider: 'Groq', category: 'api', status: 'operational',
     latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
     incidents: [], aiwatchScore: null, scoreGrade: null,
   }
@@ -910,7 +910,7 @@ describe('is-down handler — which live sections say they could not load (#1742
   })
 
   it('status loaded but its processing threw after this service was read: no could-not-load line on the 200 page', async () => {
-    const res = new Response(JSON.stringify({ services: [svc('groq', 'Groq Cloud')], aiAnalysis: {}, supplyChainBanner: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    const res = new Response(JSON.stringify({ services: [svc('groq', 'GroqCloud')], aiAnalysis: {}, supplyChainBanner: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     fetchMock.mockResolvedValueOnce(res)
     const page = await handler(req('groq'))
     const html = await page.text()

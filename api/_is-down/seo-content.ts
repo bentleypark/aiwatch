@@ -211,11 +211,11 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     ],
   },
   groq: {
-    displayName: 'Groq Cloud',
-    description: 'Groq Cloud provides ultra-low-latency inference for open-source LLMs using custom LPU hardware.',
-    whenDown: 'When Groq Cloud is down, applications relying on its low-latency inference (real-time voice, streaming chat, agentic loops) lose their inference backend.',
+    displayName: 'GroqCloud',
+    description: 'GroqCloud provides ultra-low-latency inference for open-source LLMs using custom LPU hardware.',
+    whenDown: 'When GroqCloud is down, applications relying on its low-latency inference (real-time voice, streaming chat, agentic loops) lose their inference backend.',
     faqs: [
-      { q: 'Is Groq Cloud down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Groq every 5 minutes and shows real-time operational status, uptime, and response time data.' },
+      { q: 'Is GroqCloud down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors GroqCloud every 5 minutes and shows real-time operational status, uptime, and response time data.' },
       { q: 'Why is Groq slow today?', a: 'Check this page for any active incidents, and the AIWatch dashboard for probe-based response time trends.' },
       { q: 'What are alternatives to Groq?', a: 'For hosted open-model inference, Together AI, Fireworks AI, and Cerebras are alternatives AIWatch also tracks. AIWatch shows current availability for each.' },
       { q: 'How do I check Groq status?', a: 'You can check Groq status on this page, on the official Groq status page at groqstatus.com, or on the AIWatch dashboard at ai-watch.dev.' },
@@ -229,7 +229,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Together AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Together AI every 5 minutes and shows real-time operational status.' },
       { q: 'Why does Together AI list so many incidents?', a: 'Together reports per-model incidents, so a single underlying issue can produce multiple entries. AIWatch groups concurrent incidents in alerts; check the official status page for per-model detail.' },
-      { q: 'What are alternatives to Together AI?', a: 'Fireworks AI, Groq Cloud, and Cerebras are alternative open-source model platforms. AIWatch shows current availability across all of them.' },
+      { q: 'What are alternatives to Together AI?', a: 'Fireworks AI, GroqCloud, and Cerebras are alternative open-source model platforms. AIWatch shows current availability across all of them.' },
       { q: 'How do I check Together AI status?', a: 'You can check Together status on this page, on the official Together status page at status.together.ai, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -240,19 +240,19 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Fireworks AI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Fireworks every 5 minutes and shows real-time operational status.' },
       { q: 'How do I check Fireworks AI status?', a: 'You can check Fireworks status on this page, on the official Fireworks status page at status.fireworks.ai, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to Fireworks AI?', a: 'Together AI, Groq Cloud, and Cerebras offer similar hosted open-source model inference. AIWatch shows current availability and reliability rankings.' },
+      { q: 'What are alternatives to Fireworks AI?', a: 'Together AI, GroqCloud, and Cerebras offer similar hosted open-source model inference. AIWatch shows current availability and reliability rankings.' },
       { q: 'Is Fireworks faster than Together AI?', a: 'Check AIWatch ranking at ai-watch.dev/#ranking to compare uptime and probe response times.' },
     ],
   },
   cerebras: {
     displayName: 'Cerebras Inference',
-    description: 'Cerebras Inference serves open-source LLMs on its wafer-scale hardware. It is a direct alternative to Groq, Together AI, and Fireworks AI for latency-sensitive workloads.',
+    description: 'Cerebras Inference serves open-source LLMs on its wafer-scale hardware. It is a direct alternative to GroqCloud, Together AI, and Fireworks AI for latency-sensitive workloads.',
     insight: 'Cerebras runs its status page on Atlassian Statuspage with one component per served model. Any single model degrading marks Cerebras degraded, so model-specific outages are not under-reported.',
     whenDown: 'When Cerebras Inference is down, apps relying on its high-throughput endpoints lose hosted inference for the affected open-source model. Streaming and high-volume batch workloads see request failures.',
     faqs: [
       { q: 'Is Cerebras Inference down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cerebras every 5 minutes — taking the worst status across all model components — and shows real-time operational status.' },
       { q: 'How do I check Cerebras status?', a: 'You can check Cerebras status on this page, on the official status page at status.cerebras.ai, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to Cerebras Inference?', a: 'Groq Cloud, Together AI, and Fireworks AI offer hosted inference for open-source models. AIWatch shows current availability for each.' },
+      { q: 'What are alternatives to Cerebras Inference?', a: 'GroqCloud, Together AI, and Fireworks AI offer hosted inference for open-source models. AIWatch shows current availability for each.' },
       { q: 'Why is one Cerebras model down but not others?', a: 'Cerebras publishes per-model status components, so a rollout or capacity issue can affect just one model (e.g. GPT-OSS-120B) while the rest stay operational. AIWatch surfaces the worst-of, so the service shows degraded even if only one model is affected.' },
     ],
   },

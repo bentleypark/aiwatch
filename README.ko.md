@@ -76,7 +76,7 @@
 | Gemini API | Google | Google Cloud incidents.json |
 | Mistral API | Mistral AI | Rootly (브라우저 렌더링) |
 | Cohere API | Cohere | incident.io (Atlassian 호환) |
-| Groq Cloud | Groq | incident.io (Atlassian 호환) |
+| GroqCloud | Groq | incident.io (Atlassian 호환) |
 | Together AI | Together | Better Stack RSS + 가동률 API |
 | Fireworks AI | Fireworks | incident.io (Atlassian 호환) |
 | Cerebras Inference | Cerebras | Atlassian Statuspage |
@@ -335,7 +335,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `azureopenai` | Azure OpenAI | `replicate` | Replicate |
 | `mistral` | Mistral API | `fal` | fal.ai |
 | `cohere` | Cohere API | `modal` | Modal |
-| `groq` | Groq Cloud | `voyageai` | Voyage AI |
+| `groq` | GroqCloud | `voyageai` | Voyage AI |
 | `together` | Together AI | `pinecone` | Pinecone |
 | `fireworks` | Fireworks AI | `turbopuffer` | turbopuffer |
 | `cerebras` | Cerebras Inference | `twelvelabs` | Twelve Labs |

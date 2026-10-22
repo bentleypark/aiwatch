@@ -53,7 +53,7 @@ import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, rootlyScoringImpact, type StoredRootlyFeed } from './parsers/rootly'
 import { atlassianRosterEntries } from './parsers/statuspage'
-import { parseMistralFeedObservation, recordMistralFeedObservation } from './mistral-feed-observation'
+import { parseMistralFeedObservation, recordMistralFeedObservation, observeMistralPageContract } from './mistral-feed-observation'
 import { recordStatusFetchRun } from './status-fetch-run'
 import { maybeDispatchWorkflow, DEEPSEEK_DISPATCH_CONFIG, MISTRAL_DISPATCH_CONFIG } from './workflow-dispatch'
 import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, extReportCountKey, isExtReportSource, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
@@ -2581,7 +2581,18 @@ export async function handleMistralFeedObservation(request: Request, env: Env, c
   if (!observation) return json(400, { ok: false, error: 'invalid observation' })
 
   recordMistralFeedObservation(env.ANALYTICS, observation)
-  return json(200, { ok: true, coverage: observation.coverage, delivery: observation.delivery })
+  // This is deliberately separate from #1650's generic "source unreadable" path. It asserts a
+  // narrow fact: the browser reached a real Rootly page, but the expected v3 contract changed.
+  // Two consecutive confirmed runs page immediately; the durable marker limits reminders to weekly.
+  const contract = await observeMistralPageContract(env.STATUS_CACHE, observation, async () => {
+    if (!env.DISCORD_WEBHOOK_URL) return false
+    return sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+      title: '⚠️ Mistral Rootly page contract changed',
+      description: 'Two consecutive Mistral scraper runs reached Rootly but could not read the expected v3 page structure, so no new feed was pushed.\n\nThis is distinct from a Cloudflare challenge.',
+      color: 0xFFA500,
+    })
+  })
+  return json(200, { ok: true, coverage: observation.coverage, delivery: observation.delivery, contract })
 }
 
 // ── POST /api/admin/rebuild-archive ─────────────────────────────

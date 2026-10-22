@@ -59,16 +59,13 @@ export const DEEPSEEK_DISPATCH_CONFIG: WorkflowDispatchConfig = {
 }
 
 // Mistral: NOT the same cadence as DeepSeek's `*/5`. The scrape job drives headed Chrome under xvfb
-// reading ~93 tooltips + ~80 incident pages (a verified run took 3m49s wall, 3m32s of actual
-// scraping — run 34581851025), and the source's one measured pacing-sensitive failure mode is
-// rate-limiting (150ms pacing lost 3/93 tooltips, 700ms lost 0, measured 2026-09-10 —
-// scripts/scrape-mistral-status.mjs). Dispatching on every `*/5` tick (12x/hour) would multiply
-// request volume against exactly the throttling the pacing exists to avoid.
+// reading ~80 incident pages. Dispatching on every `*/5` tick (12x/hour) would multiply
+// request volume against the source.
 //
 // #1397 — cooldownS was originally 55min, chosen to land ~once/hour; that traded away incident-
 // detection latency (an actual Mistral outage could go up to ~1h unseen) without weighing it against
-// the alternative, and the "more often risks worse rate-limiting" reasoning above is itself an
-// extrapolation from within-run tooltip pacing, not a measurement of repeated-run frequency — see
+// the alternative, and the "more often risks worse rate-limiting" reasoning is itself an
+// extrapolation from within-run pacing, not a measurement of repeated-run frequency — see
 // #1397 for the full reasoning, not restated here. The `timeout-minutes: 12` ceiling on
 // `mistral-feed.yml` is the real worst-case run length to design a cooldown against: whatever cooldownS
 // is chosen here, the realized dispatch-to-dispatch interval must clear 12min so a full-timeout run cannot

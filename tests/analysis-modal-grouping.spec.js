@@ -49,7 +49,7 @@ const ANALYSIS_MODEL = {
 const MOCK = {
   services: [
     { id: 'together', category: 'api', name: 'Together AI', provider: 'Together', status: 'degraded', latency: 150, incidents: [INC_NETWORK, INC_MODEL] },
-    { id: 'groq', category: 'api', name: 'Groq Cloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
+    { id: 'groq', category: 'api', name: 'GroqCloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
     { id: 'fireworks', category: 'api', name: 'Fireworks AI', provider: 'Fireworks', status: 'operational', latency: 110, incidents: [], aiwatchScore: 87 },
   ],
   aiAnalysis: {
@@ -109,7 +109,7 @@ test.describe('AnalysisModal grouping — same service multi-incident', () => {
 const ISOLATED_MOCK = {
   services: [
     { id: 'together', category: 'api', name: 'Together AI', provider: 'Together', status: 'operational', latency: 150, incidents: [INC_NETWORK, INC_MODEL] },
-    { id: 'groq', category: 'api', name: 'Groq Cloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
+    { id: 'groq', category: 'api', name: 'GroqCloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
     { id: 'fireworks', category: 'api', name: 'Fireworks AI', provider: 'Fireworks', status: 'operational', latency: 110, incidents: [], aiwatchScore: 87 },
   ],
   aiAnalysis: {
@@ -153,7 +153,7 @@ test.describe('AnalysisModal grouping — operational service with active analys
 const RESOLVED_MOCK = {
   services: [
     { id: 'together', category: 'api', name: 'Together AI', provider: 'Together', status: 'operational', latency: 150, incidents: [] },
-    { id: 'groq', category: 'api', name: 'Groq Cloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
+    { id: 'groq', category: 'api', name: 'GroqCloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
   ],
   aiAnalysis: {
     together: [{
@@ -193,7 +193,7 @@ test.describe('AnalysisModal — fully resolved group', () => {
 const EXCLUDED_SVC_MOCK = {
   services: [
     { id: 'huggingface', category: 'api', name: 'Hugging Face', provider: 'Hugging Face', status: 'degraded', latency: 180, incidents: [INC_MODEL] },
-    { id: 'groq', category: 'api', name: 'Groq Cloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
+    { id: 'groq', category: 'api', name: 'GroqCloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
   ],
   aiAnalysis: {
     huggingface: [{ ...ANALYSIS_MODEL, needsFallback: true }],

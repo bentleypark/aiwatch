@@ -3,12 +3,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { Window } from 'happy-dom'
 import {
-  withRetry, buildUptimeEntry, envPositiveInt, readComponentRow, readComponents, parseUpdateRows, readIncidentPage,
+  withRetry, buildUptimeEntry, envPositiveInt, parseUpdateRows, readIncidentPage,
   buildMistralFeedObservation, reportMistralFeedObservation, runWithMistralFeedObservation, deliverMistralFeed,
-  isCloudflareChallenge,
+  isCloudflareChallenge, MistralPageContractError, readV3Roster, readV3Chart, parseV3DayTooltip,
+  readV3ComponentStatus, readIncidentLinks, COMPONENT_STATES_WORDS, navigationFailure,
+  gotoReadable, loadV3Roster, readHistoryUrls,
 } from './scrape-mistral-status.mjs'
 
-// #1381 — `withRetry` is the only pure thing in the scraper, and it is the part that decides whether a
+// #1381 — `withRetry` is the part of the scraper that decides whether a
 // lost read becomes a missing incident. Reads from this page are lossy under rate limiting, so a
 // regression here does not throw — it quietly under-reports, which downstream reads as a quieter month.
 
@@ -59,8 +61,7 @@ test('a falsy-but-valid result is returned rather than retried', async () => {
 
 test('backs off an ORDER OF MAGNITUDE further on a 429 than on a generic failure', async () => {
   // A 429 is the server asking for a slower rate, so the backoff a timeout deserves is the wrong
-  // answer — it spends the next slot on another rejection. Measured: a full run (93 tooltips plus
-  // incident pages) earns 429s, and those losses are what made the Worker withhold uptime entirely.
+  // answer — it spends the next slot on another rejection.
   const slept = []
   await assert.rejects(withRetry(async () => { throw new Error('HTTP 429') }, {
     attempts: 3, delayMs: 300, rateLimitMs: 5000, sleep: async (ms) => slept.push(ms),
@@ -170,6 +171,11 @@ test('buildMistralFeedObservation makes a pre-coverage failure observable withou
   assert.deepEqual(buildMistralFeedObservation(undefined, 'not-posted'), { delivery: 'not-posted' })
 })
 
+test('buildMistralFeedObservation labels only an explicit Rootly contract failure', () => {
+  assert.deepEqual(buildMistralFeedObservation({ failure: 'page-contract' }, 'not-posted'),
+    { delivery: 'not-posted', failure: 'page-contract' })
+})
+
 test('reportMistralFeedObservation is fail-soft and uses the internal diagnostic endpoint', async () => {
   const calls = []
   await reportMistralFeedObservation('https://worker.example/', 'secret', { delivery: 'stored', listed: 1, fetched: 1, available: 1, uptimeLostTooltips: 0 }, async (url, init) => {
@@ -213,11 +219,11 @@ test('runWithMistralFeedObservation reports a partial payload after a stored fee
   ]])
 })
 
-test('runWithMistralFeedObservation reports an unavailable run before rethrowing its scraper error', async () => {
+test('a plain timeout error that main() did not convert is not a page-contract failure', async () => {
   const reports = []
   await assert.rejects(
-    runWithMistralFeedObservation('https://worker.example', 'secret', async () => { throw new Error('browser blocked') }, async (...args) => reports.push(args)),
-    /browser blocked/,
+    runWithMistralFeedObservation('https://worker.example', 'secret', async () => { throw new Error('page.waitForSelector: Timeout 60000ms exceeded') }, async (...args) => reports.push(args)),
+    /Timeout 60000ms/,
   )
   assert.deepEqual(reports, [['https://worker.example', 'secret', { delivery: 'not-posted' }]])
 })
@@ -293,65 +299,218 @@ test('envPositiveInt REFUSES the values that used to read as "scrape nothing"', 
   }
 })
 
-// ── component rows (#1476) ───────────────────────────────────────────────────────────
-// Both strings were READ off status.mistral.ai in a headed browser on 2026-09-22T01:11Z, while the
-// OCR component was the one affected.
-const LIVE_AFFECTED = 'OCR API Affected 90 days ago 99.31% Today'
-const LIVE_OPERATIONAL = 'Agents API Operational 90 days ago 100.0% Today'
+// ── Rootly v3 page (captured 2026-10-21 from status.mistral.ai) ─────────────────────────────
+// Markup shapes below are the live ones: bar colour classes, the hidden inline tooltip, the
+// `data-component-id` card, the component index attribute. Builders only repeat them.
+const v3Tip = (date, inner) =>
+  `<div data-uptime-day-tooltip="" aria-hidden="true" class="hidden">\n<div class="bg-white">\n<div class="text-eyebrow">\n ${date}\n </div>\n${inner}\n</div></div>`
+const V3_CLASS = {
+  clean: 'h-full w-full rounded-v2-xs bg-pothos-10 hover:bg-pothos-12',
+  impacted: 'h-full w-full rounded-v2-xs bg-red-v2-12 hover:bg-red-v2-12',
+  noData: 'h-full w-full rounded-v2-xs bg-dove-grey-5',
+}
+const v3Bar = ({ kind, date, text, titles = [] }) => {
+  const inner = kind === 'clean' ? '<span class="text-base">\n No incidents\n </span>'
+    : kind === 'noData' ? '<span class="text-base">\n No data\n </span>'
+      : `<span title="Impacted">\n Impacted\n </span>\n<span class="w-14">\n ${text}\n </span>\n<div>\n Related\n </div>\n${titles.map((t) =>
+        `<a title="${t}" href="https://status.mistral.ai/incidents/ff51dc3e-2e73-4d0e-9660-e76f166abc64">\n ${t}\n </a>`).join('')}`
+  return `<div class="relative flex-1"><div class="${V3_CLASS[kind] ?? kind}" data-uptime-loading="bar"></div>${v3Tip(date, inner)}</div>`
+}
+const v3Card = ({ id, name, icon = 'text-pothos-12', bars }) =>
+  `<div data-entry-index="0" data-component-id="${id}"><div><div data-uptime-loading="icon"><span class="w-5 h-5 ${icon}"></span></div>`
+  + `<h3 class="text-md-semibold">\n  ${name}\n</h3><span data-uptime-loading="text">· 99.66% uptime</span>`
+  + `<div data-controller="status-pages--v3--uptime-chart-component">${bars.map(v3Bar).join('')}</div></div></div>`
+const v3Page = (cards, index) =>
+  `<main><div data-testid="status-page-section-system-status" data-status-pages--v3--system-status-component-index-value='${JSON.stringify(index)}'>${cards.join('')}</div></main>`
+const v3DocOf = (html, url = 'https://status.mistral.ai/') => {
+  const window = new Window({ url })
+  window.document.body.innerHTML = html
+  return window.document
+}
+const BAR = {
+  noData: { kind: 'noData', date: 'July 23, 2026' },
+  clean: { kind: 'clean', date: 'July 28, 2026' },
+  short: { kind: 'impacted', date: 'July 24, 2026', text: '1m', titles: ['Completion API Degraded - mistral-vibe-cli-fast'] },
+  long: { kind: 'impacted', date: 'August 9, 2026', text: '1h 5m', titles: ['Completion API Degraded - mistral-medium-2505'] },
+}
+const v3Chart = (bars) => readV3Chart({ id: 'c1', bars: bars.map((b) => readV3Roster(v3DocOf(v3Page([v3Card({ id: 'c1', name: 'X', bars: [b] })], []))).cards[0].bars[0]) })
 
-test('reads the word an affected component renders', () => {
-  assert.deepEqual(readComponentRow(LIVE_AFFECTED), { name: 'OCR API', status: 'Affected' })
+test('the roster reads ids, names, icon classes and every bar; the expected count comes from the index', () => {
+  const doc = v3DocOf(v3Page([
+    v3Card({ id: 'c1', name: 'Completion API', bars: [BAR.clean, BAR.short] }),
+    v3Card({ id: 'c2', name: 'OCR API', icon: 'text-amber-11', bars: [BAR.clean] }),
+  ], [{ type: 'component', id: 'c1' }, { type: 'component', id: 'c2' }, { type: 'component', id: 'c3' }, { type: 'group', id: 'g1' }]))
+  const roster = readV3Roster(doc)
+  assert.equal(roster.expected, 3, 'the index lists 3 components and one group; only components count')
+  assert.deepEqual(roster.cards.map((c) => [c.id, c.name, c.bars.length]), [['c1', 'Completion API', 2], ['c2', 'OCR API', 1]])
+  assert.match(roster.cards[1].iconClass, /text-amber/)
+  assert.equal(roster.cards[0].bars[1].text, 'July 24, 2026 Impacted 1m Related Completion API Degraded - mistral-vibe-cli-fast')
+  assert.deepEqual(roster.cards[0].bars[1].titles, ['Completion API Degraded - mistral-vibe-cli-fast'])
 })
 
-test('reads the bare maintenance word the page legend renders', () => {
-  assert.deepEqual(readComponentRow('OCR API Maintenance 90 days ago 99.31% Today'), { name: 'OCR API', status: 'Maintenance' })
+test('a page without the section reads as no components', () => {
+  assert.deepEqual(readV3Roster(v3DocOf('<main><p>moved</p></main>')), { expected: 0, cards: [] })
 })
 
-test('still reads Under Maintenance as the whole phrase', () => {
-  assert.deepEqual(readComponentRow('OCR API Under Maintenance 90 days ago 99.31% Today'), { name: 'OCR API', status: 'Under Maintenance' })
+test('the icon colour maps to a status word the Worker accepts; any other colour is Unknown', () => {
+  assert.equal(readV3ComponentStatus('w-5 text-pothos-12'), 'Operational')
+  assert.equal(readV3ComponentStatus('w-5 text-amber-11'), 'Degraded')
+  assert.equal(readV3ComponentStatus('w-5 text-red-v2-12'), 'Major Outage')
+  assert.equal(readV3ComponentStatus('w-5 text-tangerine-11'), 'Unknown')
+  assert.equal(readV3ComponentStatus('w-5 text-dove-grey-6'), 'Unknown')
+  assert.equal(readV3ComponentStatus(undefined), 'Unknown')
+  assert.deepEqual(COMPONENT_STATES_WORDS, ['Operational', 'Degraded', 'Major Outage'])
 })
 
-test('reads the word an operational component renders', () => {
-  assert.deepEqual(readComponentRow(LIVE_OPERATIONAL), { name: 'Agents API', status: 'Operational' })
+test('a day tooltip reads as its date and minutes, and nothing else is guessed', () => {
+  assert.deepEqual(parseV3DayTooltip('July 24, 2026 Impacted 1m Related Completion API Degraded'), { date: 'July 24, 2026', minutes: 1 })
+  assert.deepEqual(parseV3DayTooltip('August 9, 2026 Impacted 1h 5m Related X'), { date: 'August 9, 2026', minutes: 65 })
+  assert.deepEqual(parseV3DayTooltip('August 13, 2026 Impacted 0m Related X'), { date: 'August 13, 2026', minutes: 0 })
+  assert.deepEqual(parseV3DayTooltip('August 9, 2026 Impacted 2h'), { date: 'August 9, 2026', minutes: 120 })
+  assert.equal(parseV3DayTooltip('August 9, 2026 Impacted Related X'), null, 'no duration')
+  assert.equal(parseV3DayTooltip('August 9, 2026 Impacted 2d Related X'), null, 'a unit this reader does not know')
+  assert.equal(parseV3DayTooltip('August 9, 2026 Degraded 5m Related X'), null, 'another status word')
+  assert.equal(parseV3DayTooltip('July 28, 2026 No incidents'), null)
 })
 
-// Coercing an unknown word to a status here would publish a state we did not read.
-test('an unknown status word reads null, not a guess', () => {
-  assert.deepEqual(readComponentRow('OCR API Wobbly 90 days ago 99.31% Today'),
-    { name: null, status: null })
-  assert.deepEqual(readComponentRow(''), { name: null, status: null })
-})
-
-// The Worker only ever receives `status: null` for an unknown word, so this row text is the one place
-// the word survives.
-test('an unreadable row is logged with its id and the word the page rendered, and still read as null', () => {
-  const logged = []
-  const rows = [
-    { id: 'c1', text: LIVE_OPERATIONAL },
-    { id: 'c2', text: 'OCR API  Wobbly 90 days ago 99.31% Today' },
-    { id: 'c3', text: '' },
-  ]
-  assert.deepEqual(readComponents(rows, (l) => logged.push(l)), [
-    { id: 'c1', name: 'Agents API', status: 'Operational' },
-    { id: 'c2', name: null, status: null },
-    { id: 'c3', name: null, status: null },
+test('a chart keeps minutes as a share of the day, excludes leading No data days, and joins titles for attribution', () => {
+  const { chart, days, fetched } = v3Chart([BAR.noData, BAR.noData, BAR.clean, BAR.short, BAR.long, BAR.clean])
+  assert.deepEqual(chart, { componentId: 'c1', barCount: 4, unreadBars: 0, impacted: [3, 4] },
+    'barCount is the days with data; the impacted indexes still count every bar')
+  assert.equal(fetched, 2)
+  assert.deepEqual(days.map((d) => [d.date, d.label]), [
+    ['July 24, 2026', 'Completion API Degraded - mistral-vibe-cli-fast'],
+    ['August 9, 2026', 'Completion API Degraded - mistral-medium-2505'],
   ])
-  assert.deepEqual(logged, [
-    '[scrape] unreadable component row c2: OCR API Wobbly 90 days ago 99.31% Today',
-    '[scrape] unreadable component row c3: ',
-  ])
-  const quiet = []
-  readComponents([{ id: 'c1', text: LIVE_OPERATIONAL }, { id: 'c4', text: LIVE_AFFECTED }], (l) => quiet.push(l))
-  assert.deepEqual(quiet, [])
-  const capped = []
-  readComponents([{ id: 'c5', text: 'x'.repeat(500) }], (l) => capped.push(l))
-  assert.equal(capped[0], `[scrape] unreadable component row c5: ${'x'.repeat(120)}`)
+  assert.ok(Math.abs(days[1].segments[0].width - (65 / 1440) * 100) < 1e-9)
+  assert.equal(days[1].segments[0].cls, 'bg-red-v2-12')
 })
 
-// The name is whatever precedes the status word, so the status word decides where the name ends.
-test('the name stops at the status word, with the markup whitespace collapsed', () => {
-  assert.deepEqual(readComponentRow('  AI Registry\n  Prompts API   Operational  90 days ago '),
-    { name: 'AI Registry Prompts API', status: 'Operational' })
+test('a bar whose colour or tooltip drifted is counted unread, never read as a clean day', () => {
+  const amber = { kind: 'h-full bg-amber-v2-12', date: 'July 24, 2026', text: '5m' }
+  assert.equal(v3Chart([BAR.clean, amber]).chart.unreadBars, 1, 'an impacted-looking bar in an unknown colour')
+  const disagree = { kind: 'clean', date: 'July 24, 2026' }
+  const tipDrift = readV3Roster(v3DocOf(v3Page([v3Card({ id: 'c1', name: 'X', bars: [disagree] })], []))).cards[0]
+  tipDrift.bars[0].text = 'July 24, 2026 Impacted 5m Related X'
+  assert.equal(readV3Chart(tipDrift).chart.unreadBars, 1, 'a clean colour over an impacted tooltip')
+  assert.equal(v3Chart([BAR.clean, BAR.noData]).chart.unreadBars, 1, 'No data AFTER data began is a day we did not read')
+})
+
+test('a tooltip with two status rows is not read as one day, so it cannot undercount', () => {
+  const card = readV3Roster(v3DocOf(v3Page([v3Card({ id: 'c1', name: 'X', bars: [BAR.clean, BAR.short] })], []))).cards[0]
+  card.bars[1].statuses = ['Impacted', 'Impacted']
+  const { chart, days, fetched } = readV3Chart(card)
+  assert.deepEqual([chart.impacted, days.length, fetched], [[1], 0, 0])
+})
+
+test('an impacted bar whose tooltip cannot be read stays impacted but yields no day', () => {
+  const lost = { kind: 'impacted', date: 'July 24, 2026', text: '2d', titles: ['X'] }
+  const { chart, days, fetched } = v3Chart([BAR.clean, lost])
+  assert.deepEqual([chart.impacted, days.length, fetched], [[1], 0, 0])
+  assert.deepEqual(buildUptimeEntry(chart, days, fetched).coverage, { impacted: 1, fetched: 0 })
+})
+
+test('the history links are read whether the page renders them absolute (live) or relative', () => {
+  const uuid = (n) => `${String(n).repeat(8)}-aaaa-bbbb-cccc-${String(n).repeat(12)}`
+  const html = `<a href="https://status.mistral.ai/incidents/${uuid(1)}">a</a>`
+    + `<a href="/incidents/${uuid(2)}">b</a><a href="https://status.mistral.ai/incidents/${uuid(1)}">dup</a>`
+    + `<a href="https://evil.example/incidents/${uuid(3)}">other origin</a><a href="/incidents/not-a-uuid">x</a>`
+  assert.deepEqual(readIncidentLinks(v3DocOf(html, 'https://status.mistral.ai/history')), [
+    `https://status.mistral.ai/incidents/${uuid(1)}`, `https://status.mistral.ai/incidents/${uuid(2)}`,
+  ])
+})
+
+const V3_INCIDENT = `<main><h1>Mistral AI Status</h1><h2>Completion API Degraded - mistral-medium-2505</h2>
+  <div><h3>Updates</h3><ul>
+    <li><span class="text-eyebrow"> Aug 9, 2026 4:30 PM UTC </span><div class="status-page-markdown-content"><p>The incident has been resolved</p></div><span data-role="label"> Resolved </span></li>
+    <li><span class="text-eyebrow"> Aug 9, 2026 3:35 PM UTC (54 minutes earlier) </span><div class="status-page-markdown-content"><p>Requests are experiencing degraded service.</p></div><span data-role="label"> Investigating </span></li>
+    <li><span class="text-eyebrow"> Aug 9, 2026 3:30 PM UTC (1 hour 5 minutes earlier) </span><span data-role="label"> Monitoring </span></li>
+  </ul></div></main>`
+
+test('a v3 incident page reads its title from main h2 and every update, including the age suffix and a body-less one', () => {
+  const page = readIncidentPage(v3DocOf(V3_INCIDENT))
+  assert.equal(page.title, 'Completion API Degraded - mistral-medium-2505')
+  assert.deepEqual(parseUpdateRows(page.rows), { dropped: 0, updates: [
+    { status: 'Resolved', at: 'Aug 9, 2026 4:30 PM UTC', body: 'The incident has been resolved' },
+    { status: 'Investigating', at: 'Aug 9, 2026 3:35 PM UTC', body: 'Requests are experiencing degraded service.' },
+    { status: 'Monitoring', at: 'Aug 9, 2026 3:30 PM UTC', body: '' },
+  ] })
+})
+
+test('a challenge or a non-2xx on ANY navigation is a plain failure, never a page-contract one', () => {
+  const res = (status, headers = {}) => ({ ok: () => status < 400, status: () => status, headers: () => headers })
+  assert.equal(navigationFailure(res(200), 'u'), null)
+  assert.match(navigationFailure(res(403, { 'cf-mitigated': 'challenge' }), 'https://x/history').message, /challenge.*https:\/\/x\/history/)
+  assert.match(navigationFailure(res(429), 'u').message, /HTTP 429/)
+  assert.match(navigationFailure(null, 'u').message, /HTTP none/)
+  assert.ok(!(navigationFailure(res(503), 'u') instanceof MistralPageContractError))
+})
+
+const response = (status, headers = {}) => ({ ok: () => status < 400, status: () => status, headers: () => headers })
+const stubPage = ({ goto = response(200), waitForSelector = async () => {}, rosters = [], urls = [] } = {}) => {
+  const calls = { waited: 0, scrolls: 0 }
+  return {
+    calls,
+    goto: async () => goto,
+    waitForSelector: async (...args) => { calls.waited++; return waitForSelector(...args) },
+    waitForTimeout: async () => {},
+    evaluate: async (fn) => {
+      if (fn === readV3Roster) return rosters.length > 1 ? rosters.shift() : rosters[0]
+      if (fn === readIncidentLinks) return urls
+      calls.scrolls++
+    },
+  }
+}
+const card = (id = 'c1', name = 'X') => ({ id, name, iconClass: '', bars: [] })
+
+test('gotoReadable fails plainly on a challenge or non-2xx, before it waits for anything', async () => {
+  for (const goto of [response(403, { 'cf-mitigated': 'challenge' }), response(503)]) {
+    const page = stubPage({ goto })
+    await assert.rejects(gotoReadable(page, 'https://x/', '#ready'), (err) => !(err instanceof MistralPageContractError))
+    assert.equal(page.calls.waited, 0)
+  }
+})
+
+test('gotoReadable turns a missing marker on a 2xx page into a contract failure', async () => {
+  const page = stubPage({ waitForSelector: async () => { throw new Error('Timeout 60000ms exceeded') } })
+  await assert.rejects(gotoReadable(page, 'https://x/', '#ready'), MistralPageContractError)
+  await assert.doesNotReject(gotoReadable(stubPage(), 'https://x/', '#ready'))
+})
+
+test('the roster scrolls until the page\'s own index is satisfied, and refuses a partial or unnamed one', async () => {
+  const page = stubPage({ rosters: [{ expected: 2, cards: [card('c1')] }, { expected: 2, cards: [card('c1'), card('c2')] }] })
+  assert.equal((await loadV3Roster(page)).cards.length, 2)
+  assert.equal(page.calls.scrolls, 1)
+  await assert.rejects(loadV3Roster(stubPage({ rosters: [{ expected: 2, cards: [card('c1')] }] }), 3), (err) => !(err instanceof MistralPageContractError) && /short: 1\/2/.test(err.message))
+  await assert.rejects(loadV3Roster(stubPage({ rosters: [{ expected: 1, cards: [card('c1'), card('c2')] }] }), 1), MistralPageContractError)
+  await assert.rejects(loadV3Roster(stubPage({ rosters: [{ expected: 15, cards: [] }] }), 1), MistralPageContractError, 'an index with no cards is the card markup changing')
+  await assert.rejects(loadV3Roster(stubPage({ rosters: [{ expected: 0, cards: [] }] }), 1), MistralPageContractError)
+  await assert.rejects(loadV3Roster(stubPage({ rosters: [{ expected: 1, cards: [card('c1', '')] }] })), MistralPageContractError)
+  await assert.rejects(loadV3Roster(stubPage({ rosters: [{ expected: 1, cards: [card('', 'X')] }] })), MistralPageContractError)
+})
+
+test('a history page with links but no matching incident URL is a contract failure, not a quiet page', async () => {
+  await assert.rejects(readHistoryUrls(stubPage({ urls: [] })), MistralPageContractError)
+  assert.deepEqual(await readHistoryUrls(stubPage({ urls: ['https://status.mistral.ai/incidents/a'] })), ['https://status.mistral.ai/incidents/a'])
+})
+
+test('v3 update rows split across two lists are all read, so a lost Resolved row cannot leave an incident open', () => {
+  const doc = v3DocOf(V3_INCIDENT)
+  const heading = [...doc.querySelectorAll('main h3')].find((h) => h.textContent.trim() === 'Updates')
+  const first = heading.parentElement.querySelector('ul')
+  const second = doc.createElement('ul')
+  second.appendChild(first.lastElementChild)
+  heading.parentElement.appendChild(second)
+  assert.equal(parseUpdateRows(readIncidentPage(doc).rows).updates.length, 3)
+})
+
+test('a Rootly contract failure reaches the observation the Worker alerts on', async () => {
+  const reports = []
+  await assert.rejects(
+    runWithMistralFeedObservation('https://worker.example', 'secret', async () => { throw new MistralPageContractError('moved') }, async (...args) => reports.push(args)),
+    /moved/,
+  )
+  assert.deepEqual(reports, [['https://worker.example', 'secret', { delivery: 'not-posted', failure: 'page-contract' }]])
 })
 
 // ── update rows ─────────────────────────────────────────────────────────────────────
