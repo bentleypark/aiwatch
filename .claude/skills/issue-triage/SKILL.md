@@ -65,7 +65,7 @@ skill is the periodic backstop — run it over the whole open board.
    - Pay special attention to `U3-someday` / `tracking` / `phase-N` labels — their blocker may have
      cleared, or incremental work may have quietly completed them.
 
-3. **Verify before closing** (parity with ship-issue step 11): `gh issue view N`, read every
+3. **Verify before closing** (parity with ship-issue step 11): read the full record as item 0 does, then read every
    `- [ ]` item, and confirm each against the **actual code** (grep for the symbol/file, run/read the
    test). Grep + read the code for the read-side too (or dispatch an `Explore` subagent via the
    Agent tool) — "the write half shipped" ≠ "done".
@@ -140,6 +140,22 @@ ranking, go measure before you rank, and re-rank on what you find.
 > verify-gated issue as actionable.
 
 Before recommending ANY issue as do-next, verify it the **same way** you'd verify a close candidate:
+0. **Read the full record first (#1759).** For any issue you will recommend as the pick, or propose a
+   label or body change for: its whole body, every comment, and its label events. Do not judge an issue
+   from a `head` / `cut` / `grep` view. `OWNER/REPO` is `bentleypark/aiwatch` or
+   `bentleypark/aiwatch-reports`; without it `gh` reads the checkout's repo, where the same number can
+   be a different issue or a PR.
+
+   ```bash
+   gh issue view N --repo OWNER/REPO --json body,comments --jq '.body, (.comments[] | "--- \(.createdAt) \(.author.login)\n\(.body)")'
+   gh api repos/OWNER/REPO/issues/N/events --paginate --jq '.[] | select(.event=="labeled" or .event=="unlabeled") | "\(.created_at) \(.event) \(.label.name)"'
+   ```
+
+   Then ask whether the remaining work can start today. "Event-gated", "inputs (missing)" or "waiting
+   for X" in the body or a comment means it is not do-next, whatever its `U` label says. For a box
+   ticked by "Auto-verified", check that its `assert:` can tell before the condition from after; if it
+   cannot, treat the box as unverified (#1760). An issue you did not read this way is `metadata only`
+   in the table and gets no pick and no label or body proposal.
 1. **Cheap shipped-check on each candidate** (1–2 issues): `git log --all --grep="#N"` + grep the
    symbol/file. If a linked PR is already **merged**, the coding is likely done.
 2. **Check what is already in flight — the committed-work checks above cannot see it.** Run this ONCE,
@@ -207,7 +223,7 @@ board is visible.
   its row, marked as such in place of a `P`. End with per-area counts + the **recommended next pick**
   (balanced across areas). Report both step-0 behind-counts and the in-flight set explicitly — they are
   conditions the sweep ran *under*, and an unstated one reads as "clean board" when it may mean "did
-  not look".
+  not look". Each row also says `read: full + N comments` or `metadata only` (#1759).
 - **State every deadline you are trading off, with its date.** If the pick beat another issue on
   urgency, name the loser's clock too — a deadline you did not write down is one you did not weigh
   (#1122). An announced third-party date is the usual kind; the date is fixed, so only your slack shrinks.
@@ -242,7 +258,7 @@ board is visible.
 - **Don't fork the checklist into a comment.** (Additive to the rule above.) Never restate a checklist
   — an `### Acceptance status` block, a re-listed `- [ ]` set, a phase table — inside a **comment**; it
   forks the single source of truth and immediately drifts. A progress/verify comment is **prose
-  evidence only**. To change state, edit the **issue body** with `gh issue edit {N} --body-file <f>`
+  evidence only**. To change state, edit the **issue body** with `gh issue edit {N} --repo OWNER/REPO --body-file <f>`
   (NOT a comment). Collapse multiple body checklist sections (Acceptance + Post-deploy + stray `- [ ]`
   lists) into one where practical — but **keep the dated `verify-after` line**, since the
   verify-before-recommend gate above keys its demotion off exactly that line. To clean up a comment that
