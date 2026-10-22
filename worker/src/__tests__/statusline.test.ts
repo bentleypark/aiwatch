@@ -437,6 +437,21 @@ describe('renderStatuslineBrief (#920)', () => {
     expect(out).toContain('More: https://ai-watch.dev')
   })
 
+  it('#1753 — a listed service labels each use, an unlisted one keeps the plain list', () => {
+    const pool = [
+      brief({ id: 'deepseek', name: 'DeepSeek API', status: 'down' }),
+      brief({ id: 'gemini', name: 'Gemini API', status: 'down' }),
+      brief({ id: 'fireworks', name: 'Fireworks AI', aiwatchScore: 70 }),
+      brief({ id: 'claude', name: 'Claude API', aiwatchScore: 90 }),
+      brief({ id: 'openai', name: 'OpenAI API', aiwatchScore: 85 }),
+    ]
+    const tryLines = renderStatuslineBrief(pool).split('\n').filter((l) => l.includes('Try instead:'))
+    expect(tryLines).toEqual([
+      '   Try instead: DeepSeek models: Fireworks AI · LLM: Claude API',
+      '   Try instead: Claude API, OpenAI API',
+    ])
+  })
+
   it('degraded service with no published incident → says so, no AI line', () => {
     const out = renderStatuslineBrief([brief({ id: 'mistral', name: 'Mistral API', status: 'degraded', incidents: [] })])
     expect(out).toContain('🟠 Mistral API (degraded) — no published incident')

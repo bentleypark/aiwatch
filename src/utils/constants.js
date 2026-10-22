@@ -668,8 +668,10 @@ export function getGroupedFallbacks(affected, allServices) {
     const label = need && !cap ? `${baseLabel} (${REQUIRED_CAPABILITY_LABEL[need]})` : baseLabel
     resolved.push({ category: svc.category, label, capability: cap || undefined, candidates })
   }
-  const perGroup = resolved.length === 1 ? 2 : 1
-  return resolved.map(g => ({ category: g.category, label: g.label, ...(g.capability ? { capability: g.capability } : {}), items: g.candidates.slice(0, perGroup) }))
+  const idsOf = g => g.candidates.map(c => c.id).join('\n')
+  const distinct = resolved.filter((g, i) => !resolved.slice(0, i).some(h => h.label === g.label && idsOf(h) === idsOf(g)))
+  const perGroup = distinct.length === 1 ? 2 : 1
+  return distinct.map(g =>({ category: g.category, label: g.label, ...(g.capability ? { capability: g.capability } : {}), items: g.candidates.slice(0, perGroup) }))
 }
 
 /**

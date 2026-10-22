@@ -1070,6 +1070,19 @@ describe('#1753 — frontend: listed services recommend their substitute lists',
     }
   })
 
+  it('a whole outage and a routed embeddings outage with the same candidates render one Embeddings group', () => {
+    const openai = down('openai', 'OpenAI API', { components: [{ name: 'Embeddings', status: 'major_outage' }, { name: 'Chat', status: 'operational' }] })
+    const rest = board.filter(s => s.id !== 'openai')
+    const cohere = down('cohere', 'Cohere API')
+    for (const order of [[cohere, openai], [openai, cohere]]) {
+      expect(getGroupedFallbacks(order, [cohere, openai, ...rest]).map(g => [g.label, g.items.map(f => f.name)])).toEqual([['Embeddings', ['Voyage AI']], ['LLM', ['Claude API']]])
+    }
+    const voyage = down('voyageai', 'Voyage AI')
+    expect(getGroupedFallbacks([voyage, openai], [voyage, openai, ...rest.filter(s => s.id !== 'voyageai')]).map(g => [g.label, g.items.map(f => f.name)])).toEqual([['Embeddings', ['Jina AI']]])
+    const noLlm = [cohere, openai, ...rest.map(s => (s.id === 'claude' ? { ...s, status: 'down' } : s))]
+    expect(getGroupedFallbacks([cohere, openai], noLlm).map(g => [g.label, g.items.map(f => f.name)])).toEqual([['Embeddings', ['Voyage AI', 'Jina AI']]])
+  })
+
   it('a listed service whose outage routes to a suppressed capability recommends nothing', () => {
     const cohere = down('cohere', 'Cohere API', { components: [{ name: 'Realtime API', status: 'major_outage' }, { name: 'command-a-03-2025', status: 'operational' }] })
     expect(getFallbacks(cohere, [cohere, ...board])).toEqual([])

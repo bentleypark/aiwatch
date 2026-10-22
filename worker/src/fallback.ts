@@ -747,8 +747,10 @@ export function getGroupedFallbacks(
     const label = need && !cap ? `${baseLabel} (${REQUIRED_CAPABILITY_LABEL[need]})` : baseLabel
     resolved.push({ label, ...(cap ? { capability: cap } : {}), fallbacks: fbs })
   }
-  const perGroup = resolved.length <= 1 ? 2 : 1
-  return resolved.map(g => ({ label: g.label, ...(g.capability ? { capability: g.capability } : {}), fallbacks: g.fallbacks.slice(0, perGroup) }))
+  const namesOf = (g: typeof resolved[number]) => g.fallbacks.map(f => f.name).join('\n')
+  const distinct = resolved.filter((g, i) => !resolved.slice(0, i).some(h => h.label === g.label && namesOf(h) === namesOf(g)))
+  const perGroup = distinct.length <= 1 ? 2 : 1
+  return distinct.map(g => ({ label: g.label, ...(g.capability ? { capability: g.capability } : {}), fallbacks: g.fallbacks.slice(0, perGroup) }))
 }
 
 export function buildGroupedFallbackText(

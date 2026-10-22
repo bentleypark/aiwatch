@@ -1,5 +1,5 @@
 import type { ServiceStatus, Incident } from './types'
-import { getFallbacks } from './fallback'
+import { getFallbacks, getGroupedFallbacks, substituteFallbacks } from './fallback'
 import { appendUtm } from './utils'
 import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
 import { SERVICE_ID_TO_SLUG } from '../../api/_is-down/slug-map'
@@ -389,8 +389,11 @@ export function renderStatuslineBrief(
     )
     const summary = inc ? aiSummaryMap[`${svc.id}:${inc.id}`] : undefined
     if (summary) lines.push(`   AI: ${summary.length > BRIEF_SUMMARY_CAP ? summary.slice(0, BRIEF_SUMMARY_CAP) + '…' : summary}`)
-    const fb = getFallbacks(svc.id, svc.category, scoredAll).map((f) => f.name)
-    if (fb.length) lines.push(`   Try instead: ${fb.join(', ')}`)
+    // #1753 — a listed service names each use's group
+    const fb = substituteFallbacks(svc.id, scoredAll)
+      ? getGroupedFallbacks([svc.id], scoredAll).map((g) => `${g.label}: ${g.fallbacks.map((f) => f.name).join(', ')}`).join(' · ')
+      : getFallbacks(svc.id, svc.category, scoredAll).map((f) => f.name).join(', ')
+    if (fb) lines.push(`   Try instead: ${fb}`)
     // Per-service landing page: the crawlable "Is <service> Down?" page. Absent for the
     // few services with no is-down page (bedrock/azureopenai → not in SERVICE_ID_TO_SLUG).
     const slug = SERVICE_ID_TO_SLUG[svc.id]
