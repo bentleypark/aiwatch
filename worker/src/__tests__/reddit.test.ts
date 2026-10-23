@@ -396,6 +396,8 @@ describe('matchesSecurityKeywords', () => {
     expect(matchesSecurityKeywords('DeepSeek database compromised with unauthorized access')).toBe(true)
     expect(matchesSecurityKeywords('Gemini prompt injection exploit discovered')).toBe(true)
     expect(matchesSecurityKeywords('xAI Grok hacked — data exfiltration confirmed')).toBe(true)
+    expect(matchesSecurityKeywords('SpaceXSI breach disclosed')).toBe(true)
+    expect(matchesSecurityKeywords('SpaceXAI breach disclosed')).toBe(true)
   })
 
   it('matches strong security signals with AI-adjacent keywords', () => {

@@ -147,9 +147,9 @@ export const SERVICES: ServiceConfig[] = [
     rosterAuditExclude: ['01KKAD7C71MCCH3FTREMJH4AAS', '01KTQBYVARFJ5KMCSECM06VKCF', '01KVR95C58GGWHV7RYBT32NP11'],
   },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://aistudio.google.com/status', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
-  // #1165/#1586 — renamed 'xAI (Grok)' → 'SpaceXAI API': now that Grok's consumer app is its own service
+  // #1165/#1586 — renamed 'xAI (Grok)' → 'SpaceXAI API' (#1746: 'SpaceXSI API'): now that Grok's consumer app is its own service
   // ('grok', in the Apps section below), "(Grok)" on this card would misname the API surface.
-  { id: 'xai', name: 'SpaceXAI API', provider: 'SpaceXAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident', '[Grok'] },
+  { id: 'xai', name: 'SpaceXSI API', provider: 'SpaceXSI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident', '[Grok'] },
   // #929 — holdShortIncidents: a non-major NEW incident is held ~2 cron cycles before alerting, so a
   // self-resolving flap never fires while a genuine longer incident still alerts. Same knob Langfuse
   // uses (#792), and it reads no source-specific field, so it keeps working across the migration.
@@ -562,7 +562,7 @@ export const SERVICES: ServiceConfig[] = [
   // stripped title within a 30-min window, which is the narrower rule #1165's objection actually
   // pointed at. The `incidentKeywords` filter above is why its merged title must keep a `Grok (`
   // marker; see the title note in `mergeSurfaceGroup`.
-  { id: 'grok', name: 'Grok', provider: 'SpaceXAI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok (', 'grok in x', '[grok build]', '[grok.com]'], addedAt: '2026-07-26' },
+  { id: 'grok', name: 'Grok', provider: 'SpaceXSI', category: 'app', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['grok (', 'grok in x', '[grok build]', '[grok.com]'], addedAt: '2026-07-26' },
   // #1731 — Kimi consumer app (www.kimi.com), the api-vs-app split mirror of `kimi` (same page): the
   // page's `Kimi` group. Badge + uptime = worst-of the group's members; the six model components fold
   // under "Models". `incidentComponentsKeepUntagged`: an incident that names no component lands here

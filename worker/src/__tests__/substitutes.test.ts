@@ -70,7 +70,7 @@ describe('#1753 — pickSubstitutes', () => {
 
 describe('#1753 — substituteFaqAnswer', () => {
   it('names every listed service under its use, sharing a common API suffix', () => {
-    const answer = substituteFaqAnswer('Cohere', SUBSTITUTES.cohere, (id) => ({ claude: 'Claude API', openai: 'OpenAI API', gemini: 'Gemini API', xai: 'SpaceXAI API', mistral: 'Mistral API' })[id] ?? id.toUpperCase())
-    expect(answer).toBe('When Cohere is down, these AIWatch-monitored services can stand in. For chat and generation: the Claude, OpenAI, Gemini, SpaceXAI or Mistral API. For embeddings and reranking: VOYAGEAI or JINA. AIWatch shows current availability for each.')
+    const answer = substituteFaqAnswer('Cohere', SUBSTITUTES.cohere, (id) => ({ claude: 'Claude API', openai: 'OpenAI API', gemini: 'Gemini API', xai: 'SpaceXSI API', mistral: 'Mistral API' })[id] ?? id.toUpperCase())
+    expect(answer).toBe('When Cohere is down, these AIWatch-monitored services can stand in. For chat and generation: the Claude, OpenAI, Gemini, SpaceXSI or Mistral API. For embeddings and reranking: VOYAGEAI or JINA. AIWatch shows current availability for each.')
   })
 })

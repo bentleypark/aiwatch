@@ -160,7 +160,7 @@ describe('getFallbacks', () => {
     expect(result[1].name).toBe('DeepSeek API')
   })
 
-  it('#1726 — a SpaceXAI API outage recommends tier-1 peers over higher-scored tier-2 ones', () => {
+  it('#1726 — a SpaceXSI API outage recommends tier-1 peers over higher-scored tier-2 ones', () => {
     expect(getFallbacks('xai', 'api', mockServices).map(f => f.name)).toEqual(['Claude API', 'Gemini API'])
   })
 
@@ -259,7 +259,7 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     const services = [
       { id: 'openai', category: 'api', name: 'OpenAI API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
-      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 85, scoreConfidence: 'high' as const },
+      { id: 'xai', category: 'api', name: 'SpaceXSI API', status: 'operational', aiwatchScore: 85, scoreConfidence: 'high' as const },
       { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 60, scoreConfidence: 'medium' as const },
     ]
     const result = getFallbacks('claude', 'api', services)
@@ -288,7 +288,7 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     const services = [
       { id: 'openai', category: 'api', name: 'OpenAI API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
-      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: null, scoreConfidence: 'low' as const },
+      { id: 'xai', category: 'api', name: 'SpaceXSI API', status: 'operational', aiwatchScore: null, scoreConfidence: 'low' as const },
     ]
     const result = getFallbacks('claude', 'api', services)
     expect(result.map(f => f.name)).toEqual(['OpenAI API', 'Gemini API'])
@@ -296,10 +296,10 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
 
   it('a low-confidence candidate still surfaces when nothing better exists (sink, not exclusion)', () => {
     const services = [
-      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: null, scoreConfidence: 'low' as const },
+      { id: 'xai', category: 'api', name: 'SpaceXSI API', status: 'operational', aiwatchScore: null, scoreConfidence: 'low' as const },
     ]
     const result = getFallbacks('claude', 'api', services)
-    expect(result.map(f => f.name)).toEqual(['SpaceXAI API'])
+    expect(result.map(f => f.name)).toEqual(['SpaceXSI API'])
   })
 
   it('a candidate with an unrecognized scoreConfidence value sinks below high/medium, never vanishes', () => {
@@ -310,7 +310,7 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
     const services = [
       { id: 'openai', category: 'api', name: 'OpenAI API', status: 'operational', aiwatchScore: 95, scoreConfidence: 'high' as const },
       { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 90, scoreConfidence: 'high' as const },
-      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 99, scoreConfidence: 'insufficient' as unknown as 'low' },
+      { id: 'xai', category: 'api', name: 'SpaceXSI API', status: 'operational', aiwatchScore: 99, scoreConfidence: 'insufficient' as unknown as 'low' },
     ]
     const result = getFallbacks('claude', 'api', services)
     // xai's score (99) would win #1 on raw Score alone — it must still sink below both real high
@@ -320,10 +320,10 @@ describe('#1186 — getFallbacks does not rank across confidence tiers by raw Sc
 
   it('an unrecognized-confidence candidate DOES surface when nothing better exists (sink, not exclusion)', () => {
     const services = [
-      { id: 'xai', category: 'api', name: 'SpaceXAI API', status: 'operational', aiwatchScore: 99, scoreConfidence: 'insufficient' as unknown as 'low' },
+      { id: 'xai', category: 'api', name: 'SpaceXSI API', status: 'operational', aiwatchScore: 99, scoreConfidence: 'insufficient' as unknown as 'low' },
     ]
     const result = getFallbacks('claude', 'api', services)
-    expect(result.map(f => f.name)).toEqual(['SpaceXAI API'])
+    expect(result.map(f => f.name)).toEqual(['SpaceXSI API'])
   })
 })
 
@@ -1764,7 +1764,7 @@ describe('#1753 — listed services recommend their substitute lists', () => {
   })
 
   it('a shared LLM key is answered by the unlisted anchor, whichever comes first', () => {
-    const services = [down('deepseek', 'DeepSeek API'), down('claude', 'Claude API'), down('gemini', 'Gemini API'), down('xai', 'SpaceXAI API'), down('mistral', 'Mistral API'),
+    const services = [down('deepseek', 'DeepSeek API'), down('claude', 'Claude API'), down('gemini', 'Gemini API'), down('xai', 'SpaceXSI API'), down('mistral', 'Mistral API'),
       down('together', 'Together AI'), down('fireworks', 'Fireworks AI'), svc('openai', 'OpenAI API', 85), svc('kimi', 'Kimi API', 97)]
     const llm = (order: string[]) => getGroupedFallbacks(order, services).find((g) => g.label === 'LLM')?.fallbacks.map((f) => f.name)
     expect(llm(['claude', 'deepseek'])).toEqual(['OpenAI API', 'Kimi API'])

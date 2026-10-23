@@ -232,7 +232,7 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
 test.describe('xAI Regional Availability', () => {
   // Inject mock xAI data with EU region ongoing incident via API intercept
   const XAI_MOCK = {
-    id: 'xai', category: 'api', name: 'SpaceXAI API', provider: 'SpaceXAI', status: 'degraded',
+    id: 'xai', category: 'api', name: 'SpaceXSI API', provider: 'SpaceXSI', status: 'degraded',
     latency: 203, uptime30d: 99.75, calendarDays: 30,
     incidents: [
       { id: 'xa-0', title: 'eu-west-1.api.x.ai went down', startedAt: new Date(Date.now() - 7200000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [] },
@@ -254,7 +254,7 @@ test.describe('xAI Regional Availability', () => {
     })
     await page.goto('/')
     await waitForDataLoad(page)
-    await page.locator('main button').filter({ hasText: 'xAI' }).first().evaluate((el) => el.click())
+    await page.locator('main button').filter({ hasText: 'SpaceXSI API' }).first().evaluate((el) => el.click())
     await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
     // EU region should show incident type label (Service Down)
     await expect(page.locator('main').getByText(/Service Down|서비스 중단/)).toBeVisible()
@@ -282,7 +282,7 @@ test.describe('xAI Regional Availability', () => {
     })
     await page.goto('/')
     await waitForDataLoad(page)
-    await page.locator('main button').filter({ hasText: 'xAI' }).first().evaluate((el) => el.click())
+    await page.locator('main button').filter({ hasText: 'SpaceXSI API' }).first().evaluate((el) => el.click())
     await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
     // Both regions should show incident (global → all affected)
     await expect(page.locator('main').getByText(/Incident Detected|장애 감지/)).toHaveCount(2)

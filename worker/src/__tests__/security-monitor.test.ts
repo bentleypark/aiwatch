@@ -84,8 +84,9 @@ describe('buildHNQuery (#720)', () => {
     expect(titleMatchesAiSecurity('Flux.ai vulnerability disclosed')).toBe(false)
   })
 
-  it('#1586 — matches the current SpaceXAI name, which "xai" alone does not cover', () => {
-    expect(buildHNQuery().split(' ')).toContain('spacexai')
+  it('#1586/#1746 — matches the current SpaceXSI name and the former SpaceXAI, which "xai" alone does not cover', () => {
+    expect(buildHNQuery().split(' ')).toEqual(expect.arrayContaining(['spacexsi', 'spacexai']))
+    expect(titleMatchesAiSecurity('SpaceXSI breach disclosed')).toBe(true)
     expect(titleMatchesAiSecurity('SpaceXAI breach disclosed')).toBe(true)
   })
 })

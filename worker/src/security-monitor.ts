@@ -33,7 +33,7 @@ export interface SecurityAlert {
 const HN_AI_KEYWORDS = [
   'openai', 'anthropic', 'claude', 'chatgpt', 'gemini', 'mistral',
   'cohere', 'deepseek', 'huggingface', 'hugging face', 'replicate',
-  'elevenlabs', 'cursor', 'copilot', 'windsurf', 'xai', 'spacexai', 'grok',
+  'elevenlabs', 'cursor', 'copilot', 'windsurf', 'xai', 'spacexai', 'spacexsi', 'grok',
 ]
 const HN_AI_MATCH_KEYWORDS = [...HN_AI_KEYWORDS, 'x.ai']
 
@@ -509,7 +509,7 @@ export const NVD_FIRST_PARTY: Array<{
   { service: 'ChatGPT',        strong: ['chatgpt desktop', 'chatgpt atlas', 'chatgpt for windows', 'chatgpt for macos', 'chatgpt app'], weak: ['chatgpt'], context: ['openai'] },
   { service: 'Azure OpenAI',   strong: ['azure openai'], weak: [], context: [] },
   { service: 'Gemini',         strong: ['gemini cli', 'gemini code assist'], weak: ['gemini'], context: ['google'] },
-  { service: 'Grok',           strong: [], weak: ['grok'], context: ['xai', 'x.ai'] },
+  { service: 'Grok',           strong: [], weak: ['grok'], context: ['xai', 'x.ai', 'spacexsi'] },
   { service: 'Perplexity',     strong: ['perplexity comet', 'comet browser'], weak: ['perplexity'], context: ['perplexity ai', 'perplexity.ai'] },
 ]
 

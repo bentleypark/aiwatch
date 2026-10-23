@@ -283,7 +283,7 @@ describe('is-down.ts — rank is scoped to the target\'s own confidence tier (#1
     const payload = new Response(JSON.stringify({
       services: [
         svc({ id: 'gemini', name: 'Gemini API', aiwatchScore: 86, scoreConfidence: 'medium' }),
-        svc({ id: 'xai', name: 'SpaceXAI API', aiwatchScore: 70, scoreConfidence: 'medium' }),
+        svc({ id: 'xai', name: 'SpaceXSI API', aiwatchScore: 70, scoreConfidence: 'medium' }),
         // Two high-confidence services with scores that would change gemini's rank/total if merged in.
         svc({ id: 'claude', name: 'Claude API', aiwatchScore: 99, uptime30d: 99.99, scoreConfidence: 'high' }),
         svc({ id: 'openai', name: 'OpenAI API', aiwatchScore: 95, uptime30d: 99.9, scoreConfidence: 'high' }),
@@ -386,7 +386,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
         svc({ id: 'claude', name: 'Claude API', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 'c-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
         svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 95 }),
         svc({ id: 'gemini', name: 'Gemini API', scoreConfidence: 'high', aiwatchScore: 90 }),
-        svc({ id: 'xai', name: 'SpaceXAI API', scoreConfidence: 'low', aiwatchScore: null }),
+        svc({ id: 'xai', name: 'SpaceXSI API', scoreConfidence: 'low', aiwatchScore: null }),
       ],
       aiAnalysis: {},
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -395,7 +395,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     const html = await res.text()
     const order = bulletOrder(html)
     expect(order).toEqual(['OpenAI API', 'Gemini API'])
-    expect(order).not.toContain('SpaceXAI API')
+    expect(order).not.toContain('SpaceXSI API')
   })
 
   it('a candidate with an unrecognized scoreConfidence value sinks below high/medium, never vanishes', async () => {
@@ -408,7 +408,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
         svc({ id: 'claude', name: 'Claude API', status: 'down', scoreConfidence: null, aiwatchScore: null, incidents: [{ id: 'c-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }] }),
         svc({ id: 'openai', name: 'OpenAI API', scoreConfidence: 'high', aiwatchScore: 95 }),
         svc({ id: 'gemini', name: 'Gemini API', scoreConfidence: 'high', aiwatchScore: 90 }),
-        svc({ id: 'xai', name: 'SpaceXAI API', scoreConfidence: 'insufficient', aiwatchScore: 99 }), // would win #1 on raw Score alone
+        svc({ id: 'xai', name: 'SpaceXSI API', scoreConfidence: 'insufficient', aiwatchScore: 99 }), // would win #1 on raw Score alone
       ],
       aiAnalysis: {},
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -417,7 +417,7 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     const html = await res.text()
     const order = bulletOrder(html)
     expect(order).toEqual(['OpenAI API', 'Gemini API'])
-    expect(order).not.toContain('SpaceXAI API')
+    expect(order).not.toContain('SpaceXSI API')
   })
 
   it('#1748 — a host outage lists other hosts even when vendors score higher', async () => {
