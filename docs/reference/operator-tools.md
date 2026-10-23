@@ -67,6 +67,19 @@ ADMIN_API_KEY=... node scripts/suppress-incident.mjs add --scope incident --incI
 ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove --scope service-pattern --svc openai --match fedramp
 ```
 
+**A `200` does not prove the entry is stored (#1740).** The endpoint reads the whole list, changes it
+and writes it back, and a KV read can miss a write made seconds earlier ([how KV works](https://developers.cloudflare.com/kv/concepts/how-kv-works/); seen 2026-10-19, #1731), so two writes close together
+can drop one while both answer `200 changed:true`. After `add`/`remove` the CLI therefore waits 130s and
+re-sends the same request, up to 3 times, until the endpoint answers `changed:false` (`check n/3: confirmed`,
+exit 0); otherwise it exits 1 with `NOT CONFIRMED` — run `list` and re-run the same command. Runs of
+the CLI on one machine take turns per endpoint (a lock file in the system temp directory, released on exit
+and on Ctrl-C; a lock naming a process that is no longer running stops the run with exit 2 and the
+file's path, to delete by hand), so with the confirm on each run confirms before the next
+one reads the list. Runs on different machines at the same time do not wait for each other: they can still lose an
+entry and exit 0, or undo each other's change to the same entry.
+`--confirm off` skips this. A raw `curl` POST gets no such check: re-send it after 130s and look for
+`changed:false`.
+
 **Where it applies** (all read the single `incident:suppressions` KV key): (1) `fetchAllServices` return —
 covers the live `/api/status` list, `scoreFor`, the go-forward `accumulateMonthlyIncidents`, and the
 `services:latest` cache in one shot; (2) `buildMonthlyArchive` **build-time** — a month archived after
@@ -165,16 +178,18 @@ Reference case: Cursor `h71m65my586h` (2026-07-14) reads 13h 20m; the component 
 
 ```bash
 # List current overrides
-curl -s https://<worker>/api/admin/duration-override -H "X-Admin-Key: $ADMIN_API_KEY"
+ADMIN_API_KEY=... node scripts/duration-override.mjs list
 
 # Pin an incident's duration (minutes). Re-adding the same id UPDATES its value (a correction, not idempotent):
-curl -s -X POST https://<worker>/api/admin/duration-override -H "X-Admin-Key: $ADMIN_API_KEY" \
-  -d '{"action":"add","id":"h71m65my586h","durationMin":18,"reason":"provider left incident open ~13h after IDE recovered; real window ~18m (sibling Sol)"}'
+ADMIN_API_KEY=... node scripts/duration-override.mjs add --id h71m65my586h --minutes 18 \
+  --reason "provider left incident open ~13h after IDE recovered; real window ~18m (sibling Sol)"
 
 # Remove (restore the provider duration):
-curl -s -X POST https://<worker>/api/admin/duration-override -H "X-Admin-Key: $ADMIN_API_KEY" \
-  -d '{"action":"remove","id":"h71m65my586h"}'
+ADMIN_API_KEY=... node scripts/duration-override.mjs remove --id h71m65my586h
 ```
+
+The list is one whole-list KV value like suppress's, so the CLI runs the same post-write confirmation
+(see "A `200` does not prove the entry is stored" above; `--confirm off` skips it).
 
 **Where it applies** (all read the single `incident:duration-overrides` KV key, each right after
 suppression): `buildMonthlyArchive` build-time (a month already archived keeps its stored figures; a rebuild

@@ -9,6 +9,7 @@
 //   ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope incident --incId <id> [--reason "..."]
 //   ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove --scope service-pattern --svc <id> --match <substr>
 //   ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove --scope incident --incId <id>
+//   add/remove also take [--confirm off] to skip the post-write confirmation (#1740).
 //
 // Example (the FedRAMP first use):
 //   node scripts/suppress-incident.mjs add --scope service-pattern --svc openai --match fedramp \
@@ -16,12 +17,15 @@
 //
 // Requires Node 18+ for built-in fetch.
 
-const WORKER_URL = process.env.WORKER_URL ?? 'https://aiwatch-worker.p2c2kbf.workers.dev'
+import { adminRequest, parseFlagPairs, printResponse, runMutation } from './operator-admin.mjs'
+
+const PATH = '/api/admin/suppress'
 const USAGE = `Usage:
   ADMIN_API_KEY=... node scripts/suppress-incident.mjs list
   ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope service-pattern --svc <id> --match <substr> [--reason "..."]
   ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope incident --incId <id> [--reason "..."]
-  ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove (same flags as the matching add)`
+  ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove (same flags as the matching add)
+  add/remove: [--confirm off] skips the post-write confirmation`
 
 const args = process.argv.slice(2)
 const action = args[0]
@@ -34,19 +38,9 @@ if (!['list', 'add', 'remove'].includes(action)) {
   process.exit(2)
 }
 
-// Parse --flag value pairs (strict, like admin-analyze.mjs).
-const rest = args.slice(1)
-if (rest.length % 2 !== 0) {
-  console.error(`Flag args must come in --flag value pairs (got ${rest.length} tokens): ${rest.join(' ')}`)
-  process.exit(2)
-}
-const flags = {}
-for (let i = 0; i < rest.length; i += 2) {
-  const key = rest[i]?.replace(/^--/, '')
-  const value = rest[i + 1]
-  if (!key) { console.error(`Flag parse error near: ${rest.slice(i).join(' ')}`); process.exit(2) }
-  flags[key] = value
-}
+const parsed = parseFlagPairs(args.slice(1))
+if (parsed.error) { console.error(parsed.error); process.exit(2) }
+const flags = parsed.flags
 
 const adminKey = process.env.ADMIN_API_KEY
 if (!adminKey) {
@@ -55,61 +49,38 @@ if (!adminKey) {
   process.exit(2)
 }
 
-let method = 'GET'
-let body
-
-if (action !== 'list') {
-  const scope = flags.scope
-  if (scope !== 'incident' && scope !== 'service-pattern') {
-    console.error(`--scope must be 'incident' or 'service-pattern' (got: ${scope ?? '(none)'})`)
-    process.exit(2)
+if (action === 'list') {
+  const started = Date.now()
+  let res
+  try {
+    res = await adminRequest(PATH, adminKey, 'GET')
+  } catch (err) {
+    console.error(`Network error: ${err instanceof Error ? err.message : err}`)
+    process.exit(1)
   }
-  body = { action, scope }
-  if (scope === 'incident') {
-    if (!flags.incId) { console.error('--incId is required for --scope incident'); process.exit(2) }
-    body.incId = flags.incId
-  } else {
-    if (!flags.svc || !flags.match) { console.error('--svc and --match are required for --scope service-pattern'); process.exit(2) }
-    body.svcId = flags.svc
-    body.match = flags.match
-  }
-  if (flags.reason) body.reason = flags.reason
-  method = 'POST'
+  printResponse(res, started)
+  process.exit(res.ok ? 0 : 1)
 }
 
-const url = `${WORKER_URL}/api/admin/suppress`
-const started = Date.now()
-
-let res
-try {
-  res = await fetch(url, {
-    method,
-    headers: {
-      'X-Admin-Key': adminKey,
-      'Content-Type': 'application/json',
-      // Browser-like UA — workers.dev routes reject the default fetch UA with Cloudflare error 1010.
-      'User-Agent': 'Mozilla/5.0 AIWatch-AdminCLI',
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  })
-} catch (err) {
-  console.error(`Network error: ${err instanceof Error ? err.message : err}`)
-  process.exit(1)
+const scope = flags.scope
+if (scope !== 'incident' && scope !== 'service-pattern') {
+  console.error(`--scope must be 'incident' or 'service-pattern' (got: ${scope ?? '(none)'})`)
+  process.exit(2)
 }
-
-const text = await res.text()
-let json
-try { json = JSON.parse(text) } catch { /* e.g. Cloudflare error 1010 HTML page */ }
-
-console.log(`HTTP ${res.status}  (${Date.now() - started}ms)`)
-console.log(json ? JSON.stringify(json, null, 2) : text)
-
-if (res.status === 401) {
-  console.error('\nHint: 401 means the secret is missing or wrong. Re-check ADMIN_API_KEY.')
-} else if (res.status === 400) {
-  console.error('\nHint: 400 — check --scope + required flags (incId, or svc+match) and action (add/remove).')
-} else if (res.status === 502) {
-  console.error('\nHint: 502 — KV read/write failed. Check Worker logs.')
+if (flags.confirm !== undefined && flags.confirm !== 'off') {
+  console.error(`--confirm only takes 'off' (got: ${flags.confirm})`)
+  process.exit(2)
 }
+const body = { action, scope }
+if (scope === 'incident') {
+  if (!flags.incId) { console.error('--incId is required for --scope incident'); process.exit(2) }
+  body.incId = flags.incId
+} else {
+  if (!flags.svc || !flags.match) { console.error('--svc and --match are required for --scope service-pattern'); process.exit(2) }
+  body.svcId = flags.svc
+  body.match = flags.match
+}
+if (flags.reason) body.reason = flags.reason
 
-process.exit(res.ok ? 0 : 1)
+process.exit(await runMutation(PATH, adminKey, body, flags.confirm,
+  'check --scope + required flags (incId, or svc+match) and action (add/remove).'))
