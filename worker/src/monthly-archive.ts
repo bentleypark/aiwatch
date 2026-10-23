@@ -46,9 +46,10 @@ export interface MonthlyIncidentEntry {
   // in-progress state (`investigating` / `identified` / `monitoring`).
   finalStatus: 'resolved' | 'monitoring' | 'investigating' | 'identified'
   // #653 — persisted so estimate-uptime services (bedrock/azureopenai) can compute an impact-weighted
-  // uptime over the 90-day archive set, not just the short live RSS window. Optional/absent on archives
-  // written before #653 → consumers treat missing as null (informational), i.e. conservatively
-  // contributes no downtime (won't fabricate an outage from pre-#653 data).
+  // uptime over the 90-day archive set, not just the short live RSS window. Optional/absent on entries
+  // accumulated before #653 and not updated since, in any archive that holds them → consumers treat
+  // missing as null (informational), i.e. conservatively contributes no downtime (won't fabricate an
+  // outage from pre-#653 data).
   impact?: 'minor' | 'major' | 'critical' | null
   // #989 — persisted because it cannot be re-derived from the stored row: `autoMonitorTitles` matches the
   // ORIGINAL (e.g. Chinese) title, but the archive stores the English `titleMap` output. #1505 — it no
