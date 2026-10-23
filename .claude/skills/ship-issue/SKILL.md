@@ -144,7 +144,9 @@ is the *procedure* — follow it top to bottom.
      `      assert: GET /api/status/cached | services[id=turbopuffer].scoreConfidence == "medium"`.
      Assertable = a predicate over an AIWatch JSON endpoint (a `/api/status` field, a count/threshold,
      `exists`); NOT GA4/GSC-CTR/consent-gated or behavioral checks — leave those as a plain human ping.
-     Validate it before it ships: `node scripts/verify-assertions.mjs --issue N` (dry-run is the default; `--apply` mutates). Grammar +
+     Validate it before it ships: `node scripts/verify-assertions.mjs --issue N` (dry-run is the default; `--apply` mutates).
+     On a `passes before its date` flag, unless the signal itself is the condition, rewrite the assert
+     so it is false until the date's event (#1760). Grammar +
      allowlist + fail-open semantics: **[docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md)**.
    - **⚠️ Before writing the date, name what will still EXIST on it (#1206).** A dated line is worth
      nothing if the thing it points at is gone when the ping arrives. On 2026-08-05 three came due and

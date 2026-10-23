@@ -6,7 +6,7 @@ import {
   evaluateAssertion, isAllowedUrl, resolveSource, pairVerifyAssertions, tickBox, runAssertion, findMalformedAssertLines,
   truncate, countOpenBoxes, countOpenVerifyAfter, planIssueAutoVerify, DEFAULT_ASSERT_BASE,
   isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, isBacktickQuotedOccurrence,
-  liveVerifyOccurrences,
+  liveVerifyOccurrences, formatAssertionResult, evaluateItems,
 } from './verify-assertions.mjs'
 
 test('parseAssertionLine — valid GET + selector + quoted expected', () => {
@@ -623,4 +623,65 @@ test('planIssueAutoVerify — an un-asserted verify-after HOLDS verify-blocked (
   assert.equal(countOpenVerifyAfter(done.newBody), 0, 'no verify-after line is left open')
   assert.equal(done.passCount, 0, 'an already-ticked box is not re-ticked')
   assert.equal(done.dropLabel, false, 'so the planner cannot drop the label on a re-run — hand removal')
+})
+
+// #1760 — #1430's box: a future date whose assert is already true.
+test('formatAssertionResult — a future-dated line whose assert already passes is flagged (#1760)', () => {
+  const body = [
+    '- [ ] **verify-after 2026-10-24** — after the retention bridge lapses, the card still publishes its own uptime',
+    '      assert: GET /api/status/cached | services[id=windsurf].uptime30d exists',
+  ].join('\n')
+  const [item] = pairVerifyAssertions(body)
+  const pass = { status: 'pass', actual: 100, url: 'https://x/api/status/cached' }
+  const flagged = (r, today) => formatAssertionResult(item, r, today).some((l) => l.includes('passes before its date (2026-10-24)'))
+
+  assert.equal(flagged(pass, '2026-10-03'), true)
+  assert.equal(flagged(pass, '2026-10-23'), true)
+  assert.equal(flagged(pass, '2026-10-24'), false)
+  assert.equal(flagged(pass, '2026-10-25'), false)
+  assert.equal(flagged({ status: 'fail', actual: null, url: 'https://x' }, '2026-10-03'), false)
+  assert.equal(flagged({ status: 'skip', error: 'HTTP 500', url: 'https://x' }, '2026-10-03'), false)
+  assert.equal(formatAssertionResult(item, pass, '2026-10-03')[0], '  ✅ PASS  services[id=windsurf].uptime30d exists ')
+})
+
+test('evaluateItems — the CLI report carries the early-pass flag (#1760)', async () => {
+  const body = [
+    '- [ ] **verify-after 2026-10-24** — after the retention bridge lapses, the card still publishes its own uptime',
+    '      assert: GET /api/status/cached | services[id=windsurf].uptime30d exists',
+  ].join('\n')
+  const items = pairVerifyAssertions(`${body}\n- [ ] **verify-after 2026-10-25** — second\n      assert: GET /api/status/cached | services[id=y].v exists`)
+  const results = [{ status: 'pass', actual: 100, url: 'https://x' }, { status: 'fail', actual: null, url: 'https://x' }]
+  const out = await evaluateItems(items, '2026-10-03', async () => results.shift())
+  assert.deepEqual(out.statuses, ['pass', 'fail'])
+  assert.deepEqual(out.evaluated, [{ lineIndex: 0, status: 'pass' }, { lineIndex: 2, status: 'fail' }])
+  assert.equal(out.lines.filter((l) => l.includes('passes before its date')).length, 1)
+})
+
+test('CLI dry-run prints the early-pass flag for a future-dated passing line only (#1760)', async () => {
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const path = await import('node:path')
+  const { spawnSync } = await import('node:child_process')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-cli-'))
+  try {
+    const body = [
+      '- [ ] **verify-after 2099-01-01** — future',
+      '      assert: GET /api/status/cached | services[id=x].v exists',
+      '- [ ] **verify-after 2000-01-01** — past',
+      '      assert: GET /api/status/cached | services[id=x].v exists',
+    ].join('\n')
+    fs.writeFileSync(path.join(dir, 'issue.json'), JSON.stringify({ number: 1, title: 't', body, author: { login: 'a' } }))
+    fs.writeFileSync(path.join(dir, 'gh'), `#!/bin/sh\ncat "${path.join(dir, 'issue.json')}"\n`, { mode: 0o755 })
+    const preload = path.join(dir, 'fetch-stub.mjs')
+    fs.writeFileSync(preload, `globalThis.fetch = async () => ({ ok: true, json: async () => ({ services: [{ id: 'x', v: 1 }] }) })\n`)
+    const r = spawnSync(process.execPath, ['--import', preload, path.resolve('scripts/verify-assertions.mjs'), '--issue', '1'], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    })
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal((r.stdout.match(/✅ PASS/g) ?? []).length, 2)
+    assert.equal((r.stdout.match(/passes before its date/g) ?? []).length, 1)
+    assert.match(r.stdout, /passes before its date \(2099-01-01\)/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })
