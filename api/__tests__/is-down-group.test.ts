@@ -153,7 +153,7 @@ describe('is-down-group.ts', () => {
       { id: 'cursor', name: 'Cursor', status: 'operational' },
     ]))
     const html = await (await handler(makeReq('xai'))).text()
-    expect(html).toContain('SpaceXAI API')
+    expect(html).toContain('SpaceXSI API')
     expect(html).not.toContain('>xAI API<')
   })
 
@@ -165,7 +165,7 @@ describe('is-down-group.ts', () => {
       { id: 'cursor', name: 'Cursor', status: 'operational' },
     ]))
     const html = await (await handler(makeReq('xai'))).text()
-    expect(html).toContain('<a href="/is-xai-api-down">SpaceXAI API</a>')
+    expect(html).toContain('<a href="/is-xai-api-down">SpaceXSI API</a>')
     expect(html).not.toContain('<a href="/is-xai-api-down">xAI API</a>')
   })
 

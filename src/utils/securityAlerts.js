@@ -48,7 +48,7 @@ export function serviceIdForAlertLabel(label) {
 // former brand and its still-live domain. Keep this deliberately small and keyed
 // by the display `provider` value: it affects only provider-only HN matching.
 const PROVIDER_MATCH_TERMS = {
-  SpaceXAI: ['spacexai', 'xai', 'x.ai'],
+  SpaceXSI: ['spacexsi', 'spacexai', 'xai', 'x.ai'],
 }
 
 function providerMentioned(titleLC, provider) {

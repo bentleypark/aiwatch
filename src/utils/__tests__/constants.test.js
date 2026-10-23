@@ -383,7 +383,7 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
     const services = [
       v('openai', 'OpenAI API', 95, 'high'),
       v('gemini', 'Gemini API', 90, 'high'),
-      v('xai', 'SpaceXAI API', 85, 'high'),
+      v('xai', 'SpaceXSI API', 85, 'high'),
       v('mistral', 'Mistral API', 60, 'medium'),
     ]
     expect(getFallbacks({ id: 'claude', category: 'api' }, services).map(f => f.name)).toEqual(['OpenAI API', 'Gemini API'])
@@ -393,7 +393,7 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
     const services = [
       v('openai', 'OpenAI API', 95, 'high'),
       v('gemini', 'Gemini API', 90, 'high'),
-      v('xai', 'SpaceXAI API', null, 'low'),
+      v('xai', 'SpaceXSI API', null, 'low'),
     ]
     expect(getFallbacks({ id: 'claude', category: 'api' }, services).map(f => f.name)).toEqual(['OpenAI API', 'Gemini API'])
   })
@@ -405,14 +405,14 @@ describe('#1186 — frontend getFallbacks does not rank across confidence tiers 
     const services = [
       v('openai', 'OpenAI API', 95, 'high'),
       v('gemini', 'Gemini API', 90, 'high'),
-      v('xai', 'SpaceXAI API', 99, 'insufficient'), // would win #1 on raw Score alone
+      v('xai', 'SpaceXSI API', 99, 'insufficient'), // would win #1 on raw Score alone
     ]
     expect(getFallbacks({ id: 'claude', category: 'api' }, services).map(f => f.name)).toEqual(['OpenAI API', 'Gemini API'])
   })
 
   it('an unrecognized-confidence candidate DOES surface when nothing better exists (sink, not exclusion)', () => {
-    const services = [v('xai', 'SpaceXAI API', 99, 'insufficient')]
-    expect(getFallbacks({ id: 'claude', category: 'api' }, services).map(f => f.name)).toEqual(['SpaceXAI API'])
+    const services = [v('xai', 'SpaceXSI API', 99, 'insufficient')]
+    expect(getFallbacks({ id: 'claude', category: 'api' }, services).map(f => f.name)).toEqual(['SpaceXSI API'])
   })
 })
 
@@ -1052,7 +1052,7 @@ describe('#1753 — frontend: listed services recommend their substitute lists',
   })
 
   it('a shared LLM key is answered by the unlisted anchor, whichever comes first', () => {
-    const ids = [['deepseek', 'DeepSeek API'], ['claude', 'Claude API'], ['gemini', 'Gemini API'], ['xai', 'SpaceXAI API'], ['mistral', 'Mistral API'], ['together', 'Together AI'], ['fireworks', 'Fireworks AI']]
+    const ids = [['deepseek', 'DeepSeek API'], ['claude', 'Claude API'], ['gemini', 'Gemini API'], ['xai', 'SpaceXSI API'], ['mistral', 'Mistral API'], ['together', 'Together AI'], ['fireworks', 'Fireworks AI']]
     const downs = ids.map(([id, name]) => down(id, name))
     const all = [...downs, svc('openai', 'OpenAI API', 85), svc('kimi', 'Kimi API', 97)]
     const llm = (order) => getGroupedFallbacks(order, all).find(g => g.label === 'LLM')?.items.map(f => f.name)

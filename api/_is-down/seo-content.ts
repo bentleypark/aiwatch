@@ -275,31 +275,31 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Perplexity status?', a: 'You can check Perplexity status on this page, on the official Perplexity status page at status.perplexity.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
-  // #1165 — key renamed 'xai' → 'xai-api' (id unchanged: 'xai'): /is-xai-down is now the SpaceXAI/Grok
+  // #1165 — key renamed 'xai' → 'xai-api' (id unchanged: 'xai'): /is-xai-down is now the SpaceXSI/Grok
   // family group page, mirroring #1164's claude/openai repurposing, now that Grok's consumer app
   // (iOS/Android/Web) is tracked separately at 'grok' below.
   'xai-api': {
-    displayName: 'SpaceXAI API',
-    description: 'SpaceXAI provides the Grok family of language models through a developer API. This page tracks the API used by developers; the consumer Grok app is monitored separately.',
-    insight: 'SpaceXAI publishes incidents through its status feed rather than a typical Statuspage interface, so AIWatch parses a different format.',
-    whenDown: 'When the SpaceXAI API is down, applications and integrations using Grok models for real-time data analysis or chat will fail. The consumer Grok app may still be operational even during an API outage, since the two surfaces can fail independently.',
+    displayName: 'SpaceXSI API',
+    description: 'SpaceXSI provides the Grok family of language models through a developer API. This page tracks the API used by developers; the consumer Grok app is monitored separately.',
+    insight: 'SpaceXSI publishes incidents through its status feed rather than a typical Statuspage interface, so AIWatch parses a different format.',
+    whenDown: 'When the SpaceXSI API is down, applications and integrations using Grok models for real-time data analysis or chat will fail. The consumer Grok app may still be operational even during an API outage, since the two surfaces can fail independently.',
     faqs: [
-      { q: 'Is the SpaceXAI Grok API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the SpaceXAI API every 5 minutes and shows real-time operational status.' },
+      { q: 'Is the SpaceXSI Grok API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the SpaceXSI API every 5 minutes and shows real-time operational status.' },
       { q: 'Is this the same as the Grok app?', a: 'No. This page tracks the developer API (api.x.ai). The consumer Grok app has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
-      { q: 'How do I check SpaceXAI API status?', a: 'You can check SpaceXAI status on this page, on the official SpaceXAI status page at status.x.ai, or on the AIWatch dashboard at ai-watch.dev.' },
-      { q: 'What are alternatives to the SpaceXAI API?', a: 'For a general LLM API, OpenAI, Claude, or Gemini are alternatives AIWatch also tracks. AIWatch shows current availability for each.' },
+      { q: 'How do I check SpaceXSI API status?', a: 'You can check SpaceXSI status on this page, on the official SpaceXSI status page at status.x.ai, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'What are alternatives to the SpaceXSI API?', a: 'For a general LLM API, OpenAI, Claude, or Gemini are alternatives AIWatch also tracks. AIWatch shows current availability for each.' },
     ],
   },
-  // Grok (#1165/#1585) — SpaceXAI's consumer surfaces, the api-vs-app split mirror of DeepSeek
+  // Grok (#1165/#1585) — SpaceXSI's consumer surfaces, the api-vs-app split mirror of DeepSeek
   // API↔DeepSeek App ('deepseek-app' below).
   grok: {
     displayName: 'Grok',
-    description: 'Grok is SpaceXAI\'s AI assistant — available on grok.com, iOS, Android, X, Office/Workspace plugins, and Grok Build. It is distinct from the SpaceXAI developer API; AIWatch tracks these Grok surfaces here and the API separately.',
+    description: 'Grok is SpaceXSI\'s AI assistant — available on grok.com, iOS, Android, X, Office/Workspace plugins, and Grok Build. It is distinct from the SpaceXSI developer API; AIWatch tracks these Grok surfaces here and the API separately.',
     insight: 'The official status page tags incidents by affected surface, and AIWatch scopes this page to Grok on grok.com, mobile, X, Office/Workspace plugins, and Build — so a Grok-only incident shows here even when the developer API stays healthy, and vice versa.',
-    whenDown: 'When Grok is down, users cannot start or continue conversations on grok.com, in its mobile apps, X, Office/Workspace plugins, or Grok Build. These surfaces can fail independently or together depending on the cause; the SpaceXAI API may still be operational for developers.',
+    whenDown: 'When Grok is down, users cannot start or continue conversations on grok.com, in its mobile apps, X, Office/Workspace plugins, or Grok Build. These surfaces can fail independently or together depending on the cause; the SpaceXSI API may still be operational for developers.',
     faqs: [
       { q: 'Is Grok down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Grok\'s app surfaces and shows real-time operational status from the official status feed.' },
-      { q: 'Is this the same as the SpaceXAI API?', a: 'No. This page tracks Grok\'s app surfaces. The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
+      { q: 'Is this the same as the SpaceXSI API?', a: 'No. This page tracks Grok\'s app surfaces. The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
       { q: 'Why is Grok not responding?', a: 'Grok may be experiencing high traffic, a backend incident, or maintenance affecting one or more of its app surfaces. Check this page for current status and recent incident history.' },
       { q: 'What are alternatives to Grok?', a: 'When Grok is down, ChatGPT, claude.ai, or the DeepSeek App are other AI chat apps that AIWatch monitors. AIWatch shows which AI chat services are currently operational.' },
     ],

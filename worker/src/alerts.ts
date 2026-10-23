@@ -945,12 +945,12 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
 // region prefix off the alert description (= the incident title) to derive a grouping key, so the SAME
 // event across regions merges. Distinct events with the SAME title do not stay separate by that key
 // alone — #1349 — which is what the per-region rule inside `collapse` below is for. The regex lives
-// in xai-regions.ts (#703) so the two surfaces agree on what a region IS. SpaceXAI-only by design.
+// in xai-regions.ts (#703) so the two surfaces agree on what a region IS. SpaceXSI-only by design.
 
 /**
- * Merge concurrent SpaceXAI API per-region incident alerts (same event, different region) into one
+ * Merge concurrent SpaceXSI API per-region incident alerts (same event, different region) into one
  * grouped alert. New + resolved handled independently (a staggered resolve fires individually — same
- * limitation as mergeTogetherAlerts). Non-region-tagged SpaceXAI alerts and all other alerts pass through.
+ * limitation as mergeTogetherAlerts). Non-region-tagged SpaceXSI alerts and all other alerts pass through.
  * Sets `_mergedKeys` so every collapsed incidentId lands in the `alerted:new:` roster (no re-fire) and
  * the daily count still tallies each region (index.ts). svcIds stays `['xai']` so tweets/feed are unaffected.
  */
@@ -991,7 +991,7 @@ export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate
       const regions = arr.map((a) => xaiRegionOf(a.description))
       const merged: AlertCandidate = {
         key: arr[0].key,
-        title: `${kind === 'new' ? '🔴' : '🟢'} SpaceXAI API — ${kind === 'new' ? 'New Incident' : 'Incident Resolved'} (${regions.join(', ')})`,
+        title: `${kind === 'new' ? '🔴' : '🟢'} SpaceXSI API — ${kind === 'new' ? 'New Incident' : 'Incident Resolved'} (${regions.join(', ')})`,
         description: arr.map((a) => a.description).join('\n'), // preserve each region's original title
         color: kind === 'new' ? 0xED4245 : 0x57F287,
         url: 'https://ai-watch.dev/#xai',

@@ -1142,7 +1142,7 @@ describe('mergeTogetherAlerts', () => {
 describe('mergeXaiRegionalAlerts (#686)', () => {
   const xaiNew = (incId: string, region: string, event: string): AlertCandidate => ({
     key: `alerted:new:${incId}`,
-    title: '🔴 SpaceXAI API — New Incident',
+    title: '🔴 SpaceXSI API — New Incident',
     description: `[API (${region}.api.x.ai)] ${event}`,
     fallbackText: '👉 Suggested fallback: OpenAI',
     color: 0xed4245,
@@ -1151,7 +1151,7 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
   })
   const xaiRes = (incId: string, region: string, event: string): AlertCandidate => ({
     key: `alerted:res:${incId}`,
-    title: '🟢 SpaceXAI API — Incident Resolved (30m)',
+    title: '🟢 SpaceXSI API — Incident Resolved (30m)',
     description: `[API (${region}.api.x.ai)] ${event}`,
     color: 0x57f287,
     url: 'https://ai-watch.dev/#xai',
@@ -1159,7 +1159,7 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
   })
 
   it('leaves an xAI withdrawal out of the merge (#1674)', () => {
-    const withdrawal = { ...xaiNew('wd1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'), key: 'alerted:wd:wd1', title: '⚪ SpaceXAI API — Incident Withdrawn' }
+    const withdrawal = { ...xaiNew('wd1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'), key: 'alerted:wd:wd1', title: '⚪ SpaceXSI API — Incident Withdrawn' }
     const result = mergeXaiRegionalAlerts([
       xaiNew('us1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'),
       xaiNew('eu1', 'eu-west-1', 'Increased Error rate on Image Generation Endpoint'),
@@ -1174,7 +1174,7 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
       xaiNew('eu1', 'eu-west-1', 'Increased Error rate on Image Generation Endpoint'),
     ])
     expect(result).toHaveLength(1)
-    expect(result[0].title).toBe('🔴 SpaceXAI API — New Incident (us-east-1, eu-west-1)')
+    expect(result[0].title).toBe('🔴 SpaceXSI API — New Incident (us-east-1, eu-west-1)')
     expect(result[0].description).toContain('us-east-1.api.x.ai') // each region's original title preserved
     expect(result[0].description).toContain('eu-west-1.api.x.ai')
     expect(result[0]._mergedKeys).toEqual(['alerted:new:us1', 'alerted:new:eu1'])
@@ -1189,7 +1189,7 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
       tagged(xaiNew('u', 'x', ''), '[US (us.api.x.ai)]', 'Models outage'),
     ])
     expect(result).toHaveLength(1)
-    expect(result[0].title).toBe('🔴 SpaceXAI API — New Incident (Global, US)')
+    expect(result[0].title).toBe('🔴 SpaceXSI API — New Incident (Global, US)')
     expect(result[0]._mergedKeys).toEqual(['alerted:new:g', 'alerted:new:u'])
   })
 
@@ -1204,7 +1204,7 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
       xaiNew('new', 'us-east-1', 'Models unavailable'),
     ])
     expect(result).toHaveLength(2)
-    expect(result.every(a => a.title === '🔴 SpaceXAI API — New Incident')).toBe(true) // neither got a (regions: …) suffix
+    expect(result.every(a => a.title === '🔴 SpaceXSI API — New Incident')).toBe(true) // neither got a (regions: …) suffix
     // Set-wise: this function has never promised an emission order across buckets — a non-bucketed
     // alert reaches `out` during the bucketing pass while every bucket flushes after it.
     expect(result.map(a => a.key).sort()).toEqual(['alerted:new:new', 'alerted:new:old'])
@@ -1218,7 +1218,7 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
     ])
     expect(result).toHaveLength(2)
     const merged = result.find(a => a.title.includes('('))!
-    expect(merged.title).toBe('🔴 SpaceXAI API — New Incident (us-east-1, eu-west-1)')
+    expect(merged.title).toBe('🔴 SpaceXSI API — New Incident (us-east-1, eu-west-1)')
     expect(merged._mergedKeys).toEqual(['alerted:new:us1', 'alerted:new:eu1'])
     // the repeat stays its own alert, keeping its own key in the roster
     expect(result.find(a => !a.title.includes('('))!.key).toBe('alerted:new:us2')
@@ -1235,8 +1235,8 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
     ])
     expect(result).toHaveLength(2)
     expect(result.map(a => a.title)).toEqual([
-      '🔴 SpaceXAI API — New Incident (us-east-1, eu-west-1)',
-      '🔴 SpaceXAI API — New Incident (us-east-1, eu-west-1)',
+      '🔴 SpaceXSI API — New Incident (us-east-1, eu-west-1)',
+      '🔴 SpaceXSI API — New Incident (us-east-1, eu-west-1)',
     ])
     expect(result.map(a => a._mergedKeys)).toEqual([
       ['alerted:new:a1', 'alerted:new:a2'],
@@ -1263,21 +1263,21 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
       xaiRes('eu1', 'eu-west-1', 'Increased Error rate on Image Generation Endpoint'),
     ])
     expect(result).toHaveLength(1)
-    expect(result[0].title).toBe('🟢 SpaceXAI API — Incident Resolved (us-east-1, eu-west-1)')
+    expect(result[0].title).toBe('🟢 SpaceXSI API — Incident Resolved (us-east-1, eu-west-1)')
     expect(result[0]._mergedKeys).toEqual(['alerted:res:us1', 'alerted:res:eu1'])
   })
 
   it('passes a single xAI alert through unchanged (no _mergedKeys)', () => {
     const result = mergeXaiRegionalAlerts([xaiNew('us1', 'us-east-1', 'Some event')])
     expect(result).toHaveLength(1)
-    expect(result[0].title).toBe('🔴 SpaceXAI API — New Incident')
+    expect(result[0].title).toBe('🔴 SpaceXSI API — New Incident')
     expect(result[0]._mergedKeys).toBeUndefined()
   })
 
   it('does not merge a non-region-tagged xAI alert with region-tagged ones', () => {
     const untagged: AlertCandidate = {
       key: 'alerted:new:c',
-      title: '🔴 SpaceXAI API — New Incident',
+      title: '🔴 SpaceXSI API — New Incident',
       description: 'Whole-service degradation',
       color: 0xed4245,
       url: 'https://ai-watch.dev/#xai',
@@ -1327,7 +1327,7 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
   it('integration: collapses two region alerts from buildIncidentAlerts into one', () => {
     const xai = mockService({
       id: 'xai',
-      name: 'SpaceXAI API',
+      name: 'SpaceXSI API',
       status: 'degraded',
       category: 'api',
       incidents: [
@@ -1339,7 +1339,7 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
     expect(alerts).toHaveLength(2)
     const merged = mergeXaiRegionalAlerts(alerts)
     expect(merged).toHaveLength(1)
-    expect(merged[0].title).toBe('🔴 SpaceXAI API — New Incident (us-east-1, eu-west-1)')
+    expect(merged[0].title).toBe('🔴 SpaceXSI API — New Incident (us-east-1, eu-west-1)')
     expect(merged[0]._mergedKeys).toEqual(['alerted:new:us1', 'alerted:new:eu1'])
     expect(merged[0].svcIds).toEqual(['xai'])
   })
@@ -2287,7 +2287,7 @@ describe('age disclosure does not survive a merge (#1330)', () => {
     // `startedAt` values are per-region and need not agree, so picking one is arbitrary attribution
     // dressed as a fact. Reinstating `merged.ageText = arr[0].ageText` had nothing to fail against.
     const svc = {
-      id: 'xai', name: 'SpaceXAI API', provider: 'SpaceXAI', category: 'api', status: 'down',
+      id: 'xai', name: 'SpaceXSI API', provider: 'SpaceXSI', category: 'api', status: 'down',
       // Titles must carry the `[API (<region>.api.x.ai)]` tag `XAI_REGION_RE` groups on; the merge
       // keys on the tag-stripped remainder, so both must describe the SAME event.
       incidents: [
