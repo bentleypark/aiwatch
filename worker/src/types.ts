@@ -72,8 +72,9 @@ export interface Incident {
   autoMonitor?: boolean
   // #1292 — this incident was SYNTHESIZED from BetterStack `index.json` `status_history` (per-DAY
   // downtime seconds) rather than read from a feed item, because BetterStack stopped publishing its
-  // monitor auto-events to `/feed`. `duration` is exact; the placement of the downtime INSIDE a day
-  // is not, so `startedAt` is only an anchor inside `derivedDay`. Read this before asserting
+  // monitor auto-events to `/feed`. `duration` is the day's downtime total (on the still-accruing day,
+  // #1623: the total so far, or null while still down); the placement of the downtime INSIDE a day
+  // is not known, so `startedAt` is only an anchor inside `derivedDay`. Read this before asserting
   // minute-level precision about it. Absent on every parsed incident. Rules: status-determination.md.
   derived?: 'status_history'
   // #1292 — the page-local calendar day this incident covers (YYYY-MM-DD), stated ONCE at the source.
