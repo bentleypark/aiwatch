@@ -756,6 +756,13 @@ export function carryForwardUptime(
   return carried
 }
 
+// Ongoing first, then newest — the order `incidents[0]` (is-down "Last incident") and
+// `/api/v1/status/:id`'s slice(0,5) read as a prefix.
+export function compareIncidentsOngoingFirst(a: Incident, b: Incident): number {
+  const isOngoing = (i: Incident) => (i.status !== 'resolved' ? 1 : 0)
+  return (isOngoing(b) - isOngoing(a)) || b.startedAt.localeCompare(a.startedAt)
+}
+
 export async function mergeAistudioIncidents(
   primary: Incident[],
   // #717 — null when the aistudio fetch THREW upstream (caught → null). All three failure modes
@@ -785,7 +792,7 @@ export async function mergeAistudioIncidents(
     if (held.length > 0) {
       console.info(`[${serviceId}] aistudio read failed (${reason}) — held ${held.length} last-known incident(s)`)
     }
-    return { incidents: [...primary, ...held], merged: 0, parseErrors, held: held.length }
+    return { incidents: [...primary, ...held].sort(compareIncidentsOngoingFirst), merged: 0, parseErrors, held: held.length }
   }
   if (!aistudioRes) {
     return holdAndReturn(0, 'fetch threw')
@@ -808,7 +815,7 @@ export async function mergeAistudioIncidents(
     if (primary.length > 0 || extras.length > 0) {
       console.info(`[${serviceId}] merged vertex=${primary.length} aistudio=${extras.length}`)
     }
-    return { incidents: [...primary, ...extras], merged: extras.length, parseErrors: 0, held: 0 }
+    return { incidents: [...primary, ...extras].sort(compareIncidentsOngoingFirst), merged: extras.length, parseErrors: 0, held: 0 }
   } catch (err) {
     console.warn(
       `[fetchService] ${serviceId} aistudio parse failed:`,
@@ -3829,9 +3836,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
               // directly under a "Yes — down" answer, while the incident LIST on the same page — which
               // sorts ongoing-first — named a different one. `/api/v1/status/:id`'s slice(0,5) could drop
               // the live incident entirely. Mirrors the SPA's `compareIncidents`.
-              const isOngoing = (i: Incident) => (i.status !== 'resolved' ? 1 : 0)
-              incidents = [...incidents, ...synthesized]
-                .sort((a, b) => (isOngoing(b) - isOngoing(a)) || b.startedAt.localeCompare(a.startedAt))
+              incidents = [...incidents, ...synthesized].sort(compareIncidentsOngoingFirst)
             }
 
           } catch (err) {

@@ -57,7 +57,7 @@ describe('mergeAistudioIncidents', () => {
     const primary = [vertex('v1')]
     const res = mockResponse({ ok: true })
     const out = await mergeAistudioIncidents(primary, res, 'gemini')
-    expect(out.incidents.map((i) => i.id)).toEqual(['vertex:v1', 'aistudio:new-keys'])
+    expect(out.incidents.map((i) => i.id)).toEqual(['aistudio:new-keys', 'vertex:v1'])
     expect(out.merged).toBe(1)
     expect(out.parseErrors).toBe(0)
   })
@@ -71,9 +71,20 @@ describe('mergeAistudioIncidents', () => {
     const primary = [vertex('v1')]
     const res = mockResponse({ ok: true, json: () => Promise.resolve(payload) })
     const out = await mergeAistudioIncidents(primary, res, 'gemini')
-    expect(out.incidents.map((i) => i.id)).toEqual(['vertex:v1', 'aistudio:live-outage'])
+    expect(out.incidents.map((i) => i.id)).toEqual(['aistudio:live-outage', 'vertex:v1'])
     const live = out.incidents.find((i) => i.id === 'aistudio:live-outage')
     expect(live?.componentIds).toEqual(['2'])
+  })
+
+  it('#1766 — an older vertex incident does not lead the merged list; ongoing first, then newest', async () => {
+    const payload = [[[
+      ['sep', 'Gemini API Batch requests not finishing', 1, [[1, 't', ['1789369200'], 'Detected'], [4, 't', ['1789376400'], 'Resolved']], 1, [1]],
+      ['oct', 'Issues creating replicated voices', 1, [[1, 't', ['1790865060'], 'Detected'], [4, 't', ['1790875200'], 'Resolved']], 1, [1]],
+      ['jun-live', 'Issues with Nano Banana', 1, [[1, 't', ['1781855640'], 'Detected']], 1, [1]],
+    ]]]
+    const stale = { ...vertex('feb'), startedAt: '2026-02-27T12:37:00.000Z', resolvedAt: '2026-02-27T14:35:00.000Z' }
+    const out = await mergeAistudioIncidents([stale], mockResponse({ ok: true, json: () => Promise.resolve(payload) }), 'gemini')
+    expect(out.incidents.map((i) => i.id)).toEqual(['aistudio:jun-live', 'aistudio:oct', 'aistudio:sep', 'vertex:feb'])
   })
 
   it('#1012 — still drops an AI-Studio-only incident (component 3) after the widen', async () => {
@@ -158,7 +169,7 @@ describe('mergeAistudioIncidents', () => {
 
     it('holds carry-over incidents on HTTP non-OK (not vertex-only)', async () => {
       const out = await mergeAistudioIncidents([vertex('v1')], mockResponse({ ok: false, status: 403 }), 'gemini', getCarryOver)
-      expect(out.incidents.map((i) => i.id)).toEqual(['vertex:v1', 'aistudio:nano-banana'])
+      expect(out.incidents.map((i) => i.id)).toEqual(['aistudio:nano-banana', 'vertex:v1'])
       expect(out.held).toBe(1)
     })
 
@@ -169,7 +180,7 @@ describe('mergeAistudioIncidents', () => {
         'gemini',
         getCarryOver,
       )
-      expect(out.incidents.map((i) => i.id)).toEqual(['vertex:v1', 'aistudio:nano-banana'])
+      expect(out.incidents.map((i) => i.id)).toEqual(['aistudio:nano-banana', 'vertex:v1'])
       expect(out.held).toBe(1)
       expect(out.parseErrors).toBe(1)
     })
@@ -179,12 +190,12 @@ describe('mergeAistudioIncidents', () => {
       const out = await mergeAistudioIncidents([vertex('v1')], mockResponse({ ok: true }), 'gemini', spy)
       expect(spy).not.toHaveBeenCalled()
       expect(out.held).toBe(0)
-      expect(out.incidents.map((i) => i.id)).toEqual(['vertex:v1', 'aistudio:new-keys'])
+      expect(out.incidents.map((i) => i.id)).toEqual(['aistudio:new-keys', 'vertex:v1'])
     })
 
     it('holds carry-over when aistudioRes is null (fetch threw upstream)', async () => {
       const out = await mergeAistudioIncidents([vertex('v1')], null, 'gemini', getCarryOver)
-      expect(out.incidents.map((i) => i.id)).toEqual(['vertex:v1', 'aistudio:nano-banana'])
+      expect(out.incidents.map((i) => i.id)).toEqual(['aistudio:nano-banana', 'vertex:v1'])
       expect(out.held).toBe(1)
     })
 
