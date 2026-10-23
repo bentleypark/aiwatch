@@ -540,16 +540,8 @@ async function main() {
   }
 
   console.log(`#${number} ${issue.title}\n${apply ? '(apply)' : '(dry-run)'} — ${items.length} assertion(s):`)
-  const statuses = []
-  const evaluated = []
-  for (const it of items) {
-    const r = await runAssertion(it.assertion)
-    statuses.push(r.status)
-    evaluated.push({ lineIndex: it.lineIndex, status: r.status })
-    const mark = r.status === 'pass' ? '✅ PASS' : r.status === 'fail' ? '❌ FAIL' : '⚠️  SKIP'
-    console.log(`  ${mark}  ${it.assertion.selector} ${it.assertion.op} ${it.assertion.expected ?? ''}`)
-    console.log(`         → actual=${truncate(JSON.stringify(r.actual))} ${r.error ? `(${r.error})` : `[${r.url}]`}`)
-  }
+  const { statuses, evaluated, lines } = await evaluateItems(items, todayUTC())
+  for (const line of lines) console.log(line)
   // #1408 — the tick AND the label decision come from `planIssueAutoVerify`, the same function the
   // daily job calls (`verify-reminders.mjs`). This path used to re-implement both, and the second copy
   // decided label removal from `statuses.every(pass)` — built from the ASSERTED lines alone. A
@@ -586,6 +578,33 @@ async function main() {
   if (repo) commentArgs.push('--repo', repo)
   gh(commentArgs)
   console.log(`\napplied: ticked ${passCount} box(es) + commented${dropLabel ? ' + removed verify-blocked' : ' (label kept — unresolved items remain)'}.`)
+}
+
+/** Evaluate each asserted item → {statuses, evaluated, lines}. `run` is injectable for tests. */
+export async function evaluateItems(items, today, run = runAssertion) {
+  const statuses = []
+  const evaluated = []
+  const lines = []
+  for (const it of items) {
+    const r = await run(it.assertion)
+    statuses.push(r.status)
+    evaluated.push({ lineIndex: it.lineIndex, status: r.status })
+    lines.push(...formatAssertionResult(it, r, today))
+  }
+  return { statuses, evaluated, lines }
+}
+
+/** The dry-run lines for one evaluated item. `today` is a UTC `YYYY-MM-DD`. */
+export function formatAssertionResult(item, r, today) {
+  const mark = r.status === 'pass' ? '✅ PASS' : r.status === 'fail' ? '❌ FAIL' : '⚠️  SKIP'
+  const lines = [
+    `  ${mark}  ${item.assertion.selector} ${item.assertion.op} ${item.assertion.expected ?? ''}`,
+    `         → actual=${truncate(JSON.stringify(r.actual))} ${r.error ? `(${r.error})` : `[${r.url}]`}`,
+  ]
+  if (r.status === 'pass' && item.date > today) {
+    lines.push(`         ⚠️  passes before its date (${item.date}): unless this signal is itself the condition, the assert cannot tell before from after.`)
+  }
+  return lines
 }
 
 function todayUTC() {

@@ -84,7 +84,8 @@ A flaky read or a not-yet-satisfied signal therefore never spuriously closes an 
 ## Behavior in the daily job
 
 Runs on **every** daily invocation (not gated on the due date), so an issue drains the moment its
-signal is met — the ping cadence (due date + weekly) is independent. Per issue with a passing
+signal is met — the ping cadence (due date + weekly) is independent. A dated `assert:` must therefore
+be false until its condition happens (#1760: #1430's `uptime30d exists` was ticked 21 days early). Per issue with a passing
 assertion: tick the passing box(es); drop `verify-blocked` once no unchecked `verify-after` line
 remains; **close** only when no unchecked box of *any* kind remains (conservative). Body edit and
 `--remove-label` are separate best-effort `gh` calls (a missing label can't drop the tick). The
@@ -319,7 +320,8 @@ Default is dry-run: fetch the issue, pair `verify-after`↔`assert`, evaluate li
 under the same rule as the daily job above — only once NO unchecked `verify-after` of any kind
 remains. It decides that by calling `planIssueAutoVerify`, not by re-deriving it: until #1408 this
 path held a second copy that counted only the ASSERTED lines, so a `durable:`-only line did not
-hold the label. Use it to validate a freshly-authored `assert:` line before the daily job runs.
+hold the label. Use it to validate a freshly-authored `assert:` line before the daily job runs: a
+PASS on a line whose date is still ahead is flagged `passes before its date` (#1760).
 
 ## Security notes (do not regress)
 
