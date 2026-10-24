@@ -90,7 +90,7 @@ const FORWARDERS = {
 /** Cannot be reached by a derived incident, or reads nothing it could get wrong. Each reason is a
  *  property of the CODE, not a recollection — if one stops holding, its file moves to APPLIERS. */
 const SAFE = {
-  'worker/src/mistral-public-api.ts': 'reads only the LENGTH of the public API\'s `incidents` array and keeps the raw text; builds no incident, publishes no duration, status or Score input (#1510 Slice 1 instrumentation)',
+  'worker/src/mistral-public-api.ts': 'PRODUCES incidents from the public API\'s `incidents.json`, and reads back only the ones it stored itself (#1510 Part E) — a derived incident never reaches it',
   // Producers — they build incidents from an upstream payload; a derived one never flows back in.
   'worker/src/parsers/betterstack.ts': 'PRODUCES them; the tag is stamped here',
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload',
@@ -194,7 +194,7 @@ const RB_FORWARDERS = {
 /** Cannot make a wrong "is this fresh" judgment, or reads nothing it could get wrong. Each reason is
  *  a property of the CODE, not a recollection — if one stops holding, its file moves to RB_APPLIERS. */
 const RB_SAFE = {
-  'worker/src/mistral-public-api.ts': 'reads only the length of the public API\'s `incidents` array; builds no incident and never sees the retainedBridge tag',
+  'worker/src/mistral-public-api.ts': 'PRODUCES incidents from the public API and reads back only the ones it stored itself; never sees the retainedBridge tag',
   // Producers + the creator/declarer — retainedBridge is stamped ONLY inside
   // mergeRetainedIncidentHistory (services.ts); no parser ever produces it, and xAI has no migration bridge.
   'worker/src/parsers/betterstack.ts': 'producer — parses an upstream payload, never stamps retainedBridge',
@@ -315,7 +315,7 @@ const SU_FORWARDERS = {
  *  property of the CODE, not a recollection — if one stops holding, its file moves to SU_APPLIERS. */
 const SU_SAFE = {
   'worker/src/incident-presence.ts': 'pageIncidents concatenates two lists; reads no time and no duration (#1698)',
-  'worker/src/mistral-public-api.ts': 'reads only the length of the public API\'s `incidents` array; builds no incident and never reads the startUnknown flag',
+  'worker/src/mistral-public-api.ts': 'PRODUCES incidents from the public API and reads back only the ones it stored itself; never reads the startUnknown flag',
   // Producers. `parsers/incident-io.ts` stamps the flag on its own anchored path; #1480's zero-length
   // case is stamped once in `services.ts`, over every parser's output. No parser stamps it itself.
   'worker/src/parsers/incident-io.ts': 'PRODUCES it — correctIncidentIoImpossibleTimes is where the flag is stamped and where the repair is attempted first',

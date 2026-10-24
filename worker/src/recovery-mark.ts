@@ -27,7 +27,7 @@
 // deliberately never surfaced at all), but it means "no banner" is not by itself evidence of this bug.
 
 import { analysisKey, parseAnalysis, putAnalysis, type AIAnalysisResult } from './ai-analysis'
-import { formatDuration, kvDel, kvPut, type KVLike } from './utils'
+import { formatDuration, isResolvedWithoutEnd, kvDel, kvPut, type KVLike } from './utils'
 import { buildHistoryRecord, type IncidentHistoryRecord } from './incident-history'
 import { readPredictionSnapshots } from './prediction-snapshot'
 
@@ -72,6 +72,8 @@ export function recoveryMarkerKey(svcId: string, incId: string): string {
 interface ResolvedIncident {
   id: string
   title?: string
+  status?: string
+  duration?: string | null
   startedAt?: string
   resolvedAt?: string | null
   /** #1390 — `startedAt` is anchored on `resolvedAt`; no elapsed time is derivable. */
@@ -120,6 +122,10 @@ export async function markIncidentResolved(
   // both cron resolution paths funnel through this function. What is lost is the "Recently Resolved"
   // row for such an incident — the same trade already accepted for a `status_history` incident, and the
   // alternative is a row that states a recovery time we have said we do not have.
+  if (inc.status != null && isResolvedWithoutEnd({ status: inc.status, resolvedAt: inc.resolvedAt, duration: inc.duration })) {
+    console.warn(`[cron] ${svcId}/${inc.id}: resolved with no recorded end — writing no recovery marker and stamping no analysis resolvedAt`)
+    return null
+  }
   if (inc.startUnknown) {
     console.warn(`[cron] ${svcId}/${inc.id}: no trustworthy start (startUnknown) — writing no recovery marker and stamping no analysis resolvedAt, so nothing downstream derives an elapsed time from the anchored pair`)
     return null

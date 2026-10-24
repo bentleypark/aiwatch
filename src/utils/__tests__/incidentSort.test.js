@@ -13,10 +13,12 @@ import {
   dominantGroupStatus,
   formatDurationMs,
   sumGroupDuration,
+  isResolvedWithoutEnd,
   displayDuration,
   incidentDisplayStatus,
 } from '../incidentSort'
 import { groupIncidents } from '../incidentGrouping'
+import { isResolvedWithoutEnd as workerIsResolvedWithoutEnd } from '../../../worker/src/utils'
 
 function makeIncident({
   id = 'inc',
@@ -454,6 +456,18 @@ describe('sumGroupDuration', () => {
     expect(result.resolvedCount).toBe(1)
   })
 
+  it('#1510 Part E — a resolved entry with no recorded end counts as unknown, not ongoing', () => {
+    const result = sumGroupDuration({
+      entries: [
+        { status: 'resolved', startedAt: start('2026-04-30T01:00:00Z'), resolvedAt: start('2026-04-30T01:10:00Z') },
+        { status: 'resolved', startedAt: start('2026-04-30T02:00:00Z'), resolvedAt: null },
+      ],
+    })
+    expect(result.hasOngoing).toBe(false)
+    expect(result.unknownCount).toBe(1)
+    expect(result.resolvedCount).toBe(1)
+  })
+
   it('returns zero totalMs and hasOngoing=false for empty entries (defensive)', () => {
     const result = sumGroupDuration({ entries: [] })
     expect(result.totalMs).toBe(0)
@@ -860,5 +874,19 @@ describe('partially-resolved merged group (#1350)', () => {
 
   it('getLatestActivity sorts by the last update, not the member resolution', () => {
     expect(getLatestActivity(partial)).toBe(new Date('2026-09-03T17:06:00Z').getTime())
+  })
+})
+
+describe('isResolvedWithoutEnd — mirror of the worker predicate (#1510 Part E)', () => {
+  it.each([
+    [{ status: 'resolved', resolvedAt: null }, true],
+    [{ status: 'resolved', resolvedAt: 'not a date' }, true],
+    [{ status: 'resolved', resolvedAt: '2026-10-23T12:00:00Z' }, false],
+    [{ status: 'resolved', resolvedAt: null, duration: '42m' }, false],
+    [{ status: 'resolved', resolvedAt: null, timeline: [{ stage: 'resolved', text: '', at: '2026-10-23T12:00:00Z' }] }, false],
+    [{ status: 'monitoring', resolvedAt: null }, false],
+  ])('%j → %s, the same answer as the worker', (inc, expected) => {
+    expect(isResolvedWithoutEnd(inc)).toBe(expected)
+    expect(workerIsResolvedWithoutEnd(inc)).toBe(expected)
   })
 })

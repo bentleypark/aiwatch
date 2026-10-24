@@ -712,10 +712,8 @@ export function buildIncidentAlerts(
     // #781 — grouped per-category fallbacks across ALL affected surfaces of the incident (not just the
     // primary's category), matching the dashboard: a multi-surface Anthropic incident now recommends
     // an LLM + an App + a Coding-Agent alternative, not just two LLMs.
-    // #1233 — `isAffectedStatus`, not `!== 'operational'`. Behaviour-neutral today: this path only runs
-    // for a service that HAS an incident, and every `unknown` return carries an empty incident list, so
-    // `firstSvc.status === 'unknown'` is not currently reachable here. Spelled correctly so it stays
-    // that way — the same posture as the sibling gate in `index.ts`'s brief-summary builder.
+    // #1233 — `isAffectedStatus`, not `!== 'operational'` — the same posture as the sibling gate in
+    // `index.ts`'s brief-summary builder.
     const fallbackText = (!isAdvisory && isAffectedStatus(firstSvc.status) && !regionText)
       ? buildGroupedFallbackText(ids, services)
       : ''
@@ -1347,18 +1345,8 @@ function buildGroupTweetDraft(
   // Hint vocab mirrors buildTweetForService below: 'active' is the fallback for "known live incident,
   // but the worst member status hasn't flipped off 'operational' yet" — never emit ?e=operational on
   // an outage share.
-  // #1233 — the tweet/reply drafts deliberately carry NO `unknown` arm. An unreadable source cannot
-  // reach them: every path that publishes `unknown` yields `incidents: []` (see `base` in services.ts),
-  // and all three drafts run only for a service attached to an incident. That invariant is pinned by a
-  // test rather than defended here — `unknown-not-an-outage.test.ts` drives the real `fetchAllServices`
-  // and asserts it, so if a future leg ever preserves incidents on an unreadable read, the test fails
-  // and these drafts become that change's problem to handle, deliberately rather than by accident.
-  //
-  // An earlier pass added the arms anyway, justified by a reachability claim that was false and that
-  // contradicted the comment in `buildIncidentAlerts` above. The group version of it was also wrong on
-  // its own terms: it read the PRIMARY member's status while speaking for the whole family, so an
-  // unreadable primary beside a confirmed-down sibling would have published "we cannot confirm" about
-  // an outage we had read perfectly well.
+  // #1233 — the tweet/reply drafts deliberately carry NO `unknown` arm; `unknown-not-an-outage.test.ts`
+  // drives the real `fetchAllServices` and checks that no `unknown` service carries an unresolved incident.
   // Hint vocab mirrors buildTweetForService: 'active' is the fallback for "known live incident, but the
   // worst member status hasn't flipped off 'operational' yet" — never emit ?e=operational on an outage.
   const hint = isRecovery ? 'resolved' : worst === 'operational' ? 'active' : worst

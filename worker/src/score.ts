@@ -2,7 +2,7 @@
 
 import type { Incident, ProbeSummary, ServiceStatus } from './types'
 import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
-import { incidentDays, statedDay } from './utils'
+import { incidentDays, isResolvedWithoutEnd, statedDay } from './utils'
 
 export interface AIWatchScore {
   // #713 — null for a 'low'-confidence service (no official uptime AND no probe): scored on only
@@ -71,7 +71,7 @@ export const MTTR_PRIOR_WEIGHT = 2
  *  are pinned together by `src/utils/__tests__/derived-tag-sync.test.js`, the same treatment
  *  `service-groups.ts` gets against `SERVICE_CATEGORIES`. Both mirrors were missed on the first pass
  *  and published a day-bucket AS a recovery time while this file reported none. */
-export function carriesRecoveryTime<T extends { derived?: string; startUnknown?: boolean }>(i: T): boolean {
+export function carriesRecoveryTime<T extends { derived?: string; startUnknown?: boolean; status: string; resolvedAt?: string | null }>(i: T): boolean {
   // #1390 — `startUnknown` is the SECOND way an incident can be impactful, resolved and in-window while
   // carrying no measurable recovery time: the provider published a record whose recovery predates its
   // start, and its page had no impact window to recover the real one, so `startedAt` is anchored on
@@ -84,7 +84,7 @@ export function carriesRecoveryTime<T extends { derived?: string; startUnknown?:
   //
   // The two mirrors named above need no change on this axis: `src/utils/recovery.js` and the is-down
   // MTTR line both already require a truthy `duration`, which an anchored incident does not have.
-  return i.derived !== 'status_history' && !i.startUnknown
+  return i.derived !== 'status_history' && !i.startUnknown && !isResolvedWithoutEnd(i)
 }
 
 /** MTTR (hours) from resolved-impactful impact-window lengths (minutes, #1505). ≥3 → the robust MEDIAN (one

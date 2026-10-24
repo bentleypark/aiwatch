@@ -9,6 +9,9 @@ import {
   parsePublicActiveIncidents,
   recordActiveIncidentsOverlay,
   isStorableOverlayIncident,
+  reconcileOverlayResolutions,
+  MISTRAL_OVERLAY_SEEN_KV_KEY,
+  MISTRAL_OVERLAY_RESOLVED_KV_KEY,
   MISTRAL_PUBLIC_API_BASE,
   MISTRAL_PUBLIC_API_INDEX,
   MISTRAL_PUBLIC_API_SOURCE,
@@ -22,7 +25,7 @@ vi.mock('../services', async () => {
   const actual = await vi.importActual<typeof import('../services')>('../services')
   return { ...actual, fetchAllServices: vi.fn() }
 })
-import { SERVICES, fetchAllServices } from '../services'
+import { SERVICES, fetchAllServices, mistralFeedResolvedIds } from '../services'
 import type { ServiceStatus } from '../services'
 import workerModule from '../index'
 import { mockKV, TEST_TIMEOUT_MS } from './helpers/unreadable-source'
@@ -240,9 +243,9 @@ describe('parsePublicActiveIncidents — real captured payload (2026-09-29)', ()
   })
 
   it('null/unparseable text is a parse failure, distinct from valid JSON with no incidents field', () => {
-    expect(parsePublicActiveIncidents(null)).toEqual({ incidents: [], dropped: 0, parseFailed: true })
-    expect(parsePublicActiveIncidents('not json')).toEqual({ incidents: [], dropped: 0, parseFailed: true })
-    expect(parsePublicActiveIncidents(JSON.stringify({}))).toEqual({ incidents: [], dropped: 0, parseFailed: false })
+    expect(parsePublicActiveIncidents(null)).toEqual({ incidents: [], dropped: 0, parseFailed: true, hasList: false })
+    expect(parsePublicActiveIncidents('not json')).toEqual({ incidents: [], dropped: 0, parseFailed: true, hasList: false })
+    expect(parsePublicActiveIncidents(JSON.stringify({}))).toEqual({ incidents: [], dropped: 0, parseFailed: false, hasList: false })
   })
 
   it('a body truncated by readPublicApi\'s RAW_MAX_CHARS (still "ok") is a parse failure, not an empty list', () => {
@@ -282,22 +285,41 @@ describe('isStorableOverlayIncident — re-validates a value read back out of KV
   })
 })
 
+const T1 = '2026-09-29T14:00:00.000Z'
+const T2 = '2026-09-29T14:05:00.000Z'
+const IDS = SERVICES.find((s) => s.id === 'mistral')!.displayComponentIds
+// A `mistral:feed` value `services.ts` can read (the `readable scrape feed` fixture in
+// mistral-active-overlay.test.ts).
+const readableFeed = (resolvedIds: string[] = [], openIds: string[] = []) => JSON.stringify({
+  fetchedAt: T1,
+  feed: {
+    fetchedAt: T1,
+    components: IDS!.map((id) => ({ id, name: `Component ${id.slice(0, 4)}`, status: 'Operational' })),
+    incidents: [
+      ...resolvedIds.map((id) => ({ id, title: 'Elevated error rates', updates: [{ status: 'Resolved', at: 'September 29, 2026 at 01:50 PM UTC', body: 'Resolved.' }, { status: 'Investigating', at: 'September 29, 2026 at 12:48 PM UTC', body: 'Investigating.' }] })),
+      ...openIds.map((id) => ({ id, title: 'Elevated error rates', updates: [{ status: 'Investigating', at: 'September 29, 2026 at 12:48 PM UTC', body: 'Investigating.' }] })),
+    ],
+    coverage: { listed: resolvedIds.length + openIds.length, fetched: resolvedIds.length + openIds.length },
+    uptime: IDS!.map((id) => ({ componentId: id, barCount: 91, unreadBars: 0, coverage: { impacted: 0, fetched: 0 }, days: [] })),
+  },
+})
+
 describe('recordActiveIncidentsOverlay', () => {
   it('writes the parsed active list on a successful read, even when empty', async () => {
     const kv = mockKV()
-    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: JSON.stringify({ incidents: [] }) }))
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: JSON.stringify({ incidents: [] }) }), T1, mistralFeedResolvedIds)
     expect(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY]).toBe('[]')
   })
 
   it('writes the real incident through to the overlay key', async () => {
     const kv = mockKV()
-    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: JSON.stringify({ incidents: [REAL_ACTIVE_INCIDENT] }) }))
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: JSON.stringify({ incidents: [REAL_ACTIVE_INCIDENT] }) }), T1, mistralFeedResolvedIds)
     expect(JSON.parse(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY])).toHaveLength(1)
   })
 
   it('does NOT overwrite on a failed/unreadable read — a transient fetch failure must not erase a real reading', async () => {
     const kv = mockKV({ [MISTRAL_ACTIVE_OVERLAY_KV_KEY]: '[{"id":"prior"}]' })
-    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'challenged', raw: null }))
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'challenged', raw: null }), T1, mistralFeedResolvedIds)
     expect(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY]).toBe('[{"id":"prior"}]')
   })
 
@@ -305,12 +327,12 @@ describe('recordActiveIncidentsOverlay', () => {
     // Pins the `parseFailed` check (`grep -n parseFailed worker/src/mistral-public-api.ts`): gating
     // the write on `outcome` alone erased a real prior reading with `[]` on a truncated-but-'ok' body.
     const kv = mockKV({ [MISTRAL_ACTIVE_OVERLAY_KV_KEY]: '[{"id":"prior"}]' })
-    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: '{"incidents":[{"id":"a"' }))
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: '{"incidents":[{"id":"a"' }), T1, mistralFeedResolvedIds)
     expect(kv.store[MISTRAL_ACTIVE_OVERLAY_KV_KEY]).toBe('[{"id":"prior"}]')
   })
 
   it('no-op with no KV binding', async () => {
-    await expect(recordActiveIncidentsOverlay(undefined, result())).resolves.toBeUndefined()
+    await expect(recordActiveIncidentsOverlay(undefined, result(), T1, mistralFeedResolvedIds)).resolves.toBeUndefined()
   })
 
   it('warns when an entry is dropped, so the loss leaves a trace', async () => {
@@ -319,8 +341,169 @@ describe('recordActiveIncidentsOverlay', () => {
     await recordActiveIncidentsOverlay(kv as never, result({
       outcome: 'ok',
       raw: JSON.stringify({ incidents: [{ ...REAL_ACTIVE_INCIDENT, id: undefined }] }),
-    }))
+    }), T1, mistralFeedResolvedIds)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('dropped 1'))
+  })
+})
+
+// #1510 Part E — the 2026-10-23 shape: an overlay-only incident leaves `incidents.json` while the feed
+// is down, and nothing recorded its end.
+describe('recordActiveIncidentsOverlay — an incident that leaves the active list is recorded as resolved (#1510 Part E)', () => {
+  const ok = (incidents: unknown[]) => result({ outcome: 'ok', raw: JSON.stringify({ incidents }) })
+  const resolutions = (kv: ReturnType<typeof mockKV>) => JSON.parse(kv.store[MISTRAL_OVERLAY_RESOLVED_KV_KEY] ?? '[]')
+  const resolvedList = (kv: ReturnType<typeof mockKV>) => resolutions(kv).map((r: { incident: unknown }) => r.incident)
+
+  it('an ok read without a previously active incident resolves it with no end, keeping that read\'s time for retention only', async () => {
+    const kv = mockKV()
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toEqual([])
+    const puts = kv.put.mock.calls.length
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    expect(kv.put.mock.calls.length - puts).toBe(1)
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolutions(kv)).toEqual([{ incident: expect.objectContaining({ id: REAL_ACTIVE_INCIDENT.id, status: 'resolved', resolvedAt: null, startedAt: '2026-09-29T12:48:01.000Z', duration: null }), endSeenAt: T2 }])
+    expect(JSON.parse(kv.store[MISTRAL_OVERLAY_SEEN_KV_KEY])).toEqual([])
+  })
+
+  it('a challenged or failed read resolves nothing', async () => {
+    for (const bad of [result({ outcome: 'challenged', raw: null }), result({ outcome: 'non-200', raw: null }), result({ outcome: 'ok', raw: '{"incidents":[' })]) {
+      const kv = mockKV()
+      await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+      await recordActiveIncidentsOverlay(kv as never, bad, T2, mistralFeedResolvedIds)
+      expect(resolvedList(kv)).toEqual([])
+      expect(JSON.parse(kv.store[MISTRAL_OVERLAY_SEEN_KV_KEY])).toHaveLength(1)
+    }
+  })
+
+  it('an ok read that dropped an unpublishable entry resolves nothing, and still records a new one', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const kv = mockKV()
+    const other = { ...REAL_ACTIVE_INCIDENT, id: 'other' }
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    await recordActiveIncidentsOverlay(kv as never, ok([{ ...REAL_ACTIVE_INCIDENT, id: undefined }, other]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toEqual([])
+    expect(JSON.parse(kv.store[MISTRAL_OVERLAY_SEEN_KV_KEY]).map((i: { id: string }) => i.id)).toEqual([REAL_ACTIVE_INCIDENT.id, 'other'])
+  })
+
+  it('a mistral:feed value services.ts cannot read is treated as absent: the end is still recorded', async () => {
+    const kv = mockKV({ 'mistral:feed': '{}' })
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv).map((i: { id: string }) => i.id)).toEqual([REAL_ACTIVE_INCIDENT.id])
+  })
+
+  it('a feed that fails only the scoped readability test is treated as unreadable: the end is still recorded', async () => {
+    const partial = JSON.parse(readableFeed([REAL_ACTIVE_INCIDENT.id]))
+    partial.feed.components = partial.feed.components.map((c: { status: string }, n: number) => ({ ...c, status: n === 0 ? 'Operational' : 'Unknown' }))
+    const kv = mockKV({ 'mistral:feed': JSON.stringify(partial) })
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv).map((i: { id: string }) => i.id)).toEqual([REAL_ACTIVE_INCIDENT.id])
+  })
+
+  it('a failed mistral:feed read changes nothing', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const kv = mockKV()
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    kv.get.mockImplementation(async (k: string) => { if (k === 'mistral:feed') throw new Error('kv down'); return kv.store[k] ?? null })
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toEqual([])
+    expect(JSON.parse(kv.store[MISTRAL_OVERLAY_SEEN_KV_KEY])).toHaveLength(1)
+  })
+
+  it.each([
+    ['a failed', 'throw', MISTRAL_OVERLAY_SEEN_KV_KEY, false],
+    ['an unparseable', '{not json', MISTRAL_OVERLAY_SEEN_KV_KEY, false],
+    ['a non-array', '{"a":1}', MISTRAL_OVERLAY_SEEN_KV_KEY, false],
+    ['an unparseable', '{not json', MISTRAL_OVERLAY_RESOLVED_KV_KEY, true],
+  ])('%s read (%s) of %s leaves both lists as they were (feed readable: %s)', async (_label, mode, key, feedReadable) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const kv = mockKV(feedReadable ? { 'mistral:feed': readableFeed() } : {})
+    if (mode === 'throw') kv.get.mockImplementation(async (k: string) => { if (k === key) throw new Error('kv down'); return kv.store[k] ?? null })
+    else kv.store[key] = mode
+    const before = { ...kv.store }
+    await recordActiveIncidentsOverlay(kv as never, ok([{ ...REAL_ACTIVE_INCIDENT, id: 'b' }]), T2, mistralFeedResolvedIds)
+    expect(kv.store[MISTRAL_OVERLAY_SEEN_KV_KEY]).toBe(before[MISTRAL_OVERLAY_SEEN_KV_KEY])
+    expect(kv.store[MISTRAL_OVERLAY_RESOLVED_KV_KEY]).toBe(before[MISTRAL_OVERLAY_RESOLVED_KV_KEY])
+  })
+
+  it('an incident listed again on a read that dropped an entry leaves the resolved list', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const kv = mockKV()
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toHaveLength(1)
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT, { ...REAL_ACTIVE_INCIDENT, id: undefined }]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toEqual([])
+  })
+
+  it.each(['{}', '{"errors":[{"title":"Rate limited"}]}', '{"data":[]}'])('a 200 JSON body without an incidents array (%s) resolves nothing', async (body) => {
+    const kv = mockKV()
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    await recordActiveIncidentsOverlay(kv as never, result({ outcome: 'ok', raw: body }), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toEqual([])
+  })
+
+  it('an end the readable feed has recorded is not recorded again, so the feed keeps its own end', async () => {
+    const kv = mockKV({ 'mistral:feed': readableFeed([REAL_ACTIVE_INCIDENT.id]) })
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    delete kv.store['mistral:feed']
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toEqual([])
+  })
+
+  it.each([['without the incident', []], ['still showing it open', [REAL_ACTIVE_INCIDENT.id]]])('a readable feed %s (a frozen snapshot) does not stop the overlay recording the end', async (_label, openIds) => {
+    const kv = mockKV({ 'mistral:feed': readableFeed([], openIds as string[]) })
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv).map((i: { id: string }) => i.id)).toEqual([REAL_ACTIVE_INCIDENT.id])
+  })
+
+  it('an end the readable feed has recorded while incidents.json still lists the incident is not recorded again', async () => {
+    const kv = mockKV({ 'mistral:feed': readableFeed([REAL_ACTIVE_INCIDENT.id]) })
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    delete kv.store['mistral:feed']
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toEqual([])
+  })
+
+  it('a readable feed that later records the end removes the overlay\'s own', async () => {
+    const kv = mockKV()
+    await recordActiveIncidentsOverlay(kv as never, ok([REAL_ACTIVE_INCIDENT]), T1, mistralFeedResolvedIds)
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toHaveLength(1)
+    kv.store['mistral:feed'] = readableFeed([REAL_ACTIVE_INCIDENT.id])
+    await recordActiveIncidentsOverlay(kv as never, ok([]), T2, mistralFeedResolvedIds)
+    expect(resolvedList(kv)).toEqual([])
+    expect(JSON.parse(kv.store[MISTRAL_OVERLAY_SEEN_KV_KEY])).toEqual([])
+  })
+})
+
+describe('reconcileOverlayResolutions', () => {
+  const inc = (id: string, over: Record<string, unknown> = {}) => ({ id, title: id, status: 'investigating' as const, impact: 'minor' as const, startedAt: '2026-10-23T09:00:00.000Z', resolvedAt: null, duration: null, timeline: [], ...over })
+  const ended = (id: string, endSeenAt: string) => ({ incident: inc(id, { status: 'resolved' }), endSeenAt })
+
+  it('keeps a still-listed incident in seen and resolves nothing', () => {
+    expect(reconcileOverlayResolutions([inc('a')], [], [inc('a')], T2)).toEqual({ seen: [inc('a')], resolved: [] })
+  })
+
+  it('an incident listed again leaves the resolved list', () => {
+    const out = reconcileOverlayResolutions([], [ended('a', T1)], [inc('a')], T2)
+    expect(out.resolved).toEqual([])
+    expect(out.seen.map((i) => i.id)).toEqual(['a'])
+  })
+
+  it('an id already in the resolved list that ends again is listed once', () => {
+    const out = reconcileOverlayResolutions([inc('a')], [ended('a', T1)], [], T2)
+    expect(out.resolved.map((r) => [r.incident.id, r.endSeenAt])).toEqual([['a', T2]])
+  })
+
+  it('drops a resolved entry older than the retention window', () => {
+    const now = '2026-10-23T12:00:00.000Z'
+    const old = ended('old', '2026-10-16T11:59:00.000Z')
+    const recent = ended('recent', '2026-10-16T12:01:00.000Z')
+    expect(reconcileOverlayResolutions([], [old, recent], [], now).resolved.map((r) => r.incident.id)).toEqual(['recent'])
   })
 })
 
@@ -358,7 +541,7 @@ describe('runMistralPublicApiProbe', () => {
   it('records the row, the sample, and the active-incident overlay in one cycle', async () => {
     const kv = mockKV()
     const writeDataPoint = vi.fn()
-    await runMistralPublicApiProbe({ STATUS_CACHE: kv as never, ANALYTICS: { writeDataPoint } as never }, 'now',
+    await runMistralPublicApiProbe({ STATUS_CACHE: kv as never, ANALYTICS: { writeDataPoint } as never }, 'now', mistralFeedResolvedIds,
       route({ 'status.json': () => json(STATUS_ACTIVE), 'incidents.json': () => json(INCIDENTS_ACTIVE) }))
     expect(writeDataPoint).toHaveBeenCalledTimes(1)
     // The sample (unchanged-content dedup) and the overlay (fresh every cycle) are two separate writes.
@@ -372,7 +555,7 @@ describe('runMistralPublicApiProbe', () => {
   it('writes only the per-incident impact to the overlay — a severe status.json indicator never leaks into it', async () => {
     const kv = mockKV()
     const noneImpact = { ...REAL_ACTIVE_INCIDENT, impact: 'none' }
-    await runMistralPublicApiProbe({ STATUS_CACHE: kv as never }, 'now', route({
+    await runMistralPublicApiProbe({ STATUS_CACHE: kv as never }, 'now', mistralFeedResolvedIds, route({
       'status.json': () => json(JSON.stringify({ status: { indicator: 'major' }, incidents: [noneImpact] })),
       'incidents.json': () => json(JSON.stringify({ incidents: [noneImpact] })),
     }))
@@ -383,7 +566,7 @@ describe('runMistralPublicApiProbe', () => {
 
   it('binds each endpoint to its own columns of the row', async () => {
     const writeDataPoint = vi.fn()
-    await runMistralPublicApiProbe({ ANALYTICS: { writeDataPoint } as never }, 'now', route({
+    await runMistralPublicApiProbe({ ANALYTICS: { writeDataPoint } as never }, 'now', mistralFeedResolvedIds, route({
       'status.json': () => json(STATUS_ACTIVE),
       'incidents.json': () => new Response('', { status: 403, headers: { 'cf-mitigated': 'challenge' } }),
     }))
@@ -398,7 +581,7 @@ describe('runMistralPublicApiProbe', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const kv = mockKV()
     kv.put.mockRejectedValue(new Error('kv down'))
-    await expect(runMistralPublicApiProbe({ STATUS_CACHE: kv as never }, 'now',
+    await expect(runMistralPublicApiProbe({ STATUS_CACHE: kv as never }, 'now', mistralFeedResolvedIds,
       route({ 'status.json': () => json(STATUS_ACTIVE), 'incidents.json': () => json(INCIDENTS_ACTIVE) }))).resolves.toBeUndefined()
   })
 })
@@ -429,5 +612,28 @@ describe('wiring — the real scheduled handler runs the probe each cycle', () =
     expect(seen.sort()).toEqual(['incidents.json', 'status.json'])
     expect(writeDataPoint.mock.calls.filter(([p]) => p.indexes[0] === MISTRAL_PUBLIC_API_INDEX)).toHaveLength(1)
     expect(kv.store[MISTRAL_PUBLIC_SAMPLE_KV_KEY]).toBeUndefined()
+  }, TEST_TIMEOUT_MS)
+
+  // #1510 Part E — what the cron passes as the feed-readability test decides both outcomes below.
+  it.each([
+    ['unreadable', null, ['open']],
+    ['readable and recording the end', 'readable', []],
+  ])('with mistral:feed %s, an incident that left incidents.json is resolved accordingly', async (_label, feed, expected) => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith(MISTRAL_PUBLIC_API_BASE)) return json(url.endsWith('status.json') ? STATUS_QUIET : INCIDENTS_QUIET)
+      throw new Error('network disabled in test')
+    }))
+    vi.mocked(fetchAllServices).mockResolvedValue({ raw: OPERATIONAL, enriched: OPERATIONAL, pageComponents: {}, upstreamFeeds: [], fetchStats: { maxInFlight: 0, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, waitingAtStartAnswered: 0, waitingAtStartTimeouts: 0 } })
+    const pending: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => { pending.push(p) }, passThroughOnException: () => {} } as unknown as ExecutionContext
+    const open = { id: 'open', title: 'Elevated error rates', status: 'investigating', impact: 'minor', startedAt: '2026-08-12T11:00:00.000Z', resolvedAt: null, duration: null, timeline: [] }
+    const kv = mockKV({ [MISTRAL_OVERLAY_SEEN_KV_KEY]: JSON.stringify([open]), ...(feed ? { 'mistral:feed': readableFeed(['open']) } : {}) })
+    await workerModule.scheduled(event, { STATUS_CACHE: kv } as never, ctx)
+    await Promise.allSettled(pending)
+    expect(JSON.parse(kv.store[MISTRAL_OVERLAY_RESOLVED_KV_KEY] ?? '[]').map((r: { incident: { id: string } }) => r.incident.id)).toEqual(expected)
+    expect(JSON.parse(kv.store[MISTRAL_OVERLAY_SEEN_KV_KEY])).toEqual([])
   }, TEST_TIMEOUT_MS)
 })

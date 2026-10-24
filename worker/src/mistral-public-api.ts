@@ -7,7 +7,7 @@
  * ONLY when that scrape feed is unreadable — a READABLE `mistral:feed` always takes priority.
  */
 import type { Incident, TimelineEntry } from './types'
-import { mapRootlyStatus, rootlyIncidentTitle } from './parsers/rootly'
+import { MISTRAL_FEED_KV_KEY, mapRootlyStatus, rootlyIncidentTitle } from './parsers/rootly'
 import { fetchWithTimeout, formatDuration, kvPut } from './utils'
 
 export const MISTRAL_PUBLIC_API_BASE = 'https://status.mistral.ai/api/v1'
@@ -19,6 +19,13 @@ export const MISTRAL_PUBLIC_SAMPLE_TTL_S = 30 * 24 * 3600
  *  `unknown` rather than freezing a stale down/degraded badge. */
 export const MISTRAL_ACTIVE_OVERLAY_KV_KEY = 'mistral:active-overlay'
 export const MISTRAL_ACTIVE_OVERLAY_TTL_S = 15 * 60
+/** Active incidents read from `incidents.json`, kept until a later read can tell whether they ended. */
+export const MISTRAL_OVERLAY_SEEN_KV_KEY = 'mistral:overlay-seen'
+/** Overlay incidents that left the active list, published as resolved while the feed is unreadable. */
+export const MISTRAL_OVERLAY_RESOLVED_KV_KEY = 'mistral:overlay-resolved'
+/** `endSeenAt` is when a read first missed the incident — retention only, never published as its end. */
+export interface OverlayResolution { incident: Incident; endSeenAt: string }
+export const MISTRAL_OVERLAY_RETAIN_S = 7 * 24 * 3600
 
 const TIMEOUT_MS = 8000
 const RAW_MAX_CHARS = 64 * 1024
@@ -139,8 +146,8 @@ interface RawPublicIncident {
  *  — so only defensive shape checks are needed, no prose-timestamp parser. An entry missing an id,
  *  parseable start, or any usable title (see `rootlyIncidentTitle` below) is dropped and counted
  *  rather than published half-formed. */
-export function parsePublicActiveIncidents(rawText: string | null): { incidents: Incident[]; dropped: number; parseFailed: boolean } {
-  if (!rawText) return { incidents: [], dropped: 0, parseFailed: true }
+export function parsePublicActiveIncidents(rawText: string | null): { incidents: Incident[]; dropped: number; parseFailed: boolean; hasList: boolean } {
+  if (!rawText) return { incidents: [], dropped: 0, parseFailed: true, hasList: false }
   let json: { incidents?: unknown }
   try {
     json = JSON.parse(rawText)
@@ -149,7 +156,7 @@ export function parsePublicActiveIncidents(rawText: string | null): { incidents:
     // to RAW_MAX_CHARS AFTER deciding `outcome: 'ok'` off the full body, so an over-sized real payload
     // reaches here truncated despite an `ok` outcome. `parseFailed` lets the caller tell that apart
     // from a page that genuinely lists none.
-    return { incidents: [], dropped: 0, parseFailed: true }
+    return { incidents: [], dropped: 0, parseFailed: true, hasList: false }
   }
   const list = Array.isArray(json?.incidents) ? (json.incidents as RawPublicIncident[]) : []
   const incidents: Incident[] = []
@@ -192,7 +199,7 @@ export function parsePublicActiveIncidents(rawText: string | null): { incidents:
       timeline,
     })
   }
-  return { incidents, dropped, parseFailed: false }
+  return { incidents, dropped, parseFailed: false, hasList: Array.isArray(json?.incidents) }
 }
 
 /** Stores the parsed active-incident list for `services.ts` to read when the scrape feed is absent.
@@ -206,6 +213,8 @@ export function parsePublicActiveIncidents(rawText: string | null): { incidents:
 export async function recordActiveIncidentsOverlay(
   kv: KVNamespace | undefined,
   incidents: Pick<PublicApiResult, 'outcome' | 'raw'>,
+  nowIso: string,
+  feedResolvedIds: (raw: string | null, nowMs: number) => Set<string> | null,
 ): Promise<void> {
   if (!kv || incidents.outcome !== 'ok') return
   const parsed = parsePublicActiveIncidents(incidents.raw)
@@ -214,6 +223,82 @@ export async function recordActiveIncidentsOverlay(
     console.warn(`[mistral-public-api] active-overlay write: dropped ${parsed.dropped} unpublishable incident(s) this cycle`)
   }
   await kvPut(kv, MISTRAL_ACTIVE_OVERLAY_KV_KEY, JSON.stringify(parsed.incidents), { expirationTtl: MISTRAL_ACTIVE_OVERLAY_TTL_S })
+  let feedResolved: Set<string> | null
+  try {
+    feedResolved = feedResolvedIds(await kv.get(MISTRAL_FEED_KV_KEY), Date.parse(nowIso))
+  } catch (err) {
+    console.warn('[mistral-public-api] feed read failed:', err instanceof Error ? err.message : err)
+    return
+  }
+  const seen = await readStoredOverlayList(kv, MISTRAL_OVERLAY_SEEN_KV_KEY)
+  const resolved = await readOverlayResolutions(kv)
+  if (seen == null || resolved == null) return
+  const tracked = parsed.dropped > 0 || !parsed.hasList
+    ? { seen: mergeById(seen, parsed.incidents, (i) => i.id), resolved: resolved.filter((r) => !parsed.incidents.some((a) => a.id === r.incident.id)) }
+    : reconcileOverlayResolutions(seen, resolved, parsed.incidents, nowIso)
+  // An end the readable feed has recorded is the feed's to publish.
+  const next = feedResolved
+    ? { seen: tracked.seen.filter((i) => !feedResolved.has(i.id)), resolved: tracked.resolved.filter((r) => !feedResolved.has(r.incident.id)) }
+    : tracked
+  const prior = { seen, resolved }
+  for (const [key, list, was] of [[MISTRAL_OVERLAY_SEEN_KV_KEY, next.seen, prior.seen], [MISTRAL_OVERLAY_RESOLVED_KV_KEY, next.resolved, prior.resolved]] as const) {
+    if (JSON.stringify(list) === JSON.stringify(was)) continue
+    await kvPut(kv, key, JSON.stringify(list), { expirationTtl: MISTRAL_OVERLAY_RETAIN_S })
+  }
+}
+
+/** #1510 Part E — `active` is one `ok` read of `incidents.json`. Every previously seen incident it no
+ *  longer lists becomes resolved with no end, since the read only shows that it ended before `nowIso`;
+ *  an incident listed again leaves the resolved list. Entries whose `endSeenAt` is older than
+ *  `MISTRAL_OVERLAY_RETAIN_S` are dropped. Pure. */
+export function reconcileOverlayResolutions(seen: Incident[], resolved: OverlayResolution[], active: Incident[], nowIso: string): { seen: Incident[]; resolved: OverlayResolution[] } {
+  const activeIds = new Set(active.map((i) => i.id))
+  const ended: OverlayResolution[] = seen
+    .filter((i) => !activeIds.has(i.id))
+    .map((i) => ({ incident: { ...i, status: 'resolved' as const, resolvedAt: null, duration: null }, endSeenAt: nowIso }))
+  const cutoff = Date.parse(nowIso) - MISTRAL_OVERLAY_RETAIN_S * 1000
+  const kept = mergeById(resolved, ended, (r) => r.incident.id)
+    .filter((r) => !activeIds.has(r.incident.id) && Date.parse(r.endSeenAt) >= cutoff)
+  return { seen: active, resolved: kept }
+}
+
+function mergeById<T>(base: T[], next: T[], idOf: (x: T) => string): T[] {
+  const ids = new Set(next.map(idOf))
+  return [...base.filter((x) => !ids.has(idOf(x))), ...next]
+}
+
+function isStorableOverlayResolution(x: unknown): x is OverlayResolution {
+  if (!x || typeof x !== 'object') return false
+  const r = x as Record<string, unknown>
+  return isStorableOverlayIncident(r.incident) && typeof r.endSeenAt === 'string' && Number.isFinite(Date.parse(r.endSeenAt))
+}
+
+/** Reads one of the overlay's incident lists back, keeping only entries that pass
+ *  `isStorableOverlayIncident`. Absent reads as empty; a failed read or an unparseable value is null. */
+async function readStoredOverlayList(kv: KVNamespace, key: string): Promise<Incident[] | null> {
+  return readStoredList(kv, key, isStorableOverlayIncident)
+}
+
+/** The resolved list, read the way `readStoredOverlayList` reads the seen one. */
+export async function readOverlayResolutions(kv: KVNamespace): Promise<OverlayResolution[] | null> {
+  return readStoredList(kv, MISTRAL_OVERLAY_RESOLVED_KV_KEY, isStorableOverlayResolution)
+}
+
+async function readStoredList<T>(kv: KVNamespace, key: string, isStorable: (x: unknown) => x is T): Promise<T[] | null> {
+  let raw: string | null
+  try {
+    raw = await kv.get(key)
+  } catch (err) {
+    console.warn(`[mistral-public-api] ${key} read failed:`, err instanceof Error ? err.message : err)
+    return null
+  }
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter(isStorable) : null
+  } catch {
+    return null
+  }
 }
 
 /** Keeps the latest payload that listed an incident, and rewrites the key only when its content changed. */
@@ -260,13 +345,14 @@ export function recordPublicApiObservation(
 export async function runMistralPublicApiProbe(
   env: { STATUS_CACHE?: KVNamespace; ANALYTICS?: AnalyticsEngineDataset },
   nowIso: string,
+  feedResolvedIds: (raw: string | null, nowMs: number) => Set<string> | null,
   doFetch: PublicApiFetch = fetchWithTimeout,
 ): Promise<void> {
   try {
     const [status, incidents] = await Promise.all([readPublicApi('status.json', doFetch), readPublicApi('incidents.json', doFetch)])
     recordPublicApiObservation(env.ANALYTICS, status, incidents)
     await recordPublicApiSample(env.STATUS_CACHE, status, incidents, nowIso)
-    await recordActiveIncidentsOverlay(env.STATUS_CACHE, incidents)
+    await recordActiveIncidentsOverlay(env.STATUS_CACHE, incidents, nowIso, feedResolvedIds)
   } catch (err) {
     console.warn('[cron] mistral public api probe failed:', err instanceof Error ? err.message : err)
   }

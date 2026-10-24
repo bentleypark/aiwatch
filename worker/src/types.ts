@@ -290,10 +290,11 @@ export interface ServiceStatus {
    *  `withUnreadFeedFlag`). Cleared when a fresh Flashduty feed supersedes the
    *  frozen mirror. Absent when false. */
   incidentSourceStale?: boolean
-  /** #1510 Slice 2 — set ONLY by `readMistralActiveOverlay` (`services.ts`): this cycle's `incidents`
-   *  came from Mistral's public Rootly API, which lists ACTIVE incidents only — unlike every other
-   *  source's live list, a resolved incident does not appear here with `status: 'resolved'`, it just
-   *  stops appearing at all. `prunePhantomIncidents` (`monthly-archive.ts`) reads this: without it, a
+  /** #1510 Slice 2 — set only on Mistral's paths while its scrape feed is unreadable (`services.ts`):
+   *  this cycle's `incidents` came from Mistral's public Rootly API, which lists ACTIVE incidents only —
+   *  unlike every other source's live list, an incident can stop appearing without ever appearing with
+   *  `status: 'resolved'`. The resolved entries this list does carry are only the ones #1510 Part E
+   *  recorded (`mistral:overlay-resolved`). `prunePhantomIncidents` (`monthly-archive.ts`) reads this: without it, a
    *  normal resolution looks identical to "upstream deleted the incident" (the #975 phantom-prune
    *  premise, which assumes absence-from-live means deletion — true for every OTHER source, false for
    *  this one), so a resolved-but-not-yet-synced incident would get pruned and a false public

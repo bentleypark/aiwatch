@@ -262,7 +262,7 @@ describe('buildRssFeed — resolution notifications (#467)', () => {
     expect(xml).not.toContain(`<pubDate>${new Date('2026-05-10T13:00:00.000Z').toUTCString()}</pubDate>`)
   })
 
-  it('uses the last timeline entry when resolvedAt is null and no entry is stage=resolved', () => {
+  it('#1510 Part E — with no end at all, does not date the resolution at the last update before it', () => {
     const inc = incident({
       id: 'r3',
       status: 'resolved',
@@ -274,13 +274,13 @@ describe('buildRssFeed — resolution notifications (#467)', () => {
       ],
     })
     const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
-    expect(xml).toContain(`<pubDate>${new Date('2026-05-10T12:45:00.000Z').toUTCString()}</pubDate>`)
+    expect(xml).toContain(`<pubDate>${NOW.toUTCString()}</pubDate>`)
   })
 
-  it('falls back to startedAt when resolvedAt is null and the timeline is empty', () => {
+  it('#1510 Part E — with no end and an empty timeline, does not date the resolution at its start', () => {
     const inc = incident({ id: 'r4', status: 'resolved', resolvedAt: null, startedAt: '2026-05-10T12:00:00.000Z', timeline: [] })
     const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
-    expect(xml).toContain(`<pubDate>${new Date('2026-05-10T12:00:00.000Z').toUTCString()}</pubDate>`)
+    expect(xml).toContain(`<pubDate>${NOW.toUTCString()}</pubDate>`)
   })
 })
 
@@ -1174,7 +1174,7 @@ describe('buildFeedWithMeta — content-derived lastModified (#860)', () => {
 
   it('guards a malformed pubDate: lastModified is null (no "Invalid Date")', () => {
     const { xml, lastModified } = buildFeedWithMeta(
-      [service({ incidents: [incident({ id: 'bad', status: 'resolved', resolvedAt: 'not-a-date' })] })],
+      [service({ incidents: [incident({ id: 'bad', status: 'resolved', resolvedAt: 'not-a-date', duration: '1h 0m' })] })],
       { scope: 'all' }, NOW,
     )
     expect(lastModified).toBeNull()

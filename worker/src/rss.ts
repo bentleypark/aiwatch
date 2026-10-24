@@ -12,7 +12,7 @@ import { getGroupedFallbacks, formatFallbackGroups } from './fallback'
 import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE, OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { recoveryBaselineText, type RecoveryBaseline } from './recovery-baseline-text'
-import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, formatDuration, severityEmoji, impactLabel } from './utils'
+import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, isResolvedWithoutEnd, formatDuration, severityEmoji, impactLabel } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
 import { withdrawalHold, liveIncidentIds, type WithdrawnIncident } from './withdrawn'
 import { pageIncidents } from './incident-presence'
@@ -55,6 +55,12 @@ function analysisFor(map: RssAiAnalysisMap | undefined, svcId: string, incId: st
 // Stamping at feed-visibility closes the window. Pure (the caller does the KV put when `stamp`):
 //   - existing value present → USE it, never re-stamp (preserves #750 first-write-wins → stable pubDate)
 //   - clean miss (null)      → USE nowIso AND stamp it
+/** #1510 Part E — the `firstSeen` entry (and `feed:resolved-seen:` KV key suffix) for the resolved
+ *  item of an incident with no recorded end: when /feed first served it, its pubDate. */
+export function resolvedSeenKey(incId: string): string {
+  return `${incId}:resolved`
+}
+
 export function resolveFeedFirstSeen(existing: string | null, nowIso: string): { use: string; stamp: boolean } {
   return existing ? { use: existing, stamp: false } : { use: nowIso, stamp: true }
 }
@@ -436,7 +442,7 @@ function descHtml(
     // so this would publish "predicted 2h, actual 0m" in a PUBLIC feed — grading a real estimate
     // against a duration we have explicitly declined to state. Same refusal `buildHistoryRecord` makes
     // about the same pair; the "lasted" line above is already safe because it reads `inc.duration`.
-    if (predicted != null && !inc.startUnknown) {
+    if (predicted != null && !inc.startUnknown && !isResolvedWithoutEnd(inc)) {
       const pva = predictedVsActualText({ predictedRecoveryHours: predicted, durationMin: durationMinOf(inc.startedAt, resolvedAtOf(inc)) })
       if (pva) lines.push(`<p>🎯 AI prediction: ${escHtml(pva)}</p>`)
     }
@@ -639,7 +645,8 @@ export function buildFeedWithMeta(
         if (servedActive && !servedActive.has(incident.id)) continue
         // #827 F4 — attach the analysis (if still in the 2h-TTL window) so the resolved item can show
         // "predicted vs actual"; absent → the line is simply omitted.
-        items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident), analysis: analysisFor(aiAnalysis, svc.id, incident.id) })
+        const pubDate = isResolvedWithoutEnd(incident) ? (firstSeen?.[resolvedSeenKey(incident.id)] ?? now.toISOString()) : resolvedAtOf(incident)
+        items.push({ svc, incident, kind: 'resolved', pubDate, analysis: analysisFor(aiAnalysis, svc.id, incident.id) })
       } else {
         // #1384 — never emit a `retainedBridge` entry as an active item. An unresolved bridged row
         // reaches here every cron cycle for the life of the migration bridge — and

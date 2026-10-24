@@ -1407,9 +1407,9 @@ describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
     expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: null, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, mergedRecords: 0, excludedUnresolved: 0 })
   })
 
-  it('treats a full list of zero-duration incidents as null (no downtime)', () => {
+  it('treats a full list of zero-duration incidents with no recorded end as null (no downtime), out of the recovery count', () => {
     const r = aggregateIncidentDurations([entry(0, 0), entry(0, 1)], 2, 0, 0)
-    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 2, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 0, mergedRecords: 0, excludedUnresolved: 0 })
+    expect(r).toEqual({ totalMin: null, countedTotalMin: null, longestMin: null, countedCount: 0, excludedDerived: 0, excludedDerivedMin: 0, excludedStartUnknown: 2, mergedRecords: 0, excludedUnresolved: 0 })
   })
 })
 

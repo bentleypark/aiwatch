@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
+import { fetchAllServices, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverridesCounted, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, type DurationOverride } from './overrides'
@@ -17,7 +17,7 @@ import { fallbackEmbedSection } from './fallback'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, omitsTimeSeries } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, omitsTimeSeries, isResolvedWithoutEnd } from './utils'
 import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
 import { rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
@@ -2174,7 +2174,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg, badgeStatusColor } from './badge'
-import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, FEED_TARGET_IDS, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
+import { buildFeedResponse, resolveFeedFirstSeen, resolvedSeenKey, isActiveItemHeld, resolveFeedService, FEED_TARGET_IDS, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, isRedditScanTick, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, promoteIncidentWindows, matchPromoteIncident, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading, type PromoteIncidentWindow } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -3182,7 +3182,7 @@ const workerExport = {
       )
       // #1510 — also writes the active-incident overlay `services.ts` reads when the Mistral scrape
       // feed is unreadable (Slice 2); waitUntil so it never delays the cycle.
-      ctx.waitUntil(runMistralPublicApiProbe(env, scheduledNow.toISOString()))
+      ctx.waitUntil(runMistralPublicApiProbe(env, scheduledNow.toISOString(), mistralFeedResolvedIds))
 
       // Health check probing (Phase 2) — runs every cron cycle
       if (env.STATUS_CACHE) {
@@ -5381,9 +5381,10 @@ const workerExport = {
         const nowIso = new Date().toISOString()
         await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
           (svc.incidents ?? [])
-            .filter((i) => i.status !== 'resolved' && i.derived !== 'status_history')
+            .filter((i) => (i.status !== 'resolved' || isResolvedWithoutEnd(i)) && i.derived !== 'status_history')
             .map(async (inc) => {
-              const fsKey = `feed:firstseen:${inc.id}`
+              const ended = inc.status === 'resolved'
+              const fsKey = ended ? `feed:resolved-seen:${inc.id}` : `feed:firstseen:${inc.id}`
               // get THREW (KV hiccup) → skip entirely: do NOT stamp (would risk clobbering an existing
               // value and breaking #750 first-write-wins) and do NOT add to the map (rss.ts falls back).
               let existing: string | null
@@ -5400,7 +5401,7 @@ const workerExport = {
                 const ok = await kvPut(env.STATUS_CACHE!, fsKey, use, { expirationTtl: ALERTED_NEW_TTL_S })
                 if (!ok) return // write failed → leave unanchored this cycle (retried next poll)
               }
-              firstSeen[inc.id] = use
+              firstSeen[ended ? resolvedSeenKey(inc.id) : inc.id] = use
             }),
         ))
         if (Object.keys(firstSeen).length > 0) feedFirstSeen = firstSeen
