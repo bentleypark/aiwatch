@@ -24,7 +24,7 @@ describe('#1292 — index.ts routes every derived-incident path through a guard'
     // A synthesized incident never had an `ai:analysis:` or an `alerted:new:` key, so these reads are
     // guaranteed misses. The second loop's read fails OPEN, so without the guard a service whose feed
     // died would emit up to 30 backdated "resolved" items at once.
-    const feedGuards = CODE.match(/\.filter\(\(i\) => i\.status [^)]*i\.derived !== 'status_history'\)/g) ?? []
+    const feedGuards = CODE.match(/\.filter\(\(i\) => \(?i\.status [^\n]*i\.derived !== 'status_history'\)/g) ?? []
     // #1623 — 2 → 4: the two `feed:firstseen` / `feed:active-emitted` stamp loops skip the today-row too.
     expect(feedGuards.length, 'both /feed loops and both /feed stamp loops must skip derived incidents').toBe(4)
   })

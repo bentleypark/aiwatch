@@ -18,7 +18,7 @@ import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
 import { pageIncidents } from './incident-presence'
-import { incidentDay, normalizeIncidentTimes } from './utils'
+import { incidentDay, isEntryWithoutEnd, isResolvedWithoutEnd, normalizeIncidentTimes } from './utils'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
@@ -681,6 +681,8 @@ export function accumulateMonthlyIncidents(
       const finalStatus = mapIncidentStatus(inc.status)
 
       if (data.incidentIds.includes(inc.id)) {
+        const held = data.incidents.find(e => e.id === inc.id)
+        if (held && isResolvedWithoutEnd(inc) && held.finalStatus === 'resolved') continue
         // A parser correction can lower a previously fabricated `1m` to unknown (`0` in the
         // accumulator), so this is a delta in either direction — not a resolution-only increase.
         const oldDur = data.durations[inc.id] ?? 0
@@ -1385,7 +1387,7 @@ export function computeMonthlyScore(
     // #1390 — `minutesToDurationString(0)` is "0h 0m", which would publish a stated duration for a row
     // whose duration we declined to state. Null is what every reader already renders as unknown, and it
     // is what keeps the monthly Score's Recovery abstaining exactly as the live one does.
-    duration: e.startUnknown || e.finalStatus !== 'resolved' ? null : minutesToDurationString(e.durationMin),
+    duration: e.startUnknown || e.finalStatus !== 'resolved' || isEntryWithoutEnd(e) ? null : minutesToDurationString(e.durationMin),
     ...(e.startUnknown ? { startUnknown: true } : {}),
     timeline: [],
   }))
@@ -1772,7 +1774,7 @@ export function aggregateIncidentDurations(
     // which is why the increment runs before the `continue` rather than after it. `total` is numerically
     // unchanged while `durationMin` is 0, but an operator #1019 override rewrites that field (and clears
     // this flag, see overrides.ts) so the ordering has to be right before it matters.
-    if (e.startUnknown) {
+    if (e.startUnknown || isEntryWithoutEnd(e)) {
       total += typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
       excludedStartUnknown++
       continue
@@ -2048,7 +2050,7 @@ export async function buildMonthlyArchive(
       // and `longestIncidentMin` while still counting toward `totalDowntimeMin` — the same
       // fails-toward-fine combination #1292 needed a line for, and nothing else in the archive explains
       // a divisor that dropped.
-      console.warn(`[monthly-archive] #1390-EXCLUDED ${id}: ${excludedStartUnknown}/${incidentList?.length ?? 0} incident(s) with no derivable duration count toward downtime but NOT toward the longest-incident or avg-recovery figures — their start is an anchor on their own resolvedAt`)
+      console.warn(`[monthly-archive] #1390-EXCLUDED ${id}: ${excludedStartUnknown}/${incidentList?.length ?? 0} incident(s) with no derivable duration count toward downtime but NOT toward the longest-incident or avg-recovery figures`)
     }
     if (excludedUnresolved > 0) {
       console.warn(`[monthly-archive] #1536-EXCLUDED ${id}: ${excludedUnresolved}/${incidentList?.length ?? 0} incident(s) with a finalStatus other than resolved count toward downtime but NOT toward the longest-incident or avg-recovery figures`)

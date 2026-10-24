@@ -21,6 +21,7 @@ import { groupImpactWindows } from './score'
 import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
 import { monthlyScoredImpact } from './parsers/rootly'
 import { SERVICES } from './services'
+import { isEntryWithoutEnd } from './utils'
 
 // ── Public types ─────────────────────────────────────────────────────
 
@@ -125,7 +126,7 @@ export function selectIncidentCandidates(
       // copy `durationLabel` VERBATIM. There is no honest label for a row whose duration is unknown, so
       // it is excluded from the per-EVENT narrative rather than given one. Its downtime is untouched in
       // the totals, exactly as the day-bucket exclusion above leaves its own.
-      if (inc.startUnknown) { excludedStartUnknown++; continue }
+      if (inc.startUnknown || isEntryWithoutEnd(inc)) { excludedStartUnknown++; continue }
       if (inc.autoMonitor) { flagged.push(inc); continue }
       flat.push({ ...inc, serviceId: id, serviceName: serviceNames[id] ?? id })
     }

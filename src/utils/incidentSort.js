@@ -149,7 +149,7 @@ export function formatMttrHours(hours) {
  * below was changed to stop giving for the same incident on the single-row path, one screen away. It
  * is counted separately instead: resolved, but carrying no measurable elapsed time.
  *
- * @param {{ entries?: { startedAt?: string, resolvedAt?: string, startUnknown?: boolean }[] }} group
+ * @param {{ entries?: { status?: string, duration?: string|null, startedAt?: string, resolvedAt?: string|null, startUnknown?: boolean }[] }} group
  * @returns {{ totalMs: number, hasOngoing: boolean, resolvedCount: number, unknownCount: number }}
  */
 export function sumGroupDuration(group) {
@@ -162,7 +162,7 @@ export function sumGroupDuration(group) {
   let resolvedCount = 0
   let unknownCount = 0
   for (const entry of group.entries ?? []) {
-    if (entry.startUnknown) { unknownCount += 1; continue }
+    if (entry.startUnknown || isResolvedWithoutEnd(entry)) { unknownCount += 1; continue }
     if (entry.resolvedAt && entry.startedAt) {
       const start = new Date(entry.startedAt).getTime()
       const end = new Date(entry.resolvedAt).getTime()
@@ -182,6 +182,18 @@ export function sumGroupDuration(group) {
     hasOngoing = true
   }
   return { totalMs, hasOngoing, resolvedCount, unknownCount }
+}
+
+/**
+ * Mirror of `isResolvedWithoutEnd` in `worker/src/utils.ts` (parity-tested): a resolved incident with
+ * no end, no duration and no `resolved` update.
+ *
+ * @param {{ status?: string, resolvedAt?: string|null, duration?: string|null, timeline?: { stage: string }[] }} inc
+ * @returns {boolean}
+ */
+export function isResolvedWithoutEnd(inc) {
+  return inc.status === 'resolved' && !inc.duration && !Number.isFinite(Date.parse(inc.resolvedAt ?? ''))
+    && !(inc.timeline ?? []).some((t) => t.stage === 'resolved')
 }
 
 /**

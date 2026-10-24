@@ -4,7 +4,7 @@ import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImp
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
 import { fetchTracked, createFetchTracker, type FetchTracker, type FetchRunStats, formatDuration, markZeroLengthResolvedIncidentsUnknown, normalizeIncidentTimes, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, UPTIME_MISSING_ALERT_MS, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
-import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, isStorableOverlayIncident } from './mistral-public-api'
+import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, isStorableOverlayIncident, readOverlayResolutions } from './mistral-public-api'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, applyProbeLatency, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
@@ -2160,6 +2160,27 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
   return result
 }
 
+/** `mistral:feed` as `readRootlyStatus` uses it, or the phase at which it cannot be used. */
+function decodeMistralFeed(raw: string | null, nowMs: number): { stored: StoredRootlyFeed } | { phase: 'absent' } | { phase: 'decode'; error: unknown } | { phase: 'shape' } {
+  if (!raw) return { phase: 'absent' }
+  let stored: StoredRootlyFeed
+  try {
+    stored = JSON.parse(raw) as StoredRootlyFeed
+  } catch (error) {
+    return { phase: 'decode', error }
+  }
+  if (!isStorableRootlyFeed(stored?.feed, SERVICES.find((c) => c.rootlyFeed)?.displayComponentIds, nowMs)) return { phase: 'shape' }
+  return { stored }
+}
+
+/** #1510 Part E — the ids a readable `mistral:feed` lists as resolved, or null when `readRootlyStatus`
+ *  could not read it. */
+export function mistralFeedResolvedIds(raw: string | null, nowMs: number): Set<string> | null {
+  const decoded = decodeMistralFeed(raw, nowMs)
+  if (!('stored' in decoded)) return null
+  return new Set(normalizeRootlyIncidents(decoded.stored.feed).incidents.filter((i) => i.status === 'resolved').map((i) => i.id))
+}
+
 // #1381 — read the browser-rendered Rootly feed (pushed to KV by the mistral-feed Action) and
 // normalize it into a ServiceStatus.
 //
@@ -2173,21 +2194,15 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
     console.warn(`[fetchService] ${base.id} rootly KV read failed:`, err instanceof Error ? err.message : err)
     return { failure: { source: 'rootly-feed', phase: 'transport', errorKind: 'unknown' } }
   }
-  if (!raw) return { failure: { source: 'rootly-feed', phase: 'absent' } }
-
-  let stored: StoredRootlyFeed
-  try {
-    stored = JSON.parse(raw) as StoredRootlyFeed
-  } catch (err) {
-    console.warn(`[fetchService] ${base.id} rootly feed JSON parse failed:`, err instanceof Error ? err.message : err)
-    return { failure: { source: 'rootly-feed', phase: 'decode' } }
-  }
   // The same rejection test the ingest endpoint applies, re-run at READ time: a value that got into KV
   // some other way (an older writer, a hand-edited key) must not be trusted just because it is stored.
-  if (!isStorableRootlyFeed(stored.feed, config.displayComponentIds, Date.parse(now))) {
-    console.warn(`[fetchService] ${base.id} rootly feed in KV failed the storable check — ignoring`)
-    return { failure: { source: 'rootly-feed', phase: 'shape' } }
+  const decoded = decodeMistralFeed(raw, Date.parse(now))
+  if (!('stored' in decoded)) {
+    if (decoded.phase === 'decode') console.warn(`[fetchService] ${base.id} rootly feed JSON parse failed:`, decoded.error instanceof Error ? decoded.error.message : decoded.error)
+    if (decoded.phase === 'shape') console.warn(`[fetchService] ${base.id} rootly feed in KV failed the storable check — ignoring`)
+    return { failure: { source: 'rootly-feed', phase: decoded.phase } }
   }
+  const stored = decoded.stored
 
   const norm = normalizeRootlyIncidents(stored.feed)
   // The uptime chart is read in the SAME scrape as the incidents: each incident takes its impact from
@@ -2251,8 +2266,7 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
     //
     // No `status === 'unknown'` guard here, and #1233 is not being ignored: the read-time
     // `isStorableRootlyFeed` above refuses every feed `rootlyOverallStatus` could answer `unknown`
-    // for, so the guard was unreachable. An unreadable feed becomes `unknown` at the CALLER, which
-    // ships no incidents at all.
+    // for, so the guard was unreachable.
     incidents: attributed.incidents,
     // COMPUTED over the trailing 30 days from the chart's per-day downtime, weighted with the
     // SHARED table (major 1.0 / minor 0.3), so a Rootly figure is comparable with every other
@@ -2327,35 +2341,40 @@ async function readRootlyStatus(kv: KVNamespace, config: ServiceConfig, base: Se
 // incident whose title names no excluded surface still raises the badge even when its body affects
 // only a non-API one, pinned against the real 2026-09-29 case (`grep -n "known limit, see
 // services.ts" worker/src/__tests__/mistral-active-overlay.test.ts`).
-async function readMistralActiveOverlay(kv: KVNamespace, config: ServiceConfig, base: ServiceStatus, now: string): Promise<ServiceStatus | null> {
+async function readMistralActiveOverlay(kv: KVNamespace, config: ServiceConfig, base: ServiceStatus, now: string): Promise<{ overlay: ServiceStatus | null; resolved: Incident[] }> {
+  const filtered = filterIncidents(await readActiveOverlayList(kv, base.id), config)
+  const activeIds = new Set(filtered.map((i) => i.id))
+  // #1510 Part E — overlay incidents that have since left the active list, published as resolved.
+  const resolved = filterIncidents(((await readOverlayResolutions(kv)) ?? []).map((r) => r.incident).filter((i) => i.status === 'resolved' && !activeIds.has(i.id)), config)
+  const worst = worstUnresolvedImpact(filtered)
+  if (worst == null) return { overlay: null, resolved } // impact none/unrecognised, or nothing survived the exclude filter
+  const status: ServiceStatus['status'] = worst === 'minor' ? 'degraded' : 'down'
+  return { overlay: { ...base, status, lastChecked: now, incidents: [...filtered, ...resolved], liveIncidentsActiveOnly: true }, resolved }
+}
+
+async function readActiveOverlayList(kv: KVNamespace, svcId: string): Promise<Incident[]> {
   let raw: string | null
   try {
     raw = await kv.get(MISTRAL_ACTIVE_OVERLAY_KV_KEY)
   } catch (err) {
-    console.warn(`[fetchService] ${base.id} active-overlay KV read failed:`, err instanceof Error ? err.message : err)
-    return null
+    console.warn(`[fetchService] ${svcId} active-overlay KV read failed:`, err instanceof Error ? err.message : err)
+    return []
   }
-  if (!raw) return null
+  if (!raw) return []
 
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return null
+    if (!Array.isArray(parsed)) return []
   } catch (err) {
-    console.warn(`[fetchService] ${base.id} active-overlay JSON parse failed:`, err instanceof Error ? err.message : err)
-    return null
+    console.warn(`[fetchService] ${svcId} active-overlay JSON parse failed:`, err instanceof Error ? err.message : err)
+    return []
   }
   // Re-validated element-by-element, not just `Array.isArray`-trusted: a malformed element (hand
   // edit, older/future writer) must not reach `filterIncidents`, which throws on a non-string
   // `title` — a throw here is caught upstream as a transient fetch failure, which can publish a
   // green `operational` pill instead of `unknown` for a feed-ONLY service.
-  const stored = parsed.filter(isStorableOverlayIncident)
-
-  const filtered = filterIncidents(stored, config)
-  const worst = worstUnresolvedImpact(filtered)
-  if (worst == null) return null // impact none/unrecognised, or nothing survived the exclude filter
-  const status: ServiceStatus['status'] = worst === 'minor' ? 'degraded' : 'down'
-  return { ...base, status, lastChecked: now, incidents: filtered, liveIncidentsActiveOnly: true }
+  return parsed.filter(isStorableOverlayIncident)
 }
 
 /** #689 — Classify a non-OK status-page API response (a real HTTP status from `summaryRes.status`).
@@ -2575,13 +2594,13 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // rather than a corner (see `workflow-dispatch.ts` for how this feed is triggered).
       // #1510 Slice 2 — before falling back to `unknown`, check whether the public API's cron-written
       // active-incident overlay has something in-scope to say.
-      const overlay = await readMistralActiveOverlay(kv, config, base, now)
+      const { overlay, resolved } = await readMistralActiveOverlay(kv, config, base, now)
       if (overlay) return overlay
       // #1233's `unknown` is what this is:
       // neither an outage nor an all-clear. Warned as well, because every OTHER failure on this path
       // warns and a silent one is indistinguishable in the logs from a healthy quiet page.
       console.warn(`[fetchService] ${config.id} rootly feed unreadable (${fed.failure.phase}) — publishing unknown`)
-      return { ...base, status: 'unknown' as const, sourceUnknown: true }
+      return { ...base, status: 'unknown' as const, sourceUnknown: true, incidents: resolved, liveIncidentsActiveOnly: true as const }
     }
 
     if (config.flashdutyFeed && kv) {

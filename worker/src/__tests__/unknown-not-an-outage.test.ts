@@ -238,18 +238,9 @@ describe('#1233 daily summary — counted, but not as an issue', () => {
   })
 })
 
-describe('#1233 the invariant that keeps `unknown` out of every incident-scoped surface', () => {
-  // Load-bearing, and the reason several modules carry NO `unknown` branch: an unreadable source never
-  // carries an incident. `base.incidents = []` in `services.ts` and every path that publishes `unknown`
-  // either spreads `base` or sets `incidents: []` itself.
-  //
-  // Everything incident-scoped depends on this: the X tweet drafts, the reply draft, `fallbackLine`'s
-  // feed item, the region and calendar fallbacks. A review pass once added defensive `unknown` arms to
-  // the drafts, justified by a reachability claim that was FALSE — and the group version of that
-  // defence was itself wrong (it read one member's status while speaking for the whole family). The
-  // arms were removed and replaced by this test, which is the honest form of the same protection: if a
-  // future leg ever preserves incidents on an unreadable read, THIS fails, and handling the
-  // incident-scoped surfaces becomes that change's explicit problem instead of a silent one.
+describe('#1233 — through the real fetchAllServices, `unknown` comes with no unresolved incident', () => {
+  // The second test seeds Mistral's #1510 Part E resolved list, so it runs with an `unknown` service
+  // that does carry (resolved) incidents.
   it('an unreadable source publishes NO incidents, through the real fetchAllServices', async () => {
     const { fetchAllServices } = await import('../services')
     const { stubFetchFailingClaudePage, mockKV, seededTracking } = await import('./helpers/unreadable-source')
@@ -260,12 +251,15 @@ describe('#1233 the invariant that keeps `unknown` out of every incident-scoped 
     expect(claude?.incidents).toEqual([])
   }, 30_000)
 
-  it('...and no service in the roster is ever `unknown` WITH incidents', async () => {
+  it('...and no service in the roster is ever `unknown` WITH an unresolved incident', async () => {
     const { fetchAllServices } = await import('../services')
+    const { MISTRAL_OVERLAY_RESOLVED_KV_KEY } = await import('../mistral-public-api')
     const { stubFetchFailingClaudePage, mockKV, seededTracking } = await import('./helpers/unreadable-source')
     stubFetchFailingClaudePage()
-    const { raw } = await fetchAllServices(mockKV(seededTracking(['claude'])) as unknown as KVNamespace)
-    const violations = raw.filter((s) => s.status === 'unknown' && (s.incidents ?? []).length > 0)
+    const ended = { id: 'ended', title: 'Elevated error rates', status: 'resolved', impact: 'minor', startedAt: new Date(Date.now() - 3600_000).toISOString(), resolvedAt: null, duration: null, timeline: [] }
+    const { raw } = await fetchAllServices(mockKV({ ...seededTracking(['claude']), [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: JSON.stringify([{ incident: ended, endSeenAt: new Date().toISOString() }]) }) as unknown as KVNamespace)
+    expect(raw.find((s) => s.id === 'mistral')?.incidents.map((i) => i.id), 'the #1510 Part E leg is exercised').toEqual(['ended'])
+    const violations = raw.filter((s) => s.status === 'unknown' && (s.incidents ?? []).some((i) => i.status !== 'resolved'))
     expect(violations.map((s) => s.id)).toEqual([])
   }, 30_000)
 })

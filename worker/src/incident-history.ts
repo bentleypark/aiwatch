@@ -18,7 +18,7 @@
 // can never abort the cron's recovery flow.
 
 import type { KVLike } from './utils'
-import { kvPut, isTimeOrderImpossible } from './utils'
+import { kvPut, isResolvedWithoutEnd, isTimeOrderImpossible } from './utils'
 import type { Incident } from './types'
 import { appendLedger, type PredictionSnapshot } from './prediction-snapshot'
 
@@ -183,6 +183,10 @@ export function buildHistoryRecord(
   // well-ordered and perfectly zero-length.
   if (inc.startUnknown || isTimeOrderImpossible(inc.startedAt, inc.resolvedAt)) {
     console.warn(`[buildHistoryRecord] ${svc.id}/${inc.id}: no trustworthy start (${inc.startUnknown ? 'startUnknown' : 'recovery predates start'}) — refusing to write a 0-minute record into the no-TTL corpus`)
+    return null
+  }
+  if (isResolvedWithoutEnd(inc)) {
+    console.warn(`[buildHistoryRecord] ${svc.id}/${inc.id}: resolved with no recorded end — refusing to write a duration we do not have into the no-TTL corpus`)
     return null
   }
   const resolvedAt = inc.resolvedAt ?? now

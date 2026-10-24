@@ -79,6 +79,17 @@ export function isTimeOrderImpossible(startedAt: string | undefined, resolvedAt:
   return end < start
 }
 
+/** A resolved incident with no end, no duration and no `resolved` update: its duration is unknown, not zero. */
+export function isResolvedWithoutEnd(inc: { status: string; resolvedAt?: string | null; duration?: string | null; timeline?: { stage: string }[] }): boolean {
+  return inc.status === 'resolved' && !inc.duration && !Number.isFinite(Date.parse(inc.resolvedAt ?? ''))
+    && !(inc.timeline ?? []).some((t) => t.stage === 'resolved')
+}
+
+/** `isResolvedWithoutEnd` for an archived row, whose duration is `durationMin` (0 when unknown). */
+export function isEntryWithoutEnd(e: { finalStatus: string; resolvedAt: string | null; durationMin: number }): boolean {
+  return isResolvedWithoutEnd({ status: e.finalStatus, resolvedAt: e.resolvedAt, duration: e.durationMin > 0 ? String(e.durationMin) : null })
+}
+
 function isZeroLengthResolvedInterval(startedAt: string | undefined, resolvedAt: string | null | undefined): boolean {
   if (!startedAt || !resolvedAt) return false
   const start = Date.parse(startedAt)

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fetchService, SERVICES } from '../services'
-import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, MISTRAL_PUBLIC_SAMPLE_KV_KEY } from '../mistral-public-api'
+import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, MISTRAL_OVERLAY_RESOLVED_KV_KEY, MISTRAL_PUBLIC_SAMPLE_KV_KEY } from '../mistral-public-api'
 import { countsAsUptimeOk } from '../utils'
+import { accumulateMonthlyIncidents } from '../monthly-archive'
 import { mockKV } from './helpers/unreadable-source'
 import type { Incident } from '../types'
 
@@ -190,5 +191,100 @@ describe('#1510 Slice 2 — fetchService overlays status from the active-inciden
     })
     const svc = await fetchService(mistral, undefined, kv as never, {})
     expect(svc.status).toBe('down')
+  })
+})
+
+// #1510 Part E — the 2026-10-23 shape: the overlay published an incident, it left `incidents.json`, and
+// the card dropped it with no end recorded.
+describe('#1510 Part E — fetchService publishes overlay-resolved incidents while the scrape feed is absent', () => {
+  const ended = incident({ id: 'ended', impact: 'minor', status: 'resolved', resolvedAt: null, duration: null })
+  const stored = (...incidents: unknown[]) => JSON.stringify(incidents.map((i) => ({ incident: i, endSeenAt: '2026-09-29T12:58:00.000Z' })))
+
+  it('with no active incident: stays unknown and lists the resolved incident', async () => {
+    const kv = mockKV({ [MISTRAL_ACTIVE_OVERLAY_KV_KEY]: '[]', [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: stored(ended) })
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.status).toBe('unknown')
+    expect(svc.sourceUnknown).toBe(true)
+    expect(svc.incidents).toEqual([ended])
+    expect(svc.liveIncidentsActiveOnly).toBe(true)
+  })
+
+  it('with the active key expired too: still lists the resolved incident', async () => {
+    const kv = mockKV({ [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: stored(ended) })
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.status).toBe('unknown')
+    expect(svc.incidents.map((i) => i.id)).toEqual(['ended'])
+  })
+
+  it('with an active incident: the badge comes from the active one, and both are listed', async () => {
+    const kv = mockKV({ [MISTRAL_ACTIVE_OVERLAY_KV_KEY]: JSON.stringify([incident({ impact: 'critical' })]), [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: stored(ended) })
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.status).toBe('down')
+    expect(svc.incidents.map((i) => i.id)).toEqual(['inc-1', 'ended'])
+  })
+
+  it('an id that is active again is listed once, as active', async () => {
+    const kv = mockKV({ [MISTRAL_ACTIVE_OVERLAY_KV_KEY]: JSON.stringify([incident({ id: 'ended', impact: 'minor' })]), [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: stored(ended) })
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.incidents).toHaveLength(1)
+    expect(svc.incidents[0].status).toBe('investigating')
+  })
+
+  it('an entry in the resolved list that is not resolved is not listed', async () => {
+    const kv = mockKV({ [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: stored({ ...ended, status: 'investigating' }) })
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.status).toBe('unknown')
+    expect(svc.incidents).toEqual([])
+  })
+
+  it('a malformed stored resolved entry is dropped, not trusted into filterIncidents', async () => {
+    const kv = mockKV({ [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: JSON.stringify([{ incident: { ...ended, title: 42 }, endSeenAt: '2026-09-29T12:58:00.000Z' }, { incident: ended }, { incident: ended, endSeenAt: 'x' }, ended, { incident: ended, endSeenAt: '2026-09-29T12:58:00.000Z' }]) })
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.status).toBe('unknown')
+    expect(svc.incidents.map((i) => i.id)).toEqual(['ended'])
+  })
+
+  it('a resolved incident whose title matches incidentExclude is not listed', async () => {
+    const kv = mockKV({ [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: stored({ ...ended, title: 'Vibe is down' }) })
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.incidents).toEqual([])
+  })
+
+  it('a readable scrape feed takes priority — the resolved list is never consulted', async () => {
+    const kv = mockKV({
+      'mistral:feed': JSON.stringify({
+        fetchedAt: new Date().toISOString(),
+        feed: {
+          fetchedAt: new Date().toISOString(),
+          components: mistral.displayComponentIds!.map((id) => ({ id, name: `Component ${id.slice(0, 4)}`, status: 'Operational' })),
+          incidents: [],
+          coverage: { listed: 0, fetched: 0 },
+          uptime: mistral.displayComponentIds!.map((id) => ({ componentId: id, barCount: 91, unreadBars: 0, coverage: { impacted: 0, fetched: 0 }, days: [] })),
+        },
+      }),
+      [MISTRAL_OVERLAY_RESOLVED_KV_KEY]: stored(ended),
+    })
+    const svc = await fetchService(mistral, undefined, kv as never, {})
+    expect(svc.incidents).toEqual([])
+  })
+})
+
+describe('#1510 Part E — the monthly accumulator records the end, and the feed\'s later value wins', () => {
+  const card = (incidents: Incident[]) => [{ id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', status: 'unknown', latency: null, uptime30d: null, lastChecked: '2026-09-29T14:00:00.000Z', incidents }] as never
+
+  it('monitoring (overlay) → resolved with no end (overlay) → resolved at the feed\'s own time', () => {
+    const open = incident({ status: 'monitoring', impact: 'minor' })
+    const overlayEnd = { ...open, status: 'resolved' as const, resolvedAt: null, duration: null }
+    const feedEnd = { ...open, status: 'resolved' as const, resolvedAt: '2026-09-29T13:30:00.000Z', duration: '42m' }
+
+    let acc = accumulateMonthlyIncidents(null, card([open]), '2026-09', null)
+    expect(acc.services.mistral.incidents![0]).toMatchObject({ finalStatus: 'monitoring', resolvedAt: null, durationMin: 0 })
+
+    acc = accumulateMonthlyIncidents(acc, card([overlayEnd]), '2026-09', null)
+    expect(acc.services.mistral.incidents![0]).toMatchObject({ finalStatus: 'resolved', resolvedAt: null, durationMin: 0 })
+
+    acc = accumulateMonthlyIncidents(acc, card([feedEnd]), '2026-09', null)
+    expect(acc.services.mistral.incidents![0]).toMatchObject({ finalStatus: 'resolved', resolvedAt: '2026-09-29T13:30:00.000Z', durationMin: 42 })
+    expect(acc.services.mistral.count).toBe(1)
   })
 })
