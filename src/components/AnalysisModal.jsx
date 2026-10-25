@@ -2,7 +2,7 @@
 import { useLang } from '../hooks/useLang'
 import { isDisplayAffected, displayStatusOf } from '../utils/statusDisplay'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
-import { computePredictionOutcome, verdictLabel, estimateExceeded, exceededRecoveryText } from '../utils/predictionAccuracy'
+import { recoveryLine, scopeLine } from '../utils/predictionAccuracy'
 import { hasLiveIncident, readsResolved } from '../utils/liveIncident'
 import { recoveryBaselineText } from '../utils/recoveryBaseline'
 
@@ -203,9 +203,6 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, services, 
                 {analyses.map((analysis, idx) => {
                   const inc = svcs.flatMap(s => s.incidents ?? []).find(i => i.id === analysis.incidentId)
                   const isRecovered = !!analysis.resolvedAt
-                  // #827 F4 — predicted vs actual once resolved (null until then or if not derivable)
-                  const outcome = computePredictionOutcome(analysis, inc)
-                  const outcomeVerdict = outcome && verdictLabel(outcome.verdict, lang)
                   // #827 F4 — which model produced this analysis (Gemma primary / Sonnet fallback)
                   const modelLabel = analysis.model === 'gemma' ? 'Gemma' : analysis.model === 'sonnet' ? 'Sonnet' : null
                   return (
@@ -229,23 +226,10 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, services, 
                         {[analysis.summary, !isRecovered && analysis.progress].filter(Boolean).join(' ').slice(0, 500)}
                       </p>
                       <div className="mono text-[10px] text-[var(--text2)]" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        {outcome ? (
-                          // #827 F4 — resolved: show our estimate vs what actually happened (richer than the bare estimate)
-                          <span>🎯 <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '예측 대비 실제' : 'Predicted vs actual'}:</strong> {lang === 'ko' ? '예측' : 'est'} ~{outcome.predictedText} · {lang === 'ko' ? '실제' : 'actual'} {outcome.actualText}{outcomeVerdict ? ` (${outcomeVerdict})` : ''}</span>
-                        ) : (
-                          <span>⏱ <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '예상 복구' : 'Est. Recovery'}:</strong> {analysis.estimatedRecovery === 'No historical data for estimation'
-                            ? (lang === 'ko' ? '복구 신호 모니터링 중...' : 'Monitoring recovery signals...')
-                            // incident already past its estimate → show elapsed vs estimate, not the stale range
-                            : estimateExceeded(analysis, inc)
-                              ? exceededRecoveryText(analysis, inc, lang)
-                              : analysis.estimatedRecovery === 'N/A'
-                                ? (lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern')
-                                : analysis.estimatedRecovery}
-                          </span>
-                        )}
-                        {analysis.affectedScope?.length > 0 && (
-                          <span>📡 <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '영향 범위' : 'Scope'}:</strong> {analysis.affectedScope.join(', ')}</span>
-                        )}
+                        {/* #827 F4 — resolved: our estimate vs what actually happened; live: the estimate */}
+                        {[recoveryLine(analysis, inc, lang), scopeLine(analysis, lang)].filter(Boolean).map(line => (
+                          <span key={line.icon}>{line.icon} <strong style={{ color: 'var(--text1)' }}>{line.label}:</strong> {line.value}</span>
+                        ))}
                         {isRecovered && <span>✅ {t('analysis.recoveredAt')}: {timeAgo(analysis.resolvedAt, lang)}</span>}
                         <span>🕐 {lang === 'ko' ? '분석 업데이트' : 'Analysis updated'} {timeAgo(analysis.analyzedAt, lang)}{modelLabel ? ` · ${modelLabel}` : ''}</span>
                       </div>

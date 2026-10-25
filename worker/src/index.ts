@@ -23,6 +23,7 @@ import { rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } f
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
 import { recordRestoreObservations, type RestoreObservation } from './uptime-archive-trace'
 import { readRecoveryBaselines, rebuildRecoveryBaselines } from './recovery-baseline'
+import { readStatusAnalyses } from './analysis-reads'
 import { appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved, isMarkableOnStatusEdge, buildResolvedRecord } from './recovery-mark'
 import { buildPredictionSnapshot, summarizeSnapshotCoverage, type SnapshotCoverage } from './prediction-snapshot'
@@ -5951,28 +5952,16 @@ const workerExport = {
             console.warn('[ext-claude] reportFeed map failed:', err instanceof Error ? err.message : err)
             return {}
           })
-          const extAiSummary: Record<string, string> = {}
-          await Promise.all(scoredAll
-            .filter((svc) => (EXT_CLAUDE_IDS as readonly string[]).includes(svc.id))
-            .flatMap((svc) => (svc.incidents ?? [])
-              .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
-              .map(async (inc) => {
-                const raw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
-                if (!raw) return
-                try {
-                  const a = JSON.parse(raw) as AIAnalysisResult
-                // #1328 — both halves. These two surfaces consume ONE string and are already
-                // filtered to active incidents, so joining here restores the sentence they lost
-                // when `summary` stopped carrying the status clause — and it does so without a
-                // client change (the extension popup ships on its own release train). Doing it
-                // this way is what leaves the rule with NO exception list to drift.
-                  if (a.summary) extAiSummary[`${svc.id}:${inc.id}`] = [a.summary, a.progress].filter(Boolean).join(' ')
-                } catch (err) {
-                  console.warn('[ext-claude] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
-                }
-              })))
+          // #1772 — the analyses the dashboard modal shows (analysis-reads.ts): live first, then the
+          // recently resolved ones of a service left with no live analysis.
+          const extNowMs = Date.now()
+          const extRead = await readStatusAnalyses(env.STATUS_CACHE,
+            scoredAll.filter((svc) => (EXT_CLAUDE_IDS as readonly string[]).includes(svc.id)), extNowMs, { markers: false })
+          const extAnalysis = Object.fromEntries(Object.entries(extRead.aiAnalysis)
+            .flatMap(([svcId, list]) => list.map((a) => [`${svcId}:${a.incidentId}`, a] as const)))
           const latestReport = await readLatestReportSummary(env.STATUS_CACHE)
-          const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData.cachedAt, { reportFeedMap: extReportFeed, aiSummaryMap: extAiSummary, latestReport })), {
+          const recoveryBaselines = await readRecoveryBaselines(env.STATUS_CACHE)
+          const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData.cachedAt, { reportFeedMap: extReportFeed, analysisMap: extAnalysis, nowMs: extNowMs, latestReport, recoveryBaselines })), {
             headers: {
               'Content-Type': 'application/json',
               // Public, unauthenticated GET — extension fetches bypass CORS via MV3
@@ -6055,53 +6044,9 @@ const workerExport = {
           const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
           const recentlyRecovered: Record<string, string[]> = {}
           const readAnalyses = async () => {
-            // Active incidents: read ai:analysis:{svcId}:{incId} for each
-            // monitoring = "recovery confirmed" — exclude from active analysis display
-            const withActiveInc = cached.services.filter(s =>
-              (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
-            )
-            await Promise.all(withActiveInc.flatMap(svc =>
-              (svc.incidents ?? []).filter(i => i.status !== 'resolved' && i.status !== 'monitoring').map(async (inc) => {
-                const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
-                if (!raw) return
-                try {
-                  const parsed = JSON.parse(raw) as AIAnalysisResult
-                  if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
-                  aiAnalysis[svc.id].push(parsed)
-                } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
-              })
-            ))
-            // Recently recovered: operational services with recovered:{svcId}:{incId} KV (independent of AI analysis)
-            // Also check ai:analysis keys for enrichment (resolved analysis data for modal display)
-            const recoveryCutoff = Date.now() - 3 * 3600_000
-            const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
-            await Promise.all(operationalCached.flatMap(svc =>
-              // #1292 — a synthesized incident can never have a `recovered:` marker (isMarkableOnStatusEdge
-              // refuses it, and it never alerts), so probing for one is a guaranteed miss. It would fire for
-              // ~3h/day per day-bucket, since a full-day bucket "resolves" at the next day's local noon.
-              // Same skip the /feed handler applies for the same reason.
-              (svc.incidents ?? []).filter(i => i.derived !== 'status_history' && i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
-                // Independent recovery marker, plus the AI analysis for enrichment (optional — banner shows regardless)
-                const [recoveredRaw, raw] = await Promise.all([
-                  env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null),
-                  env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null),
-                ])
-                if (recoveredRaw) {
-                  if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
-                  if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
-                }
-                if (!raw) return
-                try {
-                  const parsed = JSON.parse(raw) as AIAnalysisResult
-                  if (parsed.resolvedAt) {
-                    if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
-                    aiAnalysis[svc.id].push(parsed)
-                    if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
-                    if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
-                  }
-                } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
-              })
-            ))
+            const read = await readStatusAnalyses(env.STATUS_CACHE!, cached.services, Date.now())
+            Object.assign(aiAnalysis, read.aiAnalysis)
+            Object.assign(recentlyRecovered, read.recentlyRecovered)
           }
 
           // #1531 part 3 — each reader below needs only the snapshot, so they run concurrently.

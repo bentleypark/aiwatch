@@ -112,8 +112,8 @@ export async function markIncidentResolved(
   // No field a patch can clear reaches them.
   //
   // Both writes below are what they hang on — `recoveredGrouping.js` builds a row only from the
-  // `recovered:` marker, and `predictionAccuracy.js` / the is-down card / the modal all return early
-  // without the `resolvedAt` stamped onto the analysis (`predictionAccuracy.js:181`,
+  // `recovered:` marker, and `prediction-accuracy.ts` / the is-down card / the modal all return early
+  // without the `resolvedAt` stamped onto the analysis (`computePredictionOutcome`,
   // `html-template.ts`'s `outcome`). Withholding both is therefore the same property the `#1292` and
   // `#1384` axes rest on (`isMarkableOnStatusEdge` refusing the shape outright), rather than three more
   // guards that the fourth consumer would walk around.

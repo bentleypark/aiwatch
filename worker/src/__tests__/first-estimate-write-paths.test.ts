@@ -169,7 +169,7 @@ describe('#1003 — ai:analysis writes are funnelled through putAnalysis', () =>
     // Pin their existence so a rewrite that reverts one to the current estimate has to delete an
     // assertion to go green.
     expect(read('incident-history.ts')).toMatch(/export function scoringBaselineHours/)
-    const spa = readFileSync(join(SRC, '../../src/utils/predictionAccuracy.js'), 'utf8')
+    const spa = read('prediction-accuracy.ts')
     expect(spa).toMatch(/export function baselineHoursFrom/)
     expect(spa).toMatch(/firstEstimatedRecoveryHours/)
     const isDown = readFileSync(join(SRC, '../../api/_is-down/html-template.ts'), 'utf8')

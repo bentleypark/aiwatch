@@ -4325,7 +4325,7 @@ function archivedDuration(durationMin: number): string | null {
  *   8. `hasActiveIncident` (fallback.ts) excludes it — otherwise a candidate could be permanently
  *      unrecommendable as a fallback over a stale ghost from a retiring source, while its real, current
  *      status source shows it healthy.
- *   9. `activeIncidents` (ext-claude.ts) excludes it from the extension popup's "current issue" list,
+ *   9. `popupIncidents` (ext-claude.ts) excludes it from the extension popup's "current issue" list,
  *      for the same reason as 8.
  *   10. `causalIncidents` (incident-text.ts) excludes it — a stale ghost's text must never lend its
  *      tokens to an upstream-attribution claim ("X is down because of Y") about what is happening now.

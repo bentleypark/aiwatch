@@ -13,6 +13,10 @@ import {
   isDownPath,
   monthLabel,
   monthlyRowText,
+  splitSharedIncidents,
+  sharedNoteText,
+  baselineLines,
+  analysisLines,
 } from './render.js'
 
 describe('monthly summary helpers (#1711)', () => {
@@ -167,5 +171,152 @@ describe('isDownPath (per-surface deep link)', () => {
   it('unknown id → null (caller renders a plain name, no link)', () => {
     expect(isDownPath('openai')).toBeNull()
     expect(isDownPath(undefined)).toBeNull()
+  })
+})
+
+describe('splitSharedIncidents (#1772)', () => {
+  const inc = (id, status = 'investigating', extra = {}) => ({ id, title: `T ${id}`, status, impact: 'major', ...extra })
+  const svc = (id, name, incidents) => ({ id, name, incidents })
+
+  it('lists an incident on every card once, with the surfaces it affects in card order', () => {
+    const out = splitSharedIncidents([
+      svc('claude', 'Claude API', [inc('a')]),
+      svc('claudeai', 'claude.ai', [inc('a')]),
+      svc('claudecode', 'Claude Code', [inc('a')]),
+    ])
+    expect(out.shared).toEqual([{ incident: inc('a'), affects: ['Claude API', 'claude.ai', 'Claude Code'], ids: ['claude', 'claudeai', 'claudecode'] }])
+    expect(out.ownBy).toEqual({ claude: [], claudeai: [], claudecode: [] })
+    expect(out.sharedCountBy).toEqual({ claude: 1, claudeai: 1, claudecode: 1 })
+  })
+
+  it('keeps a one-card incident on its card and shares only what two or more cards list', () => {
+    const out = splitSharedIncidents([
+      svc('claude', 'Claude API', [inc('a')]),
+      svc('claudeai', 'claude.ai', [inc('a'), inc('login')]),
+      svc('claudecode', 'Claude Code', []),
+    ])
+    expect(out.shared.map((s) => [s.incident.id, s.affects])).toEqual([['a', ['Claude API', 'claude.ai']]])
+    expect(out.ownBy.claudeai.map((i) => i.id)).toEqual(['login'])
+    expect(out.ownBy.claude).toEqual([])
+    expect(out.sharedCountBy).toEqual({ claude: 1, claudeai: 1, claudecode: 0 })
+  })
+
+  it('does not treat an id repeated on ONE card as shared', () => {
+    const out = splitSharedIncidents([svc('claude', 'Claude API', [inc('a'), inc('a')]), svc('claudeai', 'claude.ai', [])])
+    expect(out.shared).toEqual([])
+    expect(out.ownBy.claude).toHaveLength(2)
+  })
+
+  it('orders shared incidents ongoing before monitoring, keeping first-seen order within each', () => {
+    const cards = [inc('m1', 'monitoring'), inc('o1'), inc('m2', 'monitoring'), inc('o2', 'identified')]
+    const out = splitSharedIncidents([svc('claude', 'Claude API', cards), svc('claudeai', 'claude.ai', cards)])
+    expect(out.shared.map((s) => s.incident.id)).toEqual(['o1', 'o2', 'm1', 'm2'])
+  })
+
+  it('takes the AI summary from a later card when the first has none', () => {
+    const out = splitSharedIncidents([
+      svc('claude', 'Claude API', [inc('a')]),
+      svc('claudeai', 'claude.ai', [inc('a', 'investigating', { aiSummary: 'S' })]),
+    ])
+    expect(out.shared[0].incident.aiSummary).toBe('S')
+  })
+
+  it('tolerates missing input', () => {
+    expect(splitSharedIncidents(undefined)).toEqual({ shared: [], ownBy: {}, sharedCountBy: {} })
+    expect(splitSharedIncidents([svc('claude', 'Claude API', undefined)]).ownBy).toEqual({ claude: [] })
+  })
+
+  it('pluralizes the card note', () => {
+    expect(sharedNoteText(1)).toBe('1 shared incident ↑')
+    expect(sharedNoteText(2)).toBe('2 shared incidents ↑')
+  })
+})
+
+describe('baselineLines (#1772)', () => {
+  const b = (n) => ({ n, medianMin: 64, p80Min: 161, since: '2026-07-22' })
+  const analysed = { id: 'a', status: 'investigating', aiSummary: 'S' }
+
+  it('shows nothing without an AI analysis', () => {
+    expect(baselineLines({ id: 'a', status: 'monitoring' }, [{ name: 'Claude API', recoveryBaseline: b(48) }])).toEqual([])
+  })
+
+  it('one unnamed line for a single surface', () => {
+    expect(baselineLines(analysed, [{ name: 'Claude API', recoveryBaseline: b(48) }])).toEqual([
+      '📊 Past incidents on this service: median 1h 4m, 80% resolved within 2h 41m (based on 48 recorded incidents since 2026-07-22)',
+    ])
+  })
+
+  it('names each surface of a shared incident and skips one without a baseline', () => {
+    const lines = baselineLines(analysed, [
+      { name: 'Claude API', recoveryBaseline: b(48) },
+      { name: 'claude.ai', recoveryBaseline: null },
+      { name: 'Claude Code', recoveryBaseline: b(50) },
+    ])
+    expect(lines).toHaveLength(2)
+    expect(lines[0].startsWith('📊 Claude API — Past incidents')).toBe(true)
+    expect(lines[1].startsWith('📊 Claude Code — Past incidents')).toBe(true)
+  })
+
+  it('names the surface on a shared incident even when only one of its surfaces has a baseline', () => {
+    const lines = baselineLines(analysed, [{ name: 'Claude API', recoveryBaseline: b(48) }, { name: 'claude.ai', recoveryBaseline: null }])
+    expect(lines).toHaveLength(1)
+    expect(lines[0].startsWith('📊 Claude API — Past incidents')).toBe(true)
+  })
+
+  it('gives each surface its line once across the popup, on the first box that can carry it', () => {
+    const api = { id: 'claude', name: 'Claude API', recoveryBaseline: b(48) }
+    const app = { id: 'claudeai', name: 'claude.ai', recoveryBaseline: b(40) }
+    const shown = new Set()
+    expect(baselineLines({ id: 'x' }, [api, app], shown)).toEqual([])
+    expect(baselineLines(analysed, [api, app], shown)).toHaveLength(2)
+    expect(baselineLines(analysed, [app], shown)).toEqual([])
+    expect([...shown]).toEqual(['claude', 'claudeai'])
+  })
+})
+
+describe('recently resolved incidents (#1772)', () => {
+  const inc = (id, status = 'investigating', extra = {}) => ({ id, title: `T ${id}`, status, impact: 'major', ...extra })
+
+  it('are listed after the unresolved ones, shared across cards like the rest', () => {
+    const out = splitSharedIncidents([
+      { id: 'claude', name: 'Claude API', incidents: [inc('m', 'monitoring')], recentlyResolved: [inc('r', 'resolved')] },
+      { id: 'claudeai', name: 'claude.ai', incidents: [inc('m', 'monitoring'), inc('a')], recentlyResolved: [inc('r', 'resolved')] },
+      { id: 'claudecode', name: 'Claude Code', incidents: [inc('a')] },
+    ])
+    expect(out.shared.map((e) => e.incident.id)).toEqual(['a', 'm', 'r'])
+  })
+
+  it('a shared incident takes the analysis from whichever card carries it', () => {
+    const ai = { summary: 'S', lines: [], analyzedAt: '', model: null }
+    const out = splitSharedIncidents([
+      { id: 'claude', name: 'Claude API', incidents: [inc('a')] },
+      { id: 'claudeai', name: 'claude.ai', incidents: [inc('a', 'investigating', { ai })] },
+    ])
+    expect(out.shared[0].incident.ai).toBe(ai)
+  })
+
+  it('a card keeps its own resolved incident', () => {
+    const out = splitSharedIncidents([{ id: 'claude', name: 'Claude API', incidents: [], recentlyResolved: [inc('r', 'resolved')] }])
+    expect(out.ownBy.claude.map((i) => i.id)).toEqual(['r'])
+  })
+})
+
+describe('analysisLines (#1772)', () => {
+  const now = Date.parse('2026-06-30T02:00:00Z')
+  const ai = { summary: 'S', lines: ['🎯 Predicted vs actual: est ~40m · actual 19m (faster than est.)', '📡 Scope: Claude API'], analyzedAt: '2026-06-30T01:50:00Z', model: 'Gemma' }
+
+  it('renders the modal lines in its order, with recovered + updated times', () => {
+    expect(analysisLines({ id: 'r', status: 'resolved', resolvedAt: '2026-06-30T01:55:00Z', ai }, now).map((l) => l.text)).toEqual([
+      '🤖 S',
+      '🎯 Predicted vs actual: est ~40m · actual 19m (faster than est.)',
+      '📡 Scope: Claude API',
+      '✅ Recovered: 5m ago',
+      '🕐 Analysis updated 10m ago · Gemma',
+    ])
+  })
+
+  it('falls back to aiSummary from a worker that sends no `ai`', () => {
+    expect(analysisLines({ id: 'a', aiSummary: 'Old' }, now)).toEqual([{ kind: 'summary', text: '🤖 Old' }])
+    expect(analysisLines({ id: 'a' }, now)).toEqual([])
   })
 })

@@ -130,7 +130,7 @@ describe('buildExtClaudePayload (#837)', () => {
 
   it('payload is lite — each service carries only the projected keys', () => {
     const out = buildExtClaudePayload(scoredSet(), 't')
-    expect(Object.keys(out.services[0]).sort()).toEqual(['components', 'fallback', 'grade', 'id', 'incidents', 'name', 'reports', 'score', 'status', 'uptime30d'])
+    expect(Object.keys(out.services[0]).sort()).toEqual(['components', 'fallback', 'grade', 'id', 'incidents', 'name', 'recentlyResolved', 'recoveryBaseline', 'reports', 'score', 'status', 'uptime30d'])
     // heavy ServiceStatus fields must not leak
     expect(out.services[0]).not.toHaveProperty('aiwatchScore')
     expect(out.services[0]).not.toHaveProperty('provider')
@@ -168,7 +168,7 @@ describe('buildExtClaudePayload — incidents + gated reports (#837 PR2)', () =>
     return { id: 'inc1', title: 'Elevated API errors', status: 'investigating', impact: 'major', startedAt: '2026-06-30T00:00:00Z', duration: null, timeline: [], ...overrides } as never
   }
 
-  it('maps ACTIVE incidents only (investigating + identified kept; resolved + monitoring excluded)', () => {
+  it('#1772 — lists every unresolved incident (monitoring kept with its phase; resolved excluded)', () => {
     const set = [
       svc({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', aiwatchScore: 50, scoreGrade: 'degrading', incidents: [
         inc({ id: 'i-inv', status: 'investigating', title: 'API errors', impact: 'major' }),
@@ -181,8 +181,24 @@ describe('buildExtClaudePayload — incidents + gated reports (#837 PR2)', () =>
     ]
     const claude = buildExtClaudePayload(set, 't').services.find((s) => s.id === 'claude')!
     // 'identified' is a real active phase — a denylist→allowlist refactor that dropped it would fail here.
-    expect(claude.incidents.map((i) => i.id)).toEqual(['i-inv', 'i-idf'])
+    expect(claude.incidents.map((i) => i.id)).toEqual(['i-inv', 'i-idf', 'i-mon'])
+    expect(claude.incidents[2]).toMatchObject({ title: 'Recovering', status: 'monitoring' })
     expect(claude.incidents[0]).toMatchObject({ title: 'API errors', status: 'investigating', impact: 'major' })
+  })
+
+  it('#1772 — orders ongoing incidents before monitoring ones, keeping input order within each', () => {
+    const set = [
+      svc({ id: 'claude', name: 'Claude API', category: 'api', status: 'degraded', aiwatchScore: 50, scoreGrade: 'degrading', incidents: [
+        inc({ id: 'i-mon1', status: 'monitoring' }),
+        inc({ id: 'i-inv', status: 'investigating' }),
+        inc({ id: 'i-mon2', status: 'monitoring' }),
+        inc({ id: 'i-idf', status: 'identified' }),
+      ] }),
+      svc({ id: 'claudeai', category: 'app', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+      svc({ id: 'claudecode', category: 'agent', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+    ]
+    const claude = buildExtClaudePayload(set, 't').services.find((s) => s.id === 'claude')!
+    expect(claude.incidents.map((i) => i.id)).toEqual(['i-inv', 'i-idf', 'i-mon1', 'i-mon2'])
   })
 
   it('#1384 — excludes a retainedBridge ghost from the "current issue" list too', () => {
@@ -202,17 +218,99 @@ describe('buildExtClaudePayload — incidents + gated reports (#837 PR2)', () =>
     expect(claude.incidents.map((i) => i.id)).toEqual(['i-inv'])
   })
 
-  it('attaches aiSummary to the matching active incident only', () => {
-    const set = [
-      svc({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', aiwatchScore: 50, scoreGrade: 'degrading', incidents: [inc({ id: 'i-act' })] }),
-      svc({ id: 'claudeai', category: 'app', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
-      svc({ id: 'claudecode', category: 'agent', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
-    ]
-    const out = buildExtClaudePayload(set, 't', { aiSummaryMap: { 'claude:i-act': 'API returning 529s; mitigation underway.' } })
-    expect(out.services.find((s) => s.id === 'claude')!.incidents[0].aiSummary).toBe('API returning 529s; mitigation underway.')
-    // no summary key → field absent (not undefined-valued)
-    const noSummary = buildExtClaudePayload(set, 't').services.find((s) => s.id === 'claude')!
-    expect(noSummary.incidents[0]).not.toHaveProperty('aiSummary')
+  const NOW = Date.parse('2026-06-30T02:00:00Z')
+  const analysis = (o: Record<string, unknown> = {}) => ({
+    summary: 'API returning 529s.', progress: 'Mitigation underway.', estimatedRecovery: '1–3h', estimatedRecoveryHours: 3,
+    affectedScope: ['Claude API', 'Claude Fable 5.1'], needsFallback: true, analyzedAt: '2026-06-30T01:50:00Z',
+    incidentId: 'i-act', model: 'gemma', ...o,
+  }) as never
+  const trio = (claude: Record<string, unknown>) => [
+    svc({ id: 'claude', name: 'Claude API', category: 'api', aiwatchScore: 50, scoreGrade: 'degrading', ...claude }),
+    svc({ id: 'claudeai', category: 'app', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+    svc({ id: 'claudecode', category: 'agent', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+  ]
+
+  it('#1772 — a live incident carries the modal lines, plus the joined aiSummary older popups render', () => {
+    const set = trio({ status: 'down', incidents: [inc({ id: 'i-act', startedAt: '2026-06-30T01:00:00Z' })] })
+    const out = buildExtClaudePayload(set, 't', { analysisMap: { 'claude:i-act': analysis() }, nowMs: NOW })
+    const i = out.services.find((s) => s.id === 'claude')!.incidents[0]
+    expect(i.aiSummary).toBe('API returning 529s. Mitigation underway.')
+    expect(i.ai).toEqual({
+      summary: 'API returning 529s. Mitigation underway.',
+      lines: ['⏱ Est. Recovery: 1–3h', '📡 Scope: Claude API, Claude Fable 5.1'],
+      analyzedAt: '2026-06-30T01:50:00Z',
+      model: 'Gemma',
+    })
+    const none = buildExtClaudePayload(set, 't').services.find((s) => s.id === 'claude')!
+    expect(none.incidents[0]).not.toHaveProperty('aiSummary')
+    expect(none.incidents[0]).not.toHaveProperty('ai')
+  })
+
+  it('#1772 — an incident past its estimate reads elapsed vs estimate, as in the modal', () => {
+    const set = trio({ status: 'down', incidents: [inc({ id: 'i-act', startedAt: '2026-06-29T22:00:00Z' })] })
+    const i = buildExtClaudePayload(set, 't', { analysisMap: { 'claude:i-act': analysis({ affectedScope: [] }) }, nowMs: NOW })
+      .services.find((s) => s.id === 'claude')!.incidents[0]
+    expect(i.ai!.lines).toEqual(['⏱ Est. Recovery: Ongoing ~4h · exceeded ~1–3h est.'])
+  })
+
+  it('#1772 — caps the summary pair at 500 characters, as the modal does', () => {
+    const set = trio({ status: 'down', incidents: [inc({ id: 'i-act' })] })
+    const i = buildExtClaudePayload(set, 't', { analysisMap: { 'claude:i-act': analysis({ summary: 'a'.repeat(400), progress: 'b'.repeat(400) }) }, nowMs: NOW })
+      .services.find((s) => s.id === 'claude')!.incidents[0]
+    expect(i.ai!.summary).toHaveLength(500)
+    expect(i.aiSummary).toHaveLength(500)
+  })
+
+  it('#1772 — an analysis with no summary counts as none', () => {
+    const set = trio({ status: 'down', incidents: [inc({ id: 'i-act' })] })
+    const i = buildExtClaudePayload(set, 't', { analysisMap: { 'claude:i-act': analysis({ summary: '' }) }, nowMs: NOW })
+      .services.find((s) => s.id === 'claude')!.incidents[0]
+    expect(i).not.toHaveProperty('ai')
+  })
+
+  it('#1772 — a monitoring incident carries no analysis even when the map has one', () => {
+    const set = trio({ status: 'operational', incidents: [inc({ id: 'i-mon', status: 'monitoring' })] })
+    const i = buildExtClaudePayload(set, 't', { analysisMap: { 'claude:i-mon': analysis() }, nowMs: NOW })
+      .services.find((s) => s.id === 'claude')!.incidents[0]
+    expect(i).not.toHaveProperty('aiSummary')
+    expect(i).not.toHaveProperty('ai')
+  })
+
+  describe('#1772 — recentlyResolved', () => {
+    const resolved = (o: Record<string, unknown> = {}) => inc({ id: 'i-res', status: 'resolved', startedAt: '2026-06-30T01:00:00Z', resolvedAt: '2026-06-30T01:19:00Z', ...o })
+    const done = analysis({ incidentId: 'i-res', estimatedRecoveryHours: 0.67, estimatedRecovery: '20–40m', resolvedAt: '2026-06-30T01:19:00Z' })
+    const recent = (claude: Record<string, unknown>, map: Record<string, never>) =>
+      buildExtClaudePayload(trio(claude), 't', { analysisMap: map, nowMs: NOW }).services.find((s) => s.id === 'claude')!.recentlyResolved
+
+    it('carries predicted vs actual, the durable summary only, and resolvedAt', () => {
+      expect(recent({ status: 'operational', incidents: [resolved()] }, { 'claude:i-res': done })).toEqual([{
+        id: 'i-res', title: 'Elevated API errors', status: 'resolved', impact: 'major', resolvedAt: '2026-06-30T01:19:00Z',
+        ai: {
+          summary: 'API returning 529s.',
+          lines: ['🎯 Predicted vs actual: est ~40m · actual 19m (faster than est.)', '📡 Scope: Claude API, Claude Fable 5.1'],
+          analyzedAt: '2026-06-30T01:50:00Z',
+          model: 'Gemma',
+        },
+      }])
+    })
+
+    it('drops an analysis with no resolvedAt stamp, or no analysis at all', () => {
+      expect(recent({ status: 'operational', incidents: [resolved()] }, { 'claude:i-res': analysis({ incidentId: 'i-res' }) })).toEqual([])
+      expect(recent({ status: 'operational', incidents: [resolved()] }, {})).toEqual([])
+    })
+
+    it('drops one resolved more than 3h ago', () => {
+      expect(recent({ status: 'operational', incidents: [resolved({ resolvedAt: '2026-06-29T22:59:00Z' })] }, { 'claude:i-res': done })).toEqual([])
+    })
+
+    it('drops them on a service that is not operational, or that has a live analysis', () => {
+      expect(recent({ status: 'degraded', incidents: [resolved()] }, { 'claude:i-res': done })).toEqual([])
+      expect(recent({ status: 'operational', incidents: [inc({ id: 'i-act' }), resolved()] }, { 'claude:i-act': analysis(), 'claude:i-res': done })).toEqual([])
+    })
+
+    it('keeps them beside a live incident that has no analysis', () => {
+      expect(recent({ status: 'operational', incidents: [inc({ id: 'i-act' }), resolved()] }, { 'claude:i-res': done }).map((i) => i.id)).toEqual(['i-res'])
+    })
   })
 
   it('reports: gated map present → count + recent (cat/ts/desc, capped 5)', () => {
@@ -271,7 +369,7 @@ describe('buildExtClaudePayload — Cowork, Console and the latest report (#1711
   function set() {
     return scoredSet().map((s) =>
       s.id === 'claudeai' ? { ...s, components: [CLAUDEAI_OWN, COWORK] }
-        : s.id === 'claude' ? { ...s, referenceComponents: [CONSOLE], referenceIncidents: [inc('c-live', 'investigating'), inc('c-done', 'resolved'), inc('c-mon', 'monitoring')] }
+        : s.id === 'claude' ? { ...s, referenceComponents: [CONSOLE], referenceIncidents: [inc('c-mon', 'monitoring'), inc('c-live', 'investigating'), inc('c-done', 'resolved'), { ...inc('c-ghost', 'investigating'), retainedBridge: true }] }
           : s.id === 'claudecode' ? { ...s, referenceComponents: [CONSOLE], referenceIncidents: [inc('c-live', 'investigating')] }
             : s) as ScoredService[]
   }
@@ -290,12 +388,22 @@ describe('buildExtClaudePayload — Cowork, Console and the latest report (#1711
     expect(buildExtClaudePayload(single, 't').services.find((s) => s.id === 'claudeai')!.components).toEqual([])
   })
 
-  it('carries Console as a reference component with its active incidents, once each, outside the services', () => {
+  it('carries Console as a reference component with its unresolved incidents, once each, outside the services', () => {
     const out = buildExtClaudePayload(set(), 't')
     expect(out.reference.components).toEqual([{ name: 'Claude Console (platform.claude.com)', status: 'down' }])
-    expect(out.reference.incidents.map((i) => i.id)).toEqual(['c-live'])
+    expect(out.reference.incidents).toEqual([
+      { id: 'c-live', title: 'Console c-live', status: 'investigating', impact: 'major' },
+      { id: 'c-mon', title: 'Console c-mon', status: 'monitoring', impact: 'major' },
+    ])
     expect(out.services.find((s) => s.id === 'claude')!.incidents).toEqual([])
     expect(out.services.find((s) => s.id === 'claude')!.status).toBe('down')
+  })
+
+  it('#1772 — carries each surface recovery baseline, and null for a surface without one', () => {
+    const b = { n: 48, medianMin: 64, p80Min: 161, since: '2026-07-22' }
+    const out = buildExtClaudePayload(scoredSet(), 't', { recoveryBaselines: { claude: b, openai: { ...b, n: 99 } } })
+    expect(out.services.map((s) => [s.id, s.recoveryBaseline])).toEqual([['claude', b], ['claudeai', null], ['claudecode', null]])
+    expect(buildExtClaudePayload(scoredSet(), 't').services.every((s) => s.recoveryBaseline === null)).toBe(true)
   })
 
   it('passes the latest published report through, and null without one', () => {
