@@ -106,6 +106,13 @@ patch needed there.) **Do not rebuild for this:** a rebuild re-snapshots every s
 data — on 2026-10-19 one did it to 37 / 38 scores and reverted #1580's patched uptimes — so a rebuild over a
 stored month now answers `409` unless the body carries `resnapshot: true`.
 
+**To compare a month archived before #1505 with one after it**, run
+`npx tsx scripts/patch-archive-derived-dupes.ts --period YYYY-MM --recount-downtime` (aiwatch-reports#161). It
+recounts each service's downtime and average recovery from the stored `incidentList` with today's
+`aggregateIncidentDurations` and suppression list, prints each service whose figures change, and writes `downtime-recount-YYYY-MM.json`. It never
+writes KV. #1505 changed two rules at once: overlapping incidents count once (#1556), and auto-monitor rows count
+as downtime (#1579). A month archived after both reproduces exactly (2026-09: no service changes).
+
 ### The rebuild refuses when it would hold less than what is stored (#1260)
 
 `archive:monthly:{YYYY-MM}` has no TTL because nothing else holds a month's per-service figures — but every

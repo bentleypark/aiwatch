@@ -1829,6 +1829,11 @@ export function aggregateIncidentDurations(
 }
 
 
+/** `avgResolutionMin` — the counted total over its divisor, rounded; null with no counted downtime. */
+export function averageResolutionMin(countedTotalMin: number | null, divisor: number): number | null {
+  return divisor > 0 && countedTotalMin != null && countedTotalMin > 0 ? Math.round(countedTotalMin / divisor) : null
+}
+
 export async function buildMonthlyArchive(
   kv: KVNamespace,
   year: number,
@@ -2091,9 +2096,7 @@ export async function buildMonthlyArchive(
     // synthesized day-buckets (real downtime), but they are not recovery samples and are not in the
     // divisor; dividing the published total by the counted count mixes the two populations.
     const probeSummary = resolveArchiveProbeSummary(id, monthlySummaries)
-    const avgResolutionMin = avgDivisor > 0 && countedTotalMin != null && countedTotalMin > 0
-      ? Math.round(countedTotalMin / avgDivisor)
-      : null
+    const avgResolutionMin = averageResolutionMin(countedTotalMin, avgDivisor)
 
     services[id] = {
       uptime: uptimeMap[id] ?? null,

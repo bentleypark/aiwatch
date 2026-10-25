@@ -31,6 +31,11 @@
  * under current code; the drift is printed per service:
  *
  *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-08 --apply-suppressions --accept-drift kimi
+ *
+ * aiwatch-reports#161 — `--recount-downtime` writes each service's downtime and average recovery recounted under today's
+ * aggregation and suppressions to `downtime-recount-{period}.json`, for the reports repo's trend:
+ *
+ *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-07 --recount-downtime
  */
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -74,6 +79,31 @@ function main(argv: string[]): void {
     console.error(`${key} parsed but carries no \`services\` object — refusing to plan against it.`)
     console.error('A LOCAL (non---remote) read looks exactly like this. Nothing written.')
     process.exit(1)
+  }
+
+  if (argv.includes('--recount-downtime')) {
+    if (argv.some((a) => ['--correction', '--apply-suppressions', '--accept-drift'].includes(a))) {
+      console.error('--recount-downtime is a separate run.')
+      process.exit(2)
+    }
+    const { list, dropped } = archivePatch.normalizeSuppressionsCounted(
+      parseOrDie(kvRaw(archivePatch.SUPPRESSIONS_KEY), `wrangler kv key get ${archivePatch.SUPPRESSIONS_KEY}`))
+    if (dropped > 0 || list.length === 0) {
+      console.error(`${archivePatch.SUPPRESSIONS_KEY}: ${list.length} usable row(s), ${dropped} unusable — refusing to recount against it.`)
+      process.exit(1)
+    }
+    const recount = archivePatch.recountDowntime(archive as archivePatch.PatchableArchive, list)
+    const services = archive.services as Record<string, Record<string, unknown>>
+    for (const [id, r] of Object.entries(recount)) {
+      const before = { downtime: services[id]?.totalDowntimeMin ?? null, mttr: services[id]?.avgResolutionMin ?? null }
+      if (before.downtime !== r.downtime || before.mttr !== r.mttr) {
+        console.log(`${id}: downtime ${String(before.downtime)} → ${String(r.downtime)}, mttr ${String(before.mttr)} → ${String(r.mttr)}`)
+      }
+    }
+    const out = resolve(process.env.ARCHIVE_PATCH_DIR ?? '.', `downtime-recount-${period}.json`)
+    writeFileSync(out, JSON.stringify({ period, services: recount }, null, 2) + '\n')
+    console.log(`\nRecount written to: ${out} (nothing written to KV)`)
+    process.exit(0)
   }
 
   const c = argv.indexOf('--correction')
