@@ -22,6 +22,7 @@ import { incidentDay, isEntryWithoutEnd, isResolvedWithoutEnd, normalizeIncident
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
+import { compareWithRecoveryBaseline, type BaselineComparison } from './recovery-baseline'
 import { kvPut, isNonReliabilityAdvisory } from './utils'
 import { diffPrunedIncidents, appendWithdrawn, type WithdrawnIncident } from './withdrawn'
 import { recordWithdrawalsPruned } from './withdrawal-log'
@@ -191,6 +192,9 @@ export interface MonthlyArchive {
   // incident fell in the month (or the archive predates this feature) — the report site
   // (aiwatch-reports) renders the "AI Prediction Accuracy" section only when present.
   predictionAccuracy?: AccuracyStats | null
+  // #1777 — `predictionAccuracy`'s incidents that had a past-recovery baseline, scored against both.
+  // null when none did; ABSENT on archives written before it.
+  predictionBaseline?: BaselineComparison | null
 }
 
 // ── Monthly security summary ─────────────────────────────────────────
@@ -1649,6 +1653,15 @@ export async function buildMonthlyAccuracy(
   return stats.total > 0 ? stats : null
 }
 
+async function buildMonthlyBaselineComparison(
+  kv: KVNamespace,
+  period: string,
+  overrides: DurationOverride[],
+): Promise<BaselineComparison | null> {
+  const historyBySvc = new Map(await Promise.all(SERVICES.map(async (s) => [s.id, await readIncidentHistory(kv, s.id)] as const)))
+  return compareWithRecoveryBaseline(historyBySvc, overrides, SERVICES, period)
+}
+
 /** #904 — pure: drop operator-suppressed incidents from a stored monthly accumulator and recompute
  *  each affected service's aggregates (count / totalMinutes / longestMinutes) from the survivors.
  *  `durations` is the complete per-id map (uncapped), so totalMinutes = Σ durations and
@@ -2129,6 +2142,8 @@ export async function buildMonthlyArchive(
   // corpus filtered to `period`. Best-effort: a read hiccup must not fail the archive → null.
   const predictionAccuracy = await buildMonthlyAccuracy(kv, period, SERVICES.map(s => s.id))
     .catch((err) => { console.warn(`[monthly-archive] accuracy aggregate failed for ${period}:`, err instanceof Error ? err.message : err); return null })
+  const predictionBaseline = await buildMonthlyBaselineComparison(kv, period, overridesOverride ?? await readOverridesFresh(kv))
+    .catch((err) => { console.warn(`[monthly-archive] baseline comparison failed for ${period}:`, err instanceof Error ? err.message : err); return null })
 
   const archive: MonthlyArchive = {
     period,
@@ -2138,6 +2153,7 @@ export async function buildMonthlyArchive(
     security,
     degradation,
     predictionAccuracy,
+    predictionBaseline,
   }
 
   await attachMonthlyNarrative(archive, narrativeOpts)
