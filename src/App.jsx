@@ -148,7 +148,7 @@ function AppInner() {
             <img src="/favicon.png" alt="" width={18} height={18} style={{ borderRadius: 3 }} />
             AI<span className="text-[var(--green)]">Watch</span>
           </span>
-          <span className="hidden md:inline mono text-[10px] text-[var(--text2)]">
+          <span className="mono text-[10px] text-[var(--text2)]">
             {t('footer.copyright')}
           </span>
         </div>

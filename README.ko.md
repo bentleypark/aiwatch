@@ -476,4 +476,4 @@ worker/
 
 ## 라이선스
 
-[AGPL-3.0](LICENSE)
+[AGPL-3.0](LICENSE)은 코드에 적용됩니다. AIWatch 이름과 로고는 이 라이선스에 포함되지 않으며, [상표 정책](TRADEMARKS.md)을 따릅니다. 공식 사이트는 [ai-watch.dev](https://ai-watch.dev)입니다.

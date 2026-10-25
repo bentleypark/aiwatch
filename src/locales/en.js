@@ -417,7 +417,7 @@ const en = {
   // Footer
   'footer.privacy': 'Privacy Policy',
   'footer.terms': 'Terms of Service',
-  'footer.copyright': '© 2026 AIWatch. All rights reserved.',
+  'footer.copyright': '© 2026 AIWatch · AGPL-3.0',
 
   // Cookie Banner
   'cookie.title': 'Cookie Notice',

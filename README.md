@@ -480,4 +480,4 @@ Found a vulnerability? Please report it responsibly — see [SECURITY.md](SECURI
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[AGPL-3.0](LICENSE) covers the code. The AIWatch name and logo are not licensed with it; see the [Trademark Policy](TRADEMARKS.md). The official site is [ai-watch.dev](https://ai-watch.dev).
