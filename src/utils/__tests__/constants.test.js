@@ -1,9 +1,5 @@
-// #403 — pin the frontend `tierFor` / `tierLabelFor` warn-once behavior.
-// Mirrors worker/src/__tests__/fallback.test.ts; the parallel implementation is intentional
-// because the worker can't import frontend code at runtime.
-
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK, isSpecializedSubTier, CAPABILITY_TIER, COMPONENT_CAPABILITY, CAPABILITY_PROVIDERS } from '../constants'
+import { describe, it, expect, vi } from 'vitest'
+import { API_TIER, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK, isSpecializedSubTier, CAPABILITY_TIER, COMPONENT_CAPABILITY, CAPABILITY_PROVIDERS } from '../constants'
 
 // #646 — the Overview renders one section per SERVICE_CATEGORIES bucket (llm/agents/voice/inference/
 // video/apps, #658). Its render has a defensive "other" catch-all for any service no bucket claims,
@@ -74,60 +70,6 @@ describe('categoryRankOf (#676 sidebar/list category order)', () => {
 
   it('returns Infinity for an unknown id (sorts last, never throws)', () => {
     expect(categoryRankOf('not-a-service')).toBe(Infinity)
-  })
-})
-
-describe('tierFor (#403 frontend warn-once helper)', () => {
-  let warnSpy
-  beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}) })
-  afterEach(() => { warnSpy.mockRestore() })
-
-  it('returns the mapped tier for a known service id (no warning)', () => {
-    expect(tierFor('claude')).toBe(API_TIER.claude)
-    expect(warnSpy).not.toHaveBeenCalled()
-  })
-
-  it('returns 99 and warns once for an unknown service id', () => {
-    const fakeId = '__fe_test_warn_once_a__'
-    expect(tierFor(fakeId)).toBe(99)
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-    expect(warnSpy.mock.calls[0][0]).toContain(fakeId)
-  })
-
-  it('repeated calls for the same unknown id do not re-warn', () => {
-    const fakeId = '__fe_test_warn_once_b__'
-    tierFor(fakeId)
-    tierFor(fakeId)
-    tierFor(fakeId)
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('tierLabelFor (#403)', () => {
-  let warnSpy
-  beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}) })
-  afterEach(() => { warnSpy.mockRestore() })
-
-  it('returns the mapped label for known tier numbers (no warning)', () => {
-    expect(tierLabelFor(1)).toBe('LLM')
-    expect(tierLabelFor(11)).toBe('Coding Agent') // #1027 — single agent tier
-    expect(warnSpy).not.toHaveBeenCalled()
-  })
-
-  it('returns undefined and warns once for an unknown tier', () => {
-    expect(tierLabelFor(7777)).toBeUndefined()
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-    expect(warnSpy.mock.calls[0][0]).toContain('7777')
-  })
-
-  it('every API_TIER value has a TIER_LABEL entry — no silent label degradation expected at runtime', () => {
-    // Mirrors the cross-mirror sync test at the unit level. If a future contributor adds a tier
-    // number to API_TIER without also extending TIER_LABEL, runtime tierLabelFor warnings would
-    // fire — this test catches it earlier.
-    const tierValues = new Set(Object.values(API_TIER))
-    for (const tier of tierValues) {
-      expect(TIER_LABEL[tier], `tier ${tier} appears in API_TIER but has no TIER_LABEL entry`).toBeDefined()
-    }
   })
 })
 
@@ -308,8 +250,8 @@ describe('#1725 — frontend: a source that requires a capability admits only th
 })
 
 describe('#1062 facet A — frontend getFallbacks Voice STT/TTS capability gate', () => {
-  // Pins the frontend WIRING (constants.js getFallbacks calls sharesCapability), not just the pure fn /
-  // data parity the api-tier-sync test covers — deleting the `&& sharesCapability(...)` filter clause
+  // Pins the frontend WIRING (constants.js getFallbacks calls sharesCapability), not just the pure fn —
+  // deleting the `&& sharesCapability(...)` filter clause
   // must fail here (feedback_mutation_test_both_directions: 순수fn 초록 ≠ 배선 초록).
   const v = (id, name, status, aiwatchScore) => ({ id, category: 'api', name, status, aiwatchScore, incidents: [] })
 
@@ -344,7 +286,7 @@ describe('#1062 facet A — frontend getFallbacks Voice STT/TTS capability gate'
   })
 })
 
-// #1186 — frontend MIRROR of worker/src/fallback.ts's proportional-interleave fix. Same rationale: a
+// #1186 — the frontend getFallbacks through worker/src/fallback.ts's proportional-interleave fix: a
 // medium score (no official uptime, #713 rescale) is not on the same scale as a high one, but
 // "confidence always wins" would structurally exclude medium whenever 2+ high peers exist, a plain "0
 // on mismatch" comparator breaks Array.sort's transitivity requirement with 3+ candidates, and a naive
@@ -602,6 +544,13 @@ describe('hasActiveIncident / getFallbacks active-incident exclusion (#550)', ()
     expect(hasActiveIncident({})).toBe(false)
   })
 
+  it('#1384 — an unresolved retainedBridge incident does not exclude an operational candidate (#1191)', () => {
+    const source = { id: 'claudecode', category: 'agent', status: 'degraded', incidents: [inc('investigating')] }
+    const bridged = op('windsurf', 'agent', 92, { incidents: [{ ...inc('investigating'), retainedBridge: true }] })
+    expect(hasActiveIncident(bridged)).toBe(false)
+    expect(getFallbacks(source, [source, bridged]).map(f => f.id)).toEqual(['windsurf'])
+  })
+
   it('excludes an operational candidate that has an unresolved incident', () => {
     // The screenshot case: Claude Code degraded; Codex is operational but "investigating" an incident.
     const source = { id: 'claudecode', category: 'agent', status: 'degraded', incidents: [inc('investigating')] }
@@ -766,16 +715,9 @@ describe('region-switch fallback suppression (#641)', () => {
   })
 })
 
-describe('#859 specialized sub-tier same-tier cap (SPA mirror of worker isSpecializedSubTier)', () => {
+describe('#859 specialized sub-tier same-tier cap (SPA getFallbacks)', () => {
   const svc = (id, name, status = 'operational', aiwatchScore = 90) =>
     ({ id, name, category: 'api', status, aiwatchScore })
-
-  it('isSpecializedSubTier: 1-3 false, 4-8 true, agents/apps false', () => {
-    expect([1, 2, 3].some(isSpecializedSubTier)).toBe(false)
-    expect([4, 5, 6, 7, 8].every(isSpecializedSubTier)).toBe(true)
-    expect(isSpecializedSubTier(11)).toBe(false)
-    expect(isSpecializedSubTier(21)).toBe(false)
-  })
 
   it('image (Stability) down → only its image sibling, not an observability service', () => {
     const services = [

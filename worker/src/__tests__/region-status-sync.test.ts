@@ -7,8 +7,7 @@
 //                                                 separate compilation surface from `src/`)
 //
 // A Worker-side copy is planned but not in this PR — when it lands, extend this test to
-// triangulate all three (same pattern as worker/src/__tests__/api-tier-sync.test.ts for
-// API_TIER). For now, keep the SPA ↔ Edge pair locked.
+// triangulate all three. For now, keep the SPA ↔ Edge pair locked.
 //
 // File 2 (api/_is-down/region-status.ts) can't be imported here — Edge Functions are a
 // different compilation surface (no @vercel/edge types in this Workers test runner).

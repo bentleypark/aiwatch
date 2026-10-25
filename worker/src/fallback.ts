@@ -4,7 +4,6 @@ import { isNonReliabilityAdvisory } from './utils'
 import { isAffectedStatus, asServiceStatus } from './status-verdict'
 import { substituteGroupsFor, pickSubstitutes, flattenSubstitutes, type SubstituteGroup } from '../../api/_shared/substitutes'
 
-// Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 // #756 — stability un-excluded now that the image category has ≥2 members (Stability + FLUX recommend
 // each other in Tier 7); bfl is fallback-eligible from the start (never added here).
 // #857 — pinecone un-excluded now that the vector category has ≥2 members (Pinecone + turbopuffer recommend
@@ -32,7 +31,7 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'ch
 // (orderForFallback, #1682).
 //
 // Exported for the cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) — that test
-// is the only safeguard against drift between the three independent copies of this map (#403).
+// is the only safeguard against drift between this map and the api/is-down.ts inline copy (#403).
 export const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
   cohere: 1.5, deepseek: 1.5, kimi: 1.5, perplexity: 1.5,
@@ -136,7 +135,7 @@ interface FallbackCandidate {
  *  outage signal) must NOT disqualify the candidate — recommending Claude Code when ChatGPT is down is
  *  correct even while Anthropic carries a Mythos/Fable access-suspension notice. An outage-signal title
  *  still counts (isNonReliabilityAdvisory returns false for it), preserving #550 for genuine degradations. */
-function hasActiveIncident(s: FallbackCandidate): boolean {
+export function hasActiveIncident(s: FallbackCandidate): boolean {
   // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) unresolved at
   // migration time never resolves for the life of the finite migration bridge, so without this
   // exclusion a service could be disqualified as a fallback candidate FOREVER over a stale ghost from
@@ -165,8 +164,8 @@ export function isSpecializedSubTier(tier: number): boolean {
 // `isSpecializedSubTier`'s same-tier gate alone still cross-recommended STT↔TTS (ElevenLabs down →
 // AssemblyAI). Each tag is AIWatch's MODELLING of a service's primary substitutable capability, not a
 // claim about the vendor's full API surface: `elevenlabs:['tts']` (text-to-speech), `assemblyai:['stt']`
-// (transcription), `deepgram:['stt','tts']` (both). Keep the three copies in lockstep with src/utils/constants.js + the api/is-down.ts inline
-// copy: api-tier-sync.test.ts deep-equals the DATA on all three and asserts the is-down filter WIRING;
+// (transcription), `deepgram:['stt','tts']` (both). Keep in lockstep with the api/is-down.ts inline
+// copy: api-tier-sync.test.ts deep-equals the DATA and asserts the is-down filter WIRING;
 // the 3-line sharesCapability body is kept identical by hand.
 export const SERVICE_CAPABILITY: Record<string, string[]> = {
   elevenlabs: ['tts'],
@@ -189,7 +188,7 @@ export function sharesCapability(a: string, b: string, aTags: string[] | undefin
 // #1062 facet B — a status-page component NAME (keyword) → the capability it represents. A multi-
 // capability service's page names distinct surfaces ("Images"/"Audio"/"Embeddings") separately
 // from its primary LLM/chat surface ("Chat Completions"/"Responses"). First match wins; anything
-// unmatched is the primary capability 'llm'. Keep in lockstep with the two mirrors + api-tier-sync.test.ts.
+// unmatched is the primary capability 'llm'. Keep in lockstep with the api/is-down.ts copy + api-tier-sync.test.ts.
 // FRAGILITY (accepted): the signal is coupled to today's status-page component NAMES and the list order.
 // First-match means "Realtime Audio" would map to `audio` (matched before `realtime`); a rename that
 // drops the keyword (OpenAI 'Images' → 'DALL·E') silently falls to `llm` → default LLM peers. Both fail
@@ -221,13 +220,13 @@ export const CAPABILITY_TIER: Record<string, number> = {
 }
 // Sentinel: a single secondary-capability outage whose capability has no available peer tier → emit
 // nothing (route-else-suppress) rather than fall through to a wrong-capability LLM peer.
-const ROUTE_SUPPRESS = -1
+export const ROUTE_SUPPRESS = -1
 
 // #1062 facet B — the human label a ROUTED group is shown under, so the recommendation self-describes
 // WHY it switched: a routed OpenAI-'Images' outage reads "Image generation → Stability AI · FLUX", not a
 // bare tier "Image → …" that leaves the reader guessing why an image tool is offered for an OpenAI
 // outage. Distinct from TIER_LABEL (the category, "Image"): this names the affected CAPABILITY. Keep in
-// lockstep with the two mirrors (pinned by api-tier-sync.test.ts). Only the routable caps need an entry.
+// lockstep with the api/is-down.ts copy (pinned by api-tier-sync.test.ts). Only the routable caps need an entry.
 export const CAPABILITY_LABEL: Record<string, string> = {
   image: 'Image generation',
   video: 'Video generation',
@@ -242,8 +241,8 @@ export const CAPABILITY_LABEL: Record<string, string> = {
 // ('Text to speech' vs the general 'Audio / speech') removes that duplication and self-describes which
 // half is down, matching #1062's "label says WHY it switched". Audio-only today (the only tagged
 // services are audio), and applied ONLY when the routed cap is 'audio', so a tagged service that ever
-// routes to another tier can never be mislabelled by an audio sub-tag. Synced worker↔frontend
-// (api-tier-sync.test.ts); NOT mirrored into is-down, which shows one service and never groups.
+// routes to another tier can never be mislabelled by an audio sub-tag. NOT mirrored into is-down,
+// which shows one service and never groups.
 // Scope: this only distinguishes a SINGLE-sub-capability anchor. Two GENERAL-audio anchors — an untagged
 // multimodal (openai `Audio`) or the both-tagged `deepgram` — still share 'Audio / speech' if they anchor
 // concurrently; that is by design (general audio has no finer name), a rarer pairing than the tts-vs-general
@@ -260,7 +259,7 @@ export const CAPABILITY_TAG_LABEL: Record<string, string> = {
 // overall status (worst-of those) is a faithful proxy for the capability's health — an operational
 // OpenAI necessarily has an operational image/audio component. `video` is the exception: no monitored OpenAI component maps to it (fallback-tiers.md). Gemini's Imagen/Veo are SEPARATE
 // Vertex products AIWatch does not monitor (no components[]), so it cannot be included faithfully.
-// Keep in lockstep with the two mirrors (pinned by api-tier-sync.test.ts).
+// Keep in lockstep with the api/is-down.ts copy (pinned by api-tier-sync.test.ts).
 export const CAPABILITY_PROVIDERS: Record<string, string[]> = {
   image: ['openai'],
   video: ['openai'],
@@ -279,7 +278,7 @@ export function isCapabilityProvider(candidateId: string, sourceTier: number): b
 
 // #1725 — a source that requires a capability its tier peers may lack (Perplexity → web search): only that
 // capability's providers qualify. Separate from CAPABILITY_PROVIDERS, which widens a specialized tier's
-// pool. Provider evidence: docs/reference/fallback-tiers.md. Mirrors: src/utils/constants.js, api/is-down.ts.
+// pool. Provider evidence: docs/reference/fallback-tiers.md. Mirror: api/is-down.ts.
 export const REQUIRED_CAPABILITY: Record<string, string> = {
   perplexity: 'search',
 }
@@ -611,8 +610,6 @@ const CATEGORY_LABEL: Record<string, string> = {
 // matches CATEGORY_LABEL[agent], mirroring how tier 21 matches CATEGORY_LABEL[app], so the grouped
 // fallback line reads "Coding Agent: Claude Code (Score 90)". LLM / Voice / Infra stay bare because
 // those abbreviations are already self-identifying as service categories in the API space.
-// Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
-// Overview.jsx imports from there so there is no third inline copy to drift against.
 export const TIER_LABEL: Record<number, string> = {
   1: 'LLM', 1.5: 'LLM', 2: 'LLM Hosting', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector', 9: 'Embeddings',
   11: 'Coding Agent', // #1027 — single tier for all coding agents (matches CATEGORY_LABEL[agent])

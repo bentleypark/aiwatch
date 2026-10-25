@@ -1291,7 +1291,7 @@ export function appendUtm(url: string, source: UtmSource): string {
 //   (a) #707 — down-classify an AWS Health advisory to `null` impact (aws.ts) so it doesn't tank the Score
 //   (b) #811 — keep an operational service whose ONLY unresolved incident is such an advisory eligible as a
 //       fallback candidate (a Claude model-access SUSPENSION must not exclude Claude Code when ChatGPT is
-//       down). Mirrored in src/utils/constants.js (frontend getFallbacks); parity pinned by a sync test.
+//       down).
 //   (c) #1021 — generalize the #707 AWS carve-out to ALL providers: down-classify a usage-limits / quota /
 //       billing advisory to `null` impact at the live-fetch choke point (fetchAllServices) so it never
 //       inflates `totalDowntimeMin` or drops the Score (the Codex June "Usage Limits Depleting Faster Than

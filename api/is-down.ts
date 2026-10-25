@@ -246,7 +246,7 @@ export default async function handler(req: Request) {
           claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11, // Coding agents (#1027) — one tier; keep in sync with worker/src/fallback.ts
           chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21, grok: 21, kimiapp: 21,
         }
-        // Inline tierFor — same warn-once shape as worker/src/fallback.ts and src/utils/constants.js.
+        // Inline tierFor — same warn-once shape as worker/src/fallback.ts.
         // The Edge Function runs once per request so the warned set is functionally a one-shot per
         // request, not per session — still useful for surfacing typos in the access log.
         const warnedTierIds = new Set<string>()
