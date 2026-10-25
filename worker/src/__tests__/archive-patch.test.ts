@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   planArchivePatch, applyArchivePatch, figuresFrom, storedFigures, figureDiff, resourceOfDerivedEntry,
-  planRowReplacement, ROW_REPLACEMENTS, planSuppressionPatch,
+  planRowReplacement, ROW_REPLACEMENTS, planSuppressionPatch, recountDowntime,
 } from '../archive-patch'
 import type { RowReplacement } from '../archive-patch'
 import type { PatchableArchive } from '../archive-patch'
@@ -489,5 +489,51 @@ describe('#1735 — planSuppressionPatch', () => {
     const { changes, refusals } = planSuppressionPatch(arch, SEPT, supp)
     expect(changes).toEqual([])
     expect(refusals[0]).toMatch(/^kimi: stored figures do not reproduce/)
+  })
+})
+
+describe('aiwatch-reports#161 — recountDowntime', () => {
+  const row = (id: string, title: string, start: string, durationMin: number): MonthlyIncidentEntry => ({
+    id, title, startedAt: start, resolvedAt: new Date(Date.parse(start) + durationMin * 60_000).toISOString(),
+    durationMin, finalStatus: 'resolved', impact: 'major',
+  })
+  // Two 60m incidents opened 30m apart: 120m summed (the pre-#1505 figure), 90m as one impact window.
+  const a = row('a', 'Elevated errors on Opus', '2026-07-10T10:00:00.000Z', 60)
+  const b = row('b', 'Elevated errors on Sonnet', '2026-07-10T10:30:00.000Z', 60)
+  const c = row('c', 'Claude Tag seeing elevated GitHub operation failures', '2026-07-12T10:00:00.000Z', 40)
+
+  it('counts overlapping incidents once', () => {
+    const out = recountDowntime({ services: { claude: { incidents: 2, totalDowntimeMin: 120, incidentList: [a, b] } } }, [])
+    expect(out.claude).toEqual({ downtime: 90, mttr: 90 }) // one 90m window, not two 60m recoveries
+  })
+
+  it('drops rows the current suppression list hides on that service', () => {
+    const supp = [{ scope: 'service-pattern' as const, svcId: 'claude', match: 'claude tag seeing elevated github operation failures' }]
+    const archive = { services: {
+      claude: { incidents: 3, totalDowntimeMin: 160, incidentList: [a, b, c] },
+      claudecode: { incidents: 1, totalDowntimeMin: 40, incidentList: [c] },
+    } }
+    expect(recountDowntime(archive, supp)).toEqual({ claude: { downtime: 90, mttr: 90 }, claudecode: { downtime: 40, mttr: 40 } })
+  })
+
+  it('returns null where the stored list is shorter than the month\'s incident count', () => {
+    const out = recountDowntime({ services: { mistral: { incidents: 250, totalDowntimeMin: 9000, incidentList: [a, b] } } }, [])
+    expect(out.mistral).toEqual({ downtime: null, mttr: null })
+  })
+
+  it('returns null for a service with no incidents', () => {
+    expect(recountDowntime({ services: { modal: { incidents: 0, totalDowntimeMin: null } } }, [])).toEqual({ modal: { downtime: null, mttr: null } })
+  })
+
+  it('counts a status_history day bucket in downtime but not in recovery', () => {
+    const bucket: MonthlyIncidentEntry = { ...row('d', 'Degraded performance', '2026-07-20T00:00:00.000Z', 50), derived: 'status_history' }
+    const out = recountDowntime({ services: { claude: { incidents: 3, incidentList: [a, b, bucket] } } }, [])
+    expect(out.claude).toEqual({ downtime: 140, mttr: 90 })
+  })
+
+  it('averages recovery over separate windows', () => {
+    const later = row('d', 'Elevated errors on Haiku', '2026-07-20T10:00:00.000Z', 30)
+    const out = recountDowntime({ services: { claude: { incidents: 3, incidentList: [a, b, later] } } }, [])
+    expect(out.claude).toEqual({ downtime: 120, mttr: 60 }) // (90 + 30) / 2
   })
 })
