@@ -1,40 +1,28 @@
-// #403 — pin the cross-mirror sync of API_TIER and TIER_LABEL.
+// #403 — pin the cross-mirror sync of API_TIER.
 //
-// Three independent copies live in this repo:
+// Two copies live in this repo (src/utils/constants.js imports the worker's since #1191):
 //   1. worker/src/fallback.ts     — canonical (Discord alerts, /api/status fallback recommendations)
-//   2. src/utils/constants.js     — frontend (Overview.jsx Action banner, AnalysisModal)
-//   3. api/is-down.ts             — Edge SSR (Is X Down? pages, inline because of the separate
+//   2. api/is-down.ts             — Edge SSR (Is X Down? pages, inline because of the separate
 //                                              compilation surface)
 //
 // Pre-#403 these were synced only by a comment ("Keep in sync with..."). The Junie-as-#1 bug
 // (#402) was the symptom of that drift discipline failing in the *agent* slice; the same failure
-// mode is latent for any future cross-mirror update. This test fails CI when the three diverge.
+// mode is latent for any future cross-mirror update. This test fails CI when the two diverge.
 //
-// File 3 (api/is-down.ts) can't be imported here — Edge Functions and Workers are different
+// File 2 (api/is-down.ts) can't be imported here — Edge Functions and Workers are different
 // compilation surfaces and api/is-down.ts pulls in @vercel/edge types. Read it via fs and check
-// every canonical key appears as a `<key>: <number>,` line. Catches forgotten additions; doesn't
-// catch a typo in the value (acceptable trade-off — the value is a tier number, an off-by-one
-// would be caught by the human reviewer because the fallback recommendation visibly changes).
+// every canonical key appears as a `<key>: <number>,` line.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares, CAPABILITY_TIER as workerCapTier, capabilityOfComponent as workerCapOf, COMPONENT_CAPABILITY as workerCompCap, CAPABILITY_LABEL as workerCapLabel, CAPABILITY_TAG_LABEL as workerCapTagLabel, routedCapability as workerRoutedCap, routingTier as workerRoutingTier, CAPABILITY_PROVIDERS as workerCapProv, isCapabilityProvider as workerIsCapProv, COMPONENT_AUDIO_TAG as workerAudioTag, capabilityTagsOf as workerTagsOf } from '../fallback'
-// Vitest resolves cross-package paths via the repo root; this works because frontend `src/` and
-// worker `src/` share a single repo with one node_modules. The import is data-only (no runtime
-// side effects from constants.js — no environment variables are read at module load).
-import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares, CAPABILITY_TIER as frontendCapTier, capabilityOfComponent as frontendCapOf, COMPONENT_CAPABILITY as frontendCompCap, CAPABILITY_LABEL as frontendCapLabel, CAPABILITY_TAG_LABEL as frontendCapTagLabel, routedCapability as frontendRoutedCap, CAPABILITY_PROVIDERS as frontendCapProv, isCapabilityProvider as frontendIsCapProv, COMPONENT_AUDIO_TAG as frontendAudioTag, capabilityTagsOf as frontendTagsOf } from '../../../src/utils/constants'
+import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares, CAPABILITY_TIER as workerCapTier, capabilityOfComponent as workerCapOf, COMPONENT_CAPABILITY as workerCompCap, CAPABILITY_LABEL as workerCapLabel, CAPABILITY_TAG_LABEL as workerCapTagLabel, routedCapability as workerRoutedCap, routingTier as workerRoutingTier, CAPABILITY_PROVIDERS as workerCapProv, isCapabilityProvider as workerIsCapProv, COMPONENT_AUDIO_TAG as workerAudioTag } from '../fallback'
 
-import { REQUIRED_CAPABILITY as workerRequired, REQUIRED_CAPABILITY_PROVIDERS as workerRequiredProviders, REQUIRED_CAPABILITY_LABEL as workerRequiredLabel, meetsRequiredCapability as workerMeetsRequired } from '../fallback'
-import { REQUIRED_CAPABILITY as frontendRequired, REQUIRED_CAPABILITY_PROVIDERS as frontendRequiredProviders, REQUIRED_CAPABILITY_LABEL as frontendRequiredLabel, meetsRequiredCapability as frontendMeetsRequired } from '../../../src/utils/constants'
+import { REQUIRED_CAPABILITY as workerRequired, REQUIRED_CAPABILITY_PROVIDERS as workerRequiredProviders, REQUIRED_CAPABILITY_LABEL as workerRequiredLabel } from '../fallback'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 
 describe('API_TIER cross-mirror sync (#403)', () => {
-  it('worker/src/fallback.ts ≡ src/utils/constants.js (deep equal)', () => {
-    expect(workerTier).toEqual(frontendTier)
-  })
-
   it('api/is-down.ts inline copy contains every canonical key', () => {
     // The inline literal looks like:  claudecode: 11, codex: 11,
     // We don't reconstruct the full object (would force the file into Vitest's module graph and
@@ -73,15 +61,7 @@ describe('API_TIER cross-mirror sync (#403)', () => {
   })
 })
 
-describe('TIER_LABEL cross-mirror sync (#403)', () => {
-  it('worker/src/fallback.ts ≡ src/utils/constants.js (deep equal)', () => {
-    // Overview.jsx now imports TIER_LABEL from constants.js, so there's no longer a third copy
-    // to compare. If a future contributor reintroduces an inline TIER_LABEL in Overview.jsx,
-    // this test won't catch it directly — but the warn-once `tierLabelFor` helper would fire
-    // on any tier number that the inline copy missed.
-    expect(workerLabel).toEqual(frontendLabel)
-  })
-
+describe('TIER_LABEL coverage (#403)', () => {
   it('every API_TIER value has a matching TIER_LABEL entry', () => {
     // Without this guarantee, `tierLabelFor` returns undefined for known tiers and the grouped
     // fallback display silently degrades to bare category labels — exactly the scenario #403
@@ -93,16 +73,11 @@ describe('TIER_LABEL cross-mirror sync (#403)', () => {
   })
 })
 
-// #857 — pin the cross-mirror sync of EXCLUDE_FALLBACK. Same three copies as API_TIER; before #857 this
+// #857 — pin the cross-mirror sync of EXCLUDE_FALLBACK. Same two copies as API_TIER; before #857 this
 // list was synced only by a "keep in sync" comment. A forgotten drop of a member (e.g. un-excluding
 // pinecone on the dashboard but not on Is-X-Down / Discord) would make a service recommendable on some
 // surfaces but not others — the exact drift class #403 built the API_TIER guard for.
 describe('EXCLUDE_FALLBACK cross-mirror sync (#857)', () => {
-  it('worker/src/fallback.ts ≡ src/utils/constants.js (same set)', () => {
-    // Order is not load-bearing (membership test via .includes), so compare as sorted sets.
-    expect([...workerExclude].sort()).toEqual([...frontendExclude].sort())
-  })
-
   it('api/is-down.ts inline copy contains every canonical member', () => {
     const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
     // The inline literal: const EXCLUDE_FALLBACK = ['replicate', 'huggingface', ...]
@@ -122,48 +97,11 @@ describe('EXCLUDE_FALLBACK cross-mirror sync (#857)', () => {
   })
 })
 
-// #811 — pin the worker ↔ frontend parity of isNonReliabilityAdvisory (worker/src/utils.ts mirrored in
-// src/utils/constants.js). Drift would mean the Discord/RSS fallback (worker) and the dashboard fallback
-// (frontend) disagree on whether a service's advisory incident disqualifies it as a candidate.
-import { isNonReliabilityAdvisory as workerAdvisory } from '../utils'
-import { isNonReliabilityAdvisory as frontendAdvisory } from '../../../src/utils/constants'
-
-describe('isNonReliabilityAdvisory cross-mirror sync (#811)', () => {
-  const CASES = [
-    "We've suspended access to Claude Mythos 5 and Claude Fable 5", // #811 live case → advisory
-    'export control directive — revoke access',                    // #707 AWS case → advisory
-    'Model deprecation: gpt-4-0314 retired',                       // advisory
-    'Scheduled maintenance window',                                // advisory
-    'Codex Usage Limits Depleting Faster Than Expected',           // #1021 live case → advisory
-    'Increased quota for all Pro tiers',                           // #1021 → advisory
-    'Billing system reconciliation delay',                         // #1021 → advisory
-    'Access suspended due to elevated error rates',                // outage signal wins → NOT advisory
-    'Elevated 5xx errors — customers hitting quota limits',        // #1021 outage wins → NOT advisory
-    'Quota errors returned to customers',                          // #1021 `errors?` guard → NOT advisory
-    'Partial outage — API timeouts',                               // outage → NOT advisory
-    'Elevated 5xx on the Messages API',                            // outage → NOT advisory
-    '',                                                            // empty → NOT advisory
-  ]
-  it('worker and frontend classify every case identically', () => {
-    for (const c of CASES) {
-      expect(frontendAdvisory(c), `mismatch for: "${c}"`).toBe(workerAdvisory(c))
-    }
-  })
-  it('the #811 + #707 advisory cases are TRUE; outage/empty are FALSE (sanity, both copies)', () => {
-    expect(workerAdvisory("We've suspended access to Claude Mythos 5 and Claude Fable 5")).toBe(true)
-    expect(frontendAdvisory('Access suspended due to elevated error rates')).toBe(false)
-  })
-})
-
-// #859 — pin the worker ↔ frontend ↔ is-down parity of isSpecializedSubTier (the 4th triplicated
-// piece of fallback logic, after API_TIER / TIER_LABEL / isNonReliabilityAdvisory). A drift here would
+// #859 — pin the worker ↔ is-down parity of isSpecializedSubTier. A drift here would
 // make the SEO is-down pages recommend a cross-tier service while the dashboard/Discord do not (or vice
 // versa) — the exact silent-divergence class this file exists to prevent.
 describe('isSpecializedSubTier cross-mirror sync (#859)', () => {
-  it('worker ≡ frontend across the full tier range + boundaries', () => {
-    for (let tier = 0; tier <= 25; tier++) {
-      expect(frontendIsSpecialized(tier), `tier ${tier} worker/frontend divergence`).toBe(workerIsSpecialized(tier))
-    }
+  it('worker boundaries', () => {
     // Explicit boundary pins so the intent (specialized API sub-tiers 4-10 only) is documented.
     expect([3, 11, 21, 99].some(workerIsSpecialized)).toBe(false) // LLM-router / agents / apps / unknown
     expect([4, 5, 6, 7, 8, 9, 10].every(workerIsSpecialized)).toBe(true) // Voice..Vector (+ headroom)
@@ -186,26 +124,11 @@ describe('isSpecializedSubTier cross-mirror sync (#859)', () => {
   })
 })
 
-// #1062 — pin the worker ↔ frontend ↔ is-down parity of SERVICE_CAPABILITY / sharesCapability (the 5th
-// triplicated piece of fallback logic). A drift here would make one surface cross-recommend STT↔TTS while
+// #1062 — pin the worker ↔ is-down parity of SERVICE_CAPABILITY / sharesCapability. A drift
+// here would make one surface cross-recommend STT↔TTS while
 // another suppresses it — the same silent-divergence class this file guards for API_TIER.
 describe('SERVICE_CAPABILITY cross-mirror sync (#1062)', () => {
-  it('worker/src/fallback.ts ≡ src/utils/constants.js (deep equal)', () => {
-    expect(workerCap).toEqual(frontendCap)
-  })
-
-  it('sharesCapability agrees across worker and frontend for every service pair', () => {
-    // Exhaustive over the capability-tagged ids + a non-tagged control (claude) — the branch that
-    // returns true when either side is untagged must match on both copies too.
-    const ids = [...Object.keys(workerCap), 'claude', 'openai']
-    for (const a of ids) {
-      for (const b of ids) {
-        expect(frontendShares(a, b), `sharesCapability("${a}","${b}") worker/frontend divergence`).toBe(workerShares(a, b))
-      }
-    }
-  })
-
-  it('the STT/TTS intent holds (both copies): TTS↔STT do NOT share, Deepgram bridges both', () => {
+  it('the STT/TTS intent holds: TTS↔STT do NOT share, Deepgram bridges both', () => {
     // ElevenLabs (TTS) and AssemblyAI (STT) are not mutually substitutable; Deepgram (both) is.
     expect(workerShares('elevenlabs', 'assemblyai')).toBe(false)
     expect(workerShares('elevenlabs', 'deepgram')).toBe(true)
@@ -217,7 +140,7 @@ describe('SERVICE_CAPABILITY cross-mirror sync (#1062)', () => {
 
   it('api/is-down.ts inline copy is EXACTLY the canonical map (bidirectional — no extra service / over-broad cap)', () => {
     // Parse the inline literal into an object and deep-equal it against the worker map, mirroring how
-    // workerCap/frontendCap are locked. A one-directional subset check (canonical ⊆ inline) would MISS
+    // workerCap is locked. A one-directional subset check (canonical ⊆ inline) would MISS
     // the drift that re-introduces this very bug: an over-broad inline cap like `elevenlabs:['tts','stt']`
     // would make the Edge surface cross-recommend AssemblyAI to a TTS caller. toEqual catches extras too.
     const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
@@ -242,24 +165,11 @@ describe('SERVICE_CAPABILITY cross-mirror sync (#1062)', () => {
   })
 })
 
-// #1062 facet B — pin the worker ↔ frontend ↔ is-down parity of the capability-ROUTING maps
+// #1062 facet B — pin the worker ↔ is-down parity of the capability-ROUTING maps
 // (COMPONENT_CAPABILITY via capabilityOfComponent + CAPABILITY_TIER). A drift would make one surface
 // route an OpenAI-Images outage to the Image tier while another recommends LLM peers.
 describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet B)', () => {
-  const COMPONENT_NAMES = ['Images', 'Image Generation', 'Sora', 'Video', 'Audio', 'Speech', 'Voice mode',
-    'Transcription', 'Realtime', 'Embeddings', 'Chat Completions', 'Responses', 'Login', 'Fine-tuning']
-
-  it('worker CAPABILITY_TIER ≡ frontend (deep equal)', () => {
-    expect(workerCapTier).toEqual(frontendCapTier)
-  })
-
-  it('capabilityOfComponent agrees across worker and frontend for every representative component name', () => {
-    for (const n of COMPONENT_NAMES) {
-      expect(frontendCapOf(n), `capabilityOfComponent("${n}") worker/frontend divergence`).toBe(workerCapOf(n))
-    }
-  })
-
-  it('the routing intent holds (both copies): modality names map to their capability, else llm', () => {
+  it('the routing intent holds: modality names map to their capability, else llm', () => {
     expect(workerCapOf('Images')).toBe('image')
     expect(workerCapOf('Sora')).toBe('video')
     expect(workerCapOf('Audio')).toBe('audio')
@@ -277,13 +187,6 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     const inline: Record<string, number> = {}
     for (const e of m![1].matchAll(/(\w+):\s*(\d+)/g)) inline[e[1]] = Number(e[2])
     expect(inline).toEqual(workerCapTier)
-  })
-
-  it('worker COMPONENT_CAPABILITY ≡ frontend (regex source + flags + capability)', () => {
-    // Deep-equal the regex BODIES, not just behavior — a weakened pattern (e.g. dropping `speech`/`voice`)
-    // could pass the name-agreement check above if no representative name happened to exercise it.
-    const shape = (list: Array<[RegExp, string]>) => list.map(([re, cap]) => [re.source, re.flags, cap])
-    expect(shape(workerCompCap)).toEqual(shape(frontendCompCap as Array<[RegExp, string]>))
   })
 
   it('api/is-down.ts inline COMPONENT_CAPABILITY carries every canonical regex LITERAL + guards + wires routingTier', () => {
@@ -339,8 +242,7 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
       'is-down must test the id-only guards before the routed-tier lookup').toBe(true)
   })
 
-  it('worker CAPABILITY_LABEL ≡ frontend (deep equal), and only routable caps have a label', () => {
-    expect(workerCapLabel).toEqual(frontendCapLabel)
+  it('only routable caps have a CAPABILITY_LABEL', () => {
     // Every label key must be a routable capability (has a CAPABILITY_TIER entry) — a label for a
     // suppressed cap (embeddings/realtime) would never render, signalling a mistake.
     for (const cap of Object.keys(workerCapLabel)) {
@@ -348,9 +250,7 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     }
   })
 
-  it('#1698 — COMPONENT_AUDIO_TAG worker ≡ frontend ≡ is-down literal, and capabilityTagsOf agrees worker↔frontend', () => {
-    const shape = (list: Array<[RegExp, string]>) => list.map(([re, tag]) => [re.source, re.flags, tag])
-    expect(shape(workerAudioTag)).toEqual(shape(frontendAudioTag as Array<[RegExp, string]>))
+  it('#1698 — COMPONENT_AUDIO_TAG worker ≡ is-down literal', () => {
     const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
     for (const [re, tag] of workerAudioTag) {
       const pair = `[/${re.source}/${re.flags}, '${tag}']`
@@ -358,25 +258,9 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     }
     expect(isDownSource.includes('if (SERVICE_CAPABILITY[entry.id]) return SERVICE_CAPABILITY[entry.id]'), 'is-down targetTags lost the own-tag-first return').toBe(true)
     expect(isDownSource.includes('return tags.size === 1 ? [...tags] : undefined'), 'is-down targetTags lost the single-tag rule').toBe(true)
-    const comps = (arr: Array<[string, string]>) => arr.map(([name, status]) => ({ name, status }))
-    const fixtures = [
-      { id: 'openrouter', components: comps([['Chat', 'operational'], ['TTS (/api/v1/audio/speech)', 'degraded']]) },
-      { id: 'openrouter', components: comps([['Chat', 'operational'], ['STT (/api/v1/audio/transcriptions)', 'degraded']]) },
-      { id: 'openrouter', components: comps([['TTS (/api/v1/audio/speech)', 'degraded'], ['STT (/api/v1/audio/transcriptions)', 'degraded']]) },
-      { id: 'openai', components: comps([['Chat Completions', 'operational'], ['Audio', 'degraded']]) },
-      { id: 'openai', components: comps([['Chat Completions', 'operational'], ['Images', 'down']]) },
-      { id: 'elevenlabs' },
-      { id: 'claude' },
-    ]
-    for (const f of fixtures) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const svc = { category: 'api', status: 'degraded', ...f } as any
-      expect(frontendTagsOf(svc), `capabilityTagsOf worker/frontend divergence for ${JSON.stringify(f)}`).toEqual(workerTagsOf(svc))
-    }
   })
 
-  it('#1129 — worker CAPABILITY_TAG_LABEL ≡ frontend, and every key is a real SERVICE_CAPABILITY sub-tag', () => {
-    expect(workerCapTagLabel).toEqual(frontendCapTagLabel)
+  it('#1129 — every CAPABILITY_TAG_LABEL key is a real SERVICE_CAPABILITY sub-tag', () => {
     // A label for a sub-tag no service carries would never render — guard against a dead entry.
     const realTags = new Set(Object.values(workerCap).flat())
     for (const tag of Object.keys(workerCapTagLabel)) {
@@ -384,7 +268,7 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     }
   })
 
-  it('routedCapability agrees worker↔frontend AND is non-null ⟺ routingTier is a positive tier', () => {
+  it('routedCapability is non-null ⟺ routingTier is a positive tier', () => {
     const comps = (arr: Array<[string, string]>) => arr.map(([name, status]) => ({ name, status }))
     const fixtures = [
       { components: comps([['Chat Completions', 'operational'], ['Images', 'down']]) },        // route image
@@ -401,7 +285,6 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const svc = { id: 'openai', category: 'api', status: 'down', ...f } as any
       const wCap = workerRoutedCap(svc)
-      expect(frontendRoutedCap(svc), `routedCapability worker/frontend divergence for ${JSON.stringify(f)}`).toBe(wCap)
       const tier = workerRoutingTier(svc)
       const isPositiveTier = typeof tier === 'number' && tier > 0
       expect(wCap !== null, `routedCapability non-null must match routingTier positive-tier for ${JSON.stringify(f)}`).toBe(isPositiveTier)
@@ -417,16 +300,10 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
     expect(inline).toEqual(workerCapLabel)
   })
 
-  it('worker CAPABILITY_PROVIDERS ≡ frontend, and isCapabilityProvider agrees over tier + candidate pairs (#1062 facet C)', () => {
-    expect(workerCapProv).toEqual(frontendCapProv)
+  it('every CAPABILITY_PROVIDERS capability has a tier, and OpenAI provides only the capability tiers (#1062 facet C)', () => {
     // Every provider capability must have a CAPABILITY_TIER entry (else isCapabilityProvider never fires).
     for (const cap of Object.keys(workerCapProv)) {
       expect(cap in workerCapTier, `CAPABILITY_PROVIDERS has '${cap}' but no CAPABILITY_TIER entry`).toBe(true)
-    }
-    for (const id of ['openai', 'claude', 'stability']) {
-      for (let tier = 1; tier <= 12; tier++) {
-        expect(frontendIsCapProv(id, tier), `isCapabilityProvider("${id}",${tier}) worker/frontend divergence`).toBe(workerIsCapProv(id, tier))
-      }
     }
     // Intent: OpenAI provides the 3 capability tiers, not the LLM/observability/vector tiers.
     expect([4, 5, 7].every(t => workerIsCapProv('openai', t))).toBe(true)
@@ -449,15 +326,7 @@ describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet
       'is-down filter no longer applies the facet-C widening clause').toBe(true)
   })
 
-  it('worker REQUIRED_CAPABILITY* ≡ frontend, and meetsRequiredCapability agrees over source + candidate pairs (#1725)', () => {
-    expect(workerRequired).toEqual(frontendRequired)
-    expect(workerRequiredProviders).toEqual(frontendRequiredProviders)
-    expect(workerRequiredLabel).toEqual(frontendRequiredLabel)
-    for (const source of ['perplexity', 'groq', 'cohere']) {
-      for (const candidate of ['claude', 'openai', 'gemini', 'xai', 'mistral', 'cohere', 'groq']) {
-        expect(frontendMeetsRequired(source, candidate), `meetsRequiredCapability("${source}","${candidate}") worker/frontend divergence`).toBe(workerMeetsRequired(source, candidate))
-      }
-    }
+  it('every REQUIRED_CAPABILITY has providers and a label (#1725)', () => {
     for (const cap of Object.values(workerRequired)) {
       expect(cap in workerRequiredProviders, `REQUIRED_CAPABILITY needs '${cap}' in REQUIRED_CAPABILITY_PROVIDERS`).toBe(true)
       expect(cap in workerRequiredLabel, `REQUIRED_CAPABILITY needs '${cap}' in REQUIRED_CAPABILITY_LABEL`).toBe(true)

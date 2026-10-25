@@ -4,9 +4,8 @@
 //
 // This MIRRORS `SERVICE_CATEGORIES.<group>.ids` in `src/utils/constants.js` — the frontend can't be
 // imported into the worker bundle (`constants.js` reads `import.meta.env`), so the membership is
-// duplicated here and pinned ↔ that source by `service-groups-sync.test.ts`, exactly as
-// `api-tier-sync.test.ts` pins `API_TIER` (#403). A drift fails CI, so a new service can't be added to
-// one side only.
+// duplicated here and pinned ↔ that source by `service-groups-sync.test.ts`. A drift fails CI, so a
+// new service can't be added to one side only.
 //
 // `all` is a UI-only filter (ids:null) and is intentionally absent here.
 

@@ -12,7 +12,7 @@ import { SERVICES } from '../services'
 import type { ServiceStatus } from '../types'
 // Data-only import across the frontend boundary — works because both `src/` trees share one repo /
 // node_modules (Vitest resolves it), and constants.js reads no env at module load that would throw
-// (import.meta.env is undefined here → its `||` fallback applies). Same as api-tier-sync.test.ts.
+// (import.meta.env is undefined here → its `||` fallback applies).
 import { SERVICE_CATEGORIES } from '../../../src/utils/constants'
 
 // The real (rankable) category buckets — every SERVICE_CATEGORIES key except the UI-only `all` (ids:null).

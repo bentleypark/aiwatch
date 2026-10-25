@@ -124,7 +124,7 @@ const SAFE = {
   'worker/src/report.ts': 'floors the crowd-report window at the earliest active start; a #1623 today-row\'s start is clamped inside its own local day',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — a #1623 today-row is one, and no time is read',
   'src/utils/regionStatus.js': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
-  'src/utils/constants.js': 'active incidents only, as a fallback exclusion — same reading as fallback.ts',
+  'src/utils/constants.js': 'reads no incident field since #1191 — its fallback exclusion calls worker/src/fallback.ts hasActiveIncident. Matches only through JSDoc mentions of `.incidents`',
   'api/_is-down/region-status.ts': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
   'api/is-down.ts': 'active-only for the verdict and fallback; the AI card joins incidents BY ID and a synthesized one is never analyzed (refreshOrReanalyze and the alert path skip it, #1623)',
 
@@ -227,7 +227,7 @@ const RB_SAFE = {
   'worker/src/statusline.ts': 'reads the first non-resolved incident for DISPLAY on the CLI status line — same accepted trade as daily-summary.ts',
   'src/utils/liveIncident.js': 'the shared SPA "still carrying a live incident?" display predicate — no push/alert capability lives in the frontend',
   'src/utils/regionStatus.js': 'active-incidents-only DISPLAY helper — matches the accepted KNOWN LIMIT 1 trade',
-  'src/utils/constants.js': 'active-incidents-only DISPLAY helper — matches the accepted KNOWN LIMIT 1 trade',
+  'src/utils/constants.js': 'reads no incident field since #1191 — worker/src/fallback.ts hasActiveIncident (an RB applier) does. Matches only through JSDoc mentions',
   'api/_is-down/region-status.ts': 'Edge SSR mirror of regionStatus.js — same DISPLAY reasoning',
   'src/components/Sidebar.jsx': 'active incident COUNT for display only — showing it counted is the accepted trade',
   'src/components/Topbar.jsx': 'active incident COUNT for display only — showing it counted is the accepted trade',
@@ -353,7 +353,7 @@ const SU_SAFE = {
   'worker/src/report.ts': 'active incidents only',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — active only',
   'src/utils/regionStatus.js': 'active incidents only',
-  'src/utils/constants.js': 'active incidents only',
+  'src/utils/constants.js': 'reads no incident field since #1191; matches only through JSDoc mentions',
   'api/_is-down/region-status.ts': 'active incidents only',
   'api/is-down.ts': 'active-only for the verdict; the AI card joins by incident id and an anchored one is never analyzed fresh',
 
