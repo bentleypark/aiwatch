@@ -318,10 +318,8 @@ describe('is-down.ts — rank is scoped to the target\'s own confidence tier (#1
   })
 })
 
-// #1186 — is-down.ts's inline orderForFallback (the "🔄 Alternatives" recommendation, a SEPARATE
-// feature from the rank/"#N of M" clause tested above, touched in the same file diff) previously had
-// only a string-pattern check (fallback-order-sync.test.ts) that the mirror exists and has the right
-// shape — never a behavioral test through the real handler. These exercise it end-to-end.
+// #1186 — the "🔄 Alternatives" ordering (a SEPARATE feature from the rank/"#N of M" clause tested
+// above), exercised end-to-end through the real handler.
 describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
   beforeEach(() => { fetchMock = spyFetchWithEmptyReportFeed() })

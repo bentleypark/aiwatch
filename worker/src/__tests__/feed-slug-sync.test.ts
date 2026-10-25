@@ -1,8 +1,8 @@
 // Cross-mirror sync test (#54). The RSS feed in worker/src/rss.ts hand-copies
 // the service-ID ↔ is-down-slug mapping because the Worker bundle cannot import
 // from api/ (Edge vs Worker compilation surfaces). This pins that copy to the
-// canonical source — api/_is-down/slug-map.ts — the same way api-tier-sync.test.ts
-// and region-status-sync.test.ts pin their mirrors. slug-map.ts is pure data
+// canonical source — api/_is-down/slug-map.ts — the same way region-status-sync.test.ts
+// pins its mirror. slug-map.ts is pure data
 // (no @vercel/edge imports) so a Vitest test can import it directly.
 
 import { describe, it, expect } from 'vitest'

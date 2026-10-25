@@ -12,8 +12,7 @@
 //
 // renderPage IS importable, so the interpolation + arg binding are pinned by rendering a real page
 // rather than by regex. api/is-down.ts is an Edge Function (it pulls @vercel/edge types and runs a
-// fetch at module scope), so its call site is pinned via fs — the `api-tier-sync.test.ts` (#403)
-// precedent for a cross-surface pin.
+// fetch at module scope), so its call site is pinned via fs.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'

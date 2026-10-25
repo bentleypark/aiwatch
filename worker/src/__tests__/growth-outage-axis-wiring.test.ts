@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// #1117 — source-scan wiring guard, in the repo's sync-test idiom (ai-usage-wiring / api-tier-sync /
+// #1117 — source-scan wiring guard, in the repo's sync-test idiom (ai-usage-wiring /
 // feed-slug-sync).
 //
 // WHAT THIS IS NOT: proof that the axis is correct in production. Nothing in this repo invokes the

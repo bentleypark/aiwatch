@@ -53,8 +53,7 @@ describe('buildCsp (#482)', () => {
 
 // Drift pin (review #482 PR1): buildCsp MUST stay byte-identical to the SPA's vercel.json policy,
 // modulo the added `'nonce-…'`. Otherwise a new origin added to vercel.json (e.g. a connect-src)
-// silently gives the migrated Edge pages a stale, more-restrictive policy. Mirrors the repo's
-// other sync-pin tests (api-tier-sync, feed-slug-sync).
+// silently gives the migrated Edge pages a stale, more-restrictive policy.
 describe('buildCsp ↔ vercel.json drift pin (#482)', () => {
   it('matches the vercel.json CSP directive-for-directive (modulo the nonce vs SPA hashes)', () => {
     // vitest runs from the repo root (cwd), where vercel.json lives.

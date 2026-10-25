@@ -13,7 +13,7 @@
 // appends — the #475 boundary, whose failure would relay operator-only content to every subscriber.
 //
 // index.ts can't be imported here (it pulls the Workers runtime + every binding), so read it via fs —
-// the upstream-link-wiring.test.ts (#1053) / api-tier-sync.test.ts (#403) precedent.
+// the upstream-link-wiring.test.ts (#1053) precedent.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'

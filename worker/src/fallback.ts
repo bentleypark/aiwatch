@@ -29,9 +29,6 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'ch
 //
 // A candidate whose Score has no incident and no probe behind it sorts after those with evidence
 // (orderForFallback, #1682).
-//
-// Exported for the cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) — that test
-// is the only safeguard against drift between this map and the api/is-down.ts inline copy (#403).
 export const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
   cohere: 1.5, deepseek: 1.5, kimi: 1.5, perplexity: 1.5,
@@ -67,7 +64,7 @@ export const API_TIER: Record<string, number> = {
 
 // #403 — surfaces the silent-fallback failure mode that produced #402 (Junie-as-#1) without
 // changing the runtime behavior. When a service id isn't in API_TIER (typo, forgotten entry on a
-// new service, partial cross-mirror sync), the lookup still resolves to 99 — but the Cloudflare
+// new service), the lookup still resolves to 99 — but the Cloudflare
 // Worker logs now carry a one-time breadcrumb so the next "why is fallback ordering weird?" debug
 // session has a starting point. Module-scoped Set so the warning is throttled per worker isolate;
 // repeated calls for the same id stay quiet.
@@ -164,9 +161,7 @@ export function isSpecializedSubTier(tier: number): boolean {
 // `isSpecializedSubTier`'s same-tier gate alone still cross-recommended STT↔TTS (ElevenLabs down →
 // AssemblyAI). Each tag is AIWatch's MODELLING of a service's primary substitutable capability, not a
 // claim about the vendor's full API surface: `elevenlabs:['tts']` (text-to-speech), `assemblyai:['stt']`
-// (transcription), `deepgram:['stt','tts']` (both). Keep in lockstep with the api/is-down.ts inline
-// copy: api-tier-sync.test.ts deep-equals the DATA and asserts the is-down filter WIRING;
-// the 3-line sharesCapability body is kept identical by hand.
+// (transcription), `deepgram:['stt','tts']` (both).
 export const SERVICE_CAPABILITY: Record<string, string[]> = {
   elevenlabs: ['tts'],
   assemblyai: ['stt'],
@@ -188,7 +183,7 @@ export function sharesCapability(a: string, b: string, aTags: string[] | undefin
 // #1062 facet B — a status-page component NAME (keyword) → the capability it represents. A multi-
 // capability service's page names distinct surfaces ("Images"/"Audio"/"Embeddings") separately
 // from its primary LLM/chat surface ("Chat Completions"/"Responses"). First match wins; anything
-// unmatched is the primary capability 'llm'. Keep in lockstep with the api/is-down.ts copy + api-tier-sync.test.ts.
+// unmatched is the primary capability 'llm'.
 // FRAGILITY (accepted): the signal is coupled to today's status-page component NAMES and the list order.
 // First-match means "Realtime Audio" would map to `audio` (matched before `realtime`); a rename that
 // drops the keyword (OpenAI 'Images' → 'DALL·E') silently falls to `llm` → default LLM peers. Both fail
@@ -225,8 +220,8 @@ export const ROUTE_SUPPRESS = -1
 // #1062 facet B — the human label a ROUTED group is shown under, so the recommendation self-describes
 // WHY it switched: a routed OpenAI-'Images' outage reads "Image generation → Stability AI · FLUX", not a
 // bare tier "Image → …" that leaves the reader guessing why an image tool is offered for an OpenAI
-// outage. Distinct from TIER_LABEL (the category, "Image"): this names the affected CAPABILITY. Keep in
-// lockstep with the api/is-down.ts copy (pinned by api-tier-sync.test.ts). Only the routable caps need an entry.
+// outage. Distinct from TIER_LABEL (the category, "Image"): this names the affected CAPABILITY. Only the
+// routable caps need an entry.
 export const CAPABILITY_LABEL: Record<string, string> = {
   image: 'Image generation',
   video: 'Video generation',
@@ -241,8 +236,7 @@ export const CAPABILITY_LABEL: Record<string, string> = {
 // ('Text to speech' vs the general 'Audio / speech') removes that duplication and self-describes which
 // half is down, matching #1062's "label says WHY it switched". Audio-only today (the only tagged
 // services are audio), and applied ONLY when the routed cap is 'audio', so a tagged service that ever
-// routes to another tier can never be mislabelled by an audio sub-tag. NOT mirrored into is-down,
-// which shows one service and never groups.
+// routes to another tier can never be mislabelled by an audio sub-tag.
 // Scope: this only distinguishes a SINGLE-sub-capability anchor. Two GENERAL-audio anchors — an untagged
 // multimodal (openai `Audio`) or the both-tagged `deepgram` — still share 'Audio / speech' if they anchor
 // concurrently; that is by design (general audio has no finer name), a rarer pairing than the tts-vs-general
@@ -259,7 +253,6 @@ export const CAPABILITY_TAG_LABEL: Record<string, string> = {
 // overall status (worst-of those) is a faithful proxy for the capability's health — an operational
 // OpenAI necessarily has an operational image/audio component. `video` is the exception: no monitored OpenAI component maps to it (fallback-tiers.md). Gemini's Imagen/Veo are SEPARATE
 // Vertex products AIWatch does not monitor (no components[]), so it cannot be included faithfully.
-// Keep in lockstep with the api/is-down.ts copy (pinned by api-tier-sync.test.ts).
 export const CAPABILITY_PROVIDERS: Record<string, string[]> = {
   image: ['openai'],
   video: ['openai'],
@@ -278,7 +271,7 @@ export function isCapabilityProvider(candidateId: string, sourceTier: number): b
 
 // #1725 — a source that requires a capability its tier peers may lack (Perplexity → web search): only that
 // capability's providers qualify. Separate from CAPABILITY_PROVIDERS, which widens a specialized tier's
-// pool. Provider evidence: docs/reference/fallback-tiers.md. Mirror: api/is-down.ts.
+// pool. Provider evidence: docs/reference/fallback-tiers.md.
 export const REQUIRED_CAPABILITY: Record<string, string> = {
   perplexity: 'search',
 }
@@ -313,7 +306,7 @@ export function meetsRequiredCapability(sourceId: string, candidateId: string): 
 // the component that drove the outage can be ABSENT from components[] → degraded.size === 0 →
 // default tier. Acceptable — it fails to the default, never to a wrong capability — but do not
 // assume the two sets agree; verify when adding a service.
-export function routingTier(svc: FallbackCandidate | undefined): number | null {
+export function routingTier(svc: Pick<FallbackCandidate, 'id' | 'components'> | undefined): number | null {
   const comps = svc?.components
   if (!comps || comps.length === 0) return null
   const degraded = new Set(
@@ -328,7 +321,7 @@ export function routingTier(svc: FallbackCandidate | undefined): number | null {
 // peer tier), else null. Companion to routingTier: routedCapability(svc) is non-null ⟺ routingTier(svc)
 // is a positive tier (pinned by a unit test). getGroupedFallbacks reads it to LABEL the routed group by
 // capability ("Image generation") instead of the bare tier ("Image"), so the routing is self-describing.
-export function routedCapability(svc: FallbackCandidate | undefined): string | null {
+export function routedCapability(svc: Pick<FallbackCandidate, 'id' | 'components'> | undefined): string | null {
   const comps = svc?.components
   if (!comps || comps.length === 0) return null
   const degraded = new Set(
@@ -347,7 +340,7 @@ export const COMPONENT_AUDIO_TAG: Array<[RegExp, string]> = [
 
 /** #1698 — the capability tags this service's outage stands for: its own SERVICE_CAPABILITY entry, else
  *  the one tag its degraded components name (undefined if none or both). */
-export function capabilityTagsOf(svc: FallbackCandidate | undefined): string[] | undefined {
+export function capabilityTagsOf(svc: Pick<FallbackCandidate, 'id' | 'components'> | undefined): string[] | undefined {
   if (!svc) return undefined
   if (SERVICE_CAPABILITY[svc.id]) return SERVICE_CAPABILITY[svc.id]
   const tags = new Set<string>()
@@ -547,8 +540,7 @@ export function getFallbacks(
     // members are deliberately absent from API_TIER, and the source itself may be an id it doesn't
     // carry — so
     // letting a tier lookup see either fires `tierFor`'s warn-once, the #402/#403 "someone forgot a tier
-    // entry" breadcrumb, for services where nothing is wrong. On the Edge mirror that warn set is
-    // per-REQUEST, so it would be false alarms on every routed page view, drowning the real signal.
+    // entry" breadcrumb, for services where nothing is wrong.
     .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== serviceId
       && (routedCross ? inSourceTier(s.id) : s.category === category)
       && isLiveCandidate(s)

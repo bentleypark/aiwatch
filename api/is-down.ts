@@ -5,6 +5,10 @@ import { getSEOContent } from './_is-down/seo-content'
 import { renderPage } from './_is-down/html-template'
 import type { RecoveryBaseline } from '../worker/src/recovery-baseline-text'
 import { substituteGroupsFor, pickSubstitutes } from './_shared/substitutes'
+import {
+  EXCLUDE_FALLBACK, ROUTE_SUPPRESS, CAPABILITY_LABEL, tierFor, isSpecializedSubTier, sharesCapability,
+  isCapabilityProvider, meetsRequiredCapability, routingTier, routedCapability, capabilityTagsOf, orderForFallback,
+} from '../worker/src/fallback'
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
@@ -33,8 +37,6 @@ function readEnv(name: string): string | undefined {
 const workerApi = readEnv('VERCEL_ENV') === 'production'
   ? WORKER_API
   : readEnv('AIWATCH_WORKER_API') || WORKER_API
-// Keep in sync with worker/src/fallback.ts and src/utils/constants.js
-const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8); #880 — voyageai un-excluded (embeddings sibling Jina added, tier 9)
 
 // #378: notify the Worker when this Edge Function falls back to a degraded render so an operator
 // Discord alert fires. Worker handles 5-min KV dedup, so fan-out across concurrent requests
@@ -228,121 +230,19 @@ export default async function handler(req: Request) {
         }
 
         // Build fallbacks from same data (tier-based priority for API services + coding agents)
-        // Cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) reads this file via fs
-        // and asserts every key in worker/src/fallback.ts API_TIER appears here, so a partial sync
-        // fails CI. The inline copy is necessary because the Edge Function bundle can't pull from
-        // worker/src/* (separate compilation surface).
-        const API_TIER: Record<string, number> = {
-          claude: 1, openai: 1, gemini: 1, xai: 1, mistral: 1,
-          cohere: 1.5, deepseek: 1.5, kimi: 1.5, perplexity: 1.5,
-          groq: 2, together: 2, fireworks: 2, cerebras: 2,
-          bedrock: 3, azureopenai: 3, openrouter: 3,
-          elevenlabs: 4, assemblyai: 4, deepgram: 4, fishaudio: 4,
-          runway: 5, luma: 5, // Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts
-          langsmith: 6, helicone: 6, langfuse: 6, // Observability (#601) — keep in sync with worker/src/fallback.ts
-          stability: 7, bfl: 7, // Image (#756) — keep in sync with worker/src/fallback.ts
-          pinecone: 8, turbopuffer: 8, // Vector (#857) — keep in sync with worker/src/fallback.ts
-          voyageai: 9, jina: 9, // Embeddings (#880) — keep in sync with worker/src/fallback.ts
-          claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11, // Coding agents (#1027) — one tier; keep in sync with worker/src/fallback.ts
-          chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21, grok: 21, kimiapp: 21,
-        }
-        // Inline tierFor — same warn-once shape as worker/src/fallback.ts.
-        // The Edge Function runs once per request so the warned set is functionally a one-shot per
-        // request, not per session — still useful for surfacing typos in the access log.
-        const warnedTierIds = new Set<string>()
-        const tierFor = (id: string): number => {
-          const t = API_TIER[id]
-          if (t !== undefined) return t
-          if (!warnedTierIds.has(id)) {
-            warnedTierIds.add(id)
-            console.warn(`[is-down/${slug}] no API_TIER for service "${id}" — falling back to 99 (Score-only ordering)`)
-          }
-          return 99
-        }
-        // #1062 — inline mirror of worker/src/fallback.ts SERVICE_CAPABILITY / sharesCapability. The Voice
-        // tier (4) mixes STT/TTS (AIWatch models elevenlabs=tts, assemblyai=stt, deepgram=both — the
-        // primary substitutable capability, not the vendor's full surface), so the same-tier gate alone
-        // still cross-recommended STT↔TTS.
-        // api-tier-sync.test.ts deep-equals this DATA block vs the worker copy AND asserts the filter still
-        // calls sharesCapability below; the 3-line body is kept identical to the worker copy by hand.
-        const SERVICE_CAPABILITY: Record<string, string[]> = {
-          elevenlabs: ['tts'], assemblyai: ['stt'], deepgram: ['stt', 'tts'], fishaudio: ['tts'],
-        }
-        const sharesCapability = (a: string, b: string, aTags: string[] | undefined = SERVICE_CAPABILITY[a]): boolean => {
-          const ca = aTags, cb = SERVICE_CAPABILITY[b]
-          if (!ca || !cb) return true
-          return ca.some(c => cb.includes(c))
-        }
-        // #1062 facet B — inline mirror of worker/src/fallback.ts routingTier. When THIS service's own
-        // component snapshot shows ONLY a single secondary-capability surface degraded (e.g. OpenAI
-        // 'Images' down, 'Chat Completions' operational), route the fallback to that capability's tier
-        // instead of LLM peers; a capability with no CAPABILITY_TIER entry (realtime) suppresses. Keep identical to the worker copy: api-tier-sync.test.ts pins this via
-        // SOURCE match (Edge can't be imported) — CAPABILITY_TIER deep-equal, each COMPONENT_CAPABILITY
-        // [regex, cap] literal, the routingTier guards (has('llm') / size>1 / route-else-suppress), and the
-        // routingTier(target) wiring. Not execution-verified; keep the body byte-identical to the worker.
-        const COMPONENT_CAPABILITY: Array<[RegExp, string]> = [
-          [/image/i, 'image'], [/\b(sora|video)\b/i, 'video'],
-          [/audio|speech|voice|transcri/i, 'audio'], [/embed/i, 'embeddings'], [/realtime/i, 'realtime'],
-        ]
-        const CAPABILITY_TIER: Record<string, number> = { image: 7, video: 5, embeddings: 9, audio: 4 }
-        const CAPABILITY_LABEL: Record<string, string> = { image: 'Image generation', video: 'Video generation', audio: 'Audio / speech', embeddings: 'Embeddings' }
-        // #1062 facet C — inline mirror. Multimodal providers admitted into a dedicated capability tier's
-        // candidate pool (only OpenAI has monitored image/audio components → faithful health proxy; `video` has none, see fallback-tiers.md).
-        const CAPABILITY_PROVIDERS: Record<string, string[]> = { image: ['openai'], video: ['openai'], audio: ['openai'] }
-        const isCapabilityProvider = (candidateId: string, srcTier: number): boolean => {
-          const cap = Object.keys(CAPABILITY_TIER).find(k => CAPABILITY_TIER[k] === srcTier)
-          return cap ? (CAPABILITY_PROVIDERS[cap]?.includes(candidateId) ?? false) : false
-        }
-        // #1725 — inline mirror of worker/src/fallback.ts REQUIRED_CAPABILITY* / meetsRequiredCapability.
-        const REQUIRED_CAPABILITY: Record<string, string> = { perplexity: 'search' }
-        const REQUIRED_CAPABILITY_PROVIDERS: Record<string, string[]> = { search: ['claude', 'openai', 'gemini', 'xai', 'mistral'] }
-        const meetsRequiredCapability = (sourceId: string, candidateId: string): boolean => {
-          const need = REQUIRED_CAPABILITY[sourceId]
-          return need ? (REQUIRED_CAPABILITY_PROVIDERS[need]?.includes(candidateId) ?? false) : true
-        }
-        const ROUTE_SUPPRESS = -1
-        const routingTier = (svc?: { components?: Array<{ name: string; status: string }> }): number | null => {
-          const comps = svc?.components
-          if (!comps || comps.length === 0) return null
-          const degraded = new Set(comps.filter(c => c.status !== 'operational').map(c => {
-            for (const [re, cap] of COMPONENT_CAPABILITY) if (re.test(c.name)) return cap
-            return 'llm'
-          }))
-          if (degraded.size === 0 || degraded.has('llm') || degraded.size > 1) return null
-          const cap = [...degraded][0]
-          return cap in CAPABILITY_TIER ? CAPABILITY_TIER[cap] : ROUTE_SUPPRESS
-        }
         const routed = routingTier(target)
-        // #1698 — inline mirror of worker capabilityTagsOf / COMPONENT_AUDIO_TAG.
-        const COMPONENT_AUDIO_TAG: Array<[RegExp, string]> = [
-          [/\btts\b/i, 'tts'],
-          [/\bstt\b|transcri/i, 'stt'],
-        ]
-        const targetTags = ((): string[] | undefined => {
-          if (SERVICE_CAPABILITY[entry.id]) return SERVICE_CAPABILITY[entry.id]
-          const tags = new Set<string>()
-          for (const c of target?.components ?? []) {
-            if (c.status === 'operational') continue
-            const tag = COMPONENT_AUDIO_TAG.find(([re]) => re.test(c.name))?.[1]
-            if (tag) tags.add(tag)
-          }
-          return tags.size === 1 ? [...tags] : undefined
-        })()
-        // #1062 facet B — human label for a routed outage's capability, so the is-down "🔄 Alternatives"
-        // heading reads "Alternatives for image generation" (self-describing). Derived by inverting
-        // CAPABILITY_TIER on the routed tier (injective); undefined when the outage does not route.
-        if (typeof routed === 'number' && routed > 0) {
-          const cap = Object.keys(CAPABILITY_TIER).find(k => CAPABILITY_TIER[k] === routed)
-          fallbackCapabilityLabel = cap ? CAPABILITY_LABEL[cap] : undefined
-        }
+        const targetTags = capabilityTagsOf(target)
+        // #1062 facet B — a routed outage names its capability in the "🔄 Alternatives" heading.
+        const routedCap = routedCapability(target)
+        if (routedCap) fallbackCapabilityLabel = CAPABILITY_LABEL[routedCap]
         if (!EXCLUDE_FALLBACK.includes(entry.id) && routed !== ROUTE_SUPPRESS && !target?.fallbackSuppressed) { // #880
           const sourceTier = routed ?? tierFor(entry.id)
           // #859 — a specialized non-LLM API sub-tier recommends its OWN tier only (no cross-tier bleed); LLM tiers 1-3 keep cross-tier
-          // fill among themselves (#1748). Mirror of worker/src/fallback.ts isSpecializedSubTier (range 4-10). Inline here like tierFor.
-          const sameTierOnly = sourceTier >= 4 && sourceTier <= 10
+          // fill among themselves (#1748).
+          const sameTierOnly = isSpecializedSubTier(sourceTier)
           const inSourceTier = (id: string) => tierFor(id) === sourceTier
           const admittedBySubTier = (id: string) => inSourceTier(id) || isCapabilityProvider(id, sourceTier)
-          // #1119 — inline mirror of the worker rule (full rationale in worker/src/fallback.ts
+          // #1119 — the worker rule (full rationale in worker/src/fallback.ts
           // getFallbacks): a ROUTED outage draws from the CAPABILITY's tier, so the source's category
           // must not gate it — an `app` ChatGPT image outage has to reach the `api` image tier, which
           // the unconditional category filter emptied into NO recommendation at all. Only the routed
@@ -351,83 +251,6 @@ export default async function handler(req: Request) {
           // routed ChatGPT image outage with "try OpenAI API" — same provider, developer console);
           // api → app/agent stays impossible because no CAPABILITY_TIER value is an app/agent tier.
           const routedCross = routed !== null && routed > 0
-          // #1186 — inline mirror of worker/src/fallback.ts orderForFallback (see there for the full
-          // design history — attempt 1 [return 0 on confidence mismatch: breaks Array.sort transitivity
-          // with 3+ candidates], attempt 2 ["confidence always wins": structurally excludes medium
-          // whenever 2+ high peers exist], attempt 3 [1-per-tier-per-round: over-corrected — a size-1
-          // medium tier got the SAME guaranteed slot as a size-9 high tier, and a 'low'/withheld-score
-          // candidate got its own round-0 slot, defeating the `?? 0` sink]). Final design: 'low'/no-
-          // confidence NEVER compete for an early slot (Score-sorted, appended after — restores the
-          // `?? 0` sink); 'high'/'medium' interleave PROPORTIONALLY by rank fraction within their own
-          // tier `(rank + 0.5) / tierSize` — ties favor 'high'. A small medium tier still gets a fair
-          // shot when pools are comparable in size, and naturally fades out as the high pool grows
-          // relative to it — no magic threshold, the fraction IS the rule.
-          type OrderCandidate = {
-            id: string
-            aiwatchScore?: number | null
-            scoreConfidence?: string
-            scoreMetrics?: { incidents30d?: number | null } | null
-            scoreBreakdown?: { responsivenessStatus?: string | null } | null
-          }
-          // #1682 — the Score's own evidence is empty: no incident in its 30-day window and no probe
-          // behind its Responsiveness. Read from what the Score used, not re-derived. Absent fields
-          // mean "unknown".
-          const isUncorroborated = (c: OrderCandidate): boolean =>
-            c.scoreConfidence === 'high' && c.scoreMetrics?.incidents30d === 0 && c.scoreBreakdown?.responsivenessStatus === 'unsupported'
-          const orderForFallback = <T extends OrderCandidate>(
-            candidates: T[],
-          ): T[] => {
-            const byDistance = new Map<number, T[]>()
-            for (const c of candidates) {
-              const dist = Math.abs(tierFor(c.id) - sourceTier)
-              const group = byDistance.get(dist)
-              if (group) group.push(c)
-              else byDistance.set(dist, [c])
-            }
-            const distances = [...byDistance.keys()].sort((a, b) => a - b)
-            const result: T[] = []
-            for (const dist of distances) {
-              const group = byDistance.get(dist)!
-              const byConfidence = new Map<string, T[]>()
-              for (const c of group) {
-                const key = isUncorroborated(c) ? 'uncorroborated' : (c.scoreConfidence ?? '__none__')
-                const bucket = byConfidence.get(key)
-                if (bucket) bucket.push(c)
-                else byConfidence.set(key, [c])
-              }
-              for (const bucket of byConfidence.values()) {
-                bucket.sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
-              }
-              // Interleave 'high'/'medium' proportionally by rank fraction within their own tier. Ties
-              // favor 'high' (index 0 below), matching the already-agreed tiebreak for an incomparable
-              // Score case.
-              const interleaved: Array<{ item: T; pos: number; priority: number }> = []
-              ;(['high', 'medium'] as const).forEach((key, priority) => {
-                const bucket = byConfidence.get(key)
-                if (!bucket) return
-                bucket.forEach((item, rank) => {
-                  interleaved.push({ item, pos: (rank + 0.5) / bucket.length, priority })
-                })
-              })
-              interleaved.sort((a, b) => a.pos - b.pos || a.priority - b.priority)
-              result.push(...interleaved.map((e) => e.item))
-              result.push(...(byConfidence.get('uncorroborated') ?? []))
-              // 'low' (score withheld), '__none__' (no confidence signal), and any OTHER value never
-              // compete for an early slot — appended after, Score-sorted among themselves (mirrors the
-              // old `?? 0` sink). Iterates every REMAINING bucket rather than a hardcoded
-              // ['low', '__none__'] pair — a candidate with a scoreConfidence outside {high,medium,low}
-              // (a legacy KV record predating this field, or a future value) must sink here, not
-              // silently vanish from the recommendation.
-              for (const [key, bucket] of byConfidence) {
-                if (key === 'high' || key === 'medium' || key === 'uncorroborated') continue
-                if (key !== 'low' && key !== '__none__') {
-                  console.warn(`[is-down] unrecognized scoreConfidence "${key}" on ${bucket.map((c) => c.id).join(', ')} — sinking below high/medium instead of dropping`)
-                }
-                result.push(...bucket)
-              }
-            }
-            return result
-          }
           const isLiveCandidate = (s: (typeof allServices)[number]) => s.status === 'operational'
             // #1384 — a `retainedBridge` entry (worker/src/services.ts `mergeRetainedIncidentHistory`)
             // unresolved at migration time never resolves for the life of the finite migration
@@ -440,7 +263,7 @@ export default async function handler(req: Request) {
           const listed = substituteGroupsFor(entry.id, fallbackCapabilityLabel ?? null)
           if (listed) {
             const clean = allServices.filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id && isLiveCandidate(s))
-            fallbackGroups = pickSubstitutes(listed, clean, (inGroup) => orderForFallback(inGroup))
+            fallbackGroups = pickSubstitutes(listed, clean, (inGroup) => orderForFallback(inGroup, sourceTier))
               .map(({ group, items }) => ({ use: group.use, items: items.map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status })) }))
             fallbacks = fallbackGroups.flatMap(g => g.items)
           } else fallbacks = orderForFallback(allServices
@@ -454,17 +277,16 @@ export default async function handler(req: Request) {
             // docs/reference/status-determination.md.
             // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either.
             // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the deliberately-untiered
-            // services. `warnedTierIds` above is per-REQUEST on the Edge, so a routed page would
-            // otherwise log six "no API_TIER" false alarms on EVERY view (#402/#403 breadcrumb).
+            // services (#402/#403 breadcrumb).
             .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id
               && (routedCross ? inSourceTier(s.id) : s.category === entry.category)
               && isLiveCandidate(s)
               // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
-              && (sameTierOnly ? admittedBySubTier(s.id) : !(tierFor(s.id) >= 4 && tierFor(s.id) <= 10))
+              && (sameTierOnly ? admittedBySubTier(s.id) : !isSpecializedSubTier(tierFor(s.id)))
               // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
               && sharesCapability(entry.id, s.id, targetTags)
               // #1725 — a ROUTED outage draws from the routed tier, where the list does not apply
-              && (routedCross || meetsRequiredCapability(entry.id, s.id))))
+              && (routedCross || meetsRequiredCapability(entry.id, s.id))), sourceTier)
             .slice(0, 2)
             .map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status }))
         }

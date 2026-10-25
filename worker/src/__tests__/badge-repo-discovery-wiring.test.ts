@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // #1158 — source-scan wiring guard, in the repo's sync-test idiom (badge-wiring.test.ts /
-// ai-usage-wiring.test.ts / api-tier-sync.test.ts).
+// ai-usage-wiring.test.ts).
 //
 // #1157 shipped the exact failure mode this guards against: a `queryBadgeTraffic` result computed
 // in index.ts's cron assembly but never threaded into the `buildDailySummary({...})` call object —
