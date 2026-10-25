@@ -1,8 +1,8 @@
 // #1068 — pin the worker fine-category mirror (service-groups.ts GROUP_MEMBERS) ↔ the frontend source
 // of truth (src/utils/constants.js SERVICE_CATEGORIES). The worker exposes this on /api/v1/status as
 // `group`; the frontend drives the sidebar/Overview filters. They MUST agree — a service added to one
-// side only would make the public API's `group` disagree with the dashboard. Same discipline as
-// api-tier-sync.test.ts (#403): a drift fails CI, so it can't be added to one side only.
+// side only would make the public API's `group` disagree with the dashboard. A drift fails CI, so it
+// can't be added to one side only.
 
 import { describe, it, expect } from 'vitest'
 import workerModule from '../index'

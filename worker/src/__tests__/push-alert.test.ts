@@ -161,7 +161,7 @@ describe('#1021 → #1184 pipeline: a real advisory never reaches the push', () 
 // Sync invariant: PUSH_SCOPE ⊆ TWEET_SEARCH_TERMS. The cron's push Click target is
 // buildTweetSearchUrl(target.svcId); if a service is added to PUSH_SCOPE but not to
 // TWEET_SEARCH_TERMS, the push still fires but the tap falls back to a generic URL (silent
-// regression). Pin it here, mirroring tweet-search-scope.test.ts / api-tier-sync.test.ts.
+// regression). Pin it here, mirroring tweet-search-scope.test.ts.
 describe('PUSH_SCOPE ⊆ TWEET_SEARCH_TERMS (push Click-target resolves)', () => {
   it.each([...PUSH_SCOPE])('buildTweetSearchUrl resolves a Top-search URL for push-scope %s', (id) => {
     expect(buildTweetSearchUrl(id)).not.toBeNull()

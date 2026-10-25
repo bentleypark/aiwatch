@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// #1003 — source-scan invariant, in the repo's sync-test idiom (feed-slug-sync / api-tier-sync).
+// #1003 — source-scan invariant, in the repo's sync-test idiom (feed-slug-sync).
 //
 // The bug this PR fixes was not in a helper — it was in ONE of the write paths to
 // `ai:analysis:{svcId}:{incId}`: the re-analysis overwrite replaced the original recovery estimate

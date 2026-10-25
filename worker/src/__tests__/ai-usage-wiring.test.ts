@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // #1080 — source-scan wiring guard, in the repo's sync-test idiom (first-estimate-write-paths /
-// api-tier-sync / feed-slug-sync).
+// feed-slug-sync).
 //
 // WHAT THIS IS NOT: proof that the #882 hold works. Nothing in this repo invokes the cron `scheduled`
 // handler, so the hold/release path has no behavioral harness — that absence is precisely why #882 is

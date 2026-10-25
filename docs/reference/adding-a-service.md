@@ -62,7 +62,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 7. `src/hooks/useSettings.js` — new services auto-inserted at canonical position in `enabledServices` (no change needed, but verify logic works)
 8. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for official status page link
 9. `src/pages/Overview.jsx` — a new `SERVICE_CATEGORIES` bucket also goes in `SECTION_KEYS` (step 5)
-10. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
+10. `api/is-down.ts` — `API_TIER` / `EXCLUDE_FALLBACK`: nothing to do, imported from `worker/src/fallback.ts` (step 3)
 10a. `api/_is-down/slug-map.ts` — add a `SLUG_TO_SERVICE` entry with BOTH `category` (coarse `api`/`app`/`agent`, mirrors worker `ServiceStatus.category` — used by the is-down fallback filter) AND `group` (fine 6-way `apps`/`llm`/`voice`/`inference`/`video`/`agents`, mirrors `SERVICE_CATEGORIES` — drives the footer "Also check" grouping via `FOOTER_CATEGORY_ORDER`, #658). Also add `RELATED_SLUGS` cross-links. Coverage is pinned by `api/_is-down/__tests__/html-template.test.ts`.
 10b. (region-aware services only) Region data lives in TWO cross-mirrored copies — both must update together. The sync is pinned by `worker/src/__tests__/region-status-sync.test.ts`:
    - `src/utils/regionStatus.js` — frontend (ServiceDetails RegionalAvailability card, Overview ActionBanner region line). Canonical source for the sync test.

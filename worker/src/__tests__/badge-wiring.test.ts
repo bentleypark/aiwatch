@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// #1157 — source-scan wiring guard, in the repo's sync-test idiom (ai-usage-wiring / api-tier-sync /
+// #1157 — source-scan wiring guard, in the repo's sync-test idiom (ai-usage-wiring /
 // first-estimate-write-paths).
 //
 // WHAT THIS IS NOT: a substitute for daily-summary.test.ts's `buildDailySummary({...badgeTraffic})`

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// #820 — source-scan wiring guard, in the repo's sync-test idiom (ai-usage-wiring / api-tier-sync).
+// #820 — source-scan wiring guard, in the repo's sync-test idiom (ai-usage-wiring).
 //
 // WHAT THIS IS NOT: proof that a real Reddit block produces a real Discord warning. Nothing in this
 // repo invokes the cron `scheduled` handler, so that path has no behavioral harness. The decision

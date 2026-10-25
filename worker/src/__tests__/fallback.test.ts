@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SERVICES } from '../services'
 import { COMPONENT_CAPABILITY, getFallbacks, buildFallbackText, buildGroupedFallbackText, fallbackEmbedSection, getGroupedFallbacks, orderForFallback, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier, routingTier, capabilityOfComponent, effectiveTierFor, CAPABILITY_TIER, isCapabilityProvider, CAPABILITY_PROVIDERS } from '../fallback'
 import { REQUIRED_CAPABILITY, REQUIRED_CAPABILITY_PROVIDERS, meetsRequiredCapability } from '../fallback'
+import { TIER_LABEL, SERVICE_CAPABILITY, sharesCapability, CAPABILITY_LABEL, CAPABILITY_TAG_LABEL, routedCapability, REQUIRED_CAPABILITY_LABEL } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -1813,5 +1814,100 @@ describe('#1753 — listed services recommend their substitute lists', () => {
     const hosting = (order: string[]) => getGroupedFallbacks(order, services).filter((g) => g.label === 'LLM Hosting')
     expect(hosting(['together', 'openrouter'])).toEqual(hosting(['openrouter', 'together']))
     expect(hosting(['together', 'openrouter'])).toHaveLength(1)
+  })
+})
+
+describe('fallback config invariants (#403 / #859 / #1062 / #1129 / #1725)', () => {
+  it('every API_TIER value has a matching TIER_LABEL entry', () => {
+    // Without this guarantee, `tierLabelFor` returns undefined for known tiers and the grouped
+    // fallback display silently degrades to bare category labels — exactly the scenario #403
+    // is meant to surface. Catching the gap at test time avoids relying on runtime warnings.
+    const tierValues = new Set(Object.values(API_TIER))
+    for (const tier of tierValues) {
+      expect(TIER_LABEL[tier], `tier ${tier} appears in API_TIER but has no TIER_LABEL entry`).toBeDefined()
+    }
+  })
+
+  it('isSpecializedSubTier boundaries', () => {
+    // Explicit boundary pins so the intent (specialized API sub-tiers 4-10 only) is documented.
+    expect([3, 11, 21, 99].some(isSpecializedSubTier)).toBe(false) // LLM-router / agents / apps / unknown
+    expect([4, 5, 6, 7, 8, 9, 10].every(isSpecializedSubTier)).toBe(true) // Voice..Vector (+ headroom)
+  })
+
+  it('the STT/TTS intent holds: TTS↔STT do NOT share, Deepgram bridges both', () => {
+    // ElevenLabs (TTS) and AssemblyAI (STT) are not mutually substitutable; Deepgram (both) is.
+    expect(sharesCapability('elevenlabs', 'assemblyai')).toBe(false)
+    expect(sharesCapability('elevenlabs', 'deepgram')).toBe(true)
+    expect(sharesCapability('assemblyai', 'deepgram')).toBe(true)
+    // An untagged service pair (LLM tier) is never capability-gated — governed by tier logic alone.
+    expect(sharesCapability('openai', 'claude')).toBe(true)
+    expect(sharesCapability('elevenlabs', 'openai')).toBe(true) // one side untagged → not gated
+  })
+
+  it('the routing intent holds: modality names map to their capability, else llm', () => {
+    expect(capabilityOfComponent('Images')).toBe('image')
+    expect(capabilityOfComponent('Sora')).toBe('video')
+    expect(capabilityOfComponent('Audio')).toBe('audio')
+    expect(capabilityOfComponent('Realtime')).toBe('realtime')
+    expect(capabilityOfComponent('Embeddings')).toBe('embeddings')
+    expect(capabilityOfComponent('Chat Completions')).toBe('llm')
+    // image/video/audio/embeddings route to a tier; realtime deliberately absent (→ suppress).
+    expect(CAPABILITY_TIER).toEqual({ image: 7, video: 5, audio: 4, embeddings: 9 })
+  })
+
+  it('only routable caps have a CAPABILITY_LABEL', () => {
+    // Every label key must be a routable capability (has a CAPABILITY_TIER entry) — a label for a
+    // suppressed cap (realtime) would never render, signalling a mistake.
+    for (const cap of Object.keys(CAPABILITY_LABEL)) {
+      expect(cap in CAPABILITY_TIER, `CAPABILITY_LABEL has '${cap}' but it has no CAPABILITY_TIER entry`).toBe(true)
+    }
+  })
+
+  it('#1129 — every CAPABILITY_TAG_LABEL key is a real SERVICE_CAPABILITY sub-tag', () => {
+    // A label for a sub-tag no service carries would never render — guard against a dead entry.
+    const realTags = new Set(Object.values(SERVICE_CAPABILITY).flat())
+    for (const tag of Object.keys(CAPABILITY_TAG_LABEL)) {
+      expect(realTags.has(tag), `CAPABILITY_TAG_LABEL has '${tag}' but no SERVICE_CAPABILITY entry uses it`).toBe(true)
+    }
+  })
+
+  it('routedCapability is non-null ⟺ routingTier is a positive tier', () => {
+    const comps = (arr: Array<[string, string]>) => arr.map(([name, status]) => ({ name, status }))
+    const fixtures = [
+      { components: comps([['Chat Completions', 'operational'], ['Images', 'down']]) },        // route image
+      { components: comps([['Chat Completions', 'operational'], ['Sora', 'down']]) },           // route video
+      { components: comps([['Chat Completions', 'operational'], ['Audio', 'degraded']]) },      // route audio
+      { components: comps([['Chat Completions', 'operational'], ['Realtime', 'down']]) },       // suppress
+      { components: comps([['Chat Completions', 'operational'], ['Embeddings', 'down']]) },     // route embeddings
+      { components: comps([['Chat Completions', 'down'], ['Images', 'down']]) },                // default (llm)
+      { components: comps([['Images', 'down'], ['Audio', 'down']]) },                           // default (≥2)
+      { components: [] },                                                                        // default (none)
+      { id: 'x' },                                                                               // default (no comps)
+    ]
+    for (const f of fixtures) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const svc = { id: 'openai', category: 'api', status: 'down', ...f } as any
+      const wCap = routedCapability(svc)
+      const tier = routingTier(svc)
+      const isPositiveTier = typeof tier === 'number' && tier > 0
+      expect(wCap !== null, `routedCapability non-null must match routingTier positive-tier for ${JSON.stringify(f)}`).toBe(isPositiveTier)
+    }
+  })
+
+  it('every CAPABILITY_PROVIDERS capability has a tier, and OpenAI provides only the capability tiers (#1062 facet C)', () => {
+    // Every provider capability must have a CAPABILITY_TIER entry (else isCapabilityProvider never fires).
+    for (const cap of Object.keys(CAPABILITY_PROVIDERS)) {
+      expect(cap in CAPABILITY_TIER, `CAPABILITY_PROVIDERS has '${cap}' but no CAPABILITY_TIER entry`).toBe(true)
+    }
+    // Intent: OpenAI provides the 3 capability tiers, not the LLM/observability/vector tiers.
+    expect([4, 5, 7].every(t => isCapabilityProvider('openai', t))).toBe(true)
+    expect([1, 6, 8].some(t => isCapabilityProvider('openai', t))).toBe(false)
+  })
+
+  it('every REQUIRED_CAPABILITY has providers and a label (#1725)', () => {
+    for (const cap of Object.values(REQUIRED_CAPABILITY)) {
+      expect(cap in REQUIRED_CAPABILITY_PROVIDERS, `REQUIRED_CAPABILITY needs '${cap}' in REQUIRED_CAPABILITY_PROVIDERS`).toBe(true)
+      expect(cap in REQUIRED_CAPABILITY_LABEL, `REQUIRED_CAPABILITY needs '${cap}' in REQUIRED_CAPABILITY_LABEL`).toBe(true)
+    }
   })
 })

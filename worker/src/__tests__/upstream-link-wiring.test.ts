@@ -9,8 +9,7 @@
 // #1003's "half-migrated dual path" and #1032's "pure fn green ≠ wiring green" — both shipped from a
 // suite that only tested the pure function.
 //
-// index.ts can't be imported here (it pulls the Workers runtime + every binding), so read it via fs —
-// the `api-tier-sync.test.ts` (#403) precedent for cross-surface pins.
+// index.ts can't be imported here (it pulls the Workers runtime + every binding), so read it via fs.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
