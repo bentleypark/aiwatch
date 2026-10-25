@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { frontendWorkerImports } from './frontend-worker-imports.mjs'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(repoRoot, 'scripts/vercel-should-build.sh')
@@ -57,6 +58,42 @@ test('preview skips only after a successful diff since the last deployment finds
   withFixture([{ 'worker/src/index.ts': 'changed\n' }, { 'docs/note.md': 'tip\n' }], ({ dir, base }) => {
     assert.equal(run(dir, { VERCEL_GIT_PREVIOUS_SHA: base }).status, 0)
   })
+})
+
+test('preview builds when a worker/ file that src/ or api/ imports changed (#1191)', () => {
+  const imported = frontendWorkerImports(repoRoot)
+  assert.ok(imported.includes('worker/src/fallback.ts'), 'control: the import scan finds fallback.ts')
+  assert.ok(!imported.includes('worker/src/index.ts'), 'control: the import scan leaves out the worker entry')
+  for (const path of imported) {
+    withFixture([{ [path]: 'changed\n' }, { 'docs/note.md': 'tip\n' }], ({ dir, base }) => {
+      assert.equal(run(dir, { VERCEL_GIT_PREVIOUS_SHA: base }).status, 1, path)
+    })
+  }
+})
+
+test('the import set follows the bundler, not the import spelling (#1191)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'worker-imports-'))
+  const files = {
+    'api/one.ts': "import { a } from '../worker/src/a.js'\nconsole.log(a)\n",
+    'api/two.ts': "import {\n  b, // the provider's id\n} from '../worker/src/b'\nconsole.log(b)\n",
+    'src/three.js': "export{c}from'../worker/src/c'\n",
+    'src/types-only.ts': "import type { T } from '../worker/src/t'\nexport const x: T = 1\n",
+    'src/__tests__/four.test.js': "import { d } from '../../worker/src/d'\nconsole.log(d)\n",
+    'worker/src/a.ts': 'export const a = 1\n',
+    'worker/src/b.ts': 'export const b = 1\n',
+    'worker/src/c.ts': 'export const c = 1\n',
+    'worker/src/d.ts': 'export const d = 1\n',
+    'worker/src/t.ts': 'export type T = number\n',
+  }
+  try {
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true })
+      writeFileSync(join(dir, path), content)
+    }
+    assert.deepEqual(frontendWorkerImports(dir), ['worker/src/a.ts', 'worker/src/b.ts', 'worker/src/c.ts'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('a branch with no previous successful deployment builds (#1415)', () => {
