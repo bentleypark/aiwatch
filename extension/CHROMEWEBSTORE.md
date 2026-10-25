@@ -5,7 +5,7 @@
 
 ## Identity
 - **Name (store + `manifest.name`):** AIWatch — Claude Status & Down Detector  — keyword-rich for CWS search ("claude down detector" / "is claude down"). The in-app title stays clean: `action.default_title` (toolbar tooltip) + the popup header are "AIWatch — Claude Status", not the long store name.
-- **Version:** 1.1.0 (`extension/manifest.json`)
+- **Version:** 1.2.0 (`extension/manifest.json`)
 - **Category:** Developer Tools
 - **Primary purpose:** Show the live operational status of Anthropic's Claude surfaces
   (Claude API, claude.ai, Claude Code) in the toolbar, with a one-click issue report.
@@ -18,7 +18,7 @@ Is Claude down? AIWatch — Claude Status shows the real-time status of Anthropi
 
 A colored dot (green / amber / red) shows the current worst-case status at a glance. Open the popup for each surface:
 • Live status + 30-day uptime + the AIWatch reliability Score
-• Active incidents, with an AI-written summary of what's happening
+• Current incidents with an AI analysis: what is happening, estimated recovery, past recovery times, and how the estimate compared once resolved
 • A recommended fallback to switch to when a service is down
 • Community reports + one-click "Report an issue"
 • claude.ai and Claude Cowork shown separately, and the Claude Console listed on its own
@@ -85,6 +85,13 @@ No `tabs`, no `<all_urls>`, no content scripts, no `scripting`, no remote code.
 - [ ] `manifest.json` version bumped if re-submitting.
 
 ## Version history
+- **1.2.0** (#1772) — An incident in its `monitoring` phase stays listed (after the ongoing ones) instead of
+  disappearing; an incident on several cards is shown once, above the cards, naming the surfaces it affects.
+  The AI analysis lines match the dashboard: estimated recovery (or elapsed vs estimate), scope, when the
+  analysis was updated and by which model, past recovery times per surface (once each), and an incident
+  resolved in the last 3h with its predicted-vs-actual recovery time, plus the AI disclaimer. No permission /
+  data-handling change. The `monitoring` listing is served by the worker, so it reaches every installed copy
+  on a worker deploy; the rest is client-side.
 - **1.1.0** (#1711) — The claude.ai card lists claude.ai's and Claude Cowork's statuses; Claude Console's status and
   active incidents appear outside the cards, labelled as not monitored and not counted; a collapsed
   summary of the latest published monthly report (incidents and downtime per surface) links to it.

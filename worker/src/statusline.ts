@@ -324,7 +324,7 @@ export type BriefService = ServiceStatus & {
 }
 
 // The first ongoing incident (resolved/monitoring are done/recovering — excluded),
-// matching the ext-claude / cached-endpoint active-incident filter.
+// matching the cached-endpoint active-incident filter.
 function firstActiveIncident(svc: ServiceStatus): Incident | undefined {
   // #1623 — a synthesized today-row's title is ours; it is never quoted as the provider's incident.
   return (svc.incidents ?? []).find((i) => i.status !== 'resolved' && i.status !== 'monitoring' && i.derived !== 'status_history')

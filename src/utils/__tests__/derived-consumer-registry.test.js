@@ -59,6 +59,7 @@ const CONSUMER = /\.incidents\b|\bincidents\s*[.[]|\??\.(?:duration|durationMin|
 
 /** Applies the rule: reads `derived` and changes behaviour. */
 const APPLIERS = {
+  'worker/src/analysis-reads.ts': 'recentlyResolvedIncidents skips a derived incident (it can never have a recovered: marker or an analysis)',
   'worker/src/reddit.ts': '#1472 promoteIncidentWindows never makes one a window — its startedAt is an anchor inside a day, not the instant a post can be matched against',
   'worker/src/score.ts': 'excludes from the MTTR sample AND the Recovery default (carriesRecoveryTime)',
   'worker/src/incident-history.ts': 'never enters the no-TTL RAG corpus (buildHistoryRecord returns null)',
@@ -110,7 +111,7 @@ const SAFE = {
   // Active-only. #1623 — one synthesized row IS unresolved: today's, while its resource is down. Each
   // file below either skips it explicitly or reads it only as "a live outage exists", never its start.
   'worker/src/daily-summary.ts': 'reads the first non-resolved incident for an elapsed time, and skips a derived one (#1623) — its start is an estimate',
-  'worker/src/ext-claude.ts': 'projects ACTIVE incidents for Claude ids only; no Better Stack service is one',
+  'worker/src/ext-claude.ts': 'projects unresolved incidents, and recently resolved ones through analysis-reads.ts, for Claude ids only; no Better Stack service is one',
   'worker/src/statusline.ts': 'quotes the first non-resolved incident, and skips a derived one (#1623) — its title is ours',
   'worker/src/fallback.ts': 'gates on non-resolved incidents: a #1623 today-row correctly marks the service as carrying an outage; no time or text is read',
   'worker/src/incident-text.ts': 'skips resolved and derived (#1623) — a cause must be the provider\'s own live text',
@@ -136,7 +137,7 @@ const SAFE = {
   'worker/src/upstream-feed.ts': 'non-carded upstream feeds; never sees a service incident list',
   'worker/src/withdrawal-log.ts': 'rows render from an incidents:withdrawn tombstone, which is keyed on the alerted:new marker synthesis never writes',
   'worker/src/probe-archival.ts': 'the incidentWindows param that would read a duration is passed by NO production caller (TODO #132) — wiring it means classifying this file again',
-  'src/utils/predictionAccuracy.js': 'every entry point returns early without an ai:analysis, and a synthesized incident is never analyzed',
+  'worker/src/prediction-accuracy.ts': 'every entry point returns early without an ai:analysis, and a synthesized incident is never analyzed',
   'src/locales/en.js': 'a flat key→string copy map; the match is a dotted i18n KEY, not a field read',
   'src/locales/ko.js': 'a flat key→string copy map; the match is a dotted i18n KEY, not a field read',
   'api/_is-down/upstream-note.ts': 'renders UpstreamLink records built by upstream-link.ts, which sources causal incidents from incident-text.ts — resolved skipped',
@@ -178,7 +179,7 @@ const RB_APPLIERS = {
   'worker/src/withdrawn.ts': 'withdrawalHold excludes it from its "incident running" check — round 9',
   'worker/src/recovery-mark.ts': 'isMarkableOnStatusEdge refuses one — no re-lit "Recently Resolved" banner on every unrelated recovery — round 9 (structural pass)',
   'worker/src/fallback.ts': 'hasActiveIncident excludes it — a stale ghost cannot permanently block a fallback recommendation — round 9 (structural pass)',
-  'worker/src/ext-claude.ts': 'activeIncidents excludes it from the popup\'s "current issue" list — round 9 (structural pass)',
+  'worker/src/ext-claude.ts': 'popupIncidents excludes it from the popup\'s "current issue" list — round 9 (structural pass)',
   'worker/src/incident-text.ts': 'causalIncidents excludes it — a stale ghost cannot lend its text to an upstream-attribution claim about right now — round 9 (structural pass)',
   'api/is-down.ts': 'the inline Alternatives fallback-candidate filter excludes it — the Edge\'s own copy of fallback.ts\'s check — round 9 (structural pass)',
 }
@@ -194,6 +195,7 @@ const RB_FORWARDERS = {
 /** Cannot make a wrong "is this fresh" judgment, or reads nothing it could get wrong. Each reason is
  *  a property of the CODE, not a recollection — if one stops holding, its file moves to RB_APPLIERS. */
 const RB_SAFE = {
+  'worker/src/analysis-reads.ts': 'reads only the ai:analysis and recovered: keys of the incidents it selects — ai-analysis.ts never analyzes a retainedBridge incident and isMarkableOnStatusEdge never marks one, so a bridged row has them only from a resolution under its retiring source, a genuine recent one',
   'worker/src/mistral-public-api.ts': 'PRODUCES incidents from the public API and reads back only the ones it stored itself; never sees the retainedBridge tag',
   // Producers + the creator/declarer — retainedBridge is stamped ONLY inside
   // mergeRetainedIncidentHistory (services.ts); no parser ever produces it, and xAI has no migration bridge.
@@ -264,7 +266,7 @@ const RB_SAFE = {
   'worker/src/probe-archival.ts': 'the incidentWindows param that would read anything is passed by NO production caller (TODO #132)',
   'worker/src/upstream-link.ts': 'consumes incident-text.ts\'s causalIncidents, which already excludes retainedBridge before this file sees it',
   'worker/src/incident-history.ts': 'both callers already gate it before calling buildHistoryRecord — recovery-mark.ts\'s isMarkableOnStatusEdge refuses it, and alerts.ts\'s alerted:res: path only ever processes ids legitimately tracked start-to-finish',
-  'src/utils/predictionAccuracy.js': 'every entry point returns early without an ai:analysis — ai-analysis.ts (fixed) never analyzes a retainedBridge incident, so one is never present',
+  'worker/src/prediction-accuracy.ts': 'every entry point returns early without an ai:analysis — ai-analysis.ts (fixed) never analyzes a retainedBridge incident, so one is never present',
   'src/components/AnalysisModal.jsx': 'renders an AI analysis, which a retainedBridge incident never has (ai-analysis.ts excludes it from analysis entirely)',
   'src/utils/recoveredGrouping.js': 'a row\'s existence comes from the recovered: KV marker, which recovery-mark.ts (now fixed) refuses to write for a retainedBridge incident',
 
@@ -339,7 +341,8 @@ const SU_SAFE = {
   // Active-only. An anchored incident is `resolved` by construction — the flag is only ever set on a
   // record that published a `resolved_at`.
   'worker/src/daily-summary.ts': 'reads only the first non-resolved incident',
-  'worker/src/ext-claude.ts': 'projects ACTIVE incidents only',
+  'worker/src/ext-claude.ts': 'projects unresolved incidents, and a resolved one only with an analysis resolvedAt — which markIncidentResolved stamps none for this shape',
+  'worker/src/analysis-reads.ts': 'reads an incident resolvedAt only as a 3h cutoff and an analysis resolvedAt only as present-or-not; derives no elapsed time or start',
   'worker/src/statusline.ts': 'reads the first non-resolved incident',
   'worker/src/fallback.ts': 'gates on non-resolved incidents',
   'worker/src/incident-text.ts': 'skips resolved — a cause must be live',
@@ -383,9 +386,9 @@ const SU_SAFE = {
   'worker/src/probe-archival.ts': 'the incidentWindows param that would read a duration is passed by NO production caller (TODO #132)',
   'worker/src/weekly-briefing.ts': 'reads the durable MonthlyIncidentEntry[] counts, not a derived elapsed time',
   'worker/src/parse-failure-log.ts': 'counts SOURCE-READ failures by reason; reads no incident field',
-  'src/utils/predictionAccuracy.js': 'every entry point returns early when the analysis carries no `resolvedAt` (predictionAccuracy.js:181), and markIncidentResolved refuses to stamp one for this shape — the same upstream-predicate property the other two axes rest on, not a claim about a different gate',
+  'worker/src/prediction-accuracy.ts': 'every entry point returns early when the analysis carries no `resolvedAt` (computePredictionOutcome), and markIncidentResolved refuses to stamp one for this shape — the same upstream-predicate property the other two axes rest on, not a claim about a different gate',
   'src/utils/recoveredGrouping.js': 'a row exists only because of the recovered: KV marker, and markIncidentResolved writes none for this shape. It does NOT read the marker\'s duration field — it subtracts the incident\'s own timestamp pair — so withholding the marker is what makes it safe, not clearing a field',
-  'src/components/AnalysisModal.jsx': 'the predicted-vs-actual line comes from predictionAccuracy.js, which returns early without a stamped analysis resolvedAt — and markIncidentResolved stamps none for this shape',
+  'src/components/AnalysisModal.jsx': 'the predicted-vs-actual line comes from prediction-accuracy.ts, which returns early without a stamped analysis resolvedAt — and markIncidentResolved stamps none for this shape',
   'src/components/IncidentTimeline.jsx': 'renders the timeline it is given; the note prop covers the empty case',
   'src/components/RecentUserReports.jsx': 'user-submitted reports, not provider incidents',
   'src/components/Sidebar.jsx': 'active incident count only',
@@ -438,7 +441,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 82 → 83: #1697 added worker/src/recovery-baseline.ts, which summarises history records; SAFE on all three.
     // 83 → 84: #1711 added worker/src/latest-report.ts, which copies archive totals; SAFE on all three.
     // 84 → 85: #1752 added worker/src/parsers/incident-io-proxy.ts, which renders the incident feed into page text; SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(85)
+    // 85 → 86: #1772 moved src/utils/predictionAccuracy.js to worker/src/prediction-accuracy.ts and added worker/src/analysis-reads.ts.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(86)
   })
 
   it('leaves none unclassified', () => {
@@ -492,7 +496,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(85)
+    expect(all.length).toBe(86)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -538,7 +542,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(85)
+    expect(all.length).toBe(86)
   })
 
   it('leaves none unclassified for startUnknown', () => {

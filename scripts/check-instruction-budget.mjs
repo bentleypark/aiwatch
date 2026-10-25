@@ -102,8 +102,9 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  46_208 → 46_226 (#1686): the directory layout names two new worker modules, infra-status.ts and
  *  rum.ts, on the existing monitoring line; what they do is in directory-map.md.
  *  46_314 → 46_383 (#1697): the directory layout names recovery-baseline.ts and recovery-baseline-text.ts on the
- *  prediction-snapshot line. */
-export const BUDGET_CHARS = 46_383
+ *  prediction-snapshot line.
+ *  46_383 → 46_444 (#1772): the same line names prediction-accuracy.ts and analysis-reads.ts. */
+export const BUDGET_CHARS = 46_444
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

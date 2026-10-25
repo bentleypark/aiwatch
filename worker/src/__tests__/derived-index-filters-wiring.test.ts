@@ -32,8 +32,11 @@ describe('#1292 — index.ts routes every derived-incident path through a guard'
   it('skips the guaranteed-miss recovered: probe on both status paths', () => {
     // `/api/status` and `/api/status/cached`. A full-day bucket "resolves" at the next day's local
     // anchor, so it enters the 3h recently-recovered window for ~3h every day, per bucket.
+    // #1772 — `/api/status/cached` and the ext-claude projection read through readStatusAnalyses
+    // (analysis-reads.ts, which carries the guard); `/api/status` keeps its own loop.
     const probeGuards = CODE.match(/i\.derived !== 'status_history' && i\.resolvedAt/g) ?? []
-    expect(probeGuards.length, 'both status paths must skip the probe').toBe(2)
+    expect(probeGuards.length, 'the /api/status path must skip the probe').toBe(1)
+    expect(CODE.match(/readStatusAnalyses\(/g) ?? []).toHaveLength(2)
   })
 
   it('forwards BOTH halves of the pair on the public /api/v1/status/:id projection', () => {
@@ -49,6 +52,7 @@ describe('#1292 — index.ts routes every derived-incident path through a guard'
     // it is the REGISTRY's looser grep that they satisfied.)
     const inCode = (CODE.match(/'status_history'/g) ?? []).length
     // #1623 — 4 → 7: the two /feed stamp loops and the `detected:` active-incident pick.
-    expect(inCode, 'index.ts must branch on the tag in executable code').toBe(7)
+    // #1772 — 7 → 6: the `/api/status/cached` probe moved to analysis-reads.ts.
+    expect(inCode, 'index.ts must branch on the tag in executable code').toBe(6)
   })
 })

@@ -2,6 +2,10 @@ import type { ServiceStatus, Incident } from './types'
 import { isUnreadableStatus } from './status-verdict'
 import { getFallbacks } from './fallback'
 import type { LatestReportSummary } from './latest-report'
+import type { RecoveryBaseline } from './recovery-baseline-text'
+import type { AIAnalysisResult } from './ai-analysis'
+import { recoveryLine, scopeLine } from './prediction-accuracy'
+import { liveAnalysisIncidents, recentlyResolvedIncidents } from './analysis-reads'
 
 // Lite projection for the Claude-only Chrome extension (#837).
 //
@@ -10,7 +14,7 @@ import type { LatestReportSummary } from './latest-report'
 // content — this worker projection is its only data source. The full
 // /api/status/cached is ~780 KB (all services + probe/latency/AI); this projection
 // emits only the three Anthropic surfaces and, for each, just what the popup shows:
-// status + AIWatch Score + per-category fallback + ACTIVE official incidents (with
+// status + AIWatch Score + per-category fallback + unresolved official incidents (with
 // the AI summary when present) + the GATED crowd-report signal (#575). ~1–2 KB.
 // Mirrors the statusline.ts (#438/#494) lite-projection pattern.
 
@@ -36,7 +40,18 @@ export interface ExtClaudeIncident {
   title: string
   status: Incident['status']
   impact: Incident['impact']
+  // The live analysis as one string — what popups before #1772 render.
   aiSummary?: string
+  ai?: ExtClaudeAnalysis
+  resolvedAt?: string
+}
+
+/** #1772 — an AI analysis as the dashboard modal shows it; `lines` are its recovery + scope lines. */
+export interface ExtClaudeAnalysis {
+  summary: string
+  lines: string[]
+  analyzedAt: string
+  model: 'Gemma' | 'Sonnet' | null
 }
 
 // The gated crowd signal — count + recent {category, when, text}. `desc` is the user's
@@ -57,10 +72,14 @@ export interface ExtClaudeService {
   grade: string | null
   fallback: Array<{ name: string; score: number | null }>
   incidents: ExtClaudeIncident[]
+  /** #1772 — incidents resolved in the last 3h whose analysis the dashboard modal still shows. */
+  recentlyResolved: ExtClaudeIncident[]
   reports: ExtClaudeReports
   /** #1711 — the components this surface's status is the worst of (claude.ai: claude.ai + Claude Cowork);
    *  empty when the surface has a single one. */
   components: Array<{ name: string; status: string }>
+  /** #1772 — this surface's past recovery times (`incident:recovery-baseline`); null when it has none. */
+  recoveryBaseline: RecoveryBaseline | null
 }
 
 /** #1711 — Anthropic components that are not services (#1669): shown with a not-counted label only. */
@@ -82,12 +101,31 @@ export interface ExtClaudeContext {
   // Gated crowd-report entries per svcId — from buildReportFeedMap (#575); only
   // corroborated services appear, so a service absent here has count 0 by construction.
   reportFeedMap?: Record<string, Array<{ cat: string; ts: number; desc?: string }>>
-  // AI summary keyed `${svcId}:${incId}` for active incidents (present when ai:analysis exists).
-  aiSummaryMap?: Record<string, string>
+  // ai:analysis keyed `${svcId}:${incId}` — live incidents plus recently resolved ones (analysis-reads.ts).
+  analysisMap?: Record<string, AIAnalysisResult>
+  nowMs?: number
   latestReport?: LatestReportSummary | null
+  recoveryBaselines?: Record<string, RecoveryBaseline>
 }
 
 const RECENT_REPORTS_CAP = 5
+
+/** #1772 — a live incident of this surface has an analysis: the gate on its recently resolved ones. */
+function hasLiveAnalysis(svc: { id: string; incidents?: Incident[] }, analysisMap: Record<string, AIAnalysisResult> | undefined): boolean {
+  return liveAnalysisIncidents(svc.incidents).some((i) => !!analysisMap?.[`${svc.id}:${i.id}`]?.summary)
+}
+
+function extAnalysis(a: AIAnalysisResult, inc: Incident, nowMs: number): ExtClaudeAnalysis {
+  const lines = [recoveryLine(a, inc, 'en', nowMs), scopeLine(a, 'en')]
+    .flatMap((l) => (l ? [`${l.icon} ${l.label}: ${l.value}`] : []))
+  return {
+    // #1328 — the progress half only while the incident is live; the 500 cap is on the pair.
+    summary: [a.summary, !a.resolvedAt && a.progress].filter(Boolean).join(' ').slice(0, 500),
+    lines,
+    analyzedAt: a.analyzedAt,
+    model: a.model === 'gemma' ? 'Gemma' : a.model === 'sonnet' ? 'Sonnet' : null,
+  }
+}
 
 // True when /api/status/cached carries ?src=ext-claude (the extension's poll tag).
 // EXACT match (not a prefix) — must be checked BEFORE isStatuslineRequest in the
@@ -97,24 +135,23 @@ export function isExtClaudeRequest(searchParams: URLSearchParams): boolean {
   return (searchParams.get('src') ?? '') === 'ext-claude'
 }
 
-// Surfaced incident phases for the popup's "current issue" list. Matches the cached
-// endpoint's AI-analysis filter: resolved = done, monitoring = recovery confirmed —
-// both excluded so the popup shows only incidents that are actually ongoing.
-function activeIncidents(list: Incident[] | undefined): Incident[] {
+// Incidents the popup lists: everything not yet resolved, ongoing first, then `monitoring` (#1772).
+function popupIncidents(list: Incident[] | undefined): Incident[] {
   // #1384 — a `retainedBridge` entry (services.ts `mergeRetainedIncidentHistory`) unresolved at
   // migration time never resolves for the life of the finite migration bridge, so without this
   // exclusion the extension popup would show a stale ghost from a retiring source as the "current
   // issue" indefinitely. Currently inert (Replicate is not in `EXT_CLAUDE_IDS`) — not a durable
   // reason, so excluded here directly rather than relying on that list never changing (round-9
   // structural pass, #1384).
-  return (list ?? []).filter((i) => i.status !== 'resolved' && i.status !== 'monitoring' && !i.retainedBridge)
+  const shown = (list ?? []).filter((i) => i.status !== 'resolved' && !i.retainedBridge)
+  return [...shown.filter((i) => i.status !== 'monitoring'), ...shown.filter((i) => i.status === 'monitoring')]
 }
 
 // Build the projection: filter to the three Anthropic surfaces (preserving
 // EXT_CLAUDE_IDS order), attach Score/grade, a per-category fallback (getFallbacks
 // recommends within the SAME category, operational + incident-free + non-excluded; WITHHELD entirely
 // for an unreadable source since #1233 — see the gate below),
-// active official incidents (+ AI summary when present), and the gated crowd-report
+// unresolved official incidents (+ AI summary when present), and the gated crowd-report
 // signal. Pure: no KV/network. `scoredAll` is the full scored set (fallback pool).
 export function buildExtClaudePayload(
   scoredAll: ScoredService[],
@@ -128,16 +165,26 @@ export function buildExtClaudePayload(
   for (const id of EXT_CLAUDE_IDS) {
     const svc = byId.get(id)
     if (!svc) continue
-    const incidents: ExtClaudeIncident[] = activeIncidents(svc.incidents).map((i) => {
-      const aiSummary = ctx.aiSummaryMap?.[`${svc.id}:${i.id}`]
-      return { id: i.id, title: i.title, status: i.status, impact: i.impact, ...(aiSummary ? { aiSummary } : {}) }
+    const nowMs = ctx.nowMs ?? Date.now()
+    const analysisOf = (i: Incident) => (a => (a?.summary ? a : undefined))(ctx.analysisMap?.[`${svc.id}:${i.id}`])
+    const incidents: ExtClaudeIncident[] = popupIncidents(svc.incidents).map((i) => {
+      const a = i.status === 'monitoring' ? undefined : analysisOf(i)
+      if (!a) return { id: i.id, title: i.title, status: i.status, impact: i.impact }
+      const ai = extAnalysis(a, i, nowMs)
+      return { id: i.id, title: i.title, status: i.status, impact: i.impact, aiSummary: ai.summary, ai }
     })
+    const recentlyResolved: ExtClaudeIncident[] = recentlyResolvedIncidents(svc, hasLiveAnalysis(svc, ctx.analysisMap), nowMs)
+      .flatMap((i) => {
+        const a = analysisOf(i)
+        if (!a?.resolvedAt) return []
+        return [{ id: i.id, title: i.title, status: i.status, impact: i.impact, resolvedAt: a.resolvedAt, ai: extAnalysis(a, i, nowMs) }]
+      })
     for (const c of svc.referenceComponents ?? []) {
       if (seenRef.has(`c:${c.id}`)) continue
       seenRef.add(`c:${c.id}`)
       reference.components.push({ name: c.name, status: c.status })
     }
-    for (const i of activeIncidents(svc.referenceIncidents)) {
+    for (const i of popupIncidents(svc.referenceIncidents)) {
       if (seenRef.has(`i:${i.id}`)) continue
       seenRef.add(`i:${i.id}`)
       reference.incidents.push({ id: i.id, title: i.title, status: i.status, impact: i.impact })
@@ -162,8 +209,10 @@ export function buildExtClaudePayload(
       // on the next worker deploy, because an empty array renders nothing in every version.
       fallback: isUnreadableStatus(svc.status) ? [] : getFallbacks(svc.id, svc.category, scoredAll),
       incidents,
+      recentlyResolved,
       reports,
       components: (svc.components ?? []).length > 1 ? svc.components!.map((c) => ({ name: c.name, status: c.status })) : [],
+      recoveryBaseline: ctx.recoveryBaselines?.[svc.id] ?? null,
     })
   }
   return { services, cachedAt, reference, latestReport: ctx.latestReport ?? null }
