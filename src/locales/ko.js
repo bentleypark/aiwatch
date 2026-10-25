@@ -413,7 +413,7 @@ const ko = {
   // Footer
   'footer.privacy': '개인정보 처리방침',
   'footer.terms': '이용약관',
-  'footer.copyright': '© 2026 AIWatch. All rights reserved.',
+  'footer.copyright': '© 2026 AIWatch · AGPL-3.0',
 
   // Cookie Banner
   'cookie.title': '쿠키 사용 안내',
