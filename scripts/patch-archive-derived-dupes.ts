@@ -35,12 +35,7 @@
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-// DEFAULT import, not named or namespace. The root package is `"type": "module"` while `worker/` has
-// its own package.json with no `type`, so everything under it is CJS. From an ESM file here, a named
-// import fails outright and a namespace import yields `{ default, 'module.exports' }` — the functions
-// live on `default`, which is what a default import binds. Verified by inspecting the live shape, not
-// assumed.
-import archivePatch from '../worker/src/archive-patch'
+import * as archivePatch from '../worker/src/archive-patch'
 
 
 /** `wrangler kv key get`, with the failure named. Same shape as `patch-archive-automonitor.mjs`. */
