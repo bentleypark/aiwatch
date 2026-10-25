@@ -110,6 +110,27 @@ describe('buildMonthlyAccuracy (#827 F3 — monthly prediction accuracy)', () =>
     expect(archive.predictionAccuracy).not.toBeNull()
     expect(archive.predictionAccuracy!.total).toBe(1)
     expect(archive.predictionAccuracy!.accurate).toBe(1)
+    expect(archive.predictionBaseline).toBeNull() // one past incident is below the baseline floor
+  })
+
+  it('#1777 wiring: buildMonthlyArchive carries predictionBaseline through to the archive', async () => {
+    const past = Array.from({ length: 10 }, (_, i) => rec({ incId: `p${i}`, startedAt: '2026-05-01T00:00:00Z', resolvedAt: '2026-05-02T00:00:00Z', durationMin: 60 }))
+    const history: Record<string, IncidentHistoryRecord[]> = {
+      claude: [...past, rec({ incId: 'a', startedAt: '2026-06-15T00:00:00Z', resolvedAt: '2026-06-15T01:00:00Z', predictedRecoveryHours: 10, durationMin: 52 })],
+    }
+    const kv = {
+      get: async (k: string) => {
+        const m = /^incident:history:(.+)$/.exec(k)
+        return m && history[m[1]] ? JSON.stringify(history[m[1]]) : null
+      },
+    } as unknown as KVNamespace
+    const archive = await buildMonthlyArchive(kv, 2026, 6)
+    expect(archive.predictionBaseline?.ai).toMatchObject({ total: 1, overPredicted: 1 })
+    expect(archive.predictionBaseline?.pastMedian).toMatchObject({ total: 1, accurate: 1 })
+    // the caller's override list reaches the baseline: past incidents pinned to 600m → 52m is under half
+    const pinned = past.map((p) => ({ id: p.incId, durationMin: 600 }))
+    const withOverrides = await buildMonthlyArchive(kv, 2026, 6, undefined, undefined, [], pinned)
+    expect(withOverrides.predictionBaseline?.pastMedian).toMatchObject({ total: 1, overPredicted: 1 })
   })
 })
 

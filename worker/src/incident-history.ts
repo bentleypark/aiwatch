@@ -427,6 +427,11 @@ function median(xs: number[]): number {
  * (a handful of resolved incidents/day), so this is meaningful only in aggregate.
  */
 export function summarizeAccuracy(records: IncidentHistoryRecord[]): AccuracyStats {
+  return tallyAccuracy(scoredPredictions(records))
+}
+
+/** The records `summarizeAccuracy` scores: one per incident, each carrying a positive prediction. */
+export function scoredPredictions(records: IncidentHistoryRecord[]): Array<IncidentHistoryRecord & { predictedRecoveryHours: number }> {
   // #847 — a grouped incident (one incId shared across sibling surfaces, e.g. Anthropic's Claude API /
   // claude.ai / Claude Code) writes one record PER affected service so each surface's RAG corpus is
   // complete. That would multi-count the SAME prediction here, inflating the denominator + skewing the
@@ -440,7 +445,12 @@ export function summarizeAccuracy(records: IncidentHistoryRecord[]): AccuracySta
       byIncId.set(r.incId, r)
     }
   }
-  const withPred = [...byIncId.values()].filter(r => r.predictedRecoveryHours != null && r.predictedRecoveryHours > 0)
+  return [...byIncId.values()].filter((r): r is IncidentHistoryRecord & { predictedRecoveryHours: number } =>
+    r.predictedRecoveryHours != null && r.predictedRecoveryHours > 0)
+}
+
+/** #1777 — accuracy of any estimate against actual durations, so a rival estimate is scored the same way. */
+export function tallyAccuracy(withPred: ReadonlyArray<{ predictedRecoveryHours: number; durationMin: number }>): AccuracyStats {
   let accurate = 0, underPredicted = 0, overPredicted = 0
   const absErrors: number[] = []
   for (const r of withPred) {
@@ -448,7 +458,7 @@ export function summarizeAccuracy(records: IncidentHistoryRecord[]): AccuracySta
     if (verdict === 'accurate') accurate++
     else if (verdict === 'under-predicted') underPredicted++
     else if (verdict === 'over-predicted') overPredicted++
-    absErrors.push(Math.abs(r.durationMin / 60 - (r.predictedRecoveryHours as number)))
+    absErrors.push(Math.abs(r.durationMin / 60 - r.predictedRecoveryHours))
   }
   const total = withPred.length
   return {

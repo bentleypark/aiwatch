@@ -566,17 +566,24 @@ export function formatAudienceScreenRow(byScreen: AudienceByScreen | null | unde
   return `\n   Screens: ${parts.join(' · ')}`
 }
 
+/** Whole percentages of `counts` (total > 0) that sum to exactly 100 (largest remainder). */
+function wholeShares(counts: number[]): number[] {
+  const total = counts.reduce((a, b) => a + b, 0)
+  const exact = counts.map((c) => (c / total) * 100)
+  const out = exact.map(Math.floor)
+  const order = exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => b.r - a.r)
+  const deficit = 100 - out.reduce((a, b) => a + b, 0)
+  for (let k = 0; k < deficit; k++) out[order[k].i]++
+  return out
+}
+
 /** #827 Feature 1 — AI recovery-prediction accuracy, rendered as a labeled multi-line block so an
- *  operator can read it cold weeks later without decoding jargon. Plain-language lines, all
- *  anchored on the predicted recovery estimate (its upper bound):
- *    - Recovered by the estimate = accurate + overPredicted; Took longer = underPredicted (sums to 100%)
- *    - Typical miss = median absolute distance from the estimate (how far off when wrong-ish)
- *    - Bias        = whether the model leans optimistic (under) or cautious (over)
+ *  operator can read it cold weeks later without decoding jargon. #1777 — the three outcomes are
+ *  listed apart: folding "far faster than the estimate" into a success rewards a wider estimate.
  *  Empty until the corpus has ≥1 predicted+resolved incident → the whole block is omitted (no "0%"). */
 export function formatAccuracyLine(accuracy: AccuracyStats | null | undefined): string {
   if (!accuracy || accuracy.total === 0) return ''
-  const byBound = accuracy.accurate + accuracy.overPredicted
-  const byPct = Math.round((byBound / accuracy.total) * 100)
+  const [inPct, fastPct, longPct] = wholeShares([accuracy.accurate, accuracy.overPredicted, accuracy.underPredicted])
   const err = accuracy.medianAbsErrorHours
   const errStr = err < 1 ? `${Math.round(err * 60)}m` : `${err.toFixed(1)}h`
   const bias = accuracy.underPredicted > accuracy.overPredicted
@@ -585,8 +592,9 @@ export function formatAccuracyLine(accuracy: AccuracyStats | null | undefined): 
       ? 'over-estimates (recovered faster than predicted)'
       : 'balanced (no consistent over/under lean)'
   return `\n🎯 **AI Recovery Prediction Accuracy** (${accuracy.total} forecast${accuracy.total === 1 ? '' : 's'} scored)`
-    + `\n   Recovered by the estimated time: ${byBound} of ${accuracy.total} (${byPct}%)`
-    + `\n   Took longer than the estimate: ${accuracy.underPredicted} of ${accuracy.total} (${100 - byPct}%)`
+    + `\n   Within range (½× to 1× the estimate): ${accuracy.accurate} of ${accuracy.total} (${inPct}%)`
+    + `\n   Recovered in under half the estimate: ${accuracy.overPredicted} of ${accuracy.total} (${fastPct}%)`
+    + `\n   Took longer than the estimate: ${accuracy.underPredicted} of ${accuracy.total} (${longPct}%)`
     + `\n   Typical miss: ${errStr} off the estimate`
     + `\n   Bias: ${bias}`
 }
