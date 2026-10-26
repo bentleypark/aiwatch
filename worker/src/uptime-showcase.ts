@@ -8,11 +8,11 @@
 // table (#1186) — and the parser returned null silently, because "no inline blob" is also the correct,
 // expected outcome on an incident.io page.
 //
-// This module is the replacement transport, and ONLY the transport: the returned `timelines` object has
+// This module is the replacement transport: the returned `timelines` object has
 // the identical `{code: {days: [{date, outages: {p, m}}]}}` shape, so it feeds the same
 // `computeUptimeData` the inline blob fed. AIWatch still COMPUTES uptime from the per-day outage
-// seconds (#1006) — the response's own `values[]` (the provider's 30/60/90-day percentages) is read by
-// nothing here on purpose.
+// seconds (#1006) — of the response's own `values[]` (the provider's 30/60/90-day percentages) only
+// `ninety` is read, and only for `uptimeReported` (#1741).
 //
 // Payload shape, measured against the live endpoint 2026-09-11 (`status.cursor.com`, and the same
 // shape on all 13 lazy pages): `{components, timelines, values}`, `timelines[code].days` = 90 entries,

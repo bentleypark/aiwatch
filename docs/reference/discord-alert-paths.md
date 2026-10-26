@@ -132,8 +132,9 @@ pre-creation days carrying `outages: {}` — a defined-but-empty object indistin
 genuinely clean real day), so a component's age was not decidable from it at all — this was a Critical
 finding on an earlier round of this diff, fixed by dropping the showcase reader entirely rather than
 patching it. `rosterAuditFixedScope` (bfl only) is the same opt-out as cohere/groq below —
-its uptime anchor never expands and its `displayAllComponents` catalog is unbounded, so the check is
-skipped for the whole service rather than demanding a `rosterAuditExclude` entry per FLUX model shipped.
+its `displayAllComponents` catalog is unbounded, so the check skips group members rather than demanding a
+`rosterAuditExclude` entry per FLUX model shipped. Top-level components and group headers are still
+audited (#1741).
 
 **NOT extended to Rootly (Mistral).** Tried the chart's `data-…-since-value` as an age source; verified
 live (headed browser) that it is the CHART'S shared window start, identical across all 15 components on
@@ -152,7 +153,8 @@ miscounting one), not any single sentence in it.
 - **`rosterAuditFixedScope`, not a list** — cohere, groq and bfl's per-model catalogs, structurally
   unbounded (`displayAllComponents`, the same reason #992's own detector avoids a hand-maintained list
   for these pages), so no finite exclude list would stay correct; see the flag's own docblock in
-  `types.ts`. `uptimeOverPageComponents` (fireworks) implies it: that scope is every component the page lists, so nothing can be out of scope, and it has no ids for the #957 alert to watch.
+  `types.ts`. On incident.io it still skips the whole page, whose reader yields no group information; on
+  Atlassian it skips only group members. `uptimeOverPageComponents` (fireworks) implies it: that scope is every component the page lists, so nothing can be out of scope, and it has no ids for the #957 alert to watch.
 
 **Scope and grouping.** `rosterAuditPages` groups every service with an `incidentIoComponentId` by the
 status page it shares (`statusUrl`), then unions each co-located service's uptime scope

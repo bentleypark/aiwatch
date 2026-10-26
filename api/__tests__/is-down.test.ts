@@ -548,6 +548,28 @@ describe('is-down.ts — Alternatives recommendation ordering (#1186)', () => {
     expect(bulletOrder(html)).toEqual(['Gemini API'])
   })
 
+  it('#1741 — a BFL Flux.3-only outage renders an image and a video subheading; an image-model outage renders no video', async () => {
+    const page = (degraded: string) => new Response(JSON.stringify({
+      services: [
+        svc({ id: 'bfl', name: 'Black Forest Labs (FLUX)', status: 'down', scoreConfidence: 'high', aiwatchScore: 80,
+          incidents: [{ id: 'b-1', title: 'Outage', status: 'investigating', impact: 'major', startedAt: now, duration: null, timeline: [] }],
+          components: ['API (api.bfl.ai)', 'FLUX.2', 'Flux.3'].map((name) => ({ id: name, name, status: name === degraded ? 'down' : 'operational' })) }),
+        svc({ id: 'stability', name: 'Stability AI', scoreConfidence: 'high', aiwatchScore: 90 }),
+        svc({ id: 'runway', name: 'Runway', scoreConfidence: 'high', aiwatchScore: 89 }),
+        svc({ id: 'luma', name: 'Luma (Dream Machine)', scoreConfidence: 'high', aiwatchScore: 88 }),
+      ],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(page('Flux.3'))
+    const flux3 = await (await handler(makeReq('flux'))).text()
+    expect([...flux3.matchAll(/class="fallback-use">([^<]+)/g)].map(m => m[1])).toEqual(['For image generation', 'For video generation'])
+    expect(bulletOrder(flux3)).toEqual(['Stability AI', 'Runway', 'Luma (Dream Machine)'])
+    fetchMock.mockResolvedValueOnce(page('FLUX.2'))
+    const image = await (await handler(makeReq('flux'))).text()
+    expect(bulletOrder(image)).toContain('Stability AI')
+    expect(bulletOrder(image)).not.toContain('Runway')
+  })
+
   it('#1753 — the FAQ alternatives answer names the same list the card reads', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ services: [], aiAnalysis: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const html = await (await handler(makeReq('deepseek'))).text()

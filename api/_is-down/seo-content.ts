@@ -461,7 +461,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   flux: {
     displayName: 'Black Forest Labs (FLUX)',
     description: 'Black Forest Labs develops the FLUX family of generative models and provides API access at api.bfl.ai for image and video generation and editing.',
-    whenDown: 'When FLUX is down, apps generating or editing images via api.bfl.ai will fail. Creative pipelines and design tools that integrate the FLUX API lose their generation capability until service recovers.',
+    whenDown: 'When FLUX is down, apps generating or editing images or video via api.bfl.ai will fail. Creative pipelines and design tools that integrate the FLUX API lose their generation capability until service recovers.',
     faqs: [
       { q: 'Is FLUX down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Black Forest Labs every 5 minutes and shows real-time operational status.' },
       { q: 'Why is the FLUX API failing?', a: 'Black Forest Labs may be experiencing high demand, specific model-tier degradation, or upstream infrastructure issues. Check this page for active incidents.' },

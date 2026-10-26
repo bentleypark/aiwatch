@@ -3676,8 +3676,8 @@ const workerExport = {
               componentsRes.body?.cancel()
               continue
             }
-            const parsed = (await componentsRes.json()) as { components?: Array<{ id?: string; name?: string; created_at?: unknown }> }
-            const rawComponents = (parsed.components ?? []).filter((c): c is { id: string; name?: string; created_at?: unknown } => typeof c.id === 'string')
+            const parsed = (await componentsRes.json()) as { components?: Array<{ id?: string; name?: string; created_at?: unknown; group_id?: unknown }> }
+            const rawComponents = (parsed.components ?? []).filter((c): c is { id: string; name?: string; created_at?: unknown; group_id?: unknown } => typeof c.id === 'string')
             const names = new Map<string, string>()
             for (const c of rawComponents) if (typeof c.name === 'string') names.set(c.id, c.name)
             if (rawComponents.length === 0) {

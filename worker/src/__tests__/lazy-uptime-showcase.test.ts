@@ -37,11 +37,12 @@ describe('the showcase transport computes what the inline blob computed (#1389)'
   it('produces an IDENTICAL result to the legacy inline page, across the whole 90-day payload', () => {
     const fromInline = parseUptimeData(legacyPage(TIMELINES), CLAUDE_API, 30, AT)
     const fromShowcase = computeUptimeData(
-      parseUptimeShowcase({ components: {}, timelines: TIMELINES, values: [{ component: CLAUDE_API, ninety: 99.5, thirty: 99.9 }] }),
+      parseUptimeShowcase({ components: {}, timelines: TIMELINES, values: [] }),
       CLAUDE_API, 30, AT,
     )
     // Every field, not just the percentage: the calendar, the window length, the provider-figure
-    // disclosure and the #1017 archive input all ride the same computation.
+    // disclosure and the #1017 archive input all ride the same computation. (`values: []`: the provider's
+    // `ninety` is the one thing only the showcase carries, #1741.)
     expect(fromShowcase).toEqual(fromInline)
   })
 
@@ -57,14 +58,17 @@ describe('the showcase transport computes what the inline blob computed (#1389)'
     expect(r.uptimeReportedDays).toBe(FIXTURE_DAYS)
   })
 
-  it('ignores the response\'s own `values[]` aggregate (#1006 — we compute, we do not copy)', () => {
-    // The provider ships a ready-made `thirty` figure. Taking it would be one line less code and a
-    // differently-defined number in a field the Reliability Ranking compares across services.
+  it('takes the response\'s own `ninety` for uptimeReported only — uptimePercent stays computed (#1006, #1741)', () => {
+    // The provider ships ready-made `thirty` and `ninety` figures. `thirty` into `uptimePercent` would be
+    // a differently-defined number in a field the Reliability Ranking compares across services; `ninety`
+    // is what the page shows beside ours, so it is read for the comparison and for nothing else.
     const r = computeUptimeData(
-      parseUptimeShowcase({ timelines: TIMELINES, values: [{ component: CLAUDE_API, thirty: 42.0 }] }),
+      parseUptimeShowcase({ timelines: TIMELINES, values: [{ component: CLAUDE_API, thirty: 42.0, ninety: 41.0 }] }),
       CLAUDE_API, 30, AT,
     )
     expect(r.uptimePercent).toBe(FIXTURE_UPTIME_30D)
+    expect(r.uptimeReported).toBe(41.0)
+    expect(r.uptimeReportedDays).toBe(90)
   })
 })
 

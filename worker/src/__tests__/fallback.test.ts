@@ -1739,6 +1739,19 @@ describe('#1753 — listed services recommend their substitute lists', () => {
     expect(getFallbacks('deepseek', 'api', [down('deepseek', 'DeepSeek API'), ...withDown('together', 'fireworks')]).map((f) => f.name)).toEqual(['Claude API', 'OpenAI API'])
   })
 
+  it('#1741 a BFL Flux.3-only outage recommends image and video services; any other BFL outage recommends no video', () => {
+    const peers = [svc('stability', 'Stability AI', 80), svc('runway', 'Runway', 79), svc('luma', 'Luma (Dream Machine)', 78)]
+    const bfl = (degraded: string) => down('bfl', 'Black Forest Labs (FLUX)', { components: ['API (api.bfl.ai)', 'FLUX.2', 'Finetuning', 'Flux.3']
+      .map((name) => ({ name, status: name === degraded ? 'down' : 'operational' })) })
+    const named = (groups: ReturnType<typeof getGroupedFallbacks>) => groups.map((g) => [g.label, g.fallbacks.map((f) => f.name)])
+    expect(named(getGroupedFallbacks(['bfl'], [bfl('Flux.3'), ...board, ...peers]))).toEqual([['Image', ['Stability AI']], ['Video', ['Runway']]])
+    for (const imageOnly of ['FLUX.2', 'Finetuning']) {
+      const names = named(getGroupedFallbacks(['bfl'], [bfl(imageOnly), ...board, ...peers])).flatMap(([, n]) => n)
+      expect(names, imageOnly).not.toContain('Runway')
+      expect(names, imageOnly).toContain('Stability AI')
+    }
+  })
+
   it('Cohere recommends a general LLM API for chat and an embeddings service, never a vendor peer', () => {
     const groups = getGroupedFallbacks(['cohere'], [down('cohere', 'Cohere API'), ...board])
     expect(groups.map((g) => [g.label, g.fallbacks.map((f) => f.name)])).toEqual([['LLM', ['Claude API']], ['Embeddings', ['Voyage AI']]])

@@ -161,10 +161,11 @@ export interface UptimeDataResult {
   uptimePercent: number | null
   /** Days the figure above actually covers — 30 unless the page carries fewer. */
   windowDays: number | null
-  /** #1006 — the figure the page shows a DESKTOP visitor: the same formula over every day it embeds
-   *  (≈90). Verified: status.claude.com renders "90 days ago … 99.58% uptime" on a wide screen, and this
-   *  reproduces it. Shown beside our 30-day number so the reader can check us against the provider —
-   *  which is what #41 built AIWatch to do. */
+  /** #1006 — the figure the page shows a DESKTOP visitor (≈90 days). Verified: status.claude.com renders
+   *  "90 days ago … 99.58% uptime" on a wide screen. Read from the showcase's own `ninety` when the
+   *  response carries one (#1741), else the same formula over every day the payload embeds. Shown beside
+   *  our 30-day number so the reader can check us against the provider — which is what #41 built AIWatch
+   *  to do. */
   uptimeReported: number | null
   /** Days `uptimeReported` covers (≈90) — stated in the UI, because the provider's own page does not
    *  commit to one: it renders 30 / 60 / 90 days depending on the viewport. */
@@ -193,8 +194,7 @@ export interface UptimeDataResult {
 // AIWatch picks the trailing 30 days deliberately: it is the window the Score's other components already
 // use, and it is the only way services from DIFFERENT sources can be ranked against each other at all.
 // It is a choice from the provider's own data, using the provider's own weights — not a copy of a figure
-// whose window the provider never commits to. Nothing is disclosed side-by-side for Atlassian for exactly
-// that reason: there is no single provider number to compare against.
+// whose window the provider never commits to.
 
 /** #1006 — `componentId` accepts a LIST (the service's `statusComponentIds` badge scope): the result is
  *  the WORST-OF across them, matching the badge convention (#379) and the impact calendar. Reading a
@@ -208,7 +208,7 @@ export function parseUptimeData(html: string, componentId: string | string[], wi
 /** #1389 — the same computation, over timelines that did NOT come from the page's inline blob.
  *  Atlassian's `LAZY_UPTIME_SHOWCASE` rollout (2026-09-10) moved that payload to a separate
  *  `/uptime_showcase` endpoint whose `timelines` object has the identical `{code: {days:[…]}}` shape,
- *  so the two sources differ only in TRANSPORT. Split here rather than at the call site so there is
+ *  so the two sources differ only in TRANSPORT (and in `ninety`, which only the showcase carries, #1741). Split here rather than at the call site so there is
  *  exactly one implementation of the window/weights/worst-of rules — a second copy is where the
  *  Atlassian and showcase numbers would start to drift. `null` in (no payload at all) is the same
  *  "nothing to compute" as an empty object: an all-null result. */
@@ -261,7 +261,7 @@ export function computeUptimeData(data: UptimeTimelines | null, componentId: str
  * are SECONDS of partial / major outage on that UTC day. Identical whether it arrives inline in the
  * page (`window.uptimeData`) or from `/uptime_showcase`'s `timelines` (#1389).
  */
-export type UptimeTimelines = Record<string, { days?: UptimeDayEntry[] }>
+export type UptimeTimelines = Record<string, { days?: UptimeDayEntry[]; ninety?: number }>
 
 /**
  * Pull the inline `window.uptimeData` blob out of a status page, or `null` when the page carries none.
@@ -325,9 +325,10 @@ export function hasLazyUptimeShowcase(html: string): boolean {
  * #1389 — read the `timelines` map out of an `/uptime_showcase` response body.
  *
  * The response also carries `components` (pre-rendered SVG) and `values` (the provider's own
- * 30/60/90-day percentages). `values` is deliberately IGNORED: #1006/#1110 — `uptime30d` is a figure
- * AIWatch computes from the per-day outage seconds, and dropping a provider-computed aggregate into it
- * would put a differently-defined number in a field the Reliability Ranking compares across services.
+ * 30/60/90-day percentages). Only `ninety` is read, onto the matching component as `ninety`, and only
+ * `uptimeReported` takes it (#1741): #1006/#1110 — `uptime30d` is a figure AIWatch computes from the
+ * per-day outage seconds, and dropping a provider-computed aggregate into it would put a
+ * differently-defined number in a field the Reliability Ranking compares across services.
  *
  * Returns null unless `timelines` is present and is an object, so an error envelope or a future
  * response that drops the field reads as "we could not read this" rather than as an empty timeline set.
@@ -339,7 +340,16 @@ export function parseUptimeShowcase(payload: unknown): UptimeTimelines | null {
   if (!payload || typeof payload !== 'object') return null
   const timelines = (payload as Record<string, unknown>).timelines
   if (!timelines || typeof timelines !== 'object' || Array.isArray(timelines)) return null
-  return timelines as UptimeTimelines
+  const values = (payload as Record<string, unknown>).values
+  if (!Array.isArray(values)) return timelines as UptimeTimelines
+  const merged = { ...(timelines as UptimeTimelines) }
+  for (const v of values) {
+    const { component, ninety } = (v ?? {}) as { component?: string; ninety?: unknown }
+    if (typeof ninety === 'number' && component != null && Object.hasOwn(merged, component)) {
+      merged[component] = { ...merged[component], ninety }
+    }
+  }
+  return merged
 }
 
 /**
@@ -355,10 +365,11 @@ export function parseUptimeShowcase(payload: unknown): UptimeTimelines | null {
  * the page publishes, and reading it needs no request beyond the ONE `componentsUrl`/`apiUrl` fetch this
  * roster audit already makes for names.
  */
-export function atlassianRosterEntries(components: Array<{ id: string; created_at?: unknown }>): { id: string; dataAvailableSince: string | null }[] {
+export function atlassianRosterEntries(components: Array<{ id: string; created_at?: unknown; group_id?: unknown }>): { id: string; dataAvailableSince: string | null; groupId?: string | null }[] {
   return components.map((c) => ({
     id: c.id,
     dataAvailableSince: typeof c.created_at === 'string' && !Number.isNaN(Date.parse(c.created_at)) ? c.created_at : null,
+    ...('group_id' in c ? { groupId: typeof c.group_id === 'string' ? c.group_id : null } : {}),
   }))
 }
 
@@ -408,7 +419,7 @@ function computeUptimeDataSingle(data: UptimeTimelines | null, componentId: stri
     result.uptimePercent = pctOver(trailing)
     result.windowDays = trailing.length > 0 ? trailing.length : null
     if (scored.length > trailing.length) {
-      result.uptimeReported = pctOver(scored)
+      result.uptimeReported = comp.ninety ?? pctOver(scored)
       result.uptimeReportedDays = scored.length
     }
     // #1017 — the LAST scored day is USUALLY today's (same "tail = trailing window ending today"

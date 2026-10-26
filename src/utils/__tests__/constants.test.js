@@ -993,6 +993,12 @@ describe('#1753 — frontend: listed services recommend their substitute lists',
     expect(getGroupedFallbacks([cohere], [cohere, ...board]).map(g => [g.label, g.items.map(f => f.name)])).toEqual([['LLM', ['Claude API']], ['Embeddings', ['Voyage AI']]])
   })
 
+  it('#1741 a BFL Flux.3-only outage recommends an image and a video service', () => {
+    const bfl = down('bfl', 'Black Forest Labs (FLUX)', { components: [{ name: 'API (api.bfl.ai)', status: 'operational' }, { name: 'Flux.3', status: 'down' }] })
+    const peers = [svc('stability', 'Stability AI', 80), svc('runway', 'Runway', 79), svc('luma', 'Luma (Dream Machine)', 78)]
+    expect(getGroupedFallbacks([bfl], [bfl, ...board, ...peers]).map(g => [g.label, g.items.map(f => f.name)])).toEqual([['Image', ['Stability AI']], ['Video', ['Runway']]])
+  })
+
   it('a shared LLM key is answered by the unlisted anchor, whichever comes first', () => {
     const ids = [['deepseek', 'DeepSeek API'], ['claude', 'Claude API'], ['gemini', 'Gemini API'], ['xai', 'SpaceXSI API'], ['mistral', 'Mistral API'], ['together', 'Together AI'], ['fireworks', 'Fireworks AI']]
     const downs = ids.map(([id, name]) => down(id, name))

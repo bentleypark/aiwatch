@@ -260,7 +260,7 @@ export default async function handler(req: Request) {
             // that check, round-9 structural pass).
             && !(s.incidents ?? []).some(i => (i as { status?: string; retainedBridge?: boolean }).status !== 'resolved' && !(i as { retainedBridge?: boolean }).retainedBridge)
             && !s.incidentSourceStale
-          const listed = substituteGroupsFor(entry.id, fallbackCapabilityLabel ?? null)
+          const listed = substituteGroupsFor(entry.id, fallbackCapabilityLabel ?? null, target?.components)
           if (listed) {
             const clean = allServices.filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id && isLiveCandidate(s))
             fallbackGroups = pickSubstitutes(listed, clean, (inGroup) => orderForFallback(inGroup, sourceTier))

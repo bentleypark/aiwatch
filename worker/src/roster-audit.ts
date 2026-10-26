@@ -20,6 +20,9 @@ export interface RosterAuditEntry {
    *  empty, or unparseable) — the same "cannot prove an age" case `computeIncidentIoUptime` withholds
    *  uptime for. Treated as unproven, not as clean, below. */
   dataAvailableSince: string | null
+  /** #1741 — Atlassian `group_id`: a string = a member of that group, `null` = a top-level component or
+   *  group header. Absent when the reader yields no group information (`parseIncidentIoAllComponentUptimes`). */
+  groupId?: string | null
 }
 
 /**
@@ -65,11 +68,12 @@ export function nextRosterFindingSeen(
 }
 
 /**
- * #1518 — the (b) call every cron branch makes: `auditAgedInOutOfScope`, unless `fixedScope` suppresses
- * it entirely (cohere/groq/bfl — a permanently-pinned anchor id whose page is a structurally unbounded
- * per-model catalog with nothing to reconcile it against). Extracted so the fixedScope gate itself is a
+ * #1518 — the (b) call every cron branch makes: `auditAgedInOutOfScope`. With `fixedScope`
+ * (cohere/groq/bfl — a page whose own roster is a structurally unbounded per-model catalog) it audits only the entries known to be top-level (`groupId === null`, #1741): a new model under
+ * a group stays silent, a new top-level component or group still reports. An incident.io entry carries no
+ * `groupId`, so a fixed-scope incident.io page still reports nothing. Extracted so the fixedScope gate itself is a
  * pure, directly mutation-testable unit rather than an inline ternary at each of the two cron call
- * sites (incident.io, Atlassian) — a dropped `fixedScope ? [] :` would otherwise pass the whole suite,
+ * sites (incident.io, Atlassian) — a dropped gate would otherwise pass the whole suite,
  * since nothing else in the tree exercises the cron wiring itself.
  */
 export function rosterAgedInFindings(
@@ -80,7 +84,8 @@ export function rosterAgedInFindings(
   nowMs: number,
   windowDays: number = ROSTER_AUDIT_WINDOW_DAYS,
 ): string[] {
-  return fixedScope ? [] : auditAgedInOutOfScope(entries, scopeIds, excludeIds, nowMs, windowDays)
+  const audited = fixedScope ? entries.filter((e) => e.groupId === null) : entries
+  return auditAgedInOutOfScope(audited, scopeIds, excludeIds, nowMs, windowDays)
 }
 
 /** Operator Discord body for a page's roster audit. `names` resolves an id to a display name when
