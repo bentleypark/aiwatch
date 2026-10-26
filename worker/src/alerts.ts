@@ -830,7 +830,7 @@ export function buildWithdrawalAlerts(
     if (!announcedIncIds.has(w.incId)) continue
     const svc = services.find((s) => s.id === w.svcId)
     // The same rule the RSS half applies, so neither channel publishes a retraction the other
-    // considers unsafe. Re-evaluated on ANY cycle inside the tombstone's 6d window, not just the prune
+    // considers unsafe. Re-evaluated on a later cycle too, not just the prune
     // cycle — an alert crowded out by the per-cycle send cap is retried later, by which time the
     // provider may have re-listed the incident. Every hold is reported to `onHold` so the caller can
     // log it: this is the one drop in the feature that can permanently lose a notice, and a silent
