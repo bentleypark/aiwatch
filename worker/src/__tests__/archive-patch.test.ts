@@ -630,3 +630,26 @@ describe('aiwatch-reports#161 — recountDowntime', () => {
     expect(out.claude).toEqual({ downtime: 120, mttr: 60 }) // (90 + 30) / 2
   })
 })
+
+describe('#1797 — a stuck row is re-added under its own id with the provider\'s outcome', () => {
+  const cases = [
+    { name: '2026-09-chatgpt', startedAt: '2026-09-30T02:20:32Z', durationMin: 2725 },
+    { name: '2026-08-openai', startedAt: '2026-08-31T22:27:56Z', durationMin: 1238 },
+  ] as const
+  for (const c of cases) {
+    it(c.name, () => {
+      const spec = ROW_REPLACEMENTS[c.name]
+      const window = monthWindow(spec.period)
+      const stored: MonthlyIncidentEntry = {
+        id: spec.remove[0], title: spec.add[0].title, startedAt: c.startedAt, resolvedAt: null,
+        durationMin: 0, finalStatus: 'monitoring', impact: 'minor',
+      }
+      const svc: Record<string, unknown> = { incidentList: [stored], officialUptime: null }
+      const archive: PatchableArchive = { services: { [spec.service]: { ...svc, ...figuresFrom(spec.service, svc, [stored], window) } } }
+      const { changes, refusals } = planRowReplacement(archive, window, spec)
+      expect(refusals).toEqual([])
+      expect(changes[0].keptList).toEqual([{ ...spec.add[0], id: stored.id, durationMin: c.durationMin, finalStatus: 'resolved' }])
+      expect(changes[0].after).toMatchObject({ incidents: 1, totalDowntimeMin: c.durationMin, countedIncidents: 1 })
+    })
+  }
+})

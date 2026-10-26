@@ -30,6 +30,7 @@ import { buildPredictionSnapshot, summarizeSnapshotCoverage, type SnapshotCovera
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { recordDiscordSend } from './discord-send-log'
 import { checkUptimeLiveness } from './uptime-liveness'
+import { checkLateResolutions } from './late-resolution'
 import { runMistralPublicApiProbe } from './mistral-public-api'
 import { handleMistralEmail } from './mistral-email'
 import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
@@ -2028,6 +2029,11 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     sendDiscordAlert,
     deactivatedSourceIds,
   )
+
+  // #1797 — hourly: past-month archive rows still open, resolved upstream.
+  if (new Date(scheduledTimeMs).getUTCMinutes() < 5) {
+    await checkLateResolutions(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, services, scheduledTimeMs, sendDiscordAlert)
+  }
 
   // Refresh TTL on existing AI analyses / re-analyze missing ones (max 2 per cron)
   // monitoring = "recovery confirmed, verifying" — treat as inactive (no TTL refresh)

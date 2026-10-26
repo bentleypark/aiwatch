@@ -282,6 +282,32 @@ export const ROW_REPLACEMENTS: Record<string, RowReplacement> = {
       impact: 'major',
     }],
   },
+  '2026-09-chatgpt': {
+    period: '2026-09',
+    service: 'chatgpt',
+    source: 'https://status.openai.com/incidents/01M3R1T4FCR1337FBBYY9K2RPB — resolved 2026-10-01T23:44:57Z (#1797)',
+    remove: ['01M3R1T4FCR1337FBBYY9K2RPB'],
+    add: [{
+      id: '01M3R1T4FCR1337FBBYY9K2RPB',
+      title: 'Elevated errors in ChatGPT Space Pages',
+      startedAt: '2026-09-30T02:20:32.108Z',
+      resolvedAt: '2026-10-01T23:44:57.067Z',
+      impact: 'minor',
+    }],
+  },
+  '2026-08-openai': {
+    period: '2026-08',
+    service: 'openai',
+    source: 'https://status.openai.com/incidents/01M1CYZDD84XD0H56XNEV2PT98 — resolved 2026-09-01T19:05:46Z (#1797)',
+    remove: ['01M1CYZDD84XD0H56XNEV2PT98'],
+    add: [{
+      id: '01M1CYZDD84XD0H56XNEV2PT98',
+      title: 'Elevated latency in the Responses API',
+      startedAt: '2026-08-31T22:27:56.967Z',
+      resolvedAt: '2026-09-01T19:05:46.393Z',
+      impact: 'minor',
+    }],
+  },
 }
 
 const isCanonicalUtc = (s: string) => {

@@ -119,6 +119,11 @@ the named services from their unchanged `incidentList` and refuses when anything
 and `countedIncidents` would move. It never writes KV. 2026-08 OpenAI was archived before #1536, so its
 month-end row that was still open sat in the divisor (2 / 254) while the published report used 1 / 507.
 
+**When the "archive row still open, resolved upstream" alert fires (#1797)**, add a `ROW_REPLACEMENTS` entry
+that removes the row and re-adds the same id with the provider's `startedAt` / `resolvedAt`, then run
+`npx tsx scripts/patch-archive-derived-dupes.ts --period YYYY-MM --correction <name>`. Review the printed figure
+diff before applying: it can move a published score and grade. The archive's `narrative` is not touched by the patch.
+
 ### The rebuild refuses when it would hold less than what is stored (#1260)
 
 `archive:monthly:{YYYY-MM}` has no TTL because nothing else holds a month's per-service figures — but every

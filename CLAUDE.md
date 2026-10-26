@@ -273,7 +273,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   discord-send-log.ts # One KV key per operator Discord embed
   uptime-showcase.ts # Atlassian's lazy uptime endpoint (#1389)
   cron-heartbeat.ts  # Cron watchdog (#1501)
-  uptime-liveness.ts # Alert when a service stops publishing uptime (#1389/#957)
+  uptime-liveness.ts late-resolution.ts # Alerts: uptime stopped publishing (#1389/#957); archive row left open (#1797)
   suppression.ts     # Operator incident-suppression layer (#904)
   overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident
   probe.ts probe-archival.ts   # Direct RTT probing (36 targets) + daily archival

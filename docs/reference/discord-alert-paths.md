@@ -206,6 +206,15 @@ Fires when a service that **was** publishing an uptime figure has published none
 - **Not suppressed:** only the UPTIME leg failing (status-page HTML or `/uptime_showcase` non-ok while summary.json is fine). Nothing else alerts on that, and it is what this detector is for.
 - **The body names no cause and no consequence.** How long, when the last reading was, and which page to open. Four review rounds each found the added clause false; a test now pins its absence.
 
+### Archive row still open, resolved upstream (#1797) — operator ops alert
+
+Fires when a live incident the provider has resolved is still a non-resolved row in a past month's `archive:monthly`.
+
+- **Source**: `worker/src/late-resolution.ts`, from `cronAlertCheck` in the first slot of each hour. It reads an archive only for a past month that a live, upstream-resolved incident started in.
+- **Operator-only** — purple (`0x9b59b6`), a data-quality alarm. It never writes the archive: resolving the row can move that month's published figures (2026-08 openai: grade good→fair), so the correction is the operator's `--correction` run ([operator-tools.md](operator-tools.md)).
+- **Deduped 30d** in `alerted:late-res:{period}:{svcId}:{incId}`, written only after a successful send. Once the row is corrected it no longer matches, so nothing re-sends.
+- **Blind spot**: it sees an incident only while the provider's live feed still lists it.
+
 ### Cron stalled (#1501) — operator ops alert
 
 Fires when the `*/5` cron has not run for 20+ min. On 2026-09-23 Cloudflare stopped dispatching the schedule for ~3h with the trigger still registered and `fetch` serving normally; every cron-side check went silent with it, and it was noticed only because the daily summary never arrived. A cron cannot report its own absence, so the watch sits on the path that stayed alive.
