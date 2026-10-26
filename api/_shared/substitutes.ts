@@ -39,10 +39,32 @@ export const SUBSTITUTES: Record<string, readonly SubstituteGroup[]> = {
   ],
 }
 
+// #1741 — lists that apply only while every degraded component of the source is named in `components`.
+// BFL's `Flux.3` is the one component whose API family serves both images and video (api.bfl.ai/openapi.json:
+// /v1/flux-3-image, /v1/flux-3-image-klein, /v1/flux-3-video, read 2026-10-25); any other BFL outage keeps
+// the image tier.
+export const COMPONENT_SUBSTITUTES: Record<string, { components: readonly string[]; groups: readonly SubstituteGroup[] }> = {
+  bfl: {
+    components: ['Flux.3'],
+    groups: [
+      { use: 'image generation', label: 'Image', ids: ['stability', 'openai'] },
+      { use: 'video generation', label: 'Video', ids: ['runway', 'luma'] },
+    ],
+  },
+}
+
 /** The groups that answer this outage, or null when tier routing applies: the service has no list, or
  *  its outage is routed to one capability. */
-export function substituteGroupsFor(sourceId: string, routedCapability: string | null): readonly SubstituteGroup[] | null {
-  return routedCapability ? null : SUBSTITUTES[sourceId] ?? null
+export function substituteGroupsFor(
+  sourceId: string,
+  routedCapability: string | null,
+  components?: ReadonlyArray<{ name: string; status: string }>,
+): readonly SubstituteGroup[] | null {
+  if (routedCapability) return null
+  const byComponent = COMPONENT_SUBSTITUTES[sourceId]
+  const degraded = (components ?? []).filter((c) => c.status !== 'operational').map((c) => c.name)
+  if (byComponent && degraded.length > 0 && degraded.every((n) => byComponent.components.includes(n))) return byComponent.groups
+  return SUBSTITUTES[sourceId] ?? null
 }
 
 /** Each group's candidates, in the caller's order, capped at `perGroup`; groups with none are dropped. */

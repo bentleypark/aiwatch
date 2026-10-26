@@ -55,4 +55,47 @@ describe('atlassianRosterAuditServices (#1518 — the Atlassian-branch equivalen
     const findings = rosterAgedInFindings(atlassianRosterEntries(page), uptimeScopeOf(claudeai), claudeai.rosterAuditExclude ?? [], false, Date.parse('2026-10-05T00:00:00Z'))
     expect(findings).toEqual([])
   })
+
+  // #1741 — status.bfl.ml components.json as served 2026-10-25, every component.
+  const BFL_PAGE = [
+    { id: 'lzj5bpsmhwt6', name: 'FLUX 1.1 [pro]', created_at: '2024-10-07T19:54:52.676Z', group_id: 'm991l9z7y6jj' },
+    { id: 'ygnttdvrl2pj', name: 'Flux.3', created_at: '2026-09-28T11:58:06.151Z', group_id: 'x16d9nh49hch' },
+    { id: '70p23r3xs7b0', name: 'FLUX.1 [pro]', created_at: '2024-10-07T23:33:59.086Z', group_id: 'm991l9z7y6jj' },
+    { id: 'h4v0br1sctqx', name: 'FLUX.1 [dev]', created_at: '2024-10-07T23:34:26.058Z', group_id: 'm991l9z7y6jj' },
+    { id: 'm991l9z7y6jj', name: 'Image Generation Services', created_at: '2024-10-07T23:33:19.918Z', group_id: null },
+    { id: 'ppxtlh70k466', name: 'FLUX 1.1 [pro] Ultra', created_at: '2025-02-05T22:48:18.818Z', group_id: 'm991l9z7y6jj' },
+    { id: '8jg9v8zhstys', name: 'Finetuning', created_at: '2025-01-17T18:24:11.561Z', group_id: null },
+    { id: 'thvty5dzd95w', name: 'FLUX.1 Fill [pro]', created_at: '2025-02-05T22:49:40.002Z', group_id: 'm991l9z7y6jj' },
+    { id: 'qcvzszkj9m47', name: 'FLUX.1 Canny [pro]', created_at: '2025-02-05T22:50:08.202Z', group_id: 'm991l9z7y6jj' },
+    { id: 'ws9rrzk6n2j7', name: 'API (api.bfl.ai)', created_at: '2026-04-22T14:05:41.303Z', group_id: null },
+    { id: 'l27p2yhv77bj', name: 'FLUX.1 Depth [pro]', created_at: '2025-02-05T22:50:57.261Z', group_id: 'm991l9z7y6jj' },
+    { id: 'x16d9nh49hch', name: 'Video Generation Services', created_at: '2026-09-28T11:58:06.107Z', group_id: null },
+    { id: '6yncdw0dwc1s', name: 'FLUX .1 Kontext [pro]', created_at: '2025-05-29T20:18:08.536Z', group_id: 'm991l9z7y6jj' },
+    { id: 'cw5sckn8002d', name: 'API EU (api.eu.bfl.ai)', created_at: '2026-09-28T11:58:59.729Z', group_id: null },
+    { id: 'bvfp4p0szk5y', name: 'FLUX.1 Kontext [max]', created_at: '2025-06-02T17:36:00.742Z', group_id: 'm991l9z7y6jj' },
+    { id: 'wb9xb021290k', name: 'API US (api.us.bfl.ai)', created_at: '2026-09-28T11:59:21.941Z', group_id: null },
+    { id: 'k1f1dgrqqc9g', name: 'FLUX.2', created_at: '2026-03-25T13:39:02.312Z', group_id: 'm991l9z7y6jj' },
+    { id: '67vphhw599hb', name: 'FLUX.2 [klein]', created_at: '2026-03-25T13:39:30.851Z', group_id: 'm991l9z7y6jj' },
+  ]
+  // Past 30 days for the 2026-09-28 additions, so they are aged in.
+  const BFL_AGED = Date.parse('2026-11-01T00:00:00Z')
+
+  it('#1741 bfl: every badge id is on the live page under the expected name', () => {
+    const bfl = SERVICES.find((s) => s.id === 'bfl')!
+    const names = new Map(BFL_PAGE.map((c) => [c.id, c.name]))
+    expect(bfl.statusComponentIds!.map((id) => names.get(id))).toEqual([
+      'API (api.bfl.ai)', 'Image Generation Services', 'Video Generation Services', 'API EU (api.eu.bfl.ai)', 'API US (api.us.bfl.ai)', 'Finetuning',
+    ])
+  })
+
+  it('#1741 bfl: the live page yields no aged-in finding under the real config', () => {
+    const bfl = SERVICES.find((s) => s.id === 'bfl')!
+    const findings = rosterAgedInFindings(atlassianRosterEntries(BFL_PAGE), uptimeScopeOf(bfl), bfl.rosterAuditExclude ?? [], bfl.rosterAuditFixedScope ?? false, BFL_AGED)
+    expect(findings).toEqual([])
+  })
+
+  it('#1741 bfl: the pre-#1741 scope reports every untracked top-level component, never a FLUX model', () => {
+    const findings = rosterAgedInFindings(atlassianRosterEntries(BFL_PAGE), ['ws9rrzk6n2j7', 'm991l9z7y6jj'], [], true, BFL_AGED)
+    expect(findings.sort()).toEqual(['8jg9v8zhstys', 'cw5sckn8002d', 'wb9xb021290k', 'x16d9nh49hch'])
+  })
 })

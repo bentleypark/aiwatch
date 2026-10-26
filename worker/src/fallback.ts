@@ -575,7 +575,7 @@ export function substituteFallbacks(
   services: FallbackCandidate[],
 ): Array<{ group: SubstituteGroup; items: FallbackCandidate[] }> | null {
   const source = services.find(s => s.id === serviceId)
-  const groups = substituteGroupsFor(serviceId, routedCapability(source))
+  const groups = substituteGroupsFor(serviceId, routedCapability(source), source?.components)
   if (!groups) return null
   if (source?.fallbackSuppressed || routingTier(source) === ROUTE_SUPPRESS) return []
   const clean = services.filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== serviceId

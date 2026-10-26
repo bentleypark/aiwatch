@@ -392,13 +392,15 @@ export const SERVICES: ServiceConfig[] = [
   // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge
   // worst-of (#379): the developer-facing API surface + the "Image Generation Services" group (rolls
   // up every FLUX model tier), so a single model-tier blip doesn't flip the badge unless API or the
-  // whole image group degrades.
+  // whole image group degrades. #1741 — also the "Video Generation Services" group (FLUX 3 video, served
+  // by the same api.bfl.ai) and the regional API EU / API US hosts, all three added to the page 2026-09-28,
+  // and Finetuning (finetuned FLUX 1.1 [pro] image generation, /v1/flux-pro-1.1-ultra-finetuned).
   // Per-component breakdown (#606): displayAllComponents per-model page. The page publishes its own
   // groups (Image / Video Generation Services), so the breakdown follows them and the page order (#1525).
-  // #1518 — rosterAuditFixedScope: uptime reads 2 anchor ids (API + the Image Generation Services group)
-  // forever; the per-model FLUX catalog `displayAllComponents` renders is structurally unbounded (14
-  // components live 2026-09-27), same shape as cohere/groq.
-  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentGroupsInline: true, addedAt: '2026-06-24', rosterAuditFixedScope: true }, // #802
+  // #1518 — rosterAuditFixedScope: the per-model FLUX catalog `displayAllComponents` renders is
+  // structurally unbounded (14 components live 2026-09-27), same shape as cohere/groq. Since #1741 it
+  // silences only group members, so a new top-level component or group still reports.
+  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj', 'x16d9nh49hch', 'cw5sckn8002d', 'wb9xb021290k', '8jg9v8zhstys'], displayAllComponents: true, componentGroupsInline: true, addedAt: '2026-06-24', rosterAuditFixedScope: true }, // #802
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
   // Jina AI (#880) — embeddings + reranking, Voyage's sibling in the Embeddings fallback tier (9). The badge,
@@ -3128,11 +3130,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // Both use the weights on /methodology (full outage 1.0, partial/degraded 0.3, announced
       // maintenance excluded). This is what makes the Score coherent — its other components (Incidents
       // 25, Recovery 15) are 30-day — and the Reliability Ranking comparable at all.
-      //
-      // `uptimeReported` is set ONLY for incident.io, where the page publishes ONE fixed aggregate that
-      // genuinely differs from our measure (LangSmith's page really does show 98.48% while its trailing-30
-      // record is spotless). An Atlassian page has no such single number — its window follows the viewport
-      // (90/60/30 days) — so there is nothing to place beside ours.
       let uptimeValue: number | null = null
       let uptimeSrc: 'official' | undefined
       let uptimeWindow: number | undefined

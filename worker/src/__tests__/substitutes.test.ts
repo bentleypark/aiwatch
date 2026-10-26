@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { SERVICES } from '../services'
 import { API_TIER } from '../fallback'
-import { SUBSTITUTES, substituteGroupsFor, pickSubstitutes, substituteFaqAnswer } from '../../../api/_shared/substitutes'
+import { SUBSTITUTES, COMPONENT_SUBSTITUTES, substituteGroupsFor, pickSubstitutes, substituteFaqAnswer } from '../../../api/_shared/substitutes'
 
 const categoryOf = new Map(SERVICES.map((s) => [s.id, s.category]))
 const tierIds = (tier: number) => Object.keys(API_TIER).filter((id) => API_TIER[id] === tier).sort()
@@ -53,6 +53,46 @@ describe('#1753 — substituteGroupsFor', () => {
   it('an unrouted outage gets every group, a routed one keeps tier routing', () => {
     expect(substituteGroupsFor('cohere', null)?.map((g) => g.label)).toEqual(['LLM', 'Embeddings'])
     expect(substituteGroupsFor('cohere', 'embeddings')).toBeNull()
+  })
+})
+
+describe('#1741 — COMPONENT_SUBSTITUTES', () => {
+  for (const [source, entry] of Object.entries(COMPONENT_SUBSTITUTES)) {
+    it(`${source}: every candidate is a monitored service of the same category, never the source, one group per label`, () => {
+      expect(categoryOf.has(source)).toBe(true)
+      for (const g of entry.groups) {
+        for (const id of g.ids) {
+          expect(categoryOf.get(id), `${source} → ${id}`).toBe(categoryOf.get(source))
+          expect(id).not.toBe(source)
+        }
+      }
+      expect(new Set(entry.groups.map((g) => g.label)).size).toBe(entry.groups.length)
+    })
+  }
+
+  const bfl = (down: string[]) => ['API (api.bfl.ai)', 'FLUX.2', 'Flux.3']
+    .map((name) => ({ name, status: down.includes(name) ? 'down' : 'operational' }))
+
+  it('a Flux.3-only outage gets both the image and the video group', () => {
+    expect(substituteGroupsFor('bfl', null, bfl(['Flux.3']))?.map((g) => g.label)).toEqual(['Image', 'Video'])
+  })
+
+  it('any other BFL outage keeps tier routing', () => {
+    expect(substituteGroupsFor('bfl', null, bfl(['FLUX.2']))).toBeNull()
+    expect(substituteGroupsFor('bfl', null, bfl(['Flux.3', 'FLUX.2']))).toBeNull()
+    expect(substituteGroupsFor('bfl', null, bfl([]))).toBeNull()
+    expect(substituteGroupsFor('bfl', null)).toBeNull()
+  })
+
+  it('a routed outage keeps tier routing', () => {
+    expect(substituteGroupsFor('bfl', 'video', bfl(['Flux.3']))).toBeNull()
+  })
+
+  it('a degraded component counts as part of the outage, not only a down one', () => {
+    const mixed = [{ name: 'Flux.3', status: 'down' }, { name: 'FLUX.2', status: 'degraded' }, { name: 'API (api.bfl.ai)', status: 'operational' }]
+    expect(substituteGroupsFor('bfl', null, mixed)).toBeNull()
+    const degradedOnly = [{ name: 'Flux.3', status: 'degraded' }, { name: 'FLUX.2', status: 'operational' }]
+    expect(substituteGroupsFor('bfl', null, degradedOnly)?.map((g) => g.label)).toEqual(['Image', 'Video'])
   })
 })
 

@@ -247,7 +247,7 @@ export function getFallbacks(service, allServices) {
 
 // #1753 — MIRROR of worker substituteFallbacks: a listed service's substitutes per group, or null.
 export function substituteFallbacks(service, allServices) {
-  const groups = substituteGroupsFor(service.id, routedCapability(service))
+  const groups = substituteGroupsFor(service.id, routedCapability(service), service.components)
   if (!groups) return null
   if (service.fallbackSuppressed || routingTier(service) === ROUTE_SUPPRESS) return []
   const clean = allServices.filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== service.id

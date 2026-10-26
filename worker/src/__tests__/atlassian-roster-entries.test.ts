@@ -30,6 +30,20 @@ describe('atlassianRosterEntries (#1518 — created_at, not the fixed-width /upt
     ])
   })
 
+  it('#1741 carries group_id as groupId: a string for a member, null for a top-level component', () => {
+    expect(atlassianRosterEntries([
+      { id: 'MEMBER', created_at: '2026-01-01T00:00:00Z', group_id: 'GROUP' },
+      { id: 'TOP', created_at: '2026-01-01T00:00:00Z', group_id: null },
+    ])).toEqual([
+      { id: 'MEMBER', dataAvailableSince: '2026-01-01T00:00:00Z', groupId: 'GROUP' },
+      { id: 'TOP', dataAvailableSince: '2026-01-01T00:00:00Z', groupId: null },
+    ])
+  })
+
+  it('#1741 a non-string group_id reads as top-level, so the audit still sees it', () => {
+    expect(atlassianRosterEntries([{ id: 'AAA', group_id: 42 }])).toEqual([{ id: 'AAA', dataAvailableSince: null, groupId: null }])
+  })
+
   it('empty array yields no entries', () => {
     expect(atlassianRosterEntries([])).toEqual([])
   })

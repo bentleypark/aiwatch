@@ -514,13 +514,14 @@ export interface ServiceConfig {
   // #1669 — page component ids that are not a service (a developer console, a dashboard). An incident
   // tagged ONLY to these ids goes to `ServiceStatus.referenceIncidents`, never `incidents`.
   referenceComponentIds?: string[]
-  // #1518 — set when this service's uptime scope is PERMANENTLY pinned to one (or a few) anchor
-  // component(s) on a page whose OWN roster is structurally unbounded — a per-model catalog
+  // #1518 — set when this service's uptime scope is a fixed list of anchor component(s) on a page
+  // whose OWN roster is structurally unbounded — a per-model catalog
   // (`displayAllComponents`: cohere/groq's incident.io pages, bfl's Atlassian one) rather than a curated
-  // allowlist meant to grow (turbopuffer). Skips the (b) aged-in-out-of-scope check for the
-  // WHOLE page: `rosterAuditExclude` cannot express this — the excluded set would need a new entry for
-  // every model the page could ever add, exactly the hand-maintained-roster trap #992's
-  // `displayAllComponents` already avoids for the breakdown.
+  // allowlist meant to grow (turbopuffer). Skips the (b) aged-in-out-of-scope check for every page
+  // entry not known to be top-level (`rosterAgedInFindings`, #1741): group members on an Atlassian page,
+  // and the whole page on incident.io, whose reader yields no group information. `rosterAuditExclude` cannot express
+  // this — the excluded set would need a new entry for every model the page could ever add, exactly the
+  // hand-maintained-roster trap #992's `displayAllComponents` already avoids for the breakdown.
   rosterAuditFixedScope?: boolean
   betterStackUrl?: string
   // #677 — AWS Health Dashboard public events JSON API (start+end+typeCode per incident). Replaced

@@ -4,7 +4,7 @@
 // Mirrors observability-services-config.test.ts (#601).
 
 import { describe, it, expect } from 'vitest'
-import { SERVICES, resolveSvcComponents, orderByPagePosition, MODEL_GROUP } from '../services'
+import { SERVICES, resolveSvcComponents, resolveSvcStatus, orderByPagePosition, MODEL_GROUP } from '../services'
 import { API_TIER, EXCLUDE_FALLBACK, TIER_LABEL } from '../fallback'
 
 describe('#756 Black Forest Labs (FLUX) image sibling config', () => {
@@ -18,8 +18,9 @@ describe('#756 Black Forest Labs (FLUX) image sibling config', () => {
     expect(s!.statusUrl).toBe('https://status.bfl.ml')
     // The developer-facing API component.
     expect(s!.statusComponentId).toBe('ws9rrzk6n2j7')
-    // Badge worst-of (#379): API + the "Image Generation Services" group roll-up.
-    expect(s!.statusComponentIds).toEqual(['ws9rrzk6n2j7', 'm991l9z7y6jj'])
+    // Badge worst-of (#379): API + the "Image Generation Services" group roll-up, and (#1741) the
+    // "Video Generation Services" group, the API EU / API US hosts and Finetuning.
+    expect(s!.statusComponentIds).toEqual(['ws9rrzk6n2j7', 'm991l9z7y6jj', 'x16d9nh49hch', 'cw5sckn8002d', 'wb9xb021290k', '8jg9v8zhstys'])
     // Single-tenant page → no incidentKeywords needed.
     expect(s!.incidentKeywords).toBeUndefined()
   })
@@ -63,6 +64,18 @@ describe('#756 Black Forest Labs (FLUX) image sibling config', () => {
       ['API US (api.us.bfl.ai)', null],
     ])
     expect(comps.find((c) => c.name === 'API US (api.us.bfl.ai)')!.status).toBe('down')
+  })
+
+  it('#1741 — an outage on the Video Generation Services group, a regional API host or Finetuning reaches the badge', () => {
+    const s = SERVICES.find((x) => x.id === 'bfl')!
+    const allUp = bflSummary.components.map((c) => ({ ...c, status: 'operational' }))
+    const withDown = (id: string) => ({
+      status: { indicator: 'major' },
+      components: allUp.map((c) => (c.id === id ? { ...c, status: 'major_outage' } : c)),
+    })
+    for (const id of [VID, 'cw5sckn8002d', 'wb9xb021290k', '8jg9v8zhstys']) expect(resolveSvcStatus(s, withDown(id), []), id).toBe('down')
+    // #379 unchanged: one image model on its own still leaves the badge operational.
+    expect(resolveSvcStatus(s, withDown('k1f1dgrqqc9g'), [])).toBe('operational')
   })
 
   it('#1525 — a page with no published groups keeps the surfaces/Models split', () => {
