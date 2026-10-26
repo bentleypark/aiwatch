@@ -127,6 +127,7 @@ export default async function handler(req: Request) {
             probeConfirmed?: boolean; probeContradicted?: boolean
             components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
             componentGroupsInline?: boolean // array-order (groups interleaved) breakdown layout
+            fallbackSuppressed?: boolean // #880 — the outage is outside the service's fallback scope
           }>
           // #926 — the worker returns an ARRAY per service (one entry per active incident). The prior
           // non-array annotation was wrong (a runtime array was silently collapsed to [0]); the Array.isArray
