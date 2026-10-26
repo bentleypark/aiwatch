@@ -1,10 +1,7 @@
 // #1106 Part 5 — the durable record that a withdrawal HAPPENED.
 //
-// Every other trace of a withdrawal is short-lived by design: the `incidents:withdrawn` tombstone
-// roster is 6d, `alerted:wd:{incId}` is 7d, `alert:feed:recent` is 2h, and Workers Logs are ~3d on
-// the free plan. The accumulator row is gone by definition — its prune is what starts all of this —
-// so `archive:monthly:{month}` is structurally missing the incident too. Past a week, nothing in KV
-// can answer "did the ⚪ path ever fire, how often, and did the thread actually close?".
+// Every other trace of a withdrawal is short-lived by design, and once they expire nothing in KV can
+// answer "did the ⚪ path ever fire, how often, and did the thread actually close?".
 //
 // That matters because #1106's own exit condition is a PRODUCTION OBSERVATION, and one we cannot
 // schedule: it needs a provider to delete an announced incident. A `verify-after` date would fire on
