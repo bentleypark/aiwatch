@@ -11,7 +11,7 @@ import { summariesFromDailyData } from './probe-archival'
 import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './types'
 import { calculateAIWatchScore, classifyProbe, mergeImpactWindows } from './score'
 import type { AIWatchScore } from './score'
-import { resolveProbeId, PROBE_TARGETS } from './probe'
+import { resolveProbeId, PROBE_TARGETS, type ProbeSpike } from './probe'
 import { monthlyScoredImpact } from './parsers/rootly'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
@@ -239,10 +239,43 @@ export interface MonthlySecuritySummary {
 // `noStatus*` = degradations flagged while the service's official status was still
 // operational (NOT on the status page) — the headline differentiator from #464.
 
+/** #1778 — one counted degradation, as it was counted. `status` is the cached service status the
+ *  `noStatus` verdict was taken from (null when the read missed); `failed` is how many of the
+ *  streak's `probes` had no measured RTT (`measuredRtt` null: a timeout or a 5xx). */
+export interface DegradationEvent {
+  svcId: string
+  at: string        // the cron run that counted it
+  since: string     // first spiking snapshot of the streak
+  noStatus: boolean
+  status: string | null
+  probes: number
+  failed: number
+}
+
+/** #1778 — the event the cron records for one counted degradation. */
+export function degradationEventFor(spike: ProbeSpike, noStatus: boolean, status: string | null, at: string): DegradationEvent {
+  return { svcId: spike.serviceId, at, since: spike.since, noStatus, status, probes: spike.consecutiveCount, failed: spike.failedCount }
+}
+
+/** #1778 — events past this many in one month are not kept; the counters still count them. */
+export const DEGRADATION_EVENTS_CAP = 3000
+
 /** Raw monthly accumulator shape stored at probe-degradation:monthly:{period}. */
 export interface DegradationMonthly {
   byService: Record<string, number>          // svcId → total RTT-degradation rising edges this month
   noStatusByService: Record<string, number>  // svcId → subset not reflected on the official status page
+  events?: DegradationEvent[]                // #1778 — absent on accumulators written before it
+}
+
+/** #1778 — how many events saw an official incident on the same service start within `windowHours`
+ *  of the streak's first spike.
+ *  Not followed is not the same as a false positive: the provider may never post. */
+export interface DegradationFollowThrough {
+  windowHours: number
+  eligible: number
+  followed: number
+  noStatusEligible: number
+  noStatusFollowed: number
 }
 
 export interface MonthlyDegradationSummary {
@@ -250,6 +283,8 @@ export interface MonthlyDegradationSummary {
   noStatusTotal: number                      // subset not on the official status page (headline)
   byService: Record<string, number>          // svcId → total
   noStatusByService: Record<string, number>  // svcId → not-on-status count
+  events?: DegradationEvent[]                // #1778 — absent on archives written before it
+  followThrough?: DegradationFollowThrough[] // #1778 — one entry per FOLLOW_THROUGH_WINDOWS_HOURS
 }
 
 /** Monthly degradation accumulator key (60d TTL) — written alongside the daily counter so the
@@ -269,12 +304,16 @@ export function addDegradationToMonthly(
   existing: DegradationMonthly | null | undefined,
   svcId: string,
   isNoStatus: boolean,
+  event?: DegradationEvent,
 ): DegradationMonthly {
   const byService = { ...(existing?.byService ?? {}) }
   const noStatusByService = { ...(existing?.noStatusByService ?? {}) }
   byService[svcId] = (byService[svcId] ?? 0) + 1
   if (isNoStatus) noStatusByService[svcId] = (noStatusByService[svcId] ?? 0) + 1
-  return { byService, noStatusByService }
+  const events = existing?.events
+  if (!event) return events ? { byService, noStatusByService, events } : { byService, noStatusByService }
+  const prior = events ?? []
+  return { byService, noStatusByService, events: prior.length < DEGRADATION_EVENTS_CAP ? [...prior, event] : prior }
 }
 
 /** Coerce an unknown parsed value into a well-formed DegradationMonthly, keeping only finite
@@ -289,7 +328,76 @@ export function normalizeDegradationMonthly(parsed: unknown): DegradationMonthly
       if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[field][k] = Math.floor(v)
     }
   }
+  const events = (parsed as Record<string, unknown>).events
+  if (Array.isArray(events)) out.events = events.filter(isDegradationEvent)
   return out
+}
+
+function isDegradationEvent(e: unknown): e is DegradationEvent {
+  if (!e || typeof e !== 'object') return false
+  const r = e as Record<string, unknown>
+  return typeof r.svcId === 'string' && typeof r.at === 'string' && typeof r.since === 'string'
+    && typeof r.noStatus === 'boolean' && (r.status === null || typeof r.status === 'string')
+    && typeof r.probes === 'number' && typeof r.failed === 'number'
+}
+
+/** #1778 — the windows `joinDegradationFollowThrough` reports, in hours after the streak's first spike. */
+export const FOLLOW_THROUGH_WINDOWS_HOURS = [1, 6, 24]
+
+/** The calendar month as the half-open UTC window `computeMonthlyScore` scores over. */
+export function monthWindow(period: string): { startISO: string; endISO: string } {
+  const [y, m] = period.split('-').map(Number)
+  return {
+    startISO: new Date(Date.UTC(y, m - 1, 1)).toISOString(),
+    endISO: new Date(Date.UTC(y, m, 1)).toISOString(),
+  }
+}
+
+/** #1778 — `joinDegradationFollowThrough` over an archive document's own events, incident rows and
+ *  period: what the builder writes and what `applyArchivePatch` rewrites. */
+export function archiveFollowThrough(archive: {
+  period?: string
+  services?: Record<string, { incidentList?: unknown }>
+  degradation?: { events?: DegradationEvent[] } | null
+}): DegradationFollowThrough[] | undefined {
+  const events = archive.degradation?.events
+  if (!events || !archive.period) return undefined
+  const incidents = Object.fromEntries(Object.entries(archive.services ?? {})
+    .map(([id, svc]) => [id, svc.incidentList as MonthlyIncidentEntry[] | undefined]))
+  return joinDegradationFollowThrough(events, incidents, monthWindow(archive.period))
+}
+
+/** #1778 — PURE. Join each event to the official incidents on its own service. An event whose window
+ *  is not inside `month` is left out of that window's counts: an incident outside it belongs to
+ *  another month's list, which this archive does not read. */
+export function joinDegradationFollowThrough(
+  events: DegradationEvent[],
+  incidentsByService: Record<string, { startedAt?: string; derived?: string; startUnknown?: boolean }[] | undefined>,
+  month: { startISO: string; endISO: string },
+  windowsHours: number[] = FOLLOW_THROUGH_WINDOWS_HOURS,
+): DegradationFollowThrough[] {
+  const monthStart = Date.parse(month.startISO)
+  const monthEnd = Date.parse(month.endISO)
+  return windowsHours.map((windowHours) => {
+    const out: DegradationFollowThrough = { windowHours, eligible: 0, followed: 0, noStatusEligible: 0, noStatusFollowed: 0 }
+    for (const e of events) {
+      const from = Date.parse(e.since)
+      const to = from + windowHours * 3_600_000
+      if (!Number.isFinite(from) || from < monthStart || to > monthEnd) continue
+      const followed = (incidentsByService[e.svcId] ?? []).some((inc) => {
+        if (inc.derived || inc.startUnknown) return false
+        const t = Date.parse(inc.startedAt ?? '')
+        return t >= from && t <= to
+      })
+      out.eligible++
+      if (followed) out.followed++
+      if (e.noStatus) {
+        out.noStatusEligible++
+        if (followed) out.noStatusFollowed++
+      }
+    }
+    return out
+  })
 }
 
 /** Aggregate the raw monthly accumulator into a permanent archive summary. Returns null on empty
@@ -301,7 +409,7 @@ export function summarizeDegradation(raw: DegradationMonthly | null | undefined)
   const total = Object.values(byService).reduce((a, b) => a + b, 0)
   if (total === 0) return null
   const noStatusTotal = Object.values(noStatusByService).reduce((a, b) => a + b, 0)
-  return { total, noStatusTotal, byService, noStatusByService }
+  return raw.events ? { total, noStatusTotal, byService, noStatusByService, events: raw.events } : { total, noStatusTotal, byService, noStatusByService }
 }
 
 // ── Incident accumulation (written daily by daily summary cron) ──────
@@ -2031,11 +2139,7 @@ export async function buildMonthlyArchive(
   // wrongly excludes a last-second incident because 'Z' > '.' lexically. A next-day midnight bound
   // is precision-agnostic.
   const monthlySummaries = summariesFromDailyData(Object.values(probeData))
-  const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
-  const monthWindow = {
-    startISO: `${period}-01T00:00:00.000Z`,
-    endISO: `${nextMonth.y}-${String(nextMonth.m).padStart(2, '0')}-01T00:00:00.000Z`,
-  }
+  const scoreWindow = monthWindow(period)
 
   for (const id of allIds) {
     if (!existedInMonth(SERVICE_ADDED_AT[id], monthEnd)) continue
@@ -2116,7 +2220,7 @@ export async function buildMonthlyArchive(
       grade: scoreSvc?.scoreGrade ?? null,
       ...(scoreSvc?.scoreConfidence ? { scoreConfidence: scoreSvc.scoreConfidence } : {}),
       ...(() => { // #993 — calendar-month Score (window-aligned with the MTTR/downtime aggregates)
-        const m = computeMonthlyScore(id, incSvc?.incidents, officialUptimeMap[id] ?? null, monthlySummaries, monthWindow, SERVICES.find((s) => s.id === id))
+        const m = computeMonthlyScore(id, incSvc?.incidents, officialUptimeMap[id] ?? null, monthlySummaries, scoreWindow, SERVICES.find((s) => s.id === id))
         return { monthlyScore: m.score, monthlyGrade: m.grade, ...(m.confidence ? { monthlyScoreConfidence: m.confidence } : {}), monthlyScoreBreakdown: m.breakdown }
       })(),
       incidents: incSvc?.count ?? 0,
@@ -2161,6 +2265,8 @@ export async function buildMonthlyArchive(
     predictionAccuracy,
     predictionBaseline,
   }
+  const followThrough = archiveFollowThrough(archive)
+  if (followThrough) archive.degradation!.followThrough = followThrough
 
   await attachMonthlyNarrative(archive, narrativeOpts)
   return archive

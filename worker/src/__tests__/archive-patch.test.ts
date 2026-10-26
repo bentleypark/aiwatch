@@ -373,6 +373,25 @@ describe('#1664 — planRowReplacement (2026-09 azureopenai)', () => {
   }
   const withEvent = (patch: Partial<RowReplacement['add'][number]>): RowReplacement => ({ ...spec, add: [{ ...spec.add[0], ...patch }] })
 
+  it('#1778 — re-joins every service\'s events against the patched document, inside its month', () => {
+    const ev = (svcId: string, since: string, at: string) => ({ svcId, at, since, noStatus: true, status: 'operational', probes: 3, failed: 0 })
+    const events = [
+      ev('azureopenai', '2026-09-29T10:01:00.000Z', '2026-09-29T10:10:00.000Z'),
+      ev('openai', '2026-09-12T08:00:00.000Z', '2026-09-12T08:10:00.000Z'),
+      ev('openai', '2026-08-31T23:50:00.000Z', '2026-09-01T00:05:00.000Z'),
+    ]
+    const openaiRows = [{ id: 'o1', title: 'Elevated errors', startedAt: '2026-09-12T08:30:00.000Z', resolvedAt: '2026-09-12T09:00:00.000Z', durationMin: 30, finalStatus: 'resolved', impact: 'major' }]
+    const arch = azureArchive(spec.remove.map(stuck))
+    const doc = { ...arch, services: { ...arch.services, openai: { incidentList: openaiRows } }, period: '2026-09',
+      degradation: { total: 3, noStatusTotal: 3, byService: { azureopenai: 1, openai: 2 }, noStatusByService: { azureopenai: 1, openai: 2 }, events } }
+    const out = applyArchivePatch(doc, planRowReplacement(doc, SEPT, spec).changes) as typeof doc & { degradation: { followThrough: unknown } }
+    expect(out.degradation.followThrough).toEqual([
+      { windowHours: 1, eligible: 2, followed: 2, noStatusEligible: 2, noStatusFollowed: 2 },
+      { windowHours: 6, eligible: 2, followed: 2, noStatusEligible: 2, noStatusFollowed: 2 },
+      { windowHours: 24, eligible: 2, followed: 2, noStatusEligible: 2, noStatusFollowed: 2 },
+    ])
+  })
+
   it('replaces the three stuck rows with the one provider-recorded event, duration derived', () => {
     const { changes, refusals } = planRowReplacement(azureArchive(spec.remove.map(stuck)), SEPT, spec)
     expect(refusals).toEqual([])

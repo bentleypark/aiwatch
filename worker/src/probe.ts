@@ -140,6 +140,7 @@ export interface ProbeSpike {
   medianRtt: number
   threshold: number
   since: string // ISO timestamp of first spike in the streak
+  failedCount: number // #1778 — probes in the streak with no measured RTT (`measuredRtt` null)
 }
 
 /**
@@ -182,6 +183,7 @@ export function detectConsecutiveSpikes(
         medianRtt: median,
         threshold: Math.round(threshold),
         since,
+        failedCount: count - rttCount,
       })
     }
   }
