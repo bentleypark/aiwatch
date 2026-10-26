@@ -70,9 +70,8 @@ describe('#1390 perplexity config — the incident.io migration (revert guard)',
   })
 
   it('`incidentIoComponentId` stays a SINGLE id — that number is attributed to the provider', () => {
-    // It is what `parseIncidentIoReportedUptime` reads for the side-by-side disclosure. Over a LIST
-    // that function returns the min across components: our own aggregate wearing the provider's label,
-    // and not necessarily even the component our worst-of picked. #1177 refused to publish that.
+    // It is what `parseIncidentIoReportedUptime` reads for the side-by-side disclosure, so a single id
+    // keeps the figure shown App's own.
     expect(typeof perplexity.incidentIoComponentId).toBe('string')
     expect(perplexity.incidentIoComponentId).toBe(APP_ID)
     expect(SCOPE, 'the disclosed component must be inside the measured scope').toContain(perplexity.incidentIoComponentId as string)

@@ -245,10 +245,9 @@ export const SERVICES: ServiceConfig[] = [
   // scope is id-based.
   //
   // `incidentIoComponentId` stays SINGLE while that scope is a list. It is what
-  // `parseIncidentIoReportedUptime` reads for the provider-ATTRIBUTED disclosure, and over a list that
-  // function returns the min across components — our own aggregate wearing the provider's label, the
-  // number #1177 refused to publish. App is the primary: the page tagged its `Investigating API issue`
-  // (2026-08-13) onto App, and the primary also drives the #135 component-miss alert.
+  // `parseIncidentIoReportedUptime` reads for the provider-attributed disclosure, so the figure shown is
+  // App's own. App is the primary: the page tagged its `Investigating API issue` (2026-08-13) onto App,
+  // and the primary also drives the #135 component-miss alert.
   //
   // One behaviour this migration DOES change, worth knowing rather than discovering: the Instatus
   // branch never reached `filterByComponentStatus`, and the Atlassian/incident.io branch does. So an
