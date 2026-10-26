@@ -384,6 +384,50 @@ export function planSuppressionPatch(
   return { changes, refusals }
 }
 
+/** #1793 — the only figures `planRecompute` may move: the ones a later counting rule changed. */
+const RECOMPUTABLE_FIGURES: readonly (keyof ArchiveServiceFigures)[] = ['avgResolutionMin', 'countedIncidents']
+
+/**
+ * #1793 — recompute named services' figures from their unchanged stored list. Refused when a named
+ * service has nothing to recompute, or when anything outside `RECOMPUTABLE_FIGURES` would move. The
+ * stored `monthlyScoreBreakdown` is carried through as it is.
+ */
+export function planRecompute(
+  archive: PatchableArchive,
+  window: { startISO: string; endISO: string },
+  ids: readonly string[],
+): { changes: ArchivePatchChange[]; refusals: string[] } {
+  const changes: ArchivePatchChange[] = []
+  const refusals: string[] = []
+  for (const id of ids) {
+    const svc = archive.services?.[id]
+    const list = svc?.incidentList
+    if (!svc || !Array.isArray(list) || list.length === 0) {
+      refusals.push(`${id}: no incident list in the archive`)
+      continue
+    }
+    const entries = list as MonthlyIncidentEntry[]
+    if (svc.incidents !== entries.length) {
+      refusals.push(`${id}: incidentList ${entries.length} != incidents ${String(svc.incidents)} — the stored figures did not come from this list`)
+      continue
+    }
+    const before = storedFigures(svc)
+    const after = { ...figuresFrom(id, svc, entries, window), monthlyScoreBreakdown: svc.monthlyScoreBreakdown as PatchedFigures['monthlyScoreBreakdown'] }
+    const moved = (Object.keys(before) as (keyof ArchiveServiceFigures)[]).filter((k) => before[k] !== after[k])
+    if (moved.length === 0) {
+      refusals.push(`${id}: stored figures already reproduce — nothing to recompute`)
+      continue
+    }
+    const outside = moved.filter((k) => !RECOMPUTABLE_FIGURES.includes(k))
+    if (outside.length > 0) {
+      refusals.push(`${id}: recomputing would also move ${figureDiff(before, after).filter((d) => outside.some((k) => d.startsWith(`${k} `))).join(', ')}`)
+      continue
+    }
+    changes.push({ id, removed: [], before, after, keptList: entries })
+  }
+  return { changes, refusals }
+}
+
 /**
  * aiwatch-reports#161 — each service's `totalDowntimeMin` and `avgResolutionMin` recounted from its stored
  * `incidentList` with today's `aggregateIncidentDurations` and today's suppression list, so a report can

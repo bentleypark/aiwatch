@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   planArchivePatch, applyArchivePatch, figuresFrom, storedFigures, figureDiff, resourceOfDerivedEntry,
-  planRowReplacement, ROW_REPLACEMENTS, planSuppressionPatch, recountDowntime,
+  planRowReplacement, ROW_REPLACEMENTS, planSuppressionPatch, recountDowntime, planRecompute,
 } from '../archive-patch'
 import type { RowReplacement } from '../archive-patch'
 import type { PatchableArchive } from '../archive-patch'
@@ -524,6 +524,64 @@ describe('#1735 — planSuppressionPatch', () => {
     const { changes, refusals } = planSuppressionPatch(arch, SEPT, supp)
     expect(changes).toEqual([])
     expect(refusals[0]).toMatch(/^kimi: stored figures do not reproduce/)
+  })
+})
+
+describe('#1793 — planRecompute', () => {
+  // The 2026-08 openai rows as stored: built before #1536, so the still-open month-end row sat in the
+  // average's divisor (2 / 254) while today's rule leaves it out (1 / 507).
+  const resolved: MonthlyIncidentEntry = {
+    id: '01KZ96S5HEWX0CX26W2WFYFKE6', title: 'Elevated errors with image generation',
+    startedAt: '2026-08-05T14:55:59Z', resolvedAt: '2026-08-05T23:22:45Z',
+    durationMin: 507, finalStatus: 'resolved', impact: 'major',
+  }
+  const open: MonthlyIncidentEntry = {
+    id: '01M1CYZDD84XD0H56XNEV2PT98', title: 'Elevated latency in the Responses API',
+    startedAt: '2026-08-31T22:27:56Z', resolvedAt: null, durationMin: 0, finalStatus: 'monitoring', impact: 'minor',
+  }
+  const archive = (): PatchableArchive => {
+    const svc: Record<string, unknown> = { incidentList: [resolved, open], officialUptime: 99.9, ...NEIGHBOUR_FIELDS }
+    const { monthlyScoreBreakdown: _, ...figures } = figuresFrom('openai', svc, [resolved, open], WINDOW)
+    const openai = { ...svc, ...figures, countedIncidents: 2, avgResolutionMin: 254 }
+    const other = { incidentList: [resolved], officialUptime: 99.9 }
+    return { services: { openai, claude: { ...other, ...figuresFrom('claude', other, [resolved], WINDOW) } } }
+  }
+
+  it('moves only the average and its divisor, from the unchanged list', () => {
+    const { changes, refusals } = planRecompute(archive(), WINDOW, ['openai'])
+    expect(refusals).toEqual([])
+    expect(changes).toHaveLength(1)
+    expect(figureDiff(changes[0].before, changes[0].after)).toEqual(['avgResolutionMin 254→507', 'countedIncidents 2→1'])
+    expect(changes[0].removed).toEqual([])
+    expect(changes[0].keptList).toEqual([resolved, open])
+  })
+
+  it('writes the two figures and leaves every other field, and the other services, as they were', () => {
+    const before = archive()
+    const after = JSON.parse(JSON.stringify(applyArchivePatch(structuredClone(before), planRecompute(before, WINDOW, ['openai']).changes)))
+    expect(after.services.openai).toEqual({ ...before.services!.openai, countedIncidents: 1, avgResolutionMin: 507 })
+    expect(after.services.claude).toEqual(before.services!.claude)
+  })
+
+  it('REFUSES when any other figure would move', () => {
+    const arch = archive()
+    arch.services!.openai.totalDowntimeMin = 600
+    const { changes, refusals } = planRecompute(arch, WINDOW, ['openai'])
+    expect(changes).toEqual([])
+    expect(refusals).toEqual(['openai: recomputing would also move totalDowntimeMin 600→507'])
+  })
+
+  it('REFUSES a service whose stored figures already reproduce', () => {
+    expect(planRecompute(archive(), WINDOW, ['claude'])).toEqual({ changes: [], refusals: ['claude: stored figures already reproduce — nothing to recompute'] })
+  })
+
+  it('REFUSES a truncated list and a service the archive does not carry', () => {
+    const arch = archive()
+    arch.services!.openai.incidents = 3
+    expect(planRecompute(arch, WINDOW, ['openai', 'nosuch']).refusals).toEqual([
+      'openai: incidentList 2 != incidents 3 — the stored figures did not come from this list',
+      'nosuch: no incident list in the archive',
+    ])
   })
 })
 
