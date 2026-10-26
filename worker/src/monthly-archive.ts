@@ -116,6 +116,9 @@ export interface MonthlyServiceData {
   monthlyScore?: number | null
   monthlyGrade?: ScoreGrade | null
   monthlyScoreConfidence?: ScoreConfidence | null
+  /** #1779 — the component points `monthlyScore` was summed from, as `calculateAIWatchScore` returns
+   *  them; same Uptime-window CAVEAT as `monthlyScore`. Absent on archives written before this. */
+  monthlyScoreBreakdown?: AIWatchScore['breakdown']
   scoreConfidence?: ScoreConfidence | null // #951 — 'high' = the Score included the 40-pt uptime component; the report labels the uptime source from this instead of a hardcoded service list
   incidents: number              // incident count for the month (from accumulated data) — UNFILTERED, see countedIncidents
   /** #1210 — the divisor `avgResolutionMin` was actually computed over: the impact windows left after
@@ -1365,7 +1368,7 @@ export function computeMonthlyScore(
   monthlySummaries: Map<string, ProbeSummary>,
   window: { startISO: string; endISO: string },
   svcConfig: ServiceConfig | undefined,
-): { score: number | null; grade: ScoreGrade | null; confidence: ScoreConfidence } {
+): { score: number | null; grade: ScoreGrade | null; confidence: ScoreConfidence; breakdown: AIWatchScore['breakdown'] } {
   // Adapt the archived incident entries to the minimal Incident shape calculateAIWatchScore reads
   // (startedAt, impact, status, duration). finalStatus → status; durationMin → the "Xh Ym" string
   // its MTTR parser expects (lossless for integer minutes); missing impact → null (informational), except a Rootly row (#1557).
@@ -1409,7 +1412,7 @@ export function computeMonthlyScore(
   const probeId = resolveProbeId(id) // #883 — inheriting services score against the parent's probe
   const probe = classifyProbe(probeId, PROBED_IDS.has(probeId), monthlySummaries)
   const r = calculateAIWatchScore(service, 30 /* unused when window is set */, probe, window)
-  return { score: r.score, grade: r.grade, confidence: r.confidence }
+  return { score: r.score, grade: r.grade, confidence: r.confidence, breakdown: r.breakdown }
 }
 
 /** Compute per-service average probe RTT (p75) from daily probe summaries */
@@ -2114,7 +2117,7 @@ export async function buildMonthlyArchive(
       ...(scoreSvc?.scoreConfidence ? { scoreConfidence: scoreSvc.scoreConfidence } : {}),
       ...(() => { // #993 — calendar-month Score (window-aligned with the MTTR/downtime aggregates)
         const m = computeMonthlyScore(id, incSvc?.incidents, officialUptimeMap[id] ?? null, monthlySummaries, monthWindow, SERVICES.find((s) => s.id === id))
-        return { monthlyScore: m.score, monthlyGrade: m.grade, ...(m.confidence ? { monthlyScoreConfidence: m.confidence } : {}) }
+        return { monthlyScore: m.score, monthlyGrade: m.grade, ...(m.confidence ? { monthlyScoreConfidence: m.confidence } : {}), monthlyScoreBreakdown: m.breakdown }
       })(),
       incidents: incSvc?.count ?? 0,
       countedIncidents: avgDivisor, // #1210 — the divisor avgResolutionMin actually used; always a number

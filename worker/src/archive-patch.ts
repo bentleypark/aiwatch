@@ -25,6 +25,7 @@ import { SERVICES } from './services'
 import { isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 export { normalizeSuppressionsCounted, SUPPRESSIONS_KEY } from './suppression'
 import type { Incident, ProbeSummary } from './types'
+import type { AIWatchScore } from './score'
 import { formatDuration } from './utils'
 
 /** STATUS_CACHE (worker/wrangler.toml). Pinned against the toml by the test beside this file. */
@@ -73,13 +74,16 @@ export interface ArchiveServiceFigures {
   monthlyScoreConfidence: string | null
 }
 
+/** #1779 — `figuresFrom` also returns the breakdown, which the reproduction gate does not compare. */
+export type PatchedFigures = ArchiveServiceFigures & { monthlyScoreBreakdown: AIWatchScore['breakdown'] }
+
 export interface ArchivePatchChange {
   id: string
   removed: string[]
   /** #1731 — stored figures that did not reproduce, accepted by name for this service. */
   acceptedDrift?: string[]
   before: ArchiveServiceFigures
-  after: ArchiveServiceFigures
+  after: PatchedFigures
   keptList: MonthlyIncidentEntry[]
 }
 
@@ -134,7 +138,7 @@ export function figuresFrom(
   svc: Record<string, unknown>,
   list: MonthlyIncidentEntry[],
   window: { startISO: string; endISO: string },
-): ArchiveServiceFigures {
+): PatchedFigures {
   const agg = aggregateIncidentDurations(list, list.length, 0, 0)
   const avg = agg.countedCount != null && agg.countedCount > 0 && agg.countedTotalMin != null
     ? Math.round(agg.countedTotalMin / agg.countedCount)
@@ -151,6 +155,7 @@ export function figuresFrom(
     monthlyScore: m.score,
     monthlyGrade: m.grade,
     monthlyScoreConfidence: m.confidence,
+    monthlyScoreBreakdown: m.breakdown,
   }
 }
 
@@ -239,6 +244,7 @@ export function applyArchivePatch(archive: PatchableArchive, changes: ArchivePat
     svc.monthlyScore = c.after.monthlyScore
     svc.monthlyGrade = c.after.monthlyGrade
     svc.monthlyScoreConfidence = c.after.monthlyScoreConfidence
+    svc.monthlyScoreBreakdown = c.after.monthlyScoreBreakdown
   }
   return archive
 }

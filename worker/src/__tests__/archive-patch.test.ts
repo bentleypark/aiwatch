@@ -54,6 +54,9 @@ const NEIGHBOUR_FIELDS = {
   avgLatencyMs: 216, p95LatencyMs: 300, latencySpikes: 208, p50LatencyMs: 185, cvCombined: 0.542,
 }
 
+/** What `applyArchivePatch` wrote, in the shape of `ArchivePatchChange.after`. */
+const writtenFigures = (svc: Record<string, unknown>) => ({ ...storedFigures(svc), monthlyScoreBreakdown: svc.monthlyScoreBreakdown })
+
 const archiveWith = (entries: MonthlyIncidentEntry[], extra: Record<string, unknown> = {}) => {
   const svc: Record<string, unknown> = {
     incidentList: entries, officialUptime: 99.44, ...NEIGHBOUR_FIELDS, ...extra,
@@ -143,8 +146,10 @@ describe('#1295 — figuresFrom reproduces what the BUILDER writes', () => {
       const list = rec.incidentList as MonthlyIncidentEntry[] | undefined
       if (!list || list.length === 0) continue
       compared++
-      expect(figureDiff(storedFigures(rec), figuresFrom(id, rec, list, WINDOW)),
+      const reproduced = figuresFrom(id, rec, list, WINDOW)
+      expect(figureDiff(storedFigures(rec), reproduced),
         `${id}: figuresFrom disagrees with buildMonthlyArchive`).toEqual([])
+      expect(rec.monthlyScoreBreakdown, `${id}: breakdown`).toEqual(reproduced.monthlyScoreBreakdown)
     }
     // Non-vacuous: the loop must actually have compared both services.
     expect(compared).toBe(2)
@@ -218,6 +223,15 @@ describe('#1295 — resourceOfDerivedEntry', () => {
 })
 
 describe('#1295 — the reproduction gate', () => {
+  it('#1779 — plans the correction for an archive written before monthlyScoreBreakdown existed', () => {
+    const arch = archiveWith([feed(`${RESOURCE} — down`, CROSS_DAY_FEED), derived()])
+    delete (arch.services.together as Record<string, unknown>).monthlyScoreBreakdown
+    const { changes, refusals } = planArchivePatch(arch, WINDOW)
+    expect(refusals).toEqual([])
+    expect(changes).toHaveLength(1)
+    expect(applyArchivePatch(arch, changes).services!.together.monthlyScoreBreakdown).toEqual(changes[0].after.monthlyScoreBreakdown)
+  })
+
   it('plans the correction when the stored figures reproduce', () => {
     const arch = archiveWith([feed(`${RESOURCE} — down`, CROSS_DAY_FEED), derived()])
     const { changes, refusals } = planArchivePatch(arch, WINDOW)
@@ -268,12 +282,14 @@ describe('#1295 — what it leaves alone', () => {
 describe('#1295 — applyArchivePatch', () => {
   it('rewrites every field the plan moved, and the list', () => {
     const arch = archiveWith([feed(`${RESOURCE} — down`, CROSS_DAY_FEED), OTHER_DAY_FEED, derived()])
+    const storedBreakdown = arch.services.together.monthlyScoreBreakdown
     const { changes } = planArchivePatch(arch, WINDOW)
+    expect(changes[0].after.monthlyScoreBreakdown).not.toEqual(storedBreakdown)
     const out = applyArchivePatch(arch, changes).services!.together
     expect((out.incidentList as MonthlyIncidentEntry[]).map((e) => e.id))
       .toEqual([`#rss-${RESOURCE} — down-${CROSS_DAY_FEED}`, OTHER_DAY_FEED.id])
     // EVERY field the plan computed, not only the ones that happened to move.
-    expect(storedFigures(out)).toEqual(changes[0].after)
+    expect(writtenFigures(out)).toEqual(changes[0].after)
     // The written document must itself reproduce — otherwise the patch publishes figures that its own
     // gate would refuse on the next run.
     expect(figureDiff(storedFigures(out), figuresFrom('together', out, out.incidentList as MonthlyIncidentEntry[], WINDOW)))
@@ -296,7 +312,7 @@ describe('#1295 — applyArchivePatch', () => {
     expect(changes).toHaveLength(1)
     expect(changes[0].before.monthlyGrade).not.toBe(changes[0].after.monthlyGrade)
     const out = applyArchivePatch(arch, changes).services!.together
-    expect(storedFigures(out)).toEqual(changes[0].after)
+    expect(writtenFigures(out)).toEqual(changes[0].after)
   })
 
   it('preserves everything outside the service it changes', () => {
