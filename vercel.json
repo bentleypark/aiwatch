@@ -25,6 +25,7 @@
     { "source": "/is-windsurf-down", "destination": "/is-devin-desktop-down", "permanent": true }
   ],
   "rewrites": [
+    { "source": "/sitemap.xml", "destination": "/api/sitemap" },
     { "source": "/is-claude-down", "destination": "/api/is-down-group?family=claude" },
     { "source": "/is-claude-api-down", "destination": "/api/is-down?slug=claude-api" },
     { "source": "/is-chatgpt-down", "destination": "/api/is-down?slug=chatgpt" },

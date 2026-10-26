@@ -25,8 +25,8 @@ const PROD_WORKER = 'https://aiwatch-worker.p2c2kbf.workers.dev'
  *  i.e. it fails loudly rather than quietly reading nothing, which is the failure mode that would matter
  *  for a guard like this. (`import.meta.url` does not resolve to a filesystem path under this config.) */
 const readSource = (file: string) => readFileSync(join(process.cwd(), 'api', file), 'utf8')
-const SURFACES = ['is-down.ts', 'is-down-group.ts', 'reports.ts']
-// The const-name assertion is scoped to the three `WORKER_API` declarations; the localhost sweep is not.
+const SURFACES = ['is-down.ts', 'is-down-group.ts', 'reports.ts', 'sitemap.ts']
+// The const-name assertion is scoped to the `WORKER_API` declarations in SURFACES; the localhost sweep is not.
 // `_is-down/html-template.ts` carries an in-code instruction to make exactly this swap ("a one-line swap
 // to http://localhost:8788/api/report-issue is the only change needed for local verification"), which
 // makes it the constant an is-down check is MOST likely to touch — the guard's coverage would have been

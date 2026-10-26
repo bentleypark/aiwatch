@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
+import { sitemapEntries } from '../_sitemap/build'
 
 // Guards the #452 fix. The Vercel-proxied `/api/status/cached` rewrite MUST force
 // the statusline lite projection (`?src=statusline-*`). Without the tag the Worker
@@ -59,10 +60,12 @@ describe('vercel.json is-down routes ↔ api/_is-down slug-map (#1430)', () => {
     }
   })
 
-  it('every is-down slug is listed in the sitemap', () => {
-    const sitemap = readFileSync(join(repoRoot, 'public/sitemap.xml'), 'utf8')
-    for (const slug of Object.keys(SLUG_TO_SERVICE)) {
-      expect(sitemap.includes(`<loc>https://ai-watch.dev/is-${slug}-down</loc>`), `/is-${slug}-down`).toBe(true)
+  it('/sitemap.xml routes to the Edge sitemap, and every is-down path it lists has its rewrite', () => {
+    const rule = vercelConfig.rewrites.find((r) => r.source === '/sitemap.xml')
+    expect(rule?.destination).toBe('/api/sitemap')
+    for (const { path } of sitemapEntries(new Map())) {
+      if (!path.startsWith('/is-')) continue
+      expect(vercelConfig.rewrites.some((r) => r.source === path), path).toBe(true)
     }
   })
 

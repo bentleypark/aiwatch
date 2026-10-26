@@ -45,6 +45,7 @@ import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedSubs, countByType, isValidEncKey, computeSubscriberDelta, readSubscriberReport } from './webhook-subscriptions'
 import { handleSlackOAuthRoute, handleSlackManageRequest, slackManageNotice } from './slack'
 import { corsHeaders, matchOrigin } from './cors'
+import { buildSitemapFeed, isSitemapRequest } from './sitemap-feed'
 import { buildStatuslinePayload, isStatuslineRequest, isStatuslinePreset, renderStatuslineBrief, buildStatuslineDownResponse, buildStatuslinePresetResponse, STATUSLINE_BRIEF_UNKNOWN } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
 import { readLatestReportSummary, refreshLatestReportSummary, isReportPublished } from './latest-report'
@@ -5979,6 +5980,19 @@ const workerExport = {
           })
           ctx.waitUntil(cache.put(cacheKey, res.clone()))
           return res
+        }
+        // #887 Phase 3 — the Edge sitemap's lastmod source (sitemap-feed.ts).
+        if (isSitemapRequest(url.searchParams)) {
+          const sitemapCache = await cacheRead(env.STATUS_CACHE, env.ANALYTICS)
+          if (!sitemapCache) {
+            return new Response(JSON.stringify({ error: 'no status snapshot available' }), {
+              status: 503,
+              headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+            })
+          }
+          return new Response(JSON.stringify(buildSitemapFeed(sitemapCache.services, Date.now())), {
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' },
+          })
         }
         // Statusline polls (#438, tagged ?src=statusline-*) only need id/name/status.
         // Return the ~KB lite projection and skip the ~2 MB probe/AI reads —

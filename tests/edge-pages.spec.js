@@ -95,3 +95,15 @@ test.describe('/confirm token gate (#486)', () => {
     expect(await res.text()).not.toContain('<button')
   })
 })
+
+test.describe('/sitemap.xml is served by the Edge sitemap (#887)', () => {
+  // Which pages carry a lastmod depends on live incidents, so that is pinned in sitemap.test.ts, not here.
+  test('serves XML listing an is-down page, with no changefreq or priority', async ({ request }) => {
+    const res = await request.get('/sitemap.xml', { maxRedirects: 0 })
+    expect(res.status()).toBe(200)
+    expect(res.headers()['content-type']).toContain('application/xml')
+    const xml = await res.text()
+    expect(xml).toContain('<loc>https://ai-watch.dev/is-groq-down</loc>')
+    expect(xml).not.toMatch(/changefreq|priority/)
+  })
+})

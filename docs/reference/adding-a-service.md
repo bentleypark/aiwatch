@@ -159,7 +159,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 18. `api/is-down.ts` — add service to `SERVICES` map
 19. `api/_is-down/html-template.ts` — if needed
 20. `vercel.json` — add rewrite rule `/is-{service}-down`
-21. `public/sitemap.xml` — add URL entry (`lastmod` is auto-bumped to build date by `scripts/bump-sitemap-lastmod.mjs` via `prebuild` hook — #337 — so any placeholder date works for the initial commit)
+21. Sitemap — nothing to add: `/sitemap.xml` (`api/sitemap.ts`, #887) lists every `SLUG_TO_SERVICE` slug
 21a. `api/_is-down/seo-content.ts` — the page's copy. Write it from the vendor's own pages and the config, and check each of these (#1028):
     - **Vendor and ownership**, **delivery forms** (API / web / desktop / CLI / IDE — no single-form claim where several exist) and **current product names**.
     - **Status source and component scope** match the service's entry in `worker/src/services.ts`.
