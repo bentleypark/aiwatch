@@ -19,7 +19,7 @@ import {
 } from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { fetchIncidentIoProxyHtml } from './parsers/incident-io-proxy'
-import { computeIncidentIoUptime, parseIncidentIoAllComponentUptimes, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoAllComponentUptimes, parseIncidentIoReportedUptime, parseIncidentIoReportedDays, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -3170,7 +3170,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // editorial judgement made from one day's snapshot, and it would give the reader an invisible
           // rule ("why does LangSmith show two numbers and OpenAI one?"). A near-identical pair is not
           // noise either: it CORROBORATES our figure against the provider's. Identical → nothing to say.
-          if (reported != null && reported !== uptimeValue) uptimeRep = reported
+          if (reported != null && reported !== uptimeValue) {
+            uptimeRep = reported
+            uptimeRepDays = parseIncidentIoReportedDays(uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId, Date.now()) ?? undefined
+          }
           // #957 — the SAME operator path #1179 already gives a partial `statusComponentIds` resolve,
           // now ALSO fed from this second, independent resolution check. `io.missing` names ids that
           // `computeIncidentIoUptime` could not find in `component_uptimes`/`data_available_since`,

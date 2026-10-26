@@ -1,53 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchService, incidentIoUptimeScopeFor, SERVICES } from '../services'
+import { pageHtml, summary, fakeKv, type Entry } from './helpers/incident-io-page'
 
-const DAY = 86_400_000
-const esc = (o: unknown) => JSON.stringify(o).replace(/"/g, '\\"')
 const fireworks = SERVICES.find((s) => s.id === 'fireworks')!
 const ANCHOR = fireworks.incidentIoComponentId as string
-const OLD = '2026-06-01T00:00:00Z'
-
-type Entry = { id: string; since?: string | null; published?: string }
-
-function pageHtml(entries: Entry[], outage?: { id: string; hours: number }): string {
-  const start = Date.now() - 5 * DAY
-  const impacts = outage
-    ? [{
-        component_id: outage.id,
-        start_at: new Date(start).toISOString(),
-        end_at: new Date(start + outage.hours * 3_600_000).toISOString(),
-        status: 'full_outage',
-        status_page_incident_id: 'inc-1',
-      }]
-    : []
-  const uptimes = entries.map((e) => ({
-    component_id: e.id,
-    data_available_since: e.since === undefined ? OLD : (e.since ?? '$undefined'),
-    status_page_component_group_id: '$undefined',
-    uptime: e.published ?? '100.00',
-  }))
-  return `<script>self.__next_f.push([1,"\\"component_impacts\\":${esc(impacts)},\\"component_uptimes\\":${esc(uptimes)}"])</script>`
-}
-
-const summary = (entries: Entry[]) => ({
-  page: { id: 'p1', name: 'Fireworks AI', updated_at: new Date().toISOString() },
-  status: { indicator: 'none', description: 'All Systems Operational' },
-  components: entries.map((e) => ({ id: e.id, name: e.id, status: 'operational' })),
-  incidents: [],
-})
-
-function fakeKv() {
-  const puts: string[] = []
-  const kv = { get: async () => null, put: async (key: string) => { puts.push(key) }, delete: async () => {} }
-  return { kv, puts }
-}
 
 async function run(entries: Entry[], outage?: { id: string; hours: number }) {
   const { kv, puts } = fakeKv()
   vi.stubGlobal('fetch', vi.fn(async () => new Response('<html></html>', { status: 200 })))
   const svc = await fetchService(
     fireworks,
-    { summary: summary(entries) as never, incidents: null, uptimeHtml: pageHtml(entries, outage) } as never,
+    { summary: summary(entries, 'Fireworks AI') as never, incidents: null, uptimeHtml: pageHtml(entries, outage) } as never,
     kv as never,
     {},
   )

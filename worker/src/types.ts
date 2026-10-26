@@ -259,8 +259,8 @@ export interface ServiceStatus {
    *  ours instead of dropping it. Absent when the two agree, or when there is nothing to compare. */
   uptimeReported?: number
   /** #1006 — the period `uptimeReported` covers, when we know it (Atlassian: the ~90 days its page
-   *  embeds and shows a desktop visitor). Absent for incident.io, whose pages publish an aggregate
-   *  without stating its window. */
+   *  embeds and shows a desktop visitor; incident.io: up to 90, fewer for a component whose records start
+   *  later). Absent when the figure's start date cannot be read. */
   uptimeReportedDays?: number
   /** #1006 — days the uptime figure actually covers, when the provider's records don't reach back the
    *  full 30 (a status-page migration creates a NEW component and resets its clock — #1004). ABSENT means
