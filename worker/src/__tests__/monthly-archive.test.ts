@@ -2581,6 +2581,21 @@ describe('buildMonthlyArchive — Responsiveness inputs (#1002 / aiwatch-reports
     expect(archive.services.gemini.cvCombined).toBeNull()
   })
 
+  it('#1779 — writes the breakdown monthlyScore was computed from, per service', async () => {
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
+      { id: 'groq', aiwatchScore: 91, scoreGrade: 'excellent' as const },
+    ])
+    const claude = archive.services.claude.monthlyScoreBreakdown!
+    const groq = archive.services.groq.monthlyScoreBreakdown!
+    expect(claude.responsivenessStatus).toBe('available')
+    expect(groq.responsivenessStatus).toBe('available')
+    expect(claude.speed).not.toBe(groq.speed)
+    const parts = (b: typeof claude) => (b.incidents + b.recovery + b.responsiveness!) / 60 * 100
+    expect(Math.abs(parts(claude) - archive.services.claude.monthlyScore!)).toBeLessThan(1)
+    expect(Math.abs(parts(groq) - archive.services.groq.monthlyScore!)).toBeLessThan(1)
+  })
+
   it('the p50 is NOT the unfiltered mean the p75/p95 columns use — they answer different questions', async () => {
     const archive = await buildMonthlyArchive(kv, 2026, 3, [{ id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const }])
     // avgLatencyMs is a mean of daily p75 over ALL days; p50LatencyMs comes from the filtered summary.
@@ -3147,6 +3162,49 @@ describe('computeMonthlyScore (#993)', () => {
     const realOutage = { ...advisory, title: 'Elevated error rates on Codex' }
     const withOutage = computeMonthlyScore('x', [realOutage], 100, noProbe, WINDOW, undefined)
     expect(withOutage.score!).toBeLessThan(clean.score!)
+  })
+})
+
+describe('computeMonthlyScore breakdown (#1779)', () => {
+  const WINDOW = { startISO: '2026-06-01T00:00:00.000Z', endISO: '2026-07-01T00:00:00.000Z' }
+  const inc = (startedAt: string, durationMin: number, impact: 'minor' | 'major' | 'critical' = 'major') => ({
+    id: startedAt, title: 't', startedAt, resolvedAt: startedAt, durationMin,
+    finalStatus: 'resolved' as const, impact,
+  })
+  const probed = new Map([['claude', { p50: 180, p95: 520, cvCombined: 0.62, validDays: 30 }]])
+  const thin = new Map([['claude', { p50: 180, p95: 520, cvCombined: 0.62, validDays: 3 }]])
+  const incidents = [inc('2026-06-04T02:00:00Z', 95), inc('2026-06-19T11:00:00Z', 41, 'minor')]
+
+  // What a reader of the archive can do with the published parts alone: sum the components present,
+  // rescale by their maxima, apply the short-history penalty. The parts are rounded to 0.1, so this
+  // lands within a point of the score, not on it.
+  const fromParts = (b: ReturnType<typeof computeMonthlyScore>['breakdown']) => {
+    const parts: [number | null, number][] = [[b.uptime, 40], [b.incidents, 25], [b.recovery, 15], [b.responsiveness, 20]]
+    const present = parts.filter(([v]) => v != null) as [number, number][]
+    const sum = present.reduce((a, [v]) => a + v, 0)
+    const max = present.reduce((a, [, m]) => a + m, 0)
+    return sum / max * 100 * (b.responsivenessStatus === 'insufficient' ? 0.95 : 1)
+  }
+
+  it.each([
+    ['official uptime + probe', 'claude', 99.62, probed, 'high', 'available'],
+    ['official uptime, unprobed service', 'x', 99.62, new Map(), 'high', 'unsupported'],
+    ['official uptime, probe under 7 days (penalty)', 'claude', 99.62, thin, 'high', 'insufficient'],
+    ['no official uptime, probed (rescaled)', 'claude', null, probed, 'medium', 'available'],
+  ] as const)('%s — the parts reproduce monthlyScore', (_label, id, uptime, summaries, confidence, status) => {
+    const r = computeMonthlyScore(id, incidents, uptime, summaries, WINDOW, undefined)
+    expect(r.confidence).toBe(confidence)
+    expect(r.breakdown.responsivenessStatus).toBe(status)
+    expect(r.score).not.toBeNull()
+    expect(Math.abs(fromParts(r.breakdown) - r.score!)).toBeLessThan(1)
+  })
+
+  it('a low-confidence service keeps its parts while the score is withheld', () => {
+    const r = computeMonthlyScore('x', incidents, null, new Map(), WINDOW, undefined)
+    expect(r.score).toBeNull()
+    expect(r.breakdown.incidents).toBeLessThan(25)
+    expect(r.breakdown.uptime).toBeNull()
+    expect(r.breakdown.responsiveness).toBeNull()
   })
 })
 
