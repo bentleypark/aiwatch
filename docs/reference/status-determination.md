@@ -372,8 +372,7 @@ off with it, and that day stopped being painted while the Incident History card 
 listed it. Six services were already in that state: openai, chatgpt, codex, langsmith, langfuse, junie.
 
 Fixed by carrying the fact instead of inferring it: `ServiceStatus.dailyImpactComplete` is set where the
-worker actually chooses the branch (Atlassian buckets → true; incident.io impacts → false; Better Stack /
-AI Studio → true), and the client gates Phase 2 on it. `days` now decides only how many cells to draw.
+worker actually chooses the branch, and the client gates Phase 2 on it. `days` now decides only how many cells to draw.
 An absent flag falls back to the old `days === 30` derivation so a payload cached before the field
 renders unchanged.
 
