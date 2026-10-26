@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
-import { fetchTracked, createFetchTracker, type FetchTracker, type FetchRunStats, formatDuration, markZeroLengthResolvedIncidentsUnknown, normalizeIncidentTimes, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, UPTIME_MISSING_ALERT_MS, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
+import { fetchTracked, createFetchTracker, launchOrderOf, type FetchTracker, type FetchRunStats, formatDuration, markZeroLengthResolvedIncidentsUnknown, normalizeIncidentTimes, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, UPTIME_MISSING_ALERT_MS, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
 import { MISTRAL_ACTIVE_OVERLAY_KV_KEY, isStorableOverlayIncident, readOverlayResolutions } from './mistral-public-api'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, applyProbeLatency, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
@@ -4513,7 +4513,7 @@ export async function attachRecordedIncidentHistory(services: ServiceStatus[], k
   }
 }
 
-export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>>; upstreamFeeds: UpstreamCandidate[]; fetchStats: FetchRunStats }> {
+export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[], random: () => number = Math.random): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>>; upstreamFeeds: UpstreamCandidate[]; fetchStats: FetchRunStats }> {
   // #1224 — read the consolidated per-service tracking blob ONCE for this whole invocation (1 KV
   // read regardless of service count), thread the SAME mutable object through every batched
   // `fetchService` call below, then write it back AT MOST once (only if something actually changed)
@@ -4536,8 +4536,9 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
   // the same URLs independently. Deduplicating saves 6 subrequests, freeing budget for enrichment.
   const uniqueApiUrls = [...new Set(SERVICES.filter((s) => s.apiUrl).map((s) => s.apiUrl!))]
+  const launchOrder = random() < 0.5 ? 'shuffled' : 'fixed'
   const prefetchMap = new Map<string, PrefetchedData>()
-  await Promise.all(uniqueApiUrls.map(async (apiUrl) => {
+  await Promise.all(launchOrderOf(uniqueApiUrls, launchOrder, random).map(async (apiUrl) => {
     const baseUrl = apiUrl.replace('/summary.json', '')
     try {
       // #1125 — components.json (the superset) for any page that configures a componentsUrl, started
@@ -4889,6 +4890,6 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     // protect. Passing it through would also let an operator silently disable an upstream
     // attribution from a UI built for a different purpose.
     upstreamFeeds,
-    fetchStats: tracker.stats(),
+    fetchStats: { ...tracker.stats(), launchOrder },
   }
 }

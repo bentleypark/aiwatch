@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import workerModule from '../index'
-import { recordStatusFetchRun, STATUS_FETCH_RUN_INDEX, STATUS_FETCH_LEG_INDEX, statusFetchLegIndex } from '../status-fetch-run'
-import type { FetchLegStats } from '../utils'
+import { recordStatusFetchRun, encodeFetchTrace, STATUS_FETCH_RUN_INDEX, STATUS_FETCH_LEG_INDEX, STATUS_FETCH_TRACE_INDEX, STATUS_FETCH_TRACE_MAX_CHARS, statusFetchLegIndex } from '../status-fetch-run'
+import { createFetchTracker, FETCH_TRACE_MAX, type FetchLegStats, type FetchTraceEntry } from '../utils'
 import type { ServiceStatus } from '../types'
 
 const NO_FAILURES = { maxInFlight: 0, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, waitingAtStartAnswered: 0, waitingAtStartTimeouts: 0 }
@@ -68,7 +68,7 @@ describe('#1489 status-fetch-run metric', () => {
     const fetchStats = { maxInFlight: 9, answered: 8, timeouts: 3, httpErrors: 4, otherErrors: 5, waitingAtStartAnswered: 20, waitingAtStartTimeouts: 21 }
     recordStatusFetchRun({ writeDataPoint }, 'live', 1234, [svc('c', null), svc('a', 99.9), svc('b', null)], fetchStats)
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['live', 'b,c'],
+      blobs: ['live', 'b,c', ''],
       doubles: [1, 1234, 2, 3, 9, 8, 3, 4, 5, 20, 21],
       indexes: [STATUS_FETCH_RUN_INDEX],
     })
@@ -99,11 +99,13 @@ describe('#1489 status-fetch-run metric', () => {
     expect(statusFetchLegIndex({ leg: 'other', budgetMs: 0 })).toBe('status-fetch-leg:other@0')
   })
 
-  it('writes the run row alone when the stats carry no legs', () => {
+  it('writes the run row and the trace row, and no leg rows, when the stats carry no legs', () => {
     const writeDataPoint = vi.fn()
     recordStatusFetchRun({ writeDataPoint }, 'cron', 10, [], NO_FAILURES)
     expect(runRows(writeDataPoint)).toHaveLength(1)
+    expect(rowsOf(writeDataPoint, STATUS_FETCH_TRACE_INDEX)).toHaveLength(1)
     expect(legRows(writeDataPoint)).toHaveLength(0)
+    expect(writeDataPoint).toHaveBeenCalledTimes(2)
   })
 
   it('never throws out of a failed write', () => {
@@ -158,4 +160,56 @@ describe('#1489 status-fetch-run metric', () => {
     expect(legRows(writeDataPoint).every((r) => r.blobs[0] === rows[0].blobs[0])).toBe(true)
     expect(legRows(writeDataPoint).map((r) => r.blobs[1])).toEqual(expect.arrayContaining(['summary', 'incidents']))
   }, 60_000)
+})
+
+describe('#1489 status-fetch-trace row', () => {
+  const entry = (over: Partial<FetchTraceEntry> = {}): FetchTraceEntry => ({ host: 'status.a.test', leg: 'summary', budgetMs: 8000, waiting: 3, outcome: 'a', ms: 420, ...over })
+
+  it('encodes one entry per fetch in start order, an unfinished one with empty outcome and time', () => {
+    const { text, written } = encodeFetchTrace([entry(), entry({ host: 'status.b.test', leg: 'showcase', budgetMs: 3000, waiting: 40, outcome: 't', ms: 3001 }), entry({ outcome: undefined, ms: undefined })])
+    expect(text).toBe('status.a.test,summary,8000,3,a,420;status.b.test,showcase,3000,40,t,3001;status.a.test,summary,8000,3,,')
+    expect(written).toBe(3)
+  })
+
+  it('cuts at whole entries and stays under the blob limit', () => {
+    const many = Array.from({ length: 2000 }, (_, i) => entry({ host: `status.${i}.example.test` }))
+    const { text, written } = encodeFetchTrace(many)
+    expect(written).toBeLessThan(many.length)
+    expect(text.length).toBeLessThanOrEqual(STATUS_FETCH_TRACE_MAX_CHARS)
+    expect(text.split(';')).toHaveLength(written)
+    expect(text.split(';').every((p) => p.split(',').length === 6)).toBe(true)
+  })
+
+  it('writes one trace point per run under its own index, with the launch order and counts', () => {
+    const writeDataPoint = vi.fn()
+    const trace = [entry(), entry({ outcome: 't', ms: 8000 })]
+    recordStatusFetchRun({ writeDataPoint }, 'cron', 900, [svc('a', 99)], { ...NO_FAILURES, answered: 1, timeouts: 1, launchOrder: 'shuffled', trace })
+    const rows = rowsOf(writeDataPoint, STATUS_FETCH_TRACE_INDEX)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].blobs.slice(0, 2)).toEqual(['cron', 'shuffled'])
+    expect(rows[0].blobs[2]).toBe(encodeFetchTrace(trace).text)
+    expect(rows[0].doubles).toEqual([1, 2, 2])
+    expect(runRows(writeDataPoint)[0].blobs[2]).toBe('shuffled')
+    expect(new Set(writeDataPoint.mock.calls.map(([p]) => (p as Point).indexes[0])).size).toBe(writeDataPoint.mock.calls.length)
+  })
+
+  it('shows a cut: the tracker traces at most FETCH_TRACE_MAX and the blob holds fewer still', async () => {
+    const tracker = createFetchTracker(() => 0)
+    for (let i = 0; i < FETCH_TRACE_MAX + 40; i++) await tracker.track(async () => new Response('{}'), `https://status-${i}.${'long-provider-name.'.repeat(3)}example.test/`, 5000)
+    const writeDataPoint = vi.fn()
+    recordStatusFetchRun({ writeDataPoint }, 'live', 1, [], tracker.stats())
+    const [row] = rowsOf(writeDataPoint, STATUS_FETCH_TRACE_INDEX)
+    expect(row.doubles[1]).toBe(FETCH_TRACE_MAX)
+    expect(row.doubles[2]).toBeLessThan(FETCH_TRACE_MAX)
+  })
+
+  it('writes every traced fetch when nothing is cut, one still in flight included', () => {
+    const tracker = createFetchTracker(() => 0)
+    void tracker.track(() => new Promise<Response>(() => {}), 'https://status.a.test/api/v2/incidents.json', 8000)
+    void tracker.track(async () => new Response('{}'), 'https://status.b.test/', 5000)
+    const writeDataPoint = vi.fn()
+    recordStatusFetchRun({ writeDataPoint }, 'live', 1, [], tracker.stats())
+    const [row] = rowsOf(writeDataPoint, STATUS_FETCH_TRACE_INDEX)
+    expect(row.doubles).toEqual([1, 2, 2])
+  })
 })

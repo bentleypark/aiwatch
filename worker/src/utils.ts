@@ -1325,7 +1325,30 @@ export interface FetchRunStats {
   waitingAtStartTimeouts: number
   /** Present on every real tracker's `stats()`. */
   legs?: FetchLegStats[]
+  /** Every fetch of the run in start order, up to `FETCH_TRACE_MAX`. Present on every real tracker's `stats()`. */
+  trace?: FetchTraceEntry[]
+  /** Which order `fetchAllServices` launched the page prefetch in. Set there, not by the tracker. */
+  launchOrder?: LaunchOrder
 }
+
+export type LaunchOrder = 'fixed' | 'shuffled'
+
+/** `a` answered 2xx, `h` answered non-2xx, `t` timeout, `e` other error. */
+export type FetchOutcome = 'a' | 'h' | 't' | 'e'
+
+export interface FetchTraceEntry {
+  host: string
+  leg: FetchLeg
+  budgetMs: number
+  /** Other fetches of the run waiting for headers when this one started. */
+  waiting: number
+  /** Unset while the fetch is still in flight. */
+  outcome?: FetchOutcome
+  /** Time from the `fetch()` call to headers or to the failure. */
+  ms?: number
+}
+
+export const FETCH_TRACE_MAX = 300
 
 export type FetchLeg = 'summary' | 'incidents' | 'components' | 'showcase' | 'html' | 'other'
 
@@ -1338,6 +1361,22 @@ export function fetchLegOf(url: string): FetchLeg {
   if (path.endsWith('/api/v2/incidents.json')) return 'incidents'
   if (path.endsWith('/api/v2/components.json')) return 'components'
   return path === '/' ? 'html' : 'other'
+}
+
+export function fetchHostOf(url: string | undefined): string {
+  if (!url) return ''
+  try { return new URL(url).hostname } catch { return '' }
+}
+
+/** The order a run launches its page prefetch in: as listed, or shuffled. The shuffle is Fisher-Yates over a copy. */
+export function launchOrderOf<T>(items: readonly T[], order: LaunchOrder, random: () => number = Math.random): T[] {
+  const out = [...items]
+  if (order === 'fixed') return out
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
 }
 
 /** Which fifth of its timeout an answer used: 0 is under 20%, 4 is 80% or more. */
@@ -1375,6 +1414,7 @@ export function createFetchTracker(now: () => number = Date.now): FetchTracker {
   let inFlight = 0
   const stats: FetchRunStats = { maxInFlight: 0, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, waitingAtStartAnswered: 0, waitingAtStartTimeouts: 0 }
   const legs = new Map<string, FetchLegStats>()
+  const trace: FetchTraceEntry[] = []
   return {
     async track(send, url, budgetMs = 0) {
       const name = url ? fetchLegOf(url) : 'other'
@@ -1383,6 +1423,8 @@ export function createFetchTracker(now: () => number = Date.now): FetchTracker {
       if (!leg) { leg = emptyLeg(name, budgetMs); legs.set(key, leg) }
       const othersWaiting = inFlight
       const startedAt = now()
+      const entry: FetchTraceEntry | null = trace.length < FETCH_TRACE_MAX ? { host: fetchHostOf(url), leg: name, budgetMs, waiting: othersWaiting } : null
+      if (entry) trace.push(entry)
       inFlight++
       stats.maxInFlight = Math.max(stats.maxInFlight, inFlight)
       try {
@@ -1395,13 +1437,16 @@ export function createFetchTracker(now: () => number = Date.now): FetchTracker {
         leg.maxAnsweredMs = Math.max(leg.maxAnsweredMs, elapsed)
         leg.answeredByBudgetShare[budgetShareBucket(elapsed, budgetMs)]++
         if (!res.ok) { stats.httpErrors++; leg.httpErrors++ }
+        if (entry) { entry.outcome = res.ok ? 'a' : 'h'; entry.ms = elapsed }
         return res
       } catch (err) {
-        if ((err as { name?: unknown } | null)?.name === 'AbortError') {
+        const timedOut = (err as { name?: unknown } | null)?.name === 'AbortError'
+        if (timedOut) {
           stats.timeouts++
           stats.waitingAtStartTimeouts += othersWaiting
           leg.timeouts++
         } else { stats.otherErrors++; leg.otherErrors++ }
+        if (entry) { entry.outcome = timedOut ? 't' : 'e'; entry.ms = now() - startedAt }
         throw err
       } finally {
         inFlight--
@@ -1410,6 +1455,7 @@ export function createFetchTracker(now: () => number = Date.now): FetchTracker {
     stats: () => ({
       ...stats,
       legs: [...legs.values()].map((l) => ({ ...l, answeredByBudgetShare: [...l.answeredByBudgetShare] })),
+      trace: trace.map((e) => ({ ...e })),
     }),
   }
 }
