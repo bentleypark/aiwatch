@@ -12,6 +12,7 @@ import {
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
+import { resolveWorkerApi } from './_shared/worker-api'
 import { computeRankPosition } from './_is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
 import { buildSupplyChainNote, type SupplyChainBannerLike, type SupplyChainNote } from './_is-down/supply-chain-note'
@@ -21,22 +22,7 @@ export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 
-/** Optional-chained rather than `process.env.X`, matching `_shared/edge-fallback-alert.ts`'s
- *  `readEnv` and for the reason stated there: a runtime without the global yields `undefined`
- *  instead of a throw. At MODULE scope that distinction is the whole page — a throw here happens
- *  before any handler runs and takes out all 43 `/is-*-down` routes at once, and nothing would
- *  catch it first (`api/` has no tsc gate, and vitest runs under Node where `process` exists). */
-function readEnv(name: string): string | undefined {
-  return (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name]
-}
-
-// Lets a local SSR check read a locally running Worker without editing this file. Ignored when
-// `VERCEL_ENV` says production: the override silently repoints every is-down page's data source, so
-// a stray value on the production project would be invisible — the pages would render normally, off
-// the wrong Worker. A local-verification affordance should not be reachable in production at all.
-const workerApi = readEnv('VERCEL_ENV') === 'production'
-  ? WORKER_API
-  : readEnv('AIWATCH_WORKER_API') || WORKER_API
+const workerApi = resolveWorkerApi(WORKER_API)
 
 // #378: notify the Worker when this Edge Function falls back to a degraded render so an operator
 // Discord alert fires. Worker handles 5-min KV dedup, so fan-out across concurrent requests

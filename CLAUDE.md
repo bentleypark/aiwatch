@@ -239,9 +239,10 @@ api/                 # Vercel Edge Functions (SSR pages + proxies). `_`-prefixed
   plugin-privacy.ts  # Plugin privacy policy — the marketplace policy URL (#920)
   extension-privacy.ts # Chrome-extension privacy policy — the Web Store policy URL (#837)
   badges.ts          # "AI Status Badges" gallery (/badges, #805)
+  sitemap.ts         # /sitemap.xml — per-page lastmod from incident activity (#887)
   confirm.ts slack-alerts.ts  # Alert opt-in pages: Discord confirm (#486), Slack install result + manage (#1581)
   csp-report.ts      # CSP violation sink (#482)
-  _is-down/ _intro/ _methodology/ _plugin/ _badges/ _shared/   # SSR templates + shared helpers (incl. _is-down/upstream-note.ts — the #1053 card's per-service claim)
+  _is-down/ _intro/ _methodology/ _plugin/ _badges/ _sitemap/ _shared/   # SSR templates + shared helpers (incl. _is-down/upstream-note.ts — the #1053 card's per-service claim)
 src/                 # React 19 SPA (Vite, no router — hash routing in App.jsx)
   components/        # StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/             # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
@@ -284,7 +285,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   stage-watchdog.ts  # Names the stage a slow is-down /api/status/cached fetch waits on (#1531)
   growth-series.ts   # Durable daily series of the consent-free growth counters (#986)
   reddit.ts security-monitor.ts changelog.ts provider-changes.ts platform-monitor.ts infra-status.ts rum.ts  # External monitoring
-  alert-feed.ts ext-claude.ts latest-report.ts indexnow.ts badge.ts og.ts og-render.ts slack.ts slack-message.ts  # Feeds, projections, SEO, images, Slack
+  alert-feed.ts ext-claude.ts sitemap-feed.ts latest-report.ts indexnow.ts badge.ts og.ts og-render.ts slack.ts slack-message.ts  # Feeds, projections, SEO, images, Slack
   parsers/           # one module per status-page platform — `ls` it, or directory-map.md for what each does
 extension/           # Claude-only Chrome extension (MV3, #837) — consumes ?src=ext-claude only
 plugin/aiwatch/      # Claude Code plugin (#920) — outage monitor + /aiwatch command
