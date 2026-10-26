@@ -1,14 +1,29 @@
 /**
- * #1489 — one Analytics Engine row per `fetchAllServices` run: which path ran it, how long it took,
- * which services came back without a freshly read uptime figure, and how the run's fetches failed. The
- * before/after measure for changes to how the status fetch spends its connections. Beside it, one row per
- * leg and timeout, each under its own index (`statusFetchLegIndex`), splits the same fetches.
+ * #1489 — what each `fetchAllServices` run writes to Analytics Engine, the before/after measure for changes to
+ * how the status fetch spends its connections. Each write call below documents its own row.
  */
 import type { ServiceStatus } from './types'
-import type { FetchRunStats } from './utils'
+import type { FetchRunStats, FetchTraceEntry } from './utils'
 
 export const STATUS_FETCH_RUN_INDEX = 'status-fetch-run'
 export const STATUS_FETCH_LEG_INDEX = 'status-fetch-leg'
+export const STATUS_FETCH_TRACE_INDEX = 'status-fetch-trace'
+
+/** Analytics Engine allows 16 KB of blobs per point: https://developers.cloudflare.com/analytics/analytics-engine/limits/ */
+export const STATUS_FETCH_TRACE_MAX_CHARS = 12_000
+
+/** One `host,leg,budgetMs,waiting,outcome,ms` per fetch in start order, `;`-joined, cut at whole entries. */
+export function encodeFetchTrace(trace: readonly FetchTraceEntry[], maxChars = STATUS_FETCH_TRACE_MAX_CHARS): { text: string; written: number } {
+  const parts: string[] = []
+  let size = 0
+  for (const e of trace) {
+    const part = `${e.host},${e.leg},${e.budgetMs},${e.waiting},${e.outcome ?? ''},${e.ms ?? ''}`
+    if (size + part.length + 1 > maxChars) break
+    parts.push(part)
+    size += part.length + 1
+  }
+  return { text: parts.join(';'), written: parts.length }
+}
 
 /** Analytics Engine samples per index: https://developers.cloudflare.com/analytics/analytics-engine/sql-api/ */
 export function statusFetchLegIndex(leg: { leg: string; budgetMs: number }): string {
@@ -28,17 +43,27 @@ export function recordStatusFetchRun(
   try {
     const nullIds = services.filter((s) => s.uptime30d == null || s.uptimeCarriedFrom).map((s) => s.id).sort()
     analytics.writeDataPoint({
-      // blob1 route, blob2 ids with no uptime read this run (null or carried; comma-joined, sorted).
+      // blob1 route, blob2 ids with no uptime read this run (null or carried; comma-joined, sorted), blob3 the
+      // order the page prefetch was launched in (`fixed` or `shuffled`; empty when the caller did not say).
       // doubles: count, wall-clock ms, services with no uptime read this run, services returned, most fetches
       // waiting for headers at once, fetches answered, timeouts, non-2xx responses, other fetch errors,
       // then the other fetches waiting at each start, summed over the answered and over the timeouts.
-      blobs: [route, nullIds.join(',')],
+      blobs: [route, nullIds.join(','), fetchStats.launchOrder ?? ''],
       doubles: [
         1, wallMs, nullIds.length, services.length,
         fetchStats.maxInFlight, fetchStats.answered, fetchStats.timeouts, fetchStats.httpErrors, fetchStats.otherErrors,
         fetchStats.waitingAtStartAnswered, fetchStats.waitingAtStartTimeouts,
       ],
       indexes: [STATUS_FETCH_RUN_INDEX],
+    })
+    // One row per run listing the fetches (`encodeFetchTrace`). blob1 route, blob2 launch order, blob3 the trace.
+    // doubles: count, fetches traced (the tracker keeps at most `FETCH_TRACE_MAX`), fetches written to blob3.
+    const trace = fetchStats.trace ?? []
+    const encoded = encodeFetchTrace(trace)
+    analytics.writeDataPoint({
+      blobs: [route, fetchStats.launchOrder ?? '', encoded.text],
+      doubles: [1, trace.length, encoded.written],
+      indexes: [STATUS_FETCH_TRACE_INDEX],
     })
     // One row per leg and timeout that made a fetch. blob1 route, blob2 leg.
     // doubles: count, timeout (ms), answered, timeouts, non-2xx, other errors, summed and maximum time to

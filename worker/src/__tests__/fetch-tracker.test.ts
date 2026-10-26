@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createFetchTracker, fetchWithTimeout, fetchLegOf, budgetShareBucket, type FetchLeg, type FetchLegStats } from '../utils'
-import { fetchAllServices } from '../services'
+import { createFetchTracker, fetchWithTimeout, fetchLegOf, budgetShareBucket, launchOrderOf, fetchHostOf, FETCH_TRACE_MAX, type FetchLeg, type FetchLegStats } from '../utils'
+import { fetchAllServices, SERVICES } from '../services'
 
 const CONNECTIONS = 6
 
@@ -216,4 +216,127 @@ describe('#1489 per-leg accounting', () => {
     expect(find(before.legs, 'summary', 8000).answered).toBe(1)
     expect(find(before.legs, 'summary', 8000).answeredByBudgetShare).toEqual([1, 0, 0, 0, 0])
   })
+})
+
+describe('#1489 per-fetch trace', () => {
+  it('records each fetch in start order with the depth it started at and how it ended', async () => {
+    let t = 0
+    const tracker = createFetchTracker(() => t)
+    let release!: (r: Response) => void
+    const first = tracker.track(() => new Promise<Response>((r) => { release = r }), 'https://status.a.test/api/v2/summary.json', 8000)
+    const second = tracker.track(async () => new Response('', { status: 503 }), 'https://status.b.test/', 5000)
+    const third = tracker.track(async () => { throw new DOMException('aborted', 'AbortError') }, 'https://status.c.test/uptime_showcase?components=x', 3000).catch(() => null)
+    const fourth = tracker.track(async () => { throw new TypeError('reset') }, 'https://status.d.test/api/v2/incidents.json', 8000).catch(() => null)
+    t = 700
+    release(new Response('{}'))
+    await Promise.all([first, second, third, fourth])
+    expect(tracker.stats().trace).toEqual([
+      { host: 'status.a.test', leg: 'summary', budgetMs: 8000, waiting: 0, outcome: 'a', ms: 700 },
+      { host: 'status.b.test', leg: 'html', budgetMs: 5000, waiting: 1, outcome: 'h', ms: 700 },
+      { host: 'status.c.test', leg: 'showcase', budgetMs: 3000, waiting: 2, outcome: 't', ms: 700 },
+      { host: 'status.d.test', leg: 'incidents', budgetMs: 8000, waiting: 3, outcome: 'e', ms: 700 },
+    ])
+  })
+
+  it('leaves a fetch still in flight without an outcome', () => {
+    const tracker = createFetchTracker(() => 0)
+    void tracker.track(() => new Promise<Response>(() => {}), 'https://status.a.test/', 5000)
+    expect(tracker.stats().trace).toEqual([{ host: 'status.a.test', leg: 'html', budgetMs: 5000, waiting: 0 }])
+  })
+
+  it('hands out a copy of the trace: a fetch settling later does not change an earlier reading', async () => {
+    const tracker = createFetchTracker(() => 0)
+    let release!: (r: Response) => void
+    const pending = tracker.track(() => new Promise<Response>((r) => { release = r }), 'https://status.a.test/', 5000)
+    const before = tracker.stats().trace!
+    release(new Response('{}'))
+    await pending
+    expect(before).toEqual([{ host: 'status.a.test', leg: 'html', budgetMs: 5000, waiting: 0 }])
+    expect(tracker.stats().trace![0].outcome).toBe('a')
+  })
+
+  it('stops recording at FETCH_TRACE_MAX but keeps counting', async () => {
+    const tracker = createFetchTracker(() => 0)
+    for (let i = 0; i < FETCH_TRACE_MAX + 5; i++) await tracker.track(async () => new Response('{}'), 'https://status.a.test/', 5000)
+    const stats = tracker.stats()
+    expect(stats.trace).toHaveLength(FETCH_TRACE_MAX)
+    expect(stats.answered).toBe(FETCH_TRACE_MAX + 5)
+  })
+
+  it('reads the host off a URL and gives an empty host for none or a bad one', () => {
+    expect(fetchHostOf('https://status.claude.com/api/v2/summary.json')).toBe('status.claude.com')
+    expect(fetchHostOf(undefined)).toBe('')
+    expect(fetchHostOf('not a url')).toBe('')
+  })
+})
+
+describe('#1489 launchOrderOf', () => {
+  const ITEMS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+  const seeded = (seed: number) => () => {
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+
+  it('keeps the listed order for fixed, as a copy', () => {
+    const out = launchOrderOf(ITEMS, 'fixed')
+    expect(out).toEqual(ITEMS)
+    expect(out).not.toBe(ITEMS)
+  })
+
+  it('shuffled is a permutation that leaves the input alone', () => {
+    const input = [...ITEMS]
+    const out = launchOrderOf(input, 'shuffled', seeded(7))
+    expect([...out].sort()).toEqual(ITEMS)
+    expect(input).toEqual(ITEMS)
+  })
+
+  it('shuffled follows the random source: different draws give different orders, the same draws the same', () => {
+    const a = launchOrderOf(ITEMS, 'shuffled', seeded(1))
+    expect(launchOrderOf(ITEMS, 'shuffled', seeded(1))).toEqual(a)
+    const orders = new Set(Array.from({ length: 20 }, (_, i) => launchOrderOf(ITEMS, 'shuffled', seeded(i)).join('')))
+    expect(orders.size).toBeGreaterThan(10)
+  })
+
+  it('every item can land in every position (no position is pinned)', () => {
+    const seen = ITEMS.map(() => new Set<string>())
+    for (let i = 0; i < 400; i++) launchOrderOf(ITEMS, 'shuffled', seeded(i)).forEach((x, pos) => seen[pos].add(x))
+    for (const s of seen) expect(s.size).toBe(ITEMS.length)
+  })
+})
+
+describe('#1489 fetchAllServices launch order', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  async function summaryOrder(random: () => number) {
+    const hosts: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/v2/summary.json')) hosts.push(new URL(url).hostname)
+      return new Response('{}', { status: 404 })
+    }))
+    const { fetchStats } = await fetchAllServices(undefined, undefined, random)
+    return { hosts: [...new Set(hosts)], fetchStats }
+  }
+
+  it('a draw under one half shuffles the prefetch and says so; the listed order is the other arm', async () => {
+    // First draw is the coin; any later draw of 0 would rotate the list if the fixed arm were shuffled.
+    let draws = 0
+    const fixed = await summaryOrder(() => (draws++ === 0 ? 0.99 : 0))
+    const listed = [...new Set(SERVICES.filter((s) => s.apiUrl).map((s) => new URL(s.apiUrl!).hostname))]
+    expect(fixed.hosts).toEqual(listed)
+    const shuffled = await summaryOrder(() => 0)
+    expect(fixed.fetchStats.launchOrder).toBe('fixed')
+    expect(shuffled.fetchStats.launchOrder).toBe('shuffled')
+    expect(fixed.hosts.length).toBeGreaterThan(5)
+    expect([...shuffled.hosts].sort()).toEqual([...fixed.hosts].sort())
+    expect(shuffled.hosts).not.toEqual(fixed.hosts)
+  }, 60_000)
+
+  it('a finished run\'s trace gives every fetch an outcome', async () => {
+    const { fetchStats } = await summaryOrder(() => 0.99)
+    expect(fetchStats.trace!.length).toBeGreaterThan(0)
+    expect(fetchStats.trace!.every((e) => e.outcome != null)).toBe(true)
+  }, 60_000)
 })
