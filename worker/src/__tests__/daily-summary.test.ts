@@ -954,23 +954,32 @@ describe('formatAccuracyLine (#827 Feature 1 — prediction accuracy)', () => {
     total: 4, accurate: 2, underPredicted: 1, overPredicted: 1, hitRate: 0.5, medianAbsErrorHours: 0.5, ...over,
   })
 
-  it('renders a labeled block: header (count), recovered/took-longer split, typical miss, bias', () => {
+  it('renders a labeled block: header (count), three-outcome split, typical miss, bias', () => {
     const out = formatAccuracyLine(stats())
     expect(out).toContain('🎯 **AI Recovery Prediction Accuracy** (4 forecasts scored)')
-    expect(out).toContain('Recovered by the estimated time: 3 of 4 (75%)')
+    expect(out).toContain('Within range (½× to 1× the estimate): 2 of 4 (50%)')
+    expect(out).toContain('Recovered in under half the estimate: 1 of 4 (25%)')
     expect(out).toContain('Took longer than the estimate: 1 of 4 (25%)')
     expect(out).toContain('Typical miss: 30m off the estimate')
     expect(out).not.toContain('On-target')
   })
-  it('counts faster-than-estimate recoveries as recovered, not only the 0.5x-1x band (2026-09 archive shape)', () => {
+  it('#1777 — keeps far-faster recoveries apart from the in-range share (2026-09 archive shape)', () => {
     const out = formatAccuracyLine(stats({ total: 120, accurate: 33, overPredicted: 58, underPredicted: 29, hitRate: 33 / 120 }))
-    expect(out).toContain('Recovered by the estimated time: 91 of 120 (76%)')
+    expect(out).toContain('Within range (½× to 1× the estimate): 33 of 120 (28%)')
+    expect(out).toContain('Recovered in under half the estimate: 58 of 120 (48%)')
     expect(out).toContain('Took longer than the estimate: 29 of 120 (24%)')
+    expect(out).not.toContain('Recovered by the estimated time')
   })
-  it('the two shares always sum to 100% (late share derived from the early one)', () => {
-    const out = formatAccuracyLine(stats({ total: 8, accurate: 2, overPredicted: 1, underPredicted: 5 }))
-    expect(out).toContain('Recovered by the estimated time: 3 of 8 (38%)')
-    expect(out).toContain('Took longer than the estimate: 5 of 8 (62%)')
+  it('#1777 — estimates that are all far too long do not read as a success', () => {
+    const out = formatAccuracyLine(stats({ total: 10, accurate: 0, overPredicted: 10, underPredicted: 0, hitRate: 0 }))
+    expect(out).toContain('Within range (½× to 1× the estimate): 0 of 10 (0%)')
+    expect(out).toContain('Recovered in under half the estimate: 10 of 10 (100%)')
+  })
+  it('the three shares always sum to 100%', () => {
+    const out = formatAccuracyLine(stats({ total: 3, accurate: 1, overPredicted: 1, underPredicted: 1 }))
+    const pcts = [...out.matchAll(/of 3 \((\d+)%\)/g)].map((m) => Number(m[1]))
+    expect(pcts).toHaveLength(3)
+    expect(pcts.reduce((a, b) => a + b, 0)).toBe(100)
   })
   it('singularizes the header for a single forecast', () => {
     expect(formatAccuracyLine(stats({ total: 1, accurate: 1, underPredicted: 0, overPredicted: 0 }))).toContain('(1 forecast scored)')

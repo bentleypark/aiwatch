@@ -7,7 +7,8 @@
 
 import type { KVLike } from './utils'
 import { kvPut } from './utils'
-import type { IncidentHistoryRecord } from './incident-history'
+import type { AccuracyStats, IncidentHistoryRecord } from './incident-history'
+import { scoredPredictions, tallyAccuracy } from './incident-history'
 import type { DurationOverride } from './overrides'
 import type { ServiceConfig } from './types'
 import { readOverridesFreshResult } from './overrides'
@@ -71,6 +72,38 @@ export function buildRecoveryBaselines(
     if (baseline) out[config.id] = baseline
   }
   return out
+}
+
+/** #1777 — the same incidents scored against the AI's estimate and against the service's past median
+ *  and past p80, both built only from records resolved before the incident started. An incident with
+ *  no such baseline is left out of all three. */
+export interface BaselineComparison {
+  ai: AccuracyStats
+  pastMedian: AccuracyStats
+  pastP80: AccuracyStats
+}
+
+export function compareWithRecoveryBaseline(
+  historyBySvc: Map<string, IncidentHistoryRecord[]>,
+  overrides: DurationOverride[],
+  configs: Array<Pick<ServiceConfig, 'id' | 'autoMonitorTitles' | 'titleMap'>>,
+  period: string,
+): BaselineComparison | null {
+  const configById = new Map(configs.map((c) => [c.id, c]))
+  const inPeriod = [...historyBySvc.values()].flat().filter((r) => r.resolvedAt.slice(0, 7) === period)
+  const ai: Array<{ predictedRecoveryHours: number; durationMin: number }> = []
+  const pastMedian: Array<{ predictedRecoveryHours: number; durationMin: number }> = []
+  const pastP80: Array<{ predictedRecoveryHours: number; durationMin: number }> = []
+  for (const r of scoredPredictions(inPeriod)) {
+    const startMs = Date.parse(r.startedAt)
+    const prior = (historyBySvc.get(r.svcId) ?? []).filter((p) => Date.parse(p.resolvedAt) < startMs)
+    const b = summarizeRecoveryHistory(prior, overrides, configById.get(r.svcId))
+    if (!b) continue
+    ai.push(r)
+    pastMedian.push({ predictedRecoveryHours: b.medianMin / 60, durationMin: r.durationMin })
+    pastP80.push({ predictedRecoveryHours: b.p80Min / 60, durationMin: r.durationMin })
+  }
+  return ai.length ? { ai: tallyAccuracy(ai), pastMedian: tallyAccuracy(pastMedian), pastP80: tallyAccuracy(pastP80) } : null
 }
 
 export function writeRecoveryBaselines(kv: KVLike, baselines: Record<string, RecoveryBaseline>): Promise<boolean> {

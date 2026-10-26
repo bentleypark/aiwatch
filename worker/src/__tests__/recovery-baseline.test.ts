@@ -5,6 +5,7 @@ import {
   readRecoveryBaselines,
   writeRecoveryBaselines,
   rebuildRecoveryBaselines,
+  compareWithRecoveryBaseline,
   RECOVERY_BASELINE_KEY,
 } from '../recovery-baseline'
 import { recoveryBaselineText } from '../recovery-baseline-text'
@@ -168,5 +169,53 @@ describe('read/write', () => {
     expect(await readRecoveryBaselines(makeKV({ [RECOVERY_BASELINE_KEY]: '{' }))).toEqual({})
     const failing = { get: async () => { throw new Error('kv down') } } as unknown as KVLike
     expect(await readRecoveryBaselines(failing)).toEqual({})
+  })
+})
+
+describe('compareWithRecoveryBaseline (#1777)', () => {
+  const sept = (incId: string, svcId: string, predictedRecoveryHours: number, durationMin: number): IncidentHistoryRecord =>
+    rec(0, durationMin, { svcId, incId, startedAt: '2026-09-10T10:00:00.000Z', resolvedAt: '2026-09-10T12:00:00.000Z', predictedRecoveryHours })
+
+  it('scores the same incidents against the AI estimate, the past median and the past p80', () => {
+    const history = new Map([['claude', [
+      ...ten(),
+      sept('s-in', 'claude', 1, 50),    // AI: 50m of 1h → in range; median 55m → in range; p80 80m → in range
+      sept('s-wide', 'claude', 10, 30), // AI: 30m of 10h → under half; median 55m → in range; p80 80m → under half
+    ]]])
+    const out = compareWithRecoveryBaseline(history, [], SERVICES, '2026-09')
+    expect(out?.ai).toMatchObject({ total: 2, accurate: 1, overPredicted: 1, underPredicted: 0 })
+    expect(out?.pastMedian).toMatchObject({ total: 2, accurate: 2, overPredicted: 0, underPredicted: 0 })
+    expect(out?.pastP80).toMatchObject({ total: 2, accurate: 1, overPredicted: 1, underPredicted: 0 })
+  })
+
+  it('builds each baseline only from records resolved before the incident started', () => {
+    const nine = ten().slice(0, 9)
+    const late = rec(9, 100, { incId: 'late', resolvedAt: '2026-09-20T00:00:00.000Z' })
+    const history = new Map([['claude', [...nine, late, sept('s', 'claude', 1, 50)]]])
+    expect(compareWithRecoveryBaseline(history, [], SERVICES, '2026-09')).toBeNull()
+  })
+
+  it('builds the baseline with the duration overrides applied', () => {
+    // inc-0..5 pinned to 600m → past median 600m, so a 50m recovery is under half of it
+    const overrides = Array.from({ length: 6 }, (_, i) => ({ id: `inc-${i}`, durationMin: 600 }))
+    const history = new Map([['claude', [...ten(), sept('s', 'claude', 1, 50)]]])
+    expect(compareWithRecoveryBaseline(history, [], SERVICES, '2026-09')?.pastMedian.accurate).toBe(1)
+    expect(compareWithRecoveryBaseline(history, overrides, SERVICES, '2026-09')?.pastMedian.overPredicted).toBe(1)
+  })
+
+  it("builds the baseline with the service's auto-monitor titles excluded", () => {
+    const history = new Map([['claude', [...ten(), sept('s', 'claude', 1, 50)]]])
+    expect(compareWithRecoveryBaseline(history, [], [{ id: 'claude' }], '2026-09')).not.toBeNull()
+    expect(compareWithRecoveryBaseline(history, [], [{ id: 'claude', autoMonitorTitles: [/^Elevated errors [0-4]$/] }], '2026-09')).toBeNull()
+  })
+
+  it('leaves out other periods and an incident whose service has no baseline', () => {
+    const history = new Map([
+      ['claude', [...ten(), sept('s', 'claude', 1, 50), { ...sept('aug', 'claude', 1, 50), resolvedAt: '2026-08-31T00:00:00.000Z' }]],
+      ['openai', [sept('o', 'openai', 1, 50)]],
+    ])
+    const out = compareWithRecoveryBaseline(history, [], SERVICES, '2026-09')
+    expect(out?.ai.total).toBe(1)
+    expect(out?.pastMedian.total).toBe(1)
   })
 })

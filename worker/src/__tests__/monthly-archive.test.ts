@@ -27,6 +27,10 @@ import {
   MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE,
   degradationMonthlyKey,
   addDegradationToMonthly,
+  degradationEventFor,
+  joinDegradationFollowThrough,
+  DEGRADATION_EVENTS_CAP,
+  type DegradationEvent,
   normalizeDegradationMonthly,
   summarizeDegradation,
   buildMonthlyAccuracy,
@@ -110,6 +114,27 @@ describe('buildMonthlyAccuracy (#827 F3 — monthly prediction accuracy)', () =>
     expect(archive.predictionAccuracy).not.toBeNull()
     expect(archive.predictionAccuracy!.total).toBe(1)
     expect(archive.predictionAccuracy!.accurate).toBe(1)
+    expect(archive.predictionBaseline).toBeNull() // one past incident is below the baseline floor
+  })
+
+  it('#1777 wiring: buildMonthlyArchive carries predictionBaseline through to the archive', async () => {
+    const past = Array.from({ length: 10 }, (_, i) => rec({ incId: `p${i}`, startedAt: '2026-05-01T00:00:00Z', resolvedAt: '2026-05-02T00:00:00Z', durationMin: 60 }))
+    const history: Record<string, IncidentHistoryRecord[]> = {
+      claude: [...past, rec({ incId: 'a', startedAt: '2026-06-15T00:00:00Z', resolvedAt: '2026-06-15T01:00:00Z', predictedRecoveryHours: 10, durationMin: 52 })],
+    }
+    const kv = {
+      get: async (k: string) => {
+        const m = /^incident:history:(.+)$/.exec(k)
+        return m && history[m[1]] ? JSON.stringify(history[m[1]]) : null
+      },
+    } as unknown as KVNamespace
+    const archive = await buildMonthlyArchive(kv, 2026, 6)
+    expect(archive.predictionBaseline?.ai).toMatchObject({ total: 1, overPredicted: 1 })
+    expect(archive.predictionBaseline?.pastMedian).toMatchObject({ total: 1, accurate: 1 })
+    // the caller's override list reaches the baseline: past incidents pinned to 600m → 52m is under half
+    const pinned = past.map((p) => ({ id: p.incId, durationMin: 600 }))
+    const withOverrides = await buildMonthlyArchive(kv, 2026, 6, undefined, undefined, [], pinned)
+    expect(withOverrides.predictionBaseline?.pastMedian).toMatchObject({ total: 1, overPredicted: 1 })
   })
 })
 
@@ -2511,6 +2536,123 @@ describe('degradation monthly accumulator (#511)', () => {
   })
 })
 
+describe('degradation events (#1778)', () => {
+  const ev = (over: Partial<DegradationEvent> = {}): DegradationEvent => ({
+    svcId: 'openai', at: '2026-10-10T12:00:00.000Z', since: '2026-10-10T11:50:00.000Z',
+    noStatus: true, status: 'operational', probes: 3, failed: 0, ...over,
+  })
+
+  it('degradationEventFor records the counted degradation as the cron saw it', () => {
+    const spike = { serviceId: 'groq', consecutiveCount: 5, avgRtt: 900, medianRtt: 120, threshold: 360, since: '2026-10-03T04:00:00Z', failedCount: 2 }
+    expect(degradationEventFor(spike, false, 'degraded', '2026-10-03T04:25:00.000Z')).toEqual({
+      svcId: 'groq', at: '2026-10-03T04:25:00.000Z', since: '2026-10-03T04:00:00Z',
+      noStatus: false, status: 'degraded', probes: 5, failed: 2,
+    })
+  })
+
+  it('appends the event beside the counters, and keeps prior events when called without one', () => {
+    const one = addDegradationToMonthly(null, 'openai', true, ev())
+    expect(one).toEqual({ byService: { openai: 1 }, noStatusByService: { openai: 1 }, events: [ev()] })
+    const two = addDegradationToMonthly(one, 'groq', false)
+    expect(two.events).toEqual([ev()])
+    expect(two.byService).toEqual({ openai: 1, groq: 1 })
+  })
+
+  it('stops keeping events at the cap while the counters still count', () => {
+    const full = { byService: { openai: DEGRADATION_EVENTS_CAP }, noStatusByService: {}, events: Array.from({ length: DEGRADATION_EVENTS_CAP }, () => ev()) }
+    const out = addDegradationToMonthly(full, 'openai', false, ev({ svcId: 'late' }))
+    expect(out.events).toHaveLength(DEGRADATION_EVENTS_CAP)
+    expect(out.events!.some((e) => e.svcId === 'late')).toBe(false)
+    expect(out.byService.openai).toBe(DEGRADATION_EVENTS_CAP + 1)
+  })
+
+  it('normalize drops an event missing any one field', () => {
+    for (const field of ['svcId', 'at', 'since', 'noStatus', 'status', 'probes', 'failed'] as const) {
+      const broken: Record<string, unknown> = { ...ev() }
+      delete broken[field]
+      expect(normalizeDegradationMonthly({ byService: {}, noStatusByService: {}, events: [broken] }).events, field).toEqual([])
+    }
+  })
+
+  it('normalize keeps well-formed events and drops the rest', () => {
+    const out = normalizeDegradationMonthly({
+      byService: { openai: 2 }, noStatusByService: {},
+      events: [ev(), { ...ev(), noStatus: 'yes' }, null, { ...ev(), status: null }],
+    })
+    expect(out.events).toEqual([ev(), ev({ status: null })])
+  })
+
+  it('summarize carries the events into the archive summary', () => {
+    expect(summarizeDegradation({ byService: { openai: 1 }, noStatusByService: { openai: 1 }, events: [ev()] })!.events).toEqual([ev()])
+  })
+
+  describe('joinDegradationFollowThrough', () => {
+    const MONTH = { startISO: '2026-10-01T00:00:00.000Z', endISO: '2026-11-01T00:00:00.000Z' }
+    const inc = (startedAt: string) => ({ startedAt })
+
+    it('counts an incident on the same service that starts between the first spike and the window end', () => {
+      const [h1, h6] = joinDegradationFollowThrough([ev()], { openai: [inc('2026-10-10T14:00:00.000Z')] }, MONTH, [1, 6])
+      expect(h1).toEqual({ windowHours: 1, eligible: 1, followed: 0, noStatusEligible: 1, noStatusFollowed: 0 })
+      expect(h6).toEqual({ windowHours: 6, eligible: 1, followed: 1, noStatusEligible: 1, noStatusFollowed: 1 })
+    })
+
+    it('includes both edges: an incident backdated to the first spike, and one at the window end', () => {
+      expect(joinDegradationFollowThrough([ev()], { openai: [inc('2026-10-10T11:50:00.000Z')] }, MONTH, [1])[0].followed).toBe(1)
+      expect(joinDegradationFollowThrough([ev()], { openai: [inc('2026-10-10T12:50:00.000Z')] }, MONTH, [1])[0].followed).toBe(1)
+      expect(joinDegradationFollowThrough([ev()], { openai: [inc('2026-10-10T12:51:00.000Z')] }, MONTH, [1])[0].followed).toBe(0)
+    })
+
+    it('measures the window from the streak\'s first spike, so an hourly re-count of one streak gets the same answer', () => {
+      const first = ev({ since: '2026-10-10T10:00:00.000Z', at: '2026-10-10T10:10:00.000Z' })
+      const recount = ev({ since: '2026-10-10T10:00:00.000Z', at: '2026-10-10T11:15:00.000Z' })
+      const [h1] = joinDegradationFollowThrough([first, recount], { openai: [inc('2026-10-10T12:00:00.000Z')] }, MONTH, [1])
+      expect(h1).toMatchObject({ eligible: 2, followed: 0 })
+    })
+
+    it('does not match a row whose startedAt is not a time: a day-bucket anchor or an unknown start', () => {
+      const nearNoon = ev({ svcId: 'huggingface', since: '2026-10-10T11:30:00.000Z', at: '2026-10-10T11:40:00.000Z' })
+      const rows = [
+        { startedAt: '2026-10-10T12:00:00.000Z', derived: 'status_history' as const, derivedDay: '2026-10-10' },
+        { startedAt: '2026-10-10T12:05:00.000Z', startUnknown: true },
+      ]
+      expect(joinDegradationFollowThrough([nearNoon], { huggingface: rows }, MONTH, [1])[0]).toMatchObject({ eligible: 1, followed: 0 })
+    })
+
+    it('does not count an incident that began before the streak, or on another service', () => {
+      const r = joinDegradationFollowThrough([ev()], {
+        openai: [inc('2026-10-10T11:49:00.000Z')],
+        chatgpt: [inc('2026-10-10T12:30:00.000Z')],
+      }, MONTH, [6])[0]
+      expect(r.eligible).toBe(1)
+      expect(r.followed).toBe(0)
+    })
+
+    it('leaves out an event whose first spike is not a readable time', () => {
+      expect(joinDegradationFollowThrough([ev({ since: 'n/a' })], { openai: [inc('2026-10-10T12:10:00.000Z')] }, MONTH, [1])[0].eligible).toBe(0)
+    })
+
+    it('leaves out an event whose streak began in the previous month', () => {
+      const straddle = ev({ since: '2026-09-30T23:50:00.000Z', at: '2026-10-01T00:05:00.000Z' })
+      expect(joinDegradationFollowThrough([straddle], { openai: [] }, MONTH, [1])[0].eligible).toBe(0)
+    })
+
+    it('leaves out an event whose window runs past the month end, per window', () => {
+      const late = ev({ at: '2026-10-31T20:00:00.000Z', since: '2026-10-31T19:50:00.000Z' })
+      const [h1, h6] = joinDegradationFollowThrough([late], { openai: [inc('2026-10-31T20:30:00.000Z')] }, MONTH, [1, 6])
+      expect(h1).toMatchObject({ eligible: 1, followed: 1 })
+      expect(h6).toMatchObject({ eligible: 0, followed: 0 })
+    })
+
+    it('counts the on-status-page events in the totals but not in the noStatus subset', () => {
+      const r = joinDegradationFollowThrough(
+        [ev(), ev({ noStatus: false, status: 'degraded' })],
+        { openai: [inc('2026-10-10T12:10:00.000Z')] }, MONTH, [1],
+      )[0]
+      expect(r).toEqual({ windowHours: 1, eligible: 2, followed: 2, noStatusEligible: 1, noStatusFollowed: 1 })
+    })
+  })
+})
+
 // The WIRING half of #1002 / aiwatch-reports#76. resolveArchiveProbeSummary being correct proves
 // nothing about the archive carrying its result — deleting the spread at the per-service build site
 // left every unit test above green. This drives the real buildMonthlyArchive and reads the field off
@@ -2558,6 +2700,21 @@ describe('buildMonthlyArchive — Responsiveness inputs (#1002 / aiwatch-reports
     // A row with no summary of its own must report null — never inherit a neighbour's figure.
     expect(archive.services.gemini.p50LatencyMs).toBeNull()
     expect(archive.services.gemini.cvCombined).toBeNull()
+  })
+
+  it('#1779 — writes the breakdown monthlyScore was computed from, per service', async () => {
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
+      { id: 'groq', aiwatchScore: 91, scoreGrade: 'excellent' as const },
+    ])
+    const claude = archive.services.claude.monthlyScoreBreakdown!
+    const groq = archive.services.groq.monthlyScoreBreakdown!
+    expect(claude.responsivenessStatus).toBe('available')
+    expect(groq.responsivenessStatus).toBe('available')
+    expect(claude.speed).not.toBe(groq.speed)
+    const parts = (b: typeof claude) => (b.incidents + b.recovery + b.responsiveness!) / 60 * 100
+    expect(Math.abs(parts(claude) - archive.services.claude.monthlyScore!)).toBeLessThan(1)
+    expect(Math.abs(parts(groq) - archive.services.groq.monthlyScore!)).toBeLessThan(1)
   })
 
   it('the p50 is NOT the unfiltered mean the p75/p95 columns use — they answer different questions', async () => {
@@ -2628,6 +2785,44 @@ describe('buildMonthlyArchive — degradation integration (#511)', () => {
     expect(archive.degradation!.total).toBe(5)
     expect(archive.degradation!.noStatusTotal).toBe(3)
     expect(archive.degradation!.byService).toEqual({ deepseek: 4, mistral: 1 })
+  })
+
+  it('#1778 — carries the events and joins them to the month\'s incidents', async () => {
+    const event = { svcId: 'deepseek', at: '2026-04-10T12:00:00.000Z', since: '2026-04-10T11:50:00.000Z', noStatus: true, status: 'operational', probes: 3, failed: 1 }
+    const kv = mkKv({
+      'probe-degradation:monthly:2026-04': JSON.stringify({ byService: { deepseek: 1 }, noStatusByService: { deepseek: 1 }, events: [event] }),
+      'incidents:monthly:2026-04': JSON.stringify({ lastUpdated: '2026-04-30T00:00:00.000Z', services: {
+        deepseek: { count: 1, totalMinutes: 30, longestMinutes: 30, dates: ['2026-04-10'], incidentIds: ['d1'], durations: { d1: 30 },
+          incidents: [{ id: 'd1', title: 'Elevated API errors', startedAt: '2026-04-10T14:00:00.000Z', resolvedAt: '2026-04-10T14:30:00.000Z', durationMin: 30, finalStatus: 'resolved', impact: 'major' }] },
+      } }),
+    })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.degradation!.events).toEqual([event])
+    expect(archive.degradation!.followThrough).toEqual([
+      { windowHours: 1, eligible: 1, followed: 0, noStatusEligible: 1, noStatusFollowed: 0 },
+      { windowHours: 6, eligible: 1, followed: 1, noStatusEligible: 1, noStatusFollowed: 1 },
+      { windowHours: 24, eligible: 1, followed: 1, noStatusEligible: 1, noStatusFollowed: 1 },
+    ])
+  })
+
+  it('#1778 — the archive joins only events whose window sits inside its own month', async () => {
+    const e = (since: string, at: string) => ({ svcId: 'deepseek', at, since, noStatus: true, status: 'operational', probes: 3, failed: 0 })
+    const kv = mkKv({
+      'probe-degradation:monthly:2026-04': JSON.stringify({ byService: { deepseek: 3 }, noStatusByService: { deepseek: 3 }, events: [
+        e('2026-03-31T23:50:00.000Z', '2026-04-01T00:05:00.000Z'),
+        e('2026-04-10T11:50:00.000Z', '2026-04-10T12:00:00.000Z'),
+        e('2026-04-30T23:30:00.000Z', '2026-04-30T23:40:00.000Z'),
+      ] }),
+    })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.degradation!.followThrough!.map((f) => f.eligible)).toEqual([1, 1, 1])
+  })
+
+  it('#1778 — an accumulator written before events existed gets no follow-through', async () => {
+    const kv = mkKv({ 'probe-degradation:monthly:2026-04': JSON.stringify({ byService: { deepseek: 1 }, noStatusByService: {} }) })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.degradation).not.toHaveProperty('events')
+    expect(archive.degradation).not.toHaveProperty('followThrough')
   })
 
   it('attaches null when accumulator is missing', async () => {
@@ -3126,6 +3321,49 @@ describe('computeMonthlyScore (#993)', () => {
     const realOutage = { ...advisory, title: 'Elevated error rates on Codex' }
     const withOutage = computeMonthlyScore('x', [realOutage], 100, noProbe, WINDOW, undefined)
     expect(withOutage.score!).toBeLessThan(clean.score!)
+  })
+})
+
+describe('computeMonthlyScore breakdown (#1779)', () => {
+  const WINDOW = { startISO: '2026-06-01T00:00:00.000Z', endISO: '2026-07-01T00:00:00.000Z' }
+  const inc = (startedAt: string, durationMin: number, impact: 'minor' | 'major' | 'critical' = 'major') => ({
+    id: startedAt, title: 't', startedAt, resolvedAt: startedAt, durationMin,
+    finalStatus: 'resolved' as const, impact,
+  })
+  const probed = new Map([['claude', { p50: 180, p95: 520, cvCombined: 0.62, validDays: 30 }]])
+  const thin = new Map([['claude', { p50: 180, p95: 520, cvCombined: 0.62, validDays: 3 }]])
+  const incidents = [inc('2026-06-04T02:00:00Z', 95), inc('2026-06-19T11:00:00Z', 41, 'minor')]
+
+  // What a reader of the archive can do with the published parts alone: sum the components present,
+  // rescale by their maxima, apply the short-history penalty. The parts are rounded to 0.1, so this
+  // lands within a point of the score, not on it.
+  const fromParts = (b: ReturnType<typeof computeMonthlyScore>['breakdown']) => {
+    const parts: [number | null, number][] = [[b.uptime, 40], [b.incidents, 25], [b.recovery, 15], [b.responsiveness, 20]]
+    const present = parts.filter(([v]) => v != null) as [number, number][]
+    const sum = present.reduce((a, [v]) => a + v, 0)
+    const max = present.reduce((a, [, m]) => a + m, 0)
+    return sum / max * 100 * (b.responsivenessStatus === 'insufficient' ? 0.95 : 1)
+  }
+
+  it.each([
+    ['official uptime + probe', 'claude', 99.62, probed, 'high', 'available'],
+    ['official uptime, unprobed service', 'x', 99.62, new Map(), 'high', 'unsupported'],
+    ['official uptime, probe under 7 days (penalty)', 'claude', 99.62, thin, 'high', 'insufficient'],
+    ['no official uptime, probed (rescaled)', 'claude', null, probed, 'medium', 'available'],
+  ] as const)('%s — the parts reproduce monthlyScore', (_label, id, uptime, summaries, confidence, status) => {
+    const r = computeMonthlyScore(id, incidents, uptime, summaries, WINDOW, undefined)
+    expect(r.confidence).toBe(confidence)
+    expect(r.breakdown.responsivenessStatus).toBe(status)
+    expect(r.score).not.toBeNull()
+    expect(Math.abs(fromParts(r.breakdown) - r.score!)).toBeLessThan(1)
+  })
+
+  it('a low-confidence service keeps its parts while the score is withheld', () => {
+    const r = computeMonthlyScore('x', incidents, null, new Map(), WINDOW, undefined)
+    expect(r.score).toBeNull()
+    expect(r.breakdown.incidents).toBeLessThan(25)
+    expect(r.breakdown.uptime).toBeNull()
+    expect(r.breakdown.responsiveness).toBeNull()
   })
 })
 

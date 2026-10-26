@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   planArchivePatch, applyArchivePatch, figuresFrom, storedFigures, figureDiff, resourceOfDerivedEntry,
-  planRowReplacement, ROW_REPLACEMENTS, planSuppressionPatch,
+  planRowReplacement, ROW_REPLACEMENTS, planSuppressionPatch, recountDowntime,
 } from '../archive-patch'
 import type { RowReplacement } from '../archive-patch'
 import type { PatchableArchive } from '../archive-patch'
@@ -53,6 +53,9 @@ const NEIGHBOUR_FIELDS = {
   uptime: 100, uptimeSource: 'platform_avg', score: 75, grade: 'good', scoreConfidence: 'high',
   avgLatencyMs: 216, p95LatencyMs: 300, latencySpikes: 208, p50LatencyMs: 185, cvCombined: 0.542,
 }
+
+/** What `applyArchivePatch` wrote, in the shape of `ArchivePatchChange.after`. */
+const writtenFigures = (svc: Record<string, unknown>) => ({ ...storedFigures(svc), monthlyScoreBreakdown: svc.monthlyScoreBreakdown })
 
 const archiveWith = (entries: MonthlyIncidentEntry[], extra: Record<string, unknown> = {}) => {
   const svc: Record<string, unknown> = {
@@ -143,8 +146,10 @@ describe('#1295 — figuresFrom reproduces what the BUILDER writes', () => {
       const list = rec.incidentList as MonthlyIncidentEntry[] | undefined
       if (!list || list.length === 0) continue
       compared++
-      expect(figureDiff(storedFigures(rec), figuresFrom(id, rec, list, WINDOW)),
+      const reproduced = figuresFrom(id, rec, list, WINDOW)
+      expect(figureDiff(storedFigures(rec), reproduced),
         `${id}: figuresFrom disagrees with buildMonthlyArchive`).toEqual([])
+      expect(rec.monthlyScoreBreakdown, `${id}: breakdown`).toEqual(reproduced.monthlyScoreBreakdown)
     }
     // Non-vacuous: the loop must actually have compared both services.
     expect(compared).toBe(2)
@@ -218,6 +223,15 @@ describe('#1295 — resourceOfDerivedEntry', () => {
 })
 
 describe('#1295 — the reproduction gate', () => {
+  it('#1779 — plans the correction for an archive written before monthlyScoreBreakdown existed', () => {
+    const arch = archiveWith([feed(`${RESOURCE} — down`, CROSS_DAY_FEED), derived()])
+    delete (arch.services.together as Record<string, unknown>).monthlyScoreBreakdown
+    const { changes, refusals } = planArchivePatch(arch, WINDOW)
+    expect(refusals).toEqual([])
+    expect(changes).toHaveLength(1)
+    expect(applyArchivePatch(arch, changes).services!.together.monthlyScoreBreakdown).toEqual(changes[0].after.monthlyScoreBreakdown)
+  })
+
   it('plans the correction when the stored figures reproduce', () => {
     const arch = archiveWith([feed(`${RESOURCE} — down`, CROSS_DAY_FEED), derived()])
     const { changes, refusals } = planArchivePatch(arch, WINDOW)
@@ -268,12 +282,14 @@ describe('#1295 — what it leaves alone', () => {
 describe('#1295 — applyArchivePatch', () => {
   it('rewrites every field the plan moved, and the list', () => {
     const arch = archiveWith([feed(`${RESOURCE} — down`, CROSS_DAY_FEED), OTHER_DAY_FEED, derived()])
+    const storedBreakdown = arch.services.together.monthlyScoreBreakdown
     const { changes } = planArchivePatch(arch, WINDOW)
+    expect(changes[0].after.monthlyScoreBreakdown).not.toEqual(storedBreakdown)
     const out = applyArchivePatch(arch, changes).services!.together
     expect((out.incidentList as MonthlyIncidentEntry[]).map((e) => e.id))
       .toEqual([`#rss-${RESOURCE} — down-${CROSS_DAY_FEED}`, OTHER_DAY_FEED.id])
     // EVERY field the plan computed, not only the ones that happened to move.
-    expect(storedFigures(out)).toEqual(changes[0].after)
+    expect(writtenFigures(out)).toEqual(changes[0].after)
     // The written document must itself reproduce — otherwise the patch publishes figures that its own
     // gate would refuse on the next run.
     expect(figureDiff(storedFigures(out), figuresFrom('together', out, out.incidentList as MonthlyIncidentEntry[], WINDOW)))
@@ -296,7 +312,7 @@ describe('#1295 — applyArchivePatch', () => {
     expect(changes).toHaveLength(1)
     expect(changes[0].before.monthlyGrade).not.toBe(changes[0].after.monthlyGrade)
     const out = applyArchivePatch(arch, changes).services!.together
-    expect(storedFigures(out)).toEqual(changes[0].after)
+    expect(writtenFigures(out)).toEqual(changes[0].after)
   })
 
   it('preserves everything outside the service it changes', () => {
@@ -356,6 +372,25 @@ describe('#1664 — planRowReplacement (2026-09 azureopenai)', () => {
     return { services: { azureopenai: { ...svc, ...figuresFrom('azureopenai', svc, rows, SEPT) } } }
   }
   const withEvent = (patch: Partial<RowReplacement['add'][number]>): RowReplacement => ({ ...spec, add: [{ ...spec.add[0], ...patch }] })
+
+  it('#1778 — re-joins every service\'s events against the patched document, inside its month', () => {
+    const ev = (svcId: string, since: string, at: string) => ({ svcId, at, since, noStatus: true, status: 'operational', probes: 3, failed: 0 })
+    const events = [
+      ev('azureopenai', '2026-09-29T10:01:00.000Z', '2026-09-29T10:10:00.000Z'),
+      ev('openai', '2026-09-12T08:00:00.000Z', '2026-09-12T08:10:00.000Z'),
+      ev('openai', '2026-08-31T23:50:00.000Z', '2026-09-01T00:05:00.000Z'),
+    ]
+    const openaiRows = [{ id: 'o1', title: 'Elevated errors', startedAt: '2026-09-12T08:30:00.000Z', resolvedAt: '2026-09-12T09:00:00.000Z', durationMin: 30, finalStatus: 'resolved', impact: 'major' }]
+    const arch = azureArchive(spec.remove.map(stuck))
+    const doc = { ...arch, services: { ...arch.services, openai: { incidentList: openaiRows } }, period: '2026-09',
+      degradation: { total: 3, noStatusTotal: 3, byService: { azureopenai: 1, openai: 2 }, noStatusByService: { azureopenai: 1, openai: 2 }, events } }
+    const out = applyArchivePatch(doc, planRowReplacement(doc, SEPT, spec).changes) as typeof doc & { degradation: { followThrough: unknown } }
+    expect(out.degradation.followThrough).toEqual([
+      { windowHours: 1, eligible: 2, followed: 2, noStatusEligible: 2, noStatusFollowed: 2 },
+      { windowHours: 6, eligible: 2, followed: 2, noStatusEligible: 2, noStatusFollowed: 2 },
+      { windowHours: 24, eligible: 2, followed: 2, noStatusEligible: 2, noStatusFollowed: 2 },
+    ])
+  })
 
   it('replaces the three stuck rows with the one provider-recorded event, duration derived', () => {
     const { changes, refusals } = planRowReplacement(azureArchive(spec.remove.map(stuck)), SEPT, spec)
@@ -489,5 +524,51 @@ describe('#1735 — planSuppressionPatch', () => {
     const { changes, refusals } = planSuppressionPatch(arch, SEPT, supp)
     expect(changes).toEqual([])
     expect(refusals[0]).toMatch(/^kimi: stored figures do not reproduce/)
+  })
+})
+
+describe('aiwatch-reports#161 — recountDowntime', () => {
+  const row = (id: string, title: string, start: string, durationMin: number): MonthlyIncidentEntry => ({
+    id, title, startedAt: start, resolvedAt: new Date(Date.parse(start) + durationMin * 60_000).toISOString(),
+    durationMin, finalStatus: 'resolved', impact: 'major',
+  })
+  // Two 60m incidents opened 30m apart: 120m summed (the pre-#1505 figure), 90m as one impact window.
+  const a = row('a', 'Elevated errors on Opus', '2026-07-10T10:00:00.000Z', 60)
+  const b = row('b', 'Elevated errors on Sonnet', '2026-07-10T10:30:00.000Z', 60)
+  const c = row('c', 'Claude Tag seeing elevated GitHub operation failures', '2026-07-12T10:00:00.000Z', 40)
+
+  it('counts overlapping incidents once', () => {
+    const out = recountDowntime({ services: { claude: { incidents: 2, totalDowntimeMin: 120, incidentList: [a, b] } } }, [])
+    expect(out.claude).toEqual({ downtime: 90, mttr: 90 }) // one 90m window, not two 60m recoveries
+  })
+
+  it('drops rows the current suppression list hides on that service', () => {
+    const supp = [{ scope: 'service-pattern' as const, svcId: 'claude', match: 'claude tag seeing elevated github operation failures' }]
+    const archive = { services: {
+      claude: { incidents: 3, totalDowntimeMin: 160, incidentList: [a, b, c] },
+      claudecode: { incidents: 1, totalDowntimeMin: 40, incidentList: [c] },
+    } }
+    expect(recountDowntime(archive, supp)).toEqual({ claude: { downtime: 90, mttr: 90 }, claudecode: { downtime: 40, mttr: 40 } })
+  })
+
+  it('returns null where the stored list is shorter than the month\'s incident count', () => {
+    const out = recountDowntime({ services: { mistral: { incidents: 250, totalDowntimeMin: 9000, incidentList: [a, b] } } }, [])
+    expect(out.mistral).toEqual({ downtime: null, mttr: null })
+  })
+
+  it('returns null for a service with no incidents', () => {
+    expect(recountDowntime({ services: { modal: { incidents: 0, totalDowntimeMin: null } } }, [])).toEqual({ modal: { downtime: null, mttr: null } })
+  })
+
+  it('counts a status_history day bucket in downtime but not in recovery', () => {
+    const bucket: MonthlyIncidentEntry = { ...row('d', 'Degraded performance', '2026-07-20T00:00:00.000Z', 50), derived: 'status_history' }
+    const out = recountDowntime({ services: { claude: { incidents: 3, incidentList: [a, b, bucket] } } }, [])
+    expect(out.claude).toEqual({ downtime: 140, mttr: 90 })
+  })
+
+  it('averages recovery over separate windows', () => {
+    const later = row('d', 'Elevated errors on Haiku', '2026-07-20T10:00:00.000Z', 30)
+    const out = recountDowntime({ services: { claude: { incidents: 3, incidentList: [a, b, later] } } }, [])
+    expect(out.claude).toEqual({ downtime: 120, mttr: 60 }) // (90 + 30) / 2
   })
 })

@@ -17,27 +17,21 @@
 // come back identical is refused rather than guessed at, exactly as `patch-archive-automonitor.mjs`
 // (#1210) refuses a service it cannot account for. A service with no collision is never rewritten, so
 // it is never reproduced either — step 2's `diff` is what shows the operator that untouched remainder.
-import { aggregateIncidentDurations, computeMonthlyScore, parseDurationMin } from './monthly-archive'
-import type { MonthlyIncidentEntry } from './monthly-archive'
+import { aggregateIncidentDurations, archiveFollowThrough, averageResolutionMin, computeMonthlyScore, parseDurationMin } from './monthly-archive'
+import type { DegradationEvent, DegradationFollowThrough, MonthlyIncidentEntry } from './monthly-archive'
 import { derivedDayAlreadyBankedFromFeed } from './monthly-archive'
 import { resolveProbeId } from './probe'
 import { SERVICES } from './services'
 import { isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 export { normalizeSuppressionsCounted, SUPPRESSIONS_KEY } from './suppression'
 import type { Incident, ProbeSummary } from './types'
+import type { AIWatchScore } from './score'
 import { formatDuration } from './utils'
 
 /** STATUS_CACHE (worker/wrangler.toml). Pinned against the toml by the test beside this file. */
 export const NAMESPACE_ID = 'e49508d80bb144e9a7ff872f2be771a4'
 
-/** The calendar month as the half-open UTC window `computeMonthlyScore` scores over. */
-export function monthWindow(period: string): { startISO: string; endISO: string } {
-  const [y, m] = period.split('-').map(Number)
-  return {
-    startISO: new Date(Date.UTC(y, m - 1, 1)).toISOString(),
-    endISO: new Date(Date.UTC(y, m, 1)).toISOString(),
-  }
-}
+export { monthWindow } from './monthly-archive'
 
 /**
  * The commands the operator runs, as data so they can be pinned.
@@ -73,19 +67,24 @@ export interface ArchiveServiceFigures {
   monthlyScoreConfidence: string | null
 }
 
+/** #1779 — `figuresFrom` also returns the breakdown, which the reproduction gate does not compare. */
+export type PatchedFigures = ArchiveServiceFigures & { monthlyScoreBreakdown: AIWatchScore['breakdown'] }
+
 export interface ArchivePatchChange {
   id: string
   removed: string[]
   /** #1731 — stored figures that did not reproduce, accepted by name for this service. */
   acceptedDrift?: string[]
   before: ArchiveServiceFigures
-  after: ArchiveServiceFigures
+  after: PatchedFigures
   keptList: MonthlyIncidentEntry[]
 }
 
 /** The minimal archive shape this reads. Anything else in the document is preserved verbatim. */
 export interface PatchableArchive {
   services?: Record<string, Record<string, unknown>>
+  period?: string
+  degradation?: { events?: DegradationEvent[]; followThrough?: DegradationFollowThrough[] } | null
 }
 
 /** `validDays` is the one `ProbeSummary` field the archive does not store. It gates the short-history
@@ -134,7 +133,7 @@ export function figuresFrom(
   svc: Record<string, unknown>,
   list: MonthlyIncidentEntry[],
   window: { startISO: string; endISO: string },
-): ArchiveServiceFigures {
+): PatchedFigures {
   const agg = aggregateIncidentDurations(list, list.length, 0, 0)
   const avg = agg.countedCount != null && agg.countedCount > 0 && agg.countedTotalMin != null
     ? Math.round(agg.countedTotalMin / agg.countedCount)
@@ -151,6 +150,7 @@ export function figuresFrom(
     monthlyScore: m.score,
     monthlyGrade: m.grade,
     monthlyScoreConfidence: m.confidence,
+    monthlyScoreBreakdown: m.breakdown,
   }
 }
 
@@ -239,7 +239,10 @@ export function applyArchivePatch(archive: PatchableArchive, changes: ArchivePat
     svc.monthlyScore = c.after.monthlyScore
     svc.monthlyGrade = c.after.monthlyGrade
     svc.monthlyScoreConfidence = c.after.monthlyScoreConfidence
+    svc.monthlyScoreBreakdown = c.after.monthlyScoreBreakdown
   }
+  const followThrough = archiveFollowThrough(archive)
+  if (followThrough) archive.degradation!.followThrough = followThrough
   return archive
 }
 
@@ -379,4 +382,30 @@ export function planSuppressionPatch(
     if (!usedAccept.has(id)) refusals.push(`${id}: named to accept drift, but it has no suppressed row with non-reproducing figures`)
   }
   return { changes, refusals }
+}
+
+/**
+ * aiwatch-reports#161 — each service's `totalDowntimeMin` and `avgResolutionMin` recounted from its stored
+ * `incidentList` with today's `aggregateIncidentDurations` and today's suppression list, so a report can
+ * compare a month archived before #1505 with one archived after it. null where the list is shorter than
+ * the month's incident count: the stored figures then came from the accumulator's pre-summed total, which
+ * cannot be recounted.
+ */
+export function recountDowntime(
+  archive: PatchableArchive,
+  suppressions: SuppressionEntry[],
+): Record<string, { downtime: number | null; mttr: number | null }> {
+  const out: Record<string, { downtime: number | null; mttr: number | null }> = {}
+  for (const [id, svc] of Object.entries(archive.services ?? {})) {
+    const list = Array.isArray(svc.incidentList) ? (svc.incidentList as MonthlyIncidentEntry[]) : []
+    const count = typeof svc.incidents === 'number' ? svc.incidents : 0
+    if (list.length < count) {
+      out[id] = { downtime: null, mttr: null }
+      continue
+    }
+    const kept = list.filter((e) => !isSuppressedByIdTitle(e.id, e.title ?? '', id, suppressions))
+    const agg = aggregateIncidentDurations(kept, kept.length, 0, 0)
+    out[id] = { downtime: agg.totalMin, mttr: averageResolutionMin(agg.countedTotalMin, agg.countedCount ?? 0) }
+  }
+  return out
 }

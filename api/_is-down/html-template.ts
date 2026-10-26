@@ -29,8 +29,8 @@ function formatRecoveryDisplay(recovery: string): string {
 }
 
 /** Upper-bound recovery hours from an AI insight: the numeric `estimatedRecoveryHours` first, else
- *  parse the display string ("2–4h" → 4, "30m–1h" → 1, "45m" → 0.75). Mirrors the frontend
- *  `predictedHoursFrom` (src/utils/predictionAccuracy.js) so both surfaces derive the bound the same
+ *  parse the display string ("2–4h" → 4, "30m–1h" → 1, "45m" → 0.75). Mirrors the dashboard's
+ *  `predictedHoursFrom` (worker/src/prediction-accuracy.ts) so both surfaces derive the bound the same
  *  way — the string-parse fallback matters for pre-deployment `ai:analysis` KV data without the
  *  numeric field. Returns null for "N/A" / "No historical data…" / missing. */
 function recoveryUpperBoundHours(insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number }): number | null {
@@ -87,7 +87,7 @@ function approxElapsedEn(min: number): string {
 }
 
 /** Overshoot multiple past which the specific estimate range is dropped as noise (#900). Mirrors
- *  `FAR_EXCEEDED_FACTOR` in `src/utils/predictionAccuracy.js` — keep the two in sync. */
+ *  `FAR_EXCEEDED_FACTOR` in `worker/src/prediction-accuracy.ts` — keep the two in sync. */
 export const FAR_EXCEEDED_FACTOR = 3
 
 /** Rich "still ongoing past the estimate" text for the AI card — "Ongoing ~12h · exceeded ~2–4h est."

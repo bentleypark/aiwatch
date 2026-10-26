@@ -3,7 +3,7 @@
 // fetch and re-renders. All DOM is built with createElement + textContent (never
 // innerHTML) — CSP-clean and injection-safe even though the data is our own API.
 
-import { REPORT_URL, SITE_BASE, withExtUtm } from './config.js'
+import { REPORT_URL, SITE_BASE, WORKER_ORIGIN_PATTERN, withExtUtm } from './config.js'
 import {
   worstStatus,
   statusLabel,
@@ -17,6 +17,12 @@ import {
   isDownPath,
   monthLabel,
   monthlyRowText,
+  splitSharedIncidents,
+  sharedNoteText,
+  baselineLines,
+  analysisLines,
+  AI_DISCLAIMER,
+  reportFailureText,
 } from './lib/render.js'
 
 const STORAGE_KEY = 'aiwatch:status'
@@ -30,13 +36,20 @@ function el(tag, className, text) {
   return node
 }
 
-function incidentNode(inc) {
+function incidentNode(inc, surfaces, now, seen) {
   const impact = inc.impact || ''
-  const box = el('div', `incident ${impact}`)
+  const box = el('div', `incident ${impact} ${inc.status === 'resolved' ? 'resolved' : ''}`.trim())
   box.appendChild(el('div', 'incident-title', inc.title))
   const meta = [statusLabelForIncident(inc.status), impact].filter(Boolean).join(' · ')
   box.appendChild(el('div', 'incident-meta', meta))
-  if (inc.aiSummary) box.appendChild(el('div', 'incident-ai', `🤖 ${inc.aiSummary}`))
+  const lines = analysisLines(inc, now)
+  for (const line of lines) box.appendChild(el('div', line.kind === 'summary' ? 'incident-ai' : 'incident-detail', line.text))
+  for (const line of baselineLines(inc, surfaces, seen && seen.baselines)) box.appendChild(el('div', 'incident-baseline', line))
+  // #1772 — once, inside the first box with an analysis.
+  if (lines.length && seen && !seen.disclaimer) {
+    seen.disclaimer = true
+    box.appendChild(el('div', 'ai-disclaimer', AI_DISCLAIMER))
+  }
   return box
 }
 
@@ -83,7 +96,7 @@ function referenceNode(reference) {
   const wrap = el('section', 'reference')
   wrap.appendChild(el('div', 'reference-note', 'Other Anthropic components · not monitored, not counted above'))
   for (const c of components) wrap.appendChild(componentNode(c, 'reference-row'))
-  for (const inc of incidents) wrap.appendChild(incidentNode(inc))
+  for (const inc of incidents) wrap.appendChild(incidentNode(inc, [], Date.now()))
   return wrap
 }
 
@@ -110,7 +123,18 @@ function monthlyNode(report, services) {
   return box
 }
 
-function cardNode(svc, now) {
+// #1772 — one block for an incident listed on several cards, naming the surfaces it affects.
+function sharedNode(shared, services, now, seen) {
+  const wrap = el('section', 'shared')
+  for (const { incident, affects, ids } of shared) {
+    const box = incidentNode(incident, services.filter((s) => ids.includes(s.id)), now, seen)
+    box.prepend(el('div', 'incident-affects', `Affects ${affects.join(' · ')}`))
+    wrap.appendChild(box)
+  }
+  return wrap
+}
+
+function cardNode(svc, now, own, sharedCount, seen) {
   const card = el('div', 'card')
   const head = el('div', 'card-head')
   head.appendChild(el('span', `dot ${svc.status || 'unknown'}`))
@@ -143,7 +167,8 @@ function cardNode(svc, now) {
 
   for (const c of svc.components || []) card.appendChild(componentNode(c, 'subcomponent'))
 
-  for (const inc of svc.incidents || []) card.appendChild(incidentNode(inc))
+  for (const inc of own) card.appendChild(incidentNode(inc, [svc], now, seen))
+  if (sharedCount > 0) card.appendChild(el('div', 'shared-note', sharedNoteText(sharedCount)))
   if (svc.reports && svc.reports.count > 0) card.appendChild(reportsNode(svc.reports, now))
 
   // Fallback only when this surface is actually having trouble (matches the dashboard's
@@ -173,7 +198,10 @@ function render(stored) {
   if (!services.length) {
     main.appendChild(el('p', 'muted', 'Status unavailable — retrying…'))
   } else {
-    for (const svc of services) main.appendChild(cardNode(svc, now))
+    const { shared, ownBy, sharedCountBy } = splitSharedIncidents(services)
+    const seen = { baselines: new Set(), disclaimer: false }
+    if (shared.length) main.appendChild(sharedNode(shared, services, now, seen))
+    for (const svc of services) main.appendChild(cardNode(svc, now, ownBy[svc.id], sharedCountBy[svc.id], seen))
     const ref = referenceNode(payload.reference)
     if (ref) main.appendChild(ref)
     const monthly = monthlyNode(payload.latestReport, services)
@@ -216,6 +244,31 @@ async function loadAndRefresh() {
   if (!rendered) render(stored)
 }
 
+const WORKER_ORIGINS = { origins: [WORKER_ORIGIN_PATTERN] }
+
+// #1773 — shows "Allow access" while the host permission is missing; returns whether it is granted
+// (null when the check itself failed).
+async function syncGrantButton() {
+  try {
+    const permitted = await chrome.permissions.contains(WORKER_ORIGINS)
+    $('report-grant').hidden = permitted
+    return permitted
+  } catch (err) {
+    console.warn('[aiwatch] permission check failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+// permissions.request needs a user action, so it is the first call in the click handler, before any await.
+function requestAccess() {
+  chrome.permissions.request(WORKER_ORIGINS)
+    .then(() => syncGrantButton())
+    .then((permitted) => {
+      if (permitted) { $('report-status').className = 'report-status'; $('report-status').textContent = '' }
+    })
+    .catch((err) => console.warn('[aiwatch] permission request failed:', err instanceof Error ? err.message : err))
+}
+
 async function submitReport(evt) {
   evt.preventDefault()
   const btn = $('report-submit')
@@ -240,17 +293,15 @@ async function submitReport(evt) {
       statusEl.className = 'report-status ok'
       statusEl.textContent = data.message || 'Thanks — we factor this into our monitoring.'
       $('report-desc').value = ''
-    } else if (res.status === 429) {
-      statusEl.className = 'report-status err'
-      statusEl.textContent = 'Too many reports — please try again later.'
     } else {
       statusEl.className = 'report-status err'
-      statusEl.textContent = data.error || 'Could not send report.'
+      statusEl.textContent = reportFailureText({ status: res.status, error: data.error })
     }
   } catch (err) {
-    statusEl.className = 'report-status err'
-    statusEl.textContent = 'Network error — could not send report.'
     console.warn('[aiwatch] report failed:', err instanceof Error ? err.message : err)
+    const permitted = await syncGrantButton()
+    statusEl.className = 'report-status err'
+    statusEl.textContent = reportFailureText({ status: null, permitted })
   } finally {
     btn.disabled = false
   }
@@ -276,5 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // users/reviewers can tell which build is installed. textContent = injection-safe.
   $('ext-version').textContent = `v${chrome.runtime.getManifest().version}`
   $('report-form').addEventListener('submit', submitReport)
+  $('report-grant').addEventListener('click', requestAccess)
+  syncGrantButton()
   loadAndRefresh()
 })

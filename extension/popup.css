@@ -70,9 +70,16 @@ a[title] { cursor: pointer; }
   border-radius: 4px;
 }
 .incident.major, .incident.critical { border-left-color: var(--red); }
+.incident.resolved { border-left-color: var(--green); }
 .incident-title { font-weight: 600; font-size: 12px; }
 .incident-meta { color: var(--text2); font-size: 11px; text-transform: capitalize; }
 .incident-ai { margin-top: 3px; color: var(--text1); font-size: 12px; }
+.incident-detail { margin-top: 2px; color: var(--text2); font-size: 11px; }
+.incident-baseline { margin-top: 3px; color: var(--text2); font-size: 11px; }
+.incident-affects { margin-bottom: 3px; color: var(--text1); font-size: 11px; font-weight: 600; }
+.shared .incident:first-child { margin-top: 0; }
+.ai-disclaimer { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--border); color: var(--text2); font-size: 10px; line-height: 1.4; }
+.shared-note { margin-top: 6px; color: var(--text2); font-size: 11px; }
 
 .reports { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text1); }
 .reports-head { margin-bottom: 4px; font-weight: 600; color: var(--text0); }
@@ -112,6 +119,8 @@ button {
   background: var(--accent); color: #06101f; font-weight: 600; font: inherit;
 }
 button:disabled { opacity: 0.6; cursor: default; }
+.report-note { margin: 6px 0 0; font-size: 11px; }
+#report-grant { margin-top: 6px; }
 .report-status { margin: 6px 0 0; font-size: 12px; min-height: 14px; }
 .report-status.ok { color: var(--green); }
 .report-status.err { color: var(--red); }

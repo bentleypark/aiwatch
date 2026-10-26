@@ -1,21 +1,21 @@
-# Privacy Policy — AIWatch · Claude Status (Chrome extension)
+# Privacy Policy — AIWatch · Claude Status (Chrome & Firefox extension)
 
-**Last updated:** July 2026
+**Last updated:** October 2026
 
 > This is the source copy. The public, Web-Store-linkable version is served at
 > **https://ai-watch.dev/extension-privacy** (`api/extension-privacy.ts`). Keep the two in sync.
 >
-> **This policy covers the Chrome extension ONLY.** It is separate from the
+> **This policy covers the browser extension (Chrome and Firefox) ONLY.** It is separate from the
 > [ai-watch.dev](https://ai-watch.dev) website policy (`src/components/LegalContent.jsx`): unlike
 > the website, the extension uses **no analytics, no cookies, and does not read any web page**.
 
-The AIWatch — Claude Status Chrome extension is designed to collect **no personal data**.
+The AIWatch — Claude Status browser extension (Chrome and Firefox) is designed to collect **no personal data**.
 
 ## What the extension does
 - Polls the **public AIWatch status API** (`aiwatch-worker.p2c2kbf.workers.dev`) approximately
   every 2 minutes (and when you open the popup) to show the current status of Claude API,
   claude.ai, and Claude Code in the toolbar and popup.
-- Caches the most recent **public status response** locally (`chrome.storage.local`) so the popup
+- Caches the most recent **public status response** locally (the browser's extension storage, `storage.local`) so the popup
   loads instantly — public service-status data only, never anything about you.
 - When you explicitly click **"Report an issue"**, sends an anonymous report containing only: the
   surface you picked (Claude API / claude.ai / Claude Code), a problem category, and an optional
@@ -38,7 +38,7 @@ It communicates with exactly one server — the AIWatch API — and sends only:
 
 ## Data storage & retention
 - **On your device:** the cached public status payload + popup preferences stay in
-  `chrome.storage.local` until you clear them or uninstall the extension.
+  the browser's extension storage (`storage.local`) until you clear them or uninstall the extension.
 - **On the server:** issue reports are stored anonymously with short lifetimes (per-day counts and
   an ~7-day recent-report window), used only in aggregate, and not linked to you.
 
@@ -46,7 +46,8 @@ It communicates with exactly one server — the AIWatch API — and sends only:
 - `alarms` — schedule the periodic background status refresh.
 - `storage` — cache the public status payload locally for instant popup display.
 - `host_permissions` (the AIWatch API origin only) — fetch status and post anonymous reports; no
-  access to claude.ai or any site you visit.
+  access to claude.ai or any site you visit. In Firefox you can turn this access off; status still loads, but
+  a report cannot be sent until you allow it again from the popup.
 
 ## Third-party services
 Only the AIWatch API (served via Cloudflare Workers). Nothing is shared with any other party; no

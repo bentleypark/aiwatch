@@ -149,3 +149,99 @@ export function monthlyRowText(row) {
   }
   return parts.join(' · ')
 }
+
+// #1772 — the three surfaces share one status page, so one incident id can sit on several cards. An id
+// on two or more cards is listed once in `shared` (with the names it affects, in card order); each card
+// keeps only its own incidents in `ownBy` plus a `sharedCountBy` count. Ongoing, then `monitoring`, then
+// the recently resolved ones.
+const PHASE_RANK = { monitoring: 1, resolved: 2 }
+
+export function popupIncidentsOf(svc) {
+  return [...((svc && svc.incidents) || []), ...((svc && svc.recentlyResolved) || [])]
+}
+
+export function splitSharedIncidents(services) {
+  const list = Array.isArray(services) ? services : []
+  const seen = new Map()
+  for (const svc of list) {
+    for (const inc of popupIncidentsOf(svc)) {
+      const entry = seen.get(inc.id)
+      if (!entry) seen.set(inc.id, { incident: inc, affects: [svc.name], ids: [svc.id] })
+      else if (!entry.ids.includes(svc.id)) {
+        entry.affects.push(svc.name)
+        entry.ids.push(svc.id)
+        if (!entry.incident.aiSummary && inc.aiSummary) entry.incident = { ...entry.incident, aiSummary: inc.aiSummary }
+        if (!entry.incident.ai && inc.ai) entry.incident = { ...entry.incident, ai: inc.ai }
+      }
+    }
+  }
+  const sharedIds = new Set([...seen.values()].filter((e) => e.ids.length > 1).map((e) => e.incident.id))
+  const shared = [...seen.values()]
+    .filter((e) => sharedIds.has(e.incident.id))
+  shared.sort((a, b) => (PHASE_RANK[a.incident.status] || 0) - (PHASE_RANK[b.incident.status] || 0))
+  const ownBy = {}
+  const sharedCountBy = {}
+  for (const svc of list) {
+    const incs = popupIncidentsOf(svc)
+    ownBy[svc.id] = incs.filter((i) => !sharedIds.has(i.id))
+    sharedCountBy[svc.id] = new Set(incs.filter((i) => sharedIds.has(i.id)).map((i) => i.id)).size
+  }
+  return { shared, ownBy, sharedCountBy }
+}
+
+// #1772 — hand copy of worker/src/recovery-baseline-text.ts (the bundle cannot import it); pinned by
+// recovery-baseline-sync.test.js.
+function minText(min) {
+  const h = Math.floor(min / 60)
+  const m = Math.round(min % 60)
+  return h === 0 ? `${m}m` : m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
+export function recoveryBaselineText(b) {
+  return `Past incidents on this service: median ${minText(b.medianMin)}, 80% resolved within ${minText(b.p80Min)} (based on ${b.n} recorded incidents since ${b.since})`
+}
+
+// #1772 — the past-recovery lines under an incident: only beside an AI analysis (as on is-down and the
+// dashboard), one per affected surface that has a baseline, named when there is more than one surface.
+// With `shown`, a surface already given its line earlier in the popup is skipped (the dashboard modal
+// shows each service's line once, on its first card), and the ones emitted are added to it.
+export function baselineLines(incident, surfaces, shown) {
+  if (!incident || !(incident.ai || incident.aiSummary)) return []
+  const list = (surfaces || []).filter((s) => s && s.recoveryBaseline && !(shown && shown.has(s.id)))
+  if (shown) for (const s of list) shown.add(s.id)
+  const named = (surfaces || []).length > 1
+  return list.map((s) => `📊 ${named ? `${s.name} — ` : ''}${recoveryBaselineText(s.recoveryBaseline)}`)
+}
+
+// #1772 — the modal's analysis lines: summary, recovery + scope (rendered by the worker), recovered, updated.
+// A worker without `ai` sends only `aiSummary`.
+export function analysisLines(incident, now) {
+  if (!incident) return []
+  const ai = incident.ai
+  if (!ai) return incident.aiSummary ? [{ kind: 'summary', text: `🤖 ${incident.aiSummary}` }] : []
+  const out = [{ kind: 'summary', text: `🤖 ${ai.summary}` }]
+  for (const line of ai.lines || []) out.push({ kind: 'detail', text: line })
+  const resolvedTs = Date.parse(incident.resolvedAt)
+  if (Number.isFinite(resolvedTs)) out.push({ kind: 'detail', text: `✅ Recovered: ${formatRelTime(resolvedTs, now)}` })
+  const analyzedTs = Date.parse(ai.analyzedAt)
+  if (Number.isFinite(analyzedTs)) out.push({ kind: 'detail', text: `🕐 Analysis updated ${formatRelTime(analyzedTs, now)}${ai.model ? ` · ${ai.model}` : ''}` })
+  return out
+}
+
+export const AI_DISCLAIMER = '⚠️ AI-generated estimation based on historical data. Actual recovery time may vary. This analysis is provided for informational purposes only.'
+
+export function sharedNoteText(count) {
+  return `${count} shared incident${count === 1 ? '' : 's'} ↑`
+}
+
+// #1773 — why a report did not send. `status` is null when fetch threw; with the host permission
+// revoked (Firefox lets the user do that) the throw is a blocked request, not a network failure.
+export function reportFailureText({ status, error, permitted }) {
+  if (status == null) {
+    return permitted === false
+      ? 'Access to AIWatch is off — click "Allow access", then send again.'
+      : 'Network error — could not send report.'
+  }
+  if (status === 429) return 'Too many reports — please try again later.'
+  return error || 'Could not send report.'
+}
