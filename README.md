@@ -40,7 +40,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Incident history** — Timeline with details from multiple status page formats
 - **Uptime** — 30-day uptime **computed by AIWatch** from each provider's own published records, rather than copied from the % they display (weighted: full outage 1.0, partial/degraded 0.3, announced maintenance excluded). Sources that don't fit that formula carry their own label instead — so our figure can differ from a provider's own, by design ([how it works](https://ai-watch.dev/methodology))
 - **Component status breakdown** — Real-time per-component status (models, API surfaces, …) on ServiceDetails + Is X Down for the services we track per-component, with collapsible section/model groups for long lists
-- **Status calendar** — 30-day (Statuspage) or 14-day (incident.io) daily status visualization
+- **Status calendar** — daily status visualization
 - **Discord & Slack alerts** — Discord webhook on status changes/incidents + Slack via its native `/feed` RSS app (zero-config) + RSS feeds
 - **Cookie consent** — GA4 Consent Mode v2 with accept/essential-only
 - **Deep links** — Hash-based routing (`#claude`, `#latency`) for direct page access

@@ -1,6 +1,6 @@
 // Build status calendar from service data
 // Uses local dates to match how official status pages display dates to users.
-// Returns array of N cell statuses (default 30, incident.io services use 14). The cell keys are
+// Returns array of N cell statuses (N = `calendarDaysOf(service)`). The cell keys are
 // IMPACT-ALIGNED and frontend-internal (NOT the wire `service.status`) — #663 renamed them from the
 // old degraded_perf/degraded/down so the key name matches the incident impact and the severity order
 // is self-evident, decoupling the calendar from the 3-state badge that shares the `status.*` i18n:
@@ -12,6 +12,11 @@
 // `cal.status.*` i18n keys. Index 0 = oldest, last index = today.
 
 const STATUS_RANK = { operational: 0, minor: 1, major: 2, critical: 3 }
+
+// #1406 — the worker decides the window (`calendarWindowDays`); 14 when the payload carries none.
+export function calendarDaysOf(service) {
+  return service.calendarDays ?? 14
+}
 
 function escalate(dayStatus, key, status) {
   if ((STATUS_RANK[status] ?? 0) > (STATUS_RANK[dayStatus[key]] ?? 0)) {
@@ -182,8 +187,8 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   // `operational` with an open informational/minor incident (e.g. claude); painting the calendar for
   // those is noise (mirrors the old worker-augment `svcStatus !== 'operational'` guard, #662).
   // #1233 — an unreadable source (`unknown`) must not trip this. It is not a verdict about the
-  // service, so treating it as one would forward-fill today's calendar cell (and the Overview 30-bar
-  // strip) as an outage day, from an incident list we could not refresh.
+  // service, so treating it as one would forward-fill today's calendar cell (and the Overview history
+  // bars) as an outage day, from an incident list we could not refresh.
   if (currentStatus && currentStatus !== 'operational' && currentStatus !== 'unknown') {
     const windowStart = new Date(today.getTime() - (days - 1) * 86_400_000)
     ;(incidents ?? []).forEach((inc) => {

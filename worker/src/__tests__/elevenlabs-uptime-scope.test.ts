@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { fetchService, SERVICES, canIdBypass, filterByComponentStatus } from '../services'
+import { fetchService, SERVICES, canIdBypass, filterByComponentStatus, calendarWindowDays } from '../services'
 import { buildIncidentIoProxyHtml } from '../parsers/incident-io-proxy'
 import type { ServiceConfig } from '../types'
 
@@ -91,7 +91,7 @@ describe('#1434 — ElevenLabs uptime covers every component its card shows', ()
 
   it('the Status Calendar spans 30 days, matching the uptime and Score windows', async () => {
     const svc = await svcFor()
-    expect(svc.calendarDays).toBe(30)
+    expect(calendarWindowDays(svc, Date.now())).toBe(30)
   })
 
   it('the impact calendar is scoped to the same components — a separate call site from uptime', async () => {

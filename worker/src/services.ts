@@ -27,6 +27,7 @@ import {
   AISTUDIO_BODY,
   AISTUDIO_COMPONENT,
   parseAistudioIncidents,
+  aistudioHistoryStart,
   computeDailyImpactFromIncidents,
   synthesizeAistudioComponents,
 } from './parsers/aistudio'
@@ -249,15 +250,6 @@ export const SERVICES: ServiceConfig[] = [
   // number #1177 refused to publish. App is the primary: the page tagged its `Investigating API issue`
   // (2026-08-13) onto App, and the primary also drives the #135 component-miss alert.
   //
-  // A SECOND consequence, disclosed rather than left to be found: `calendarDays` is derived as
-  // `statusComponentId ? 30 : 14`, so giving perplexity a primary moved its Status Calendar from 14 days
-  // to 30. Kept, not reverted — App, Website and Computer's `data_available_since` clear 30 days, the
-  // page itself draws 90, and 30 matches the uptime and Score windows as well as the other incident.io
-  // services that carry a `statusComponentId`. But the derivation is a config flag standing in for "how
-  // much per-day record exists", which is a defect in its own right (#1406, with the measurement:
-  // `fireworks` publishes 57 days and draws 14). When that rule is redone, re-decide this with it.
-  // The 2026-09-18 `API` addition below does not touch this derivation — it widens `statusComponentIds`
-  // (the worst-of/uptime scope), not `statusComponentId` (the sole input `calendarDays` reads).
   // One behaviour this migration DOES change, worth knowing rather than discovering: the Instatus
   // branch never reached `filterByComponentStatus`, and the Atlassian/incident.io branch does. So an
   // ACTIVE incident whose components have all returned to operational is now dropped (perplexity sets
@@ -758,6 +750,39 @@ export function carryForwardUptime(
   return carried
 }
 
+/** #1406 — `carryForwardUptime`'s rule for `incidentHistoryStart`: same age cap, same provenance. */
+export function carryForwardIncidentHistoryStart(
+  services: ServiceStatus[],
+  prevServices: ServiceStatus[] | null,
+  now: number,
+  maxAgeMs: number = UPTIME_MISSING_ALERT_MS,
+): void {
+  if (!prevServices) return
+  for (const svc of services) {
+    if (svc.incidentHistoryStart != null) continue
+    const prev = prevServices.find((p) => p.id === svc.id)
+    if (prev?.incidentHistoryStart == null) continue
+    const readAt = prev.incidentHistoryCarriedFrom ?? prev.lastChecked
+    const readMs = Date.parse(readAt)
+    if (!Number.isFinite(readMs) || now - readMs > maxAgeMs) continue
+    svc.incidentHistoryStart = prev.incidentHistoryStart
+    svc.incidentHistoryCarriedFrom = readAt
+  }
+}
+
+const CALENDAR_FULL_DAYS = 30
+const CALENDAR_SHORT_DAYS = 14
+
+/** #1406 — how many days the Status Calendar draws. */
+export function calendarWindowDays(
+  svc: Pick<ServiceStatus, 'uptimeSource' | 'dailyImpactComplete' | 'feedDepthStart' | 'incidentHistoryStart'>,
+  nowMs: number,
+): number {
+  if (svc.uptimeSource != null || svc.dailyImpactComplete === true) return CALENDAR_FULL_DAYS
+  const reachesBack = (iso: string | undefined) => iso !== undefined && nowMs - Date.parse(iso) >= CALENDAR_FULL_DAYS * 86_400_000
+  return reachesBack(svc.feedDepthStart) || reachesBack(svc.incidentHistoryStart) ? CALENDAR_FULL_DAYS : CALENDAR_SHORT_DAYS
+}
+
 // Ongoing first, then newest — the order `incidents[0]` (is-down "Last incident") and
 // `/api/v1/status/:id`'s slice(0,5) read as a prefix.
 export function compareIncidentsOngoingFirst(a: Incident, b: Incident): number {
@@ -775,7 +800,7 @@ export async function mergeAistudioIncidents(
   // #717 — invoked ONLY on a failed aistudio read to recover the last-known active aistudio
   // incidents instead of silently returning vertex-only. Lazy so the happy path pays no KV read.
   getCarryOver?: () => Promise<Incident[]>,
-): Promise<{ incidents: Incident[]; merged: number; parseErrors: number; held: number }> {
+): Promise<{ incidents: Incident[]; merged: number; parseErrors: number; held: number; historyStart?: string }> {
   const cancelBody = () => {
     aistudioRes?.body?.cancel().catch((e) =>
       console.warn(`[fetchService] ${serviceId} aistudio body cancel failed:`, e),
@@ -817,7 +842,8 @@ export async function mergeAistudioIncidents(
     if (primary.length > 0 || extras.length > 0) {
       console.info(`[${serviceId}] merged vertex=${primary.length} aistudio=${extras.length}`)
     }
-    return { incidents: [...primary, ...extras].sort(compareIncidentsOngoingFirst), merged: extras.length, parseErrors: 0, held: 0 }
+    const historyStart = aistudioHistoryStart(raw)
+    return { incidents: [...primary, ...extras].sort(compareIncidentsOngoingFirst), merged: extras.length, parseErrors: 0, held: 0, ...(historyStart ? { historyStart } : {}) }
   } catch (err) {
     console.warn(
       `[fetchService] ${serviceId} aistudio parse failed:`,
@@ -3301,7 +3327,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         ...(feedDepthStart ? { feedDepthStart } : {}),
         ...(components.length > 0 ? { components } : {}),
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete } : {}),
-        calendarDays: config.statusComponentId ? 30 : 14,
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
         ...(uptimeWindow != null ? { uptimeWindowDays: uptimeWindow } : {}),
         ...(uptimeRep != null ? { uptimeReported: uptimeRep } : {}),
@@ -3398,7 +3423,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           ...base,
           status: deriveAwsStatus(oursHealth),
           incidents: filtered,
-          calendarDays: 14,
           ...(awsRegionHealth && Object.keys(awsRegionHealth).length > 0 ? { awsRegionHealth } : {}),
         }
       }
@@ -3458,7 +3482,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           ...base,
           status: deriveAwsStatus(ours),
           incidents: filtered,
-          calendarDays: 14,
         }
       }
 
@@ -3501,6 +3524,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       const latency = Date.now() - start
 
       let incidents: Incident[] = []
+      let incidentHistoryStart: string | undefined
       let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
       // #1017 — MUST stay assigned together with instatusUptime above (both read off the same
       // `parseInstatusUptime()` result, same as instatusReported/instatusReportedDays below) — an edit
@@ -3661,6 +3685,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         const getCarryOver = () => readLastKnownAistudioIncidents(kv, config.id, Date.now())
         const merge = await mergeAistudioIncidents(incidents, aistudioRes, config.id, getCarryOver)
         incidents = merge.incidents
+        incidentHistoryStart = merge.historyStart
         parseErrors += merge.parseErrors
       }
 
@@ -3982,7 +4007,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         : []
 
       const dailyImpact = bsDailyImpact ?? aistudioDailyImpact
-      const has30dCalendar = bsDailyImpact != null || aistudioDailyImpact != null
 
       return {
         ...base,
@@ -4002,7 +4026,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         status: legFalseGreen && legShouldDegrade ? 'unknown' : derivedStatus,
         ...(legFalseGreen ? { sourceUnknown: true } : {}),
         incidents: filtered,
-        calendarDays: has30dCalendar ? 30 : 14,
+        ...(incidentHistoryStart ? { incidentHistoryStart } : {}),
         // Better Stack / AI Studio publish their own per-day record, the same class as Atlassian's
         // buckets — so the calendar keeps owning every day here, unchanged by #1390.
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete: true } : {}),
@@ -4793,19 +4817,20 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // feed's depth. Runs before scoring/cache consumers receive `raw`.
   await attachRecordedIncidentHistory(raw, kv, new Date())
 
-  // Read cached snapshot — the degraded fallback, the uptime carry-forward and the #1672 reference hold
+  // Read cached snapshot
   let cachedServices: ServiceStatus[] | null = null
   if (kv) {
     const cached = await kv.get(CACHE_KEY).catch(() => null)
     if (cached) {
-      // NOT normalised (#1233): apart from the uptime fields `carryForwardUptime` copies and the incident lists `holdReferenceClassification` reads, which the decode
-      // does not touch, the only thing read from this snapshot is `prev.status === 'operational'` below, and the transitional decode only ever rewrites `degraded` → `unknown` — both of which fail
-      // that test identically. A decode here would be a provable no-op, so it is left out rather than
+      // NOT normalised (#1233): the transitional decode only ever rewrites `degraded` → `unknown`, and the one status test on this
+      // snapshot (`prev.status === 'operational'` below) fails both identically. A decode here would be a provable no-op, so it is left out rather than
       // added as reassurance. The read-side decode that matters is in `cacheRead` and `cronAlertCheck`.
       try { cachedServices = JSON.parse(cached).services } catch { console.warn('[fetchAllServices] corrupt services cache in KV — fallback not available') }
     }
   }
   carryForwardUptime(raw, cachedServices, Date.now())
+  carryForwardIncidentHistoryStart(raw, cachedServices, Date.now())
+  for (const svc of raw) svc.calendarDays = calendarWindowDays(svc, Date.now())
   holdReferenceClassification(raw, cachedServices)
 
   // Enriched results (with cache fallback for degraded services)

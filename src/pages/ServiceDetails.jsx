@@ -12,7 +12,7 @@ import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
 import { incidentNote } from '../utils/incidentNote'
-import { buildCalendarFromIncidents } from '../utils/calendar'
+import { buildCalendarFromIncidents, calendarDaysOf } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { buildBadgeMarkdown } from '../utils/badge'
 import { compareGroupedRows, dominantGroupStatus, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
@@ -822,7 +822,7 @@ export default function ServiceDetails({ serviceId }) {
   // only; the Score card gates on its own validity (#713 — the worker already nulls the score for a
   // no-uptime+no-probe service, while a probed no-uptime service keeps a real, rankable score).
   const incidentsBlanked = !!service.incidentSourceStale
-  const calendarDays = service.calendarDays ?? 14
+  const calendarDays = calendarDaysOf(service)
 
   const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays, service.status, service.dailyImpactComplete)
 

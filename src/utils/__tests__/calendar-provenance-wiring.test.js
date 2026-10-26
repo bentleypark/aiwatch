@@ -5,8 +5,8 @@
 // `days === 30` derivation with every unit test still green.
 //
 // Round 1 of #1390's review named this as the gap: `calendar.test.js` proves the function, and nothing
-// proved the three call sites. `Overview.jsx` is the load-bearing one — it hardcodes `days = 30` for
-// every service regardless of `calendarDays`, which is why six services beyond perplexity were affected.
+// proved the three call sites. `Overview.jsx` was the load-bearing one — it then hardcoded `days = 30`
+// for every service regardless of `calendarDays`, which is why six services beyond perplexity were affected.
 //
 // Same mechanism and same reason as `derived-date-precision-wiring.test.js`: scan the source rather
 // than trust a sweep, because the failure is a per-call-site argument pass.

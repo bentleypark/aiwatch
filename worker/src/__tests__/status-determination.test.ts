@@ -726,8 +726,7 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
-  // stops a non-API component from flipping the OpenAI API badge, and gives a
-  // 30-day calendar (calendarDays keys off statusComponentId). The curated group == displayComponentIds.
+  // stops a non-API component from flipping the OpenAI API badge. The curated group == displayComponentIds.
   const SHARED_PAGE_PRIMARY: Record<string, string> = {
     openai: '01JMXBRMFE6N2NNT7DG6XZQ6PW',   // Chat Completions
     chatgpt: '01JMXBNJXGV1T5GT2M9XA83XNG',  // Conversations

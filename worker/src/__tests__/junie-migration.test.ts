@@ -44,7 +44,7 @@ describe('junie config (#1004 revert guard)', () => {
   })
 
   it('badge, uptime and breakdown read JetBrains AI alone (#1517)', () => {
-    expect(junie.statusComponentId).toBe(AI_ID)                            // primary: miss-check + calendarDays
+    expect(junie.statusComponentId).toBe(AI_ID)                            // primary: miss-check
     expect(junie.statusComponentIds).toEqual([AI_ID])                      // worst-of badge + uptime scope
     expect(junie.displayComponentIds).toEqual([AI_ID])                     // ≡ statusComponentIds
     expect(junie.incidentComponents).toEqual(['JetBrains AI'])

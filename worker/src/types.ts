@@ -164,6 +164,9 @@ export interface ServiceStatus {
   // #1614 — the oldest page-wide row of a capped Statuspage-compatible `incidents.json`
   // (`cappedFeedDepthStart`). Absent when the feed returned its whole history.
   feedDepthStart?: string
+  // #1406 — `aistudioHistoryStart`, then `carryForwardIncidentHistoryStart`.
+  incidentHistoryStart?: string
+  incidentHistoryCarriedFrom?: string
   /** #802 — days AIWatch has monitored this service, from `ServiceConfig.addedAt` (now − addedAt).
    *  ABSENT when the service has no `addedAt` (= an established service well past the window → treated
    *  as full coverage). A service with `coverageDays < 30` is excluded from the Reliability Ranking

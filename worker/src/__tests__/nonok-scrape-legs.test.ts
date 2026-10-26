@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { fetchService, SERVICES } from '../services'
+import { fetchService, SERVICES, calendarWindowDays } from '../services'
 import { normalizeCachedService } from '../status-verdict'
 import { AISTUDIO_ENDPOINT } from '../parsers/aistudio'
 import type { ServiceConfig, ServiceStatus } from '../types'
@@ -503,7 +503,7 @@ describe('#1234 — a failed leg must not discard what the OTHER leg read', () =
     expect(svc.sourceUnknown, 'still disclosed').toBe(true)
     expect(svc.uptime30d, 'the surviving leg measured this — dropping it is not a safer answer').not.toBeNull()
     expect(svc.components?.length ?? 0).toBeGreaterThan(0)
-    expect(svc.calendarDays, 'the 30-day calendar the surviving leg supplies').toBe(30)
+    expect(calendarWindowDays(svc, Date.now()), 'the 30-day calendar the surviving leg supplies').toBe(30)
   })
 
 })

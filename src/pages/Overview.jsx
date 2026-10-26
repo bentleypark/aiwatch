@@ -16,7 +16,7 @@ import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionS
 import RssCopyIcon from '../components/RssCopyIcon'
 import SlackInstallLink from '../components/SlackInstallLink'
 import { regionStatusOf } from '../utils/regionStatus'
-import { buildCalendarFromIncidents } from '../utils/calendar'
+import { buildCalendarFromIncidents, calendarDaysOf } from '../utils/calendar'
 import { groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { groupIncidents } from '../utils/incidentGrouping'
@@ -81,9 +81,9 @@ function StatCard({ value, sub, labelKey, colorClass, index, t }) {
 }
 
 // Variable-height history bars matching design mockup (18px container, bars 4-18px)
-function HistoryBars({ history30d, compact }) {
+function HistoryBars({ history, compact }) {
   const h = compact ? 10 : 18
-  const bars = compact ? history30d.slice(-30) : history30d
+  const bars = compact ? history.slice(-30) : history
   return (
     <div className="flex gap-[2px] items-end" style={{ height: `${h}px` }} aria-hidden="true">
       {bars.map((status, i) => {
@@ -111,6 +111,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
   // incident has a baseless uptime but a real incident count (matches ServiceDetails `incidentsBlanked`).
   const isUnreliable = isUnreliableUptime(service)
   const incidentsBlanked = !!service.incidentSourceStale
+  const calendarDays = calendarDaysOf(service)
   const hasUptime = service.uptime30d != null && !isUnreliable
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
   const uptimeStr = hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')
@@ -160,7 +161,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
             {!incidentsBlanked && scoreStr && <>{' · '}{scoreStr}</>}
           </span>
         </div>
-        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status, service.dailyImpactComplete)} compact />
+        <HistoryBars history={buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays, service.status, service.dailyImpactComplete)} compact />
       </div>
 
       {/* ── Desktop full layout ── */}
@@ -207,7 +208,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
           </div>
         )}
 
-        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status, service.dailyImpactComplete)} />
+        <HistoryBars history={buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays, service.status, service.dailyImpactComplete)} />
       </div>
     </button>
   )
