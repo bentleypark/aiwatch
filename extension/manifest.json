@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AIWatch — Claude Status & Down Detector",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Live Claude API, claude.ai & Claude Code status in your toolbar — uptime, incidents, AIWatch Score & one-click issue report.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -19,8 +19,18 @@
   },
   "background": {
     "service_worker": "service-worker.js",
+    "scripts": ["service-worker.js"],
     "type": "module"
   },
   "permissions": ["alarms", "storage"],
-  "host_permissions": ["https://aiwatch-worker.p2c2kbf.workers.dev/*"]
+  "host_permissions": ["https://aiwatch-worker.p2c2kbf.workers.dev/*"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "claude-status@ai-watch.dev",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  }
 }

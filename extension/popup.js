@@ -3,7 +3,7 @@
 // fetch and re-renders. All DOM is built with createElement + textContent (never
 // innerHTML) — CSP-clean and injection-safe even though the data is our own API.
 
-import { REPORT_URL, SITE_BASE, withExtUtm } from './config.js'
+import { REPORT_URL, SITE_BASE, WORKER_ORIGIN_PATTERN, withExtUtm } from './config.js'
 import {
   worstStatus,
   statusLabel,
@@ -22,6 +22,7 @@ import {
   baselineLines,
   analysisLines,
   AI_DISCLAIMER,
+  reportFailureText,
 } from './lib/render.js'
 
 const STORAGE_KEY = 'aiwatch:status'
@@ -243,6 +244,31 @@ async function loadAndRefresh() {
   if (!rendered) render(stored)
 }
 
+const WORKER_ORIGINS = { origins: [WORKER_ORIGIN_PATTERN] }
+
+// #1773 — shows "Allow access" while the host permission is missing; returns whether it is granted
+// (null when the check itself failed).
+async function syncGrantButton() {
+  try {
+    const permitted = await chrome.permissions.contains(WORKER_ORIGINS)
+    $('report-grant').hidden = permitted
+    return permitted
+  } catch (err) {
+    console.warn('[aiwatch] permission check failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+// permissions.request needs a user action, so it is the first call in the click handler, before any await.
+function requestAccess() {
+  chrome.permissions.request(WORKER_ORIGINS)
+    .then(() => syncGrantButton())
+    .then((permitted) => {
+      if (permitted) { $('report-status').className = 'report-status'; $('report-status').textContent = '' }
+    })
+    .catch((err) => console.warn('[aiwatch] permission request failed:', err instanceof Error ? err.message : err))
+}
+
 async function submitReport(evt) {
   evt.preventDefault()
   const btn = $('report-submit')
@@ -267,17 +293,15 @@ async function submitReport(evt) {
       statusEl.className = 'report-status ok'
       statusEl.textContent = data.message || 'Thanks — we factor this into our monitoring.'
       $('report-desc').value = ''
-    } else if (res.status === 429) {
-      statusEl.className = 'report-status err'
-      statusEl.textContent = 'Too many reports — please try again later.'
     } else {
       statusEl.className = 'report-status err'
-      statusEl.textContent = data.error || 'Could not send report.'
+      statusEl.textContent = reportFailureText({ status: res.status, error: data.error })
     }
   } catch (err) {
-    statusEl.className = 'report-status err'
-    statusEl.textContent = 'Network error — could not send report.'
     console.warn('[aiwatch] report failed:', err instanceof Error ? err.message : err)
+    const permitted = await syncGrantButton()
+    statusEl.className = 'report-status err'
+    statusEl.textContent = reportFailureText({ status: null, permitted })
   } finally {
     btn.disabled = false
   }
@@ -303,5 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // users/reviewers can tell which build is installed. textContent = injection-safe.
   $('ext-version').textContent = `v${chrome.runtime.getManifest().version}`
   $('report-form').addEventListener('submit', submitReport)
+  $('report-grant').addEventListener('click', requestAccess)
+  syncGrantButton()
   loadAndRefresh()
 })

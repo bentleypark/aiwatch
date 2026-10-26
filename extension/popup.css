@@ -119,6 +119,8 @@ button {
   background: var(--accent); color: #06101f; font-weight: 600; font: inherit;
 }
 button:disabled { opacity: 0.6; cursor: default; }
+.report-note { margin: 6px 0 0; font-size: 11px; }
+#report-grant { margin-top: 6px; }
 .report-status { margin: 6px 0 0; font-size: 12px; min-height: 14px; }
 .report-status.ok { color: var(--green); }
 .report-status.err { color: var(--red); }

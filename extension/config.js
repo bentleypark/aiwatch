@@ -7,6 +7,9 @@
 // host_permissions. Revert BOTH before committing (the shipped build is prod-only).
 export const WORKER_BASE = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 export const SITE_BASE = 'https://ai-watch.dev'
+// #1773 — the manifest's host_permissions entry. Firefox lets the user revoke it, and the report POST
+// then fails its CORS preflight, so the popup checks and re-requests it.
+export const WORKER_ORIGIN_PATTERN = `${WORKER_BASE}/*`
 
 // The lite projection the extension polls (PR1 #841): the 3 Anthropic surfaces +
 // status/score/grade/fallback + active incidents + gated crowd reports, plus components, the Console

@@ -17,7 +17,23 @@ import {
   sharedNoteText,
   baselineLines,
   analysisLines,
+  reportFailureText,
 } from './render.js'
+
+describe('reportFailureText (#1773)', () => {
+  it('names a revoked host permission instead of a network error', () => {
+    expect(reportFailureText({ status: null, permitted: false })).toMatch(/Allow access/)
+  })
+  it('keeps the network-error text when the permission is held or could not be checked', () => {
+    expect(reportFailureText({ status: null, permitted: true })).toBe('Network error — could not send report.')
+    expect(reportFailureText({ status: null, permitted: null })).toBe('Network error — could not send report.')
+  })
+  it('maps a 429, a server error message, and a bare non-2xx', () => {
+    expect(reportFailureText({ status: 429 })).toBe('Too many reports — please try again later.')
+    expect(reportFailureText({ status: 400, error: 'Invalid category' })).toBe('Invalid category')
+    expect(reportFailureText({ status: 500 })).toBe('Could not send report.')
+  })
+})
 
 describe('monthly summary helpers (#1711)', () => {
   it('names the report month and rejects anything else', () => {

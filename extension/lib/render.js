@@ -233,3 +233,15 @@ export const AI_DISCLAIMER = '⚠️ AI-generated estimation based on historical
 export function sharedNoteText(count) {
   return `${count} shared incident${count === 1 ? '' : 's'} ↑`
 }
+
+// #1773 — why a report did not send. `status` is null when fetch threw; with the host permission
+// revoked (Firefox lets the user do that) the throw is a blocked request, not a network failure.
+export function reportFailureText({ status, error, permitted }) {
+  if (status == null) {
+    return permitted === false
+      ? 'Access to AIWatch is off — click "Allow access", then send again.'
+      : 'Network error — could not send report.'
+  }
+  if (status === 429) return 'Too many reports — please try again later.'
+  return error || 'Could not send report.'
+}

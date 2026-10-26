@@ -1,7 +1,7 @@
 // Vercel Edge Function — /extension-privacy page (#837)
 //
-// Public, directly-linkable privacy policy for the AIWatch **Chrome extension**, required by
-// the Chrome Web Store (a reviewer visits the URL). It is SEPARATE from the website privacy
+// Public, directly-linkable privacy policy for the AIWatch **browser extension** (Chrome + Firefox),
+// required by the Chrome Web Store and AMO (a reviewer visits the URL). It is SEPARATE from the website privacy
 // policy (src/components/LegalContent.jsx, shown as a modal): the extension uses NO analytics,
 // NO cookies, and does not read web pages — so the website policy would not accurately describe
 // it. Self-contained SSR (no data fetch), no inline script → trivially CSP-clean. Mirrors
@@ -12,7 +12,7 @@ import { generateNonce, buildCsp } from './_shared/csp-nonce'
 export const config = { runtime: 'edge' }
 
 const CONTACT = 'contact@ai-watch.dev'
-const UPDATED = 'July 2026'
+const UPDATED = 'October 2026'
 
 export function renderExtensionPrivacyPage(): string {
   return `<!DOCTYPE html>
@@ -20,8 +20,8 @@ export function renderExtensionPrivacyPage(): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy Policy — AIWatch Claude Status (Chrome extension)</title>
-<meta name="description" content="Privacy policy for the AIWatch Claude Status Chrome extension. No analytics, no cookies, no page reading — it only polls the public AIWatch status API.">
+<title>Privacy Policy — AIWatch Claude Status (Chrome &amp; Firefox extension)</title>
+<meta name="description" content="Privacy policy for the AIWatch Claude Status browser extension for Chrome and Firefox. No analytics, no cookies, no page reading — it only polls the public AIWatch status API.">
 <link rel="canonical" href="https://ai-watch.dev/extension-privacy">
 <meta name="robots" content="index, follow">
 <style>
@@ -46,15 +46,15 @@ export function renderExtensionPrivacyPage(): string {
 <body>
 <main>
   <h1>Privacy Policy — AIWatch Claude Status</h1>
-  <p class="updated">Chrome extension · Last updated: ${UPDATED}</p>
-  <p class="lead">The <strong>AIWatch — Claude Status</strong> Chrome extension is designed to collect <strong>no personal data</strong>. This policy explains exactly what it does and does not do.</p>
+  <p class="updated">Chrome &amp; Firefox extension · Last updated: ${UPDATED}</p>
+  <p class="lead">The <strong>AIWatch — Claude Status</strong> browser extension (Chrome and Firefox) is designed to collect <strong>no personal data</strong>. This policy explains exactly what it does and does not do.</p>
 
-  <div class="note">This policy covers the <strong>Chrome extension only</strong>. It is separate from the <a href="https://ai-watch.dev">ai-watch.dev</a> website policy: unlike the website, the extension uses <strong>no analytics, no cookies, and does not read any web page</strong>.</div>
+  <div class="note">This policy covers the <strong>browser extension (Chrome and Firefox) only</strong>. It is separate from the <a href="https://ai-watch.dev">ai-watch.dev</a> website policy: unlike the website, the extension uses <strong>no analytics, no cookies, and does not read any web page</strong>.</div>
 
   <h2>1. What the extension does</h2>
   <ul>
     <li>Polls the <strong>public AIWatch status API</strong> (<code>aiwatch-worker.p2c2kbf.workers.dev</code>) approximately every 2 minutes (and when you open the popup) to show the current status of Claude API, claude.ai, and Claude Code in the toolbar and popup.</li>
-    <li>Caches the most recent <strong>public status response</strong> locally (<code>chrome.storage.local</code>) so the popup loads instantly. This contains only public service-status data — never anything about you.</li>
+    <li>Caches the most recent <strong>public status response</strong> locally (the browser's extension storage, <code>storage.local</code>) so the popup loads instantly. This contains only public service-status data — never anything about you.</li>
     <li>When you explicitly click <strong>"Report an issue"</strong>, sends an anonymous report to the AIWatch API containing only: the surface you picked (Claude API / claude.ai / Claude Code), a problem category, and an optional short note you type.</li>
   </ul>
 
@@ -74,7 +74,7 @@ export function renderExtensionPrivacyPage(): string {
 
   <h2>4. Data storage &amp; retention</h2>
   <ul>
-    <li><strong>On your device:</strong> the cached public status payload and your popup preferences stay in <code>chrome.storage.local</code> until you clear them or uninstall the extension.</li>
+    <li><strong>On your device:</strong> the cached public status payload and your popup preferences stay in the browser's extension storage (<code>storage.local</code>) until you clear them or uninstall the extension.</li>
     <li><strong>On the server:</strong> issue reports are stored anonymously with short lifetimes (per-day counts and an approximately 7-day recent-report window) and are used only in aggregate. They are not linked to you.</li>
   </ul>
 
@@ -82,7 +82,7 @@ export function renderExtensionPrivacyPage(): string {
   <ul>
     <li><code>alarms</code> — schedule the periodic background status refresh.</li>
     <li><code>storage</code> — cache the public status payload locally for instant popup display.</li>
-    <li><code>host_permissions</code> (the AIWatch API origin only) — fetch status and post anonymous reports. This grants no access to claude.ai or any site you visit.</li>
+    <li><code>host_permissions</code> (the AIWatch API origin only) — fetch status and post anonymous reports. This grants no access to claude.ai or any site you visit. In Firefox you can turn this access off; status still loads, but a report cannot be sent until you allow it again from the popup.</li>
   </ul>
 
   <h2>6. Third-party services</h2>
