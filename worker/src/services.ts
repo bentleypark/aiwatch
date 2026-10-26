@@ -3984,7 +3984,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       }
 
       // aistudio has no uptime/impact RPC — derive dailyImpact from the
-      // post-filter incident list so gemini's 30-day calendar renders.
+      // post-filter incident list.
       const aistudioDailyImpact = config.aistudioStatus
         ? computeDailyImpactFromIncidents(filtered)
         : null
@@ -4026,9 +4026,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         ...(legFalseGreen ? { sourceUnknown: true } : {}),
         incidents: filtered,
         ...(incidentHistoryStart ? { incidentHistoryStart } : {}),
-        // Better Stack / AI Studio publish their own per-day record, the same class as Atlassian's
-        // buckets — so the calendar keeps owning every day here, unchanged by #1390.
-        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete: true } : {}),
+        // Better Stack publishes its own per-day record, the same class as Atlassian's buckets. AI Studio's
+        // map is derived from `filtered` (#1788), so the calendar still paints the incidents themselves.
+        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete: bsDailyImpact != null } : {}),
         ...(betterStackUptime != null
           ? {
               uptime30d: betterStackUptime,

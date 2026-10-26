@@ -57,8 +57,8 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   }
 
   // The local day a SPECIFIC incident belongs to, or null if it cannot be determined. A
-  // `status_history`-derived incident's `startedAt` is a SYNTHETIC anchor timestamp — Better Stack/
-  // aiStudio publish only a daily record with no real start/end time, so AIWatch invents one purely
+  // `status_history`-derived incident's `startedAt` is a SYNTHETIC anchor timestamp — Better Stack
+  // publishes only a daily record with no real start/end time, so AIWatch invents one purely
   // to have a sortable field (#1400 — Together AI's "Kimi K3 — recovered", `startedAt: "…19:00:00Z"`,
   // is not when anything actually happened; its real information is `derivedDay`, day-only like a
   // bare dailyImpact entry). A genuine incident's `startedAt` IS a real instant — safe, and in fact
@@ -97,7 +97,7 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   }
 
   // Phase 1: Apply dailyImpact — bare keys are the SOURCE's own displayed day (Rootly/Flashduty: UTC;
-  // Better Stack/aiStudio: whatever day their own API groups by), remapped to local below; full-ISO
+  // Better Stack: whatever day its own API groups by; AI Studio: the UTC day AIWatch derived from its incidents), remapped to local below; full-ISO
   // keys are a real instant (incident.io). dailyImpact values are impact names (critical/major/minor),
   // which now equal the cell keys — so map via the shared impactToCellStatus (skips any unknown impact
   // by returning 'minor', but dailyImpact only emits the three known levels).
@@ -145,7 +145,7 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
       const start = new Date(inc.startedAt)
       if (isNaN(start.getTime())) return
       const status = impactToCellStatus(inc.impact) // same map for ongoing/resolved (minor/null → yellow)
-      // dailyImpact services (incident.io 14-day): the official per-day record (Phase 1) owns the
+      // dailyImpact services: the per-day record (Phase 1) owns the
       // days — supplement only the START day to avoid spanning noise across unrelated components.
       // Ongoing incidents likewise paint only the start day here (Phase 3 extends them to today).
       // no-dailyImpact services (RSS/JSON-only: Bedrock/Azure) with a RESOLVED incident have no
@@ -177,8 +177,7 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
 
   // Phase 3 (#662): extend ONGOING incidents forward to "today" — source-aware, so the official
   // record stays authoritative for finalized past days.
-  //   • services WITH an official daily record (dailyImpact: statuspage / incident.io / betterstack /
-  //     aistudio / flashduty-DeepSeek): official buckets own past days; fill ONLY today's (local) cell
+  //   • services WITH a daily record (dailyImpact): its buckets own past days; fill ONLY today's (local) cell
   //     from the live ongoing status — today's official bucket isn't finalized yet, so this
   //     contradicts nothing. Without this an active incident leaves today green.
   //   • services with NO daily record (no dailyImpact — RSS-only, e.g. Bedrock/Azure): nothing to

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mergeAistudioIncidents, carryOverAistudioIncidents, readLastKnownAistudioIncidents, AISTUDIO_CARRYOVER_MAX_AGE_MS, CACHE_KEY, SERVICES, fetchService, calendarWindowDays } from '../services'
 import { AISTUDIO_ENDPOINT } from '../parsers/aistudio'
 import type { Incident } from '../types'
+import { buildCalendarFromIncidents } from '../../../src/utils/calendar.js'
 
 function vertex(id: string, title = 't'): Incident {
   return {
@@ -358,6 +359,35 @@ describe('#1012 — gemini fetchService wires the synthesized component breakdow
       { id: 'aistudio-api', name: 'API', status: 'operational' },
       { id: 'aistudio-multimodal-live', name: 'Multimodal Live API', status: 'operational' },
     ])
+  })
+
+  it('#1788 — an incident with no impact is painted on the calendar, beside one that has an impact', async () => {
+    const at = (d: Date) => String(Math.floor(d.getTime() / 1000))
+    const daysAgoNoon = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); d.setHours(12, 0, 0, 0); return d }
+    const plusHours = (d: Date, h: number) => new Date(d.getTime() + h * 3_600_000)
+    const minorStart = daysAgoNoon(3)
+    const noImpactStart = daysAgoNoon(1)
+    const flapStart = daysAgoNoon(5)
+    const payload = [[[
+      ['minor', 'Gemini API elevated errors', 1, [[1, 't', [at(minorStart)], 'Detected'], [4, 't', [at(plusHours(minorStart, 2))], 'Resolved']], 1, [1]],
+      ['no-impact', 'Gemini API billing display issue', 0, [[1, 't', [at(noImpactStart)], 'Detected'], [4, 't', [at(plusHours(noImpactStart, 1))], 'Resolved']], 1, [1]],
+      ['flap', 'Gemini API brief outage', 2, [[1, 't', [at(flapStart)], 'Detected'], [4, 't', [at(plusHours(flapStart, 5 / 60))], 'Resolved']], 1, [1]],
+    ]]]
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === AISTUDIO_ENDPOINT) return new Response(JSON.stringify(payload), { status: 200 })
+      if (url === gemini.statusUrl) return new Response('', { status: 200 })
+      if (url === 'https://status.cloud.google.com/incidents.json') return new Response(JSON.stringify([]), { status: 200 })
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const result = await fetchService(gemini, undefined, undefined, {})
+    expect(result.incidents.find((i) => i.id === 'aistudio:no-impact')?.impact, 'premise: the incident is listed with no impact').toBeNull()
+    expect(result.dailyImpact, 'premise: the impacted day makes a per-day map').toBeTruthy()
+
+    const cells = (buildCalendarFromIncidents as (...args: unknown[]) => string[])(result.incidents, result.dailyImpact, 30, result.status, result.dailyImpactComplete)
+    expect(cells[cells.length - 4], 'premise: the impacted day is painted').not.toBe('operational')
+    expect(cells[cells.length - 2]).not.toBe('operational')
+    expect(cells[cells.length - 6], 'a listed sub-10-minute incident paints like any other').toBe('major')
   })
 
   it('#1406 — a quiet month keeps the 30-day calendar when the AI Studio read reaches back further; a failed read carries no history of its own', async () => {
