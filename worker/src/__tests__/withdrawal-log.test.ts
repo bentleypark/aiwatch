@@ -164,8 +164,6 @@ describe('upsertPrunedRows', () => {
   })
 
   it('is first-write-wins: a re-prune must not move prunedAt', () => {
-    // prunedAt is the clock the "permanently unclosed" verdict is derived from, so a moving value
-    // would keep resetting the 48h window and make a lost notice look forever pending.
     const out = upsertPrunedRows([row()], [tomb({ prunedAt: '2026-07-22T09:00:00Z' })])
     expect(out).toHaveLength(1)
     expect(out[0].prunedAt).toBe('2026-07-21T09:00:00Z')
@@ -393,7 +391,7 @@ describe('recordWithdrawalsPruned', () => {
 
   it('writes it with NO expirationTtl — the durability IS the feature', async () => {
     // The sibling call in withdrawn.ts passes `{ expirationTtl: WITHDRAWN_KEY_TTL_S }`; copy-pasting
-    // it here would evaporate the log after 48h and nothing would notice until the #1106 question is
+    // it here would let the log expire and nothing would notice until the #1106 question is
     // asked months later.
     const { kv, put } = makeKV()
     await recordWithdrawalsPruned(kv, [tomb()])
@@ -457,7 +455,7 @@ describe('markWithdrawalsAnnounced', () => {
     expect(JSON.parse(store[KEY])[0].announcedAt).toBe('2026-07-21T09:05:00.000Z')
   })
 
-  it('also stamps a row in the PREVIOUS month — a tombstone lives 48h and can cross the boundary', async () => {
+  it('also stamps a row in the PREVIOUS month — a tombstone can cross the month boundary', async () => {
     // Without this the row would read "never closed" forever, which is the false positive the log
     // exists to make impossible.
     const junKey = withdrawalLogKey('2026-06')
@@ -508,7 +506,7 @@ describe('markWithdrawalsAnnounced', () => {
 
   it('but SAYS SO — a notice with no row anywhere means the durable log under-reports it', async () => {
     // There is exactly one attempt to stamp any id, ever (the `alerted:wd:` key stops the alert
-    // re-firing and the tombstone dies at 48h), so this discrepancy is permanent and must not be silent.
+    // re-firing and the tombstone ages out), so this discrepancy is permanent and must not be silent.
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { kv } = makeKV({ [KEY]: JSON.stringify([row()]) })
     await markWithdrawalsAnnounced(kv, new Set(['unknown-id']), new Date('2026-07-21T09:05:00Z'))

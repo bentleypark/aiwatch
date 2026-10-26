@@ -176,7 +176,7 @@ describe('withdrawn roster KV (#1106)', () => {
     expect(await readWithdrawn(throwing)).toEqual([])
   })
 
-  // A 48h-lived value outlives a rollback, so the previous SHAPE is readable for two days. An entry
+  // A value that lives for days outlives a rollback, so the previous SHAPE stays readable. An entry
   // missing `title` would throw inside sanitize() in the unguarded cron alert build.
   it('drops a malformed ELEMENT rather than handing it to an emitter', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -485,7 +485,7 @@ describe('buildWithdrawalAlerts (#1106)', () => {
   })
 
   // The Discord half must apply the same hold rule as RSS — reachable on any cycle inside the
-  // tombstone's 48h, not just the prune cycle — and every hold must be reported to the caller.
+  // tombstone's lifetime, not just the prune cycle — and every hold must be reported to the caller.
   it('emits NOTHING while the incident is live again, another outage runs, or the source is unreadable', () => {
     const cases: Array<[ServiceStatus[], string]> = [
       [[svc('mistral', [inc('aud-1', TOMB.startedAt)], { status: 'down' })], 'republished-same-id'],
@@ -831,8 +831,8 @@ describe('#1106 index.ts wiring', () => {
 
   // Correct by OMISSION today: `alerted:wd:` lands in the 7d branch only because it is neither a
   // status nor a recovery key. If it were ever classified as a status alert the TTL would drop to 2h
-  // while the tombstone lives 48h — re-posting the same public retraction to the operator and every
-  // subscriber ~23 times.
+  // while the tombstone lives for days — re-posting the same public retraction to the operator and every
+  // subscriber dozens of times.
   it('the withdrawal dedup key gets the 7d TTL, not the 2h status-alert one', () => {
     expect(ALERTED_NEW_TTL_S).toBe(604800)
     const ttlLine = src.match(/const ttl = [^\n]*\n/)?.[0] ?? ''
