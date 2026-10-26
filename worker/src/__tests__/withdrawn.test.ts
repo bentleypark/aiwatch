@@ -484,8 +484,8 @@ describe('buildWithdrawalAlerts (#1106)', () => {
     expect(buildWithdrawalAlerts([TOMB], new Set(['some-other-id']), services, () => {})).toEqual([])
   })
 
-  // The Discord half must apply the same hold rule as RSS — reachable on any cycle inside the
-  // tombstone's lifetime, not just the prune cycle — and every hold must be reported to the caller.
+  // The Discord half must apply the same hold rule as RSS — not only on the
+  // prune cycle — and every hold must be reported to the caller.
   it('emits NOTHING while the incident is live again, another outage runs, or the source is unreadable', () => {
     const cases: Array<[ServiceStatus[], string]> = [
       [[svc('mistral', [inc('aud-1', TOMB.startedAt)], { status: 'down' })], 'republished-same-id'],
