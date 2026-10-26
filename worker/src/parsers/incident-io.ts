@@ -108,20 +108,16 @@ export interface IncidentIoImpact {
   status_page_incident_id?: string
 }
 
-/** #1006 — the percentage the page ITSELF displays for a component (`component_uptimes[].uptime`).
- *  This is NOT the metric any more — it is not a 30-day figure and its downtime definition differs page
- *  to page, which is the whole bug. It is kept as a DISCLOSURE: #41 deliberately made AIWatch reproduce
- *  the provider's published number, and the detail page still shows it beside our own 30-day measure
- *  rather than dropping it silently. null on a `chart_only` page (`$undefined` — Stability / ElevenLabs
- *  / Replicate publish the impact records but hide the %). */
-export function parseIncidentIoReportedUptime(
+type ReportedSource = { id: string } | { group: string }
+
+function readIncidentIoReported(
   html: string,
   componentId: string | string[],
   groupId?: string,
-): number | null {
+): { pct: number; source: ReportedSource } | null {
   const ids = Array.isArray(componentId) ? componentId : [componentId]
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
-  let worst: number | null = null
+  let worst: { pct: number; source: ReportedSource } | null = null
   for (const chunk of chunks) {
     if (!chunk.includes('component_uptimes')) continue
     const section = chunk.substring(chunk.indexOf('component_uptimes'))
@@ -135,7 +131,7 @@ export function parseIncidentIoReportedUptime(
       ))
       if (groupMatch) {
         const pct = parseFloat(groupMatch[1])
-        if (!Number.isNaN(pct) && pct >= 0 && pct <= 100) return pct
+        if (!Number.isNaN(pct) && pct >= 0 && pct <= 100) return { pct, source: { group: groupId } }
       }
     }
     for (const id of ids) {
@@ -145,10 +141,56 @@ export function parseIncidentIoReportedUptime(
       if (raw === '$undefined' || raw === '') continue
       const pct = parseFloat(raw)
       if (Number.isNaN(pct) || pct < 0 || pct > 100) continue
-      if (worst === null || pct < worst) worst = pct
+      if (worst === null || pct < worst.pct) worst = { pct, source: { id } }
     }
   }
   return worst
+}
+
+/** #1006 — the percentage the page ITSELF displays for a component (`component_uptimes[].uptime`).
+ *  This is NOT the metric any more — it is not a 30-day figure and its downtime definition differs page
+ *  to page, which is the whole bug. It is kept as a DISCLOSURE: #41 deliberately made AIWatch reproduce
+ *  the provider's published number, and the detail page still shows it beside our own 30-day measure
+ *  rather than dropping it silently. null on a `chart_only` page (`$undefined` — Stability / ElevenLabs
+ *  / Replicate publish the impact records but hide the %). */
+export function parseIncidentIoReportedUptime(
+  html: string,
+  componentId: string | string[],
+  groupId?: string,
+): number | null {
+  return readIncidentIoReported(html, componentId, groupId)?.pct ?? null
+}
+
+const INCIDENT_IO_REPORTED_WINDOW_DAYS = 90
+
+export function parseIncidentIoReportedDays(
+  html: string,
+  componentId: string | string[],
+  groupId: string | undefined,
+  nowMs: number,
+): number | null {
+  const reported = readIncidentIoReported(html, componentId, groupId)
+  if (!reported) return null
+  const since = 'group' in reported.source
+    ? parseIncidentIoGroupDataAvailableSince(html, reported.source.group)
+    : parseIncidentIoDataAvailableSince(html, reported.source.id)
+  const sinceMs = Date.parse(since ?? '')
+  if (Number.isNaN(sinceMs)) return null
+  const ageDays = Math.floor((nowMs - sinceMs) / 86_400_000)
+  return ageDays < 1 ? null : Math.min(INCIDENT_IO_REPORTED_WINDOW_DAYS, ageDays)
+}
+
+function parseIncidentIoGroupDataAvailableSince(html: string, groupId: string): string | null {
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  for (const chunk of chunks) {
+    if (!chunk.includes('component_uptimes')) continue
+    const section = chunk.substring(chunk.indexOf('component_uptimes'))
+    const match = section.match(new RegExp(
+      `\\\\"component_id\\\\":\\\\"\\$undefined\\\\"[^{}]{0,300}?\\\\"data_available_since\\\\":\\\\"([^\\\\"]*)\\\\"[^{}]{0,200}?\\\\"status_page_component_group_id\\\\":\\\\"${groupId}\\\\"`,
+    ))
+    if (match) return match[1]
+  }
+  return null
 }
 
 /** How far back a component's own records reach (`component_uptimes[].data_available_since`). incident.io
