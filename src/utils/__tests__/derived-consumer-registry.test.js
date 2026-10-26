@@ -59,6 +59,7 @@ const CONSUMER = /\.incidents\b|\bincidents\s*[.[]|\??\.(?:duration|durationMin|
 
 /** Applies the rule: reads `derived` and changes behaviour. */
 const APPLIERS = {
+  'worker/src/late-resolution.ts': '#1797 resolvedUpstream refuses one, so a synthesized row is never reported as still open in a past month\'s archive',
   'worker/src/analysis-reads.ts': 'recentlyResolvedIncidents skips a derived incident (it can never have a recovered: marker or an analysis)',
   'worker/src/reddit.ts': '#1472 promoteIncidentWindows never makes one a window — its startedAt is an anchor inside a day, not the instant a post can be matched against',
   'worker/src/score.ts': 'excludes from the MTTR sample AND the Recovery default (carriesRecoveryTime)',
@@ -195,6 +196,7 @@ const RB_FORWARDERS = {
 /** Cannot make a wrong "is this fresh" judgment, or reads nothing it could get wrong. Each reason is
  *  a property of the CODE, not a recollection — if one stops holding, its file moves to RB_APPLIERS. */
 const RB_SAFE = {
+  'worker/src/late-resolution.ts': '#1797 resolvedUpstream refuses one through isMarkableOnStatusEdge (recovery-mark.ts), which tests .retainedBridge',
   'worker/src/analysis-reads.ts': 'reads only the ai:analysis and recovered: keys of the incidents it selects — ai-analysis.ts never analyzes a retainedBridge incident and isMarkableOnStatusEdge never marks one, so a bridged row has them only from a resolution under its retiring source, a genuine recent one',
   'worker/src/mistral-public-api.ts': 'PRODUCES incidents from the public API and reads back only the ones it stored itself; never sees the retainedBridge tag',
   // Producers + the creator/declarer — retainedBridge is stamped ONLY inside
@@ -316,6 +318,7 @@ const SU_FORWARDERS = {
 /** Cannot be reached by an anchored incident, or reads nothing it could get wrong. Each reason is a
  *  property of the CODE, not a recollection — if one stops holding, its file moves to SU_APPLIERS. */
 const SU_SAFE = {
+  'worker/src/late-resolution.ts': '#1797 the live startedAt only picks which archive month to read; the times it reports come from the stored row and the upstream resolvedAt',
   'worker/src/incident-presence.ts': 'pageIncidents concatenates two lists; reads no time and no duration (#1698)',
   'worker/src/mistral-public-api.ts': 'PRODUCES incidents from the public API and reads back only the ones it stored itself; never reads the startUnknown flag',
   // Producers. `parsers/incident-io.ts` stamps the flag on its own anchored path; #1480's zero-length
@@ -442,7 +445,8 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 83 → 84: #1711 added worker/src/latest-report.ts, which copies archive totals; SAFE on all three.
     // 84 → 85: #1752 added worker/src/parsers/incident-io-proxy.ts, which renders the incident feed into page text; SAFE on all three.
     // 85 → 86: #1772 moved src/utils/predictionAccuracy.js to worker/src/prediction-accuracy.ts and added worker/src/analysis-reads.ts.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(86)
+    // 86 → 87: #1797 added worker/src/late-resolution.ts, which matches live resolved incidents to a past month's archive rows.
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(87)
   })
 
   it('leaves none unclassified', () => {
@@ -496,7 +500,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(86)
+    expect(all.length).toBe(87)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -542,7 +546,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(86)
+    expect(all.length).toBe(87)
   })
 
   it('leaves none unclassified for startUnknown', () => {
