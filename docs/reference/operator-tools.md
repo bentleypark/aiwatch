@@ -233,9 +233,8 @@ optional `reason`. **Response**: `{ ok, changed, overrides }` on 200. Failure mo
 path ever actually fire in production, and did every announced thread get closed?**
 
 That question was unanswerable before, and not for want of logging. A withdrawal leaves
-`incidents:withdrawn` (48h), `alerted:wd:{incId}` (7d), `alert:feed:recent` (2h) and Workers Logs
-(~3d) — and the accumulator row is gone by definition, since its prune is what starts the sequence.
-Past a week there was nothing left to read, while the event itself is **unschedulable** (it needs a
+`incidents:withdrawn`, `alerted:wd:{incId}`, `alert:feed:recent` and Workers Logs, and each of them
+expires on its own. Once those expired there was nothing left to read, while the event itself is **unschedulable** (it needs a
 provider to delete an announced incident), so a `verify-after` date would have fired on an absence.
 
 ```bash
