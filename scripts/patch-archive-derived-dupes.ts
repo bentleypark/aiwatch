@@ -36,6 +36,11 @@
  * aggregation and suppressions to `downtime-recount-{period}.json`, for the reports repo's trend:
  *
  *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-07 --recount-downtime
+ *
+ * #1793 — `--recompute <id>[,<id>]` recomputes a named service's average recovery and its divisor from its
+ * unchanged stored list, and refuses if any other figure would move:
+ *
+ *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-08 --recompute openai
  */
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -115,11 +120,23 @@ function main(argv: string[]): void {
   }
   const window = archivePatch.monthWindow(period)
   let plan: ReturnType<typeof archivePatch.planArchivePatch>
+  const r = argv.indexOf('--recompute')
+  if (r >= 0 && argv.some((a) => ['--correction', '--apply-suppressions', '--accept-drift'].includes(a))) {
+    console.error('--recompute is a separate run.')
+    process.exit(2)
+  }
   if (argv.includes('--accept-drift') && !argv.includes('--apply-suppressions')) {
     console.error('--accept-drift applies only to --apply-suppressions.')
     process.exit(2)
   }
-  if (argv.includes('--apply-suppressions')) {
+  if (r >= 0) {
+    const ids = (argv[r + 1] ?? '').split(',').filter(Boolean)
+    if (ids.length === 0 || ids[0].startsWith('--')) {
+      console.error('--recompute needs one or more service ids.')
+      process.exit(2)
+    }
+    plan = archivePatch.planRecompute(archive, window, ids)
+  } else if (argv.includes('--apply-suppressions')) {
     if (correction) {
       console.error('--apply-suppressions and --correction are separate runs.')
       process.exit(2)

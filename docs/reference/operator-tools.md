@@ -113,6 +113,12 @@ recounts each service's downtime and average recovery from the stored `incidentL
 writes KV. #1505 changed two rules at once: overlapping incidents count once (#1556), and auto-monitor rows count
 as downtime (#1579). A month archived after both reproduces exactly (2026-09: no service changes).
 
+**To correct one service's average recovery in a stored month**, run
+`npx tsx scripts/patch-archive-derived-dupes.ts --period YYYY-MM --recompute <id>[,<id>]` (#1793). It recomputes
+the named services from their unchanged `incidentList` and refuses when anything other than `avgResolutionMin`
+and `countedIncidents` would move. It never writes KV. 2026-08 OpenAI was archived before #1536, so its
+month-end row that was still open sat in the divisor (2 / 254) while the published report used 1 / 507.
+
 ### The rebuild refuses when it would hold less than what is stored (#1260)
 
 `archive:monthly:{YYYY-MM}` has no TTL because nothing else holds a month's per-service figures — but every
