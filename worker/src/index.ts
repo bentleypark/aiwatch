@@ -1357,7 +1357,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     // #1106 — `alerted:wd:` MUST land in the 7d branch, and does so only because it is neither a
     // status nor a recovery key. That is correct by omission, and the omission is load-bearing: its
     // subject is a tombstone that survives 6d and reproduces the alert deterministically, so a 2h
-    // TTL would re-post the same public retraction to the operator AND every subscriber ~23 times.
+    // TTL would re-post the same public retraction to the operator AND every subscriber dozens of times.
     // Pinned by a test — see `ALERTED_NEW_TTL_S` below, which is the same 7d window.
     const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : ALERTED_NEW_TTL_S
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'

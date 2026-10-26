@@ -103,11 +103,9 @@ function isLogEntry(v: unknown): v is WithdrawalLogEntry {
 /**
  * Merge freshly-pruned tombstones into a month's rows. FIRST write wins per `(svcId, incId)`.
  *
- * First-write-wins is what makes the prune's call idempotent, and it is not merely tidy: a re-prune
- * (or a second accumulator pass over the same cycle) would otherwise move `prunedAt` forward, and
- * `prunedAt` is the clock the "never closed" reading is derived from — a moving one would keep
- * resetting the roster window and make a permanently-lost notice look perpetually pending. It also
- * protects an already-stamped `announcedAt` from being erased by a later prune of the same id.
+ * First-write-wins is what makes the prune's call idempotent: a re-prune (or a second accumulator
+ * pass over the same cycle) would otherwise move `prunedAt` forward. It also protects an
+ * already-stamped `announcedAt` from being erased by a later prune of the same id.
  */
 export function upsertPrunedRows(
   existing: WithdrawalLogEntry[],

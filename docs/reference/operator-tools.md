@@ -253,8 +253,8 @@ curl -s "https://<worker>/api/admin/withdrawals?months=12" -H "X-Admin-Key: $ADM
 | Field | Means |
 |---|---|
 | `announced` | The ⚪ notice was accepted by Discord — the thread was closed. Working as designed |
-| `pending` | Not announced YET, and still inside the tombstone's 48h. Normally a `withdrawalHold` (the provider re-published the id, an incident is still running, or the status source was unreadable) — benign, re-evaluated every 5 min |
-| `neverClosed` | **#1106 recurring.** No operator ⚪ notice went out, and `prunedAt` is older than 48h, so the tombstone it would render from is gone and nothing can send it now. Scoped to the OPERATOR webhook (see below) — subscribers may still have received it |
+| `pending` | Not announced YET, and still before its send deadline. Normally a `withdrawalHold` (the provider re-published the id, an incident is still running, or the status source was unreadable) — benign, re-evaluated every 5 min |
+| `neverClosed` | **#1106 recurring.** No operator ⚪ notice went out, and the window for sending it has closed, so nothing can send it now. Scoped to the OPERATOR webhook (see below) — subscribers may still have received it |
 | `malformedTimestamp` | An un-announced row whose `prunedAt` is unparseable, so it cannot be aged — counted apart rather than sitting in `pending` forever |
 | `partial` / `ok` | `partial: true` (and `ok: false`) means the counts are computed over LESS than the requested range — some month could not be opened, or some rows failed the shape check. Branch on `ok`; the rows are still returned |
 | `unreadableMonths` | Months whose KV value could not be read at all |

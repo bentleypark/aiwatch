@@ -46,8 +46,8 @@ export const WITHDRAWN_KEY = 'incidents:withdrawn'
  *  our own cadence. `withdrawalHold`'s `incident-running` breaks that assumption: it clears only when
  *  the PROVIDER closes the incident the withdrawn one duplicated, on the provider's schedule. #1153's
  *  case sat in `monitoring` for 11h+ while the provider's own indicator read "All Systems
- *  Operational", so the loss this module documents as "accepted … only if that state outlasts the
- *  roster" was on track to be the ordinary outcome rather than the edge case.
+ *  Operational", so a held notice turning into a loss was on track to be the ordinary outcome
+ *  rather than the edge case.
  *
  *  6d and not 7d: `buildWithdrawalAlerts` skips any tombstone absent from `announcedIncIds`, which is
  *  built from `alerted:new:{incId}` (`ALERTED_NEW_TTL_S`, 7d). Once that marker expires the notice is
@@ -163,7 +163,7 @@ export type WithdrawalHold = 'republished-same-id' | 'incident-running' | 'sourc
  *
  * A hold is normally a DELAY, not a loss: the tombstone lives 6d and the cron re-evaluates every 5
  * minutes, so the notice goes out once the service is readable and clean again. It becomes a loss
- * only if that state outlasts the roster — accepted, and the right way round, because a fabricated
+ * only if that state outlasts the notice's send deadline — accepted, and the right way round, because a fabricated
  * closing notice for a running outage is worse than a late one. The caller logs every hold, so the
  * loss is at least diagnosable.
  */
