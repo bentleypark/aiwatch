@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mergeAistudioIncidents, carryOverAistudioIncidents, readLastKnownAistudioIncidents, AISTUDIO_CARRYOVER_MAX_AGE_MS, CACHE_KEY, SERVICES, fetchService } from '../services'
+import { mergeAistudioIncidents, carryOverAistudioIncidents, readLastKnownAistudioIncidents, AISTUDIO_CARRYOVER_MAX_AGE_MS, CACHE_KEY, SERVICES, fetchService, calendarWindowDays } from '../services'
 import { AISTUDIO_ENDPOINT } from '../parsers/aistudio'
 import type { Incident } from '../types'
 
@@ -60,6 +60,13 @@ describe('mergeAistudioIncidents', () => {
     expect(out.incidents.map((i) => i.id)).toEqual(['aistudio:new-keys', 'vertex:v1'])
     expect(out.merged).toBe(1)
     expect(out.parseErrors).toBe(0)
+  })
+
+  it('#1406 — reports how far back the read reaches on success, and nothing on a failed read', async () => {
+    const ok = await mergeAistudioIncidents([], mockResponse({ ok: true }), 'gemini')
+    expect(ok.historyStart).toBe(new Date(1776466800 * 1000).toISOString())
+    const failed = await mergeAistudioIncidents([], mockResponse({ ok: false, status: 403 }), 'gemini')
+    expect(failed.historyStart).toBeUndefined()
   })
 
   // #1012 — the filter widened from [API]-only to [API, MULTIMODAL_LIVE]; a pure Live API outage
@@ -351,6 +358,29 @@ describe('#1012 — gemini fetchService wires the synthesized component breakdow
       { id: 'aistudio-api', name: 'API', status: 'operational' },
       { id: 'aistudio-multimodal-live', name: 'Multimodal Live API', status: 'operational' },
     ])
+  })
+
+  it('#1406 — a quiet month keeps the 30-day calendar when the AI Studio read reaches back further; a failed read carries no history of its own', async () => {
+    const quiet = [[[['old', 'Gemini 2.0 Flash Throttling Incident', 1, [[1, 't', ['1735560000'], 'Detected'], [4, 't', ['1735653600'], 'Resolved']], 1, [1]]]]]
+    const routed = (aistudio: Response) => vi.fn(async (url: string) => {
+      if (url === AISTUDIO_ENDPOINT) return aistudio
+      if (url === gemini.statusUrl) return new Response('', { status: 200 })
+      if (url === 'https://status.cloud.google.com/incidents.json') return new Response(JSON.stringify([]), { status: 200 })
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    vi.stubGlobal('fetch', routed(new Response(JSON.stringify(quiet), { status: 200 })))
+    const read = await fetchService(gemini, undefined, undefined, {})
+    expect(read.dailyImpactComplete, 'premise: no per-day record to lean on this month').toBeUndefined()
+    expect(read.incidentHistoryStart).toBe('2024-12-30T12:00:00.000Z')
+    expect(calendarWindowDays(read, Date.now())).toBe(30)
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('fetch', routed(new Response('', { status: 403 })))
+    const failed = await fetchService(gemini, undefined, undefined, {})
+    expect(failed.incidentHistoryStart).toBeUndefined()
+    expect(calendarWindowDays(failed, Date.now())).toBe(14)
+    warn.mockRestore()
   })
 
   // #1012 review (rounds 2-4) — a same-cycle "is this trustworthy" gate was tried and reverted: every

@@ -71,7 +71,10 @@ describe('#1489 carry-forward on the live /api/status path', () => {
     for (const [k, v] of [
       ['tracking:state', JSON.stringify({ claude: { uptimeSeenAt: today } })],
       [CACHE_KEY, JSON.stringify({
-        services: [{ id: 'claude', status: 'operational', uptime30d: 99.86, uptimeSource: 'official', lastChecked: new Date(Date.now() - 60_000).toISOString(), incidents: [] }],
+        services: [
+          { id: 'claude', status: 'operational', uptime30d: 99.86, uptimeSource: 'official', lastChecked: new Date(Date.now() - 60_000).toISOString(), incidents: [] },
+          { id: 'gemini', status: 'operational', uptime30d: null, incidentHistoryStart: '2024-12-30T12:00:00.000Z', lastChecked: new Date(Date.now() - 60_000).toISOString(), incidents: [] },
+        ],
         upstreamFeeds: [],
         cachedAt: new Date(Date.now() - 60_000).toISOString(),
       })],
@@ -99,6 +102,11 @@ describe('#1489 carry-forward on the live /api/status path', () => {
     const claude = body.services.find((s) => s.id === 'claude')!
     expect(claude.uptime30d).toBe(99.86)
     expect(claude.uptimeCarriedFrom).toBeDefined()
+    expect(claude.calendarDays, '#1406 — decided after the carry, so the carried uptime counts').toBe(30)
+    expect(body.services.find((s) => s.id === 'xai')!.calendarDays, '#1406 — no record this cycle').toBe(14)
+    const gemini = body.services.find((s) => s.id === 'gemini')!
+    expect(gemini.incidentHistoryCarriedFrom, '#1406 — the AI Studio read this cycle returned no history').toBeDefined()
+    expect(gemini.calendarDays, '#1406 — the last read history start counts, as a carried uptime does').toBe(30)
     const row = writeDataPoint.mock.calls.map(([p]) => p as { blobs: string[]; indexes: string[] }).find((p) => p.indexes[0] === 'status-fetch-run')!
     expect(row.blobs[1].split(',')).toContain('claude')
     expect(JSON.parse(store.get('tracking:state')!).claude.uptimeMissingSince).toBeDefined()

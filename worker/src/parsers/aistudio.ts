@@ -97,6 +97,20 @@ function unwrap(data: unknown): IncidentEntry[] {
   return []
 }
 
+/** #1406 — the oldest update time across every entry the read returned, before the component filter. */
+export function aistudioHistoryStart(data: unknown): string | undefined {
+  let oldest: string | undefined
+  for (const entry of unwrap(data)) {
+    const updates = entry?.[3]
+    if (!Array.isArray(updates)) continue
+    for (const u of updates) {
+      const at = Array.isArray(u) ? extractUnixTimestamp(u, entry[0]) : null
+      if (at && (oldest === undefined || at < oldest)) oldest = at
+    }
+  }
+  return oldest
+}
+
 export interface ParseAistudioOptions {
   // Restrict incidents to those affecting at least one of these components.
   // Use AISTUDIO_COMPONENT values (e.g. [AISTUDIO_COMPONENT.API]).

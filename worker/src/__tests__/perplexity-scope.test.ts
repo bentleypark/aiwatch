@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { SERVICES, filterIncidents, fetchService } from '../services'
+import { SERVICES, filterIncidents, fetchService, calendarWindowDays } from '../services'
 import { computeIncidentIoUptime } from '../parsers/incident-io'
 import type { Incident } from '../types'
 
@@ -334,11 +334,17 @@ describe('#1390 wiring — the incident.io payload reaches incidents, uptime and
     expect(svc.dailyImpact, 'premise: there IS a per-day record to qualify').toBeTruthy()
     expect(svc.dailyImpactComplete).toBe(false)
     // Pinned together, because the pair is the bug: a 30-day window whose record is incomplete is
-    // exactly the combination the old `days === 30` gate got wrong. The 30 is itself a CONSEQUENCE of
-    // this migration (`calendarDays` derives from `statusComponentId`), disclosed on the config and
-    // deliberately kept — so this line is the record of that decision, and #1406 is where the
-    // derivation itself is re-decided.
-    expect(svc.calendarDays).toBe(30)
+    // exactly the combination the old `days === 30` gate got wrong.
+    expect(calendarWindowDays(svc, Date.now())).toBe(30)
+  })
+
+  it('#1406 — on incident.io, dropping the statusComponentId does not resize the calendar', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html></html>', { status: 200 })))
+    const html = ioPageHtml({ componentId: COMPUTER_ID, hours: 24, status: 'full_outage' })
+    const withPrimary = await fetchService(perplexity, { summary: summary() as never, incidents: null, uptimeHtml: html } as never, undefined, {})
+    const withoutPrimary = await fetchService({ ...perplexity, statusComponentId: undefined }, { summary: summary() as never, incidents: null, uptimeHtml: html } as never, undefined, {})
+    expect(withoutPrimary.uptimeSource, 'premise: uptime is still computed without a primary').toBe('official')
+    expect(calendarWindowDays(withoutPrimary, Date.now())).toBe(calendarWindowDays(withPrimary, Date.now()))
   })
 
   it('renders all four components in the breakdown, in card order', async () => {
