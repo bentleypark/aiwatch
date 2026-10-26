@@ -249,6 +249,22 @@ describe('detectConsecutiveSpikes', () => {
     expect(spikes[0].avgRtt).toBe(0) // all failed, no positive rtt
   })
 
+  it('#1778 — counts the streak\'s failed probes apart from its slow ones', () => {
+    const snapshots: ProbeSnapshot[] = Array.from({ length: 10 }, (_, i) => ({
+      t: `2026-03-24T00:${String(i * 5).padStart(2, '0')}:00Z`,
+      data: { gemini: { status: 403, rtt: 50 } },
+    }))
+    snapshots.push(
+      { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 0, rtt: -1 } } },
+      { t: '2026-03-24T01:05:00Z', data: { gemini: { status: 403, rtt: 300 } } },
+      { t: '2026-03-24T01:10:00Z', data: { gemini: { status: 0, rtt: -1 } } },
+      { t: '2026-03-24T01:15:00Z', data: { gemini: { status: 403, rtt: 280 } } },
+    )
+    const [spike] = detectConsecutiveSpikes(snapshots, ['gemini'], 3)
+    expect(spike.consecutiveCount).toBe(4)
+    expect(spike.failedCount).toBe(2)
+  })
+
   it('handles multiple services independently', () => {
     // Need enough baseline to keep median low despite spike values
     const snapshots: ProbeSnapshot[] = [

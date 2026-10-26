@@ -2193,7 +2193,7 @@ import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent
 import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, degradationEventFor, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
 import { checkInfraStatus, runInfraStatusCycle } from './infra-status'
 import { runGoneCheck } from './alerted-gone'
@@ -3248,7 +3248,8 @@ const workerExport = {
               const degMonthRaw = await env.STATUS_CACHE.get(degMonthKey).catch(() => null)
               let degMonth = null
               try { degMonth = degMonthRaw ? normalizeDegradationMonthly(JSON.parse(degMonthRaw)) : null } catch { degMonth = null }
-              const nextDegMonth = addDegradationToMonthly(degMonth, spike.serviceId, isNoStatus)
+              const nextDegMonth = addDegradationToMonthly(degMonth, spike.serviceId, isNoStatus,
+                degradationEventFor(spike, isNoStatus, statusByService.get(spike.serviceId) ?? null, new Date().toISOString()))
               await kvPut(env.STATUS_CACHE, degMonthKey, JSON.stringify(nextDegMonth), { expirationTtl: DEGRADATION_MONTHLY_TTL_SECONDS })
               // Record probe spike as earliest detection (Detection Lead feature)
               const detectKey = `detected:${spike.serviceId}`

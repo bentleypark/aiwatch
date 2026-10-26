@@ -17,8 +17,8 @@
 // come back identical is refused rather than guessed at, exactly as `patch-archive-automonitor.mjs`
 // (#1210) refuses a service it cannot account for. A service with no collision is never rewritten, so
 // it is never reproduced either — step 2's `diff` is what shows the operator that untouched remainder.
-import { aggregateIncidentDurations, averageResolutionMin, computeMonthlyScore, parseDurationMin } from './monthly-archive'
-import type { MonthlyIncidentEntry } from './monthly-archive'
+import { aggregateIncidentDurations, archiveFollowThrough, averageResolutionMin, computeMonthlyScore, parseDurationMin } from './monthly-archive'
+import type { DegradationEvent, DegradationFollowThrough, MonthlyIncidentEntry } from './monthly-archive'
 import { derivedDayAlreadyBankedFromFeed } from './monthly-archive'
 import { resolveProbeId } from './probe'
 import { SERVICES } from './services'
@@ -31,14 +31,7 @@ import { formatDuration } from './utils'
 /** STATUS_CACHE (worker/wrangler.toml). Pinned against the toml by the test beside this file. */
 export const NAMESPACE_ID = 'e49508d80bb144e9a7ff872f2be771a4'
 
-/** The calendar month as the half-open UTC window `computeMonthlyScore` scores over. */
-export function monthWindow(period: string): { startISO: string; endISO: string } {
-  const [y, m] = period.split('-').map(Number)
-  return {
-    startISO: new Date(Date.UTC(y, m - 1, 1)).toISOString(),
-    endISO: new Date(Date.UTC(y, m, 1)).toISOString(),
-  }
-}
+export { monthWindow } from './monthly-archive'
 
 /**
  * The commands the operator runs, as data so they can be pinned.
@@ -90,6 +83,8 @@ export interface ArchivePatchChange {
 /** The minimal archive shape this reads. Anything else in the document is preserved verbatim. */
 export interface PatchableArchive {
   services?: Record<string, Record<string, unknown>>
+  period?: string
+  degradation?: { events?: DegradationEvent[]; followThrough?: DegradationFollowThrough[] } | null
 }
 
 /** `validDays` is the one `ProbeSummary` field the archive does not store. It gates the short-history
@@ -246,6 +241,8 @@ export function applyArchivePatch(archive: PatchableArchive, changes: ArchivePat
     svc.monthlyScoreConfidence = c.after.monthlyScoreConfidence
     svc.monthlyScoreBreakdown = c.after.monthlyScoreBreakdown
   }
+  const followThrough = archiveFollowThrough(archive)
+  if (followThrough) archive.degradation!.followThrough = followThrough
   return archive
 }
 
