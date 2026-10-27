@@ -331,6 +331,15 @@ describe('filterNvdCves (end-to-end candidate pipeline)', () => {
   it('skips CVEs with no description', () => {
     expect(filterNvdCves([{ id: 'CVE-X' }])).toEqual([])
   })
+
+  // #1805 — CVE-2025-59536 was published 2025-10-03 and re-modified 2026-10-12, which put it in
+  // the lastModified window and archived it as an October alert.
+  it('drops a CVE published before the cutoff and keeps one published after it', () => {
+    const cutoff = Date.parse('2026-10-05T00:00:00Z')
+    const republished = { ...claudeCodeCve, id: 'CVE-2025-59536', published: '2025-10-03T14:15:44.300' }
+    const fresh = { ...codexCve, published: '2026-10-07T18:15:41.773' }
+    expect(filterNvdCves([republished, fresh], cutoff).map(a => a.id)).toEqual(['CVE-2026-14898'])
+  })
 })
 
 describe('formatSecurityDigest — NVD alerts render (regression: they were dropped)', () => {
@@ -431,6 +440,17 @@ describe('fetchNvdAlerts', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 503, body: { cancel() {} } } as unknown as Response)
     await expect(fetchNvdAlerts(kv as unknown as KVNamespace)).rejects.toThrow(/NVD HTTP 503/)
     expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('does not return a CVE published a year ago that was re-modified inside the window (#1805)', async () => {
+    const yearAgo = new Date(Date.now() - 365 * 86400 * 1000).toISOString().slice(0, 23)
+    const hourAgo = new Date(Date.now() - 3600 * 1000).toISOString().slice(0, 23)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(nvdResponse([
+      { ...claudeCodeCve, published: yearAgo },
+      { ...codexCve, published: hourAgo },
+    ]) as unknown as Response)
+    const alerts = await fetchNvdAlerts(fakeKv() as unknown as KVNamespace)
+    expect(alerts.map(a => a.id)).toEqual(['CVE-2026-14898'])
   })
 
   it('works with kv=null (test ergonomics)', async () => {

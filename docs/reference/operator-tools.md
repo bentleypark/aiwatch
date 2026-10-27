@@ -124,6 +124,13 @@ that removes the row and re-adds the same id with the provider's `startedAt` / `
 `npx tsx scripts/patch-archive-derived-dupes.ts --period YYYY-MM --correction <name>`. Review the printed figure
 diff before applying: it can move a published score and grade. The archive's `narrative` is not touched by the patch.
 
+**To remove republished advisories from a stored month's security section (#1805)**, add a `SECURITY_REMOVALS`
+entry (each url with its advisory's own publication date) and run
+`npx tsx scripts/patch-archive-derived-dupes.ts --period YYYY-MM --security-correction <name>`. It recomputes
+`security` from `security:monthly:{period}` with the builder's own gate and summary, refusing the run if the stored
+section does not reproduce or if a listed entry was detected within 7 days of its publication. `security:monthly`
+expires 60 days after its last write, so this works only while that key exists. It never writes KV.
+
 ### The rebuild refuses when it would hold less than what is stored (#1260)
 
 `archive:monthly:{YYYY-MM}` has no TTL because nothing else holds a month's per-service figures — but every

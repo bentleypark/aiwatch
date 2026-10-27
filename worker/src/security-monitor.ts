@@ -489,6 +489,9 @@ const NVD_WINDOW_MS = 6 * 3600 * 1000           // fetch CVEs modified in the la
 const NVD_FETCH_TIMEOUT_MS = 20000              // ample headroom over the ~1.5s 6h-window fetch, well under cron limits
 const NVD_RESULTS_PER_PAGE = 2000               // NVD's max page size (one page covers a 6h window many times over)
 const NVD_MAX_PAGES = 4                          // 8000-CVE/cycle ceiling — an unreachable backstop given the 6h window
+// #1805 — the counterpart of #1696's OSV cutoff: the window above selects by lastModified, so a
+// CVE published long ago and re-modified now would be alerted and archived as new.
+export const STALE_PUBLICATION_MS = 7 * 86400 * 1000
 
 // First-party product → AIWatch service. `strong` phrases identify the product on
 // their own (multi-word, low-collision); `weak` single tokens ('grok', 'gemini',
@@ -516,6 +519,7 @@ export const NVD_FIRST_PARTY: Array<{
 // Minimal shape of a CVE object from the NVD 2.0 `vulnerabilities[].cve` payload.
 interface NvdCve {
   id: string
+  published?: string
   vulnStatus?: string
   descriptions?: Array<{ lang: string; value: string }>
   metrics?: Record<string, Array<{ cvssData?: { baseScore?: number; baseSeverity?: string } }>>
@@ -701,10 +705,11 @@ export function nvdCveToAlert(cve: NvdCve, service: string): SecurityAlert {
 
 // Full candidate pipeline: rejected/clone/kernel filters → first-party attribution →
 // alert. Pure over the CVE list so it's exhaustively unit-testable without network.
-export function filterNvdCves(cves: NvdCve[]): SecurityAlert[] {
+export function filterNvdCves(cves: NvdCve[], publishedCutoffMs = Date.now() - STALE_PUBLICATION_MS): SecurityAlert[] {
   const alerts: SecurityAlert[] = []
   for (const cve of cves) {
     if (isRejectedCve(cve)) continue
+    if (cve.published && Date.parse(cve.published) < publishedCutoffMs) continue
     const desc = extractNvdDescription(cve)
     if (!desc) continue
     if (isThirdPartyCloneSubject(desc)) continue

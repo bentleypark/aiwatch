@@ -17,8 +17,9 @@
 // come back identical is refused rather than guessed at, exactly as `patch-archive-automonitor.mjs`
 // (#1210) refuses a service it cannot account for. A service with no collision is never rewritten, so
 // it is never reproduced either — step 2's `diff` is what shows the operator that untouched remainder.
-import { aggregateIncidentDurations, archiveFollowThrough, averageResolutionMin, computeMonthlyScore, parseDurationMin } from './monthly-archive'
-import type { DegradationEvent, DegradationFollowThrough, MonthlyIncidentEntry } from './monthly-archive'
+import { aggregateIncidentDurations, archiveFollowThrough, averageResolutionMin, computeMonthlyScore, parseDurationMin, summarizeSecurityAlerts } from './monthly-archive'
+import type { DegradationEvent, DegradationFollowThrough, MonthlyIncidentEntry, MonthlySecurityEntry, MonthlySecuritySummary } from './monthly-archive'
+import { isPubliclyVerifiedAlert, STALE_PUBLICATION_MS } from './security-monitor'
 import { derivedDayAlreadyBankedFromFeed } from './monthly-archive'
 import { resolveProbeId } from './probe'
 import { SERVICES } from './services'
@@ -478,4 +479,96 @@ export function recountDowntime(
     out[id] = { downtime: agg.totalMin, mttr: averageResolutionMin(agg.countedTotalMin, agg.countedCount ?? 0) }
   }
   return out
+}
+
+/** #1805 — security alerts removed from a stored month because they were first published long before
+ *  the month detected them (a re-modified record read as new). `publishedAt` is the advisory's own date. */
+export interface SecurityRemoval {
+  period: string
+  source: string
+  remove: Array<{ url: string; publishedAt: string }>
+}
+
+export const SECURITY_REMOVALS: Record<string, SecurityRemoval> = {
+  '2026-09-republished': {
+    period: '2026-09',
+    source: 'osv.dev `database_specific.github_reviewed_at` (else `published`), or NVD `published` where OSV has no record — read 2026-10-27 (#1805)',
+    remove: [
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-9856', publishedAt: '2026-08-02T15:10:53.809Z' },
+      { url: 'https://github.com/anthropics/anthropic-sdk-python/security/advisories/GHSA-q5f5-3gjm-7mfm', publishedAt: '2026-04-01T21:15:30Z' },
+      { url: 'https://github.com/anthropics/anthropic-sdk-python/security/advisories/GHSA-w828-4qhx-vxx3', publishedAt: '2026-04-01T21:17:34Z' },
+      { url: 'https://github.com/langchain-ai/langsmith-sdk/security/advisories/GHSA-3644-q5cj-c5c7', publishedAt: '2026-05-13T15:29:30Z' },
+      { url: 'https://github.com/langchain-ai/langchain/security/advisories/GHSA-gr75-jv2w-4656', publishedAt: '2026-06-16T15:03:14Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2025-6984', publishedAt: '2025-09-04T10:42:33.990Z' },
+      { url: 'https://github.com/langchain-ai/langchain/security/advisories/GHSA-2g6r-c272-w58r', publishedAt: '2026-02-11T14:23:13Z' },
+      { url: 'https://github.com/langchain-ai/langchain/security/advisories/GHSA-6qv9-48xg-fc7f', publishedAt: '2025-11-20T17:42:12Z' },
+      { url: 'https://github.com/langchain-ai/langchain/security/advisories/GHSA-926x-3r5x-gfhw', publishedAt: '2026-04-08T21:51:32Z' },
+      { url: 'https://github.com/langchain-ai/langchain/security/advisories/GHSA-c67j-w6g6-q2cm', publishedAt: '2025-12-23T18:46:13Z' },
+      { url: 'https://github.com/langchain-ai/langchain/security/advisories/GHSA-pjwx-r37v-7724', publishedAt: '2026-05-08T23:07:32Z' },
+      { url: 'https://github.com/langchain-ai/langchain/security/advisories/GHSA-qh6h-p6c9-ff54', publishedAt: '2026-03-27T19:45:00Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-4372', publishedAt: '2026-05-24T13:40:40.995Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2025-3933', publishedAt: '2025-07-11T09:22:27.103Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2025-6921', publishedAt: '2025-09-23T13:56:15.636Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2025-6638', publishedAt: '2025-09-12T10:46:07.934Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-1839', publishedAt: '2026-04-07T05:22:00.959Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2025-5197', publishedAt: '2025-08-06T11:53:37.232Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-5241', publishedAt: '2026-06-03T12:33:10.227Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2024-11394', publishedAt: '2024-11-22T21:23:49.302Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2025-3777', publishedAt: '2025-07-07T09:55:38.190Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2024-11392', publishedAt: '2024-11-22T21:23:27.024Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2025-6051', publishedAt: '2025-09-14T17:03:02.953Z' },
+      { url: 'https://nvd.nist.gov/vuln/detail/CVE-2024-11393', publishedAt: '2024-11-22T21:23:38.476Z' },
+    ],
+  },
+}
+
+const canonicalJson = (v: unknown): string =>
+  Array.isArray(v) ? `[${v.map(canonicalJson).join(',')}]`
+    : v && typeof v === 'object'
+      ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson((v as Record<string, unknown>)[k])}`).join(',')}}`
+      : JSON.stringify(v)
+
+const withoutTimelines = (s: MonthlySecuritySummary) =>
+  ({ ...s, topFindings: s.topFindings.map(({ timeline: _t, ...f }) => f) })
+
+/**
+ * Plan a stored month's `security` section with `spec.remove` taken out. Pure. The stored section must
+ * come back identical (timelines aside) from the stored `security:monthly` entries through the builder's
+ * own gate and summary, or the run is refused; every listed url must be present, and every entry it
+ * matches must have been detected more than `STALE_PUBLICATION_MS` after `publishedAt`. Timelines on the
+ * remaining top findings are carried over from the stored section.
+ */
+export function planSecurityPatch(
+  stored: MonthlySecuritySummary | null | undefined,
+  accumulated: unknown,
+  spec: SecurityRemoval,
+): { security: MonthlySecuritySummary | null; refusals: string[] } {
+  const refuse = (why: string) => ({ security: null, refusals: [`security: ${why}`] })
+  if (!stored) return refuse('the archive has no security section')
+  if (!Array.isArray(accumulated)) return refuse('security:monthly is not an array')
+  const verified = (accumulated as MonthlySecurityEntry[]).filter(isPubliclyVerifiedAlert)
+  if (canonicalJson(withoutTimelines(summarizeSecurityAlerts(verified))) !== canonicalJson(withoutTimelines(stored))) {
+    return refuse('the stored section does not reproduce from security:monthly')
+  }
+  const drop = new Set<string>()
+  for (const r of spec.remove) {
+    const published = Date.parse(r.publishedAt)
+    const matched = verified.filter((e) => e.url === r.url)
+    if (matched.length === 0) return refuse(`${r.url} is not in the month`)
+    if (!Number.isFinite(published)) return refuse(`${r.url} has no parseable publishedAt`)
+    for (const e of matched) {
+      if (!(Date.parse(e.detectedAt) - published > STALE_PUBLICATION_MS)) {
+        return refuse(`${r.url} was detected ${e.detectedAt}, within ${STALE_PUBLICATION_MS / 86400000} days of ${r.publishedAt}`)
+      }
+    }
+    drop.add(r.url)
+  }
+  const kept = verified.filter((e) => !drop.has(e.url))
+  if (kept.length === 0) return { security: null, refusals: [] }
+  const timelines = new Map(stored.topFindings.filter((f) => f.timeline).map((f) => [f.url, f.timeline]))
+  const after = summarizeSecurityAlerts(kept)
+  return {
+    security: { ...after, topFindings: after.topFindings.map((f) => (timelines.has(f.url) ? { ...f, timeline: timelines.get(f.url) } : f)) },
+    refusals: [],
+  }
 }
