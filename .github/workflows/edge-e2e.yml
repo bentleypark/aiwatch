@@ -43,7 +43,8 @@ jobs:
           ref: ${{ github.event.deployment.sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version-file: .nvmrc
+          check-latest: true
       # #1348 — bounded, but deliberately NOT cached, unlike every `npm ci` in test.yml. Stated as
       # what is and is not established: run 33703810844 recorded the `actions/cache` STEP refusing
       # to restore or save under `deployment_status`, but that refusal comes from that action's own

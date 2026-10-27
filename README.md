@@ -210,7 +210,7 @@ Cloudflare KV
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 24 (`.nvmrc`)
 - npm
 - Cloudflare account (for Worker deployment)
 
