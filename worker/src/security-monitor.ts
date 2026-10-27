@@ -246,6 +246,7 @@ interface OSVVuln {
     }>
   }>
   database_specific?: { severity?: string; cwe_ids?: string[]; github_reviewed_at?: string }
+  aliases?: string[]
   modified: string
 }
 
@@ -322,6 +323,26 @@ export async function listOSVCandidates(): Promise<OSVCandidate[]> {
   return candidates
 }
 
+const reviewedAtMs = (v: OSVVuln): number =>
+  v.database_specific?.github_reviewed_at ? Date.parse(v.database_specific.github_reviewed_at) : Number.NaN
+
+// NaN on any failure, so an unreadable alias keeps the record rather than dropping it.
+async function fetchReviewedAtMs(id: string): Promise<number> {
+  try {
+    const res = await fetch(`https://api.osv.dev/v1/vulns/${id}`, {
+      headers: { 'User-Agent': 'AIWatch/1.0 (ai-watch.dev; security monitoring)' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) {
+      res.body?.cancel()
+      return Number.NaN
+    }
+    return reviewedAtMs(await res.json() as OSVVuln)
+  } catch {
+    return Number.NaN
+  }
+}
+
 // Phase 2 — fetch the full vuln document for a single candidate.
 // Returns null on network/HTTP failure so the orchestrator can drop just this alert
 // rather than fail the whole batch (Promise.allSettled also catches throws).
@@ -342,7 +363,11 @@ export async function fetchOSVVulnDetails(
   }
 
   const v = await res.json() as OSVVuln
-  const reviewedMs = v.database_specific?.github_reviewed_at ? Date.parse(v.database_specific.github_reviewed_at) : Number.NaN
+  let reviewedMs = reviewedAtMs(v)
+  // #1805 — a record from another database (PYSEC) carries no review date; its GHSA alias, when it has
+  // one, does. Without a GHSA alias the record is kept, as #1696 pins.
+  const ghsa = v.aliases?.find((a) => a.startsWith('GHSA-'))
+  if (kv && Number.isNaN(reviewedMs) && ghsa) reviewedMs = await fetchReviewedAtMs(ghsa)
   if (kv && reviewedMs < reviewedCutoffMs) {
     try {
       await kv.put(`${OSV_IGNORED_PREFIX}${v.id}`, '1', { expirationTtl: 604800 })

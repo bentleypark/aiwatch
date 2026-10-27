@@ -540,6 +540,70 @@ describe('fetchOSVAlerts — two-phase flow (#323)', () => {
       expect(alerts.map((a) => a.id)).toEqual(['PYSEC-2025-211'])
       expect(store.has('security:ignored:osv:PYSEC-2025-211')).toBe(false)
     })
+
+    // #1805 — PYSEC-2026-1980 (published 2026-07-07) aliases CVE-2025-6921 and GHSA-4w7r-h757-3r74,
+    // which GitHub reviewed on 2025-09-23: an old advisory re-entering OSV under another database's id.
+    const runAliased = async (aliasRoute: unknown) => {
+      const now = Date.now()
+      const nowISO = new Date(now).toISOString()
+      const id = 'PYSEC-2026-1980'
+      const ghsa = 'GHSA-4w7r-h757-3r74'
+      const fetchMock = stubFetchByUrl({
+        'querybatch': { results: [{ vulns: [{ id, modified: nowISO }] }] },
+        [id]: { id, modified: nowISO, published: new Date(now - 112 * DAY).toISOString(), summary: 'Transformers advisory', aliases: ['CVE-2025-6921', ghsa], database_specific: {} },
+        ...(aliasRoute === undefined ? {} : { [ghsa]: aliasRoute }),
+      })
+      const store = new Map<string, string>()
+      const kv = {
+        async get(key: string) { return store.get(key) ?? null },
+        async put(key: string, value: string) { store.set(key, value) },
+      } as unknown as KVNamespace
+      return { alerts: await fetchOSVAlerts(kv), store, fetchMock, id }
+    }
+    const ghsaDoc = (reviewedDaysAgo: number) => ({
+      id: 'GHSA-4w7r-h757-3r74', modified: new Date().toISOString(),
+      database_specific: { github_reviewed_at: new Date(Date.now() - reviewedDaysAgo * DAY).toISOString() },
+    })
+
+    it('is stale when it has no review date but its GHSA alias was reviewed long ago', async () => {
+      const { alerts, store, id } = await runAliased(ghsaDoc(400))
+
+      expect(alerts).toEqual([])
+      expect(store.get(`security:ignored:osv:${id}`)).toBe('1')
+    })
+
+    it('is a first sighting when its GHSA alias was reviewed within the window', async () => {
+      const { alerts, id } = await runAliased(ghsaDoc(1))
+
+      expect(alerts.map((a) => a.id)).toEqual([id])
+    })
+
+    it('uses its own review date when it has one, without reading the alias', async () => {
+      const now = Date.now()
+      const nowISO = new Date(now).toISOString()
+      const id = 'GHSA-reviewed-own'
+      const fetchMock = stubFetchByUrl({
+        'querybatch': { results: [{ vulns: [{ id, modified: nowISO }] }] },
+        [id]: { id, modified: nowISO, summary: 'Own review date', aliases: ['GHSA-4w7r-h757-3r74'], database_specific: { github_reviewed_at: new Date(now - DAY).toISOString() } },
+        'GHSA-4w7r-h757-3r74': ghsaDoc(400),
+      })
+      const store = new Map<string, string>()
+      const kv = {
+        async get(key: string) { return store.get(key) ?? null },
+        async put(key: string, value: string) { store.set(key, value) },
+      } as unknown as KVNamespace
+
+      expect((await fetchOSVAlerts(kv)).map((a) => a.id)).toEqual([id])
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('GHSA-4w7r-h757-3r74'))).toBe(false)
+    })
+
+    it('is kept when its GHSA alias cannot be read', async () => {
+      const { alerts, store, fetchMock, id } = await runAliased(undefined)
+
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('GHSA-4w7r-h757-3r74'))).toBe(true)
+      expect(alerts.map((a) => a.id)).toEqual([id])
+      expect(store.has(`security:ignored:osv:${id}`)).toBe(false)
+    })
   })
 
   it('lets a new advisory through once a burst of old republications has been marked', async () => {
