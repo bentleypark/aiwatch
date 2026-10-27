@@ -38,6 +38,11 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
    ```
    For Atlassian Statuspage services, if the custom domain is blocked, use `https://{slug}.statuspage.io/api/v2/summary.json` instead. Confirm `statusComponentId` resolves on the chosen endpoint. See `docs/reference/status-determination.md` § "Status page URL selection".
 
+   **Which components the service counts (#1821)** — decide each component on the page by asking in order:
+   1. Is it this card's product, or another product's, whether or not AIWatch has a card for that product? The provider's own grouping is the first evidence: a component the provider groups under another card belongs to that card (#1008). Any other product's component → **Excluded**.
+   2. Is it where the card's users use the product, or an account / billing / admin screen? Admin → **Reference** (#1669).
+   3. Is it where the product runs, or an auxiliary page (marketing site, docs)? Runs → **Counted**; auxiliary → **Excluded**.
+
    **Per-component breakdown (#606, optional but check it)** — if the status page exposes **≥2 availability-relevant components**, configure a per-component breakdown. Pick the right mechanism — full rules in `docs/reference/status-determination.md` § "Per-component snapshot":
    - **Curated allowlist** → `displayComponentIds: [ids]` (a few stable surfaces).
    - **Per-model / many churny components** → `displayAllComponents: true` + `componentDenylist: ['Docs','Website',…]` + `componentSurfaces: [names]` (surfaces stay individual; the rest fold into a collapsible "Models" group). With a `statusComponentId` and no `statusComponentIds`, also set `uptimeOverLiveComponents: true`, or uptime is computed on that one component alone (#1679; e.g. cerebras). On an incident.io page (`incidentIoComponentId` set), set `uptimeOverPageComponents: true` with a single anchor id instead of an id list (#1709; e.g. fireworks).
