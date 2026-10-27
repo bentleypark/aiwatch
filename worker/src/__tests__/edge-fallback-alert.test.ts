@@ -29,10 +29,20 @@ function makeReq(body: unknown, token?: string): Request {
 
 const cors = { 'Access-Control-Allow-Origin': '*' }
 
+let pending: Promise<unknown>[] = []
+const ctx = { waitUntil: (p: Promise<unknown>) => { pending.push(p) } }
+
+async function call(req: Request, env: Parameters<typeof handleEdgeFallbackAlert>[1]): Promise<Response> {
+  const res = await handleEdgeFallbackAlert(req, env, cors, ctx)
+  await Promise.all(pending)
+  return res
+}
+
 describe('handleEdgeFallbackAlert (#378)', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
+    pending = []
     fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(null, { status: 204 }),
     )
@@ -43,59 +53,94 @@ describe('handleEdgeFallbackAlert (#378)', () => {
   it('returns 401 when EDGE_ALERT_TOKEN is not configured', async () => {
     const { kv } = makeKV()
     const env = { STATUS_CACHE: kv } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }, 'anything'), env, cors)
+    const res = await call(makeReq({ surface: 'is-down', slug: 'claude' }, 'anything'), env)
     expect(res.status).toBe(401)
   })
 
   it('returns 401 on wrong Bearer token', async () => {
     const { kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }, 'wrong'), env, cors)
+    const res = await call(makeReq({ surface: 'is-down', slug: 'claude' }, 'wrong'), env)
     expect(res.status).toBe(401)
   })
 
   it('returns 401 when Authorization header is missing entirely', async () => {
     const { kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }), env, cors)
+    const res = await call(makeReq({ surface: 'is-down', slug: 'claude' }), env)
     expect(res.status).toBe(401)
   })
 
   it('returns 400 when surface or slug is missing', async () => {
     const { kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down' }, 'correct'), env, cors)
+    const res = await call(makeReq({ surface: 'is-down' }, 'correct'), env)
     expect(res.status).toBe(400)
   })
 
   it('dispatches Discord alert and writes dedup marker on first call', async () => {
     const { store, kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude', reason: 'worker_timeout' }, 'correct'), env, cors)
+    const res = await call(makeReq({ surface: 'is-down', slug: 'claude', reason: 'worker_timeout' }, 'correct'), env)
     expect(res.status).toBe(200)
-    const body = await res.json() as { ok: boolean; dispatched: boolean }
-    expect(body).toMatchObject({ ok: true, dispatched: true })
+    const body = await res.json() as { ok: boolean; queued: boolean }
+    expect(body).toMatchObject({ ok: true, queued: true })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(store[`${EDGE_FALLBACK_ALERT_KEY_PREFIX}is-down:claude`]).toBe('1')
   })
 
-  it('returns deduped: true on second call within the cooldown window', async () => {
+  it('#1531 — answers before the Discord post settles, with the marker written first and the post under waitUntil', async () => {
+    let release!: (r: Response) => void
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((r) => { release = r }))
+    const { store, kv } = makeKV()
+    const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
+    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env, cors, ctx)
+    expect(res.status).toBe(200)
+    expect(pending).toHaveLength(1)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(store[`${EDGE_FALLBACK_ALERT_KEY_PREFIX}is-down:claude`]).toBe('1')
+    release(new Response(null, { status: 204 }))
+    await Promise.all(pending)
+  })
+
+  it.each([['is-down', true], ['reports', false]] as const)('#1531 — the %s alert mentions the CDN copy only where the page sets stale-if-error', async (surface, mentions) => {
+    const { kv } = makeKV()
+    const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
+    await call(makeReq({ surface, slug: 'claude' }, 'correct'), env)
+    const sent = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { embeds: Array<{ description: string }> }
+    expect(sent.embeds[0].description.includes('stale-if-error')).toBe(mentions)
+  })
+
+  it('#1531 — answers even while the dedup read stalls, with the whole dispatch under waitUntil', async () => {
+    const { kv } = makeKV()
+    ;(kv.get as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise(() => {}))
+    const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
+    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env, cors, ctx)
+    expect(res.status).toBe(200)
+    expect(pending).toHaveLength(1)
+  })
+
+  it('#1531 — still posts to Discord when the dedup marker write is rejected', async () => {
+    const { kv } = makeKV()
+    ;(kv.put as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('kv down'))
+    const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
+    await call(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends nothing on a second call within the cooldown window', async () => {
     const { kv } = makeKV({ [`${EDGE_FALLBACK_ALERT_KEY_PREFIX}is-down:claude`]: '1' })
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env, cors)
+    const res = await call(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env)
     expect(res.status).toBe(200)
-    const body = await res.json() as { ok: boolean; deduped: boolean }
-    expect(body).toMatchObject({ ok: true, deduped: true })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('skips Discord but still writes dedup marker when DISCORD_WEBHOOK_URL is unset', async () => {
     const { store, kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env, cors)
+    const res = await call(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env)
     expect(res.status).toBe(200)
-    const body = await res.json() as { dispatched: boolean }
-    expect(body.dispatched).toBe(false)
     expect(store[`${EDGE_FALLBACK_ALERT_KEY_PREFIX}is-down:claude`]).toBe('1')
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -104,7 +149,7 @@ describe('handleEdgeFallbackAlert (#378)', () => {
     fetchMock.mockResolvedValueOnce(new Response('upstream gone', { status: 502 }))
     const { store, kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    const res = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env, cors)
+    const res = await call(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env)
     expect(res.status).toBe(200)
     expect(store[`${EDGE_FALLBACK_ALERT_KEY_PREFIX}is-down:claude`]).toBe('1')
   })
@@ -112,7 +157,7 @@ describe('handleEdgeFallbackAlert (#378)', () => {
   it('uses TTL of 5 minutes on the dedup marker', async () => {
     const { kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env, cors)
+    await call(makeReq({ surface: 'is-down', slug: 'claude' }, 'correct'), env)
     const putMock = (kv.put as unknown as ReturnType<typeof vi.fn>)
     const opts = putMock.mock.calls[0]?.[2] as { expirationTtl: number } | undefined
     expect(opts?.expirationTtl).toBe(EDGE_FALLBACK_ALERT_TTL_S)
@@ -123,9 +168,9 @@ describe('handleEdgeFallbackAlert (#378)', () => {
     const { store, kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
     // Inject path-traversal + special chars; expect them stripped before forming the dedup key.
-    await handleEdgeFallbackAlert(
+    await call(
       makeReq({ surface: 'is-down/../etc', slug: '../../passwd!@#$', reason: 'rm -rf /' }, 'correct'),
-      env, cors,
+      env,
     )
     // Key should not contain '/' or '.', should match the sanitized shape
     const keys = Object.keys(store)
@@ -140,7 +185,7 @@ describe('handleEdgeFallbackAlert (#378)', () => {
     const { store, kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
     const longSlug = 'a'.repeat(200)
-    await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: longSlug }, 'correct'), env, cors)
+    await call(makeReq({ surface: 'is-down', slug: longSlug }, 'correct'), env)
     const keys = Object.keys(store)
     expect(keys).toHaveLength(1)
     // Key shape: alerted:edge-fallback:{surface}:{slug} — slug portion ≤ 64
@@ -151,10 +196,9 @@ describe('handleEdgeFallbackAlert (#378)', () => {
   it('case-insensitive dedup: "Claude" and "claude" collapse to the same key', async () => {
     const { store, kv } = makeKV()
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
-    await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'Claude' }, 'correct'), env, cors)
-    const res2 = await handleEdgeFallbackAlert(makeReq({ surface: 'IS-DOWN', slug: 'claude' }, 'correct'), env, cors)
-    const body2 = await res2.json() as { deduped?: boolean }
-    expect(body2.deduped).toBe(true)
+    await call(makeReq({ surface: 'is-down', slug: 'Claude' }, 'correct'), env)
+    await call(makeReq({ surface: 'IS-DOWN', slug: 'claude' }, 'correct'), env)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(Object.keys(store)).toHaveLength(1)
     // Key must be all-lowercase
     expect(Object.keys(store)[0]).toBe(`${EDGE_FALLBACK_ALERT_KEY_PREFIX}is-down:claude`)
@@ -164,13 +208,10 @@ describe('handleEdgeFallbackAlert (#378)', () => {
     const { store, kv } = makeKV({ [`${EDGE_FALLBACK_ALERT_KEY_PREFIX}is-down:claude`]: '1' })
     const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
     // Different slug → must NOT dedup against claude
-    const res1 = await handleEdgeFallbackAlert(makeReq({ surface: 'is-down', slug: 'openai' }, 'correct'), env, cors)
-    const body1 = await res1.json() as { dispatched?: boolean; deduped?: boolean }
-    expect(body1.deduped).not.toBe(true)
+    await call(makeReq({ surface: 'is-down', slug: 'openai' }, 'correct'), env)
     // Different surface, same slug → must NOT dedup either
-    const res2 = await handleEdgeFallbackAlert(makeReq({ surface: 'reports', slug: 'claude' }, 'correct'), env, cors)
-    const body2 = await res2.json() as { dispatched?: boolean; deduped?: boolean }
-    expect(body2.deduped).not.toBe(true)
+    await call(makeReq({ surface: 'reports', slug: 'claude' }, 'correct'), env)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     // Three distinct keys now
     expect(Object.keys(store).length).toBe(3)
   })

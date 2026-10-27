@@ -6,6 +6,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down'
+import { isDownCacheControl } from '../_shared/is-down-cache'
+import { LAST_CHECKED_CLIENT_JS } from '../_is-down/html-template'
 import { spyFetchWithEmptyReportFeed } from './fetch-stub'
 
 function makeReq(slug: string): Request {
@@ -49,7 +51,10 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     fetchMock.mockResolvedValueOnce(makeWorkerSuccess())
     const res = await handler(makeReq('claude-api'))
     expect(res.status).toBe(200)
-    expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=60, stale-while-revalidate=300')
+    expect(res.headers.get('Cache-Control')).toBe(isDownCacheControl(false))
+    const html = await res.text()
+    expect(html).toContain('<time class="last-checked" datetime=')
+    expect(html).toContain(`<script>${LAST_CHECKED_CLIENT_JS}</script>`)
   })
 
   it('returns 503 + no-store when Worker fetch is rejected (timeout / network failure)', async () => {

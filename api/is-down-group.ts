@@ -16,12 +16,13 @@ import { audienceBeaconScript } from './_shared/audience-beacon'
 import { historyLinkAttrs, historyClickBeacon } from './_shared/history-link'
 import { cspForHtml } from './_shared/csp-hash'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
+import { isDownCacheControl } from './_shared/is-down-cache'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { cookieBannerHtml } from './_shared/cookie-banner'
 import { getSEOContent } from './_is-down/seo-content'
-import { ALERT_CTA_CSS, ERRORS_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, displayDuration, formatRecoveryMinutes, renderErrorList, renderIncidentTimeline, timeAgo } from './_is-down/html-template'
+import { ALERT_CTA_CSS, ERRORS_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, displayDuration, formatRecoveryMinutes, renderErrorList, LAST_CHECKED_CLIENT_JS, lastCheckedTime, renderIncidentTimeline } from './_is-down/html-template'
 
 export const config = { runtime: 'edge' }
 
@@ -286,14 +287,14 @@ function renderGroupPage(
       ? `AIWatch Score: ${m.aiwatchScore}${gradeNote ? ` (${gradeNote})` : ''}`
       : ''
     const measurements = [uptime, score].filter(Boolean).join(' · ')
-    const checked = m.lastChecked ? `Last checked: ${timeAgo(m.lastChecked)}` : ''
+    const checked = m.lastChecked ? `Last checked: ${lastCheckedTime(m.lastChecked)}` : ''
     const historyNotice = m.incidentSourceStale ? 'Incident history unavailable' : ''
     const basisNotice = m.incidentSourceStale && (m.probeConfirmed || m.probeContradicted) ? "Status from AIWatch's own checks" : ''
     return `
     <li class="member-row">
       <a href="/is-${esc(m.slug)}-down">
         <span class="member-emoji">${STATUS_EMOJI[m.status]}</span>
-        <span class="member-details"><span class="member-name">${esc(m.name)}</span>${measurements ? `<span class="member-measurements">${esc(measurements)}</span>` : ''}${checked ? `<span class="member-checked">${esc(checked)}</span>` : ''}${basisNotice ? `<span class="member-history-unavailable">${basisNotice}</span>` : ''}${historyNotice ? `<span class="member-history-unavailable">${historyNotice}</span>` : ''}</span>
+        <span class="member-details"><span class="member-name">${esc(m.name)}</span>${measurements ? `<span class="member-measurements">${esc(measurements)}</span>` : ''}${checked ? `<span class="member-checked">${checked}</span>` : ''}${basisNotice ? `<span class="member-history-unavailable">${basisNotice}</span>` : ''}${historyNotice ? `<span class="member-history-unavailable">${historyNotice}</span>` : ''}</span>
         <span class="member-status">${STATUS_LABEL[m.status]}</span>
       </a>
     </li>`
@@ -607,6 +608,7 @@ ${ALERT_CTA_CSS}  .cta-member { display:flex; align-items:center; justify-conten
   .report-actions .btn { flex:1; }
   .report-msg { margin:12px 0 0; color:#3fb950; font-size:13px; }
 </style>
+<script>${LAST_CHECKED_CLIENT_JS}</script>
 </head>
 <body>
 <h1>${STATUS_EMOJI[headline]} Is ${esc(family.name)} Down?</h1>
@@ -1003,9 +1005,7 @@ export default async function handler(req: Request) {
       status: isFallback ? 503 : 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': isFallback
-          ? 'no-store, max-age=0, must-revalidate'
-          : 'public, s-maxage=60, stale-while-revalidate=300',
+        'Cache-Control': isDownCacheControl(isFallback),
         [csp.key]: csp.value,
       },
     })

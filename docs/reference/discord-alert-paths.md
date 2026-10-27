@@ -261,6 +261,17 @@ first has not finished, the first success wins, and both are abandoned at the sa
 `worker_timeout` alert now means neither request finished within 5 s, and a request the second one
 rescued sends no alert.
 
+**#1531 Part 6 — the CDN keeps the last good page, and the alert outlives the Edge's abort.** A good
+render of either page carries `stale-if-error` (`api/_shared/is-down-cache.ts`), so when a later
+render is the 503 fallback the Vercel CDN can answer with the good copy it still holds
+([Vercel docs](https://vercel.com/docs/caching/cache-control-headers#stale-if-error)). On
+`api/is-down.ts` the alert still fires, because the function still rendered the fallback; it does not
+say which of the two the visitor received. The Worker answers the alert POST at once and runs the
+dedup read, the marker, the Discord post and its `discord-sent:` record under `waitUntil`, marker
+before post. Before this the Edge's
+500 ms abort cancelled the Worker after the post and before both writes, so Edge fallback alerts were
+missing from the send log and a second request could post the same alert again.
+
 **#1368 — it never fired.** The production `EDGE_ALERT_TOKEN` was measured empty on 2026-09-08, and
 the guard returned silently on a falsy token in every environment — correct for local and preview,
 catastrophic in production, and indistinguishable between them. What established "never fired" was an
@@ -278,14 +289,7 @@ The fix distinguishes *misconfigured in production* from *absent outside product
 observed `VERCEL_ENV` in both lines so an unreadable one is visible rather than silent, and inspects
 the response — the Worker RETURNS 401 (its own copy of the secret absent, or disagreeing with the
 caller's) and 400 rather than throwing, so a discarded `Response` would have left the next likely
-failure, a secret rotated on one end only, exactly as silent as the empty token. Not covered: the
-Worker can answer 200 while reporting `dispatched: false` in its body, so an OK response is not proof
-of delivery.
-
-**The 500ms dispatch budget was justified against the wrong work.** Its inherited comment sized it for
-a Worker hop, but on a dedup miss `handleEdgeFallbackAlert` awaits a KV read, then `sendDiscordAlert`
-— which sets no timeout of its own — then a KV write, before responding. Whether 500ms suffices is
-unmeasured, and so is what a timeout costs. It is not retuned here.
+failure, a secret rotated on one end only, exactly as silent as the empty token.
 
 **Not wired: `api/is-down-group.ts`.** It serves `/is-claude-down`, `/is-openai-down` and
 `/is-xai-down` (`vercel.json`), returns the same 503 + `no-store` degraded render, and alerts nothing

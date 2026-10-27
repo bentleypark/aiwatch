@@ -22,10 +22,10 @@
  *  caller awaits this before responding.
  *
  *  ⚠️ The budget was justified against the wrong work (#1368): its original comment sized it for "a
- *  healthy Worker to respond from the same edge region", i.e. a Worker hop. On a dedup MISS the
- *  callee awaits a KV read, then `sendDiscordAlert` — which sets no timeout of its own — then a KV
- *  write, before responding. Whether 500ms suffices is unmeasured, and so is what a timeout costs
- *  (whether the abort cancels the Worker's send or its dedup write). Do not retune it from this note. */
+ *  healthy Worker to respond from the same edge region", i.e. a Worker hop. #1531 measured what a
+ *  timeout cost: Workers Logs record the 2026-10-23 08:32 UTC request as `canceled`, with its Discord
+ *  post delivered and its dedup and send-log writes lost. The Worker now runs that work under
+ *  `waitUntil` and answers at once. Do not retune it from this note. */
 export const ALERT_TIMEOUT_MS = 500
 
 export type AlertConfigVerdict =
@@ -136,10 +136,6 @@ export async function notifyEdgeFallback(
     // resolved Response would leave "the two ends disagree" as silent as the empty token was — on the
     // failure a two-sided secret rotation is most likely to produce. Its 401 carries no detail by
     // design, so the caller is the only place it is observable.
-    //
-    // NOT covered here: the Worker can answer 200 while carrying `dispatched: false` in its body, so
-    // an OK response is not proof of delivery. Reading that flag would mean parsing the body of a
-    // best-effort alert, and the cases behind it are the Worker's own blind spot — #1257's territory.
     if (!res.ok) {
       console.error(
         `[${logLabel}] edge-fallback alert REJECTED by the Worker (HTTP ${res.status}) — the alert did`

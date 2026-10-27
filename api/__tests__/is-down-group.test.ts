@@ -3,7 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down-group'
-import { REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
+import { isDownCacheControl } from '../_shared/is-down-cache'
+import { LAST_CHECKED_CLIENT_JS, REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
 import { makeLocalStorage } from '../../src/utils/__tests__/localStorageStub.js'
 
 // Every handler invocation begins with the status fetch, and a degraded/down fixture may make a
@@ -139,7 +140,7 @@ describe('is-down-group.ts', () => {
     const res = await handler(makeReq('claude'))
     const html = await res.text()
     expect(res.status).toBe(200)
-    expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=60, stale-while-revalidate=300')
+    expect(res.headers.get('Cache-Control')).toBe(isDownCacheControl(false))
     expect(html).toContain('Is Anthropic (Claude) Down? Operational')
     expect(html).toContain('/is-claude-api-down')
     expect(html).toContain('/is-claude-ai-down')
@@ -183,6 +184,8 @@ describe('is-down-group.ts', () => {
     expect(html).toContain('30-day family summary')
     expect(html).toContain('2 incidents across monitored services')
     expect(html).toContain('average recovery: 1h 30m')
+    expect(html).toContain('<span class="member-checked">Last checked: <time class="last-checked" datetime=')
+    expect(html).toContain(`<script>${LAST_CHECKED_CLIENT_JS}</script>`)
   })
 
   it('keeps issue reports attributable to a selected member and exposes monthly reports like single-service pages', async () => {

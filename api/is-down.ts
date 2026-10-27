@@ -12,6 +12,7 @@ import {
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
+import { isDownCacheControl } from './_shared/is-down-cache'
 import { resolveWorkerApi } from './_shared/worker-api'
 import { computeRankPosition } from './_is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
@@ -385,9 +386,7 @@ export default async function handler(req: Request) {
       status: isFallback ? 503 : 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': isFallback
-          ? 'no-store, max-age=0, must-revalidate'
-          : 'public, s-maxage=60, stale-while-revalidate=300',
+        'Cache-Control': isDownCacheControl(isFallback),
         [csp.key]: csp.value,
       },
     })
