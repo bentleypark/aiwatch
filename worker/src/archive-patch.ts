@@ -547,7 +547,9 @@ export function planSecurityPatch(
   if (!stored) return refuse('the archive has no security section')
   if (!Array.isArray(accumulated)) return refuse('security:monthly is not an array')
   const verified = (accumulated as MonthlySecurityEntry[]).filter(isPubliclyVerifiedAlert)
-  if (canonicalJson(withoutTimelines(summarizeSecurityAlerts(verified))) !== canonicalJson(withoutTimelines(stored))) {
+  const reproduced = withoutTimelines(summarizeSecurityAlerts(verified))
+  if (stored.byServiceSource === undefined) delete reproduced.byServiceSource
+  if (canonicalJson(reproduced) !== canonicalJson(withoutTimelines(stored))) {
     return refuse('the stored section does not reproduce from security:monthly')
   }
   const drop = new Set<string>()

@@ -228,6 +228,7 @@ export interface MonthlySecuritySummary {
   bySource: { osv: number; hackernews: number; nvd: number }
   bySeverity: Record<SecuritySeverityBucket, number>
   byService: Record<string, number>                // service name → count
+  byServiceSource?: Record<string, Partial<Record<MonthlySecurityEntry['source'], number>>> // #1805; absent from archives built before it
   topFindings: MonthlySecurityTopFinding[]         // sorted by severity desc, max 10
 }
 
@@ -1610,6 +1611,7 @@ export function summarizeSecurityAlerts(entries: MonthlySecurityEntry[]): Monthl
   const bySource: MonthlySecuritySummary['bySource'] = { osv: 0, hackernews: 0, nvd: 0 }
   const bySeverity: MonthlySecuritySummary['bySeverity'] = { critical: 0, high: 0, medium: 0, low: 0 }
   const byService: Record<string, number> = {}
+  const byServiceSource: NonNullable<MonthlySecuritySummary['byServiceSource']> = {}
 
   for (const e of entries) {
     if (e.source === 'osv') bySource.osv++
@@ -1617,7 +1619,11 @@ export function summarizeSecurityAlerts(entries: MonthlySecurityEntry[]): Monthl
     else if (e.source === 'nvd') bySource.nvd++
     const sev = normalizeSeverity(e.severity)
     if (sev) bySeverity[sev]++
-    if (e.service) byService[e.service] = (byService[e.service] ?? 0) + 1
+    if (e.service) {
+      byService[e.service] = (byService[e.service] ?? 0) + 1
+      const perSource = (byServiceSource[e.service] ??= {})
+      perSource[e.source] = (perSource[e.source] ?? 0) + 1
+    }
   }
 
   const topFindings = [...entries]
@@ -1629,7 +1635,7 @@ export function summarizeSecurityAlerts(entries: MonthlySecurityEntry[]): Monthl
     })
     .slice(0, 10)
 
-  return { totalAlerts: entries.length, bySource, bySeverity, byService, topFindings }
+  return { totalAlerts: entries.length, bySource, bySeverity, byService, byServiceSource, topFindings }
 }
 
 /**

@@ -1155,6 +1155,21 @@ describe('summarizeSecurityAlerts', () => {
     expect(s.topFindings[0]).toEqual(entries[0])
   })
 
+  it('#1805 — splits each service count by source, summing to byService', () => {
+    const entries: MonthlySecurityEntry[] = [
+      { title: 'A', url: 'u1', source: 'nvd', severity: 'high', service: 'Claude Code', detectedAt: '2026-10-01T00:00:00Z' },
+      { title: 'B', url: 'u2', source: 'nvd', severity: 'low', service: 'Claude Code', detectedAt: '2026-10-02T00:00:00Z' },
+      { title: 'C', url: 'u3', source: 'hackernews', service: 'Claude Code', detectedAt: '2026-10-03T00:00:00Z' },
+      { title: 'D', url: 'u4', source: 'osv', severity: 'high', service: 'Hugging Face', detectedAt: '2026-10-04T00:00:00Z' },
+      { title: 'E', url: 'u5', source: 'osv', detectedAt: '2026-10-05T00:00:00Z' },
+    ]
+    const s = summarizeSecurityAlerts(entries)
+    expect(s.byServiceSource).toEqual({ 'Claude Code': { nvd: 2, hackernews: 1 }, 'Hugging Face': { osv: 1 } })
+    for (const [svc, per] of Object.entries(s.byServiceSource ?? {})) {
+      expect(Object.values(per).reduce((a, b) => a + (b ?? 0), 0)).toBe(s.byService[svc])
+    }
+  })
+
   it('sorts topFindings by severity desc with recent-first tie-break', () => {
     const entries: MonthlySecurityEntry[] = [
       { title: 'old-critical', url: 'u1', source: 'osv', severity: 'critical', detectedAt: '2026-03-01T00:00:00Z' },
@@ -1856,6 +1871,7 @@ describe('buildMonthlyArchive', () => {
     expect(archive.security).not.toBeNull()
     expect(archive.security!.totalAlerts).toBe(2)                       // chatter excluded from the count
     expect(archive.security!.bySource).toEqual({ osv: 1, hackernews: 1, nvd: 0 })
+    expect(archive.security!.byServiceSource).toEqual({ 'Anthropic (Claude)': { osv: 1 }, 'GitHub Copilot': { hackernews: 1 } })
     const titles = archive.security!.topFindings.map(f => f.title)
     expect(titles).toContain('anthropic SDK advisory')
     expect(titles).toContain('Copilot RCE (CVE-2025-53773)')
