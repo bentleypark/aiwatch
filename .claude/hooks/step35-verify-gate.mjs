@@ -15,7 +15,7 @@
 //             deny `--no-verify` / `--no-gpg-sign` (the real gate is here, before the shell, so git's
 //             own --no-verify can't bypass it).
 //   • Edit|Write|MultiEdit → deny self-edits to .claude/hooks/** and .claude/settings*.json
-//             (a gate the agent can rewrite is no gate).
+//             (a gate the agent can rewrite is no gate). Bash writes there are not checked (#1721).
 //
 // Fail-CLOSED: on any parse error we deny. Each deny states the authorization that lifts IT — which is
 // not the same phrase on every path: the commit and fail-closed denies advise the step-3.5 override,
@@ -24,9 +24,10 @@
 // git-mutation-gate.sh still nudges those). Reload note: settings changes need /hooks opened once.
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execSync } from 'node:child_process'
+import { execSync, execFileSync } from 'node:child_process'
 
 // ── Audit logging (so `npm run hook-audit` can observe this hard gate) ───────
 // Append one line to .claude/hook-audit.jsonl in the SAME schema as _audit.sh
@@ -221,6 +222,49 @@ export function readEntries(transcriptPath) {
   return out
 }
 
+/** The roots whose `.claude/` is the gate (#1721). */
+function gateRoots() {
+  const roots = [process.env.CLAUDE_PROJECT_DIR, path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')].filter(Boolean)
+  for (const root of [...roots]) {
+    try {
+      const out = execFileSync('git', ['-C', root, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      for (const m of out.matchAll(/^worktree (.+)$/gm)) roots.push(m[1])
+    } catch { /* not a repo / git missing: the two roots above still protect */ }
+  }
+  roots.push(os.homedir()) // user-scope ~/.claude/settings.json can set disableAllHooks, which switches this gate off
+  return roots
+}
+
+/** `path.resolve` with symlinks followed on the longest existing prefix (the target may not exist yet, and
+ *  macOS `/tmp` is `/private/tmp`, so a plain string compare misses the same directory). `.native` also
+ *  returns the on-disk letter case, which a case-insensitive volume otherwise lets a caller vary. */
+function realish(p) {
+  let head = path.resolve(p)
+  const tail = []
+  for (;;) {
+    try { return path.join(fs.realpathSync.native(head), ...tail.reverse()) } catch { /* not there yet */ }
+    const up = path.dirname(head)
+    if (up === head) return path.resolve(p)
+    tail.push(path.basename(head))
+    head = up
+  }
+}
+
+const CASE_FOLDING_FS = process.platform === 'darwin' || process.platform === 'win32'
+const GATE_CONFIG_REL = CASE_FOLDING_FS
+  ? /^\.claude[\\/](?:hooks[\\/]|settings(?:\.local)?\.json$)/i
+  : /^\.claude[\\/](?:hooks[\\/]|settings(?:\.local)?\.json$)/
+
+/** True when `filePath` (resolved against `cwd`) is `.claude/hooks/**` or `.claude/settings*.json` directly
+ *  under one of `roots`. Another repo's `.claude/` is not this gate's to protect. */
+export function isGateConfigPath(filePath, cwd, roots) {
+  if (!filePath) return false
+  const lexical = path.resolve(cwd || process.cwd(), filePath)
+  const paths = [lexical, realish(lexical)]
+  const rootForms = (root) => [path.resolve(root), realish(root)]
+  return roots.some((root) => rootForms(root).some((r) => paths.some((abs) => GATE_CONFIG_REL.test(path.relative(r, abs)))))
+}
+
 function main() {
   let input
   try { input = JSON.parse(fs.readFileSync(0, 'utf8')) } catch { process.exit(0) } // no input → don't block
@@ -230,7 +274,9 @@ function main() {
   // Self-protection: never let the agent weaken its own gate.
   if (EDIT_TOOLS.has(tool)) {
     const fp = ti.file_path ?? ti.notebook_path ?? ''
-    if (/\.claude\/(?:hooks\/|settings(?:\.local)?\.json)/.test(fp)) {
+    let gateFile
+    try { gateFile = isGateConfigPath(fp, input.cwd, gateRoots()) } catch { gateFile = true } // can't tell → treat as the gate
+    if (gateFile) {
       // Allow ONLY when a user turn ANYWHERE in this transcript states the intent (`HOOK_WORK_RE`, whose
       // accepted shapes are `HOOK_WORK_EXAMPLES`); otherwise the agent must not edit its own gate. This
       // branch consults HOOK_WORK_RE and nothing else — a generic verification-skip must not authorize the
