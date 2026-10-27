@@ -1097,6 +1097,22 @@ export function incrementSecurityCount(raw: string | null, addBy: number): numbe
   return (Number.isFinite(prev) ? prev : 0) + addBy
 }
 
+/** Append a cron run's alerts to the `security:monthly:*` list, storing each URL once (#1809). */
+export function appendSecurityMonthly(monthly: SecurityAlertMeta[], alerts: SecurityAlert[], nowISO: string): SecurityAlertMeta[] {
+  const next = [...monthly]
+  const existingIds = new Set(monthly.map(m => m.url))
+  for (const alert of alerts) {
+    if (existingIds.has(alert.url)) continue
+    existingIds.add(alert.url)
+    next.push({
+      title: alert.title, url: alert.url, source: alert.source,
+      severity: alert.severity, service: alert.service, detectedAt: nowISO,
+      epssPercentile: alert.epssPercentile, epssPercentage: alert.epssPercentage,
+    })
+  }
+  return next
+}
+
 /**
  * Shape of dashboard-surfaced security alert metadata stored in KV under `security:seen:*`.
  * Separate from `SecurityAlert` (which is the detection-time shape with `id`) — once an alert

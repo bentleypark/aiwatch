@@ -2185,7 +2185,7 @@ import { generateBadgeSvg, badgeStatusColor } from './badge'
 import { buildFeedResponse, resolveFeedFirstSeen, resolvedSeenKey, isActiveItemHeld, resolveFeedService, FEED_TARGET_IDS, feedHttpResponse, reportArchiveResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, isRedditScanTick, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, promoteIncidentWindows, matchPromoteIncident, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading, type PromoteIncidentWindow } from './reddit'
-import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
+import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, appendSecurityMonthly, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
 import { parseFailKey, parseParseFailDay, reasonsFor } from './parse-failure-log'
@@ -3524,17 +3524,7 @@ const workerExport = {
             const monthKey = `security:monthly:${nowISO.slice(0, 7)}`
             try {
               const monthRaw = await env.STATUS_CACHE.get(monthKey).catch(() => null)
-              const monthly: Array<{ title: string; url: string; source: string; severity?: string; service?: string; detectedAt: string; epssPercentile?: number; epssPercentage?: number }> = monthRaw ? JSON.parse(monthRaw) : []
-              const existingIds = new Set(monthly.map(m => m.url))
-              for (const alert of securityAlerts) {
-                if (!existingIds.has(alert.url)) {
-                  monthly.push({
-                    title: alert.title, url: alert.url, source: alert.source,
-                    severity: alert.severity, service: alert.service, detectedAt: nowISO,
-                    epssPercentile: alert.epssPercentile, epssPercentage: alert.epssPercentage,
-                  })
-                }
-              }
+              const monthly = appendSecurityMonthly(monthRaw ? JSON.parse(monthRaw) : [], securityAlerts, nowISO)
               await kvPut(env.STATUS_CACHE, monthKey, JSON.stringify(monthly.slice(-100)), { expirationTtl: 5_184_000 }) // 60d
             } catch (err) {
               console.warn('[cron] security monthly accumulation failed:', err instanceof Error ? err.message : err)
