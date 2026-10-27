@@ -682,6 +682,17 @@ describe('#1805 — planSecurityPatch', () => {
     expect(security?.topFindings[1].timeline).toEqual(timeline)
   })
 
+  it('reproduces a section stored before byServiceSource existed', () => {
+    const { byServiceSource: _b, ...older } = stored
+    const { security, refusals } = planSecurityPatch(older, accumulated, spec)
+    expect(refusals).toEqual([])
+    expect(security?.totalAlerts).toBe(2)
+  })
+
+  it('refuses a stored byServiceSource that does not reproduce', () => {
+    expect(planSecurityPatch({ ...stored, byServiceSource: {} }, accumulated, spec).refusals[0]).toMatch(/does not reproduce/)
+  })
+
   it('refuses when the stored section does not reproduce from the accumulator', () => {
     expect(planSecurityPatch({ ...stored, totalAlerts: 4 }, accumulated, spec).refusals[0]).toMatch(/does not reproduce/)
   })
