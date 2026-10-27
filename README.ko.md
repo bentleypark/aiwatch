@@ -209,7 +209,7 @@ Cloudflare KV
 
 ### 사전 요구사항
 
-- Node.js 20+
+- Node.js 24 (`.nvmrc`)
 - npm
 - Cloudflare 계정 (Worker 배포용)
 

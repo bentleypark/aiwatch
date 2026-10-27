@@ -18,7 +18,7 @@ automation and skills.
 
 - Install root dependencies with `npm install`.
 - Install worker dependencies with `cd worker && npm install`.
-- Use Node.js 20+.
+- Use Node.js 24 (`.nvmrc`; `nvm use` picks it up).
 
 ## Common Commands
 
