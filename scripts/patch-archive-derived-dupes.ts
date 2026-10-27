@@ -41,6 +41,11 @@
  * unchanged stored list, and refuses if any other figure would move:
  *
  *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-08 --recompute openai
+ *
+ * #1805 — `--security-correction <name>` removes the `SECURITY_REMOVALS` entries from the stored
+ * `security` section, recomputed from `security:monthly:{period}`:
+ *
+ *   npx tsx scripts/patch-archive-derived-dupes.ts --period 2026-09 --security-correction 2026-09-republished
  */
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -108,6 +113,33 @@ function main(argv: string[]): void {
     const out = resolve(process.env.ARCHIVE_PATCH_DIR ?? '.', `downtime-recount-${period}.json`)
     writeFileSync(out, JSON.stringify({ period, services: recount }, null, 2) + '\n')
     console.log(`\nRecount written to: ${out} (nothing written to KV)`)
+    process.exit(0)
+  }
+
+  const sc = argv.indexOf('--security-correction')
+  if (sc >= 0) {
+    const others = ['--correction', '--apply-suppressions', '--accept-drift', '--recompute']
+    const spec = archivePatch.SECURITY_REMOVALS[argv[sc + 1] ?? '']
+    if (argv.some((a) => others.includes(a)) || !spec || spec.period !== period) {
+      console.error(`--security-correction is a separate run and must name a ${period} entry of SECURITY_REMOVALS: ${Object.keys(archivePatch.SECURITY_REMOVALS).join(', ')}`)
+      process.exit(2)
+    }
+    const accKey = `security:monthly:${period}`
+    const { security, refusals } = archivePatch.planSecurityPatch(
+      archive.security as Parameters<typeof archivePatch.planSecurityPatch>[0], parseOrDie(kvRaw(accKey), `wrangler kv key get ${accKey}`), spec)
+    for (const r of refusals) console.error(`REFUSED  ${r}`)
+    if (refusals.length) process.exit(1)
+    const before = archive.security as { totalAlerts: number; bySource: unknown; byService: unknown }
+    console.log(`security.totalAlerts ${before.totalAlerts} → ${security?.totalAlerts ?? 'null'}`)
+    console.log(`security.bySource ${JSON.stringify(before.bySource)} → ${JSON.stringify(security?.bySource ?? null)}`)
+    console.log(`security.byService ${JSON.stringify(before.byService)} → ${JSON.stringify(security?.byService ?? null)}`)
+    const outDir = process.env.ARCHIVE_PATCH_DIR ?? '.'
+    const out = resolve(outDir, `${key.replace(/:/g, '-')}.patched.json`)
+    const backup = resolve(outDir, `${key.replace(/:/g, '-')}-before.json`)
+    writeFileSync(out, JSON.stringify({ ...archive, security }))
+    console.log(`\nPatched document written to: ${out}`)
+    console.log('\nTo apply, run these yourself (nothing above touched KV):')
+    for (const line of archivePatch.applyCommands(key, out, backup)) console.log(line)
     process.exit(0)
   }
 

@@ -9,7 +9,12 @@ import { describe, it, expect } from 'vitest'
 import {
   planArchivePatch, applyArchivePatch, figuresFrom, storedFigures, figureDiff, resourceOfDerivedEntry,
   planRowReplacement, ROW_REPLACEMENTS, planSuppressionPatch, recountDowntime, planRecompute,
+  planSecurityPatch, SECURITY_REMOVALS,
 } from '../archive-patch'
+import type { SecurityRemoval } from '../archive-patch'
+import { summarizeSecurityAlerts } from '../monthly-archive'
+import type { MonthlySecurityEntry } from '../monthly-archive'
+import type { OsvTimelineEntry } from '../security-monitor'
 import type { RowReplacement } from '../archive-patch'
 import type { PatchableArchive } from '../archive-patch'
 import { applyCommands, monthWindow, NAMESPACE_ID } from '../archive-patch'
@@ -652,4 +657,55 @@ describe('#1797 — a stuck row is re-added under its own id with the provider\'
       expect(changes[0].after).toMatchObject({ incidents: 1, totalDowntimeMin: c.durationMin, countedIncidents: 1 })
     })
   }
+})
+
+// #1805 — entries copied from `security:monthly:2026-09`. The LangChain advisory was GitHub-reviewed
+// 2025-12-23 and re-modified on 2026-09-10, which is when it was archived; the NVD CVE is genuine.
+describe('#1805 — planSecurityPatch', () => {
+  const nvd: MonthlySecurityEntry = { title: 'CVE-2026-13745: A vulnerability in the Gemini CLI', url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-13745', source: 'nvd', severity: 'critical', service: 'Gemini', detectedAt: '2026-09-10T10:00:54.708Z' }
+  const stale: MonthlySecurityEntry = { title: 'LangChain serialization injection vulnerability enables secret extraction in dumps/loads APIs', url: 'https://github.com/langchain-ai/langchain/security/advisories/GHSA-c67j-w6g6-q2cm', source: 'osv', severity: 'critical', service: 'LangChain', detectedAt: '2026-09-10T04:01:11.527Z' }
+  const fresh: MonthlySecurityEntry = { title: 'Fresh SDK advisory', url: 'https://github.com/advisories/GHSA-aaaa-bbbb-cccc', source: 'osv', severity: 'high', service: 'Hugging Face', detectedAt: '2026-09-20T00:00:00.000Z' }
+  const chatter: MonthlySecurityEntry = { title: 'Claude leaks prompts (no CVE)', url: 'https://news.ycombinator.com/item?id=1', source: 'hackernews', detectedAt: '2026-09-12T00:00:00.000Z' }
+  const accumulated = [nvd, stale, fresh, chatter]
+  const timeline: OsvTimelineEntry[] = [{ stage: 'detected', at: '2026-09-20T00:00:00.000Z', severity: 'high' }]
+  const stored = (() => {
+    const s = summarizeSecurityAlerts([nvd, stale, fresh])
+    return { ...s, topFindings: s.topFindings.map((f) => (f.url === fresh.url ? { ...f, timeline } : f)) }
+  })()
+  const spec: SecurityRemoval = { period: '2026-09', source: 'test', remove: [{ url: stale.url, publishedAt: '2025-12-23T18:46:13Z' }] }
+
+  it('recomputes the section without the removed advisory and keeps the remaining timelines', () => {
+    const { security, refusals } = planSecurityPatch(stored, accumulated, spec)
+    expect(refusals).toEqual([])
+    expect(security).toMatchObject({ totalAlerts: 2, bySource: { osv: 1, hackernews: 0, nvd: 1 }, byService: { Gemini: 1, 'Hugging Face': 1 } })
+    expect(security?.topFindings.map((f) => f.url)).toEqual([nvd.url, fresh.url])
+    expect(security?.topFindings[1].timeline).toEqual(timeline)
+  })
+
+  it('refuses when the stored section does not reproduce from the accumulator', () => {
+    expect(planSecurityPatch({ ...stored, totalAlerts: 4 }, accumulated, spec).refusals[0]).toMatch(/does not reproduce/)
+  })
+
+  it('refuses a url that is not in the month', () => {
+    const r = planSecurityPatch(stored, accumulated, { ...spec, remove: [{ url: 'https://example.com/x', publishedAt: '2025-01-01T00:00:00Z' }] })
+    expect(r.refusals[0]).toMatch(/not in the month/)
+  })
+
+  it('refuses an entry detected within 7 days of its publication', () => {
+    const r = planSecurityPatch(stored, accumulated, { ...spec, remove: [{ url: fresh.url, publishedAt: '2026-09-15T00:00:00Z' }] })
+    expect(r.refusals[0]).toMatch(/within 7 days/)
+  })
+
+  it('returns null when nothing is left, as the builder writes for an empty month', () => {
+    const only = summarizeSecurityAlerts([stale])
+    expect(planSecurityPatch(only, [stale], spec)).toEqual({ security: null, refusals: [] })
+  })
+
+  it('every SECURITY_REMOVALS entry names a parseable date and no url twice', () => {
+    for (const r of Object.values(SECURITY_REMOVALS)) {
+      expect(r.period).toMatch(/^\d{4}-\d{2}$/)
+      expect(new Set(r.remove.map((x) => x.url)).size).toBe(r.remove.length)
+      for (const x of r.remove) expect(Number.isFinite(Date.parse(x.publishedAt))).toBe(true)
+    }
+  })
 })

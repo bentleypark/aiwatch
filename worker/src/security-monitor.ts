@@ -491,7 +491,7 @@ const NVD_RESULTS_PER_PAGE = 2000               // NVD's max page size (one page
 const NVD_MAX_PAGES = 4                          // 8000-CVE/cycle ceiling — an unreachable backstop given the 6h window
 // #1805 — the counterpart of #1696's OSV cutoff: the window above selects by lastModified, so a
 // CVE published long ago and re-modified now would be alerted and archived as new.
-const NVD_PUBLISHED_WINDOW_MS = 7 * 86400 * 1000
+export const STALE_PUBLICATION_MS = 7 * 86400 * 1000
 
 // First-party product → AIWatch service. `strong` phrases identify the product on
 // their own (multi-word, low-collision); `weak` single tokens ('grok', 'gemini',
@@ -705,7 +705,7 @@ export function nvdCveToAlert(cve: NvdCve, service: string): SecurityAlert {
 
 // Full candidate pipeline: rejected/clone/kernel filters → first-party attribution →
 // alert. Pure over the CVE list so it's exhaustively unit-testable without network.
-export function filterNvdCves(cves: NvdCve[], publishedCutoffMs = Date.now() - NVD_PUBLISHED_WINDOW_MS): SecurityAlert[] {
+export function filterNvdCves(cves: NvdCve[], publishedCutoffMs = Date.now() - STALE_PUBLICATION_MS): SecurityAlert[] {
   const alerts: SecurityAlert[] = []
   for (const cve of cves) {
     if (isRejectedCve(cve)) continue
