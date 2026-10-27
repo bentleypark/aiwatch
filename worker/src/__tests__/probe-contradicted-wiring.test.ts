@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchAllServices } from '../services'
-import { TEST_TIMEOUT_MS, mockKV, seededTracking, stubFetchFailingClaudePage, probeFixture } from './helpers/unreadable-source'
+import { TEST_TIMEOUT_MS, mockKV, seededTracking, stubFetchFailingClaudePage, stubFetchDegradedClaudePage, probeFixture } from './helpers/unreadable-source'
 
 // The WIRED half of the `probeContradicted` guard.
 //
@@ -58,5 +58,54 @@ describe('probeContradicted is set from fetchAllServices, and the floor governs 
     // surfaces got it wrong. The pair above/below is the both-directions pin on that promotion.
     expect(claude?.status).toBe('degraded')
     expect(claude?.probeContradicted).toBe(true)
+  }, TEST_TIMEOUT_MS)
+})
+
+// #1235 — `enriched` (what `/api/status` serves) swaps a `degraded` service for its cached
+// `operational` record. A `degraded` flagged `probeContradicted` must not be swapped.
+describe('#1235 — the enriched cache smoothing skips a probeContradicted degraded', () => {
+  const cachedOperational = () => ({
+    'services:latest': JSON.stringify({ services: [{ id: 'claude', name: 'Claude API', status: 'operational', incidents: [] }] }),
+  })
+
+  it('keeps degraded + probeContradicted when the cache holds operational', async () => {
+    stubFetchFailingClaudePage()
+    const kv = mockKV({ ...seededTracking(['claude']), ...cachedOperational() })
+    const failing = probeFixture([
+      { minAgo: 0, status: 0, rtt: -1 },
+      { minAgo: 5, status: 0, rtt: -1 },
+    ])
+
+    const { enriched } = await fetchAllServices(kv as unknown as KVNamespace, failing)
+    const claude = enriched.find((s) => s.id === 'claude')
+
+    expect({ status: claude?.status, sourceUnknown: claude?.sourceUnknown, probeContradicted: claude?.probeContradicted })
+      .toEqual({ status: 'degraded', sourceUnknown: true, probeContradicted: true })
+  }, TEST_TIMEOUT_MS)
+
+  it('keeps degraded + probeContradicted when a readable page reports degraded and the probe is failing', async () => {
+    stubFetchDegradedClaudePage()
+    const kv = mockKV(cachedOperational())
+    const failing = probeFixture([
+      { minAgo: 0, status: 0, rtt: -1 },
+      { minAgo: 5, status: 0, rtt: -1 },
+    ])
+
+    const { enriched } = await fetchAllServices(kv as unknown as KVNamespace, failing)
+    const claude = enriched.find((s) => s.id === 'claude')
+
+    expect({ status: claude?.status, probeContradicted: claude?.probeContradicted })
+      .toEqual({ status: 'degraded', probeContradicted: true })
+  }, TEST_TIMEOUT_MS)
+
+  it('keeps unknown + sourceUnknown for an unreadable source with no probe, when the cache holds operational', async () => {
+    stubFetchFailingClaudePage()
+    const kv = mockKV({ ...seededTracking(['claude']), ...cachedOperational() })
+
+    const { enriched } = await fetchAllServices(kv as unknown as KVNamespace)
+    const claude = enriched.find((s) => s.id === 'claude')
+
+    expect({ status: claude?.status, sourceUnknown: claude?.sourceUnknown })
+      .toEqual({ status: 'unknown', sourceUnknown: true })
   }, TEST_TIMEOUT_MS)
 })
