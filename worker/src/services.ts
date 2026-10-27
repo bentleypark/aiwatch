@@ -10,7 +10,7 @@ import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, type UptimeTimelines, type UptimeDataResult, normalizeStatus, parseIncidents, parseUptimeData, computeUptimeData, hasLazyUptimeShowcase } from './parsers/statuspage'
-import { fetchUptimeShowcase } from './uptime-showcase'
+import { readThroughUptimeShowcase } from './uptime-showcase'
 import {
   MISTRAL_FEED_KV_KEY, isStorableRootlyFeed, normalizeRootlyIncidents,
   rootlyOverallStatus, mapRootlyComponentStatus, computeRootlyUptime, attachRootlyImpact,
@@ -4609,16 +4609,16 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       // silent all over again. Measured 2026-09-11: 13 of the 19 Atlassian pages match, and no
       // incident.io page does — which is what keeps the extra subrequest off them.
       //
-      // COST, stated rather than buried: this is a THIRD serial round-trip in this page's chain, on
-      // every `/api/status` poll as well as the cron, for every page that both matches and tracks a
-      // component. 3s, not the prefetch's 5s, for the reason the in-service re-fetch below gives —
+      // COST, stated rather than buried: this is a THIRD serial round-trip in this page's chain, for
+      // every page that both matches and tracks a component; since #1489 a good read is reused
+      // from KV for `SHOWCASE_CACHE_TTL_S`. 3s, not the prefetch's 5s, for the reason the in-service re-fetch below gives —
       // the page has already been waited on twice this cycle, and the one that is slow is the one that
       // would eat the batch budget. `scope` is computed first so a lazy page on which we track nothing
       // costs no request at all.
       const pageComponents = await componentsFetch
       const scope = uptimeScopeForPage(apiUrl, pickBreakdownComponents(summary?.components, pageComponents?.ok ? pageComponents.components : undefined))
       const uptimeTimelines = (uptimeHtml && scope.length > 0 && hasLazyUptimeShowcase(uptimeHtml))
-        ? await fetchUptimeShowcase(statusUrl, scope, 3000, tracker)
+        ? await readThroughUptimeShowcase(kv, statusUrl, scope, 3000, tracker)
         : undefined
       prefetchMap.set(apiUrl, { summary, incidents, uptimeHtml, uptimeTimelines: uptimeTimelines ?? undefined, componentsFetch: await componentsFetch })
     } catch (err) {

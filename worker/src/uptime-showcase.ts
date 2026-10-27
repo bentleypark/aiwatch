@@ -27,6 +27,44 @@ export function showcaseUrl(statusUrl: string, codes: string[]): string {
   return `${statusUrl.replace(/\/$/, '')}/uptime_showcase?components=${encodeURIComponent(codes.join(','))}`
 }
 
+/** #1489 — the bars are daily, so a read is reused for this long instead of refetched on every run. */
+export const SHOWCASE_CACHE_TTL_S = 1800
+
+/** `null` when the key would exceed KV's 512-byte limit; the caller then fetches without caching. */
+export function showcaseCacheKey(statusUrl: string, codes: string[]): string | null {
+  const key = `uptime-showcase:${new URL(statusUrl).host}:${[...codes].sort().join(',')}`
+  return new TextEncoder().encode(key).length <= 512 ? key : null
+}
+
+/**
+ * #1489 — `fetchUptimeShowcase` behind a KV read-through. Only a successful read is stored, so a
+ * failure is retried on the next run. A KV read or write that fails falls back to the fetch alone.
+ */
+export async function readThroughUptimeShowcase(
+  kv: KVNamespace | undefined,
+  statusUrl: string,
+  codes: string[],
+  timeoutMs: number,
+  tracker: FetchTracker,
+): Promise<UptimeTimelines | null> {
+  const key = kv && codes.length > 0 ? showcaseCacheKey(statusUrl, codes) : null
+  if (!kv || !key) return fetchUptimeShowcase(statusUrl, codes, timeoutMs, tracker)
+  const cached = await kv.get(key).catch(() => null)
+  if (cached) {
+    try {
+      const timelines = JSON.parse(cached)
+      if (timelines && typeof timelines === 'object' && !Array.isArray(timelines)) return timelines as UptimeTimelines
+    } catch { /* refetch below */ }
+  }
+  const fresh = await fetchUptimeShowcase(statusUrl, codes, timeoutMs, tracker)
+  if (fresh) {
+    await kv.put(key, JSON.stringify(fresh), { expirationTtl: SHOWCASE_CACHE_TTL_S }).catch((err) => {
+      console.warn(`[uptime-showcase] ${statusUrl} cache write failed:`, err instanceof Error ? err.message : err)
+    })
+  }
+  return fresh
+}
+
 /**
  * Fetch one page's uptime timelines. `null` on any failure — the caller then computes no uptime for
  * that cycle, which is what a failed inline-blob page already did.
