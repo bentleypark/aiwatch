@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle, buildHNQuery, titleMatchesAiSecurity, hasSecuritySignal, isShowOrLaunchHN, isPubliclyVerifiedAlert, CVE_ID_RE, fetchHNSecurityPosts } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, appendSecurityMonthly, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle, buildHNQuery, titleMatchesAiSecurity, hasSecuritySignal, isShowOrLaunchHN, isPubliclyVerifiedAlert, CVE_ID_RE, fetchHNSecurityPosts } from '../security-monitor'
 import type { SecurityAlert, SecurityAlertMeta, OsvTimeline } from '../security-monitor'
 
 // #325: OSV_PACKAGES drives both querybatch input and the post-fetch enrichment
@@ -875,6 +875,28 @@ describe('formatSecurityDigest', () => {
     // Should not contain a service tag like [Hugging Face], but [Details]/[HN] links are expected
     expect(digest.description).not.toMatch(/\[(?!Details|HN|Source)[A-Z][a-zA-Z ]+\]/)
     expect(digest.description).toContain('GHSA-noservice')
+  })
+})
+
+describe('appendSecurityMonthly (#1809)', () => {
+  const NOW = '2026-09-10T04:01:11.527Z'
+  const alert = (url: string, title = url): SecurityAlert => ({
+    source: 'osv', id: url, title, url, severity: 'high', kvKey: `security:seen:osv:${url}`, service: 'LangChain',
+  })
+
+  it('stores a URL once when one run carries it twice', () => {
+    const url = 'https://github.com/advisories/GHSA-gr75-jv2w-4656'
+    const out = appendSecurityMonthly([], [alert(url, 'first'), alert(url, 'second'), alert('https://osv.dev/b')], NOW)
+
+    expect(out.map(e => e.url)).toEqual([url, 'https://osv.dev/b'])
+    expect(out[0].title).toBe('first')
+  })
+
+  it('does not re-add a URL already stored, and keeps the stored entry', () => {
+    const stored = { title: 'old', url: 'https://osv.dev/a', source: 'osv', detectedAt: '2026-09-01T00:00:00.000Z' }
+    const out = appendSecurityMonthly([stored], [alert('https://osv.dev/a'), alert('https://osv.dev/c')], NOW)
+
+    expect(out).toEqual([stored, expect.objectContaining({ url: 'https://osv.dev/c', detectedAt: NOW, service: 'LangChain' })])
   })
 })
 
