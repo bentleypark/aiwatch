@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import {
   isUiEdgePath, lastUiEditIndex, hasUserTurnAfter, decideCommit, CONFIRM_RE, OVERRIDE_RE, HOOK_WORK_RE, auditLine,
   HOOK_WORK_EXAMPLES, COMMIT_OVERRIDE_EXAMPLES, ADVICE,
-  readEntries,
+  readEntries, isGateConfigPath,
 } from '../.claude/hooks/step35-verify-gate.mjs'
 
 // ── fixtures matching the real transcript JSONL shape ──
@@ -204,14 +204,14 @@ test('hasUserTurnAfter — skips harness-injected user turns (command stdout / t
 // CLI regression (#657): the flag check must read the command HEAD, not the commit MESSAGE body —
 // a message that merely discusses "--no-verify" (this very commit did) must not be mistaken for it.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // Isolate the gate's audit write to a throwaway log so these CLI runs don't pollute the real
 // (gitignored) telemetry the #659 monitoring depends on.
 const TMP_AUDIT = join(mkdtempSync(join(tmpdir(), 'step35-')), 'hook-audit.jsonl')
-const runHook = (input) => {
-  try { return execFileSync('node', ['.claude/hooks/step35-verify-gate.mjs'], { input: JSON.stringify(input), encoding: 'utf8', env: { ...process.env, HOOK_AUDIT_LOG: TMP_AUDIT } }) }
+const runHook = (input, env = {}) => {
+  try { return execFileSync('node', ['.claude/hooks/step35-verify-gate.mjs'], { input: JSON.stringify(input), encoding: 'utf8', env: Object.fromEntries(Object.entries({ ...process.env, HOOK_AUDIT_LOG: TMP_AUDIT, ...env }).filter(([, v]) => v !== undefined)) }) }
   catch (e) { return e.stdout || '' }
 }
 /** Drive EVERY deny path the gate has and return each RENDERED `permissionDecisionReason`, paired with
@@ -231,10 +231,10 @@ function renderedDenies() {
   }
   const bare = transcript('bare.jsonl', [userText('아무 말')])
   const edited = transcript('edited.jsonl', [edit('src/x.jsx'), userText('아무 말')])
-  const reasonOf = (input) => JSON.parse(runHook(input)).hookSpecificOutput.permissionDecisionReason
+  const reasonOf = (input, env) => JSON.parse(runHook(input, env)).hookSpecificOutput.permissionDecisionReason
   const commit = { tool_name: 'Bash', tool_input: { command: 'git commit -m x' }, cwd: dir }
   return [
-    { label: 'self-edit', accepts: () => HOOK_WORK_RE, reason: reasonOf({ tool_name: 'Edit', tool_input: { file_path: join(dir, '.claude', 'hooks', 'x.mjs') }, transcript_path: bare }) },
+    { label: 'self-edit', accepts: () => HOOK_WORK_RE, reason: reasonOf({ tool_name: 'Edit', tool_input: { file_path: join(dir, '.claude', 'hooks', 'x.mjs') }, transcript_path: bare }, { CLAUDE_PROJECT_DIR: dir }) },
     { label: 'no-verify', accepts: () => OVERRIDE_RE, reason: reasonOf({ tool_name: 'Bash', tool_input: { command: 'git commit --no-verify -m x' }, cwd: '/tmp' }) },
     { label: 'commit:no-edit-event', accepts: () => OVERRIDE_RE, reason: reasonOf({ ...commit, transcript_path: bare }) },
     { label: 'commit:no-confirmation', accepts: () => OVERRIDE_RE, reason: reasonOf({ ...commit, transcript_path: edited }) },
@@ -477,7 +477,7 @@ test('CLI: a .claude/hooks self-edit is DENIED unauthorized and ALLOWED on state
   const target = join(dir, '.claude', 'hooks', 'review-loop-gate.mjs')
   const withTurn = (text) => {
     writeFileSync(tp, JSON.stringify({ type: 'user', isMeta: false, isSidechain: false, message: { content: text } }) + '\n')
-    return runHook({ tool_name: 'Edit', tool_input: { file_path: target }, transcript_path: tp })
+    return runHook({ tool_name: 'Edit', tool_input: { file_path: target }, transcript_path: tp }, { CLAUDE_PROJECT_DIR: dir })
   }
   // A pasted audit report authorizes nothing — including one carrying this gate's own note shape, whose
   // absolute worktree path used to read as "fix … gate" (#1150).
@@ -489,5 +489,117 @@ test('CLI: a .claude/hooks self-edit is DENIED unauthorized and ALLOWED on state
   }
   // A NON-protected path is never gated here, so the deny above is not an always-deny.
   writeFileSync(tp, JSON.stringify({ type: 'user', isMeta: false, message: { content: 'hi' } }) + '\n')
-  assert.equal(runHook({ tool_name: 'Edit', tool_input: { file_path: join(dir, 'src', 'x.jsx') }, transcript_path: tp }).trim(), '')
+  assert.equal(runHook({ tool_name: 'Edit', tool_input: { file_path: join(dir, 'src', 'x.jsx') }, transcript_path: tp }, { CLAUDE_PROJECT_DIR: dir }).trim(), '')
+})
+
+test('isGateConfigPath — only THIS project\'s .claude/hooks + settings, resolved against cwd (#1721)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'step35-root-'))
+  const other = mkdtempSync(join(tmpdir(), 'step35-other-'))
+  const roots = [root]
+  assert.equal(isGateConfigPath(join(root, '.claude', 'hooks', 'step35-verify-gate.mjs'), root, roots), true)
+  assert.equal(isGateConfigPath(join(root, '.claude', 'settings.json'), root, roots), true)
+  assert.equal(isGateConfigPath(join(root, '.claude', 'settings.local.json'), root, roots), true)
+  // another repo's hooks cannot weaken this gate
+  assert.equal(isGateConfigPath(join(other, '.claude', 'hooks', 'tooling-trigger.sh'), root, roots), false)
+  assert.equal(isGateConfigPath(join(other, '.claude', 'settings.json'), root, roots), false)
+  // relative paths resolve against cwd — the same `.claude/hooks/x` is in or out depending on where cwd is
+  assert.equal(isGateConfigPath('.claude/hooks/x.sh', root, roots), true)
+  assert.equal(isGateConfigPath('.claude/hooks/x.sh', other, roots), false)
+  assert.equal(isGateConfigPath('../elsewhere/../.claude/hooks/x.sh', join(root, 'src'), roots), true)
+  // `..` cannot walk back out of the other repo into this one's gate, nor out of this one into a sibling
+  assert.equal(isGateConfigPath(join(root, 'src', '..', '.claude', 'hooks', 'x.sh'), other, roots), true)
+  assert.equal(isGateConfigPath(join(root, '..', 'sibling', '.claude', 'hooks', 'x.sh'), root, roots), false)
+  // a symlinked route to this project's hooks is the same directory
+  symlinkSync(root, join(other, 'alias'))
+  assert.equal(isGateConfigPath(join(other, 'alias', '.claude', 'hooks', 'x.sh'), other, roots), true)
+  // the project's other files, a name that only starts like settings.json, and an empty path are not the gate
+  assert.equal(isGateConfigPath(join(root, 'src', 'x.jsx'), root, roots), false)
+  assert.equal(isGateConfigPath(join(root, '.claude', 'settings.jsonc'), root, roots), false)
+  assert.equal(isGateConfigPath(join(root, 'nested', '.claude', 'hooks', 'x.sh'), root, roots), false)
+  assert.equal(isGateConfigPath('', root, roots), false)
+})
+
+test('CLI: a hook under ANOTHER repo is not denied; one under CLAUDE_PROJECT_DIR is (#1721)', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'step35-proj-'))
+  const other = mkdtempSync(join(tmpdir(), 'step35-copilot-'))
+  const bare = join(proj, 't.jsonl')
+  writeFileSync(bare, JSON.stringify({ type: 'user', isMeta: false, message: { content: '아무 말' } }) + '\n')
+  const edit = (file_path, cwd) => runHook({ tool_name: 'Write', tool_input: { file_path }, cwd, transcript_path: bare }, { CLAUDE_PROJECT_DIR: proj })
+  assert.equal(edit(join(other, '.claude', 'hooks', 'main-commit-guard.sh'), proj).trim(), '')
+  assert.match(edit(join(proj, '.claude', 'hooks', 'main-commit-guard.sh'), proj), /"permissionDecision":"deny"/)
+  assert.match(edit('.claude/settings.local.json', proj), /"permissionDecision":"deny"/)
+  assert.equal(edit('.claude/settings.local.json', other).trim(), '')
+})
+
+test('isGateConfigPath — a root listed for another worktree of this repo, and a letter-case variant, are the gate (#1721)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'step35-wt-'))
+  const wt = join(root, '.claude', 'worktrees', 'fix-x')
+  mkdirSync(join(wt, '.claude', 'hooks'), { recursive: true })
+  // as the CLI computes them: the project root plus every `git worktree list` entry
+  const roots = [root, wt]
+  assert.equal(isGateConfigPath(join(wt, '.claude', 'hooks', 'step35-verify-gate.mjs'), root, roots), true)
+  assert.equal(isGateConfigPath(join(wt, '.claude', 'settings.json'), root, roots), true)
+  assert.equal(isGateConfigPath(join(wt, '.claude', 'hooks', 'x.sh'), root, [root]), false) // the root list is what carries it
+  // a macOS/Windows volume lets the caller vary letter case; the same directory must stay the gate
+  if (process.platform === 'darwin' || process.platform === 'win32') {
+    assert.equal(isGateConfigPath(join(root.toUpperCase(), '.claude', 'hooks', 'x.sh'), root, roots), true)
+    assert.equal(isGateConfigPath(join(root, '.CLAUDE', 'HOOKS', 'x.sh'), root, roots), true)
+    assert.equal(isGateConfigPath(join(root, '.claude', 'Settings.JSON'), root, roots), true)
+  }
+})
+
+test('CLI: a worktree of this repo is the gate; no CLAUDE_PROJECT_DIR and no cwd still denies; a malformed cwd denies (#1721)', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'step35-wtcli-'))
+  const g = (...a) => execFileSync('git', ['-C', proj, ...a], { stdio: 'ignore' })
+  g('init', '-q'); g('-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'i')
+  const wt = join(proj, '.claude', 'worktrees', 'probe')
+  g('worktree', 'add', '-q', wt, '-b', 'probe')
+  const tp = join(proj, 't.jsonl')
+  writeFileSync(tp, JSON.stringify({ type: 'user', isMeta: false, message: { content: '아무 말' } }) + '\n')
+  const run = (file_path, cwd, env) => runHook({ tool_name: 'Edit', tool_input: { file_path }, ...(cwd === undefined ? {} : { cwd }), transcript_path: tp }, env)
+  const denied = /"permissionDecision":"deny"/
+  assert.match(run(join(wt, '.claude', 'hooks', 'step35-verify-gate.mjs'), proj, { CLAUDE_PROJECT_DIR: proj }), denied)
+  // env unset and cwd absent: the hook's own checkout (this repo) is the root, and a relative path resolves against the process cwd
+  assert.match(run('.claude/hooks/step35-verify-gate.mjs', undefined, { CLAUDE_PROJECT_DIR: undefined }), denied)
+  // ...and without a cwd a relative path that is NOT the gate is still allowed, so the fallback is what carries the case above
+  assert.equal(run('src/x.jsx', undefined, { CLAUDE_PROJECT_DIR: undefined }).trim(), '')
+  // a cwd that is not a string cannot be resolved: treat it as the gate rather than let the exception allow the edit
+  assert.match(run('.claude/hooks/x.sh', 42, { CLAUDE_PROJECT_DIR: proj }), denied)
+})
+
+test('CLI: the user-scope ~/.claude settings and hooks are the gate (they can disable every project hook) (#1721)', () => {
+  const home = mkdtempSync(join(tmpdir(), 'step35-home-'))
+  const tp = join(home, 't.jsonl')
+  writeFileSync(tp, JSON.stringify({ type: 'user', isMeta: false, message: { content: '아무 말' } }) + '\n')
+  const run = (file_path) => runHook({ tool_name: 'Write', tool_input: { file_path }, cwd: home, transcript_path: tp }, { HOME: home, CLAUDE_PROJECT_DIR: mkdtempSync(join(tmpdir(), 'step35-elsewhere-')) })
+  assert.match(run(join(home, '.claude', 'settings.json')), /"permissionDecision":"deny"/)
+  assert.match(run(join(home, '.claude', 'hooks', 'x.sh')), /"permissionDecision":"deny"/)
+  assert.equal(run(join(home, '.claude', 'projects', 'p', 'memory', 'MEMORY.md')).trim(), '')
+  assert.equal(run(join(home, 'Desktop', 'aiwatch-copilot', '.claude', 'hooks', 'x.sh')).trim(), '')
+})
+
+test('isGateConfigPath — a gate file that is itself a symlink is still the gate (#1721)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'step35-link-'))
+  const dotfiles = mkdtempSync(join(tmpdir(), 'step35-dotfiles-'))
+  mkdirSync(join(root, '.claude', 'hooks'), { recursive: true })
+  writeFileSync(join(dotfiles, 's.json'), '{}')
+  writeFileSync(join(dotfiles, 'h.sh'), '')
+  symlinkSync(join(dotfiles, 's.json'), join(root, '.claude', 'settings.local.json'))
+  symlinkSync(join(dotfiles, 'h.sh'), join(root, '.claude', 'hooks', 'h.sh'))
+  assert.equal(isGateConfigPath(join(root, '.claude', 'settings.local.json'), root, [root]), true)
+  assert.equal(isGateConfigPath(join(root, '.claude', 'hooks', 'h.sh'), root, [root]), true)
+})
+
+test('isGateConfigPath — a symlinked .claude or .claude/hooks DIRECTORY is still the gate (#1721)', () => {
+  const home = mkdtempSync(join(tmpdir(), 'step35-dirlink-'))
+  const dotfiles = mkdtempSync(join(tmpdir(), 'step35-dotdir-'))
+  mkdirSync(join(dotfiles, 'hooks'))
+  symlinkSync(dotfiles, join(home, '.claude'))
+  assert.equal(isGateConfigPath(join(home, '.claude', 'settings.json'), home, [home]), true)
+  assert.equal(isGateConfigPath(join(home, '.claude', 'hooks', 'new.sh'), home, [home]), true)
+  const proj = mkdtempSync(join(tmpdir(), 'step35-hooklink-'))
+  const shared = mkdtempSync(join(tmpdir(), 'step35-shared-'))
+  mkdirSync(join(proj, '.claude'))
+  symlinkSync(shared, join(proj, '.claude', 'hooks'))
+  assert.equal(isGateConfigPath(join(proj, '.claude', 'hooks', 'gate.mjs'), proj, [proj]), true)
 })
