@@ -9,10 +9,8 @@ import { TEST_TIMEOUT_MS, HEALTHY_SUMMARY, mockKV, seededTracking, decayedTracki
 //   failure alone.
 //
 // Asserted on `raw` — what `CACHE_KEY` (is-down, badge, statusline) is written from. `/api/status`
-// serves `enriched`, where a pre-existing one-poll cache smoothing can substitute a cached operational
-// record (#1235). Since #1233 that smoothing keys on `degraded`, so an unreadable source no longer
-// enters it — but a probe-CORROBORATED one still does, because the cross-validation promotes it to
-// `degraded` before the smoothing runs. #1235 is unchanged by this file either way; it pins `raw`.
+// serves `enriched`, whose one-poll cache smoothing skips a service flagged `probeContradicted` (#1235); that is pinned
+// in `probe-contradicted-wiring.test.ts`.
 //
 // Part 1: `trackFetchFailure`'s count decays 30 min after the crossing that froze its timestamp, so a
 // still-unreadable source re-published `operational` in a loop.

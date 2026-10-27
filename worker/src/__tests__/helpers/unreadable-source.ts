@@ -95,6 +95,20 @@ export function stubFetch5xxClaudePage() {
   }))
 }
 
+/** The Anthropic status page is READABLE and reports the Claude API component degraded, naming no
+ *  incident — every other URL answers `HEALTHY_SUMMARY`. */
+export function stubFetchDegradedClaudePage() {
+  const degraded = {
+    ...HEALTHY_SUMMARY,
+    components: [{ id: 'k8w3r06qmzrp', name: 'Claude API', status: 'degraded_performance' }],
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const body = url.includes('status.claude.com') ? degraded : HEALTHY_SUMMARY
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }))
+}
+
 // Timestamps are built INSIDE each test, so a sample's age cannot depend on collection order or on
 // how long the suite ran before reaching this file. (Reviewers saw intermittent reds here during a
 // session in which other agents were mutating this tree; that is NOT established as the cause, and

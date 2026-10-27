@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchAllServices } from '../services'
-import { TEST_TIMEOUT_MS, mockKV, seededTracking, stubFetchFailingClaudePage, probeFixture } from './helpers/unreadable-source'
+import { TEST_TIMEOUT_MS, mockKV, seededTracking, stubFetchFailingClaudePage, stubFetchDegradedClaudePage, probeFixture } from './helpers/unreadable-source'
 
 // #1633 — `latency` reaches /api/v1/status and services:latest straight from
 // fetchAllServices' `raw`, so it is asserted there, on the real entry point.
@@ -29,16 +29,12 @@ describe('fetchAllServices publishes probe RTT as latency, and nothing for an un
   }, TEST_TIMEOUT_MS)
 
   it('the enriched cache fallback carries the fresh latency, not the cached snapshot\'s', async () => {
-    stubFetchFailingClaudePage()
+    stubFetchDegradedClaudePage()
     // 412 = a status-page fetch time held by a services:latest snapshot written before #1633.
     const cached = { services: [{ id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', status: 'operational', latency: 412, uptime30d: 99.9, lastChecked: new Date().toISOString(), incidents: [] }] }
-    const kv = mockKV({ ...seededTracking(['claude']), 'services:latest': JSON.stringify(cached) })
-    const failing = probeFixture([
-      { minAgo: 5, status: 0, rtt: -1 },
-      { minAgo: 0, status: 0, rtt: -1 },
-    ])
+    const kv = mockKV({ 'services:latest': JSON.stringify(cached) })
 
-    const { raw, enriched } = await fetchAllServices(kv as unknown as KVNamespace, failing)
+    const { raw, enriched } = await fetchAllServices(kv as unknown as KVNamespace)
 
     // The premise: a fresh `degraded` over a cached `operational` is what takes the fallback branch.
     expect(raw.find((s) => s.id === 'claude')?.status).toBe('degraded')

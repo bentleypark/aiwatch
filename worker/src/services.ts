@@ -4772,15 +4772,14 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
           // Daily suppression counter — see recordProbeSuppression() docstring.
           if (kv) await recordProbeSuppression(kv, svc.id, date)
         } else if (isProbeFailing(probeSnapshots, svc.id)) {
-          // #1004 — the probe INDEPENDENTLY corroborates the outage: the status page is unreadable AND
-          // our direct call to the service is failing. A neutral "we can't read the source" badge would
-          // be a false reassurance here — this outage is backed by evidence.
+          // #1004 — the probe INDEPENDENTLY corroborates the outage: our direct call to the service is
+          // failing. A neutral "we can't read the source" badge would be a false reassurance here — this
+          // outage is backed by evidence.
           //
           // #1233 — that promotion now happens HERE, in the value itself, instead of being published as
           // `unknown` + a flag for each surface to correct. `probeContradicted` used to be the correction
           // token, and three surfaces never applied it. The worker holds the probe data and already runs
-          // this pass, so it is the one place that can resolve the question once; the flag survives only
-          // as provenance (why this is `degraded` despite an unreadable source), read by no verdict.
+          // this pass, so it is the one place that can resolve the question once.
           svc.status = 'degraded'
           svc.probeContradicted = true
         } else if (svc.id in (probeSnapshots[probeSnapshots.length - 1]?.data ?? {})) {
@@ -4842,11 +4841,9 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // `prev` wholesale, which also dropped its `sourceUnknown` flag for that poll (#1235). Routing the
   // unreadable case to its own value takes it out of the branch rather than adding a guard to it.
   //
-  // NOT a claim that #1235 is closed: a probe-CORROBORATED unreadable source is promoted to `degraded`
-  // by the cross-validation above, before this runs, so that case still enters the branch and still
-  // loses `probeContradicted` with the rest of the record. That is #1235's scope, unchanged here.
+  // #1235 — a `degraded` flagged `probeContradicted` by the cross-validation above is not smoothed.
   const enriched: ServiceStatus[] = raw.map((svc) => {
-    if (svc.status === 'degraded' && cachedServices) {
+    if (svc.status === 'degraded' && !svc.probeContradicted && cachedServices) {
       const prev = cachedServices.find((s) => s.id === svc.id)
       if (prev && prev.status === 'operational') {
         return { ...prev, latency: svc.latency, lastChecked: svc.lastChecked }

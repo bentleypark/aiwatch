@@ -329,16 +329,9 @@ export interface ServiceStatus {
    *  (a deleted Statuspage answers `302 → 200 text/html`, not `4xx`) produced the same probe-backed
    *  green with nothing recording that the probe is what backed it. */
   probeConfirmed?: boolean
-  /** #1004 — set when an unreadable-source verdict is CORROBORATED by our own probe (the service is
-   *  probed, and the probe is not healthy). Distinct from `probeConfirmed` (an unreadable source + a
-   *  HEALTHY probe). Set by the cross-validation in `fetchAllServices`.
-   *
-   *  #1233 — PROVENANCE ONLY. It used to be the correction token: the value on the wire was `degraded`
-   *  either way, and each surface had to read this flag to tell a real outage from an unreadable source
-   *  — which is exactly what several surfaces never did. The cross-validation now resolves the question
-   *  into `status` itself (a corroborating probe publishes `degraded`, an uncorroborated one `unknown`),
-   *  so no verdict reads this field; it records WHY the status is `degraded` despite an unreadable
-   *  source. */
+  /** #1004 — set when the cross-validation in `fetchAllServices` finds our own probe failing for a
+   *  service it re-checks (`isReadSuspect`). Distinct from `probeConfirmed` (an unreadable source + a
+   *  HEALTHY probe). */
   probeContradicted?: boolean
 }
 
