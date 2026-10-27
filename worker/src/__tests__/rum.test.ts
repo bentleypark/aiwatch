@@ -69,6 +69,10 @@ describe('#1686 evaluateRum — 4 of the last 5', () => {
     expect(evaluateRum(Array.from({ length: 5 }, () => ok(RUM_SLOW_MS))).kind).toBe('slow')
     expect(evaluateRum(Array.from({ length: 5 }, () => ok(RUM_SLOW_MS - 1))).kind).toBe('healthy')
   })
+  it('#1686 — T is 12 s: a batch of 11 s polls is healthy, 12 s polls are slow', () => {
+    expect(evaluateRum(Array.from({ length: 5 }, () => ok(11_000))).kind).toBe('healthy')
+    expect(evaluateRum(Array.from({ length: 5 }, () => ok(12_000))).kind).toBe('slow')
+  })
   it('a timeout counts as slow whatever its elapsed time', () => {
     const t: RumSample = { totalMs: 100, serverMs: null, outcome: 'timeout' }
     expect(evaluateRum([t, t, t, t, ok(100)]).kind).toBe('slow')

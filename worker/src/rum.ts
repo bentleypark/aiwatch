@@ -11,8 +11,8 @@ import { ALERT_TTL_S, readInfraContext } from './infra-status'
 export const RUM_INDEX = 'rum-api'
 export const RUM_WINDOW = 5
 export const RUM_MIN_SLOW = 4
-/** Provisional threshold T. #1686 sets it from a week of real samples. */
-export const RUM_SLOW_MS = 10_000
+/** Threshold T, set in #1686 from the 2026-10-20 to 10-26 samples. */
+export const RUM_SLOW_MS = 12_000
 /** A slow poll whose worker time is under this spent its time outside the worker. */
 export const RUM_WORKER_SLOW_MS = 1_000
 
