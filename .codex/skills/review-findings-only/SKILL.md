@@ -41,6 +41,18 @@ test only there; never mutate the reviewed worktree. If the reviewed tree change
 that condition instead of mixing revisions. If citing a docblock, memory page, issue, PR, or comment as
 support, read it and quote the sentence relied on.
 
+## Two checks a top-to-bottom read of the diff does not do
+
+1. **Weakened verification.** Read the test and CI changes before the source changes, and look for a deleted
+   or skipped test, an assertion edited to match broken behaviour, a lowered threshold, a command forced to
+   succeed.
+2. **Omissions.** For each piece of state the diff introduces or touches (a KV key, a marker, a flag, a
+   cache entry, a tombstone), name where it is set, where it is cleared, and which exit (success, error,
+   timeout, a later unrelated run) leaves it set. For each reader of that state, say what it does when the
+   state is absent or stale.
+
+Both go through the same 80 floor and the four-item shape above.
+
 ## Input and report shape
 
 The caller supplies the review round, prior-round findings and fixes, and the running Critical/Important

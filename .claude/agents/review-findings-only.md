@@ -34,6 +34,18 @@ Rate every issue 0-100 and **report only ≥ 80**:
 
 Filter aggressively. A short report of defects that survive scrutiny is worth more than a long one.
 
+## Two checks a top-to-bottom read of the diff does not do
+
+1. **Weakened verification.** Read the test and CI changes before the source changes, and look for a deleted
+   or skipped test, an assertion edited to match broken behaviour, a lowered threshold, a command forced to
+   succeed.
+2. **Omissions.** For each piece of state the diff introduces or touches (a KV key, a marker, a flag, a
+   cache entry, a tombstone), name where it is set, where it is cleared, and which exit (success, error,
+   timeout, a later unrelated run) leaves it set. For each reader of that state, say what it does when the
+   state is absent or stale.
+
+Both go through the same confidence floor and the four-item shape below.
+
 ## Every finding must carry these four things
 
 1. **A locator.** `file:line` when the target is a file. When it is not — an issue body, a PR body, a
