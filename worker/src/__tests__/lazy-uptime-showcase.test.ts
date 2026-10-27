@@ -19,7 +19,7 @@ import {
   hasLazyUptimeShowcase,
   parseUptimeShowcase,
 } from '../parsers/statuspage'
-import { fetchUptimeShowcase, showcaseUrl } from '../uptime-showcase'
+import { fetchUptimeShowcase, showcaseUrl, SHOWCASE_CACHE_TTL_S } from '../uptime-showcase'
 import { createFetchTracker } from '../utils'
 import { fetchAllServices, uptimeScopeForPage, uptimeScopeOf, SERVICES } from '../services'
 import { TEST_TIMEOUT_MS, mockKV } from './helpers/unreadable-source'
@@ -201,13 +201,14 @@ describe('fetchAllServices publishes uptime from the showcase (the wiring)', () 
   const today = () => new Date().toISOString().split('T')[0]
 
   /** Runs one cycle against the post-rollout Anthropic page, capturing showcase URLs and the warn. */
-  async function run(showcase: (url: string) => Response) {
+  async function run(showcase: (url: string) => Response, kv = mockKV()) {
     const seen: string[] = []
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     stubLazyClaudePage((url) => { seen.push(url); return showcase(url) })
-    const { raw } = await fetchAllServices(mockKV() as unknown as KVNamespace, [])
+    const { raw } = await fetchAllServices(kv as unknown as KVNamespace, [])
     return {
       claude: raw.find((s) => s.id === 'claude'),
+      kv,
       seen,
       lazyWarns: warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('lazy uptime placeholders')),
     }
@@ -232,6 +233,20 @@ describe('fetchAllServices publishes uptime from the showcase (the wiring)', () 
     }
     expect(lazyWarns, 'a healthy cycle is silent').toEqual([])
   }, TEST_TIMEOUT_MS)
+
+  it('#1489 — a cached showcase read is reused: no request, same uptime', async () => {
+    const first = await run(() => showcaseResponse(today()))
+    const keys = Object.keys(first.kv.store).filter((k) => k.startsWith('uptime-showcase:'))
+    expect(keys, 'the good read is stored once for the page').toHaveLength(1)
+    expect((first.kv.put.mock.calls as unknown[][]).find((c) => c[0] === keys[0])?.[2]).toEqual({ expirationTtl: SHOWCASE_CACHE_TTL_S })
+
+    vi.unstubAllGlobals(); vi.restoreAllMocks()
+    const second = await run(() => new Response('Not Found', { status: 404 }), mockKV({ [keys[0]]: first.kv.store[keys[0]] }))
+    expect(second.seen, 'the cached page is not asked again').toEqual([])
+    expect(second.claude?.uptime30d).toBe(FIXTURE_UPTIME_30D)
+    expect(second.claude?.uptimeReported).toBe(FIXTURE_UPTIME_90D)
+    expect(second.lazyWarns).toEqual([])
+  }, TEST_TIMEOUT_MS * 2)
 
   it('leaves uptime NULL — never invented — when the showcase cannot be read, and says so', async () => {
     // The other direction, and what makes the case above load-bearing: delete the production showcase
