@@ -341,6 +341,13 @@ export function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+/** #1531 Part 6 — a CDN `stale-if-error` copy keeps its render-time label, so the page re-ages it on load. */
+export function lastCheckedTime(iso: string): string {
+  return `<time class="last-checked" datetime="${esc(iso)}">${esc(timeAgo(iso))}</time>`
+}
+
+export const LAST_CHECKED_CLIENT_JS = `document.addEventListener('DOMContentLoaded',function(){var t=document.querySelectorAll('time.last-checked[datetime]');for(var i=0;i<t.length;i++){var ms=new Date(t[i].getAttribute('datetime')).getTime();if(isNaN(ms))continue;var m=Math.floor((Date.now()-ms)/60000),h=Math.floor(m/60);t[i].textContent=m<1?'just now':m<60?m+'m ago':h<24?h+'h ago':Math.floor(h/24)+'d ago'}});`
+
 /** #1292 — `dayOnly` drops the time of day and `derivedDay` supplies the date. A `status_history`-
  *  derived incident is reconstructed from a per-DAY downtime-seconds bucket, so its `startedAt` is our
  *  anchor inside that day, not the provider's instant. Every other incident's timestamp is
@@ -686,6 +693,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 .share-copy.copied{background:#1a3d22;border-color:#3fb950;color:#3fb950}
 @media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}.incident-group>summary{flex-direction:column;align-items:flex-start;gap:2px}.incident-group-title{flex:none}.incident-group-meta{white-space:normal}.fallback-item{gap:10px}}
 </style>
+<script>${LAST_CHECKED_CLIENT_JS}</script>
 </head>
 <body>
 <div class="container">
@@ -1161,7 +1169,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   // which is NOT the same as a measurement (#1268): depending on which writer set the flag the badge may
   // be a live feed, a probe override, or an unmeasured default, and this file cannot tell them apart.
   const stale = !!service.incidentSourceStale
-  const metaParts = [`Last checked: ${esc(timeAgo(service.lastChecked))}`]
+  const metaParts = [`Last checked: ${lastCheckedTime(service.lastChecked)}`]
   if (hasUptime && !stale) metaParts.push(`Uptime: ${service.uptime30d!.toFixed(2)}%`)
   if (service.aiwatchScore != null && !stale) metaParts.push(`AIWatch Score: ${service.aiwatchScore}${esc(gradeStr)}`)
   const incidents = Array.isArray(service.incidents) ? service.incidents : []

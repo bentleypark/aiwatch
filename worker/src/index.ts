@@ -2440,7 +2440,7 @@ interface EdgeFallbackRequest {
   reason?: string   // short reason string ('worker_unreachable', 'parse_error', etc.)
 }
 
-export async function handleEdgeFallbackAlert(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+export async function handleEdgeFallbackAlert(request: Request, env: Env, cors: Record<string, string>, ctx: Pick<ExecutionContext, 'waitUntil'>): Promise<Response> {
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
@@ -2460,27 +2460,25 @@ export async function handleEdgeFallbackAlert(request: Request, env: Env, cors: 
   if (!surface || !slug) return json(400, { ok: false, error: 'surface and slug required' })
 
   const dedupKey = `${EDGE_FALLBACK_ALERT_KEY_PREFIX}${surface}:${slug}`
-  const existing = await env.STATUS_CACHE.get(dedupKey).catch(() => null)
-  if (existing) return json(200, { ok: true, deduped: true })
-
-  if (!env.DISCORD_WEBHOOK_URL) {
-    // Skip dispatch but still write the dedup marker so the next call doesn't
-    // recheck immediately — keeps behavior consistent regardless of whether
-    // the operator has configured a webhook URL.
+  // #1531 — the Edge aborts this request after ALERT_TIMEOUT_MS, which cancels anything still
+  // awaited here. Everything after validation — the dedup read, the marker and the send with its
+  // send-log record — therefore runs under waitUntil, the marker before the send.
+  const webhookUrl = env.DISCORD_WEBHOOK_URL
+  ctx.waitUntil((async () => {
+    const existing = await env.STATUS_CACHE.get(dedupKey).catch(() => null)
+    if (existing) return
+    // The marker is written even with no webhook configured, so the next call does not recheck
+    // immediately, and even if the send then fails, so a misconfigured webhook is not retried.
     await env.STATUS_CACHE.put(dedupKey, '1', { expirationTtl: EDGE_FALLBACK_ALERT_TTL_S }).catch(() => undefined)
-    return json(200, { ok: true, dispatched: false, reason: 'webhook_not_configured' })
-  }
+    if (!webhookUrl) return
+    await sendDiscordAlert(webhookUrl, {
+      title: `:warning: Edge SSR fallback: ${surface}/${slug}`,
+      description: `Vercel Edge rendered the degraded "Status data is temporarily unavailable" page because the upstream Worker fetch failed.${surface === 'is-down' ? ' Visitors may still have received the CDN\'s last good copy (\`stale-if-error\`, #1531).' : ''}\n\n**Reason**: \`${reason}\`\n**Surface**: \`${surface}\`\n**Slug**: \`${slug}\`\n\nThe Edge response is now \`Cache-Control: no-store\` (#378) so subsequent requests retry instead of serving stale failure. If this fires repeatedly, check Worker logs and KV health.`,
+      color: 0xf0883e,
+    })
+  })())
 
-  const dispatched = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-    title: `:warning: Edge SSR fallback: ${surface}/${slug}`,
-    description: `Vercel Edge served the degraded "Status data is temporarily unavailable" render because the upstream Worker fetch failed.\n\n**Reason**: \`${reason}\`\n**Surface**: \`${surface}\`\n**Slug**: \`${slug}\`\n\nThe Edge response is now \`Cache-Control: no-store\` (#378) so subsequent requests retry instead of serving stale failure. If this fires repeatedly, check Worker logs and KV health.`,
-    color: 0xf0883e,
-  })
-  // Write the dedup marker even if Discord delivery failed — otherwise a
-  // misconfigured webhook produces a thundering herd of retry attempts.
-  await env.STATUS_CACHE.put(dedupKey, '1', { expirationTtl: EDGE_FALLBACK_ALERT_TTL_S }).catch(() => undefined)
-
-  return json(200, { ok: true, dispatched })
+  return json(200, { ok: true, queued: true })
 }
 
 // ── POST /api/internal/deepseek-feed ───────────────────────────
@@ -5089,7 +5087,7 @@ const workerExport = {
     // degraded fallback render so the operator gets a Discord alert (#378). KV
     // dedup ensures one notice per 5min per surface+slug.
     if (request.method === 'POST' && url.pathname === '/api/internal/edge-fallback') {
-      return handleEdgeFallbackAlert(request, env, cors)
+      return handleEdgeFallbackAlert(request, env, cors, ctx)
     }
 
     // POST /api/internal/deepseek-feed — GitHub Action scraper pushes the browser-rendered
