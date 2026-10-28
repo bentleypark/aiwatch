@@ -1231,7 +1231,7 @@ ${'' /* #857 — this meta line always renders. When the service is ranked it le
    when it's unranked (score withheld during a new service's coverage/confidence ramp, e.g. turbopuffer)
    it leads with a monthly-report context sentence instead of the rank — so the reports pointer keeps a
    real lead-in rather than a bare link, without adding the (info-dense, #802-declined) "not yet ranked" note.
-   #1186 — `totalRanked` is now the target's own confidence-tier count (is-down.ts filters `scored` to
+   #1186 — `totalRanked` is now the target's own confidence-tier count (worker status-view.ts rankInTier filters `scored` to
    `s.scoreConfidence === target.scoreConfidence`), never a combined high+medium count — so a medium-
    confidence service's "#N of M" must say what M actually counts, or a small M (e.g. "of 4") reads as an
    unexplained shrink for a reader who just saw a much larger number on the dashboard's high table. */}

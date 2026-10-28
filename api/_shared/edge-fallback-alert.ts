@@ -62,7 +62,7 @@ function readEnv(name: string): string | undefined {
 }
 
 /** Per-isolate, so a large outage producing many fallback renders logs once per isolate rather than
- *  once per request. Mirrors the `warnedExcludedSlugs` / `warnedMissingSlugs` pattern already used in
+ *  once per request. Mirrors the `warnedMissingSlugs` pattern already used in
  *  `api/is-down.ts`: re-fires on cold start and across the fleet, which is enough visibility without
  *  log volume scaling with request rate.
  *

@@ -1,5 +1,5 @@
 // Shared reliability predicates for a service's score/uptime data (#591). Centralized so every
-// surface (Ranking, Uptime, Overview, Sidebar, ServiceDetails; mirrored in api/is-down.ts) makes the
+// surface (Ranking, Uptime, Overview, Sidebar, ServiceDetails) makes the
 // SAME include/exclude decision — the #591 bug was three surfaces drifting from the original copy.
 //
 // Two distinct "no reliable uptime" cases:
@@ -37,7 +37,7 @@ export const hasSufficientCoverage = (s) => s.coverageDays == null || s.coverage
  *  `low` (NEITHER uptime nor probe — e.g. Azure OpenAI, scored on only 2 components → over-scores
  *  under the rescale). A `low` service is shown on its detail page but kept OUT of the ranking. #802 —
  *  ALSO requires ≥30d of coverage (a recently-added service is shown on its detail page but kept out of
- *  the ranking until it accrues a full window). Mirror of api/is-down.ts:hasReliableData. */
+ *  the ranking until it accrues a full window). Mirror of worker/src/status-view.ts rankInTier. */
 export const hasReliableScoreData = (s) =>
   !s.incidentSourceStale && s.scoreConfidence !== 'low' && hasSufficientCoverage(s)
 

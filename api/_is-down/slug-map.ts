@@ -1,9 +1,8 @@
 // URL slug ↔ Worker service ID mapping
 // Bedrock + Azure OpenAI excluded — estimate-only sources with no differentiated data (#263).
 //
-// `category` is the COARSE 3-way (api/app/agent) mirroring worker ServiceStatus.category — the
-// is-down fallback filter (api/is-down.ts) matches it against the worker's value, so it must stay
-// in that vocabulary. `group` is the FINE 6-way display taxonomy (#658) mirroring the dashboard
+// `category` is the COARSE 3-way (api/app/agent) mirroring worker ServiceStatus.category.
+// `group` is the FINE 6-way display taxonomy (#658) mirroring the dashboard
 // SERVICE_CATEGORIES (apps/llm/voice/inference/video/agents); it drives only the footer "Also
 // check" grouping (renderFooter / FOOTER_CATEGORY_ORDER).
 export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provider: string; category: string; group: string }> = {

@@ -4,17 +4,12 @@ import { SLUG_TO_SERVICE } from './_is-down/slug-map'
 import { getSEOContent } from './_is-down/seo-content'
 import { renderPage } from './_is-down/html-template'
 import type { RecoveryBaseline } from '../worker/src/recovery-baseline-text'
-import { substituteGroupsFor, pickSubstitutes } from './_shared/substitutes'
-import {
-  EXCLUDE_FALLBACK, ROUTE_SUPPRESS, CAPABILITY_LABEL, tierFor, isSpecializedSubTier, sharesCapability,
-  isCapabilityProvider, meetsRequiredCapability, routingTier, routedCapability, capabilityTagsOf, orderForFallback,
-} from '../worker/src/fallback'
+import { EXCLUDE_FALLBACK } from '../worker/src/fallback'
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { isDownCacheControl } from './_shared/is-down-cache'
 import { resolveWorkerApi } from './_shared/worker-api'
-import { computeRankPosition } from './_is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
 import { buildSupplyChainNote, type SupplyChainBannerLike, type SupplyChainNote } from './_is-down/supply-chain-note'
 import { buildUpstreamNote, type UpstreamLinkLike, type UpstreamNote } from './_is-down/upstream-note'
@@ -36,9 +31,7 @@ const workerApi = resolveWorkerApi(WORKER_API)
 // Per-isolate dedup for repeated ops signals — re-fires on cold start / per isolate in
 // the fleet, which gives operators enough visibility on deploy without log-volume
 // scaling with request rate.
-const warnedExcludedSlugs = new Set<string>()       // target passed isFinite but failed hasReliableData
 const warnedMissingSlugs = new Set<string>()        // SLUG_TO_SERVICE id not present in API response
-const warnedDroppedScoreKeys = new Set<string>()    // services with non-finite aiwatchScore in API response
 
 export default async function handler(req: Request) {
   try {
@@ -79,6 +72,7 @@ export default async function handler(req: Request) {
     let fallbackCapabilityLabel: string | undefined
     // #1753 — a listed service's substitutes, one entry per use (the card's subheadings).
     let fallbackGroups: Array<{ use: string; items: typeof fallbacks }> | undefined
+    let viewMissing = false
     let aiInsight: { summary: string; progress?: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null = null
     // #926 — the worker returns ONE analysis per active incident (aiAnalysis: Record<svcId, AIAnalysisResult[]>).
     // Keep the FULL array for the visible AI Analysis card (parity with the dashboard AnalysisModal, which
@@ -95,7 +89,7 @@ export default async function handler(req: Request) {
     // overwritten below before use.
     let fallbackReason: string = 'unknown'
 
-    const statusFetch = await hedgedJsonFetch(`${workerApi}/api/status/cached?series=0`)
+    const statusFetch = await hedgedJsonFetch(`${workerApi}/api/status/cached?series=0&view=is-down&id=${encodeURIComponent(entry.id)}`)
     if (statusFetch.ok && statusFetch.attempt === 2) console.warn(`[is-down/${slug}] status fetch answered by the hedged second request`)
 
     if (statusFetch.ok) {
@@ -127,11 +121,12 @@ export default async function handler(req: Request) {
           // itself down). Optional: a worker predating #1053 omits the key entirely (deploy skew).
           upstreamLinks?: UpstreamLinkLike[]
           recoveryBaseline?: Record<string, RecoveryBaseline>
+          fallbacks?: typeof fallbacks
+          fallbackGroups?: typeof fallbackGroups
+          fallbackCapabilityLabel?: string
         }
-        const allServices = data.services ?? []
-
-        // Extract target service
-        const target = allServices.find(s => s.id === entry.id)
+        // #1831 — the Worker view carries only the target, already ranked, plus its fallbacks.
+        const target = (data.services ?? []).find(s => s.id === entry.id)
         if (target) {
           serviceData = target
         } else {
@@ -144,140 +139,11 @@ export default async function handler(req: Request) {
             console.error(`[is-down/${slug}] service id "${entry.id}" not in API response — SLUG_TO_SERVICE is out of sync with worker/src/services.ts`)
           }
         }
-
-        // Calculate rank by AIWatch Score — match dashboard logic (src/pages/Ranking.jsx):
-        // 1. A service is score-rankable when its feed is live AND `scoreConfidence !== 'low'` — EXACT
-        //    mirror of serviceReliability.js:hasReliableScoreData (#713). `low` confidence means the
-        //    worker found NEITHER an official uptime % NOR a real probe (e.g. Azure OpenAI — scored on
-        //    only incidents+recovery, which over-scores under the rescale), so it's excluded from the
-        //    rank; a `high`/`medium` service (has official uptime, or a probe) is ranked.
-        // 2. #1186 — ranked WITHIN the target's own confidence TIER only, never across tiers. A
-        //    medium-confidence score (no official uptime; the rescale is mathematically equivalent to
-        //    imputing uptime = 0.667×(I+R+P), see score.ts) is not on the same scale as a high-confidence
-        //    one, so "#N of M" must count only the target's own tier — mirrors Ranking.jsx's split into
-        //    two independent rank sequences (serviceReliability.js:splitByConfidence), not one shared "M".
-        // 3. Use competition ranking (1, 2, 4=, 4=, 4=, 7=, ...) based on rounded score,
-        //    not array index — otherwise tied services display different ranks per service
-        if (Number.isFinite(target?.aiwatchScore)) {
-          // #802 — ALSO exclude a recently-added service (<30d coverage) from the ranked set: its
-          // incident/recovery/responsiveness Score components are based on a thin observed window, so it
-          // would rank off insufficient data. `coverageDays` absent = established → full coverage.
-          const hasReliableData = (s: { scoreConfidence?: string; incidentSourceStale?: boolean; coverageDays?: number }) =>
-            !s.incidentSourceStale && s.scoreConfidence !== 'low' && (s.coverageDays == null || s.coverageDays >= 30)
-          const targetScore = Math.round(target!.aiwatchScore as number)
-          // #1186 — the tier-scope filter below (`s.scoreConfidence === target!.scoreConfidence`) always
-          // matches the target against ITSELF, so an orphaned confidence value (undefined, or a legacy/
-          // future value outside 'high'/'medium'/'low') would never actually fail the rank lookup — it
-          // would just produce a misleading "ranked #1 of 1" (or "of N" for however many OTHER services
-          // happen to share that same value). serviceReliability.js's buildRanking treats this identical
-          // shape as unrankable (routes it to `insufficient` rather than a degenerate tier of its own);
-          // mirror that here by requiring the target's own confidence be literally 'high' or 'medium'
-          // before attempting a rank at all.
-          if (!hasReliableData(target!) || (target!.scoreConfidence !== 'high' && target!.scoreConfidence !== 'medium')) {
-            // Target itself fails the reliability filter — dedup'd to avoid log spam
-            if (!warnedExcludedSlugs.has(slug)) {
-              warnedExcludedSlugs.add(slug)
-              console.warn(`[is-down/${slug}] target excluded from ranked set (low-confidence score — no official uptime + no probe, an unrecognized scoreConfidence value, or stale incident source #591/#713) — check SLUG_TO_SERVICE vs scoreConfidence/incidentSourceStale`)
-            }
-          } else {
-            // Use Number.isFinite instead of != null so NaN scores (from a corrupt pipeline)
-            // don't silently corrupt the sort order or tie-count. Dedup by dropped-ids set
-            // so a persistently-NaN service doesn't spam logs on every request.
-            const dropped = allServices.filter(s => s.aiwatchScore != null && !Number.isFinite(s.aiwatchScore))
-            if (dropped.length > 0) {
-              const key = dropped.map(d => d.id).sort().join(',')
-              if (!warnedDroppedScoreKeys.has(key)) {
-                warnedDroppedScoreKeys.add(key)
-                console.error(`[is-down] non-finite aiwatchScore for: ${key}`)
-              }
-            }
-            // #1186 — same confidence tier as the target ONLY (see comment block above).
-            const scored = allServices
-              .filter(s => Number.isFinite(s.aiwatchScore) && hasReliableData(s) && s.scoreConfidence === target!.scoreConfidence)
-              .sort((a, b) => (b.aiwatchScore as number) - (a.aiwatchScore as number))
-            // #787 — rank by ROUNDED score (competition ranking: tied services share the first
-            // position), derivation extracted to the pure computeRankPosition for deterministic tests.
-            const { rank, tied: isTied, total } = computeRankPosition(scored as Array<{ aiwatchScore: number }>, targetScore)
-            if (rank > 0) {
-              (serviceData as any).rank = rank;
-              (serviceData as any).rankTied = isTied;
-              (serviceData as any).totalRanked = total
-            } else {
-              // Should be unreachable — target passed all filters but isn't in scored.
-              // Log so the asymmetry between target-check and filter-check is visible.
-              console.error(
-                `[is-down/${slug}] rank lookup failed despite passing filters: ` +
-                `targetScore=${targetScore}, scoredLen=${scored.length}, ` +
-                `sampleScores=${scored.slice(0, 5).map(s => Math.round(s.aiwatchScore as number)).join(',')}`,
-              )
-            }
-          }
-        } else if (target?.aiwatchScore != null) {
-          // Target has a non-null but non-finite score (NaN/Infinity) — hard pipeline bug.
-          console.error(`[is-down/${slug}] target.aiwatchScore is not finite:`, target.aiwatchScore)
-        }
-
-        // Build fallbacks from same data (tier-based priority for API services + coding agents)
-        const routed = routingTier(target)
-        const targetTags = capabilityTagsOf(target)
-        // #1062 facet B — a routed outage names its capability in the "🔄 Alternatives" heading.
-        const routedCap = routedCapability(target)
-        if (routedCap) fallbackCapabilityLabel = CAPABILITY_LABEL[routedCap]
-        if (!EXCLUDE_FALLBACK.includes(entry.id) && routed !== ROUTE_SUPPRESS && !target?.fallbackSuppressed) { // #880
-          const sourceTier = routed ?? tierFor(entry.id)
-          // #859 — a specialized non-LLM API sub-tier recommends its OWN tier only (no cross-tier bleed); LLM tiers 1-3 keep cross-tier
-          // fill among themselves (#1748).
-          const sameTierOnly = isSpecializedSubTier(sourceTier)
-          const inSourceTier = (id: string) => tierFor(id) === sourceTier
-          const admittedBySubTier = (id: string) => inSourceTier(id) || isCapabilityProvider(id, sourceTier)
-          // #1119 — the worker rule (full rationale in worker/src/fallback.ts
-          // getFallbacks): a ROUTED outage draws from the CAPABILITY's tier, so the source's category
-          // must not gate it — an `app` ChatGPT image outage has to reach the `api` image tier, which
-          // the unconditional category filter emptied into NO recommendation at all. Only the routed
-          // path relaxes; `routed > 0` keeps ROUTE_SUPPRESS suppressed by its own guard alone; the
-          // routed branch pins to `inSourceTier` (NOT the facet-C-widened form, which would answer a
-          // routed ChatGPT image outage with "try OpenAI API" — same provider, developer console);
-          // api → app/agent stays impossible because no CAPABILITY_TIER value is an app/agent tier.
-          const routedCross = routed !== null && routed > 0
-          const isLiveCandidate = (s: (typeof allServices)[number]) => s.status === 'operational'
-            // #1384 — a `retainedBridge` entry (worker/src/services.ts `mergeRetainedIncidentHistory`)
-            // unresolved at migration time never resolves for the life of the finite migration
-            // bridge, so without this exclusion a candidate could be permanently unrecommendable as
-            // a fallback over a stale ghost from a retiring source (the SAME gap found and fixed in
-            // worker/src/fallback.ts's `hasActiveIncident` — this is is-down's own parallel copy of
-            // that check, round-9 structural pass).
-            && !(s.incidents ?? []).some(i => (i as { status?: string; retainedBridge?: boolean }).status !== 'resolved' && !(i as { retainedBridge?: boolean }).retainedBridge)
-            && !s.incidentSourceStale
-          const listed = substituteGroupsFor(entry.id, fallbackCapabilityLabel ?? null, target?.components)
-          if (listed) {
-            const clean = allServices.filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id && isLiveCandidate(s))
-            fallbackGroups = pickSubstitutes(listed, clean, (inGroup) => orderForFallback(inGroup, sourceTier))
-              .map(({ group, items }) => ({ use: group.use, items: items.map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status })) }))
-            fallbacks = fallbackGroups.flatMap(g => g.items)
-          } else fallbacks = orderForFallback(allServices
-            // #550 — exclude candidates with an unresolved incident even if status is still 'operational'.
-            // Deliberately BROADER than BOTH `hasLiveIncident` (_is-down/html-template.ts), which excludes
-            // `monitoring`, AND worker `fallback.ts`'s own gate, which exempts #811 advisory titles. Not a
-            // mirror of either — the divergence is the point:
-            // recommending a service whose recovery is only just being confirmed is a
-            // worse error than omitting it, so this gate stays conservative. #1104 widened the window
-            // this fires in — an incident now survives our own component's recovery — see
-            // docs/reference/status-determination.md.
-            // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either.
-            // #1119 — EXCLUDE_FALLBACK first, so a tier lookup never sees the deliberately-untiered
-            // services (#402/#403 breadcrumb).
-            .filter(s => !EXCLUDE_FALLBACK.includes(s.id) && s.id !== entry.id
-              && (routedCross ? inSourceTier(s.id) : s.category === entry.category)
-              && isLiveCandidate(s)
-              // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
-              && (sameTierOnly ? admittedBySubTier(s.id) : !isSpecializedSubTier(tierFor(s.id)))
-              // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
-              && sharesCapability(entry.id, s.id, targetTags)
-              // #1725 — a ROUTED outage draws from the routed tier, where the list does not apply
-              && (routedCross || meetsRequiredCapability(entry.id, s.id))), sourceTier)
-            .slice(0, 2)
-            .map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status }))
-        }
+        viewMissing = !!target && data.fallbacks === undefined
+        if (viewMissing) console.error(`[is-down/${slug}] status response has no fallbacks — the Worker did not serve ?view=is-down`)
+        fallbacks = data.fallbacks ?? []
+        fallbackGroups = data.fallbackGroups
+        fallbackCapabilityLabel = data.fallbackCapabilityLabel
 
         // Extract AI analysis for this service. #926 — take the WHOLE array (one entry per active
         // incident), not just [0], so a multi-incident service renders every AI card (dashboard parity).
@@ -365,7 +231,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline, serviceData === null && !EXCLUDE_FALLBACK.includes(entry.id), fallbackGroups)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline, (serviceData === null || viewMissing) && !EXCLUDE_FALLBACK.includes(entry.id), fallbackGroups)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT

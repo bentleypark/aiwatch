@@ -918,12 +918,18 @@ describe('is-down handler — which live sections say they could not load (#1742
     expect(html).not.toContain('Alternatives can&rsquo;t be shown right now')
   })
 
-  it('status loaded but this service missing from it: the computed alternatives still render', async () => {
+  it('a Worker that ignores ?view= (deploy skew): alternatives say they could not load, and it is logged (#1831)', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    fetchMock.mockImplementationOnce(async () => ok([svc('claude', 'Claude API'), svc('openai', 'OpenAI API')]))
+    const html = await (await handler(req('claude-api'))).text()
+    expect(html).toContain('Alternatives can&rsquo;t be shown right now')
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('no fallbacks'))
+  })
+
+  it('status loaded but this service missing from it: alternatives say they could not load (#1831)', async () => {
     fetchMock.mockResolvedValueOnce(ok([svc('openai', 'OpenAI API')]))
     const html = await (await handler(req('claude-api'))).text()
-    expect(html).toContain('Alternatives When')
-    expect(html).toContain('OpenAI API')
-    expect(html).not.toContain('Alternatives can&rsquo;t be shown right now')
+    expect(html).toContain('Alternatives can&rsquo;t be shown right now')
   })
 })
 

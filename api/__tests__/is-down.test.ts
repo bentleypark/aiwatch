@@ -57,6 +57,14 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     expect(html).toContain(`<script>${LAST_CHECKED_CLIENT_JS}</script>`)
   })
 
+  it('asks the Worker for this service\'s view, not the whole payload (#1831)', async () => {
+    fetchMock.mockResolvedValueOnce(makeWorkerSuccess())
+    await handler(makeReq('claude-api'))
+    const params = new URL(String(fetchMock.mock.calls[0][0])).searchParams
+    expect(params.get('view')).toBe('is-down')
+    expect(params.get('id')).toBe('claude')
+  })
+
   it('returns 503 + no-store when Worker fetch is rejected (timeout / network failure)', async () => {
     fetchMock.mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
     const res = await handler(makeReq('claude-api'))
@@ -275,7 +283,7 @@ describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => 
 // — the same apples-to-oranges comparison #1186 removed from the dashboard, just on a different surface.
 describe('is-down.ts — rank is scoped to the target\'s own confidence tier (#1186)', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
-  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  beforeEach(() => { fetchMock = spyFetchWithEmptyReportFeed() })
   afterEach(() => { fetchMock.mockRestore() })
 
   const now = new Date().toISOString()

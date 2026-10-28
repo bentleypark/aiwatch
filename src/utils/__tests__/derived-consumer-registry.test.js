@@ -129,7 +129,7 @@ const SAFE = {
   'src/utils/regionStatus.js': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
   'src/utils/constants.js': 'reads no incident field since #1191 — its fallback exclusion calls worker/src/fallback.ts hasActiveIncident. Matches only through JSDoc mentions of `.incidents`',
   'api/_is-down/region-status.ts': 'active incidents only, for region-mapped services; no Better Stack service has a region map',
-  'api/is-down.ts': 'active-only for the verdict and fallback; the AI card joins incidents BY ID and a synthesized one is never analyzed (refreshOrReanalyze and the alert path skip it, #1623)',
+  'api/is-down.ts': 'active-only for the verdict; the AI card joins incidents BY ID and a synthesized one is never analyzed (refreshOrReanalyze and the alert path skip it, #1623)',
 
   // Read a count, an id or a title — never a duration-as-recovery or a minute-precise timestamp.
   'worker/src/suppression.ts': 'matches by id/title to hide an entry',
@@ -183,7 +183,6 @@ const RB_APPLIERS = {
   'worker/src/fallback.ts': 'hasActiveIncident excludes it — a stale ghost cannot permanently block a fallback recommendation — round 9 (structural pass)',
   'worker/src/ext-claude.ts': 'popupIncidents excludes it from the popup\'s "current issue" list — round 9 (structural pass)',
   'worker/src/incident-text.ts': 'causalIncidents excludes it — a stale ghost cannot lend its text to an upstream-attribution claim about right now — round 9 (structural pass)',
-  'api/is-down.ts': 'the inline Alternatives fallback-candidate filter excludes it — the Edge\'s own copy of fallback.ts\'s check — round 9 (structural pass)',
 }
 
 /** Carries the tag across a boundary. Must not test it — must not DROP it, where dropping would hide
@@ -235,6 +234,7 @@ const RB_SAFE = {
   'src/utils/regionStatus.js': 'active-incidents-only DISPLAY helper — matches the accepted KNOWN LIMIT 1 trade',
   'src/utils/constants.js': 'reads no incident field since #1191 — worker/src/fallback.ts hasActiveIncident (an RB applier) does. Matches only through JSDoc mentions',
   'api/_is-down/region-status.ts': 'Edge SSR mirror of regionStatus.js — same DISPLAY reasoning',
+  'api/is-down.ts': '#1831 renders the fallbacks the Worker view computed (fallback.ts hasActiveIncident, an RB applier); it joins the AI card to incidents by id for DISPLAY only',
   'src/components/Sidebar.jsx': 'active incident COUNT for display only — showing it counted is the accepted trade',
   'src/components/Topbar.jsx': 'active incident COUNT for display only — showing it counted is the accepted trade',
   'src/utils/calendar.js': 'real, exact timestamps paint the correct calendar day already — displaying it is the accepted trade, not a freshness concern',

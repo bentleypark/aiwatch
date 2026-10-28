@@ -5,7 +5,7 @@ import { hasReliableScoreData, isUnreliableUptime } from '../../utils/serviceRel
 // Score + Uptime rankings: their empty 30-day window inflates the Score from MISSING data and their
 // uptime30d is frozen. #713 — services with NO official uptime no longer get an invented estimate;
 // ranking inclusion keys on `scoreConfidence` (high=official uptime, medium=probe-only, low=neither).
-// The predicates gate every ranking surface (Ranking.jsx, Uptime.jsx; api/is-down.ts mirrors them).
+// The predicates gate every ranking surface (Ranking.jsx, Uptime.jsx).
 
 const stale = { id: 'deepseek', uptimeSource: 'official', uptime30d: 99.9, incidents: [{ id: 'x' }], incidentSourceStale: true, scoreConfidence: 'high' }
 const normal = { id: 'claude', uptimeSource: 'official', uptime30d: 99.95, incidents: [{ id: 'a' }], scoreConfidence: 'high' }
