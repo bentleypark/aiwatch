@@ -48,7 +48,7 @@ describe('#1679 — every service\'s uptime scope is pinned', () => {
         "codex": "incident.io 01KMP3KP5MGE23B80K1EK4S8PV,01KMKFAMWKNQ84Z1766MV08ZDE,01KMP3KP5M8X0EBTVW6KN327EE,01JVCV8YSWZFRSM1G5CVP253SK",
         "cohere": "incident.io 01HQ6CA39NZ5X3PRFPN71Q89TE",
         "copilot": "atlassian pjmpxvq2cmr2,cnnb39dkkk82",
-        "cursor": "atlassian rflc60xp5jp2,mwv1g9sc7kdh,k0trcq273dr6,vsny1qv7v86c,2x2chyqwmkzl",
+        "cursor": "atlassian rflc60xp5jp2,mwv1g9sc7kdh,k0trcq273dr6,vsny1qv7v86c,2x2chyqwmkzl,cursor-ios,bugbot,xwjpvdf81qh9",
         "deepgram": "atlassian cv8l6gg3cb9d,vm1x1v101qtn",
         "deepseek": "flashduty 01KY4MVS8BM3F9JSYWACGQVG7A,01KY4MVS8BSBSVW6053QJ37RJE | atlassian j4n367d9mh3x",
         "deepseekapp": "flashduty 01KY4ND2PNYT9FY5W4ZH80VGJ4,01KY4ND2PN1CCNW2MFT5VW713H,01KY4ND2PNJ6MFA4VJ0DSN6M2J,01KY4ND2PNNFFY6QKV67WFJW8N,01KY4ND2PN6EFSJ4RDYDJYPMNK",

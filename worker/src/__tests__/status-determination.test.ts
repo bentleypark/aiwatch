@@ -999,7 +999,7 @@ describe('pickBreakdownComponents (#606 Cat B)', () => {
 })
 
 describe('SERVICES multi-component config sanity (#379)', () => {
-  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI + Review Agents', () => {
+  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI + Review Agents + Cursor IDE (iOS) + BugBot + Origin', () => {
     const cursor = SERVICES.find((s) => s.id === 'cursor')!
     expect(cursor.statusComponentId).toBe('rflc60xp5jp2') // IDE
     expect(cursor.statusComponentIds).toEqual([
@@ -1008,15 +1008,12 @@ describe('SERVICES multi-component config sanity (#379)', () => {
       'k0trcq273dr6', // Automations
       'vsny1qv7v86c', // CLI
       '2x2chyqwmkzl', // Review Agents (#1420)
+      'cursor-ios', // Cursor IDE (iOS) (#1814)
+      'bugbot', // BugBot (#1814)
+      'xwjpvdf81qh9', // Origin (#1814)
     ])
-  })
-
-  it('cursor displayComponentIds is a SUPERSET of statusComponentIds — resolveSvcComponents falls back to statusComponentIds only when displayComponentIds is absent entirely, so a display-only addition that omits the badge set would silently drop the core rows from the breakdown card', () => {
-    const cursor = SERVICES.find((s) => s.id === 'cursor')!
-    expect(cursor.displayComponentIds, 'cursor').toBeDefined()
-    for (const id of cursor.statusComponentIds!) {
-      expect(cursor.displayComponentIds, `statusComponentIds entry ${id} missing from displayComponentIds`).toContain(id)
-    }
+    expect(cursor.referenceComponentIds).toEqual(['jh0714rgjgt4', 'enterprise-dashboard']) // cursor.com, Enterprise Dashboard (#1814)
+    expect(cursor.scopeIncidentsToComponent).toBe(true) // #1814 — Grok Bot-only incidents leave the card
   })
 
   it('claudecode intentionally stays single-component (dependency tracking would clash with incidentKeywords filter)', () => {
