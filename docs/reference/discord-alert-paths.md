@@ -272,6 +272,16 @@ before post. Before this the Edge's
 500 ms abort cancelled the Worker after the post and before both writes, so Edge fallback alerts were
 missing from the send log and a second request could post the same alert again.
 
+**#1531 Part 7 — a last-good copy outside Cloudflare.** Hourly (`getUTCMinutes() < 5`), the cron
+writes the `?series=0` payload (`buildCachedStatusPayload`) to one public Vercel Blob,
+`LAST_GOOD_COPY_URL` (`worker/src/last-good-copy-path.ts`), with the Worker secret
+`BLOB_READ_WRITE_TOKEN`, abandoning an upload still unfinished after `LAST_GOOD_COPY_UPLOAD_MS`. Both is-down pages pass `lastGoodView` (`api/_shared/last-good-copy.ts`)
+to `hedgedJsonFetch`: the copy read starts with the hedge, or at an earlier failure, and is used
+only once every Worker request has failed, within the same 5 s, and only if its `lastUpdated` is within `LAST_GOOD_MAX_AGE_MS`. The page is then a 200 cut from the
+copy, sent `no-store`, and `api/is-down.ts` still alerts, with `_served_copy` appended to the reason.
+R2 was ruled out because its reads enter the same Cloudflare colo as the Worker request
+([#1531 comment](https://github.com/bentleypark/aiwatch/issues/1531#issuecomment-6467051908)).
+
 **#1368 — it never fired.** The production `EDGE_ALERT_TOKEN` was measured empty on 2026-09-08, and
 the guard returned silently on a falsy token in every environment — correct for local and preview,
 catastrophic in production, and indistinguishable between them. What established "never fired" was an

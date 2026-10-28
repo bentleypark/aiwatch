@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { buildStatusView, parseStatusView, type LeanStatusPayload } from '../../worker/src/status-view'
+import { LAST_GOOD_COPY_URL } from '../../worker/src/last-good-copy-path'
 
 const urlOf = (input: RequestInfo | URL) => typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
 
@@ -36,6 +37,7 @@ export function spyFetchWithEmptyReportFeed() {
     if (urlOf(input).includes('/api/report-feed')) {
       return new Response(JSON.stringify({ reports: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
+    if (urlOf(input) === LAST_GOOD_COPY_URL) return new Response('', { status: 404 })
     return guard(input, init)
   })
 }

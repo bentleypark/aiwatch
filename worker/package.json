@@ -18,6 +18,7 @@
     "wrangler": "^4.0.0"
   },
   "dependencies": {
-    "@resvg/resvg-wasm": "^2.6.2"
+    "@resvg/resvg-wasm": "^2.6.2",
+    "@vercel/blob": "2.8.2"
   }
 }

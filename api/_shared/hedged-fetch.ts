@@ -6,6 +6,7 @@ export const DEADLINE_MS = 5000
 
 export type HedgedFetchResult<T> =
   | { ok: true; data: T; attempt: 1 | 2 }
+  | { ok: true; data: T; attempt: 'copy'; reason: string }
   | { ok: false; reason: string }
 
 async function attemptJson<T>(url: string, signal: AbortSignal): Promise<{ ok: true; data: T } | { ok: false; reason: string }> {
@@ -24,17 +25,26 @@ async function attemptJson<T>(url: string, signal: AbortSignal): Promise<{ ok: t
 }
 
 /** Fetch + parse JSON. A second request starts at `hedgeAfterMs` if the first has not finished; the
- *  first success wins. A failure that arrives before the hedge is returned as is. Both are abandoned
- *  at `deadlineMs`. */
+ *  first success wins. Without `lastGood`, a failure that arrives before the hedge is returned as is. Both are abandoned
+ *  at `deadlineMs`. #1531 Part 7 — `lastGood`, when given, starts with the hedge (or at an earlier
+ *  failure) and answers only once every Worker request has failed. */
 export function hedgedJsonFetch<T>(
   url: string,
-  { hedgeAfterMs = HEDGE_AFTER_MS, deadlineMs = DEADLINE_MS }: { hedgeAfterMs?: number; deadlineMs?: number } = {},
+  {
+    hedgeAfterMs = HEDGE_AFTER_MS,
+    deadlineMs = DEADLINE_MS,
+    lastGood,
+  }: { hedgeAfterMs?: number; deadlineMs?: number; lastGood?: (signal: AbortSignal) => Promise<T | null> } = {},
 ): Promise<HedgedFetchResult<T>> {
   return new Promise((resolve) => {
     const controllers: AbortController[] = []
     const failures: string[] = []
     let settled = false
     let inFlight = 0
+    let copyStarted = false
+    let copyDone = false
+    let copyData: T | null = null
+    let workerFailure: string | null = null
 
     const finish = (result: HedgedFetchResult<T>) => {
       if (settled) return
@@ -45,6 +55,28 @@ export function hedgedJsonFetch<T>(
       resolve(result)
     }
 
+    const settleWithCopy = (reason: string) =>
+      finish(copyData !== null ? { ok: true, data: copyData, attempt: 'copy', reason } : { ok: false, reason })
+
+    const startCopy = () => {
+      if (!lastGood || copyStarted) return
+      copyStarted = true
+      const controller = new AbortController()
+      controllers.push(controller)
+      void lastGood(controller.signal).catch(() => null).then((data) => {
+        copyDone = true
+        copyData = data
+        if (workerFailure !== null && inFlight === 0) settleWithCopy(workerFailure)
+      })
+    }
+
+    const fail = (reason: string) => {
+      workerFailure = reason
+      if (!lastGood) return finish({ ok: false, reason })
+      startCopy()
+      if (copyDone) settleWithCopy(reason)
+    }
+
     const launch = (attempt: 1 | 2) => {
       const controller = new AbortController()
       controllers.push(controller)
@@ -53,12 +85,12 @@ export function hedgedJsonFetch<T>(
         inFlight--
         if (result.ok) return finish({ ok: true, data: result.data, attempt })
         failures.push(result.reason)
-        if (inFlight === 0) finish({ ok: false, reason: failures[0] })
+        if (inFlight === 0) fail(failures[0])
       })
     }
 
-    const hedgeTimer = setTimeout(() => launch(2), hedgeAfterMs)
-    const deadlineTimer = setTimeout(() => finish({ ok: false, reason: failures[0] ?? 'worker_timeout' }), deadlineMs)
+    const hedgeTimer = setTimeout(() => { launch(2); startCopy() }, hedgeAfterMs)
+    const deadlineTimer = setTimeout(() => settleWithCopy(failures[0] ?? 'worker_timeout'), deadlineMs)
     launch(1)
   })
 }

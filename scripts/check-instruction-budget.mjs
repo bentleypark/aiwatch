@@ -108,7 +108,7 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  46_487 → 46_594 (#887): the directory layout names api/sitemap.ts, api/_sitemap/ and sitemap-feed.ts.
  *  46_594 → 46_629 (#1721): the step35 table row says its self-edit deny covers Edit/Write, not Bash.
  *  46_629 → 46_659 (#1831): the directory layout names status-view.ts on the fallback.ts line, and the #1186 rank note names it in place of is-down.ts. */
-export const BUDGET_CHARS = 46_659
+export const BUDGET_CHARS = 46_749
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

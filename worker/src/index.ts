@@ -49,6 +49,7 @@ import { buildSitemapFeed, isSitemapRequest } from './sitemap-feed'
 import { buildStatuslinePayload, isStatuslineRequest, isStatuslinePreset, renderStatuslineBrief, buildStatuslineDownResponse, buildStatuslinePresetResponse, STATUSLINE_BRIEF_UNKNOWN } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
 import { readLatestReportSummary, refreshLatestReportSummary, isReportPublished } from './latest-report'
+import { writeLastGoodCopy } from './last-good-copy'
 import type { FeedTrafficCounts, StatuslineTrafficCounts } from './api-traffic'
 import { EXT_INDEX, PLUGIN_MONITOR_INDEX, PLUGIN_BRIEF_INDEX, recordCacheReadOutcome, recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, readFeedPolls, readExtPolls, readPluginPolls, readStatuslinePolls, recordBadgeTraffic, queryBadgeTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
@@ -90,6 +91,7 @@ interface Env {
   // `wrangler secret put EDGE_ALERT_TOKEN` and the same value as a Vercel env
   // var so both ends agree. Absent secret → endpoint always 401.
   EDGE_ALERT_TOKEN?: string
+  BLOB_READ_WRITE_TOKEN?: string
   // #618: Bearer token for POST /api/internal/deepseek-feed — the GitHub Action scraper that
   // browser-renders status.deepseek.com (bot-walled to a plain Worker fetch) authenticates with
   // this. Set via `wrangler secret put DEEPSEEK_FEED_TOKEN` and the same value as a GH Action
@@ -2483,7 +2485,9 @@ export async function handleEdgeFallbackAlert(request: Request, env: Env, cors: 
     if (!webhookUrl) return
     await sendDiscordAlert(webhookUrl, {
       title: `:warning: Edge SSR fallback: ${surface}/${slug}`,
-      description: `Vercel Edge rendered the degraded "Status data is temporarily unavailable" page because the upstream Worker fetch failed.${surface === 'is-down' ? ' Visitors may still have received the CDN\'s last good copy (\`stale-if-error\`, #1531).' : ''}\n\n**Reason**: \`${reason}\`\n**Surface**: \`${surface}\`\n**Slug**: \`${slug}\`\n\nThe Edge response is now \`Cache-Control: no-store\` (#378) so subsequent requests retry instead of serving stale failure. If this fires repeatedly, check Worker logs and KV health.`,
+      description: `${reason.endsWith('_served_copy')
+        ? 'Vercel Edge rendered the page from the hourly last-good copy in Vercel Blob (#1531) because the upstream Worker fetch failed.'
+        : `Vercel Edge rendered the degraded "Status data is temporarily unavailable" page because the upstream Worker fetch failed.${surface === 'is-down' ? ' Visitors may still have received the CDN\'s last good copy (\`stale-if-error\`, #1531).' : ''}`}\n\n**Reason**: \`${reason}\`\n**Surface**: \`${surface}\`\n**Slug**: \`${slug}\`\n\nThe Edge response is now \`Cache-Control: no-store\` (#378) so subsequent requests retry instead of serving stale failure. If this fires repeatedly, check Worker logs and KV health.`,
       color: 0xf0883e,
     })
   })())
@@ -3146,6 +3150,93 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
 // #1501 — per-isolate rate limit for the cron-heartbeat check that `fetch` runs.
 const cronWatchdogThrottle = createWatchdogThrottle(WATCHDOG_INTERVAL_MS)
 
+/** #1531 Part 7 — the `?series=0` body of `/api/status/cached`, shared with the cron's last-good copy. */
+export async function buildCachedStatusPayload(
+  env: Env,
+  withSeries: boolean,
+  track: <T>(stage: string, work: Promise<T>) => Promise<T> = (_stage, work) => work,
+) {
+  const cached = await track('snapshot', cacheRead(env.STATUS_CACHE, env.ANALYTICS))
+  if (!cached) return null
+  let probe24h: ProbeSnapshot[] = []
+
+  // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
+  // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly.
+
+  // Read AI analysis (per-incident keys) — uses live incident list
+  const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
+  const recentlyRecovered: Record<string, string[]> = {}
+  const readAnalyses = async () => {
+    const read = await readStatusAnalyses(env.STATUS_CACHE!, cached.services, Date.now())
+    Object.assign(aiAnalysis, read.aiAnalysis)
+    Object.assign(recentlyRecovered, read.recentlyRecovered)
+  }
+
+  // #1531 part 3 — each reader below needs only the snapshot, so they run concurrently.
+  const seriesRead = withSeries ? track('series', env.STATUS_CACHE!.get('probe:24h').catch(() => null)) : Promise.resolve(null)
+  const analysesRead = track('analyses', readAnalyses())
+  // See readRecentSecurityAlerts — both endpoints must emit this field.
+  const securityAlertsRead = track('security', readRecentSecurityAlerts(env.STATUS_CACHE!))
+  // #475 — canonical per-user alert feed (see /api/status). Both endpoints emit it.
+  const alertFeedRead = track('alert-feed', readAlertFeed(env.STATUS_CACHE!))
+  // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
+  const reportFeedRead = track('report-feed', buildReportFeedMap(env.STATUS_CACHE!, cached.services))
+  const probeSummariesRead = track('probe-summaries', readProbeSummaries(env.STATUS_CACHE, 'status-cached'))
+  const recoveryBaselineRead = track('recovery-baseline', readRecoveryBaselines(env.STATUS_CACHE!))
+
+  const probeRaw = await seriesRead
+  await analysesRead
+  const securityAlerts = await securityAlertsRead
+  const alertFeed = await alertFeedRead
+  const reportFeed = await reportFeedRead
+  const cachedProbeSummaries = await probeSummariesRead
+  const recoveryBaseline = await recoveryBaselineRead
+  if (probeRaw) {
+    try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
+  }
+
+  // Calculate scores for cached services (same as /api/status)
+  const scoredCached = cached.services.map((svc) => {
+    const s = scoreFor(svc, cachedProbeSummaries)
+    return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}) }
+  })
+
+  // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
+  const supplyChainBanner = buildSupplyChainBanner(scoredCached)
+  // #1053 — cross-provider upstream links. THIS is the path is-down reads; omitting it here
+  // would leave the SSR page permanently linkless while the dashboard worked.
+  //
+  // Emitted UNCONDITIONALLY (an empty array when the gate stays quiet), unlike the
+  // alertFeed/reportFeed/supplyChainBanner neighbours below which omit their key. Deliberate:
+  // this gate fires only during a live cross-provider outage — a handful of times a year — and
+  // the worker deploy is manual + batched, so with a conditional key `upstreamLinks ===
+  // undefined` would mean EITHER "no #1053 worker deployed" OR "deployed and correctly quiet",
+  // with no observable separating them, ever. The feature could be dead on arrival for weeks
+  // with zero signal (#1032's stale-branch deploy is a live way for that to happen). Presence of
+  // the key now means "the #1053 code is live", which is both the cheapest deploy check and what
+  // makes a #873 `assert:` clause possible on this issue — the gate RESULT is not assertable
+  // because it is outage-timed. #574's banner has the conditional shape and has sat
+  // verify-blocked ever since; that is the outcome this avoids.
+  // #1072 — feeds ride in the same snapshot (see cacheRead: absent on a pre-#1072 snapshot).
+  const upstreamLinks = buildUpstreamLinks(scoredCached, cached.upstreamFeeds ?? [], Date.now())
+
+  const payload = {
+    services: scoredCached,
+    lastUpdated: cached.cachedAt,
+    cached: true,
+    ...(probe24h.length > 0 ? { probe24h } : {}),
+    ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
+    ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
+    ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
+    ...(alertFeed.length > 0 ? { alertFeed } : {}),
+    ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
+    ...(supplyChainBanner ? { supplyChainBanner } : {}),
+    ...(Object.keys(recoveryBaseline).length > 0 ? { recoveryBaseline } : {}),
+    upstreamLinks,
+  }
+  return payload
+}
+
 const workerExport = {
   async scheduled(event: ScheduledEvent, rawEnv: Env, ctx: ExecutionContext): Promise<void> {
     // Use the scheduled trigger time (not wall-clock) so time-of-day checks like
@@ -3335,6 +3426,12 @@ const workerExport = {
       }
 
       const result = await cronAlertCheck(env, event.scheduledTime)
+
+      if (env.STATUS_CACHE && env.BLOB_READ_WRITE_TOKEN && new Date(event.scheduledTime).getUTCMinutes() < 5) {
+        const outcome = await writeLastGoodCopy(await buildCachedStatusPayload(env, false), env.BLOB_READ_WRITE_TOKEN)
+        console.log(`[cron] #1531 last-good copy: ${outcome}`)
+      }
+
       if (!env.DISCORD_WEBHOOK_URL) return
 
       // Reddit community monitoring — every 15 minutes (#1418). KV budget (#820 round 2 — the old
@@ -6059,84 +6156,8 @@ const workerExport = {
           if (hit === TIMED_OUT) console.warn({ event: 'edge-cache-timeout', route: 'status-cached', afterMs: EDGE_CACHE_MATCH_MS })
           else if (hit) return view ? viewResponse(await hit.json() as LeanStatusPayload) : hit
         }
-        const cached = await watchdog.track('snapshot', cacheRead(env.STATUS_CACHE, env.ANALYTICS))
-        if (cached) {
-          let probe24h: ProbeSnapshot[] = []
-
-          // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
-          // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly.
-
-          // Read AI analysis (per-incident keys) — uses live incident list
-          const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
-          const recentlyRecovered: Record<string, string[]> = {}
-          const readAnalyses = async () => {
-            const read = await readStatusAnalyses(env.STATUS_CACHE!, cached.services, Date.now())
-            Object.assign(aiAnalysis, read.aiAnalysis)
-            Object.assign(recentlyRecovered, read.recentlyRecovered)
-          }
-
-          // #1531 part 3 — each reader below needs only the snapshot, so they run concurrently.
-          const seriesRead = withSeries ? watchdog.track('series', env.STATUS_CACHE!.get('probe:24h').catch(() => null)) : Promise.resolve(null)
-          const analysesRead = watchdog.track('analyses', readAnalyses())
-          // See readRecentSecurityAlerts — both endpoints must emit this field.
-          const securityAlertsRead = watchdog.track('security', readRecentSecurityAlerts(env.STATUS_CACHE!))
-          // #475 — canonical per-user alert feed (see /api/status). Both endpoints emit it.
-          const alertFeedRead = watchdog.track('alert-feed', readAlertFeed(env.STATUS_CACHE!))
-          // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
-          const reportFeedRead = watchdog.track('report-feed', buildReportFeedMap(env.STATUS_CACHE!, cached.services))
-          const probeSummariesRead = watchdog.track('probe-summaries', readProbeSummaries(env.STATUS_CACHE, 'status-cached'))
-          const recoveryBaselineRead = watchdog.track('recovery-baseline', readRecoveryBaselines(env.STATUS_CACHE!))
-
-          const probeRaw = await seriesRead
-          await analysesRead
-          const securityAlerts = await securityAlertsRead
-          const alertFeed = await alertFeedRead
-          const reportFeed = await reportFeedRead
-          const cachedProbeSummaries = await probeSummariesRead
-          const recoveryBaseline = await recoveryBaselineRead
-          if (probeRaw) {
-            try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
-          }
-
-          // Calculate scores for cached services (same as /api/status)
-          const scoredCached = cached.services.map((svc) => {
-            const s = scoreFor(svc, cachedProbeSummaries)
-            return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}) }
-          })
-
-          // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
-          const supplyChainBanner = buildSupplyChainBanner(scoredCached)
-          // #1053 — cross-provider upstream links. THIS is the path is-down reads; omitting it here
-          // would leave the SSR page permanently linkless while the dashboard worked.
-          //
-          // Emitted UNCONDITIONALLY (an empty array when the gate stays quiet), unlike the
-          // alertFeed/reportFeed/supplyChainBanner neighbours below which omit their key. Deliberate:
-          // this gate fires only during a live cross-provider outage — a handful of times a year — and
-          // the worker deploy is manual + batched, so with a conditional key `upstreamLinks ===
-          // undefined` would mean EITHER "no #1053 worker deployed" OR "deployed and correctly quiet",
-          // with no observable separating them, ever. The feature could be dead on arrival for weeks
-          // with zero signal (#1032's stale-branch deploy is a live way for that to happen). Presence of
-          // the key now means "the #1053 code is live", which is both the cheapest deploy check and what
-          // makes a #873 `assert:` clause possible on this issue — the gate RESULT is not assertable
-          // because it is outage-timed. #574's banner has the conditional shape and has sat
-          // verify-blocked ever since; that is the outcome this avoids.
-          // #1072 — feeds ride in the same snapshot (see cacheRead: absent on a pre-#1072 snapshot).
-          const upstreamLinks = buildUpstreamLinks(scoredCached, cached.upstreamFeeds ?? [], Date.now())
-
-          const payload = {
-            services: scoredCached,
-            lastUpdated: cached.cachedAt,
-            cached: true,
-            ...(probe24h.length > 0 ? { probe24h } : {}),
-            ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
-            ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
-            ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
-            ...(alertFeed.length > 0 ? { alertFeed } : {}),
-            ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
-            ...(supplyChainBanner ? { supplyChainBanner } : {}),
-            ...(Object.keys(recoveryBaseline).length > 0 ? { recoveryBaseline } : {}),
-            upstreamLinks,
-          }
+        const payload = await buildCachedStatusPayload(env, withSeries, (stage, work) => watchdog!.track(stage, work))
+        if (payload) {
           const res = new Response(JSON.stringify(payload), {
             status: 200,
             headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },

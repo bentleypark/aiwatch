@@ -10,6 +10,7 @@ import { audienceBeaconScript } from './_shared/audience-beacon'
 import { historyLinkAttrs, historyClickBeacon } from './_shared/history-link'
 import { cspForHtml } from './_shared/csp-hash'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
+import { lastGoodView } from './_shared/last-good-copy'
 import { isDownCacheControl } from './_shared/is-down-cache'
 import { resolveWorkerApi } from './_shared/worker-api'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
@@ -778,11 +779,15 @@ export default async function handler(req: Request) {
     let shareIncidentToken: string | null = null
     let shareIncidentStartedMs = -Infinity
     let isFallback = true
+    let servedCopy = false
     try {
       // #1831 — this family's members in full; the other families' members for their status only.
       const statusOnlyIds = Object.values(FAMILY_GROUPS).filter((f) => f.slug !== family.slug).flatMap((f) => f.members)
-      const statusFetch = await hedgedJsonFetch(`${workerApi}/api/status/cached?series=0&view=is-down-group&ids=${family.members.map(encodeURIComponent).join(',')}&status=${statusOnlyIds.map(encodeURIComponent).join(',')}`)
+      const statusUrl = `${workerApi}/api/status/cached?series=0&view=is-down-group&ids=${family.members.map(encodeURIComponent).join(',')}&status=${statusOnlyIds.map(encodeURIComponent).join(',')}`
+      const statusFetch = await hedgedJsonFetch(statusUrl, { lastGood: lastGoodView<unknown>(statusUrl) })
       if (statusFetch.ok && statusFetch.attempt === 2) console.warn(`[is-down-group/${familyKey}] status fetch answered by the hedged second request`)
+      servedCopy = statusFetch.ok && statusFetch.attempt === 'copy'
+      if (statusFetch.ok && statusFetch.attempt === 'copy') console.warn(`[is-down-group/${familyKey}] status fetch failed (${statusFetch.reason}); served the last-good copy`)
       if (!statusFetch.ok) console.warn(`[is-down-group/${familyKey}] status fetch failed: ${statusFetch.reason}`)
       if (statusFetch.ok) {
         const data = statusFetch.data as {
@@ -1002,7 +1007,7 @@ export default async function handler(req: Request) {
       status: isFallback ? 503 : 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': isDownCacheControl(isFallback),
+        'Cache-Control': isDownCacheControl(isFallback || servedCopy),
         [csp.key]: csp.value,
       },
     })
