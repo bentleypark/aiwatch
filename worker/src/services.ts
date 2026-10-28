@@ -4346,9 +4346,7 @@ function archivedDuration(durationMin: number): string | null {
  *      for the same reason as 8.
  *   10. `causalIncidents` (incident-text.ts) excludes it — a stale ghost's text must never lend its
  *      tokens to an upstream-attribution claim ("X is down because of Y") about what is happening now.
- *   11. The inline Alternatives fallback-candidate filter in `api/is-down.ts` excludes it — the Edge's
- *      own separate copy of reader 8's check, needing the same exclusion independently.
- * Readers 7-11 were found by audit (this file's own review, before merge), not by a numbered PR round.
+ * Readers 7-10 were found by audit (this file's own review, before merge), not by a numbered PR round.
  *
  * KNOWN LIMIT 1 — an entry unresolved at the migration instant is displayed as an ongoing
  * 'investigating' incident for as long as the bridge runs, contributing to Score as such AND visible

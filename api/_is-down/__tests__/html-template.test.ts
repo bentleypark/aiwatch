@@ -357,7 +357,7 @@ describe('renderPage <title> — live status (#566)', () => {
 
   // #802 — a <30d-coverage service is excluded from the ranked SET (so other services' `of M`
   // denominator matches the dashboard), but is-down adds NO on-page note for it (the page is already
-  // information-dense): its rank is simply absent. The exclusion itself lives in is-down.ts's filter.
+  // information-dense): its rank is simply absent. The exclusion itself lives in worker/src/status-view.ts rankInTier.
   it('does NOT render a "recently added" note (no extra is-down clutter for a <30d service)', () => {
     const recent = renderPage('runway', mkService({ status: 'operational', scoreConfidence: 'high' }), mkSeo(), [])
     expect(recent).not.toContain('recently added')
@@ -397,7 +397,7 @@ describe('renderPage — partial-outage header (#722/#744)', () => {
   })
 })
 
-// #591 — a stale-source service (frozen feed; is-down.ts never sets a rank for it) must not surface
+// #591 — a stale-source service (frozen feed; the Worker view never sets a rank for it) must not surface
 // its frozen uptime/score, and must show the honest "we can't read the source" note instead.
 // #1268 — the note no longer names a CAUSE. It said the status page had "moved to a source AIWatch
 // can't reach", which described the one service that reached this branch when #591 shipped; the flag
@@ -410,7 +410,7 @@ describe('renderPage — stale incident source (#591)', () => {
     aiwatchScore: 88,            // inflated by the empty window — must NOT appear
     scoreGrade: 'good',
     incidentSourceStale: true,
-    // rank intentionally unset: is-down.ts excludes stale services from the ranked set
+    // rank intentionally unset: the Worker view excludes stale services from the ranked set
   })
 
   it('omits the frozen uptime and inflated score from the header meta', () => {
@@ -825,16 +825,10 @@ describe('renderFooter — Also check category grouping', () => {
     expect([...present].sort()).toEqual(['agents', 'apps', 'image', 'inference', 'llm', 'observability', 'video', 'voice'])
   })
 
-  it('`category` stays the COARSE worker vocabulary (api/app/agent) — guards the is-down fallback filter', () => {
-    // #658 — `category` and the fine `group` now sit side by side on every entry. `category` MUST
-    // remain in the worker's 3-way vocabulary because api/is-down.ts filters fallback candidates with
-    // `s.category === entry.category`, where `s.category` is the worker ServiceStatus value (api/app/
-    // agent). #1119 narrowed that to the NON-routed path — a capability-routed source is pinned to the
-    // routed tier instead — but the non-routed path is still the common one, so this guard stands.
-    // If a contributor "aligns" category with the fine group (e.g. sets category:'voice'),
-    // that equality matches NO operational candidate and the service's fallback list silently goes
-    // empty — no runtime error, no other test failure. Pin the coarse vocabulary here so that
-    // mistake fails loudly. (The fine taxonomy is asserted on `group` in the test above.)
+  it('`category` stays the COARSE worker vocabulary (api/app/agent)', () => {
+    // #658 — `category` and the fine `group` now sit side by side on every entry. `category` stays in
+    // the worker's 3-way vocabulary: api/is-down-group.ts compares it with 'api'. (The fine taxonomy is
+    // asserted on `group` in the test above.)
     const cats = new Set(Object.values(SLUG_TO_SERVICE).map(e => e.category))
     expect([...cats].sort()).toEqual(['agent', 'api', 'app'])
   })

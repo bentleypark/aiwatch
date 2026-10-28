@@ -6,6 +6,7 @@ import handler from '../is-down-group'
 import { isDownCacheControl } from '../_shared/is-down-cache'
 import { LAST_CHECKED_CLIENT_JS, REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
 import { makeLocalStorage } from '../../src/utils/__tests__/localStorageStub.js'
+import { spyFetchAsWorker } from './fetch-stub'
 
 // Every handler invocation begins with the status fetch, and a degraded/down fixture may make a
 // second, best-effort report-feed request. Keep any unlisted call local to the test so a fixture
@@ -67,17 +68,28 @@ describe('is-down-group.ts', () => {
   })
 
   it('requests the cached payload without the time series it never reads (#1531)', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
     ]))
     await handler(makeReq('claude'))
     expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('series')).toBe('0')
   })
 
+  it('asks for its family in full and the other families for their status only (#1831)', async () => {
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+    ]))
+    await handler(makeReq('claude'))
+    const params = new URL(String(fetchMock.mock.calls[0][0])).searchParams
+    expect(params.get('view')).toBe('is-down-group')
+    expect(params.get('ids')).toBe('claude,claudeai,claudecode')
+    expect(params.get('status')).toBe('openai,chatgpt,codex,xai,grok,cursor')
+  })
+
   it('a stalled first status request is answered by the hedged second one, not the fallback (#1531 Part 5)', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      fetchMock = vi.spyOn(globalThis, 'fetch')
+      fetchMock = spyFetchAsWorker()
         .mockImplementationOnce((_u, init) => new Promise((_, reject) => {
           init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
         }))
@@ -101,7 +113,7 @@ describe('is-down-group.ts', () => {
   // (the [data-ga] listener was a dead no-op), unlike every individual is-down page. Regression guard
   // for the fix: both shared modules must actually render, not just be imported.
   it('wires GA4 (consent-init) + the cookie consent banner, same as the individual is-down pages', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -120,7 +132,7 @@ describe('is-down-group.ts', () => {
   // that never reflects an outage) — plus a `v` cache-buster (#1103: a static og:image query string
   // behind a static og:url can make a social crawler unfurl with NO image at all, not just a stale one).
   it('uses the dynamic /api/og live-status card for og:image, reflecting the worst-of headline + cache-busted', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational' },
       { id: 'chatgpt', name: 'ChatGPT', status: 'down' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -132,7 +144,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('renders operational when every family member is operational', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -148,7 +160,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('#1586 — keeps current canonical member labels when the Worker payload still carries a former name', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'xai', name: 'xAI API', status: 'operational' },
       { id: 'grok', name: 'Grok', status: 'operational' },
       { id: 'cursor', name: 'Cursor', status: 'operational' },
@@ -160,7 +172,7 @@ describe('is-down-group.ts', () => {
 
   it('#1586 — incident rows also use the canonical member label when the Worker payload carries a former name', async () => {
     const recent = new Date(Date.now() - 60 * 60_000).toISOString()
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'xai', name: 'xAI API', status: 'operational', incidents: [{ id: 'x1', title: 'Elevated errors', status: 'resolved', startedAt: recent, duration: '20m' }] },
       { id: 'grok', name: 'Grok', status: 'operational' },
       { id: 'cursor', name: 'Cursor', status: 'operational' },
@@ -173,7 +185,7 @@ describe('is-down-group.ts', () => {
   it('renders member measurements and a deduplicated 30-day family summary from the cached payload', async () => {
     const recent = new Date(Date.now() - 60 * 60_000).toISOString()
     const earlier = new Date(Date.now() - 14 * 86_400_000).toISOString()
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational', lastChecked: new Date().toISOString(), uptime30d: 99.95, aiwatchScore: 92, scoreGrade: 'excellent', incidents: [{ id: 'shared', title: 'API latency', status: 'resolved', startedAt: recent, duration: '1h 0m' }, { id: 'older', title: 'Earlier outage', status: 'resolved', startedAt: earlier, duration: '2h 0m' }] },
       { id: 'claudeai', name: 'claude.ai', status: 'operational', lastChecked: new Date().toISOString(), uptime30d: 99.9, aiwatchScore: 90, scoreGrade: 'good', incidents: [{ id: 'shared', title: 'API latency', status: 'resolved', startedAt: recent, duration: '1h 0m' }] },
       { id: 'claudecode', name: 'Claude Code', status: 'operational', lastChecked: new Date().toISOString(), uptime30d: 100, aiwatchScore: 95, scoreGrade: 'excellent' },
@@ -189,7 +201,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('keeps issue reports attributable to a selected member and exposes monthly reports like single-service pages', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational' },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -214,7 +226,7 @@ describe('is-down-group.ts', () => {
 
   it('shows community reports only for a member with an independent problem signal', async () => {
     const now = Date.now()
-    fetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock = spyFetchAsWorker()
       .mockResolvedValueOnce(statusResponse([
         { id: 'claude', name: 'Claude API', status: 'degraded' },
         { id: 'claudeai', name: 'claude.ai', status: 'operational' },
@@ -229,7 +241,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('does not fetch or publish community reports for an operational family', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -240,7 +252,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('withholds stale member measurements and publishes the same structured-data types as individual pages', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational', uptime30d: 99.9, aiwatchScore: 95, incidentSourceStale: true, incidents: [{ id: 'stale', title: 'Unverified incident', status: 'resolved', startedAt: new Date().toISOString(), duration: '1h 0m' }] },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -257,7 +269,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('does not publish the all-clear when a member whose source cannot be read leaves the family with no incidents', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -268,7 +280,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('claims no quiet window when the status fetch fails and no member was read at all', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('worker unreachable'))
+    fetchMock = spyFetchAsWorker().mockRejectedValueOnce(new Error('worker unreachable'))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).not.toContain('No incidents reported')
     expect(html).toContain('Incident history unavailable for Claude API, claude.ai, Claude Code.')
@@ -276,7 +288,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('does not extend the quiet window to a member the Worker response left out', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
     ]))
     const html = await (await handler(makeReq('claude'))).text()
@@ -287,7 +299,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('names only the unknown members in the alert block, not the family status page', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -301,7 +313,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('names every member in the alert block when every one of them is unknown', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'unknown' },
       { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
       { id: 'claudecode', name: 'Claude Code', status: 'unknown' },
@@ -313,7 +325,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('keeps the outage wording in the alert block when a real outage outranks an unknown member', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational' },
       { id: 'chatgpt', name: 'ChatGPT', status: 'down' },
       { id: 'codex', name: 'Codex', status: 'unknown' },
@@ -335,7 +347,7 @@ describe('is-down-group.ts', () => {
     ])
 
     it('names the mixed state on the page title, description, headline, JSON-LD and share text', async () => {
-      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mixed())
+      fetchMock = spyFetchAsWorker().mockResolvedValueOnce(mixed())
       const html = await (await handler(makeReq('claude'))).text()
       const sentence = 'Partly unknown — AIWatch cannot confirm the status of claude.ai. Operational: Claude API, Claude Code.'
       expect(html).toContain('<title>Is Anthropic (Claude) Down? Partly Unknown | AIWatch</title>')
@@ -347,7 +359,7 @@ describe('is-down-group.ts', () => {
     })
 
     it('leaves the social card on the raw status', async () => {
-      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mixed())
+      fetchMock = spyFetchAsWorker().mockResolvedValueOnce(mixed())
       const html = await (await handler(makeReq('claude'))).text()
       expect(meta(html, 'property', 'og:title')).toBe('Is Anthropic (Claude) Down? Unknown | AIWatch')
       expect(meta(html, 'name', 'twitter:title')).toBe('Is Anthropic (Claude) Down? Unknown | AIWatch')
@@ -357,7 +369,7 @@ describe('is-down-group.ts', () => {
     })
 
     it('keeps Unknown when no member is operational', async () => {
-      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
         { id: 'claude', name: 'Claude API', status: 'unknown' },
         { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
         { id: 'claudecode', name: 'Claude Code', status: 'unknown' },
@@ -368,7 +380,7 @@ describe('is-down-group.ts', () => {
     })
 
     it('lets a real outage win over the mixed state', async () => {
-      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
         { id: 'claude', name: 'Claude API', status: 'operational' },
         { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
         { id: 'claudecode', name: 'Claude Code', status: 'down' },
@@ -379,7 +391,7 @@ describe('is-down-group.ts', () => {
     })
 
     it('leaves an all-operational family unchanged', async () => {
-      fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+      fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
         { id: 'claude', name: 'Claude API', status: 'operational' },
         { id: 'claudeai', name: 'claude.ai', status: 'operational' },
         { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -391,7 +403,7 @@ describe('is-down-group.ts', () => {
   })
 
   it("says a green member's status is AIWatch's own measurement when its source is unreadable and its probe answers", async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true, probeConfirmed: true },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -405,7 +417,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('says a degraded member is AIWatch\'s own measurement when a failing probe promoted it past an unreadable source', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'degraded', incidentSourceStale: true, probeContradicted: true },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -418,7 +430,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('does not credit AIWatch\'s own checks when an unreadable source has no probe behind it', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -428,7 +440,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('does not credit AIWatch\'s own checks for a status the provider\'s readable page reported', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'degraded', probeContradicted: true },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -438,7 +450,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('keeps another member\'s real outage as the headline when one member\'s source is unreadable', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
       { id: 'chatgpt', name: 'ChatGPT', status: 'down' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -448,7 +460,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('names every unreadable member and claims no quiet window when all of them are unreadable', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational', incidentSourceStale: true },
       { id: 'codex', name: 'Codex', status: 'operational', incidentSourceStale: true },
@@ -459,7 +471,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('keeps listing a readable member\'s incident and still says which member\'s history is missing', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidentSourceStale: true },
       { id: 'chatgpt', name: 'ChatGPT', status: 'degraded', incidents: [
         { id: 'inc-chat', title: 'Slow responses', status: 'investigating', startedAt: new Date().toISOString(), resolvedAt: null, duration: null },
@@ -472,7 +484,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('withholds the family summary when the status fetch fails', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('worker unreachable'))
+    fetchMock = spyFetchAsWorker().mockRejectedValueOnce(new Error('worker unreachable'))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).not.toContain('30-day family summary')
     expect(html).not.toContain('incidents across monitored services')
@@ -480,7 +492,7 @@ describe('is-down-group.ts', () => {
 
   it('withholds the family summary when a member status is unknown, even if others carry incidents', async () => {
     const recent = new Date(Date.now() - 60 * 60_000).toISOString()
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'unknown', incidents: [{ id: 'a', title: 'A', status: 'resolved', startedAt: recent, duration: '1h 0m' }] },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational', incidents: [{ id: 'b', title: 'B', status: 'resolved', startedAt: recent, duration: '2h 0m' }] },
@@ -490,7 +502,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('withholds the family summary when a member is missing from the payload', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
     ]))
@@ -500,7 +512,7 @@ describe('is-down-group.ts', () => {
 
   it('excludes a status_history-derived incident from the family average recovery', async () => {
     const recent = new Date(Date.now() - 60 * 60_000).toISOString()
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational', incidents: [
         { id: 'real', title: 'Real', status: 'resolved', startedAt: recent, duration: '1h 0m' },
         { id: 'day', title: 'Daily bucket', status: 'resolved', startedAt: recent, duration: '9h 0m', derived: 'status_history', derivedDay: recent.slice(0, 10) } as MockIncident,
@@ -514,7 +526,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('marks a medium-confidence score, like the per-service page', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational', aiwatchScore: 80, scoreGrade: 'good', scoreConfidence: 'medium' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational', aiwatchScore: null, scoreGrade: null, scoreConfidence: 'low' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational', aiwatchScore: 95, scoreGrade: 'excellent', scoreConfidence: 'high' },
@@ -525,7 +537,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('worst-of headline: one member down dominates the others being operational', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational' },
       { id: 'chatgpt', name: 'ChatGPT', status: 'down' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -538,7 +550,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('worst-of headline: degraded beats operational but loses to down', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -555,7 +567,7 @@ describe('is-down-group.ts', () => {
   // the word "Unknown" appears somewhere — the old bugs would still pass a mere `.toContain('Unknown')`
   // check, since a lone member row could say "Unknown" while the headline still lied.
   it('returns 503 + no-store, headline reads Unknown (never fabricated), and every member link still works', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
+    fetchMock = spyFetchAsWorker().mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
     const res = await handler(makeReq('claude'))
     const html = await res.text()
     expect(res.status).toBe(503)
@@ -575,7 +587,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('returns 503 + no-store when the Worker responds with a non-2xx status', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('upstream error', { status: 502 }))
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(new Response('upstream error', { status: 502 }))
     const res = await handler(makeReq('openai'))
     const html = await res.text()
     expect(res.status).toBe(503)
@@ -584,7 +596,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('a member missing from the Worker response renders as unknown, not fabricated as operational', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       // claudeai / claudecode absent — e.g. a partial worker response
     ]))
@@ -597,7 +609,7 @@ describe('is-down-group.ts', () => {
   it('headline reads Unknown (not Operational) when EVERY member is missing from an otherwise-successful response', async () => {
     // The bug this guards: STATUS_RANK used to tie 'unknown' with 'operational' at rank 0, so the
     // reduce (seeded 'operational') never moved off it when every member came back unknown.
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([]))
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([]))
     const res = await handler(makeReq('claude'))
     const html = await res.text()
     expect(res.status).toBe(200) // fetch succeeded — an empty/mismatched roster is not a fetch failure
@@ -613,7 +625,7 @@ describe('is-down-group.ts', () => {
   // which is a different route into the same state and would not have caught a `normalizeStatus` that
   // dropped the new word.
   it('a member the worker reports as `unknown` renders Unknown — never Degraded Performance', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'unknown' },
       { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
       { id: 'claudecode', name: 'Claude Code', status: 'unknown' },
@@ -628,7 +640,7 @@ describe('is-down-group.ts', () => {
   // else branch, so meta/og/twitter/JSON-LD and the visible headline all read "see which service IS
   // AFFECTED" under an "Unknown" title. Served 200 and cached, so that sentence is what crawlers carry.
   it('does not assert a confirmed outage in the description under an Unknown headline', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'unknown' },
       { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
       { id: 'claudecode', name: 'Claude Code', status: 'unknown' },
@@ -640,7 +652,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('control: a real outage still says which service is affected', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'down' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -650,7 +662,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('a CONFIRMED down member still outranks a worker-reported unknown sibling', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'down' },
       { id: 'claudeai', name: 'claude.ai', status: 'unknown' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -661,7 +673,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('...and an unknown member is not masked by an operational sibling either', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'unknown' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -672,7 +684,7 @@ describe('is-down-group.ts', () => {
   })
 
   it('a CONFIRMED down member still wins over an unknown sibling (unknown does not mask a real outage)', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'down' },
       // claudeai / claudecode missing — unknown, must not outrank the confirmed 'down' above
     ]))
@@ -694,7 +706,7 @@ describe('is-down-group.ts — og:url pin (#1063/#804 parity, group page)', () =
   afterEach(() => { fetchMock?.mockRestore() })
 
   it('with no ?e=/&i=, og:url is the bare canonical (unpinned — unchanged legacy behavior)', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -704,7 +716,7 @@ describe('is-down-group.ts — og:url pin (#1063/#804 parity, group page)', () =
   })
 
   it('with ?e=degraded&i=<token>, og:url carries BOTH — a distinct, per-incident card identity', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' }, // live status is IRRELEVANT once pinned
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -720,7 +732,7 @@ describe('is-down-group.ts — og:url pin (#1063/#804 parity, group page)', () =
   })
 
   it('a pinned share drops the 10-min cache-buster (the image must not move after the share moment)', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'openai', name: 'OpenAI API', status: 'operational' },
       { id: 'chatgpt', name: 'ChatGPT', status: 'operational' },
       { id: 'codex', name: 'Codex', status: 'operational' },
@@ -731,7 +743,7 @@ describe('is-down-group.ts — og:url pin (#1063/#804 parity, group page)', () =
   })
 
   it('an unrecognized ?e= value is ignored (falls back to unpinned live behavior)', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'down' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -742,7 +754,7 @@ describe('is-down-group.ts — og:url pin (#1063/#804 parity, group page)', () =
   })
 
   it('?i= alone (no ?e=) still pins the og:url — an incident-token-only share is just as frozen', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -769,7 +781,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('merges a shared incident id across two members into ONE row listing both', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'down', incidents: [
         { id: 'inc-shared', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null },
       ] },
@@ -788,7 +800,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('does NOT merge two genuinely different incident ids — each renders its own row', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'down', incidents: [
         { id: 'inc-a', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null },
       ] },
@@ -804,7 +816,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
   })
 
   it('#887 — lists each member\'s error reference in its own disclosure (API open), and skips members without one', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -820,7 +832,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('#1596 — shows the provider timeline under an incident row, and nothing for a row without one', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'down', incidents: [
         { id: 'inc-a', title: 'Elevated errors', status: 'identified', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null, timeline: [
           { stage: 'investigating', text: 'Looking into errors', at: '2026-07-26T05:00:00Z' },
@@ -844,7 +856,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('does NOT attach an AI analysis meant for a different, unrelated incident on the same service', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [{ id: 'claude', name: 'Claude API', status: 'down', incidents: [
         { id: 'inc-real', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null },
       ] }],
@@ -864,7 +876,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
   // analysis is filed under 'claudeai' only — it must still attach to the merged row.
   it('finds the AI analysis even when filed under a NON-first member of a merged incident', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [
         { id: 'claude', name: 'Claude API', status: 'down', incidents: [
           { id: 'inc-shared', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null },
@@ -884,7 +896,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('shows a RESOLVED incident\'s analysis as "Post-Incident Analysis" (no ETA) within the 2h window', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [{ id: 'claude', name: 'Claude API', status: 'operational', incidents: [
         { id: 'inc-recent', title: 'Brief spike', status: 'resolved', startedAt: '2026-07-26T06:00:00Z', resolvedAt: '2026-07-26T06:30:00Z', duration: '30m' },
       ] }],
@@ -900,7 +912,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('hides a RESOLVED incident\'s analysis once past the 2h window, but still renders the row', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [{ id: 'claude', name: 'Claude API', status: 'operational', incidents: [
         { id: 'inc-old', title: 'Old incident', status: 'resolved', startedAt: '2026-07-24T09:00:00Z', resolvedAt: '2026-07-24T10:30:00Z', duration: '1h 30m' },
       ] }],
@@ -917,7 +929,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('never shows analysis for a resolved incident with no resolvedAt (fails closed, not open)', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [{ id: 'claude', name: 'Claude API', status: 'operational', incidents: [
         { id: 'inc-no-date', title: 'Unclear resolution time', status: 'resolved', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null },
       ] }],
@@ -932,7 +944,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('sorts an ONGOING incident above a more-recently-resolved one, regardless of startedAt', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational', incidents: [
         { id: 'inc-resolved-recent', title: 'Just resolved', status: 'resolved', startedAt: '2026-07-26T06:00:00Z', resolvedAt: '2026-07-26T06:30:00Z', duration: '30m' },
       ] },
@@ -951,7 +963,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
   // date used to fail OPEN (never filtered, kept in the list forever) instead of failing safe.
   it('excludes an incident with a malformed/missing startedAt instead of keeping it forever', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational', incidents: [
         { id: 'inc-bad-date', title: 'Should be dropped', status: 'resolved', startedAt: 'not-a-date', resolvedAt: null, duration: null },
       ] },
@@ -967,7 +979,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('recommends a healthy sibling family inside an ongoing incident\'s AI card', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [
         { id: 'claude', name: 'Claude API', status: 'down', incidents: [
           { id: 'inc-x', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null },
@@ -988,7 +1000,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('does NOT recommend a sibling family that is itself degraded/down', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [
         { id: 'claude', name: 'Claude API', status: 'down', incidents: [
           { id: 'inc-x', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null },
@@ -1007,7 +1019,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
 
   it('does NOT recommend an alternative on a RESOLVED incident\'s card, even with a healthy sibling', async () => {
     vi.useFakeTimers().setSystemTime(NOW)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [
         { id: 'claude', name: 'Claude API', status: 'operational', incidents: [
           { id: 'inc-resolved', title: 'Brief spike', status: 'resolved', startedAt: '2026-07-26T06:00:00Z', resolvedAt: '2026-07-26T06:30:00Z', duration: '30m' },
@@ -1026,7 +1038,7 @@ describe('is-down-group.ts — recent incidents (#1164 round-3)', () => {
   })
 
   it('shows "No incidents reported" (not an empty section) when the family has none in the window', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1047,7 +1059,7 @@ describe('outage-audience beacon (#842-B / #1193)', () => {
   // that posts no pageview leaves every visitor arriving on a family link uncounted. That every
   // member id is valid is pinned in api/_is-down/__tests__/family-groups.test.ts.
   it('posts a pageview naming a family member, flagged inactive when all are healthy', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1070,7 +1082,7 @@ describe('outage-audience beacon (#842-B / #1193)', () => {
     // outage quiet. The svc must move with it: recordOutageView stores (source, active-flag, svcId)
     // as one row, so an active flag paired with a member that was operational at render time asserts
     // an outage view of a service that had no outage. That row is permanent and unbackfillable.
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'down' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1085,7 +1097,7 @@ describe('outage-audience beacon (#842-B / #1193)', () => {
     // down outranks degraded (STATUS_RANK), and the headline says "Down" — so the row must name the
     // down member. Naming the degraded one would pair a `down` headline with a service that was only
     // degraded.
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'down' },
@@ -1098,7 +1110,7 @@ describe('outage-audience beacon (#842-B / #1193)', () => {
   it('survives the CSP hash pass — the beacon script is not stripped or unhashed', async () => {
     // The page hashes its own inline scripts; an added script that never made it into the policy
     // would render but be blocked in a browser, which no HTML assertion above would notice.
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1143,7 +1155,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
   }
 
   it('X share URL carries the status pin, the x UTM and the active incident token', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degradedFamily())
     const html = await (await handler(makeReq('claude'))).text()
     const shared = 'https://ai-watch.dev/is-claude-down?e=degraded'
       + '&utm_source=x&utm_medium=social&utm_campaign=outage&i=q7txxvbsftgq'
@@ -1151,7 +1163,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
   })
 
   it('does NOT share the bare canonical during an outage — the defect this pins', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degradedFamily())
     const html = await (await handler(makeReq('claude'))).text()
     // The old bar interpolated the unpinned URL into the tweet TEXT, where it renders as the shared
     // link. Both `text=` and `url=` are encodeURIComponent'd, so match that form.
@@ -1160,7 +1172,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
   })
 
   it('copy-link shares the same pin under its own UTM (copy-link/share), not the bare URL', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degradedFamily())
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain('data-url="https://ai-watch.dev/is-claude-down?e=degraded'
       + '&amp;utm_source=copy-link&amp;utm_medium=share&amp;utm_campaign=outage&amp;i=q7txxvbsftgq"')
@@ -1168,7 +1180,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
   })
 
   it('pins to the WORST-OF status, so one member down outranks another merely degraded', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [ongoing] },
       { id: 'claudeai', name: 'claude.ai', status: 'down', incidents: [ongoing] },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1183,7 +1195,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
       startedAt: new Date(Date.now() - 1_800_000).toISOString(),
       resolvedAt: new Date(Date.now() - 600_000).toISOString(), duration: '20m',
     }
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily([resolvedLater, ongoing]))
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degradedFamily([resolvedLater, ongoing]))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain(encodeURIComponent('&i=q7txxvbsftgq'))
     expect(html).not.toContain(encodeURIComponent('&i=resolved-newer'))
@@ -1199,7 +1211,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
       startedAt: new Date(Date.now() - 7_200_000).toISOString(),
       resolvedAt: new Date(Date.now() - 3_600_000).toISOString(), duration: '1h',
     }
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily([resolvedOnly]))
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degradedFamily([resolvedOnly]))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-down?e=degraded'))
     expect(html).not.toContain(encodeURIComponent('&i='))
@@ -1212,7 +1224,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
       id: 'long-running', title: 'Sustained degradation', status: 'monitoring',
       startedAt: new Date(Date.now() - 12 * 86_400_000).toISOString(), duration: null,
     }
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily([ancient]))
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degradedFamily([ancient]))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain(encodeURIComponent('&i=long-running'))
     // The incident itself is correctly absent from the rendered list — only the token outlives the window.
@@ -1222,7 +1234,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
   // The INBOUND `?e=`/`?i=` a visitor arrived on pins THIS page's card; it must never leak into the
   // URL the page hands out, or a recovered outage's card re-propagates through every fresh share.
   it('ignores the inbound ?e=/&i= pin when building the outbound share URL', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1234,7 +1246,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
   })
 
   it('an operational family still shares the plain canonical — no pin, no UTM', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1249,7 +1261,7 @@ describe('is-down-group.ts — public share bar carries the OG pin + UTM (#1243)
   })
 
   it('an UNREADABLE family (unknown) also shares the plain canonical — unknown is not an outage pin', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'unknown' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1286,7 +1298,7 @@ describe('is-down-group.ts — Copy link parity with the individual pages (#1243
   }
 
   it('copies a MESSAGE (data-text), not just the URL', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degraded())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degraded())
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain('data-text="🟡 Is Anthropic (Claude) down? Degraded Performance. Live status →\n'
       + 'https://ai-watch.dev/is-claude-down?e=degraded'
@@ -1294,13 +1306,13 @@ describe('is-down-group.ts — Copy link parity with the individual pages (#1243
   })
 
   it('keeps data-url as the fallback the handler reads when data-text is absent', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degraded())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degraded())
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain('data-url="https://ai-watch.dev/is-claude-down?e=degraded')
   })
 
   it('tags the X link for GA4 so the delegated listener has something to forward', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degraded())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degraded())
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain('data-ga="share" data-ga-method="x" data-ga-item="Anthropic (Claude)"')
   })
@@ -1309,7 +1321,7 @@ describe('is-down-group.ts — Copy link parity with the individual pages (#1243
   // fires on successful copy, so one copy would emit two `share` events — and the click-side one would
   // count a copy that failed.
   it('does not double-count copy: the copy button carries no data-ga', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degraded())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degraded())
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).not.toMatch(/data-action="copy-link"[^>]*data-ga=/)
     expect(html).not.toMatch(/data-ga=[^>]*data-action="copy-link"/)
@@ -1345,7 +1357,7 @@ describe('is-down-group.ts — Copy link handler, executed (#1243)', () => {
    *  missing (non-secure context); `null` → no clipboard object at all. */
   async function mountCopyHandler(clipboard: ((t: string) => Promise<void>) | Record<string, never> | null) {
     const writeText = typeof clipboard === 'function' ? clipboard : undefined
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [ongoing] },
       { id: 'claudeai', name: 'claude.ai', status: 'degraded', incidents: [ongoing] },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1513,7 +1525,7 @@ describe('is-down-group.ts — delegated [data-ga] listener, executed (#1243)', 
   })
 
   async function mountListener() {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded' },
       { id: 'claudeai', name: 'claude.ai', status: 'degraded' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1607,7 +1619,7 @@ describe('is-down-group.ts — which incident becomes the card identity (#1243)'
   const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString()
 
   it('picks the NEWEST unresolved incident, not the first member that has one', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       // openai is declared first in FAMILY_GROUPS and carries a recovering `monitoring` tail…
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidents: [
         { id: 'monitoring-tail', title: 'Elevated errors', status: 'monitoring', startedAt: iso(3 * 3_600_000), duration: null },
@@ -1624,7 +1636,7 @@ describe('is-down-group.ts — which incident becomes the card identity (#1243)'
   })
 
   it('an unparseable startedAt never wins the rank', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [
         { id: 'garbage-date', title: 'Malformed', status: 'investigating', startedAt: 'not-a-date', duration: null },
         { id: 'real-outage', title: 'Degraded performance', status: 'investigating', startedAt: iso(20 * 60_000), duration: null },
@@ -1641,7 +1653,7 @@ describe('is-down-group.ts — which incident becomes the card identity (#1243)'
   // seed that accepts anything lets a NaN-dated incident become the token, and the display filter then
   // drops that same incident — a card identity naming something the page refuses to show.
   it('emits NO &i= when the only unresolved incident has an unparseable date', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [
         { id: 'garbage-only', title: 'Malformed', status: 'investigating', startedAt: 'not-a-date', duration: null },
       ] },
@@ -1659,7 +1671,7 @@ describe('is-down-group.ts — which incident becomes the card identity (#1243)'
   // before it ever reads a token — so its `&i=stale` negative cannot fail on that input. This is the
   // path that matters: a visitor arrives on a stale pin while the family is degraded for a NEW reason.
   it('a stale inbound ?i= never becomes the outbound token during a new outage', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded', incidents: [
         { id: 'q7txxvbsftgq', title: 'Degraded performance', status: 'investigating', startedAt: iso(3_600_000), duration: null },
       ] },
@@ -1702,7 +1714,7 @@ describe('is-down-group.ts — share paths the rendered assertions could not rea
   // The X intent takes two params and only `url=` was ever asserted, so shipping an empty tweet body
   // stayed green.
   it('sends BOTH intent params — a share with an empty tweet body is not a share', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degradedFamily())
     const html = await (await handler(makeReq('claude'))).text()
     const text = encodeURIComponent('🟡 Is Anthropic (Claude) down? Degraded Performance. Live status →')
     expect(html).toContain(`tweet?text=${text}&amp;url=`)
@@ -1711,7 +1723,7 @@ describe('is-down-group.ts — share paths the rendered assertions could not rea
   // The handler reads `data-text || data-url`, but every executed case either has both or neither, so
   // dropping the fallback survived. Removing ONLY data-text exercises it.
   it('falls back to data-url when only data-text is missing', async () => {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(degradedFamily())
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(degradedFamily())
     const html = await (await handler(makeReq('claude'))).text()
     const shareRow = html.match(/<div class="share-row">[\s\S]*?<\/div>/)
     const script = html.match(/var copyBtn = document\.querySelector[\s\S]*?\n\}\)\n/)
@@ -1753,7 +1765,7 @@ describe('is-down-group.ts - the AI card splits durable from perishable prose (#
     const inc = status === 'resolved'
       ? { id: 'inc-1', title: 'Elevated errors', status: 'resolved', startedAt: '2026-07-26T05:00:00Z', resolvedAt: '2026-07-26T06:30:00Z', duration: '1h 30m' }
       : { id: 'inc-1', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-26T05:00:00Z', resolvedAt: null, duration: null }
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse(
       [{ id: 'claude', name: 'Claude API', status: status === 'resolved' ? 'operational' : 'down', incidents: [inc] }],
       { claude: [{ incidentId: 'inc-1', summary: DURABLE, ...(progress ? { progress } : {}), estimatedRecovery: '30m-1h' }] },
     ))
@@ -1787,7 +1799,7 @@ describe('is-down-group.ts — the report modal gates on the shared guard (#1369
   async function bootReportModal(stored: Record<string, string>) {
     vi.stubGlobal('localStorage', makeLocalStorage())
     for (const [svc, day] of Object.entries(stored)) localStorage.setItem(`aiwatch-reported-${svc}`, day)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1874,7 +1886,7 @@ describe('is-down-group.ts — the alert block matches the per-service page, per
   let fetchMock: ReturnType<typeof vi.spyOn>
 
   async function render(statuses: Record<string, string> = {}) {
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: statuses.claude ?? 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: statuses.claudeai ?? 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: statuses.claudecode ?? 'operational' },
@@ -1976,7 +1988,7 @@ describe('is-down-group.ts — the alert block matches the per-service page, per
 // consent-free click beacon in the page's delegated listener.
 describe('is-down-group.ts — 30-day history links (#1612)', () => {
   it('links each readable member to its own 30-day Incidents view', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'operational' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational', incidentSourceStale: true },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -1988,7 +2000,7 @@ describe('is-down-group.ts — 30-day history links (#1612)', () => {
   })
 
   it('posts the clicked member and the family headline phase, tagged as the group surface', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse([
+    spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
       { id: 'claude', name: 'Claude API', status: 'degraded' },
       { id: 'claudeai', name: 'claude.ai', status: 'operational' },
       { id: 'claudecode', name: 'Claude Code', status: 'operational' },
@@ -2004,7 +2016,7 @@ describe('is-down-group.ts — 30-day history links (#1612)', () => {
 describe('is-down-group.ts — 30-day summary includes records past the feed depth (#1614)', () => {
   it('counts a member incident that only incidentsBeyondFeed carries', async () => {
     const ago = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString()
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ services: [
+    spyFetchAsWorker().mockResolvedValueOnce(new Response(JSON.stringify({ services: [
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidents: [
         { id: 'live', title: 'Live', status: 'resolved', startedAt: ago(2), resolvedAt: ago(1.9), duration: '30m' },
       ], incidentsBeyondFeed: [
@@ -2038,7 +2050,7 @@ describe('is-down-group.ts — reference components (#1669)', () => {
   ]
 
   it('lists the Console row and its incident, labelled with the component, not a member link', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(services() as never))
+    spyFetchAsWorker().mockResolvedValueOnce(statusResponse(services() as never))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain('not monitored services, not counted above')
     expect(html).toContain(`<span class="member-name">${CONSOLE}</span>`)
@@ -2050,7 +2062,7 @@ describe('is-down-group.ts — reference components (#1669)', () => {
     const old = { ...consoleIncident, id: 'old-1', title: 'Old console outage', status: 'resolved', startedAt: hoursAgo(24 * 9) }
     const svcs = services()
     svcs[0].referenceIncidents = [old]
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(svcs as never))
+    spyFetchAsWorker().mockResolvedValueOnce(statusResponse(svcs as never))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).not.toContain('Old console outage')
   })
@@ -2058,7 +2070,7 @@ describe('is-down-group.ts — reference components (#1669)', () => {
   it('lists none for a member whose source is unreadable', async () => {
     const svcs = services()
     Object.assign(svcs[0], { incidentSourceStale: true })
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(svcs as never))
+    spyFetchAsWorker().mockResolvedValueOnce(statusResponse(svcs as never))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).not.toContain('Elevated errors on platform.claude.com')
   })
@@ -2066,14 +2078,14 @@ describe('is-down-group.ts — reference components (#1669)', () => {
   it('a member row for the same incident id keeps its member link', async () => {
     const svcs = services()
     svcs[1].incidents = [{ ...consoleIncident, title: 'Elevated errors on platform.claude.com' }] as never
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(svcs as never))
+    spyFetchAsWorker().mockResolvedValueOnce(statusResponse(svcs as never))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain('<span class="incident-service"><a href="/is-claude-ai-down">claude.ai</a></span>')
     expect(html).not.toContain(`<span class="incident-service">${CONSOLE}</span>`)
   })
 
   it('a degraded Console does not move the family headline or the 30-day summary', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse(services() as never))
+    spyFetchAsWorker().mockResolvedValueOnce(statusResponse(services() as never))
     const html = await (await handler(makeReq('claude'))).text()
     expect(html).toContain('<title>Is Anthropic (Claude) Down? Operational')
     expect(html).toContain('0 incidents across monitored services')

@@ -2,13 +2,8 @@ import { test, expect, AUDIENCE_BEACON_RE } from './fixtures.js'
 // #568/#643: upper bound on the is-down "ranked #X of N" denominator. constants.js is a pure data
 // module (no browser deps) → importable in node/Playwright, so this auto-tracks service additions.
 //
-// #643 — the bound must be the TOTAL service count, not `total − 2`. api/is-down.ts drops a service
-// from the ranked set only when `uptimeSource === 'estimate' && incidents.length === 0` (plus stale
-// sources), which is DYNAMIC: an estimate-only service like bedrock/azureopenai is RANKED while it
-// has a live incident. The old `total − NO_FEED_SERVICES.length` assumed those two are ALWAYS
-// excluded, so the test flaked (denominator rose above the bound) whenever an estimate-only service
-// had an active incident. The only static invariant is `denominator ≤ total`; the exact count varies
-// with live data and can't be asserted statically here.
+// #643 — the bound must be the TOTAL service count: which services are ranked depends on live data
+// (worker/src/status-view.ts rankInTier), so the only static invariant is `denominator ≤ total`.
 import { ALL_SERVICE_IDS } from '../src/utils/constants.js'
 const MAX_RANKED = ALL_SERVICE_IDS.length
 
@@ -274,7 +269,7 @@ test.describe('Is X Down? SSR pages', () => {
 
   // #787 — the "(tied)" coverage moved to DETERMINISTIC unit tests: the render branch in
   // api/_is-down/__tests__/html-template.test.ts ('renders "(tied)" iff rankTied is set') and the
-  // rank+tie DERIVATION in api/_is-down/__tests__/ranking.test.ts (computeRankPosition). The old e2e
+  // rank+tie DERIVATION in worker/src/__tests__/status-view-rank-position.test.ts (computeRankPosition). The old e2e
   // here asserted a LIVE score tie existed among 6 services, which false-failed whenever scores
   // drifted apart (it blocked unrelated PR #786's Edge E2E). The SSR rank LINE stays covered by the
   // 'is ranked #N' e2e; both halves of the tie path now need no live data.

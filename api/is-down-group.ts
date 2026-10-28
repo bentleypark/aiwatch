@@ -11,6 +11,7 @@ import { historyLinkAttrs, historyClickBeacon } from './_shared/history-link'
 import { cspForHtml } from './_shared/csp-hash'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { isDownCacheControl } from './_shared/is-down-cache'
+import { resolveWorkerApi } from './_shared/worker-api'
 import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
@@ -21,6 +22,8 @@ import { ALERT_CTA_CSS, ERRORS_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_
 export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
+
+const workerApi = resolveWorkerApi(WORKER_API)
 const REPORT_ENDPOINT = `${WORKER_API}/api/report-issue`
 
 interface MemberStatus {
@@ -341,8 +344,7 @@ function renderGroupPage(
 </section>`
 
   // #1164 review — a lightweight alternative-service nudge for an ONGOING incident's AI card: not the
-  // individual is-down page's tiered fallback engine (~150 lines, worker/src/fallback.ts-synced, keyed
-  // per-service capability/tier) — deliberately not duplicated a third time here, and out of scope for
+  // tiered fallback engine (worker/src/fallback.ts, keyed per-service capability/tier) — out of scope for
   // a "worst-of across N surfaces of ONE provider" page anyway. A group page only has sibling FAMILIES
   // to recommend, so the question is simply "is the other whole provider healthy right now?". Never
   // recommends a family that's itself degraded/down/unknown — that isn't an alternative.
@@ -777,7 +779,9 @@ export default async function handler(req: Request) {
     let shareIncidentStartedMs = -Infinity
     let isFallback = true
     try {
-      const statusFetch = await hedgedJsonFetch(`${WORKER_API}/api/status/cached?series=0`)
+      // #1831 — this family's members in full; the other families' members for their status only.
+      const statusOnlyIds = Object.values(FAMILY_GROUPS).filter((f) => f.slug !== family.slug).flatMap((f) => f.members)
+      const statusFetch = await hedgedJsonFetch(`${workerApi}/api/status/cached?series=0&view=is-down-group&ids=${family.members.map(encodeURIComponent).join(',')}&status=${statusOnlyIds.map(encodeURIComponent).join(',')}`)
       if (statusFetch.ok && statusFetch.attempt === 2) console.warn(`[is-down-group/${familyKey}] status fetch answered by the hedged second request`)
       if (!statusFetch.ok) console.warn(`[is-down-group/${familyKey}] status fetch failed: ${statusFetch.reason}`)
       if (statusFetch.ok) {
@@ -830,8 +834,7 @@ export default async function handler(req: Request) {
             probeConfirmed: s.probeConfirmed, probeContradicted: s.probeContradicted,
           }
         })
-        // #1164 review — same /api/status/cached payload already carries EVERY monitored service (not
-        // just this family's), so the sibling family's worst-of status is derived from the same `byId`
+        // #1164 review — the group view also carries the other families' members (status only, #1831), so the sibling family's worst-of status is derived from the same `byId`
         // map with zero extra fetches — see the "🔄 Alternative" recommendation in renderGroupPage.
         otherFamilies = otherFamilies.map((f) => ({
           ...f,
