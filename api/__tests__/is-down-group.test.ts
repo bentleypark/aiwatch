@@ -7,6 +7,7 @@ import { isDownCacheControl } from '../_shared/is-down-cache'
 import { LAST_CHECKED_CLIENT_JS, REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
 import { makeLocalStorage } from '../../src/utils/__tests__/localStorageStub.js'
 import { spyFetchAsWorker } from './fetch-stub'
+import { LAST_GOOD_COPY_URL } from '../../worker/src/last-good-copy-path'
 
 // Every handler invocation begins with the status fetch, and a degraded/down fixture may make a
 // second, best-effort report-feed request. Keep any unlisted call local to the test so a fixture
@@ -584,6 +585,28 @@ describe('is-down-group.ts', () => {
     expect(html).toContain('Claude Code')
     expect(html).not.toContain('>claudeai<')
     expect(html).not.toContain('>claudecode<')
+  })
+
+  it('a failed Worker read is rendered from the last-good copy as a 200 that is not cached (#1531 Part 7)', async () => {
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const u = String(input)
+      if (u === LAST_GOOD_COPY_URL) {
+        const body = await statusResponse([
+          { id: 'claude', name: 'Claude API', status: 'operational' },
+          { id: 'claudeai', name: 'claude.ai', status: 'degraded' },
+          { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+        ]).json()
+        return new Response(JSON.stringify({ ...body, lastUpdated: new Date().toISOString() }), { status: 200 })
+      }
+      if (u.includes('/api/status/cached')) return new Response('upstream error', { status: 502 })
+      return new Response(JSON.stringify({ reports: [] }), { status: 200 })
+    })
+    const res = await handler(makeReq('claude'))
+    const html = await res.text()
+    expect(fetchMock.mock.calls.map(([u]) => String(u))).toContain(LAST_GOOD_COPY_URL)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Cache-Control')).toBe(isDownCacheControl(true))
+    expect(html).toContain('Is Anthropic (Claude) Down? Degraded Performance')
   })
 
   it('returns 503 + no-store when the Worker responds with a non-2xx status', async () => {

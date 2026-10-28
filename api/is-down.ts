@@ -8,6 +8,7 @@ import { EXCLUDE_FALLBACK } from '../worker/src/fallback'
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
+import { lastGoodView } from './_shared/last-good-copy'
 import { isDownCacheControl } from './_shared/is-down-cache'
 import { resolveWorkerApi } from './_shared/worker-api'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
@@ -89,8 +90,11 @@ export default async function handler(req: Request) {
     // overwritten below before use.
     let fallbackReason: string = 'unknown'
 
-    const statusFetch = await hedgedJsonFetch(`${workerApi}/api/status/cached?series=0&view=is-down&id=${encodeURIComponent(entry.id)}`)
+    const statusUrl = `${workerApi}/api/status/cached?series=0&view=is-down&id=${encodeURIComponent(entry.id)}`
+    const statusFetch = await hedgedJsonFetch(statusUrl, { lastGood: lastGoodView<unknown>(statusUrl) })
     if (statusFetch.ok && statusFetch.attempt === 2) console.warn(`[is-down/${slug}] status fetch answered by the hedged second request`)
+    const copyReason = statusFetch.ok && statusFetch.attempt === 'copy' ? statusFetch.reason : null
+    if (copyReason) console.warn(`[is-down/${slug}] status fetch failed (${copyReason}); served the last-good copy`)
 
     if (statusFetch.ok) {
       try {
@@ -242,6 +246,7 @@ export default async function handler(req: Request) {
     // Worker so the operator gets a Discord alert.
     const isFallback = serviceData === null
     if (isFallback) await notifyEdgeFallback(WORKER_API, { surface: 'is-down', slug, reason: fallbackReason }, `is-down/${slug}`)
+    else if (copyReason) await notifyEdgeFallback(WORKER_API, { surface: 'is-down', slug, reason: `${copyReason}_served_copy` }, `is-down/${slug}`)
     // #482 — HASH-based CSP (not nonce): hash THIS response's inline scripts so the policy is
     // derived from the served content. Unlike a random nonce, a content hash stays valid when the
     // page is edge-cached (the cached header's hashes match the cached body), so /is-down keeps its
@@ -252,7 +257,7 @@ export default async function handler(req: Request) {
       status: isFallback ? 503 : 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': isDownCacheControl(isFallback),
+        'Cache-Control': isDownCacheControl(isFallback || copyReason !== null),
         [csp.key]: csp.value,
       },
     })

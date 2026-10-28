@@ -285,6 +285,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   stage-watchdog.ts  # Names the stage a slow is-down /api/status/cached fetch waits on (#1531)
   growth-series.ts   # Durable daily series of the consent-free growth counters (#986)
   reddit.ts security-monitor.ts changelog.ts provider-changes.ts platform-monitor.ts infra-status.ts rum.ts  # External monitoring
+  last-good-copy.ts last-good-copy-path.ts # is-down fallback copy in Vercel Blob (#1531)
   alert-feed.ts ext-claude.ts sitemap-feed.ts latest-report.ts indexnow.ts badge.ts og.ts og-render.ts slack.ts slack-message.ts  # Feeds, projections, SEO, images, Slack
   parsers/           # one module per status-page platform — `ls` it, or directory-map.md for what each does
 extension/           # Claude-only Chrome extension (MV3, #837) — consumes ?src=ext-claude only

@@ -111,6 +111,15 @@ describe('handleEdgeFallbackAlert (#378)', () => {
     expect(sent.embeds[0].description.includes('stale-if-error')).toBe(mentions)
   })
 
+  it.each([['worker_timeout_served_copy', true], ['worker_timeout', false]] as const)('#1531 Part 7 — reason %s says the page came from the last-good copy: %s', async (reason, servedCopy) => {
+    const { kv } = makeKV()
+    const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
+    await call(makeReq({ surface: 'is-down', slug: 'claude', reason }, 'correct'), env)
+    const { description } = (JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { embeds: Array<{ description: string }> }).embeds[0]
+    expect(description.includes('last-good copy in Vercel Blob')).toBe(servedCopy)
+    expect(description.includes('temporarily unavailable')).toBe(!servedCopy)
+  })
+
   it('#1531 — answers even while the dedup read stalls, with the whole dispatch under waitUntil', async () => {
     const { kv } = makeKV()
     ;(kv.get as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise(() => {}))

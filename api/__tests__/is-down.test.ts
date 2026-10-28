@@ -9,6 +9,7 @@ import handler from '../is-down'
 import { isDownCacheControl } from '../_shared/is-down-cache'
 import { LAST_CHECKED_CLIENT_JS } from '../_is-down/html-template'
 import { spyFetchWithEmptyReportFeed } from './fetch-stub'
+import { LAST_GOOD_COPY_URL } from '../../worker/src/last-good-copy-path'
 
 function makeReq(slug: string): Request {
   return new Request(`https://ai-watch.dev/api/is-down?slug=${slug}`, { method: 'GET' })
@@ -38,7 +39,9 @@ describe('is-down.ts cache-header divergence (#378)', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
-    fetchMock = vi.spyOn(globalThis, 'fetch')
+    const guard = globalThis.fetch
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) =>
+      String(input) === LAST_GOOD_COPY_URL ? Promise.resolve(new Response('', { status: 404 })) : guard(input, init))
   })
   afterEach(() => {
     fetchMock.mockRestore()
@@ -130,6 +133,35 @@ describe('is-down.ts cache-header divergence (#378)', () => {
       { surface: 'is-down', slug: 'gemini', reason: 'service_missing' },
       { surface: 'is-down', slug: 'cursor', reason: 'parse_error' },
     ])
+  })
+
+  it('a failed Worker read is rendered from the last-good copy: 200, no-store, alert names the copy (#1531 Part 7)', async () => {
+    process.env.EDGE_ALERT_TOKEN = 'test-token'
+    const alerts: Array<{ reason: string }> = []
+    const copyReads: string[] = []
+    fetchMock.mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (u.includes('/api/internal/edge-fallback')) {
+        alerts.push(JSON.parse((init?.body as string) ?? '{}'))
+        return new Response(null, { status: 200 })
+      }
+      if (u === LAST_GOOD_COPY_URL) {
+        copyReads.push(u)
+        const body = await makeWorkerSuccess().json()
+        return new Response(JSON.stringify({ ...body, lastUpdated: new Date().toISOString() }), { status: 200 })
+      }
+      if (u.includes('/api/report-feed')) return new Response(JSON.stringify({ reports: [] }), { status: 200 })
+      throw new Error(`unexpected fetch ${u}`)
+    })
+    fetchMock.mockResolvedValueOnce(new Response('upstream', { status: 502 }))
+    const res = await handler(makeReq('claude-api'))
+    expect(copyReads).toHaveLength(1)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Cache-Control')).toBe(isDownCacheControl(true))
+    const html = await res.text()
+    expect(html).toContain('Claude API')
+    expect(html).not.toContain('Alternatives can&rsquo;t be shown right now')
+    expect(alerts).toEqual([{ surface: 'is-down', slug: 'claude-api', reason: 'worker_http_502_served_copy' }])
   })
 
   it('a stalled first status request is answered by the hedged second one, not the fallback (#1531 Part 5)', async () => {
