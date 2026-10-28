@@ -48,7 +48,7 @@ which is gov-compliance-scoped, not general-API availability). It is a SEPARATE 
 suppression says "this IS ours but hide it". See [status-determination.md](status-determination.md).
 
 Two entry scopes:
-- **`incident`** — hide ONE specific incident by id (ad-hoc one-off). `{ scope:'incident', incId }`.
+- **`incident`** — hide ONE specific incident by id (ad-hoc one-off). `{ scope:'incident', incId }`. With `svcId` (`--svc`) it is hidden on that service only, for an incident two cards read from one page (#1814). Add and remove name the same `svcId`.
 - **`service-pattern`** — hide any incident on a service whose title contains `match` (recurring surface;
   a runtime-editable `incidentExclude`). `{ scope:'service-pattern', svcId, match }`.
 

@@ -242,3 +242,52 @@ describe('readSuppressionsFreshResult (#1318)', () => {
       .toEqual({ state: 'ok', list: [{ scope: 'incident', incId: 'x' }] })
   })
 })
+
+// #1814 — a Grok Bot-only incident stored on cursor before the scope fix must leave cursor's record
+// and stay on the Grok Bot card, which reads the same page.
+describe('#1814 incident suppression scoped to one service', () => {
+  const GROK_BOT = inc({ id: 'ps_45622ec185897742', title: 'Delayed responses in Grok Bot', status: 'resolved' })
+  const scoped: SuppressionEntry[] = [{ scope: 'incident', incId: 'ps_45622ec185897742', svcId: 'cursor' }]
+
+  it('hides the incident on the named service only', () => {
+    expect(isSuppressed(GROK_BOT, 'cursor', scoped)).toBe(true)
+    expect(isSuppressed(GROK_BOT, 'grokbot', scoped)).toBe(false)
+  })
+
+  it('applySuppressions keeps it on the other card', () => {
+    const [cursor, grokbot] = applySuppressions([svc('cursor', [GROK_BOT]), svc('grokbot', [GROK_BOT])], scoped)
+    expect(cursor.incidents).toEqual([])
+    expect(grokbot.incidents).toEqual([GROK_BOT])
+  })
+
+  it('normalize keeps svcId, and an unscoped entry still hides the incident everywhere', () => {
+    expect(normalizeSuppressions([{ scope: 'incident', incId: 'x', svcId: 'cursor' }])).toEqual([{ scope: 'incident', incId: 'x', svcId: 'cursor' }])
+    expect(isSuppressed(GROK_BOT, 'grokbot', [{ scope: 'incident', incId: 'ps_45622ec185897742' }])).toBe(true)
+  })
+
+  it('a scoped and an unscoped entry for the same id are different targets', () => {
+    expect(sameSuppressionTarget({ scope: 'incident', incId: 'x', svcId: 'cursor' }, { scope: 'incident', incId: 'x' })).toBe(false)
+    expect(sameSuppressionTarget({ scope: 'incident', incId: 'x', svcId: 'cursor' }, { scope: 'incident', incId: 'x', svcId: 'cursor' })).toBe(true)
+  })
+
+  it('mutateSuppressions adds and removes the scoped entry', () => {
+    const added = mutateSuppressions([], { action: 'add', scope: 'incident', incId: 'x', svcId: 'cursor' })
+    expect(added.ok && added.list).toEqual([{ scope: 'incident', incId: 'x', svcId: 'cursor' }])
+    const start: SuppressionEntry[] = [{ scope: 'incident', incId: 'x' }, { scope: 'incident', incId: 'x', svcId: 'cursor' }]
+    const removed = mutateSuppressions(start, { action: 'remove', scope: 'incident', incId: 'x', svcId: 'cursor' })
+    expect(removed.ok && removed.list).toEqual([{ scope: 'incident', incId: 'x' }])
+  })
+})
+
+it('#1814 the month archive drops a scoped row from cursor and keeps it on grokbot', async () => {
+  const { filterSuppressedFromMonthly } = await import('../monthly-archive')
+  const row = (id: string, min: number) => ({ id, title: 'Delayed responses in Grok Bot', startedAt: '2026-10-27T20:33:09Z', durationMin: min, finalStatus: 'resolved' })
+  const svcData = (ids: string[]) => ({
+    count: ids.length, totalMinutes: ids.length * 10, longestMinutes: 10, dates: ['2026-10-27'],
+    incidentIds: ids, durations: Object.fromEntries(ids.map((i) => [i, 10])), incidents: ids.map((i) => row(i, 10)),
+  })
+  const data = { lastUpdated: '2026-10-28T00:00:00Z', services: { cursor: svcData(['gb', 'ide']), grokbot: svcData(['gb']) } } as never
+  const out = filterSuppressedFromMonthly(data, [{ scope: 'incident', incId: 'gb', svcId: 'cursor' }]) as unknown as { services: Record<string, { count: number; totalMinutes: number; incidentIds: string[] }> }
+  expect(out.services.cursor).toMatchObject({ count: 1, totalMinutes: 10, incidentIds: ['ide'] })
+  expect(out.services.grokbot).toMatchObject({ count: 1, incidentIds: ['gb'] })
+})

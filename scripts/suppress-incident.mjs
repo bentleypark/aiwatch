@@ -6,9 +6,9 @@
 // Usage:
 //   ADMIN_API_KEY=... node scripts/suppress-incident.mjs list
 //   ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope service-pattern --svc <id> --match <substr> [--reason "..."]
-//   ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope incident --incId <id> [--reason "..."]
+//   ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope incident --incId <id> [--svc <id>] [--reason "..."]
 //   ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove --scope service-pattern --svc <id> --match <substr>
-//   ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove --scope incident --incId <id>
+//   ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove --scope incident --incId <id> [--svc <id>]
 //   add/remove also take [--confirm off] to skip the post-write confirmation (#1740).
 //
 // Example (the FedRAMP first use):
@@ -23,7 +23,7 @@ const PATH = '/api/admin/suppress'
 const USAGE = `Usage:
   ADMIN_API_KEY=... node scripts/suppress-incident.mjs list
   ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope service-pattern --svc <id> --match <substr> [--reason "..."]
-  ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope incident --incId <id> [--reason "..."]
+  ADMIN_API_KEY=... node scripts/suppress-incident.mjs add    --scope incident --incId <id> [--svc <id>] [--reason "..."]
   ADMIN_API_KEY=... node scripts/suppress-incident.mjs remove (same flags as the matching add)
   add/remove: [--confirm off] skips the post-write confirmation`
 
@@ -75,6 +75,25 @@ const body = { action, scope }
 if (scope === 'incident') {
   if (!flags.incId) { console.error('--incId is required for --scope incident'); process.exit(2) }
   body.incId = flags.incId
+  if (flags.svc) {
+    let probe
+    try {
+      probe = await adminRequest(PATH, adminKey, 'GET')
+    } catch (err) {
+      console.error(`Network error: ${err instanceof Error ? err.message : err}. Nothing was written.`)
+      process.exit(1)
+    }
+    if (!probe.ok) {
+      printResponse(probe, Date.now())
+      console.error('Nothing was written.')
+      process.exit(1)
+    }
+    if (probe.json?.incidentSvcScope !== true) {
+      console.error('This Worker does not scope incident suppressions to one service, so --svc would be stored as a suppression on every service. Deploy the Worker first. Nothing was written.')
+      process.exit(2)
+    }
+    body.svcId = flags.svc
+  }
 } else {
   if (!flags.svc || !flags.match) { console.error('--svc and --match are required for --scope service-pattern'); process.exit(2) }
   body.svcId = flags.svc
