@@ -101,6 +101,12 @@ describe('#1669 fetchService — a Console-only incident on the claude card', ()
     expect(svc.referenceIncidents?.map((i) => i.id)).toEqual(['978mjkgw6mh7'])
   })
 
+  it('#1828 the hold removes referenceCountable from a card it does not hold', () => {
+    const svc = { id: 'claude', status: 'operational', incidents: [], referenceCountable: ['978mjkgw6mh7'] } as unknown as ServiceStatus
+    holdReferenceClassification([svc], null)
+    expect(svc.referenceCountable).toBeUndefined()
+  })
+
   it('a card without referenceComponentIds gets no referenceIncidents', async () => {
     const svc = await fetchWith('claudeai', [consoleOnly()], { [CONSOLE]: 'degraded_performance' })
     expect(svc.referenceIncidents).toBeUndefined()
@@ -343,6 +349,18 @@ describe('#1669 referenceIncidentsOf', () => {
     expect(referenceIncidentsOf([inc([NAME[CONSOLE]], [CONSOLE, CLAUDE_API])], claude, COMPONENTS)).toEqual([])
   })
 
+  it('#1828 an id-only tag inside the reference set is a reference incident', () => {
+    expect(referenceIncidentsOf([inc(undefined, [CONSOLE])], claude, COMPONENTS)).toHaveLength(1)
+  })
+
+  it('#1828 an id-only tag outside the reference set is not', () => {
+    expect(referenceIncidentsOf([inc(undefined, [CONSOLE, CLAUDE_API])], claude, COMPONENTS)).toEqual([])
+  })
+
+  it('#1828 an id-only tag on a reference id the page no longer lists matches nothing', () => {
+    expect(referenceIncidentsOf([inc(undefined, [CONSOLE])], claude, COMPONENTS.filter((c) => c.id !== CONSOLE))).toEqual([])
+  })
+
   it('a reference id the page no longer lists matches nothing', () => {
     expect(referenceIncidentsOf([inc([NAME[CONSOLE]])], claude, COMPONENTS.filter((c) => c.id !== CONSOLE))).toEqual([])
   })
@@ -392,16 +410,17 @@ describe('#1821 fetchService — chatgpt and the Compliance API', () => {
     impact(DELAYED.id, COMPLIANCE), impact(CONV.id, CONVERSATIONS),
     impact(API_FILES.id, BATCH), impact(API_FILES.id, FILES), impact(API_SIGNIN.id, API_LOGIN),
   ])
-  const fetchChatgpt = () => {
+  const fetchOn = (id: string, pageHtml = html) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
     const summary = { status: { indicator: 'minor', description: 'Partially Degraded Service' }, components: COMPONENTS, incidents: [] }
-    return fetchService(cfg('chatgpt'), {
+    return fetchService(cfg(id), {
       summary: summary as never,
       incidents: { incidents: [DELAYED, CONV, API_FILES, API_SIGNIN] } as never,
       componentsFetch: { ok: true, components: COMPONENTS },
-      uptimeHtml: html,
+      uptimeHtml: pageHtml,
     } as never, undefined, {})
   }
+  const fetchChatgpt = () => fetchOn('chatgpt')
 
   it('counts the Conversations incident only — not the Compliance API one, nor the APIs-group Files / Login ones', async () => {
     expect((await fetchChatgpt()).incidents.map((i) => i.id)).toEqual([CONV.id])
@@ -409,5 +428,96 @@ describe('#1821 fetchService — chatgpt and the Compliance API', () => {
 
   it('a degraded Compliance API leaves the badge operational', async () => {
     expect((await fetchChatgpt()).status).toBe('operational')
+  })
+
+  it('#1828 chatgpt carries the Compliance API incident as a reference incident', async () => {
+    expect((await fetchChatgpt()).referenceIncidents?.map((i) => i.id)).toEqual([DELAYED.id])
+  })
+
+  it('#1828 openai carries it as a reference incident and still counts the APIs-group incidents', async () => {
+    const openai = await fetchOn('openai')
+    expect(openai.referenceIncidents?.map((i) => i.id)).toEqual([DELAYED.id])
+    expect(openai.incidents.map((i) => i.id)).not.toContain(DELAYED.id)
+    expect(openai.incidents.map((i) => i.id)).toEqual(expect.arrayContaining([API_FILES.id]))
+  })
+
+  it('#1828 counted incidents carry no component names; the reference incident is named from its id', async () => {
+    const svc = await fetchChatgpt()
+    expect(svc.incidents.every((i) => i.componentNames === undefined)).toBe(true)
+    expect(svc.referenceIncidents?.map((i) => i.componentNames)).toEqual([['Compliance API']])
+  })
+
+  it('#1828 a summary.json window without the Compliance API still identifies it from components.json', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    const summary = { status: { indicator: 'minor', description: 'Partially Degraded Service' }, components: COMPONENTS.filter((c) => c.id !== COMPLIANCE), incidents: [] }
+    const svc = await fetchService(cfg('chatgpt'), {
+      summary: summary as never,
+      incidents: { incidents: [DELAYED, CONV] } as never,
+      componentsFetch: { ok: true, components: COMPONENTS },
+      uptimeHtml: html,
+    } as never, undefined, {})
+    expect(svc.referenceIncidents?.map((i) => i.id)).toEqual([DELAYED.id])
+    expect(svc.referenceComponents?.map((c) => c.name)).toEqual(['Compliance API'])
+  })
+
+  it('#1828 a reference incident later tagged to a counted id becomes counted', async () => {
+    const first = await fetchChatgpt()
+    holdReferenceClassification([first], [])
+    const second = await fetchOn('chatgpt', tpHtml([impact(DELAYED.id, COMPLIANCE), impact(DELAYED.id, CONVERSATIONS), impact(CONV.id, CONVERSATIONS)]))
+    holdReferenceClassification([second], [first])
+    expect(second.incidents.map((i) => i.id)).toContain(DELAYED.id)
+    expect(second.referenceIncidents).toBeUndefined()
+  })
+
+  it('#1828 chatgpt: a run that cannot read the snapshot does not count an incident its filter drops', async () => {
+    const first = await fetchChatgpt()
+    holdReferenceClassification([first], null)
+    const second = await fetchChatgpt()
+    holdReferenceClassification([second], [first])
+    expect(first.incidents.map((i) => i.id)).not.toContain(DELAYED.id)
+    expect(first.referenceIncidents?.map((i) => i.id)).toEqual([DELAYED.id])
+    expect(first.referenceLedger?.reference).toEqual([DELAYED.id])
+    expect(first.referenceCountable).toBeUndefined()
+    expect(second.incidents.map((i) => i.id)).not.toContain(DELAYED.id)
+    expect(second.referenceIncidents?.map((i) => i.id)).toEqual([DELAYED.id])
+  })
+
+  it('#1828 openai: a run that cannot read the snapshot does not count an open Compliance incident the badge filter drops', async () => {
+    const open = tpIncident('01M4COMPLIANCEOPEN0000000A', 'Delayed Costs data in the Compliance API', new Date().toISOString(), 'investigating')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    const summary = { status: { indicator: 'minor', description: 'Partially Degraded Service' }, components: COMPONENTS, incidents: [] }
+    const svc = await fetchService(cfg('openai'), {
+      summary: summary as never,
+      incidents: { incidents: [open] } as never,
+      componentsFetch: { ok: true, components: COMPONENTS },
+      uptimeHtml: tpHtml([impact(open.id, COMPLIANCE)]),
+    } as never, undefined, {})
+    holdReferenceClassification([svc], null)
+    expect(svc.incidents.map((i) => i.id)).not.toContain(open.id)
+    expect(svc.referenceIncidents?.map((i) => i.id)).toEqual([open.id])
+  })
+
+  it('#1828 openai: a resolved Compliance incident is counted by a run that cannot read the snapshot', async () => {
+    const svc = await fetchOn('openai')
+    holdReferenceClassification([svc], null)
+    expect(svc.incidents.map((i) => i.id)).toContain(DELAYED.id)
+    expect(svc.referenceCountable).toBeUndefined()
+  })
+
+  it('#1828 openai: a Compliance incident counted before the deploy stays counted', async () => {
+    const svc = await fetchOn('openai')
+    const before = { id: 'openai', status: 'operational', incidents: [...svc.incidents, ...(svc.referenceIncidents ?? [])] } as unknown as ServiceStatus
+    holdReferenceClassification([svc], [before])
+    expect(svc.incidents.map((i) => i.id)).toContain(DELAYED.id)
+    expect(svc.referenceIncidents).toBeUndefined()
+  })
+
+  it('#1828 openai: a reference incident stays reference on a cycle whose HTML does not join', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const first = await fetchOn('openai')
+    holdReferenceClassification([first], [])
+    const second = await fetchOn('openai', '<html></html>')
+    holdReferenceClassification([second], [first])
+    expect(second.referenceIncidents?.map((i) => i.id)).toEqual([DELAYED.id])
   })
 })

@@ -946,11 +946,12 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(TRACKED_COMPONENT_IDS.has('01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP tracked by no service').toBe(false)
     expect(TRACKED_COMPONENT_IDS.has('01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager tracked by no service').toBe(false)
     expect(TRACKED_COMPONENT_IDS.has('01KVR95C58GGWHV7RYBT32NP11'), 'Ads API tracked by no service').toBe(false)
-    // #1821 — `Compliance API` is on no card.
+    // #1821 — `Compliance API` is not counted; #1828 — it is a reference component on chatgpt and openai.
     const chatgptCfg = SERVICES.find((s) => s.id === 'chatgpt')!
     expect(chatgptCfg.statusComponentIds, 'Compliance API not in the badge scope').not.toContain('01JNKS9D9S72PMP1938PVFFQN4')
     expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API not in the breakdown').toBe(false)
-    expect(chatgptCfg.referenceComponentIds).toBeUndefined()
+    expect(chatgptCfg.referenceComponentIds).toEqual(['01JNKS9D9S72PMP1938PVFFQN4'])
+    expect(SERVICES.find((s) => s.id === 'openai')!.referenceComponentIds).toEqual(['01JNKS9D9S72PMP1938PVFFQN4'])
     expect(chatgptCfg.rosterAuditExclude).toEqual(['01JNKS9D9S72PMP1938PVFFQN4'])
     // #1010 — `Sites` and `ChatGPT Work` are ChatGPT-group members that were held out on first pass
     // while their `data_available_since` was under 30 days, and adopted once it cleared. Asserted on BOTH id lists rather than through `has`, which reads
