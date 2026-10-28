@@ -22,13 +22,10 @@
 // next cron while the incident is still in the live feed. An override is applied on READ/BUILD instead
 // (the same rebuild-safe shape as `filterSuppressedFromMonthly`), so it never fights the accumulator.
 //
-// APPLY POINTS — the monthly-accumulator read/build paths, right after suppression:
-//   1. `buildMonthlyArchive` build-time — corrects a rebuilt/first-built month's archive.
-//   2. `/api/report` current-month partial — the dashboard 30/90-day incident list.
-//   3. the weekly briefing — reads the raw accumulator directly.
+// APPLY POINTS — search for the callers of `readOverridesFresh` and `readOverridesFreshResult`.
 // The live `/api/status` Score is intentionally NOT overridden here: MTTR is median-based for services
-// with ≥3 resolved incidents (robust to one outlier), and the going-forward scoring robustness is
-// tracked separately (#1019 Part B). Its Incidents component, though, counts the days up to the stored
+// with ≥3 resolved incidents (robust to one outlier), and a small-sample prior covers fewer
+// (#1019 Part B, `MTTR_PRIOR_MIN` in score.ts). Its Incidents component, though, counts the days up to the stored
 // `resolvedAt` (#1487), so an overridden incident can cover more days live than in the archive.
 
 import type { MonthlyIncidents, MonthlyIncidentServiceData } from './monthly-archive'

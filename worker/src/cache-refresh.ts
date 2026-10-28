@@ -1,25 +1,25 @@
-// #488/#1057 — refresh the status cache on a status-change edge.
+// #488/#1057/#1371 — refresh the status cache outside the throttled traffic write.
 //
 // Every OG/SEO surface reads CACHE_KEY (via /api/status/cached). That key is otherwise written only
 // by the /api/status fetch handler's cacheWrite, throttled to once per 10 min and dependent on
 // incidental live traffic. So an incident the cron just detected (and alerted on) stays invisible to
 // SEO/OG for up to ~10 min — a shared "Is X Down?" card previews the pre-incident state.
 //
-// Two event-driven refreshes bypass that throttle, both writing CACHE_KEY only (never the daily uptime
-// counters, so incident edges don't bias the sampling):
+// Refreshes that bypass that throttle all go through `writeStatusCache`, which writes CACHE_KEY only
+// (never the daily uptime counters, so incident edges don't bias the sampling). The edge-triggered ones:
 //   #488 — the CRON, when a status-change alert fired (sentCount > 0). Covers the no-live-traffic case.
 //   #1057 — the LIVE /api/status handler, when a poll's fresh snapshot shows a status edge the cached
 //           snapshot doesn't yet reflect. This is what decouples the OG card's freshness from the alert
 //           timing: while the operator watches the (live) dashboard flip to down, their browser is
 //           polling /api/status, so the OG card flips on that poll — AHEAD of the */5 cron/Discord
 //           alert, instead of in lockstep with it (the whole-turn root cause of #1057).
-// Status edges are rare → a handful of writes/day, negligible against the monthly KV budget.
+// `refreshStatusCacheAfterCronFetch` (#1371) is the cron's write after its own live fetch, edge or not.
 // Extracted here as thin, KV-only functions so the decisions are unit-testable without invoking the
 // whole cron / fetch handler.
 //
-// Contract parity: stores RAW ServiceStatus[] under { services, cachedAt } (what /api/status/cached +
-// cacheWrite assume). /api/status/cached recomputes scores on read, so the OG card gets both the
-// correct status and the incident-adjusted Score.
+// Contract parity: stores RAW ServiceStatus[] (what /api/status/cached + cacheWrite assume).
+// /api/status/cached recomputes scores on read, so the OG card gets both the correct status and the
+// incident-adjusted Score.
 
 import { kvPut } from './utils'
 import type { ServiceStatus } from './services'
@@ -28,7 +28,6 @@ import type { UpstreamCandidate } from './upstream-feed'
 
 /** The snapshot-side write guard used by `cacheWrite` (the traffic writer) and, since #1371, by the
  *  cron writer below. Moved here from `index.ts` so the second caller does not need an import cycle.
- *  The other two CACHE_KEY writers still inline their own length check.
  *
  *  `cacheWrite` consults this BEFORE the throttle, so refusing costs no write slot.
  */
@@ -36,13 +35,13 @@ export function shouldPersistSnapshot(services: ServiceStatus[]): boolean {
   return services.length > 0
 }
 
-/** The shared CACHE_KEY writer (#488 + #1057). Stores RAW ServiceStatus[] under
+/** The shared CACHE_KEY writer. Stores RAW ServiceStatus[] under
  *  { services, upstreamFeeds, cachedAt }.
- *  A single primitive so the two event-driven refreshes write byte-identical snapshots — a second copy
+ *  A single primitive so every refresh writes byte-identical snapshots — a second copy
  *  of this JSON shape would silently drift from /api/status/cached's read contract. Returns kvPut's
  *  success boolean; never throws (kvPut swallows + logs).
  *
- *  `upstreamFeeds` (#1072) is REQUIRED, not optional-with-a-default. The snapshot has three writers and
+ *  `upstreamFeeds` (#1072) is REQUIRED, not optional-with-a-default. The snapshot has several writers and
  *  is-down renders whichever wrote last, so an optional param would let one path omit the feeds and
  *  still compile — and the omitting path would be an EDGE refresh, i.e. exactly the write that fires
  *  when an outage begins. The upstream note would then blink out at the moment it matters, on some
@@ -115,7 +114,7 @@ export function hasStatusEdge(
  *  snapshot (`snapshotUnusable`). That closes the window *after* the key is already gone, but nothing
  *  stops it going gone: on a tick where the snapshot is present-but-stale the cron live-fetches for its
  *  alert decisions and then DISCARDS the result, so `CACHE_KEY` runs out its TTL with no writer, and
- *  every `cacheRead()` caller — the 43 Edge is-down pages among them — serves its degraded 503 render
+ *  every `cacheRead()` caller — the Edge is-down pages among them — serves its degraded 503 render
  *  until the next tick notices the miss. Raising the TTL only moves that window later; the gap exists
  *  because the fresh data in hand was not written, not because the TTL was short.
  *
@@ -159,9 +158,8 @@ export type LiveEdgeRefresh = 'skipped' | 'refreshed' | 'refresh-failed'
  *  When cacheWrite was throttle-skipped (`wrote === false`), CACHE_KEY still holds the previous
  *  snapshot that the is-down/OG surfaces read. If this poll's `fresh` shows a status edge vs it, force
  *  an immediate CACHE_KEY refresh so the social card flips on THIS poll, ahead of the cron/#488 alert.
- *  `readCached` is injected (not a hard import of index.ts's cacheRead) so this stays KV-fake-testable
- *  and reuses the ONE parser of the { services, cachedAt } shape — no second copy to drift. NOTE the
- *  caller must ensure `readCached` reads the SAME key as `cacheKey` (production: both are CACHE_KEY) —
+ *  `readCached` is injected (not a hard import of index.ts's cacheRead) so this stays KV-fake-testable.
+ *  NOTE the caller must ensure `readCached` reads the SAME key as `cacheKey` (production: both are CACHE_KEY) —
  *  a mismatch would compare the edge against the wrong snapshot. The read runs ONLY on the throttled
  *  path (short-circuits when `wrote`). Returns the outcome so the caller can
  *  log success vs failure at the right severity — a failed forced write silently reintroduces the

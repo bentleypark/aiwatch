@@ -1,11 +1,8 @@
-// Crowd "Report an issue" — #575 Phase A (COLLECT ONLY, no public display).
+// Crowd "Report an issue" — #575.
 //
-// A 1st-party "Report an issue" button on /is-X-down posts here. Phase A stores a per-service,
-// per-UTC-day counter plus an IP-hash dedup marker, and exposes the counts ONLY internally
-// (daily Discord summary). It NEVER surfaces a "N users reporting" verdict — at AIWatch's volume
-// (~22 visitors/incident) a raw crowd banner would manufacture false signal and damage the
-// correctness AIWatch is trusted for. Gated corroboration + a Status Confidence input is Phase B
-// (only when the crowd signal cross-matches an independent degrade signal). See issue #575.
+// A 1st-party "Report an issue" button on /is-X-down posts here. This module holds the per-service,
+// per-UTC-day counter and the IP-hash dedup marker, the rolling feed, and the display gate
+// `shouldSurfaceReports` below. See issue #575.
 //
 // Pure helpers here (keys, validation, IP hash) are unit-tested; the KV I/O lives in index.ts.
 

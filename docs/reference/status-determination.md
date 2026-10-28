@@ -114,8 +114,7 @@ solves: an incident's `duration` is the provider's **paperwork** span (`resolved
 (its `affected_components` on the resolve update reads `operational → operational`), yet the stored
 duration is **13h 20m**; the sibling `96m8j04k15r5` ("- Sol") on the same component resolved in **18 min**,
 the best proxy for when the shared degradation cleared. That overstated duration feeds **MTTR / the
-Recovery score** (median-robust at ≥3 resolved incidents, but the `<3` mean fallback lets one such outlier
-tank a low-incident service) and the monthly report's `longestIncidentMin` / `totalDowntimeMin`.
+Recovery score** and the monthly report's `longestIncidentMin` / `totalDowntimeMin`.
 
 The **override layer** (`worker/src/overrides.ts`, operated via `GET/POST /api/admin/duration-override`)
 mirrors suppression: an `incident:duration-overrides` KV list of `{ id, durationMin, reason }`, applied by
@@ -127,14 +126,12 @@ mirrors suppression: an `incident:duration-overrides` KV list of `{ id, duration
 It also flows into the calendar-month `monthlyScore` (#993), whose MTTR reads the same per-incident
 durations. Applied on **READ/BUILD** of the monthly accumulator — NOT
 by editing it — because `accumulateMonthlyIncidents` rewrites a stored duration whenever the feed's differs (`dur !== oldDur`), so it would overwrite
-a lowered stored value on the next cron while the incident is still in the live feed. Three apply points,
-each right after suppression: `buildMonthlyArchive` (rebuild-safe), the `/api/report` current-month partial
-(dashboard 30/90-day list — but for a still-live current-month incident the live `/api/status` value wins
-in `mergeArchiveIntoMap`, so the override's visible effect there lags until the incident ages out of the
-feed; the permanent archive is unaffected), and the weekly briefing. The live `/api/status` Score is
-deliberately **not** overridden — MTTR robustness for the general case is tracked as #1019 Part B (a
-confidence-gate or small-sample shrinkage on MTTR, vs. computing duration from AIWatch's own observed
-`degraded → operational` edge). Removing an override restores the provider duration with zero code change.
+a lowered stored value on the next cron while the incident is still in the live feed. On the `/api/report`
+current-month partial (dashboard 30/90-day list), a still-live current-month incident keeps the live
+`/api/status` value in `mergeArchiveIntoMap`, so the override's visible effect there lags until the
+incident ages out of the feed; the permanent archive is unaffected. The live `/api/status` Score is
+deliberately **not** overridden — small-sample MTTR robustness is the prior in
+`score.ts` (`MTTR_PRIOR_MIN`, `MTTR_PRIOR_WEIGHT`; #1019 Part B). Removing an override restores the provider duration with zero code change.
 
 **A failed READ of the list is not treated the same everywhere (#1274)**, because a missing override is
 invisible downstream — `applyDurationOverrides` leaves `incidentIds` untouched by design, so the #1260
@@ -142,6 +139,8 @@ content census sees no change and nothing objects on its own.
 
 - `rebuild-archive` **refuses** (`readOverridesFreshResult` → `503`/`500`). An operator is holding the
   request and can retry, so nothing is lost by declining.
+- `rebuildRecoveryBaselines` (#1697) reads it the same way and, on a failed read, returns that state
+  without writing.
 - The **month-end cron** reads it the same way but **archives anyway**, announcing on Discord that the
   month went out without its overrides. Refusing there would be worse than the bug: the cron writes a
   month once, so a skipped month is never revisited, and the sources it would be rebuilt from expire.

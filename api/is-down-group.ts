@@ -1,14 +1,8 @@
-// #1164 — Vercel Edge Function for the provider-family group pages that now live at
-// /is-claude-down and /is-openai-down (the single-service content that used to be there moved to
-// /is-claude-api-down and /is-openai-api-down, api/is-down.ts). Someone searching the bare product
-// name ("is claude down") is more likely asking about the product broadly than one specific surface
-// — this page worst-of's the family's live status and links out to each member's own page.
-//
-// Deliberately LIGHT still: no FAQ/Alternatives/embed-badge/region-status sections — those stay
-// individual-page-only. But the page carries real content beyond the live status snapshot: recent
-// incidents (7d, across every member) with their AI analysis when one exists, a share affordance, and
-// cross-links to sibling family pages — real-review feedback that a bare status list read as too
-// empty, especially on the (common) all-operational day.
+// #1164 — Vercel Edge Function for the provider-family group pages, for example /is-claude-down (the
+// single-service content that used to be there moved to /is-claude-api-down, api/is-down.ts).
+// Someone searching the bare product name ("is claude down") is more likely asking about the product
+// broadly than one specific surface — this page worst-of's the family's live status and links out to
+// each member's own page.
 
 import { FAMILY_GROUPS, SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, type ServiceFamily } from './_is-down/slug-map'
 import { buildShareUrl } from './_is-down/share-url'
