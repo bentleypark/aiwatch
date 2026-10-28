@@ -51,6 +51,18 @@ describe('auditAgedInOutOfScope (#1518b — a component that crossed 30 days and
     ]
     expect(auditAgedInOutOfScope(entries, ['IN_SCOPE'], ['EXCLUDED'], NOW).sort()).toEqual(['AGED_1', 'AGED_2'])
   })
+
+  it('#1821 — a member of a scoped group is covered by its group; a member of an excluded or any other group still reports', () => {
+    const entries: RosterAuditEntry[] = [
+      { id: 'G_IN', dataAvailableSince: ago(400), groupId: null },
+      { id: 'M_IN', dataAvailableSince: ago(400), groupId: 'G_IN' },
+      { id: 'G_EX', dataAvailableSince: ago(400), groupId: null },
+      { id: 'M_EX', dataAvailableSince: ago(400), groupId: 'G_EX' },
+      { id: 'M_OTHER', dataAvailableSince: ago(400), groupId: 'G_OTHER' },
+      { id: 'TOP', dataAvailableSince: ago(400), groupId: null },
+    ]
+    expect(auditAgedInOutOfScope(entries, ['G_IN'], ['G_EX'], NOW).sort()).toEqual(['M_EX', 'M_OTHER', 'TOP'])
+  })
 })
 
 describe('nextRosterFindingSeen (#1518 — dedup so a stable finding does not re-alert every daily run)', () => {

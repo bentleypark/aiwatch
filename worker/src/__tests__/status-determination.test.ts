@@ -722,7 +722,8 @@ describe('displayComponentIds config sanity (#606)', () => {
   // #1008: "Codex in ChatGPT Desktop" moved from codex (5→4) to its official ChatGPT group (11→12).
   // #1010: `Compliance API` joined chatgpt's badge scope (12→13), then `Sites` + `ChatGPT Work` once
   // their `data_available_since` cleared 30 days (13→15). One retired component later left the scope (15→14).
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 14, chatgpt: 16, codex: 4 }
+  // #1821: `Compliance API` left chatgpt's scope (16→15).
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 14, chatgpt: 15, codex: 4 }
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
@@ -828,12 +829,12 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(14 + 16 + 4)
+    expect(all.length).toBe(14 + 15 + 4)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
   // single statusComponentId badge (so the badge is unchanged; statusComponentIds plural absent).
-  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, voyageai: 2, pinecone: 6, twelvelabs: 20 }
+  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 3, characterai: 5 }
 
   it('single-owner services carry the curated displayComponentIds count, keep their badge statusComponentId, and have no worst-of statusComponentIds', () => {
     for (const [id, count] of Object.entries(SINGLE_OWNER_COUNT)) {
@@ -845,6 +846,37 @@ describe('displayComponentIds config sanity (#606)', () => {
       expect(svc.statusComponentId, id).toBeDefined()
       expect(svc.statusComponentIds, id).toBeUndefined()
     }
+  })
+
+  it.each([
+    ['assemblyai', ['rfh9swc12f9h', '12wrfd55ml3r', '74m51w396x54']],
+    ['deepgram', ['cvbdk3fslx9v', 't80v4qz2jdsf']],
+    ['twelvelabs', ['29c68cnyd14l', '20930d4nz774']],
+    ['voyageai', ['p4zzcfjd8p5q']],
+  ])('#1821 — %s keeps its consoles, playgrounds, dashboards and billing as Reference', (id, ref) => {
+    expect(SERVICES.find((s) => s.id === id)!.referenceComponentIds).toEqual(ref)
+  })
+
+  it.each([
+    ['assemblyai', ['kygwc83t1rfg', '20vm7q71wjcn', 'psxcg5mfhznq']],
+    ['deepgram', ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'vsnk4gb1bb47', 'vm1x1v101qtn']],
+  ])('#1821 — %s shows only the counted API surfaces as breakdown rows', (id, rows) => {
+    expect(SERVICES.find((s) => s.id === id)!.displayComponentIds).toEqual(rows)
+  })
+
+  it('#1821 — deepgram badges its Public API group and Management APIs', () => {
+    expect(SERVICES.find((s) => s.id === 'deepgram')!.statusComponentIds).toEqual(['cv8l6gg3cb9d', 'vm1x1v101qtn'])
+  })
+
+  it('#1821 — pinecone and twelvelabs badge over every top-level row they show', () => {
+    const pinecone = SERVICES.find((s) => s.id === 'pinecone')!
+    expect(pinecone.statusComponentIds).toEqual(['r7tngp2p3sjd', 'g7400gqyfhh9', 'hrgtfbcqygpc', '34h37xk5ltv1', 'pxr1b208pdh1'])
+    expect([...pinecone.displayComponentIds!].sort()).toEqual([...pinecone.statusComponentIds!].sort())
+    expect(pinecone.referenceComponentIds).toEqual(['jhky1rj0ps27'])
+    const twelvelabs = SERVICES.find((s) => s.id === 'twelvelabs')!
+    expect(twelvelabs.statusComponentIds).toEqual(['mvv53x91b74m', '28vf3d4r3tjg'])
+    expect(twelvelabs.displayComponentIds).toHaveLength(20)
+    expect(SERVICES.find((s) => s.id === 'voyageai')!.displayComponentIds).toBeUndefined()
   })
 
   it('every BetterStack service excludes the Website section from their breakdown (#606 Cat C1)', () => {
@@ -886,19 +918,19 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(svc.holdShortIncidents).toBe(true)
   })
 
-  it('langsmith shows LLM Gateway in the breakdown and holds it out of the badge and the roster audit (#1518)', () => {
+  it('#1821 — langsmith counts every component it shows; Billing is Reference and roster-audit excluded', () => {
     const svc = SERVICES.find((s) => s.id === 'langsmith')!
-    const gateway = '01M26K8BYHD6NJP0PMEPB8S0RV'
-    expect(svc.displayComponentIds).toContain(gateway)
-    expect(svc.rosterAuditExclude).toContain(gateway)
-    expect(svc.statusComponentIds).not.toContain(gateway)
-    // Application, API, Run Ingestion, Deployments Control/Data Plane, Billing, PromptHub, Fleet,
-    // Sandboxes, Bulk Exports, LLM Gateway — the official page's order, 2026-09-28.
+    const billing = '01KX6FV0RR5Q12SE5Q6SH2RF8E'
+    // Application, API, Run Ingestion, Deployments Control/Data Plane, PromptHub, Fleet, Sandboxes,
+    // Bulk Exports, LLM Gateway — the official page's order, 2026-09-28, without Billing.
     expect(svc.displayComponentIds).toEqual([
       '01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RR46HM5EVSKG4BVY01',
-      '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RRHHPK0Y474ESRYV0X',
-      '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR0E7AJPG60HR2ZTT9', gateway,
+      '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RRHHPK0Y474ESRYV0X',
+      '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR0E7AJPG60HR2ZTT9', '01M26K8BYHD6NJP0PMEPB8S0RV',
     ])
+    expect([...svc.statusComponentIds!].sort()).toEqual([...svc.displayComponentIds!].sort())
+    expect(svc.referenceComponentIds).toEqual([billing])
+    expect(svc.rosterAuditExclude).toEqual([billing])
   })
 
   it('pins the non-obvious official-group assignments (the ones the comments justify)', () => {
@@ -914,10 +946,12 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(TRACKED_COMPONENT_IDS.has('01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP tracked by no service').toBe(false)
     expect(TRACKED_COMPONENT_IDS.has('01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager tracked by no service').toBe(false)
     expect(TRACKED_COMPONENT_IDS.has('01KVR95C58GGWHV7RYBT32NP11'), 'Ads API tracked by no service').toBe(false)
-    // #1010 — `Compliance API` was orphaned alongside FedRAMP / Ads Manager by #693 on the premise that
-    // it is likewise a non-ChatGPT Platform surface. The status page files it inside the official
-    // ChatGPT group — the same group `incidentIoGroupId` names and the badge scope is drawn from.
-    expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API → chatgpt').toBe(true)
+    // #1821 — `Compliance API` is on no card.
+    const chatgptCfg = SERVICES.find((s) => s.id === 'chatgpt')!
+    expect(chatgptCfg.statusComponentIds, 'Compliance API not in the badge scope').not.toContain('01JNKS9D9S72PMP1938PVFFQN4')
+    expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API not in the breakdown').toBe(false)
+    expect(chatgptCfg.referenceComponentIds).toBeUndefined()
+    expect(chatgptCfg.rosterAuditExclude).toEqual(['01JNKS9D9S72PMP1938PVFFQN4'])
     // #1010 — `Sites` and `ChatGPT Work` are ChatGPT-group members that were held out on first pass
     // while their `data_available_since` was under 30 days, and adopted once it cleared. Asserted on BOTH id lists rather than through `has`, which reads
     // only `displayComponentIds`: the invariant here is `statusComponentIds` ≡ `displayComponentIds`,

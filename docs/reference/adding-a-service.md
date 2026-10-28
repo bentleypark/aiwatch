@@ -39,9 +39,13 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
    For Atlassian Statuspage services, if the custom domain is blocked, use `https://{slug}.statuspage.io/api/v2/summary.json` instead. Confirm `statusComponentId` resolves on the chosen endpoint. See `docs/reference/status-determination.md` § "Status page URL selection".
 
    **Which components the service counts (#1821)** — decide each component on the page by asking in order:
-   1. Is it this card's product, or another product's, whether or not AIWatch has a card for that product? The provider's own grouping is the first evidence: a component the provider groups under another card belongs to that card (#1008). Any other product's component → **Excluded**.
-   2. Is it where the card's users use the product, or an account / billing / admin screen? Admin → **Reference** (#1669).
-   3. Is it where the product runs, or an auxiliary page (marketing site, docs)? Runs → **Counted**; auxiliary → **Excluded**.
+   1. Is it this card's product, or another product's, whether or not AIWatch has a card for that product? The card's product is what its name says: an app and an API of one product are different products only where AIWatch gives them separate cards. The provider's own grouping is the first evidence: a component the provider groups under another card belongs to that card (#1008). Any other product's component → **Excluded**.
+   2. Is it where the card's users use the product, or an account / billing / admin screen? Decide from what the component does, whatever its group: Admin → **Reference** (#1669).
+   3. Is it something the card's users call or open themselves, or an auxiliary page (marketing site, docs) or internal infrastructure (a queue, a cloud provider's group)? Called or opened → **Counted**; otherwise → **Excluded**.
+
+   For question 3, judge a grouped component with the rest of its official group: the provider's grouping says which surface it belongs to (the product's API, its console, its infrastructure). An auxiliary page (marketing site, docs) is excluded whatever its group.
+
+   The PR that sets a verdict names its evidence, read in this order: the component's description and group on the status page, the incidents tagged on it (title, updates, postmortem), the provider's docs for that surface, and the AIWatch issue that set the card's scope. A name or a category label alone is not evidence. A component with no such evidence is listed in that PR as unresolved, and its setting is not changed.
 
    **Per-component breakdown (#606, optional but check it)** — if the status page exposes **≥2 availability-relevant components**, configure a per-component breakdown. Pick the right mechanism — full rules in `docs/reference/status-determination.md` § "Per-component snapshot":
    - **Curated allowlist** → `displayComponentIds: [ids]` (a few stable surfaces).

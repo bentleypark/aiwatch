@@ -369,3 +369,45 @@ describe('#1669 referenceIncidents has no counting reader in the worker', () => 
     expect(importers).toEqual(['alerted-gone.ts', 'alerts.ts', 'index.ts', 'monthly-archive.ts', 'rss.ts', 'withdrawn.ts'])
   })
 })
+
+// #1821 — status.openai.com "Delayed Costs data in the Compliance API": "API and ChatGPT usage are not affected".
+describe('#1821 fetchService — chatgpt and the Compliance API', () => {
+  const COMPLIANCE = '01JNKS9D9S72PMP1938PVFFQN4'
+  const CONVERSATIONS = '01JMXBNJXGV1T5GT2M9XA83XNG'
+  const FILES = '01JMXBRMFESJCBGJR10PDD3WCQ' // APIs group
+  const BATCH = '01JMXBRMFE5ESNNV8JDHVCGSRD' // APIs group
+  const API_LOGIN = '01JSM5RTJWHRWDTS6Q604VEW3B' // APIs group
+  const COMPONENTS = [
+    { id: COMPLIANCE, name: 'Compliance API', status: 'degraded_performance' },
+    { id: CONVERSATIONS, name: 'Conversations', status: 'operational' },
+    { id: FILES, name: 'Files', status: 'operational' },
+    { id: BATCH, name: 'Batch', status: 'operational' },
+    { id: API_LOGIN, name: 'Login', status: 'operational' },
+  ]
+  const DELAYED = tpIncident('01M4COMPLIANCE00000000000A', 'Delayed Costs data in the Compliance API', '2026-10-08T17:45:10Z')
+  const CONV = tpIncident('01M4CONVERSATIONS000000000', 'Elevated errors in ChatGPT conversations', '2026-10-08T17:45:10Z')
+  const API_FILES = tpIncident('01M4APIFILES0000000000000A', 'Elevated error rates on Batch', '2026-10-08T17:45:10Z')
+  const API_SIGNIN = tpIncident('01M4APILOGIN0000000000000B', 'Increased errors signing in to platform.openai.com', '2026-10-08T17:45:10Z')
+  const html = tpHtml([
+    impact(DELAYED.id, COMPLIANCE), impact(CONV.id, CONVERSATIONS),
+    impact(API_FILES.id, BATCH), impact(API_FILES.id, FILES), impact(API_SIGNIN.id, API_LOGIN),
+  ])
+  const fetchChatgpt = () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    const summary = { status: { indicator: 'minor', description: 'Partially Degraded Service' }, components: COMPONENTS, incidents: [] }
+    return fetchService(cfg('chatgpt'), {
+      summary: summary as never,
+      incidents: { incidents: [DELAYED, CONV, API_FILES, API_SIGNIN] } as never,
+      componentsFetch: { ok: true, components: COMPONENTS },
+      uptimeHtml: html,
+    } as never, undefined, {})
+  }
+
+  it('counts the Conversations incident only — not the Compliance API one, nor the APIs-group Files / Login ones', async () => {
+    expect((await fetchChatgpt()).incidents.map((i) => i.id)).toEqual([CONV.id])
+  })
+
+  it('a degraded Compliance API leaves the badge operational', async () => {
+    expect((await fetchChatgpt()).status).toBe('operational')
+  })
+})

@@ -110,7 +110,7 @@ describe('filterIncidents — id-keyed exclude-bypass (#1032)', () => {
     expect(filterIncidents([kitchenSink], cfg('codex'))).toHaveLength(0)
   })
 
-  it('a `fedramp`-titled advisory is admitted to chatgpt by ANY badged id — Login since #693, Compliance API + ChatGPT Work since #1010', () => {
+  it('a `fedramp`-titled advisory is admitted to chatgpt by ANY badged id — Login since #693, ChatGPT Work since #1010; not by Compliance API, on no card since #1821', () => {
     // The exclude yields to `incidentTagsOwnBadge`, which intersects the WHOLE badge list, so the axis
     // is per-id and not per-domain, so every adoption WIDENS this surface. The `ChatGPT Work` case is
     // hypothetical about the axis, not a prediction: all 25 advisories replayed on 2026-07-16 tagged
@@ -120,13 +120,13 @@ describe('filterIncidents — id-keyed exclude-bypass (#1032)', () => {
     const title =
       'Codex, workspace analytics, conversation search, searching for custom GPTs, ChatGPT user invites, ' +
       'and Compliance Log Platform download endpoint not working in FedRAMP workspaces'
-    expect(cfg('chatgpt').statusComponentIds ?? []).toContain(COMPLIANCE)
+    expect(cfg('chatgpt').statusComponentIds ?? []).not.toContain(COMPLIANCE)
     expect(cfg('chatgpt').statusComponentIds ?? []).toContain(CHATGPT_LOGIN)
     expect(cfg('chatgpt').statusComponentIds ?? []).toContain(CHATGPT_WORK)
-    expect(filterIncidents([apiIncident('FED3', title, [FEDRAMP, COMPLIANCE])], cfg('chatgpt'))).toHaveLength(1)
+    expect(filterIncidents([apiIncident('FED3', title, [FEDRAMP, COMPLIANCE])], cfg('chatgpt'))).toHaveLength(0)
     expect(filterIncidents([apiIncident('FED6', title, [FEDRAMP, CHATGPT_LOGIN])], cfg('chatgpt'))).toHaveLength(1)
     expect(filterIncidents([apiIncident('FED7', title, [FEDRAMP, CHATGPT_WORK])], cfg('chatgpt'))).toHaveLength(1)
-    // FedRAMP-only tag → still dropped, so the two admissions above are the ids' doing, not the title's.
+    // FedRAMP-only tag → still dropped, so the admissions above are the ids' doing, not the title's.
     expect(filterIncidents([apiIncident('FED4', title, [FEDRAMP])], cfg('chatgpt'))).toHaveLength(0)
     // codex badges neither id, so it is unaffected either way.
     expect(filterIncidents([apiIncident('FED5', title, [FEDRAMP, COMPLIANCE])], cfg('codex'))).toHaveLength(0)

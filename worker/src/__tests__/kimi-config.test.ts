@@ -50,21 +50,22 @@ describe('kimi config shape (#989/#1731)', () => {
 
   it('each card names exactly its group members, and its ids are those same components', () => {
     const members = (group: string) => PAGE.filter(([, , g]) => g === group)
-    expect(kimi.incidentComponents).toEqual(members('87jpctq5cp71').map(([, n]) => n))
-    expect(kimi.displayComponentIds).toEqual(members('87jpctq5cp71').map(([id]) => id))
+    expect([...kimi.incidentComponents!, ...kimi.referenceComponentIds!.map((id) => nameOf.get(id))]).toEqual(members('87jpctq5cp71').map(([, n]) => n))
+    expect([kimi.statusComponentId, ...kimi.referenceComponentIds!]).toEqual(members('87jpctq5cp71').map(([id]) => id))
     expect(kimiapp.incidentComponents).toEqual(members('01l1n50g13g6').map(([, n]) => n))
     expect(kimiapp.statusComponentIds!.map((id) => nameOf.get(id))).toEqual(kimiapp.incidentComponents)
   })
 
   it('kimiapp keeps the sibling card and every group header out of its roster audit', () => {
-    const expected = [...kimi.displayComponentIds!, ...GROUP_HEADERS]
+    const expected = [kimi.statusComponentId!, ...kimi.referenceComponentIds!, ...GROUP_HEADERS]
     expect([...kimiapp.rosterAuditExclude!].sort()).toEqual(expected.sort())
   })
 
-  it('kimi badges the single Open API component; kimiapp badges the worst-of its group', () => {
+  it('kimi badges Open API and carries Open Platform Portal as reference (#1821); kimiapp badges the worst-of its group', () => {
     expect(kimi.statusComponentId).toBe('8psr5dfdld0s')
     expect(kimi.statusComponentIds).toBeUndefined()
-    expect(kimi.displayComponentIds).toEqual(['8psr5dfdld0s', 'pjrph68g94yr'])
+    expect(kimi.displayComponentIds).toBeUndefined()
+    expect(kimi.referenceComponentIds).toEqual(['pjrph68g94yr'])
     expect(kimiapp.statusComponentIds).toHaveLength(kimiapp.incidentComponents!.length)
     expect(kimiapp.statusComponentIds).toContain(kimiapp.statusComponentId)
     expect(kimiapp.displayComponentIds).toEqual(kimiapp.statusComponentIds)
@@ -258,6 +259,47 @@ describe('fetchService applies tag AND titleMap in the right order (#989 — rea
     expect(svc.incidents).toHaveLength(4)
     expect(svc.incidents.every((i) => !/[一-鿿]/.test(i.title))).toBe(true)
     expect((await fetchCard(kimi)).incidents.map((i) => i.title)).toEqual(['Open Platform API service disruption'])
+  })
+})
+
+// #1821 — Open Platform Portal is the console (platform.kimi.com: login, API keys, workbench), not the API.
+describe('kimi carries an Open Platform Portal-only incident as reference (#1821)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  const inc = (id: string, components: [string, string][]) => ({
+    id, name: '开放平台控制台异常', status: 'resolved', impact: 'minor',
+    created_at: '2026-10-19T10:00:00.000Z', started_at: '2026-10-19T10:00:00.000Z',
+    resolved_at: '2026-10-19T10:30:00.000Z', updated_at: '2026-10-19T10:30:00.000Z',
+    incident_updates: [{ status: 'resolved', body: 'Resolved.', created_at: '2026-10-19T10:30:00.000Z' }],
+    components: components.map(([cid, name]) => ({ id: cid, name })),
+  })
+  const PORTAL: [string, string] = ['pjrph68g94yr', 'Open Platform Portal']
+  const OPEN_API: [string, string] = ['8psr5dfdld0s', 'Open API']
+  const fetchCard = (config: ServiceConfig, portalStatus: string) => {
+    const summary = {
+      status: { indicator: 'minor', description: 'Minor Service Outage' },
+      components: [
+        { id: OPEN_API[0], name: OPEN_API[1], status: 'operational' },
+        { id: PORTAL[0], name: PORTAL[1], status: portalStatus },
+      ],
+      incidents: [inc('p1', [PORTAL]), inc('b1', [PORTAL, OPEN_API])],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    return fetchService(config, { summary: summary as never, incidents: null }, undefined, {})
+  }
+
+  it('the Portal-only incident is reference on kimi; one also tagged Open API stays counted', async () => {
+    const svc = await fetchCard(kimi, 'operational')
+    expect(svc.incidents.map((i) => i.id)).toEqual(['b1'])
+    expect(svc.referenceIncidents?.map((i) => i.id)).toEqual(['p1'])
+  })
+
+  it('a Portal outage leaves the kimi badge on Open API', async () => {
+    expect((await fetchCard(kimi, 'major_outage')).status).toBe('operational')
+  })
+
+  it('kimiapp counts neither', async () => {
+    expect((await fetchCard(kimiapp, 'operational')).incidents).toEqual([])
   })
 })
 

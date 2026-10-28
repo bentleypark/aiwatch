@@ -329,7 +329,7 @@ test('#1444 POSITIVE CONTROL: the list binds to the field BEFORE it, not the nea
   // Same line: `cerebras/runway/…` sits 9 chars after `statusComponentIds` and 4 before
   // `displayComponentIds`. Binding to the nearest charges runway/copilot/windsurf — all real
   // statusComponentIds members — to displayComponentIds, three false positives from one list.
-  const line = 'from `statusComponentIds` (#604: cerebras/runway/langsmith/copilot/windsurf), `displayComponentIds` (#606: kimi/cursor)'
+  const line = 'from `statusComponentIds` (#604: cerebras/runway/langsmith/copilot/windsurf), `displayComponentIds` (#606: deepgram/cursor)'
   assert.deepEqual(audit(line), ['statusComponentIds<-cerebras'])
 })
 

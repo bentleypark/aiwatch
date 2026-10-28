@@ -117,7 +117,7 @@ export function servicesByStatusSource(): Record<string, string[]> {
 
 // #1731 — status.moonshot.cn's groups, split between the two Kimi cards. Names feed `incidentComponents`
 // (exact match); the app's ids feed its badge, uptime and breakdown.
-const KIMI_API_COMPONENTS = ['Open API', 'Open Platform Portal']
+const KIMI_API_COMPONENTS = ['Open API']
 const KIMI_APP_COMPONENTS = ['Website', 'Sign In / Sign Up', 'File uploads', 'Search', 'API Service', 'Model', 'Vision Model', 'Thinking Model', 'Text Model', 'Research Model', 'K2 Model']
 const KIMI_APP_COMPONENT_IDS = ['sttxgsd2bps7', 'ckrtmmv96r2z', 'x3z9ydzr6ywk', 'smbb3z35s0jl', 'rf64wcbxt3r2', 'x0zsqgy57b75', '8rkd3yj051gl', 'lk7q3z0fcylp', 'p1j9ttb7jwhp', 'wmn9wzv84k1v', 'z2zfp65lvb2z']
 const KIMI_TITLE_MAP: Record<string, string> = { 'Agentic 模型错误报警': 'Agentic model error alert', 'agentic模型错误报警': 'Agentic model error alert', '搜索请求出现大量报错': 'Elevated search request error rate', '短信登录异常': 'SMS login failure', 'deep research workflow错误率异常': 'Deep Research workflow error rate anomaly', '开放平台 API 服务异常': 'Open Platform API service disruption', 'kimi fs服务异常': 'Kimi file service disruption', '二维码登录异常': 'QR code login failure' }
@@ -272,8 +272,9 @@ export const SERVICES: ServiceConfig[] = [
   // #989 — Kimi API (Moonshot AI's developer platform, platform.kimi.com). status.moonshot.cn is an
   // Atlassian Statuspage (`.cn` CNAMEs to AtlassianEdge, so a Worker fetch reaches it) shared with the
   // Kimi consumer app (`kimiapp`, below) and Kimi Code (#1690). #1731 — this card is the page's `SaaS`
-  // group only (Open API + Open Platform Portal): incidents by exact component name, badge on Open API.
-  { id: 'kimi', name: 'Kimi API', provider: 'Moonshot AI', category: 'api', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: '8psr5dfdld0s', incidentComponents: KIMI_API_COMPONENTS, displayComponentIds: ['8psr5dfdld0s', 'pjrph68g94yr'], titleMap: KIMI_TITLE_MAP, addedAt: '2026-07-18' },
+  // group (Open API + Open Platform Portal): incidents by exact component name. #1821 — Open Platform Portal is the
+  // console (login, API keys, workbench), a reference component; the badge is Open API alone.
+  { id: 'kimi', name: 'Kimi API', provider: 'Moonshot AI', category: 'api', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: '8psr5dfdld0s', incidentComponents: KIMI_API_COMPONENTS, referenceComponentIds: ['pjrph68g94yr'], titleMap: KIMI_TITLE_MAP, addedAt: '2026-07-18' },
   // #1403 — OpenRouter migrated its status page from OnlineOrNot to Datadog Status Page (the old
   // React-Router SSR payload is gone; a plain fetch now returns a ~600-byte client-rendered shell).
   // No `retainIncidentHistoryUntil` bridge here, unlike replicate (below): this page BACKFILLED its
@@ -313,15 +314,17 @@ export const SERVICES: ServiceConfig[] = [
     // real incident.
     rosterAuditExclude: ['01M52EA7NHXRC1YGSRG47C2D57', '01M52EGBQ24XDEGJTJW1JZW9F3', '01M52EHH7PCX9F1P1YTMH1ZMDT'],
   },
-  // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
-  // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
-  // — the card shows the per-surface children). Display-only — badge stays on statusComponentId.
+  // displayComponentIds (#606): the per-surface children of each badge group (assemblyai + deepgram).
+  // #1821 — consoles, playgrounds, dashboards and billing are Reference; assemblyai's AWS Cloud
+  // group and deepgram's On-Premise group are not shown. deepgram's Management APIs is counted: it serves
+  // `v1/auth/grant`, the temporary token client-side apps call the voice APIs with.
   // #692 — deepgram includes BOTH '...Voice Agent API' (r2z04fcdhhzb) AND its sibling 'Voice Agent
   // API: Downstream Providers' (7n3stjcbj4bx, a third-party dependency e.g. Gemini), kept adjacent.
   // Deepgram degrades only the Downstream component during a provider outage, so omitting it hid a
   // real degradation behind an operational base row — surfacing it makes the breakdown honest.
-  { id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', category: 'api', statusUrl: 'https://status.assemblyai.com', apiUrl: 'https://status.assemblyai.com/api/v2/summary.json', statusComponentId: '50txf4qfk2kv', displayComponentIds: ['kygwc83t1rfg', '20vm7q71wjcn', 'trxjzz9bwdmc', 'psxcg5mfhznq', 'rfh9swc12f9h', '12wrfd55ml3r'] },
-  { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
+  { id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', category: 'api', statusUrl: 'https://status.assemblyai.com', apiUrl: 'https://status.assemblyai.com/api/v2/summary.json', statusComponentId: '50txf4qfk2kv', displayComponentIds: ['kygwc83t1rfg', '20vm7q71wjcn', 'psxcg5mfhznq'], referenceComponentIds: ['rfh9swc12f9h', '12wrfd55ml3r', '74m51w396x54'] },
+  { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', statusComponentIds: ['cv8l6gg3cb9d', 'vm1x1v101qtn'], displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'vsnk4gb1bb47', 'vm1x1v101qtn'], referenceComponentIds: ['cvbdk3fslx9v', 't80v4qz2jdsf'],
+    rosterAuditExclude: ['vhv1mkf16jjw', 'cvbdk3fslx9v', 't80v4qz2jdsf', 'cv7wd8pvvqh4', 'l2n5q03f22t4', 'jgfq9ffjsfqk', 'y4btfh52r1qh', 'l4ch656gbn1k', 'dspsk5mtjzqt'] },
   // Fish Audio (#1549) — TTS / voice cloning. Better Stack page (mirror helicone/luma); its per-model
   // resources sit in their own page section, which parseBetterStackComponents already groups.
   { id: 'fishaudio', name: 'Fish Audio', provider: 'Fish Audio', category: 'api', statusUrl: 'https://status.fish.audio', apiUrl: null, rssFeedUrl: 'https://status.fish.audio/feed', betterStackUrl: 'https://status.fish.audio', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-09-30' }, // #802
@@ -341,14 +344,14 @@ export const SERVICES: ServiceConfig[] = [
   // (parseInstatusNextUptime), and `incidentKeywords: ['api']` (matched against componentNames, #623)
   // scopes the badge + incident list to API-affecting incidents — a Website/Dashboard-only incident is
   // dropped. Single-tenant page → no incidentExclude needed.
-  // displayComponentIds (#761): ALL top-level Instatus components — API, Website, Official Models
-  // (uniform "show every top-level component" rule, same as perplexity). Display-only — badge stays on
-  // statusComponent 'API'. Next.js Instatus exposes per-component status.
-  { id: 'fal', name: 'fal.ai', provider: 'fal', category: 'api', statusUrl: 'https://status.fal.ai', apiUrl: null, instatusUrl: 'https://status.fal.ai', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clzmj6mnv0283gwmwtdqtt9u3', 'clzmj6mni0276gwmw95xftvtd', 'clzu5ivf0385762icocgwepue4u'], addedAt: '2026-06-24' }, // #802
-  // displayComponentIds (#606): pinecone's FUNCTIONAL surfaces (Console, Pod/Serverless Indexes
-  // group headers, Index Management, Inference, Assistant). The 22 region components are excluded
-  // — the Region card already covers per-region status. Display-only — badge stays on statusComponentId.
-  { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd', displayComponentIds: ['jhky1rj0ps27', 'g7400gqyfhh9', 'r7tngp2p3sjd', 'hrgtfbcqygpc', '34h37xk5ltv1', 'pxr1b208pdh1'] },
+  // displayComponentIds (#761): API + Official Models. #1821 — the Website group is fal's Dashboard
+  // (fal.ai/dashboard/keys), an admin screen; not shown, as the Instatus path carries no reference
+  // components. Official Models is shown, but uptime follows statusComponent 'API' alone.
+  { id: 'fal', name: 'fal.ai', provider: 'fal', category: 'api', statusUrl: 'https://status.fal.ai', apiUrl: null, instatusUrl: 'https://status.fal.ai', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clzmj6mnv0283gwmwtdqtt9u3', 'clzu5ivf0385762icocgwepue4u'], addedAt: '2026-06-24' }, // #802
+  // #1821 — badge/uptime worst-of over Serverless Indexes + Pod Indexes (groups of regions), Index
+  // Management, Inference and Assistant, the rows the breakdown shows. Console is Reference. The 22
+  // region components are not listed — the Region card already covers per-region status.
+  { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd', statusComponentIds: ['r7tngp2p3sjd', 'g7400gqyfhh9', 'hrgtfbcqygpc', '34h37xk5ltv1', 'pxr1b208pdh1'], displayComponentIds: ['g7400gqyfhh9', 'r7tngp2p3sjd', 'hrgtfbcqygpc', '34h37xk5ltv1', 'pxr1b208pdh1'], referenceComponentIds: ['jhky1rj0ps27'], rosterAuditExclude: ['jhky1rj0ps27'] },
   // turbopuffer (#857) — serverless vector-search DB; the Vector fallback sibling for Pinecone (un-blocks
   // the vector sub-tier, #601 → both un-excluded from EXCLUDE_FALLBACK, API_TIER 8). Single-tenant page,
   // no incidentKeywords needed. It serves a Statuspage-compatible summary.json but is an **incident.io**
@@ -362,10 +365,8 @@ export const SERVICES: ServiceConfig[] = [
   // Uptime = worst-of across the per-region API components. There is no group aggregate to read
   // (every component is ungrouped), so a single region would be an arbitrary pick that reports 100%
   // while another region is down; worst-of matches the statusComponentIds badge convention (#379).
-  // `Dashboard` (01K0Q5QSJV9KAZMEMMQ0NCHD9E) is deliberately EXCLUDED because it is not an API surface —
-  // same principle as langsmith's uptime (count only representative API surfaces), though the direction
-  // differs: excluding Run Ingestion stopped an over-good ~100% from hiding incidents, while excluding
-  // Dashboard stops a non-API component from dragging the worst-of down. A new region must be added here;
+  // `Dashboard` (01K0Q5QSJV9KAZMEMMQ0NCHD9E) is deliberately EXCLUDED because it is not an API surface,
+  // so it cannot drag the worst-of down. A new region must be added here;
   // `computeIncidentIoUptime` warns when a configured id no longer resolves (ULID rotation), and
   // turbopuffer-config.test.ts pins the roster by value.
   // The badge still rides the overall page indicator (status-determination step 4), so no
@@ -392,8 +393,8 @@ export const SERVICES: ServiceConfig[] = [
   // structurally unbounded (14 components live 2026-09-27), same shape as cohere/groq. Since #1741 it
   // silences only group members, so a new top-level component or group still reports.
   { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj', 'x16d9nh49hch', 'cw5sckn8002d', 'wb9xb021290k', '8jg9v8zhstys'], displayAllComponents: true, componentGroupsInline: true, addedAt: '2026-06-24', rosterAuditFixedScope: true }, // #802
-  // displayComponentIds (#606): API + User Dashboard. Display-only.
-  { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
+  // #1821 — User Dashboard (usage statistics) is Reference; the card is the API component alone.
+  { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', referenceComponentIds: ['p4zzcfjd8p5q'] },
   // Jina AI (#880) — embeddings + reranking, Voyage's sibling in the Embeddings fallback tier (9). The badge,
   // uptime and incident list cover every model component on the page; `fallbackComponents` limits the
   // RECOMMENDATION to the text-embedding + reranker models that substitute for Voyage, so a code-embeddings,
@@ -410,9 +411,10 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606): the individual API surfaces (Search/Embed/Analyze/Index/Video list)
   // under the APIs group, plus the 7 Knowledge Store / Responses APIs of the separate Jockey group
   // (created 2026-10-14; the group header is not listed), read from the live summary.json 2026-10-15.
-  // componentGroups mirror the page's own APIs and Jockey groups.
-  // Excludes Platform/Playground/Dashboard (non-API surfaces). Embed API - Marengo3.5 Sync/Async added
-  // 2026-08-31 (new-component alert, display-only per #606 convention); '2k0gnkk2kjmz' dropped in the
+  // componentGroups mirror the page's own APIs and Jockey groups. #1821 — badge/uptime worst-of over
+  // both groups; Platform's Playground and Dashboard are Reference.
+  // Embed API - Marengo3.5 Sync/Async added
+  // 2026-08-31 (new-component alert); '2k0gnkk2kjmz' dropped in the
   // same pass — no longer present on the page (was silently logging a breakdown-drift warning).
   // #983 — Twelve Labs' Statuspage auto-monitor opens a BRAND-NEW incident per component blip, all
   // under one fixed title, and Statuspage stamps `impact: 'major'` on it whenever the affected
@@ -422,37 +424,28 @@ export const SERVICES: ServiceConfig[] = [
   // them into one ×N row; `flapSuppression` then dedups a repeat within the 60-min window (#283).
   // The provider's REAL, human-written incidents use distinct titles ("Search API failure", "API
   // server failure") and never match this anchored pattern.
-  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', 'j21c5rdfj8kf', '91lzwtn6071h', 'p1hx7t867896', '3ng4ddpvmv3r', '12vp1vm9smc2', 'qkmbnw1n5mgh', 'j86pqszy5w90', '27kd6568skjp', '3pksbw640gn9', 'rgbmm56z696d', 'sjbv0n38bs7n', 'cns848tdzn22', 'jzy4m39608m3'], componentGroups: { 'mrclkkqtj01j': 'APIs', '2zsl201s8df5': 'APIs', 'jnvb5r3v74q1': 'APIs', '751304vy1s9x': 'APIs', 'hr353rqqmwmk': 'APIs', 'yklrkrhkd1by': 'APIs', '3t1cjx55dyrf': 'APIs', 'j21c5rdfj8kf': 'APIs', '91lzwtn6071h': 'APIs', 'p1hx7t867896': 'APIs', '3ng4ddpvmv3r': 'APIs', '12vp1vm9smc2': 'APIs', 'qkmbnw1n5mgh': 'APIs', 'j86pqszy5w90': 'Jockey', '27kd6568skjp': 'Jockey', '3pksbw640gn9': 'Jockey', 'rgbmm56z696d': 'Jockey', 'sjbv0n38bs7n': 'Jockey', 'cns848tdzn22': 'Jockey', 'jzy4m39608m3': 'Jockey' }, autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
+  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', statusComponentIds: ['mvv53x91b74m', '28vf3d4r3tjg'], referenceComponentIds: ['29c68cnyd14l', '20930d4nz774'], rosterAuditExclude: ['blny8xq0yq7p', '29c68cnyd14l', '20930d4nz774'], displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', 'j21c5rdfj8kf', '91lzwtn6071h', 'p1hx7t867896', '3ng4ddpvmv3r', '12vp1vm9smc2', 'qkmbnw1n5mgh', 'j86pqszy5w90', '27kd6568skjp', '3pksbw640gn9', 'rgbmm56z696d', 'sjbv0n38bs7n', 'cns848tdzn22', 'jzy4m39608m3'], componentGroups: { 'mrclkkqtj01j': 'APIs', '2zsl201s8df5': 'APIs', 'jnvb5r3v74q1': 'APIs', '751304vy1s9x': 'APIs', 'hr353rqqmwmk': 'APIs', 'yklrkrhkd1by': 'APIs', '3t1cjx55dyrf': 'APIs', 'j21c5rdfj8kf': 'APIs', '91lzwtn6071h': 'APIs', 'p1hx7t867896': 'APIs', '3ng4ddpvmv3r': 'APIs', '12vp1vm9smc2': 'APIs', 'qkmbnw1n5mgh': 'APIs', 'j86pqszy5w90': 'Jockey', '27kd6568skjp': 'Jockey', '3pksbw640gn9': 'Jockey', 'rgbmm56z696d': 'Jockey', 'sjbv0n38bs7n': 'Jockey', 'cns848tdzn22': 'Jockey', 'jzy4m39608m3': 'Jockey' }, autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
   // LangSmith (#561) — LangChain's hosted observability/eval platform on an incident.io page. Since #1066
   // that page is a "global"/multi-region page whose Atlassian v2 compat API returns `components: []`, so
   // it is NO LONGER covered by statuspage.ts directly — `incidentIoGlobalPage` routes it through
   // parseIncidentIoGlobalPage (see the #1066 note below). Multi-component worst-of (#379): badge
-  // tracks the three load-bearing surfaces (Run Ingestion + API + Application); the other components
-  // are excluded so non-availability blips don't flip the badge. Single-tenant (dedicated) page → no
+  // tracks every component except Billing, which is Reference (#1821). Single-tenant (dedicated) page → no
   // incidentKeywords needed. is-down slug is 'langchain' (see slug-map.ts / rss.ts).
   // The API component's published `component_uptimes` figure is surfaced as `uptimeReported` — NOT the
   // statuspage uptime-showcase (incident.io pages don't emit it). The API surface is the developer-facing one and tracks
   // the real incident activity; Run Ingestion reads ~100% despite the incidents, so it would understate.
-  // That API component is also statusComponentIds[1], so it doubles as one of the three worst-of badge
-  // inputs.
-  // #1066 — `displayComponentIds` shows ALL 11 page components in the breakdown (decoupled from the
-  // 3-component badge, #606): the badge stays on the availability core (API/Run Ingestion/Application)
-  // so a Billing/Bulk-Exports blip can't flip it, while the dashboard mirrors the official page's full
-  // component list, in the official page's order.
+  // `displayComponentIds` lists the counted components in the official page's order.
   // #1066 — LangSmith migrated to an incident.io "global"/multi-region page: status.smith.langchain.com
   // now 301s to global.status.smith.langchain.com/gcp-us, whose Atlassian v2 compat API returns
   // `components: []`. `incidentIoGlobalPage` routes it through parseIncidentIoGlobalPage, which rebuilds
   // the summary.json shape from the page-root RSC. Component ids ALL rotated (01JT46QKH7… → 01KX6FV0RR…);
-  // the badge worst-of is still Run Ingestion + API + Application, incidentIoComponentId is still the API
+  // incidentIoComponentId is still the API
   // component (whose published `component_uptimes` figure — a rolling window, not consumed by the Score —
   // becomes uptimeReported). New components' data_available_since is 2026-07-10, so uptime reports a <30-day
   // window until the migration clock catches up (#1006 uptimeWindowDays).
-  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://global.status.smith.langchain.com/gcp-us', apiUrl: 'https://global.status.smith.langchain.com/gcp-us/api/v2/summary.json', incidentIoGlobalPage: true, statusComponentId: '01KX6FV0RR5XXJ0SM3NXZRKMBY', statusComponentIds: ['01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RRKA56PXCRWEHJTMXM'], displayComponentIds: ['01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR0E7AJPG60HR2ZTT9', '01M26K8BYHD6NJP0PMEPB8S0RV'], incidentIoBaseUrl: 'https://global.status.smith.langchain.com/gcp-us/incidents', incidentIoComponentId: '01KX6FV0RRSSTKC5V2GPAMCEQR', addedAt: '2026-06-11',
-    // #1518 — the 8 OTHER `displayComponentIds` members: already shown in the breakdown, deliberately
-    // held out of the narrower uptime scope. Deliberately NOT exhaustive — a page component in neither
-    // this list nor the uptime scope still surfaces as a genuine roster-audit finding, which is what
-    // caught `01M26K8BYHD6NJP0PMEPB8S0RV` (LLM Gateway) live 2026-09-27, before it was added to both lists.
-    rosterAuditExclude: ['01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9', '01M26K8BYHD6NJP0PMEPB8S0RV'],
+  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://global.status.smith.langchain.com/gcp-us', apiUrl: 'https://global.status.smith.langchain.com/gcp-us/api/v2/summary.json', incidentIoGlobalPage: true, statusComponentId: '01KX6FV0RR5XXJ0SM3NXZRKMBY', statusComponentIds: ['01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR0E7AJPG60HR2ZTT9', '01M26K8BYHD6NJP0PMEPB8S0RV'], displayComponentIds: ['01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR0E7AJPG60HR2ZTT9', '01M26K8BYHD6NJP0PMEPB8S0RV'], incidentIoBaseUrl: 'https://global.status.smith.langchain.com/gcp-us/incidents', incidentIoComponentId: '01KX6FV0RRSSTKC5V2GPAMCEQR', addedAt: '2026-06-11',
+    // #1821 — Billing, the one admin component.
+    rosterAuditExclude: ['01KX6FV0RR5Q12SE5Q6SH2RF8E'], referenceComponentIds: ['01KX6FV0RR5Q12SE5Q6SH2RF8E'],
   }, // #802
   // #601 — LLM observability siblings for LangSmith (un-blocks the observability fallback sub-tier).
   // Helicone: Better Stack (mirror together/luma — official uptime + RSS). Langfuse: incident.io
@@ -517,7 +510,8 @@ export const SERVICES: ServiceConfig[] = [
   //   primary is in the window" was the wrong criterion: it says nothing about the other ids the badge
   //   reads. It also widened the breakdown, which the #1062 capability routing reads
   //   (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
-  // #1010 — `Compliance API`, `Sites` and `ChatGPT Work` are ChatGPT-group members in the badge scope.
+  // #1010 — `Sites` and `ChatGPT Work` are ChatGPT-group members in the badge scope. #1821 — `Compliance API` is Reference
+  //   by the criterion (its incidents state "API and ChatGPT usage are not affected"), on no card until #1828.
   // #1601 — a new group member is adopted on sight (`dots`/`Space`, created 2026-09-29): uptime measures
   //   every component over the oldest one's window, so a young member no longer shortens it. The
   //   30-day hold-out the members above went through is retired.
@@ -527,7 +521,7 @@ export const SERVICES: ServiceConfig[] = [
   //   FedRAMP component id specifically, never the environment scope; and a component matching no
   //   `COMPONENT_CAPABILITY` regex classifies `llm`, so co-degrading it with a routed capability
   //   widens `degraded` and #1062 returns null (a missed reroute, the fail-safe direction).
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P', '01M3Q6NERHVE2WPPAQRHBAC6XB', '01M3Q6NERHS4BG0HQ85VAR1SRH'], displayComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01JNKS9D9S72PMP1938PVFFQN4', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P', '01M3Q6NERHVE2WPPAQRHBAC6XB', '01M3Q6NERHS4BG0HQ85VAR1SRH'] },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P', '01M3Q6NERHVE2WPPAQRHBAC6XB', '01M3Q6NERHS4BG0HQ85VAR1SRH'], displayComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P', '01M3Q6NERHVE2WPPAQRHBAC6XB', '01M3Q6NERHS4BG0HQ85VAR1SRH'], rosterAuditExclude: ['01JNKS9D9S72PMP1938PVFFQN4'] },
   // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
   // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +

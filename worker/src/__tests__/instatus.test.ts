@@ -533,8 +533,7 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
 
   it('feeds resolveSvcComponents — respects displayComponentIds order and drops unlisted ids', () => {
     // Generic resolveSvcComponents demonstration (a 2-id subset that omits Website) — shows order is
-    // displayComponentIds order and an unlisted component is dropped. fal's REAL config lists all
-    // three top-level components (pinned in fal-config.test.ts); this just exercises the resolver.
+    // displayComponentIds order and an unlisted component is dropped.
     const raw = parseInstatusComponents(nextHtmlWithComponents({ api: 'MAJOROUTAGE' }))
     const resolved = resolveSvcComponents(
       { displayComponentIds: ['clzu5ivf0385762icocgwepue4u', 'clzmj6mnv0283gwmwtdqtt9u3'] } as any,
