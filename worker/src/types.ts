@@ -161,6 +161,9 @@ export interface ServiceStatus {
   // #1672 — the ids each side has held, carried across cycles (including ones that read nothing). Set only
   // on services whose component tags come from page HTML.
   referenceLedger?: { counted: string[]; reference: string[] }
+  // #1828 — ids of `referenceIncidents` the fetch pipeline would have counted. Read and removed by
+  // `holdReferenceClassification`.
+  referenceCountable?: string[]
   // #1614 — the oldest page-wide row of a capped Statuspage-compatible `incidents.json`
   // (`cappedFeedDepthStart`). Absent when the feed returned its whole history.
   feedDepthStart?: string

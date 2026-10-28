@@ -146,6 +146,8 @@ export const SERVICES: ServiceConfig[] = [
     // `component_uptimes` entry on the live page at all, so the audit cannot age it in either way; kept
     // here so an id an upstream fix later makes readable is excluded from day one, not day two.)
     rosterAuditExclude: ['01KKAD7C71MCCH3FTREMJH4AAS', '01KTQBYVARFJ5KMCSECM06VKCF', '01KVR95C58GGWHV7RYBT32NP11'],
+    // #1828 — Compliance API is Reference by the #1821 criterion, as on chatgpt.
+    referenceComponentIds: ['01JNKS9D9S72PMP1938PVFFQN4'],
   },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://aistudio.google.com/status', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
   // #1165/#1586 — renamed 'xAI (Grok)' → 'SpaceXAI API' (#1746: 'SpaceXSI API'): now that Grok's consumer app is its own service
@@ -511,7 +513,7 @@ export const SERVICES: ServiceConfig[] = [
   //   reads. It also widened the breakdown, which the #1062 capability routing reads
   //   (`fallback.test.ts`). Pinned in `page-components-source.test.ts`.
   // #1010 — `Sites` and `ChatGPT Work` are ChatGPT-group members in the badge scope. #1821 — `Compliance API` is Reference
-  //   by the criterion (its incidents state "API and ChatGPT usage are not affected"), on no card until #1828.
+  //   by the criterion (its incidents state "API and ChatGPT usage are not affected"), carried as a reference component (#1828).
   // #1601 — a new group member is adopted on sight (`dots`/`Space`, created 2026-09-29): uptime measures
   //   every component over the oldest one's window, so a young member no longer shortens it. The
   //   30-day hold-out the members above went through is retired.
@@ -521,7 +523,7 @@ export const SERVICES: ServiceConfig[] = [
   //   FedRAMP component id specifically, never the environment scope; and a component matching no
   //   `COMPONENT_CAPABILITY` regex classifies `llm`, so co-degrading it with a routed capability
   //   widens `degraded` and #1062 returns null (a missed reroute, the fail-safe direction).
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P', '01M3Q6NERHVE2WPPAQRHBAC6XB', '01M3Q6NERHS4BG0HQ85VAR1SRH'], displayComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P', '01M3Q6NERHVE2WPPAQRHBAC6XB', '01M3Q6NERHS4BG0HQ85VAR1SRH'], rosterAuditExclude: ['01JNKS9D9S72PMP1938PVFFQN4'] },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P', '01M3Q6NERHVE2WPPAQRHBAC6XB', '01M3Q6NERHS4BG0HQ85VAR1SRH'], displayComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR', '01KX45G1SHQQ9DTAX9S4W7FV8G', '01KX45G1SH21AX5DT93D4HMF0P', '01M3Q6NERHVE2WPPAQRHBAC6XB', '01M3Q6NERHS4BG0HQ85VAR1SRH'], rosterAuditExclude: ['01JNKS9D9S72PMP1938PVFFQN4'], referenceComponentIds: ['01JNKS9D9S72PMP1938PVFFQN4'] },
   // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
   // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
@@ -668,16 +670,24 @@ export function carryOverAistudioIncidents(
  * #1672 — on a service whose component tags come only from page HTML, an incident keeps the side it was
  * first put on: counted stays counted; reference stays reference while this cycle carries no component
  * tags for it. `referenceLedger` carries that memory across cycles; with no readable snapshot every incident
- * is counted. Mutates `services`.
+ * the fetch would have counted is counted. Mutates `services`.
  */
 export function holdReferenceClassification(services: ServiceStatus[], prevServices: ServiceStatus[] | null): void {
   for (const svc of services) {
+    const countable = new Set(svc.referenceCountable ?? [])
+    delete svc.referenceCountable
     const config = SERVICES.find((c) => c.id === svc.id)
     if (!config?.referenceComponentIds?.length || !config.incidentIoComponentId) continue
     if (!prevServices) {
-      svc.incidents = [...svc.incidents, ...(svc.referenceIncidents ?? [])].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-      delete svc.referenceIncidents
-      svc.referenceLedger = { counted: svc.incidents.map((i) => i.id).slice(0, REFERENCE_LEDGER_MAX), reference: [] }
+      const kept = (svc.referenceIncidents ?? []).filter((i) => !countable.has(i.id))
+      svc.incidents = [...svc.incidents, ...(svc.referenceIncidents ?? []).filter((i) => countable.has(i.id))]
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+      if (kept.length > 0) svc.referenceIncidents = kept
+      else delete svc.referenceIncidents
+      svc.referenceLedger = {
+        counted: svc.incidents.map((i) => i.id).slice(0, REFERENCE_LEDGER_MAX),
+        reference: kept.map((i) => i.id).slice(0, REFERENCE_LEDGER_MAX),
+      }
       continue
     }
     const prev = prevServices.find((p) => p.id === svc.id)
@@ -688,7 +698,7 @@ export function holdReferenceClassification(services: ServiceStatus[], prevServi
     const wasCounted = new Set(ledger.counted)
     const wasReference = new Set(ledger.reference)
     const toCounted = (svc.referenceIncidents ?? []).filter((i) => wasCounted.has(i.id))
-    const toReference = svc.incidents.filter((i) => wasReference.has(i.id) && !(i.componentNames ?? []).length)
+    const toReference = svc.incidents.filter((i) => wasReference.has(i.id) && !(i.componentNames ?? []).length && !(i.componentIds ?? []).length)
     if (toCounted.length > 0 || toReference.length > 0) {
       const out = new Set([...toCounted, ...toReference].map((i) => i.id))
       svc.incidents = [...svc.incidents.filter((i) => !out.has(i.id)), ...toCounted]
@@ -1534,12 +1544,18 @@ export function referenceIncidentsOf(
 ): Incident[] {
   const ids = config.referenceComponentIds
   if (!ids?.length) return []
-  const names = new Set(pageComponents.filter((c) => ids.includes(c.id)).map((c) => c.name.toLowerCase()))
+  const listed = pageComponents.filter((c) => ids.includes(c.id))
+  const names = new Set(listed.map((c) => c.name.toLowerCase()))
+  const nameOf = new Map(listed.map((c) => [c.id, c.name]))
   return incidents.filter((inc) => {
     const tagged = inc.componentNames ?? []
-    if (tagged.length === 0 || !tagged.every((n) => names.has(n.toLowerCase()))) return false
-    return (inc.componentIds ?? []).every((id) => ids.includes(id))
-  })
+    if (tagged.length > 0) {
+      if (!tagged.every((n) => names.has(n.toLowerCase()))) return false
+      return (inc.componentIds ?? []).every((id) => ids.includes(id))
+    }
+    const taggedIds = inc.componentIds ?? []
+    return taggedIds.length > 0 && taggedIds.every((id) => nameOf.has(id))
+  }).map((inc) => (inc.componentNames?.length ? inc : { ...inc, componentNames: inc.componentIds!.map((id) => nameOf.get(id)!) }))
 }
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -2914,7 +2930,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // or the whole prefetch entry is missing because summary.json failed that cycle and fetchService
       // re-fetched it above) — so fetch it here rather than silently dropping every incident.
       // (uptimeHtml is declared + possibly populated above for the #1066 global-page rebuild.)
-      const tagsNeedHtml = !!((config.incidentComponents || config.referenceComponentIds) && config.incidentIoComponentId)
+      const tagsNeedHtml = !!((config.incidentComponents || (config.referenceComponentIds && !canIdBypass(config))) && config.incidentIoComponentId)
       // #1032 — the id-axis twin (`canIdBypass`: exclude + badge group + incident.io page). The gate
       // states the reachable set rather than widening it. Deliberately NOT "every incident.io service":
       // `attachIncidentIoComponentIds` is cheap but its output would then ride the KV/API payload for
@@ -3008,10 +3024,6 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       }
 
       let filtered = filterIncidents(incidents, config)
-      const referenceIncidents = referenceIncidentsOf(incidents, config, summaryData.components ?? [])
-      const referenceComponents: ServiceComponent[] = (summaryData.components ?? [])
-        .filter((c) => config.referenceComponentIds?.includes(c.id))
-        .map((c) => ({ id: c.id, name: c.name, status: normalizeStatus(c.status) }))
 
       // #606 Cat B / #693 follow-up — source the component list from componentsUrl (components.json, a
       // SUPERSET on shared pages like status.openai.com) when set, else summary.json. This list is NOT
@@ -3044,6 +3056,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         }
       }
       const badgeSummary = { ...summaryData, components: breakdownComponents }
+      const referenceIncidents = referenceIncidentsOf(incidents, config, breakdownComponents ?? [])
+      const referenceComponents: ServiceComponent[] = (breakdownComponents ?? [])
+        .filter((c) => config.referenceComponentIds?.includes(c.id))
+        .map((c) => ({ id: c.id, name: c.name, status: normalizeStatus(c.status) }))
 
       // Compute svcStatus BEFORE includeUntaggedIncidents so the
       // cross-contamination guard (#361) can suppress untagged-include for
@@ -3222,6 +3238,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // prefix fallback keeps judging (and a sibling-tagged incident is still dropped) — see its doc.
       filtered = filterByComponentStatus(filtered, svcStatus, config, breakdownComponents ?? [])
       const referenceIds = new Set(referenceIncidents.map((i) => i.id))
+      const referenceCountable = filtered.filter((i) => referenceIds.has(i.id)).map((i) => i.id)
       filtered = filtered.filter((i) => !referenceIds.has(i.id))
 
       // Track component ID misses for migration detection (#135).
@@ -3316,6 +3333,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         status: svcStatus,
         incidents: filtered,
         ...(referenceIncidents.length > 0 ? { referenceIncidents } : {}),
+        ...(referenceCountable.length > 0 ? { referenceCountable } : {}),
         ...(referenceComponents.length > 0 ? { referenceComponents } : {}),
         ...(feedDepthStart ? { feedDepthStart } : {}),
         ...(components.length > 0 ? { components } : {}),
