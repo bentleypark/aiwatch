@@ -41,6 +41,7 @@ on:
       - 'scripts/check-instruction-budget.mjs'   # #1285 — ditto, the instruction-budget ratchet
       - 'scripts/check-conflict-markers.mjs'   # ditto, the conflict-marker check
       - 'scripts/check-machine-paths.mjs'   # #1610 — ditto, the machine-path check
+      - 'scripts/check-directory-map.mjs'   # #1817 — ditto, the directory-map entry check
       - 'api/__tests__/service-count-lockstep.test.ts'   # ditto, for the count lockstep
       - 'vitest.config.js'                 # passWithNoTests there would disarm the lockstep gate
       - '.github/workflows/docs-lint.yml'
@@ -56,6 +57,7 @@ on:
       - 'scripts/check-instruction-budget.mjs'
       - 'scripts/check-conflict-markers.mjs'
       - 'scripts/check-machine-paths.mjs'
+      - 'scripts/check-directory-map.mjs'
       - 'api/__tests__/service-count-lockstep.test.ts'
       - 'vitest.config.js'
       - '.github/workflows/docs-lint.yml'
@@ -84,6 +86,7 @@ jobs:
       - run: node scripts/lint-okf-bundle.mjs
       - run: node scripts/check-conflict-markers.mjs
       - run: node scripts/check-machine-paths.mjs
+      - run: node scripts/check-directory-map.mjs
 
   count-lockstep:
     name: Service Count Lockstep
