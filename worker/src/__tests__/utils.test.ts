@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, placeNewComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, severityEmoji, impactLabel, parseSnapshotWindow, omitsTimeSeries, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, readTrackingState, writeTrackingStateIfChanged, diffPageComponents, placeNewComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, severityEmoji, impactLabel, parseSnapshotWindow, omitsTimeSeries, settleWithin, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike, type TrackingStateBlob, type StatusSourceReadFailure } from '../utils'
 import type { Incident, ServiceComponent } from '../types'
 
 describe('appendStatusHint (#539)', () => {
@@ -989,5 +989,41 @@ describe('omitsTimeSeries (#1531)', () => {
     expect(omitsTimeSeries(new URLSearchParams(''))).toBe(false)
     expect(omitsTimeSeries(new URLSearchParams('series=1'))).toBe(false)
     expect(omitsTimeSeries(new URLSearchParams('series='))).toBe(false)
+  })
+})
+
+describe('settleWithin (#1531)', () => {
+  const TIMED_OUT = Symbol('timed-out')
+
+  it('returns the work result when it settles first', async () => {
+    expect(await settleWithin(Promise.resolve('hit'), 50, TIMED_OUT)).toBe('hit')
+  })
+
+  it('returns the timed-out value when the work outlasts the deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const result = settleWithin(new Promise(() => {}), 250, TIMED_OUT)
+      await vi.advanceTimersByTimeAsync(250)
+      expect(await result).toBe(TIMED_OUT)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not time out before the deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      let late: (v: string) => void = () => {}
+      const result = settleWithin(new Promise<string>((r) => { late = r }), 250, TIMED_OUT)
+      await vi.advanceTimersByTimeAsync(249)
+      late('hit')
+      expect(await result).toBe('hit')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('passes a rejection through', async () => {
+    await expect(settleWithin(Promise.reject(new Error('boom')), 50, TIMED_OUT)).rejects.toThrow('boom')
   })
 })

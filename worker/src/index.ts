@@ -17,7 +17,7 @@ import { fallbackEmbedSection } from './fallback'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, omitsTimeSeries, isResolvedWithoutEnd } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, settleWithin, omitsTimeSeries, isResolvedWithoutEnd } from './utils'
 import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
 import { rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
@@ -179,6 +179,9 @@ async function buildReportFeedMap(kv: KVNamespace, services: ServiceStatus[]): P
 const HOUR_MS = 3_600_000
 // #1531 — under the Edge's 5 s budget, with room left for the log line to be emitted before a cancel.
 const CACHED_WATCHDOG_MS = 3_000
+// #1531 — a lookup normally settles in 20–48 ms; one stalled past 3 s in the 2026-10-28 claude-ai incident.
+const EDGE_CACHE_MATCH_MS = 250
+const TIMED_OUT = Symbol('timed-out')
 /** Fixed-window per-IP limiter (in-memory, per-isolate — same mechanism as the existing
  *  alertProxyRate/webhookPingRate counters, just an hour window). Returns true if over the limit.
  *  Fixed-window means up to 2× the limit can pass across a window boundary; acceptable for these
@@ -6039,8 +6042,9 @@ const workerExport = {
         // #1531 — the Edge is-down fetch sends no Origin; a browser request would need its own CORS headers.
         const leanCacheKey = !withSeries && !origin ? new Request(`${url.origin}${url.pathname}?series=0`) : null
         if (leanCacheKey) {
-          const hit = await watchdog.track('edge-cache', caches.default.match(leanCacheKey))
-          if (hit) return hit
+          const hit = await watchdog.track('edge-cache', settleWithin(caches.default.match(leanCacheKey), EDGE_CACHE_MATCH_MS, TIMED_OUT))
+          if (hit === TIMED_OUT) console.warn({ event: 'edge-cache-timeout', route: 'status-cached', afterMs: EDGE_CACHE_MATCH_MS })
+          else if (hit) return hit
         }
         const cached = await watchdog.track('snapshot', cacheRead(env.STATUS_CACHE, env.ANALYTICS))
         if (cached) {

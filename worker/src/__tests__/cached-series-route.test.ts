@@ -7,7 +7,7 @@ import type { ServiceStatus } from '../types'
 
 const SNAPSHOT = { t: '2026-09-29T14:45:00Z', data: { claude: { status: 401, rtt: 120 } } }
 
-function makeEnv(opts: { snapshot?: boolean } = {}) {
+function makeEnv(opts: { snapshot?: boolean; snapshotDelayMs?: number } = {}) {
   const reads: string[] = []
   const store = new Map<string, string>([
     ['probe:24h', JSON.stringify({ snapshots: [SNAPSHOT] })],
@@ -21,9 +21,10 @@ function makeEnv(opts: { snapshot?: boolean } = {}) {
       cachedAt: '2026-09-29T14:45:00Z',
     }))
   }
+  const stall = (k: string) => k === 'services:latest' && opts.snapshotDelayMs ? new Promise((r) => setTimeout(r, opts.snapshotDelayMs)) : Promise.resolve()
   const kv = {
-    get: async (k: string) => { reads.push(k); return store.get(k) ?? null },
-    getWithMetadata: async (k: string) => { reads.push(k); return { value: store.get(k) ?? null, metadata: null } },
+    get: async (k: string) => { reads.push(k); await stall(k); return store.get(k) ?? null },
+    getWithMetadata: async (k: string) => { reads.push(k); await stall(k); return { value: store.get(k) ?? null, metadata: null } },
     put: async () => {}, delete: async () => {}, list: async () => ({ keys: [], list_complete: true }),
   } as unknown as KVNamespace
   return { env: { ALLOWED_ORIGIN: '*', STATUS_CACHE: kv } as unknown as Parameters<typeof workerModule.fetch>[1], reads }
@@ -46,7 +47,7 @@ beforeEach(() => {
 })
 afterEach(() => { vi.restoreAllMocks() })
 
-async function get(query: string, opts: { origin?: string; snapshot?: boolean } = {}) {
+async function get(query: string, opts: { origin?: string; snapshot?: boolean; snapshotDelayMs?: number } = {}) {
   const { env, reads } = makeEnv(opts)
   const pending: Promise<unknown>[] = []
   const res = await workerModule.fetch(
@@ -109,5 +110,32 @@ describe('/api/status/cached?series=0 edge cache (#1531 part 2)', () => {
     const miss = await get('?series=0', { snapshot: false })
     expect(miss.status).toBe(503)
     expect(puts).toEqual([])
+  }, 60_000)
+})
+
+describe('/api/status/cached?series=0 stalled edge-cache lookup (#1531)', () => {
+  it('a caches.default.match that never settles falls through to the KV snapshot', async () => {
+    ;(globalThis as unknown as { caches: unknown }).caches = {
+      default: { match: () => new Promise(() => {}), put: async () => {} },
+    }
+    const warn = vi.mocked(console.warn)
+    const started = Date.now()
+    const { status, body, reads } = await get('?series=0')
+    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(status).toBe(200)
+    expect((body.services as unknown[]).length).toBe(1)
+    expect(reads).toContain('services:latest')
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'edge-cache-timeout' }))
+  }, 60_000)
+
+  it('a later stall is not blamed on the abandoned lookup in the stage-watchdog line', async () => {
+    ;(globalThis as unknown as { caches: unknown }).caches = {
+      default: { match: () => new Promise(() => {}), put: async () => {} },
+    }
+    const warn = vi.mocked(console.warn)
+    await get('?series=0', { snapshotDelayMs: 3_500 })
+    const line = warn.mock.calls.map((c) => c[0]).find((l) => (l as { event?: string })?.event === 'stage-watchdog') as { pending: string[]; done: Record<string, number> }
+    expect(line.pending).toEqual(['snapshot'])
+    expect(line.done).toHaveProperty('edge-cache')
   }, 60_000)
 })

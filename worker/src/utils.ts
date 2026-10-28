@@ -1478,6 +1478,13 @@ export async function fetchWithTimeout(
   return tracker ? tracker.track(send, url, timeoutMs) : send()
 }
 
+/** #1531 — `work`'s result, or `timedOut` once `ms` passes first. `work` keeps running; a rejection passes through. */
+export function settleWithin<T, F>(work: Promise<T>, ms: number, timedOut: F): Promise<T | F> {
+  let timer!: ReturnType<typeof setTimeout>
+  const deadline = new Promise<F>((resolve) => { timer = setTimeout(() => resolve(timedOut), ms) })
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer))
+}
+
 export function fetchTracked(
   url: string,
   timeoutMs: number | undefined,
