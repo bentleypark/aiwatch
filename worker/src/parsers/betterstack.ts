@@ -548,13 +548,18 @@ export function parseBetterStackReportedUptime(data: BetterStackIndex): number |
  *  Then AVERAGED across resources, preserving the pre-#1006 avg-of-resources convention that the
  *  `platform_avg` label describes. Returns null when no resource carries a usable history. */
 export function parseBetterStackUptime(data: BetterStackIndex, windowDays = 30): number | null {
-  const resources = (data.included ?? []).filter(
-    (r) => r.type === 'status_page_resource' && Array.isArray(r.attributes?.status_history),
-  )
-  if (resources.length === 0) return null
+  const perResource = scoreBetterStackResources(data, windowDays).map((r) => r.pct)
+  if (perResource.length === 0) return null
 
-  const perResource: number[] = []
-  for (const resource of resources) {
+  const avg = perResource.reduce((a, b) => a + b, 0) / perResource.length
+  // Floor, like every other source: never round 99.998% up to a clean 100%.
+  return Math.floor(avg * 100) / 100
+}
+
+function scoreBetterStackResources(data: BetterStackIndex, windowDays: number): { pct: number; days: number }[] {
+  const scored: { pct: number; days: number }[] = []
+  for (const resource of data.included ?? []) {
+    if (resource.type !== 'status_page_resource' || !Array.isArray(resource.attributes?.status_history)) continue
     // status_history is chronological (oldest first) — the trailing window is the tail.
     const days = resource.attributes!.status_history!.slice(-windowDays).filter((d) => d.status !== 'not_monitored')
     if (days.length === 0) continue
@@ -567,13 +572,18 @@ export function parseBetterStackUptime(data: BetterStackIndex, windowDays = 30):
       console.warn(`[parseBetterStackUptime] ${resource.attributes?.public_name}: computed ${pct}% — history shape may have changed`)
       continue
     }
-    perResource.push(pct)
+    scored.push({ pct, days: days.length })
   }
-  if (perResource.length === 0) return null
+  return scored
+}
 
-  const avg = perResource.reduce((a, b) => a + b, 0) / perResource.length
-  // Floor, like every other source: never round 99.998% up to a clean 100%.
-  return Math.floor(avg * 100) / 100
+/** #1835 — how many monitored days `parseBetterStackUptime`'s figure covers when that is fewer than
+ *  `windowDays`: the most monitored days any averaged resource has. null for a full window or no
+ *  monitored day at all. */
+export function parseBetterStackUptimeWindowDays(data: BetterStackIndex, windowDays = 30): number | null {
+  let longest = 0
+  for (const r of scoreBetterStackResources(data, windowDays)) longest = Math.max(longest, r.days)
+  return longest > 0 && longest < windowDays ? longest : null
 }
 
 /**

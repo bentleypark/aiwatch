@@ -125,6 +125,15 @@ describe('#1292 — an emptied BetterStack feed must not read as "no incidents"'
     expect(onCoveredDays).toEqual([])
   })
 
+  it('#1835 — publishes how many days its uptime covers when that is under 30', async () => {
+    stubFetch(EMPTY_FEED)
+    const svc = await fetchService(helicone, undefined, undefined, {})
+    // The fixture's longest monitored history is 3 days (eu.api.helicone.ai, 08-14..16).
+    expect(svc.uptime30d).not.toBeNull()
+    expect(svc.uptimeSource).toBe('platform_avg')
+    expect(svc.uptimeWindowDays).toBe(3)
+  })
+
   it('a renamed status_history is already visible — uptime and the calendar null out with it', () => {
     // The shape change that reads exactly like a clean month is NOT counted separately. It does not
     // need to be: `parseBetterStackUptime` and `parseBetterStackDailyImpact` read the same field on

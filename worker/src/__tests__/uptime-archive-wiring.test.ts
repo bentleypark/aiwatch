@@ -72,6 +72,14 @@ describe('#1017 — cacheWrite wiring for the durable per-day archive', () => {
     expect(index).toMatch(/counters\[s\.id\]\.weightedOutageSec\s*=\s*s\.todayWeightedOutageSec\s*\?\?\s*null/)
   })
 
+  it('#1835 — cacheWrite itself runs the counter update before writing daily:{date}', () => {
+    const body = index.slice(index.indexOf('async function cacheWrite('))
+    const fnBody = body.slice(0, body.indexOf('\n}\n'))
+    const call = fnBody.search(/\n\s+updateDailyCounters\(counters, services\)\n/)
+    expect(call).toBeGreaterThan(-1)
+    expect(call).toBeLessThan(fnBody.indexOf('kv.put(dailyKey'))
+  })
+
   it('assigns the restored dailyImpact back onto the service before CACHE_KEY is serialized', () => {
     expect(index).toMatch(/if \(restored !== s\.dailyImpact\) s\.dailyImpact = restored/)
   })
@@ -135,6 +143,19 @@ describe('#1017 follow-up — the durable restore trace is written from the real
     expect(trace.shortwin.uptimeWindowDays).toBe(14)
     // ONE day added by the mocked restore, on top of the one live day already present.
     expect(trace.shortwin.maxDaysRestored).toBe(1)
+  })
+
+  it('#1835 — a short-window Better Stack (platform_avg) service is not restored or traced', async () => {
+    const services = [
+      { id: 'helicone', dailyImpact: {}, calendarDays: 30, uptimeWindowDays: 3, uptimeSource: 'platform_avg' },
+      { id: 'shortwin', dailyImpact: {}, calendarDays: 30, uptimeWindowDays: 14, uptimeSource: 'official' },
+    ] as unknown as ServiceStatus[]
+    const { kv, put } = traceKV()
+    await restoreArchivedCalendars(kv, services, NOW)
+    expect(Object.keys(written(put))).toEqual(['shortwin'])
+    const { restoreArchivedCalendar } = await import('../uptime-archive')
+    const args = vi.mocked(restoreArchivedCalendar).mock.calls.map(([, a]) => a).filter((a) => a.serviceId === 'helicone')
+    expect(args.at(-1)?.uptimeWindowDays).toBeUndefined()
   })
 
   it('reads and writes the SAME key', async () => {

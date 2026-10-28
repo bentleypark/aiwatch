@@ -400,6 +400,20 @@ describe('computeMonthlyOfficialUptime (#586)', () => {
     }
     expect(computeMonthlyOfficialUptime(daily).characterai).toBeUndefined()
   })
+
+  it('#1835 — a short-window snapshot is not the month-end 30-day value', () => {
+    // Helicone, October 2026: the old monitors read ~91% through the 27th, the replacements could
+    // publish a 1-day 100% on the 29th-31st. That must not become October's Official Uptime.
+    const daily = {
+      '2026-10-29': { helicone: { ok: 288, total: 288, officialUptime: 100, officialUptimeWindowDays: 1 } },
+      '2026-10-30': { helicone: { ok: 288, total: 288, officialUptime: 100, officialUptimeWindowDays: 2 } },
+      '2026-10-31': { helicone: { ok: 288, total: 288, officialUptime: 100, officialUptimeWindowDays: 3 } },
+    }
+    expect(computeMonthlyOfficialUptime(daily).helicone).toBeUndefined()
+    // A full-window value earlier in the tail still stands.
+    const mixed = { ...daily, '2026-10-29': { helicone: { ok: 288, total: 288, officialUptime: 91.2, officialUptimeWindowDays: null } } }
+    expect(computeMonthlyOfficialUptime(mixed).helicone).toBe(91.2)
+  })
 })
 
 // ── resolveArchiveProbeSummary (#1002 / aiwatch-reports#76 — the SAME display ≡ score rule) ──

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from '../betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackUptimeWindowDays, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from '../betterstack'
 
 describe('parseBetterStackComponents (#606 Cat C)', () => {
   const fixture = {
@@ -1112,6 +1112,55 @@ describe('parseBetterStackUptime (#1006 — computed, not copied)', () => {
     expect(parseBetterStackUptime({ included: [] })).toBeNull()
     expect(parseBetterStackUptime({})).toBeNull()
     expect(parseBetterStackUptime({ included: [{ type: 'status_page_resource', attributes: { availability: 1 } }] })).toBeNull()
+  })
+
+  it('#1835 — a figure from fewer than 30 monitored days says how many (Helicone after its monitors were replaced)', () => {
+    const unmonitored = (n: number) => Array.from({ length: n }, () => ({ status: 'not_monitored' }))
+    const firstDay = days([...unmonitored(89), {}])
+    expect(parseBetterStackUptime({ included: [resource(firstDay)] })).toBe(100)
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(firstDay)] })).toBe(1)
+    // The most monitored days any averaged resource has is the figure's window.
+    const fiveDays = days([...unmonitored(85), ...Array.from({ length: 5 }, () => ({}))])
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(firstDay), resource(fiveDays)] })).toBe(5)
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(fiveDays), resource(firstDay)] })).toBe(5)
+    // Fish Audio's shape: full-window resources listed before one young monitor (Drama 3, 7 days).
+    const full = days(Array.from({ length: 90 }, () => ({})))
+    const sevenDays = days([...unmonitored(83), ...Array.from({ length: 7 }, () => ({}))])
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(full), resource(sevenDays)] })).toBeNull()
+  })
+
+  it('#1835 — a resource the uptime drops (out-of-range %) does not lengthen the disclosed window', () => {
+    const outOfRange = days([
+      ...Array.from({ length: 60 }, () => ({ status: 'not_monitored' })),
+      { status: 'downtime', down: 30 * 86_400 + 1 },
+      ...Array.from({ length: 29 }, () => ({})),
+    ])
+    const threeDays = days([...Array.from({ length: 87 }, () => ({ status: 'not_monitored' })), {}, {}, {}])
+    const page = { included: [resource(outOfRange), resource(threeDays)] }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseBetterStackUptime(page)).toBe(100)
+    expect(parseBetterStackUptimeWindowDays(page)).toBe(3)
+    warn.mockRestore()
+  })
+
+  it('#1835 — counts monitored days inside the trailing 30 only, not across the whole ~90-day history', () => {
+    const gapThenTwenty = days([
+      ...Array.from({ length: 60 }, () => ({})),
+      ...Array.from({ length: 10 }, () => ({ status: 'not_monitored' })),
+      ...Array.from({ length: 20 }, () => ({})),
+    ])
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(gapThenTwenty)] })).toBe(20)
+    const twentyDaysOld = days([...Array.from({ length: 70 }, () => ({ status: 'not_monitored' })), ...Array.from({ length: 20 }, () => ({}))])
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(twentyDaysOld)] })).toBe(20)
+  })
+
+  it('#1835 — no window note for a full 30-day window, or when nothing was monitored', () => {
+    const full = days(Array.from({ length: 90 }, () => ({})))
+    const unmonitored = days(Array.from({ length: 90 }, () => ({ status: 'not_monitored' })))
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(full)] })).toBeNull()
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(full), resource(unmonitored)] })).toBeNull()
+    expect(parseBetterStackUptimeWindowDays({ included: [resource(unmonitored)] })).toBeNull()
+    expect(parseBetterStackUptime({ included: [resource(unmonitored)] })).toBeNull()
   })
 })
 

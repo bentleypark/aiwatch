@@ -199,6 +199,8 @@ interface DailyCounters {
     ok: number
     total: number
     officialUptime?: number | null
+    // #1835 — `uptimeWindowDays` of that snapshot, so the month-end reader can tell a short window apart.
+    officialUptimeWindowDays?: number | null
     // #605 — per-component daily uptime accumulation. Same {ok,total} cadence as the service,
     // keyed by component id (+ name for display). Populated from ServiceStatus.components (#604/#606).
     // Rides the existing `daily:{date}` value (+0 KV writes); the monthly archive aggregates it.
@@ -238,8 +240,8 @@ function todayUTC(): string {
   return new Date().toISOString().split('T')[0]
 }
 
-/** #1017 — restore archived calendar days for any service whose live window looks incomplete (a
- *  status-page migration reset it, #1004's disclosed `uptimeWindowDays` signal). Mutates each
+/** #1017 — restore archived calendar days for any non-`platform_avg` service (#1835) whose live
+ *  window looks incomplete (a status-page migration reset it, #1004's disclosed `uptimeWindowDays` signal). Mutates each
  *  service's `dailyImpact` in place. `restoreArchivedCalendar` itself gates on `uptimeWindowDays`
  *  being present, so this pays the extra `history:` reads ONLY for a service actually flagged short —
  *  never on the common full-window path. Per-service try/catch (mirrors `component-seen:`/
@@ -262,7 +264,7 @@ export async function restoreArchivedCalendars(kv: KVNamespace, services: Servic
   const observations: RestoreObservation[] = []
   await Promise.all(services.map(async (s) => {
     const calendarDays = s.calendarDays ?? 30
-    const windowDays = s.uptimeWindowDays
+    const windowDays = s.uptimeSource === 'platform_avg' ? undefined : s.uptimeWindowDays
     // Computed BEFORE the restore: eligibility depends only on data already in hand, never on the
     // restore succeeding. Only `daysRestored` depends on the outcome.
     const eligible = isArchiveRestoreEligible(calendarDays, windowDays)
@@ -297,6 +299,42 @@ export async function restoreArchivedCalendars(kv: KVNamespace, services: Servic
   await recordRestoreObservations(kv, observations, nowISO)
 }
 
+// Update counters for all services (official sources take priority in response,
+// but counters serve as fallback if official sources fail)
+export function updateDailyCounters(counters: DailyCounters, services: ServiceStatus[]): void {
+  services.forEach((s) => {
+    if (!counters[s.id]) counters[s.id] = { ok: 0, total: 0 }
+    counters[s.id].total++
+    // #733 — impact-gated: a `degraded` snapshot only counts as down when a major/critical
+    // unresolved incident backs it; a minor/partial-scope or no-incident degraded counts as up
+    // (mirrors official rolling-uptime weighting — prevents a sticky minor incident from cratering
+    // uptime/Stability/Score while the status page reads ~100%).
+    //
+    // #1233 — an unreadable poll still books an `ok` sample here, and that is DELIBERATELY UNCHANGED.
+    // The honest treatment is a third outcome (record no sample at all — the poll observed nothing),
+    // and it was implemented and then reverted during this change's review: making `total === 0`
+    // reachable turned out to be unsafe: the three consumers of this counter DISAGREE about what a
+    // zero-sample service means. `computeMonthlyUptime` publishes **0%** into the permanent monthly
+    // archive, `computeUptime` (the live `/api/uptime` path) answers **100%**, and
+    // `computeMonthlyComponentUptime` correctly DROPS the row — with a comment naming the first one as
+    // the asymmetry it is avoiding. Of those, 0% is the one that ships: it prints a provider whose page
+    // we never read as that month's worst performer, moving the fabrication from silence to a public
+    // accusation. Correcting this properly means making those three agree on a "no data" path first,
+    // which is its own change. Tracked as a follow-up.
+    if (countsAsUptimeOk(s.status, s.incidents)) counters[s.id].ok++
+    // #586 — snapshot the live status-page rolling-30d uptime each cycle (last-write-wins = the
+    // day's most-recent value). The monthly archive reads the month-end day's value as the
+    // "Official Uptime" display number, so it stays month-accurate and survives a later rebuild
+    // (unlike a one-shot snapshot taken only at build time).
+    Object.assign(counters[s.id], officialUptimeSnapshot(s))
+    // #1017 — same last-write-wins cadence as officialUptime above: today's weighted outage seconds,
+    // the durable per-day archive input (rides the SAME daily:{date} write — +0 new KV writes).
+    counters[s.id].weightedOutageSec = s.todayWeightedOutageSec ?? null
+    // #605 — accumulate per-component uptime (same cadence) for services with a breakdown.
+    accumulateComponentCounters(counters[s.id], s.components)
+  })
+}
+
 // Returns true when this call issued the writes (counters + CACHE_KEY). `false` means this call
 // wrote nothing — CACHE_KEY still holds the previous snapshot — which is the half #1057 reads: the
 // /api/status handler force-refreshes on a status edge when it sees `false`. (The write itself is
@@ -327,39 +365,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
     if (existing) counters = JSON.parse(existing)
   } catch (err) { console.warn('[kv] daily counter parse failed:', dailyKey, err instanceof Error ? err.message : err) }
 
-  // Update counters for all services (official sources take priority in response,
-  // but counters serve as fallback if official sources fail)
-  services.forEach((s) => {
-    if (!counters[s.id]) counters[s.id] = { ok: 0, total: 0 }
-    counters[s.id].total++
-    // #733 — impact-gated: a `degraded` snapshot only counts as down when a major/critical
-    // unresolved incident backs it; a minor/partial-scope or no-incident degraded counts as up
-    // (mirrors official rolling-uptime weighting — prevents a sticky minor incident from cratering
-    // uptime/Stability/Score while the status page reads ~100%).
-    //
-    // #1233 — an unreadable poll still books an `ok` sample here, and that is DELIBERATELY UNCHANGED.
-    // The honest treatment is a third outcome (record no sample at all — the poll observed nothing),
-    // and it was implemented and then reverted during this change's review: making `total === 0`
-    // reachable turned out to be unsafe: the three consumers of this counter DISAGREE about what a
-    // zero-sample service means. `computeMonthlyUptime` publishes **0%** into the permanent monthly
-    // archive, `computeUptime` (the live `/api/uptime` path) answers **100%**, and
-    // `computeMonthlyComponentUptime` correctly DROPS the row — with a comment naming the first one as
-    // the asymmetry it is avoiding. Of those, 0% is the one that ships: it prints a provider whose page
-    // we never read as that month's worst performer, moving the fabrication from silence to a public
-    // accusation. Correcting this properly means making those three agree on a "no data" path first,
-    // which is its own change. Tracked as a follow-up.
-    if (countsAsUptimeOk(s.status, s.incidents)) counters[s.id].ok++
-    // #586 — snapshot the live status-page rolling-30d uptime each cycle (last-write-wins = the
-    // day's most-recent value). The monthly archive reads the month-end day's value as the
-    // "Official Uptime" display number, so it stays month-accurate and survives a later rebuild
-    // (unlike a one-shot snapshot taken only at build time).
-    counters[s.id].officialUptime = s.uptime30d ?? null
-    // #1017 — same last-write-wins cadence as officialUptime above: today's weighted outage seconds,
-    // the durable per-day archive input (rides the SAME daily:{date} write — +0 new KV writes).
-    counters[s.id].weightedOutageSec = s.todayWeightedOutageSec ?? null
-    // #605 — accumulate per-component uptime (same cadence) for services with a breakdown.
-    accumulateComponentCounters(counters[s.id], s.components)
-  })
+  updateDailyCounters(counters, services)
 
   // #1017 — restored BEFORE CACHE_KEY is serialized below, so every reader of the live snapshot
   // (frontend calendar, is-down SSR) sees the restored days with no changes on their end. See
@@ -2203,7 +2209,7 @@ import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent
 import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, degradationEventFor, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, degradationEventFor, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount, officialUptimeSnapshot } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
 import { parseStatusView, buildStatusView, type LeanStatusPayload } from './status-view'
 import { checkInfraStatus, runInfraStatusCycle } from './infra-status'
