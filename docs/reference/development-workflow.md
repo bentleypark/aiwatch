@@ -52,7 +52,7 @@ the engineering gates below remain the same.
    - Frontend: `npm run lint`, `npm run build`, `npm run test:src`, and `npm test`
    - Worker: `npm run test:worker`, `npm run typecheck:worker`, and
      `npx wrangler deploy --config worker/wrangler.toml --dry-run`
-   - Documentation: `npm run lint:okf`, `npm run lint:docs`, and `npm run lint:budget`; also run
+   - Documentation: `npm run lint:okf`, `npm run lint:docs`, `npm run lint:map`, and `npm run lint:budget`; also run
      `npm run lint:korean` for Korean-copy changes and `npm run test:scripts` when scripts or
      workflow invariants are affected
 
