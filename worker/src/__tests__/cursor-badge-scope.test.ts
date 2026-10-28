@@ -87,3 +87,91 @@ describe('#1420 Cursor badge scope — the 2026-09-03 17:02Z state through fetch
     expect(svc.incidents.map((i) => i.id)).toContain('dj4cgfmwgm65')
   })
 })
+
+// #1814 — components as status.x.ai/api/compat/summary.json served them on 2026-10-28 (Cursor page).
+const liveComponent = (id: string, name: string, status: string, position: number) => ({
+  id, name, status, created_at: '2026-10-28T09:14:35.193Z', updated_at: '2026-10-28T09:14:35.193Z', position,
+  description: null, showcase: true, start_date: null, group_id: null, page_id: '0tp9ssgtptvs', group: false,
+  only_show_if_degraded: false,
+})
+const LIVE = (statuses: Record<string, string> = {}) => [
+  ['cursor-ios', 'Cursor IDE (iOS)', 1], ['rflc60xp5jp2', 'IDE', 2], ['mwv1g9sc7kdh', 'Cloud Agents', 3], ['vsny1qv7v86c', 'CLI', 4],
+  ['k0trcq273dr6', 'Automations', 5], ['bugbot', 'BugBot', 6], ['2x2chyqwmkzl', 'Review Agents', 7], ['sm5wkcnqkvr9', 'Grok Bot', 8],
+  ['jh0714rgjgt4', 'cursor.com', 9], ['xwjpvdf81qh9', 'Origin', 10], ['enterprise-dashboard', 'Enterprise Dashboard', 11],
+].map(([id, name, pos]) => liveComponent(id as string, name as string, statuses[id as string] ?? 'operational', pos as number))
+
+const xaiIncident = (id: string, name: string, status: string, componentIds: string[], statuses: Record<string, string>) => ({
+  id, name, status, impact: 'minor', created_at: '2026-10-27T07:33:08.000Z', updated_at: '2026-10-27T08:18:40.000Z',
+  started_at: '2026-10-27T07:33:08.000Z', monitoring_at: null, resolved_at: status === 'resolved' ? '2026-10-27T08:18:40.000Z' : null,
+  shortlink: `https://status.x.ai/history?incident=automations%2F${id}`, page_id: '0tp9ssgtptvs',
+  components: LIVE(statuses).filter((c) => componentIds.includes(c.id)),
+  incident_updates: [{
+    id: `evt_${id}`, status, body: 'We are investigating elevated errors.', incident_id: id,
+    created_at: '2026-10-27T07:33:08.000Z', updated_at: '2026-10-27T07:33:08.000Z', display_at: '2026-10-27T07:33:08.000Z',
+    affected_components: componentIds.map((c) => ({ code: c, name: LIVE().find((x) => x.id === c)!.name, old_status: 'operational', new_status: statuses[c] ?? 'operational' })),
+  }],
+})
+
+describe('#1814 Cursor components added after the move to status.x.ai', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  const fetchCursor = (statuses: Record<string, string>, incidents: unknown[]) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    return fetchService(cfg('cursor'), {
+      summary: { status: { indicator: 'minor', description: 'Partially Degraded Service' }, components: LIVE(statuses), incidents } as never,
+      incidents: { incidents } as never,
+    } as never, undefined, {})
+  }
+
+  it.each([['bugbot', 'BugBot'], ['cursor-ios', 'Cursor IDE (iOS)']])('an open incident on %s alone keeps the badge non-operational and stays on the card', async (id) => {
+    const inc = xaiIncident(`ps_${id}`, 'Elevated errors', 'investigating', [id], { [id]: 'degraded_performance' })
+    const svc = await fetchCursor({ [id]: 'degraded_performance' }, [inc])
+    expect(svc.status).not.toBe('operational')
+    expect(svc.incidents.map((i) => i.id)).toEqual([inc.id])
+  })
+
+  it('an Enterprise Dashboard-only incident is a reference incident, and the outage leaves the badge operational', async () => {
+    const inc = xaiIncident('ps_dashboard', 'Enterprise Dashboard unavailable', 'resolved', ['enterprise-dashboard'], { 'enterprise-dashboard': 'major_outage' })
+    const svc = await fetchCursor({ 'enterprise-dashboard': 'major_outage' }, [inc])
+    expect(svc.status).toBe('operational')
+    expect(svc.incidents).toEqual([])
+    expect(svc.referenceIncidents?.map((i) => i.id)).toEqual([inc.id])
+  })
+
+  it('an open incident on Origin alone keeps the badge non-operational and stays on the card', async () => {
+    const inc = xaiIncident('ps_origin', 'Origin pushes failing', 'investigating', ['xwjpvdf81qh9'], { xwjpvdf81qh9: 'partial_outage' })
+    const svc = await fetchCursor({ xwjpvdf81qh9: 'partial_outage' }, [inc])
+    expect(svc.status).not.toBe('operational')
+    expect(svc.incidents.map((i) => i.id)).toEqual([inc.id])
+  })
+
+  it.each(['investigating', 'resolved'])('a %s incident tagged Grok Bot alone leaves the card and the badge', async (status) => {
+    const inc = xaiIncident('ps_grokbot', 'Delayed responses in Grok Bot', status, ['sm5wkcnqkvr9'], { sm5wkcnqkvr9: 'major_outage' })
+    const svc = await fetchCursor({ sm5wkcnqkvr9: 'major_outage' }, [inc])
+    expect(svc.status).toBe('operational')
+    expect(svc.incidents).toEqual([])
+    expect(svc.components?.map((c) => c.name)).not.toContain('Grok Bot')
+  })
+
+  it('an incident tagged Grok Bot and Cloud Agents stays on the card', async () => {
+    const inc = xaiIncident('ps_shared', 'Some Cloud Agents and Grok Bot sessions may fail to start', 'resolved', ['mwv1g9sc7kdh', 'sm5wkcnqkvr9'], {})
+    const svc = await fetchCursor({}, [inc])
+    expect(svc.incidents.map((i) => i.id)).toEqual([inc.id])
+  })
+
+  it('an incident tagged cursor.com and Grok Bot leaves both cursor lists — it belongs to the Grok Bot card (#1837)', async () => {
+    const inc = xaiIncident('qy67qt0s4n18', 'Investigating service degradation', 'resolved', ['jh0714rgjgt4', 'sm5wkcnqkvr9'], {})
+    const svc = await fetchCursor({}, [inc])
+    expect(svc.incidents).toEqual([])
+    expect(svc.referenceIncidents ?? []).toEqual([])
+  })
+
+  it('a cursor.com-only incident is a reference incident', async () => {
+    const inc = xaiIncident('ps_payments', 'Payment System Sync Issues', 'resolved', ['jh0714rgjgt4'], { jh0714rgjgt4: 'degraded_performance' })
+    const svc = await fetchCursor({ jh0714rgjgt4: 'degraded_performance' }, [inc])
+    expect(svc.status).toBe('operational')
+    expect(svc.incidents).toEqual([])
+    expect(svc.referenceIncidents?.map((i) => i.id)).toEqual([inc.id])
+  })
+})

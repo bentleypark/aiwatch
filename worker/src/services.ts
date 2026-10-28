@@ -583,17 +583,11 @@ export const SERVICES: ServiceConfig[] = [
   //   Codex product (API/CLI/VS Code/Web) was operational. Removed from BOTH arrays and moved to
   //   chatgpt where it belongs.
   { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', statusComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', statusComponentIds: ['01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK'], displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV'] },
-  // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379) + Review Agents (#1420). Auxiliary
-  // surfaces are intentionally excluded from that worst-of set. Origin + Grok Bot (new components,
-  // 2026-08-17) join that excluded category — Grok Bot is a bot integration, not a core product
-  // surface, and Origin has no confirmed core-surface role — but resolveSvcComponents falls back to
-  // statusComponentIds ONLY when displayComponentIds is absent, so displayComponentIds here MUST be a
-  // superset of statusComponentIds (mirrors codex/openai/langsmith) or the breakdown card silently
-  // loses the core rows the moment this field exists at all.
-  // #1518 — rosterAuditExclude: Origin + Grok Bot are the 2 `displayComponentIds`-only members the
-  // paragraph above already excludes from uptime scope by name; `cursor.com` (the marketing site) is a
-  // new judgement call, matching the FedRAMP/Ads precedent above.
-  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl'], displayComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl', 'xwjpvdf81qh9', 'sm5wkcnqkvr9'], rosterAuditExclude: ['xwjpvdf81qh9', 'sm5wkcnqkvr9', 'jh0714rgjgt4'] },
+  // cursor badge reflects worst-of over `statusComponentIds` (#379, #1420).
+  // #1814 — components decided by the #1821 criterion: Origin (Cursor's git forge), Cursor IDE (iOS) and
+  //   BugBot are Counted; cursor.com (sign-in, payments) and Enterprise Dashboard (billing, usage, team
+  //   settings) are Reference; Grok Bot is another product, so its incidents are scoped off this card.
+  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponent: 'IDE', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl', 'cursor-ios', 'bugbot', 'xwjpvdf81qh9'], scopeIncidentsToComponent: true, rosterAuditExclude: ['sm5wkcnqkvr9', 'jh0714rgjgt4', 'enterprise-dashboard'], referenceComponentIds: ['jh0714rgjgt4', 'enterprise-dashboard'] },
   // copilot badge reflects worst-of: Copilot + Copilot AI Model Providers (direct upstream) (#379).
   // #1518 — the other 10 components on this page are GitHub's own platform (Git/Webhooks/API Requests/
   // Issues/PRs/Actions/Packages/Pages/Codespaces/the www redirect notice), not Copilot's — the same
@@ -1689,7 +1683,7 @@ export function __resetMissingJoinWarnThrottle(): void { warnedMissingJoin.clear
 
 /**
  * Two independent rules, in order:
- *   1. `scopeIncidentsToComponent` (#934/#1090, opt-in — `claude` only) — drop any incident whose
+ *   1. `scopeIncidentsToComponent` (#934/#1090, opt-in — `claude`, `cursor`) — drop any incident whose
  *      `componentNames` name no component in THIS service's badge group, regardless of the incident's
  *      status AND regardless of our own. Untagged ⇒ keep (fail-open).
  *   2. #228/#970 (not flag-gated) — when our component is `operational`, drop ACTIVE incidents, since
@@ -1711,8 +1705,8 @@ export function __resetMissingJoinWarnThrottle(): void { warnedMissingJoin.clear
  * incident status; membership widened from `statusComponent` prefix-only to badge-group-or-prefix, so
  * one predicate (`inBadgeGroup`) answers this question for both rules. Extensionally identical for
  * `claude` today — its badge group resolves to ['claude api (api.anthropic.com)', 'claude api'], both
- * of which prefix-match — so the widening is latent until a future opt-in sets `statusComponentIds` ALONGSIDE a `statusComponent`
- * name — ids alone leave rule 1 inactive entirely (see the INACTIVE warn below).
+ * of which prefix-match. `cursor` sets `statusComponentIds` alongside a `statusComponent` name, so the
+ * widening is live there — ids alone leave rule 1 inactive entirely (see the INACTIVE warn below).
  *
  * Rule 1 is default-off so a single-tenant service whose broad `statusComponent: 'API'` would wrongly
  * drop a specific-component incident (`fal` today) and keyword-scoped
@@ -1784,7 +1778,7 @@ export function filterByComponentStatus(
   // `incidentExclude` names no keyword in that title, so nothing else stopped it — and since the
   // filtered list is passed on unchanged, it REACHES the card, the Score inputs (`score.ts`) and
   // `buildIncidentAlerts` (traced through the call graph; the wrong-service alert was not itself
-  // observed). Opt-in (claude only) for the reasons in types.ts. Untagged ⇒ ambiguous ⇒ keep.
+  // observed). Opt-in for the reasons in types.ts. Untagged ⇒ ambiguous ⇒ keep.
   // No `!unjudgeable` term here — it could not change the outcome. This rule already requires
   // `ownComponent`, and `inBadgeGroup`'s `startsWith(ownComponent)` fallback is live whenever that is
   // truthy, so an empty badge group can never make the predicate reject everything. (NOT because

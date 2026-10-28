@@ -413,7 +413,7 @@ export interface ServiceConfig {
   // incidentKeywords/incidentComponents) keeps an incident in filterByComponentStatus only if the
   // incident named a component in THIS service's badge group. Prevents a sibling-component-only
   // incident (e.g. a Claude-Code-only "GitHub failures" incident, componentNames: ['Claude Code'])
-  // from cross-attributing to Claude API. Set on `claude` ONLY — single-tenant services have no
+  // from cross-attributing to Claude API. Set on `claude` and `cursor` (#1814, where Grok Bot shares the page) — single-tenant services have no
   // sibling to leak from; keyword-scoped siblings (claudeai/claudecode) already scope upstream and
   // could drop 'across surfaces' incidents. Off by default.
   //
