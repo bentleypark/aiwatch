@@ -10,7 +10,7 @@ tags: [worker, cron, data-flow]
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (48 services) through one per-invocation `createFetchTracker` (#1489). It never delays a
+    → parallel fetch (49 services) through one per-invocation `createFetchTracker` (#1489). It never delays a
       fetch, and each `fetchWithTimeout` timeout starts at the `fetch()` call. It records, per run, how many other
       fetches were waiting for headers when each one started, for the timeouts and the answers apart.
       Half the runs (a coin per run) launch the page prefetch in a shuffled order, the other half in `SERVICES`

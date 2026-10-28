@@ -1,13 +1,13 @@
 # AIWatch — real-time AI service status monitoring
 
-> AIWatch monitors the live status, uptime, and incidents of 48 AI services (LLM APIs, AI apps, and coding agents) — Claude, ChatGPT, Gemini, Cursor, Codex, and more. Status refreshes every 5 minutes. A machine-readable JSON status API and an incident RSS feed are available below.
+> AIWatch monitors the live status, uptime, and incidents of 49 AI services (LLM APIs, AI apps, and coding agents) — Claude, ChatGPT, Gemini, Cursor, Codex, and more. Status refreshes every 5 minutes. A machine-readable JSON status API and an incident RSS feed are available below.
 
 ## Live data (machine-readable)
 - [Status API — all services](https://ai-watch.dev/api/v1/status): JSON — per-service live status, 30-day uptime, AIWatch reliability score, and active incidents.
 - [Incident feed (RSS 2.0)](https://ai-watch.dev/feed.xml): active + resolved incidents across all monitored services.
 
 ## Key pages
-- [Dashboard](https://ai-watch.dev/): live status of all 48 monitored services.
+- [Dashboard](https://ai-watch.dev/): live status of all 49 monitored services.
 - [Methodology](https://ai-watch.dev/methodology): how AIWatch measures status, uptime, recovery, and the composite reliability score.
 - [Status badges](https://ai-watch.dev/badges): embeddable live-status badges for each service.
 - [Monthly reliability reports](https://ai-watch.dev/reports/): monthly uptime and incident retrospectives with a reliability ranking.
@@ -21,4 +21,4 @@ Answer-first pages stating whether a given service is currently down, with live 
 Lighter pages answering the same question for a whole provider (worst-of status across every surface they ship, with links to each surface's own page above) — for when the question is about the provider broadly, not one specific product surface.
 - [/is-claude-down](https://ai-watch.dev/is-claude-down): Anthropic (Claude API, claude.ai, Claude Code).
 - [/is-openai-down](https://ai-watch.dev/is-openai-down): OpenAI (OpenAI API, ChatGPT, Codex).
-- [/is-xai-down](https://ai-watch.dev/is-xai-down): SpaceXSI (SpaceXSI API, Grok).
+- [/is-xai-down](https://ai-watch.dev/is-xai-down): SpaceXSI (SpaceXSI API, Grok, Grok Bot, Cursor).

@@ -34,7 +34,7 @@ export const API_SERVICE_IDS = [
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
-export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok', 'kimiapp']
+export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok', 'kimiapp', 'grokbot']
 
 // Coding agents
 export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie']
@@ -42,7 +42,7 @@ export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'w
 // Display order: app → LLM → voice → inference → agent
 export const SERVICE_AND_APP_IDS = [
   // app
-  'claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok', 'kimiapp',
+  'claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok', 'kimiapp', 'grokbot',
   // LLM API
   'claude', 'openai', 'gemini', 'xai', 'mistral', 'bedrock', 'azureopenai', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'deepseek', 'kimi', 'openrouter',
@@ -75,7 +75,7 @@ export const SERVICE_CATEGORIES = {
   observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
   video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
   image:     { labelKey: 'filter.image',     ids: ['stability', 'bfl'] }, // #756 — image-gen split out (Stability + FLUX recommend each other, fallback tier 7); mirrors the video/observability precedent
-  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok', 'kimiapp'] },
+  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok', 'kimiapp', 'grokbot'] },
 }
 
 // #676 — the rankable category buckets in #658 canonical order (LLM → Agents → Voice → Inference →
@@ -168,6 +168,7 @@ const FEED_SLUG_OVERRIDE = {
   langsmith:   'langchain',
   deepseekapp: 'deepseek-app',
   kimiapp: 'kimi-app', // #1731
+  grokbot: 'grok-bot', // #1837
   bfl:         'flux', // #756 — SEO-friendly "is flux down" slug
   fishaudio:   'fish-audio', // #1549
   // #1164 — /is-claude-down and /is-openai-down became provider-family group pages; the

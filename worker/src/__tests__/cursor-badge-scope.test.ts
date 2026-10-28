@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchService, SERVICES } from '../services'
 import type { ServiceConfig } from '../types'
+import { EXCLUDE_FALLBACK } from '../fallback'
 
 // #1420 — Cursor incident `dj4cgfmwgm65` (critical, 2026-09-03 13:41→17:07Z) as status.cursor.com
 // served it at ~17:02Z: still `identified`, with Automations/Cloud Agents already recovered and
@@ -174,4 +175,50 @@ describe('#1814 Cursor components added after the move to status.x.ai', () => {
     expect(svc.incidents).toEqual([])
     expect(svc.referenceIncidents?.map((i) => i.id)).toEqual([inc.id])
   })
+})
+
+// #1837 — the Grok Bot card reads the same page as cursor and keeps only the Grok Bot component's incidents.
+describe('#1837 Grok Bot card on Cursor\'s status page', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  const fetchOn = (id: string, statuses: Record<string, string>, incidents: unknown[]) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    return fetchService(cfg(id), {
+      summary: { status: { indicator: 'minor', description: 'Partially Degraded Service' }, components: LIVE(statuses), incidents } as never,
+      incidents: { incidents } as never,
+    } as never, undefined, {})
+  }
+
+  it('an open Grok Bot-only incident is on the Grok Bot card, which turns non-operational, and not on cursor', async () => {
+    const inc = xaiIncident('ps_grokbot', 'Delayed responses in Grok Bot', 'investigating', ['sm5wkcnqkvr9'], { sm5wkcnqkvr9: 'major_outage' })
+    const grokbot = await fetchOn('grokbot', { sm5wkcnqkvr9: 'major_outage' }, [inc])
+    const cursor = await fetchOn('cursor', { sm5wkcnqkvr9: 'major_outage' }, [inc])
+    expect(grokbot.status).not.toBe('operational')
+    expect(grokbot.incidents.map((i) => i.id)).toEqual([inc.id])
+    expect(cursor.status).toBe('operational')
+    expect(cursor.incidents).toEqual([])
+  })
+
+  it('a resolved Grok Bot + Cloud Agents incident is on both cards', async () => {
+    const inc = xaiIncident('ps_shared', 'Some Cloud Agents and Grok Bot sessions may fail to start', 'resolved', ['mwv1g9sc7kdh', 'sm5wkcnqkvr9'], {})
+    expect((await fetchOn('grokbot', {}, [inc])).incidents.map((i) => i.id)).toEqual([inc.id])
+    expect((await fetchOn('cursor', {}, [inc])).incidents.map((i) => i.id)).toEqual([inc.id])
+  })
+
+  it('an open Cloud Agents-only outage leaves the Grok Bot card operational and empty', async () => {
+    const inc = xaiIncident('ps_agents', 'Cloud Agents failing to start', 'investigating', ['mwv1g9sc7kdh'], { mwv1g9sc7kdh: 'major_outage' })
+    const grokbot = await fetchOn('grokbot', { mwv1g9sc7kdh: 'major_outage' }, [inc])
+    expect(grokbot.status).toBe('operational')
+    expect(grokbot.incidents).toEqual([])
+  })
+
+  it('a resolved cursor.com-only incident is not on the Grok Bot card', async () => {
+    const inc = xaiIncident('ps_payments', 'Payment System Sync Issues', 'resolved', ['jh0714rgjgt4'], {})
+    expect((await fetchOn('grokbot', {}, [inc])).incidents).toEqual([])
+  })
+})
+
+it('#1837 Grok Bot is never recommended as a fallback', () => {
+  expect(EXCLUDE_FALLBACK).toContain('grokbot')
 })

@@ -48,6 +48,7 @@ export const STATUS_URL = {
   deepseekapp: 'https://status.deepseek.com',
   grok:        'https://status.x.ai',
   kimiapp:     'https://status.moonshot.cn',
+  grokbot:     'https://status.cursor.com',
   claudecode:  'https://status.claude.com',
   copilot:     'https://githubstatus.com',
   cursor:      'https://status.cursor.com',

@@ -58,6 +58,7 @@ describe('#1679 — every service\'s uptime scope is pinned', () => {
         "fishaudio": "betterstack all page resources",
         "gemini": "none",
         "grok": "none",
+        "grokbot": "atlassian sm5wkcnqkvr9",
         "groq": "incident.io 01K053E2FAKWKEYHXEV7WAHJBM",
         "helicone": "betterstack all page resources",
         "huggingface": "betterstack all page resources",

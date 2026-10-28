@@ -84,7 +84,7 @@ describe('is-down-group.ts', () => {
     const params = new URL(String(fetchMock.mock.calls[0][0])).searchParams
     expect(params.get('view')).toBe('is-down-group')
     expect(params.get('ids')).toBe('claude,claudeai,claudecode')
-    expect(params.get('status')).toBe('openai,chatgpt,codex,xai,grok,cursor')
+    expect(params.get('status')).toBe('openai,chatgpt,codex,xai,grok,grokbot,cursor')
   })
 
   it('a stalled first status request is answered by the hedged second one, not the fallback (#1531 Part 5)', async () => {

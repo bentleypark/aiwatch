@@ -598,6 +598,20 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Kimi status?', a: 'You can check Kimi status on this page, on the official Moonshot status page at status.moonshot.cn, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  // #1837 — sources: x.ai/bot/guides/grok-bot-101 (product, cloud computer, phone + desktop, Cursor
+  // connection) and the `grokbot` config (Cursor's status page, Grok Bot component, no uptime, no probe).
+  'grok-bot': {
+    displayName: 'Grok Bot',
+    description: 'Grok Bot is SpaceXSI\'s personal assistant agent. Each bot has its own computer in the cloud, which users reach from their phone or desktop. It is a separate product from the Grok chat app and from Cursor.',
+    insight: 'Grok Bot is listed as a component on Cursor\'s status page (status.cursor.com, which now redirects to status.x.ai). AIWatch reads the Grok Bot component and its incidents from that page.',
+    whenDown: 'When Grok Bot is down, bots may respond slowly or not at all, routines may not run, and bot computers may be unreachable or fail to reset. The Grok chat app and Cursor are tracked on their own pages and can stay operational.',
+    faqs: [
+      { q: 'Is Grok Bot down right now?', a: 'Check the live status indicator at the top of this page. AIWatch checks the Grok Bot component on the official status page every 5 minutes.' },
+      { q: 'Is this the same as Grok?', a: 'No. Grok is the chat app on grok.com, mobile and X, and has its own page on AIWatch. Grok Bot is an agent with its own cloud computer, tracked on this page.' },
+      { q: 'What are alternatives to Grok Bot?', a: 'ChatGPT and claude.ai are other AI apps AIWatch tracks. AIWatch shows current availability for each.' },
+      { q: 'How do I check Grok Bot status?', a: 'You can check Grok Bot status on this page, on the official status page at status.x.ai, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   // Coding agents (#294) — "OpenAI Codex" on this page means the current coding
   // agent product, not the code-generation API OpenAI retired in 2023.
   codex: {
