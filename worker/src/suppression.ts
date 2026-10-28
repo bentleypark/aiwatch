@@ -28,6 +28,8 @@ export const SUPPRESSIONS_KEY = 'incident:suppressions'
 export interface IncidentSuppression {
   scope: 'incident'
   incId: string
+  /** #1814 — set: hide the incident on this service only (two cards can read one page). */
+  svcId?: string
   reason?: string
   createdAt?: string
   by?: string
@@ -58,7 +60,7 @@ export function isSuppressedByIdTitle(
   const lower = title.toLowerCase()
   for (const e of list) {
     if (e.scope === 'incident') {
-      if (e.incId && incId === e.incId) return true
+      if (e.incId && incId === e.incId && (!e.svcId || e.svcId === svcId)) return true
     } else if (e.scope === 'service-pattern') {
       if (e.svcId === svcId && e.match && lower.includes(e.match.toLowerCase())) return true
     }
@@ -110,6 +112,7 @@ export function normalizeSuppressionsCounted(parsed: unknown): { list: Suppressi
       out.push({
         scope: 'incident',
         incId: e.incId,
+        ...(typeof e.svcId === 'string' && e.svcId ? { svcId: e.svcId } : {}),
         ...pickMeta(e),
       })
     } else if (
@@ -165,7 +168,7 @@ function pickMeta(e: Record<string, unknown>): { reason?: string; createdAt?: st
 /** Pure: does `a` refer to the same suppression target as `b`? (identity for add-dedup / remove.) */
 export function sameSuppressionTarget(a: SuppressionEntry, b: SuppressionEntry): boolean {
   if (a.scope !== b.scope) return false
-  if (a.scope === 'incident' && b.scope === 'incident') return a.incId === b.incId
+  if (a.scope === 'incident' && b.scope === 'incident') return a.incId === b.incId && (a.svcId ?? '') === (b.svcId ?? '')
   if (a.scope === 'service-pattern' && b.scope === 'service-pattern') {
     return a.svcId === b.svcId && a.match.toLowerCase() === b.match.toLowerCase()
   }
@@ -195,7 +198,7 @@ export function mutateSuppressions(list: SuppressionEntry[], m: SuppressionMutat
   let target: SuppressionEntry
   if (m.scope === 'incident') {
     if (!m.incId) return { ok: false, error: 'incId is required for scope=incident' }
-    target = { scope: 'incident', incId: m.incId }
+    target = { scope: 'incident', incId: m.incId, ...(m.svcId ? { svcId: m.svcId } : {}) }
   } else if (m.scope === 'service-pattern') {
     if (!m.svcId || !m.match) return { ok: false, error: 'svcId and match are required for scope=service-pattern' }
     target = { scope: 'service-pattern', svcId: m.svcId, match: m.match }

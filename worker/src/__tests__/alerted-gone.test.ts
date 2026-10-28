@@ -140,6 +140,11 @@ describe('#1118 classifyGone', () => {
     expect(classifyGone('i1', ['openai'], row('investigating'), list)).toBe('reported')
     expect(classifyGone('i1', ['fireworks'], null, list)).toBe('reported')
   })
+  it('#1814 a suppression scoped to one service applies only to that service', () => {
+    const list: SuppressionEntry[] = [{ scope: 'incident', incId: 'i1', svcId: 'cursor' }]
+    expect(classifyGone('i1', ['cursor'], null, list)).toBe('suppressed')
+    expect(classifyGone('i1', ['grokbot'], null, list)).toBe('reported')
+  })
 })
 
 describe('#1118 listIds', () => {

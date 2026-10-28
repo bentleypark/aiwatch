@@ -164,7 +164,7 @@ test('a failed re-send stops the loop and is reported unconfirmed', async () => 
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 
-async function withEndpoint(changedSeq, fn) {
+async function withEndpoint(changedSeq, fn, getFields = {}) {
   const posts = []
   const stored = new Set()
   const stateful = (b) => {
@@ -189,7 +189,7 @@ async function withEndpoint(changedSeq, fn) {
       }
       const changed = req.method === 'POST' ? step : undefined
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, ...(changed === undefined ? {} : { changed }) }))
+      res.end(JSON.stringify({ ok: true, ...(changed === undefined ? {} : { changed }), ...(req.method === 'GET' ? getFields : {}) }))
     })
   })
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
@@ -300,6 +300,36 @@ test('duration-override.mjs: --minutes 0 and 12.5 are sent as numbers', async ()
       assert.equal(posts[0].durationMin, expected)
     })
   }
+})
+
+test('#1814 suppress-incident sends --svc as svcId for an incident-scope entry', async () => {
+  await withEndpoint([true, false], async (url, posts) => {
+    const r = await runCli('suppress-incident.mjs', ['add', '--scope', 'incident', '--incId', 'i1', '--svc', 'cursor'], url)
+    assert.equal(r.code, 0, r.out)
+    assert.equal(posts[0].svcId, 'cursor')
+    assert.equal(posts[0].incId, 'i1')
+  }, { incidentSvcScope: true })
+})
+
+test('#1814 suppress-incident --svc writes nothing to a Worker that does not scope incident suppressions', async () => {
+  await withEndpoint([true, false], async (url, posts) => {
+    const r = await runCli('suppress-incident.mjs', ['add', '--scope', 'incident', '--incId', 'i1', '--svc', 'cursor'], url)
+    assert.equal(r.code, 2, r.out)
+    assert.equal(posts.length, 0)
+    assert.match(r.out, /Deploy the Worker first/)
+  })
+})
+
+test('#1814 suppress-incident --svc reports a failed check as a failure, not as an old Worker', async () => {
+  await withEndpoint([true], async (url, posts) => {
+    const r = await runCli('suppress-incident.mjs', ['add', '--scope', 'incident', '--incId', 'i1', '--svc', 'cursor'], `${url}/refuse`)
+    assert.equal(r.code, 1, r.out)
+    assert.equal(posts.length, 0)
+    assert.doesNotMatch(r.out, /Deploy the Worker first/)
+  })
+  const r = await runCli('suppress-incident.mjs', ['add', '--scope', 'incident', '--incId', 'i1', '--svc', 'cursor'], 'http://127.0.0.1:1')
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /Network error/)
 })
 
 test('two runs of one CLI started together do not interleave their writes', async () => {

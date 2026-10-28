@@ -2904,7 +2904,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
 
 // ── #904: GET/POST /api/admin/suppress ───────────────────────────
 // Operator-managed incident-suppression list (see suppression.ts). GET returns the current list;
-// POST { action:'add'|'remove', scope:'incident'|'service-pattern', incId? | (svcId?+match?), reason? }
+// POST { action:'add'|'remove', scope:'incident'|'service-pattern', (incId+svcId?) | (svcId+match), reason? }
 // mutates it. Auth via X-Admin-Key (same ADMIN_API_KEY as /api/admin/analyze). The pure add/remove
 // logic lives in mutateSuppressions; this wraps it with auth + KV read/write + cache invalidation.
 interface AdminSuppressRequest {
@@ -2956,7 +2956,7 @@ async function handleAdminSuppress(request: Request, env: Env, cors: Record<stri
     return json(502, { ok: false, error: 'failed to read suppression list' })
   }
 
-  if (request.method === 'GET') return json(200, { ok: true, suppressions: read.list, ...operatorListStateFields(read) })
+  if (request.method === 'GET') return json(200, { ok: true, suppressions: read.list, ...operatorListStateFields(read), incidentSvcScope: true })
   if (read.state !== 'ok') return operatorListRewriteRefusal(json, read, SUPPRESSIONS_KEY)
   const current = read.list
 

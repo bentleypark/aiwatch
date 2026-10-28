@@ -82,7 +82,7 @@ export function classifyGone(
   suppressions: SuppressionEntry[],
 ): 'reported' | 'resolved' | 'suppressed' | 'unverified' {
   if (row?.finalStatus === 'resolved') return 'resolved'
-  const hidden = suppressions.some((e) => e.scope === 'incident' && e.incId === incId)
+  const hidden = suppressions.some((e) => e.scope === 'incident' && e.incId === incId && (!e.svcId || svcIds.includes(e.svcId)))
     || (row !== null && svcIds.some((svcId) => isSuppressedByIdTitle(incId, row.title, svcId, suppressions)))
   if (hidden) return 'suppressed'
   return row?.frozen ? 'unverified' : 'reported'

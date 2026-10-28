@@ -179,3 +179,15 @@ describe('GET surfaces rows the API is not showing', () => {
     expect(body.droppedRows).toBeUndefined()
   })
 })
+
+describe('#1814 /api/admin/suppress scoped to one service', () => {
+  it('GET says the worker scopes incident suppressions, and POST stores svcId', async () => {
+    const { kv, store } = makeKV({ [SUPPRESSIONS]: '[]' })
+    const got = await workerModule.fetch(call('/api/admin/suppress', 'GET'), env(kv), ctx)
+    expect((await got.json() as { incidentSvcScope?: boolean }).incidentSvcScope).toBe(true)
+    const res = await workerModule.fetch(
+      call('/api/admin/suppress', 'POST', { action: 'add', scope: 'incident', incId: 'gb', svcId: 'cursor' }), env(kv), ctx)
+    expect(res.status).toBe(200)
+    expect(JSON.parse(store[SUPPRESSIONS])).toMatchObject([{ scope: 'incident', incId: 'gb', svcId: 'cursor' }])
+  })
+})
