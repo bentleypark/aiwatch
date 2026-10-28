@@ -6,18 +6,9 @@ import { SERVICE_ID_TO_SLUG } from '../../api/_is-down/slug-map'
 
 // Minimal status-only projection for terminal statusline integrations (#438).
 //
-// The Claude Code statusline snippets (#400, src/pages/Statusline.jsx) poll the
-// status endpoint on (roughly) every prompt and `jq` out only id/name/status.
-// The full /api/status/cached response is ~2 MB (services + probe:24h +
-// AI analysis) — downloaded and discarded on every poll — which
-// made /api/status/cached the single largest Vercel Fast Data Transfer route
-// (17.8 GB/cycle). This projection drops everything but id/name/status so each
-// poll is ~KB. Served when the request carries the `?src=statusline-*` tag.
+// This projection keeps only id/name/status. Served when the request carries the `?src=statusline-*` tag.
 
-// The field set is a contract: the Statusline.jsx snippet `jq` filters read
-// exactly `.services[].id`, `.name`, `.status`. Renaming/dropping any of these
-// silently breaks every installed statusline (jq emits nothing; the snippet's
-// `2>/dev/null || true` swallows the error). statusline.test.ts pins the keys.
+// statusline.test.ts pins the field set.
 export interface StatuslineService {
   id: string
   name: string
@@ -39,7 +30,7 @@ export function buildStatuslinePayload(
 }
 
 // True when a request to /api/status/cached is a statusline poll (carries the
-// `?src=statusline-<preset>` tag set by Statusline.jsx). Used to short-circuit
+// `?src=statusline-<preset>` tag). Used to short-circuit
 // the heavy KV reads and return buildStatuslinePayload instead.
 export function isStatuslineRequest(searchParams: URLSearchParams): boolean {
   return (searchParams.get('src') ?? '').startsWith('statusline-')
