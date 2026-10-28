@@ -26,7 +26,7 @@ export interface RosterAuditEntry {
 }
 
 /**
- * #1518(b) — page components 30+ days old that are neither in `scopeIds` nor `excludeIds`
+ * #1518(b) — page components 30+ days old that are neither in `scopeIds` nor `excludeIds`, nor members of a group in `scopeIds`
  * (`ServiceConfig.rosterAuditExclude` — out of scope on purpose, for a reason specific to that service;
  * see its own comment in `services.ts`). An id absent from `entries`,
  * or present with no usable `data_available_since`, is skipped — under-30-days-proven is not the same
@@ -42,8 +42,9 @@ export function auditAgedInOutOfScope(
   const scope = new Set(scopeIds)
   const exclude = new Set(excludeIds)
   const agedIn: string[] = []
-  for (const { id, dataAvailableSince } of entries) {
+  for (const { id, dataAvailableSince, groupId } of entries) {
     if (scope.has(id) || exclude.has(id)) continue
+    if (groupId && scope.has(groupId)) continue
     if (!dataAvailableSince) continue
     const ageDays = (nowMs - Date.parse(dataAvailableSince)) / 86_400_000
     if (ageDays >= windowDays) agedIn.push(id)

@@ -447,12 +447,11 @@ describe('a badge component outside summary.json\'s window (#1175)', () => {
 // outage leaves it operational — so a revert of the config line fails here rather than going quiet.
 describe('an official ChatGPT-group component absent from the config (#1010)', () => {
   const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
-  // Every member #1010 adopted into the badge scope. `Sites` and `ChatGPT Work` joined on a second
+  // Every member #1010 adopted into the badge scope, less `Compliance API` (on no card since #1821). `Sites` and `ChatGPT Work` joined on a second
   // pass, once their `data_available_since` cleared 30 days (see the chatgpt config comment in
   // services.ts). Adding a row here is the point of adopting a component — membership in
   // status-determination.test.ts says the config lists it; these three cases say the code acts on it.
   const ADDED: [string, string][] = [
-    ['Compliance API', '01JNKS9D9S72PMP1938PVFFQN4'],
     ['Sites', '01KX45G1SHQQ9DTAX9S4W7FV8G'],
     ['ChatGPT Work', '01KX45G1SH21AX5DT93D4HMF0P'],
   ]
@@ -502,7 +501,7 @@ describe('an official ChatGPT-group component absent from the config (#1010)', (
 describe('uptime is computed over the badge scope, not the primary alone (#1010/#1006)', () => {
   const CHATGPT = SERVICES.find((s) => s.id === 'chatgpt')!
   const PRIMARY = CHATGPT.incidentIoComponentId as string // "Conversations"
-  const COMPLIANCE = '01JNKS9D9S72PMP1938PVFFQN4' // a NON-primary badge id, adopted by #1010
+  const SITES = '01KX45G1SHQQ9DTAX9S4W7FV8G' // a NON-primary badge id, adopted by #1010
   const DAY = 86_400_000
   const now = Date.now()
   const iso = (daysAgo: number) => new Date(now - daysAgo * DAY).toISOString()
@@ -536,7 +535,7 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
 
   it('a 24h outage on a NON-primary badge component moves uptime30d', async () => {
     const html = rsc(
-      [impactEntry(COMPLIANCE, 5, 4, 'full_outage')],
+      [impactEntry(SITES, 5, 4, 'full_outage')],
       CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, 400)),
     )
     // Control on the SAME html: scoped to the primary alone the page reads a spotless 100, so the
@@ -547,8 +546,8 @@ describe('uptime is computed over the badge scope, not the primary alone (#1010/
   })
 
   it('a young badge component does not shorten the disclosed window (#1601)', async () => {
-    const html = rsc([], CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, id === COMPLIANCE ? 20 : 400)))
-    expect(computeIncidentIoUptime(html, COMPLIANCE, now)!.days).toBe(20) // control: the young component alone is short
+    const html = rsc([], CHATGPT.statusComponentIds!.map((id) => uptimeEntry(id, id === SITES ? 20 : 400)))
+    expect(computeIncidentIoUptime(html, SITES, now)!.days).toBe(20) // control: the young component alone is short
     const svc = await fetchService(CHATGPT, withUptimeHtml(html), undefined, {})
     expect(svc.uptimeWindowDays).toBeUndefined()
   })

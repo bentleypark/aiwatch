@@ -7,7 +7,7 @@ import type { ServiceConfig } from '../types'
 describe('atlassianRosterAuditServices (#1518 — the Atlassian-branch equivalent of rosterAuditPages)', () => {
   it('matches exactly the real multi-id Atlassian services, none of the incident.io ones', () => {
     const ids = atlassianRosterAuditServices().map((s) => s.id).sort()
-    expect(ids).toEqual(['bfl', 'claudeai', 'copilot', 'cursor', 'jina', 'kimiapp', 'runway', 'windsurf'])
+    expect(ids).toEqual(['bfl', 'claudeai', 'copilot', 'cursor', 'deepgram', 'jina', 'kimiapp', 'pinecone', 'runway', 'twelvelabs', 'windsurf'])
   })
 
   it('excludes a service with a single-id statusComponentIds list', () => {
@@ -40,6 +40,102 @@ describe('atlassianRosterAuditServices (#1518 — the Atlassian-branch equivalen
   it('no two of them share a statusUrl — the cron keys its seen-set on statusUrl alone', () => {
     const urls = atlassianRosterAuditServices().map((s) => s.statusUrl)
     expect(new Set(urls).size).toBe(urls.length)
+  })
+
+  it('#1821 — on status.moonshot.cn a new member of either group still reports, though kimiapp excludes the group headers', () => {
+    const kimiapp = SERVICES.find((s) => s.id === 'kimiapp')!
+    const entries = [
+      { id: 'NEW_SAAS', dataAvailableSince: '2025-01-01T00:00:00Z', groupId: '87jpctq5cp71' },
+      { id: 'NEW_KIMI', dataAvailableSince: '2025-01-01T00:00:00Z', groupId: '01l1n50g13g6' },
+    ]
+    expect(rosterAgedInFindings(entries, uptimeScopeOf(kimiapp), kimiapp.rosterAuditExclude ?? [], false, Date.parse('2026-10-28T00:00:00Z')).sort()).toEqual(['NEW_KIMI', 'NEW_SAAS'])
+  })
+
+  // #1821 — status.pinecone.io components.json as served 2026-10-28, every component.
+  const PINECONE_PAGE = [
+    { id: 'm0src6w2y5cs', created_at: '2022-07-20T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'jhky1rj0ps27', created_at: '2022-07-20T00:00:00Z', group_id: null },
+    { id: 'pxrv8w9g33xl', created_at: '2024-03-04T00:00:00Z', group_id: 'r7tngp2p3sjd' },
+    { id: 'bsfcc9g5875b', created_at: '2023-01-26T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'zp1lkdyfrwt3', created_at: '2024-03-20T00:00:00Z', group_id: 'r7tngp2p3sjd' },
+    { id: 'm2plw2fl0ssb', created_at: '2023-03-18T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'v47ybr4zw5gy', created_at: '2024-06-20T00:00:00Z', group_id: 'r7tngp2p3sjd' },
+    { id: 'pjdtxsth1qb5', created_at: '2023-03-24T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'hky8j2m18wbd', created_at: '2024-07-28T00:00:00Z', group_id: 'r7tngp2p3sjd' },
+    { id: 'hcnqgqjsrcz5', created_at: '2023-04-03T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: '6jbr8t8ctbfc', created_at: '2024-07-02T00:00:00Z', group_id: 'r7tngp2p3sjd' },
+    { id: 'cd8dy02swtjd', created_at: '2023-04-27T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: '5j9yslcpk4b4', created_at: '2024-09-24T00:00:00Z', group_id: 'r7tngp2p3sjd' },
+    { id: 'g7400gqyfhh9', created_at: '2023-03-18T00:00:00Z', group_id: null },
+    { id: 'mv2ztwm9bypv', created_at: '2023-05-19T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'c5g0prwsb217', created_at: '2023-06-22T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: '2qvfsf1bnyhd', created_at: '2022-07-20T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'ctfk7mwkzlzs', created_at: '2023-04-20T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'k5ykpmr8kdq5', created_at: '2023-04-06T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: '5ntb606ylyjf', created_at: '2023-04-20T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'r7tngp2p3sjd', created_at: '2024-03-04T00:00:00Z', group_id: null },
+    { id: 'p9299mk9b7m2', created_at: '2023-05-04T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'hrgtfbcqygpc', created_at: '2024-06-19T00:00:00Z', group_id: null },
+    { id: '3khsvr7j9bf1', created_at: '2023-04-08T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: '34h37xk5ltv1', created_at: '2024-10-30T00:00:00Z', group_id: null },
+    { id: 'pz791s0xf7nd', created_at: '2023-11-07T00:00:00Z', group_id: 'g7400gqyfhh9' },
+    { id: 'pxr1b208pdh1', created_at: '2025-04-18T00:00:00Z', group_id: null },
+    { id: 'pgh87kbtyjxb', created_at: '2022-07-20T00:00:00Z', group_id: 'g7400gqyfhh9' },
+  ]
+
+  // #1821 — status.twelvelabs.io components.json as served 2026-10-28, every component.
+  const TWELVELABS_PAGE = [
+    { id: 'mvv53x91b74m', created_at: '2023-02-13T00:00:00Z', group_id: null },
+    { id: '29c68cnyd14l', created_at: '2023-02-14T00:00:00Z', group_id: 'blny8xq0yq7p' },
+    { id: '12vp1vm9smc2', created_at: '2026-10-06T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: 'j86pqszy5w90', created_at: '2026-10-14T00:00:00Z', group_id: '28vf3d4r3tjg' },
+    { id: '20930d4nz774', created_at: '2023-02-14T00:00:00Z', group_id: 'blny8xq0yq7p' },
+    { id: 'qkmbnw1n5mgh', created_at: '2026-10-06T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: '27kd6568skjp', created_at: '2026-10-14T00:00:00Z', group_id: '28vf3d4r3tjg' },
+    { id: '28vf3d4r3tjg', created_at: '2026-10-14T00:00:00Z', group_id: null },
+    { id: 'blny8xq0yq7p', created_at: '2023-02-14T00:00:00Z', group_id: null },
+    { id: 'yklrkrhkd1by', created_at: '2026-05-04T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: '3pksbw640gn9', created_at: '2026-10-14T00:00:00Z', group_id: '28vf3d4r3tjg' },
+    { id: '3t1cjx55dyrf', created_at: '2026-04-20T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: 'rgbmm56z696d', created_at: '2026-10-14T00:00:00Z', group_id: '28vf3d4r3tjg' },
+    { id: 'mrclkkqtj01j', created_at: '2023-02-13T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: 'sjbv0n38bs7n', created_at: '2026-10-14T00:00:00Z', group_id: '28vf3d4r3tjg' },
+    { id: '2zsl201s8df5', created_at: '2025-03-03T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: 'cns848tdzn22', created_at: '2026-10-14T00:00:00Z', group_id: '28vf3d4r3tjg' },
+    { id: 'jnvb5r3v74q1', created_at: '2025-05-21T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: 'jzy4m39608m3', created_at: '2026-10-14T00:00:00Z', group_id: '28vf3d4r3tjg' },
+    { id: 'p1hx7t867896', created_at: '2026-08-31T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: '3ng4ddpvmv3r', created_at: '2026-08-31T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: '751304vy1s9x', created_at: '2025-03-03T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: 'hr353rqqmwmk', created_at: '2026-05-13T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: 'j21c5rdfj8kf', created_at: '2023-02-15T00:00:00Z', group_id: 'mvv53x91b74m' },
+    { id: '91lzwtn6071h', created_at: '2025-03-03T00:00:00Z', group_id: 'mvv53x91b74m' },
+  ]
+
+  // #1821 — status.deepgram.com components.json as served 2026-10-28, every component.
+  const DEEPGRAM_PAGE = [
+    { id: 'cv8l6gg3cb9d', created_at: '2022-01-06T00:00:00Z', group_id: null },
+    { id: 'm49xkwqkc4kh', created_at: '2022-01-06T00:00:00Z', group_id: 'cv8l6gg3cb9d' },
+    { id: 'l4ch656gbn1k', created_at: '2022-01-06T00:00:00Z', group_id: 'y4btfh52r1qh' },
+    { id: 'l2n5q03f22t4', created_at: '2022-01-24T00:00:00Z', group_id: 'cv7wd8pvvqh4' },
+    { id: 's6v5z4lsl658', created_at: '2022-01-06T00:00:00Z', group_id: 'cv8l6gg3cb9d' },
+    { id: 'jgfq9ffjsfqk', created_at: '2022-01-06T00:00:00Z', group_id: 'cv7wd8pvvqh4' },
+    { id: 'cvbdk3fslx9v', created_at: '2022-01-06T00:00:00Z', group_id: 'vhv1mkf16jjw' },
+    { id: 'cv7wd8pvvqh4', created_at: '2022-01-06T00:00:00Z', group_id: null },
+    { id: 'dspsk5mtjzqt', created_at: '2022-01-06T00:00:00Z', group_id: 'y4btfh52r1qh' },
+    { id: '6854s60zwxgw', created_at: '2024-03-18T00:00:00Z', group_id: 'cv8l6gg3cb9d' },
+    { id: 'vhv1mkf16jjw', created_at: '2022-01-06T00:00:00Z', group_id: null },
+    { id: 't80v4qz2jdsf', created_at: '2024-10-23T00:00:00Z', group_id: 'vhv1mkf16jjw' },
+    { id: 'r2z04fcdhhzb', created_at: '2025-10-14T00:00:00Z', group_id: 'cv8l6gg3cb9d' },
+    { id: 'y4btfh52r1qh', created_at: '2022-01-06T00:00:00Z', group_id: null },
+    { id: 'vm1x1v101qtn', created_at: '2024-10-23T00:00:00Z', group_id: 'vhv1mkf16jjw' },
+    { id: '7n3stjcbj4bx', created_at: '2025-10-16T00:00:00Z', group_id: 'cv8l6gg3cb9d' },
+    { id: 'vsnk4gb1bb47', created_at: '2023-06-09T00:00:00Z', group_id: 'cv8l6gg3cb9d' },
+  ]
+
+  it.each([['pinecone', PINECONE_PAGE], ['twelvelabs', TWELVELABS_PAGE], ['deepgram', DEEPGRAM_PAGE]])('#1821 %s: the live page yields no aged-in finding under the real config', (id, comps) => {
+    const config = atlassianRosterAuditServices().find((s) => s.id === id)!
+    expect(rosterAgedInFindings(atlassianRosterEntries(comps), uptimeScopeOf(config), config.rosterAuditExclude ?? [], config.rosterAuditFixedScope ?? false, Date.parse('2026-12-01T00:00:00Z'))).toEqual([])
   })
 
   it('claudeai: every component on status.claude.com (live 2026-10-05) is in scope or excluded — no aged-in finding', () => {

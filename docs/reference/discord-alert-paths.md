@@ -101,7 +101,7 @@ config drift that isn't a mismatch, a partial resolve, or a new component — it
 just wrong for its age. One check, against the page's live `component_uptimes`, not a recorded
 snapshot:
 
-- **Aged in, out of scope** — a page component that has now cleared 30 days and was never added. It
+- **Aged in, out of scope** — a page component that has now cleared 30 days and was never added, alone or through a group it belongs to. It
   contributes nothing to the uptime worst-of, so an outage on it is invisible in the reported
   percentage. #992's new-component alert cannot catch this: it fires once, on first sight, regardless of
   age, and for a `displayAllComponents` page says "Action: none" — neither is "has this now aged in".

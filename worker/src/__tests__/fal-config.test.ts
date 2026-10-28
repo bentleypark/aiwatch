@@ -27,10 +27,9 @@ describe('#758 fal.ai inference service config', () => {
     expect(s!.incidentKeywords).toEqual(['api'])
   })
 
-  it('fal has the #761 per-component snapshot config (all top-level: API, Website, Official Models)', () => {
+  it('fal shows API + Official Models; Website is not shown (#1821)', () => {
     const s = SERVICES.find((x) => x.id === 'fal')!
-    // Display-only — ALL top-level Instatus components (uniform rule); badge stays on statusComponent 'API'.
-    expect(s.displayComponentIds).toEqual(['clzmj6mnv0283gwmwtdqtt9u3', 'clzmj6mni0276gwmw95xftvtd', 'clzu5ivf0385762icocgwepue4u'])
+    expect(s.displayComponentIds).toEqual(['clzmj6mnv0283gwmwtdqtt9u3', 'clzu5ivf0385762icocgwepue4u'])
   })
 
   it('fal is excluded from fallback (self-serve inference platform, like Replicate/Hugging Face)', () => {

@@ -208,7 +208,7 @@ describe('parseIncidentIoGlobalPage (#1066)', () => {
 describe('parseIncidentIoGlobalPage — real LangSmith global page fixture (#1066)', () => {
   const html = readFileSync(resolve(__dirname, 'fixtures/langsmith-global-page.html'), 'utf8')
 
-  it('extracts all 10 LangSmith components with the three badge surfaces present', () => {
+  it('extracts all 10 LangSmith components', () => {
     const res = parseIncidentIoGlobalPage(html)
     expect(res).not.toBeNull()
     expect(res!.components).toHaveLength(10)
@@ -216,8 +216,7 @@ describe('parseIncidentIoGlobalPage — real LangSmith global page fixture (#106
     expect(byId[API]?.name).toBe('LangSmith API')
     expect(byId[RUN]?.name).toBe('LangSmith Run Ingestion')
     expect(byId[APP]?.name).toBe('LangSmith Application')
-    // The page is currently clean → the badge worst-of resolves operational, and the migration
-    // "component not found" alert can no longer fire (all configured ids are present).
+    // The page is currently clean → the badge worst-of resolves operational.
     for (const id of [API, RUN, APP]) expect(byId[id]?.status).toBe('operational')
     expect(res!.status.indicator).toBe('none')
   })
@@ -348,10 +347,10 @@ describe('parseIncidentIoGlobalPage → resolveSvcStatus with the real langsmith
   const langsmith = SERVICES.find((s) => s.id === 'langsmith')!
   const fixture = readFileSync(resolve(__dirname, 'fixtures/langsmith-global-page.html'), 'utf8')
 
-  it('the clean real page resolves the badge worst-of to operational + 10-component breakdown', () => {
+  it('the clean real page resolves the badge worst-of to operational + a 9-component breakdown (Billing is Reference, #1821)', () => {
     const rebuilt = parseIncidentIoGlobalPage(fixture)!
     expect(resolveSvcStatus(langsmith, rebuilt, [])).toBe('operational')
-    expect(resolveSvcComponents(langsmith, rebuilt)).toHaveLength(10)
+    expect(resolveSvcComponents(langsmith, rebuilt)).toHaveLength(9)
   })
 
   it('an active full_outage on a badge component drives the real config to `down`', () => {
