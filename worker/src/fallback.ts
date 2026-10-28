@@ -81,7 +81,7 @@ export function tierFor(id: string): number {
   return 99
 }
 
-interface FallbackCandidate {
+export interface FallbackCandidate {
   id: string
   category: string
   name: string
@@ -488,15 +488,27 @@ export function getFallbacks(
   category: string,
   services: FallbackCandidate[],
 ): Array<{ name: string; score: number | null }> {
-  if (EXCLUDE_FALLBACK.includes(serviceId)) return []
-  if (services.find(s => s.id === serviceId)?.fallbackSuppressed) return []
+  const selection = selectFallbacks(serviceId, category, services)
+  const picked = selection.groups ? flattenSubstitutes(selection.groups) : selection.items
+  return picked.map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))
+}
+
+/** #1831 — the candidates `getFallbacks` recommends, as the service objects themselves: per group for a
+ *  listed service, else one ordered list. */
+export function selectFallbacks<T extends FallbackCandidate>(
+  serviceId: string,
+  category: string,
+  services: T[],
+): { groups: Array<{ group: SubstituteGroup; items: T[] }>; items?: undefined } | { groups?: undefined; items: T[] } {
+  if (EXCLUDE_FALLBACK.includes(serviceId)) return { items: [] }
+  if (services.find(s => s.id === serviceId)?.fallbackSuppressed) return { items: [] }
   // #1062 facet B — if the outage is a single secondary-capability component (e.g. OpenAI 'Images'),
   // route candidates to that capability's tier; if it has no peer tier (realtime), suppress.
   const source = services.find(s => s.id === serviceId)
   const routed = routingTier(source)
-  if (routed === ROUTE_SUPPRESS) return []
+  if (routed === ROUTE_SUPPRESS) return { items: [] }
   const listed = substituteFallbacks(serviceId, services)
-  if (listed) return flattenSubstitutes(listed).map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))
+  if (listed) return { groups: listed }
   const sourceTags = capabilityTagsOf(source)
   const sourceTier = routed ?? tierFor(serviceId)
   // #859 — for a specialized sub-tier source, restrict candidates to the SAME tier (no cross-tier bleed).
@@ -563,17 +575,17 @@ export function getFallbacks(
       console.warn(`[fallback] "${serviceId}" routed to tier ${sourceTier} but no candidate survived — no recommendation will render on any surface`)
     }
   }
-  return picked.map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))
+  return { items: picked }
 }
 
 const isLiveCandidate = (s: FallbackCandidate) => s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale
 
 // #1753 — a listed service's substitutes, per group, or null when it has no list. Same live-clean gate as
 // getFallbacks; tier routing does not apply inside a list.
-export function substituteFallbacks(
+export function substituteFallbacks<T extends FallbackCandidate>(
   serviceId: string,
-  services: FallbackCandidate[],
-): Array<{ group: SubstituteGroup; items: FallbackCandidate[] }> | null {
+  services: T[],
+): Array<{ group: SubstituteGroup; items: T[] }> | null {
   const source = services.find(s => s.id === serviceId)
   const groups = substituteGroupsFor(serviceId, routedCapability(source), source?.components)
   if (!groups) return null

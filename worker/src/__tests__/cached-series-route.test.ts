@@ -139,3 +139,25 @@ describe('/api/status/cached?series=0 stalled edge-cache lookup (#1531)', () => 
     expect(line.done).toHaveProperty('edge-cache')
   }, 60_000)
 })
+
+describe('/api/status/cached?series=0&view= (#1831)', () => {
+  it('a view is cut from the payload it builds, and the full payload is what the edge cache keeps', async () => {
+    const { status, body } = await get('?series=0&view=is-down&id=claude')
+    expect(status).toBe(200)
+    expect((body.services as Array<{ id: string }>).map((s) => s.id)).toEqual(['claude'])
+    expect(body).toHaveProperty('fallbacks')
+    expect(puts).toEqual(['https://example.com/api/status/cached?series=0'])
+    const full = await get('?series=0')
+    expect(full.reads).toEqual([])
+    expect(full.body).not.toHaveProperty('fallbacks')
+  }, 60_000)
+
+  it('a view is cut from the edge-cache entry with no KV reads', async () => {
+    await get('?series=0')
+    const { status, body, reads } = await get('?series=0&view=is-down&id=claude')
+    expect(status).toBe(200)
+    expect(reads).toEqual([])
+    expect((body.services as Array<{ id: string }>).map((s) => s.id)).toEqual(['claude'])
+    expect(body).toHaveProperty('fallbacks')
+  }, 60_000)
+})

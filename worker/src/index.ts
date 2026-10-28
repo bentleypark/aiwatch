@@ -2205,6 +2205,7 @@ import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type P
 import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, degradationEventFor, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
+import { parseStatusView, buildStatusView, type LeanStatusPayload } from './status-view'
 import { checkInfraStatus, runInfraStatusCycle } from './infra-status'
 import { runGoneCheck } from './alerted-gone'
 import { parseRumBatch, recordRumSamples, evaluateRum, applyRumVerdict, withServerTiming } from './rum'
@@ -6041,10 +6042,16 @@ const workerExport = {
         watchdog = startStageWatchdog('status-cached', CACHED_WATCHDOG_MS)
         // #1531 — the Edge is-down fetch sends no Origin; a browser request would need its own CORS headers.
         const leanCacheKey = !withSeries && !origin ? new Request(`${url.origin}${url.pathname}?series=0`) : null
+        // #1831 — a view shares the lean cache entry and is cut from it on the way out.
+        const view = parseStatusView(url.searchParams)
+        const viewResponse = (payload: LeanStatusPayload) => new Response(JSON.stringify(buildStatusView(view!, payload)), {
+          status: 200,
+          headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
+        })
         if (leanCacheKey) {
           const hit = await watchdog.track('edge-cache', settleWithin(caches.default.match(leanCacheKey), EDGE_CACHE_MATCH_MS, TIMED_OUT))
           if (hit === TIMED_OUT) console.warn({ event: 'edge-cache-timeout', route: 'status-cached', afterMs: EDGE_CACHE_MATCH_MS })
-          else if (hit) return hit
+          else if (hit) return view ? viewResponse(await hit.json() as LeanStatusPayload) : hit
         }
         const cached = await watchdog.track('snapshot', cacheRead(env.STATUS_CACHE, env.ANALYTICS))
         if (cached) {
@@ -6110,7 +6117,7 @@ const workerExport = {
           // #1072 — feeds ride in the same snapshot (see cacheRead: absent on a pre-#1072 snapshot).
           const upstreamLinks = buildUpstreamLinks(scoredCached, cached.upstreamFeeds ?? [], Date.now())
 
-          const res = new Response(JSON.stringify({
+          const payload = {
             services: scoredCached,
             lastUpdated: cached.cachedAt,
             cached: true,
@@ -6123,12 +6130,13 @@ const workerExport = {
             ...(supplyChainBanner ? { supplyChainBanner } : {}),
             ...(Object.keys(recoveryBaseline).length > 0 ? { recoveryBaseline } : {}),
             upstreamLinks,
-          }), {
+          }
+          const res = new Response(JSON.stringify(payload), {
             status: 200,
             headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
           })
           if (leanCacheKey) ctx.waitUntil(caches.default.put(leanCacheKey, res.clone()))
-          return res
+          return view ? viewResponse(payload) : res
         }
         return new Response(JSON.stringify({ error: 'no cached data' }), {
           status: 503,
