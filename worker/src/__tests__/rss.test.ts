@@ -876,7 +876,7 @@ describe('buildRssFeed — provider-grouped title (#724)', () => {
       service({ id: 'a', name: 'Svc A', provider: '', status: 'degraded', incidents: [shared] }),
       service({ id: 'b', name: 'Svc B', provider: '', status: 'degraded', incidents: [shared] }),
     ], { scope: 'all' }, NOW)
-    expect(xml).toContain('Svc A (Svc A, Svc B) — New Incident') // no leading " (" / "undefined ("
+    expect(xml).toContain('Svc A, Svc B — New Incident') // no leading " (" / "undefined ("
     expect(xml).not.toContain('undefined (')
   })
 })

@@ -9,7 +9,7 @@ import type { ServiceStatus, Incident } from './types'
 import { isAffectedStatus } from './status-verdict'
 import { escapeXml } from './badge'
 import { getGroupedFallbacks, formatFallbackGroups } from './fallback'
-import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE, OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S } from './alerts'
+import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE, OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S, mergedAlertName } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { recoveryBaselineText, type RecoveryBaseline } from './recovery-baseline-text'
 import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, isResolvedWithoutEnd, formatDuration, severityEmoji, impactLabel } from './utils'
@@ -181,6 +181,7 @@ export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
   langsmith: 'langchain',
   deepseekapp: 'deepseek-app',
   kimiapp: 'kimi-app', // #1731
+  grokbot: 'grok-bot', // #1837
   bfl: 'flux', // #756
   fishaudio: 'fish-audio', // #1549
   // #1164 — /is-claude-down and /is-openai-down were repurposed as provider-family group pages; the
@@ -322,15 +323,15 @@ function rfc822(iso: string): string {
 // to names via `services` (a tombstone for a service we no longer carry contributes nothing).
 // #1164 — carries `id` alongside `name` (not just name) so a caller can decide whether the
 // co-affected set shares a FAMILY_OF_SERVICE family (group is-down link), not just render a name list.
-function buildIncidentServiceMap(services: ServiceStatus[], withdrawn?: WithdrawnIncident[]): Map<string, Array<{ id: string; name: string }>> {
-  const map = new Map<string, Array<{ id: string; name: string }>>()
-  const add = (incId: string, id: string, name: string) => {
+function buildIncidentServiceMap(services: ServiceStatus[], withdrawn?: WithdrawnIncident[]): Map<string, Array<{ id: string; name: string; provider: string }>> {
+  const map = new Map<string, Array<{ id: string; name: string; provider: string }>>()
+  const add = (incId: string, svc: ServiceStatus) => {
     const entries = map.get(incId) ?? []
-    if (!entries.some((e) => e.id === id)) entries.push({ id, name })
+    if (!entries.some((e) => e.id === svc.id)) entries.push({ id: svc.id, name: svc.name, provider: svc.provider || svc.name })
     map.set(incId, entries)
   }
   for (const svc of services) {
-    for (const inc of svc.incidents ?? []) add(inc.id, svc.id, svc.name)
+    for (const inc of svc.incidents ?? []) add(inc.id, svc)
   }
   // Snapshot the LIVE ids before folding, so the check below can't be satisfied by a sibling
   // tombstone this same loop just added (a multi-surface withdrawal must still group).
@@ -342,7 +343,7 @@ function buildIncidentServiceMap(services: ServiceStatus[], withdrawn?: Withdraw
     // naming a service that no longer carries the incident. Only genuinely-gone ids may contribute.
     if (liveIds.has(w.incId)) continue
     const svc = services.find((s) => s.id === w.svcId)
-    if (svc) add(w.incId, svc.id, svc.name)
+    if (svc) add(w.incId, svc)
   }
   return map
 }
@@ -505,7 +506,7 @@ function descHtml(
 function itemXml(
   service: ServiceStatus,
   inc: Incident,
-  incidentServices: Map<string, Array<{ id: string; name: string }>>,
+  incidentServices: Map<string, Array<{ id: string; name: string; provider: string }>>,
   opts: { kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string },
 ): string {
   const isResolved = opts.kind === 'resolved'
@@ -524,9 +525,7 @@ function itemXml(
   // embed ("Anthropic (Claude API, claude.ai, Claude Code) — …") instead of an API-centric
   // "Claude API — …". Single-surface incidents keep the plain "<service>" lead.
   // #539: defuse the bare "claude.ai" brand so Slack /feed doesn't auto-link/unfurl it.
-  const lead = coAffected.length > 0
-    ? `${service.provider || service.name} (${[service.name, ...coAffected].join(', ')})`
-    : service.name
+  const lead = mergedAlertName([service.name, ...coAffected], [service.provider || service.name, ...coAffectedEntries.map((e) => e.provider)])
   // The Discord alert's title shapes (alerts.ts). #1106 — "Withdrawn" never "Resolved": the event word
   // is the whole point of the item.
   const isAdvisory = isNonReliabilityAdvisory(inc.title)

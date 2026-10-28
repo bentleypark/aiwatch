@@ -601,6 +601,13 @@ export function parseAlertedRoster(raw: string, currentSvcId: string): { ids: st
   return { ids: [currentSvcId], corrupt: true }
 }
 
+/** The title of an alert one incident raises on several cards: `Provider (A, B)` when the cards share a
+ *  provider, the names alone when they do not (#1837 — Grok Bot and Cursor share a status page). */
+export function mergedAlertName(names: string[], providers: string[]): string {
+  if (names.length === 1) return names[0]
+  return new Set(providers).size === 1 ? `${providers[0]} (${names.join(', ')})` : names.join(', ')
+}
+
 /**
  * Build incident alerts (new + resolved) from service data.
  * Does NOT check KV dedup — caller is responsible for filtering already-sent alerts.
@@ -625,8 +632,8 @@ export function buildIncidentAlerts(
   suppressedIncIds: Set<string> = new Set(),
 ): AlertCandidate[] {
   // Group services by incidentId to show all affected services in one alert
-  const newIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; firstSvc: ScoredService }>()
-  const resolvedIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; firstSvc: ScoredService }>()
+  const newIncidents = new Map<string, { names: string[]; ids: string[]; providers: string[]; inc: Incident; firstSvc: ScoredService }>()
+  const resolvedIncidents = new Map<string, { names: string[]; ids: string[]; providers: string[]; inc: Incident; firstSvc: ScoredService }>()
 
   for (const svc of services) {
     const counted = new Set((svc.incidents ?? []).map((i) => i.id))
@@ -677,16 +684,18 @@ export function buildIncidentAlerts(
         if (existing) {
           if (!existing.names.includes(svc.name)) existing.names.push(svc.name)
           if (!existing.ids.includes(svc.id)) existing.ids.push(svc.id)
+          existing.providers.push(svc.provider)
         } else {
-          newIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], inc, firstSvc: svc })
+          newIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], providers: [svc.provider], inc, firstSvc: svc })
         }
       } else if (inc.status === 'resolved' && alertedNewMap.has(inc.id)) {
         const existing = resolvedIncidents.get(inc.id)
         if (existing) {
           if (!existing.names.includes(svc.name)) existing.names.push(svc.name)
           if (!existing.ids.includes(svc.id)) existing.ids.push(svc.id)
+          existing.providers.push(svc.provider)
         } else {
-          resolvedIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], inc, firstSvc: svc })
+          resolvedIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], providers: [svc.provider], inc, firstSvc: svc })
         }
       }
     }
@@ -694,8 +703,8 @@ export function buildIncidentAlerts(
 
   const alerts: AlertCandidate[] = []
 
-  for (const [incId, { names, ids, inc, firstSvc }] of newIncidents) {
-    const displayName = names.length > 1 ? `${firstSvc.provider} (${names.join(', ')})` : names[0]
+  for (const [incId, { names, ids, providers, inc, firstSvc }] of newIncidents) {
+    const displayName = mergedAlertName(names, providers)
     // #1021 — a non-reliability ADVISORY (usage-limits/quota/billing/deprecation — down-classified to
     // impact:null upstream) is NOT an availability outage, so it must not go out with the red
     // "🔴 New Incident" outage framing or a "try X instead" fallback (recommending users abandon a service
@@ -765,8 +774,8 @@ export function buildIncidentAlerts(
     })
   }
 
-  for (const [incId, { names, ids, inc, firstSvc }] of resolvedIncidents) {
-    const displayName = names.length > 1 ? `${firstSvc.provider} (${names.join(', ')})` : names[0]
+  for (const [incId, { names, ids, providers, inc, firstSvc }] of resolvedIncidents) {
+    const displayName = mergedAlertName(names, providers)
     // #1021 — match the new-alert framing: an advisory "clears" (ℹ️ / blue), it doesn't "resolve" like an
     // outage, and its duration is not downtime so it is omitted (showing it would re-imply an outage).
     const isAdvisory = isNonReliabilityAdvisory(inc.title)
@@ -825,7 +834,7 @@ export function buildWithdrawalAlerts(
   onHold: (w: WithdrawnIncident, reason: NonNullable<WithdrawalHold>) => void,
 ): AlertCandidate[] {
   const liveIds = liveIncidentIds(services)
-  const grouped = new Map<string, { names: string[]; ids: string[]; title: string; provider: string }>()
+  const grouped = new Map<string, { names: string[]; ids: string[]; title: string; providers: string[] }>()
   for (const w of withdrawn) {
     if (!announcedIncIds.has(w.incId)) continue
     const svc = services.find((s) => s.id === w.svcId)
@@ -846,14 +855,15 @@ export function buildWithdrawalAlerts(
     if (existing) {
       if (!existing.names.includes(name)) existing.names.push(name)
       if (!existing.ids.includes(w.svcId)) existing.ids.push(w.svcId)
+      existing.providers.push(svc.provider ?? name)
       continue
     }
-    grouped.set(w.incId, { names: [name], ids: [w.svcId], title: w.title, provider: svc.provider ?? name })
+    grouped.set(w.incId, { names: [name], ids: [w.svcId], title: w.title, providers: [svc.provider ?? name] })
   }
 
   const alerts: AlertCandidate[] = []
-  for (const [incId, { names, ids, title, provider }] of grouped) {
-    const displayName = names.length > 1 ? `${provider} (${names.join(', ')})` : names[0]
+  for (const [incId, { names, ids, title, providers }] of grouped) {
+    const displayName = mergedAlertName(names, providers)
     alerts.push({
       key: `alerted:wd:${incId}`,
       title: `⚪ ${displayName} — Incident Withdrawn`,

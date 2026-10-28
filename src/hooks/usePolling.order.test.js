@@ -10,8 +10,8 @@ import { SERVICE_CATEGORIES, SERVICE_AND_APP_IDS, API_TIER } from '../utils/cons
 describe('MOCK_SERVICES order (#796)', () => {
   const cats = MOCK_SERVICES.map((s) => s.category)
 
-  it('has the full 48-service roster', () => {
-    expect(MOCK_SERVICES.length).toBe(48)
+  it('has the full 49-service roster', () => {
+    expect(MOCK_SERVICES.length).toBe(49)
   })
 
   it('is grouped in the canonical api → app → agent order (matches worker SERVICES + live API)', () => {

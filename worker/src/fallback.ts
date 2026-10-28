@@ -10,7 +10,7 @@ import { substituteGroupsFor, pickSubstitutes, flattenSubstitutes, type Substitu
 // each other in Tier 8); turbopuffer is fallback-eligible from the start (never added here).
 // #880 — voyageai un-excluded now that the embeddings category has ≥2 members (Voyage + Jina recommend
 // each other in Tier 9); jina is fallback-eligible from the start (never added here).
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs', 'grokbot']
 
 // Tier-based priority — same-tier services first via orderForFallback (#1186 — a confidence-aware
 // proportional interleave, NOT a raw Score sort; see that function's doc comment), then adjacent tiers

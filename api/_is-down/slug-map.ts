@@ -85,6 +85,8 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'grok':            { id: 'grok',        name: 'Grok',            provider: 'SpaceXSI',     category: 'app', group: 'apps' },
   // #1731 — Kimi consumer app (www.kimi.com), the api-vs-app split mirror of 'kimi'.
   'kimi-app':        { id: 'kimiapp',     name: 'Kimi App',        provider: 'Moonshot AI',  category: 'app', group: 'apps' },
+  // #1837 — Grok Bot, a component on Cursor's status page.
+  'grok-bot':        { id: 'grokbot',     name: 'Grok Bot',        provider: 'SpaceXSI',     category: 'app', group: 'apps' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
   // distinct from the deprecated 2023 Codex code-generation API.
   'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent', group: 'agents' },
@@ -147,6 +149,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'deepseek-app':   ['deepseek', 'chatgpt', 'claude-ai', 'character-ai'],
   'grok':           ['chatgpt', 'claude-ai', 'deepseek-app', 'character-ai'],
   'kimi-app':       ['kimi', 'chatgpt', 'claude-ai', 'deepseek-app'],
+  'grok-bot':       ['grok', 'cursor', 'chatgpt', 'claude-ai'],
 }
 
 // Reverse lookup: service ID → URL slug (for internal linking)
@@ -174,10 +177,10 @@ export const FAMILY_GROUPS: Record<string, ServiceFamily> = {
   // Anysphere (Cursor's parent) — mirrors claude/openai already grouping their coding-agent surface
   // (claudecode/codex) under the parent provider's family. NOTE: the SpaceX↔Anysphere deal had not
   // closed as of this writing (agreed 2026-06-16, expected close Q3 2026, subject to regulatory
-  // approval) — Cursor's own infra (status.cursor.com) stays fully independent of status.x.ai
-  // regardless; `provider` below is intentionally left as 'Anysphere' (slug-map line ~18) since that
+  // approval) — `provider` below is intentionally left as 'Anysphere' (slug-map line ~18) since that
   // remains factually accurate even after this grouping change.
-  xai: { slug: 'xai', name: 'SpaceXSI (Grok, Cursor)', members: ['xai', 'grok', 'cursor'] },
+  // #1837 — Grok Bot (x.ai/bot) added per explicit product decision.
+  xai: { slug: 'xai', name: 'SpaceXSI (Grok, Grok Bot, Cursor)', members: ['xai', 'grok', 'grokbot', 'cursor'] },
 }
 
 // #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a

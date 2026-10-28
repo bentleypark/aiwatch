@@ -607,6 +607,14 @@ export const MOCK_SERVICES = [
         ] },
     ],
   },
+  {
+    // #1837 — Grok Bot: a component on Cursor's status page.
+    id: 'grokbot', category: 'app', name: 'Grok Bot', provider: 'SpaceXSI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist([]),
+    history3m: null,
+    incidents: [],
+  },
   // ── Coding Agents ──
   {
     id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational',

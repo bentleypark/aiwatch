@@ -559,6 +559,10 @@ export const SERVICES: ServiceConfig[] = [
   // rosterAuditExclude: Open API + Open Platform Portal (the `kimi` card) and the page's three group
   // headers. The Kimi Code members are left to age into the audit — their add-or-decline is #1690.
   { id: 'kimiapp', name: 'Kimi App', provider: 'Moonshot AI', category: 'app', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: 'sttxgsd2bps7', statusComponentIds: KIMI_APP_COMPONENT_IDS, displayComponentIds: KIMI_APP_COMPONENT_IDS, componentGroups: { 'x0zsqgy57b75': 'Models', 'z2zfp65lvb2z': 'Models', 'lk7q3z0fcylp': 'Models', 'p1j9ttb7jwhp': 'Models', '8rkd3yj051gl': 'Models', 'wmn9wzv84k1v': 'Models' }, incidentComponents: KIMI_APP_COMPONENTS, incidentComponentsKeepUntagged: true, autoMonitorTitles: [/^agentic\s*模型错误报警$/i, /^搜索请求出现大量报错$/, /^kimi\s*fs服务异常$/i], autoMonitorCriticalHoldable: true, titleMap: KIMI_TITLE_MAP, rosterAuditExclude: ['8psr5dfdld0s', 'pjrph68g94yr', '01l1n50g13g6', '87jpctq5cp71', 'cyrtlddz0q8c'], addedAt: '2026-10-19' },
+  // #1837 — Grok Bot (x.ai/bot), a component on Cursor's status page (`status.cursor.com` → 301 → status.x.ai).
+  // Same page as `cursor`, which scopes Grok Bot-only incidents off its card (#1814). No uptime source and no
+  // probe, so `scoreConfidence` is `low`: the Score is withheld and the card stays out of the ranking.
+  { id: 'grokbot', name: 'Grok Bot', provider: 'SpaceXSI', category: 'app', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'sm5wkcnqkvr9', incidentComponents: ['Grok Bot'], addedAt: '2026-10-28' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the
