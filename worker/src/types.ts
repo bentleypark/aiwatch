@@ -252,9 +252,8 @@ export interface ServiceStatus {
    *                      (#1580) — a day's `downtime_duration` counts at 0.3 when its `status` is
    *                      `degraded` and 1.0 otherwise — and measures each resource only over the days it was
    *                      monitored (`not_monitored` days leave the denominator) before averaging, so one
-   *                      page's figure can blend a 7-day monitor with 30-day ones. It emits no
-   *                      `uptimeWindowDays`. Do not describe it as "the same window and weights as
-   *                      'official'"; it is neither. */
+   *                      page's figure can blend a 7-day monitor with 30-day ones.
+   *                      Do not describe it as "the same window and weights as 'official'"; it is neither. */
   uptimeSource?: 'official' | 'platform_avg'
   /** #1006 — the % the PROVIDER displays on its own status page, when AIWatch's own 30-day figure differs
    *  from it (Atlassian: their ~90-day window; incident.io: their published aggregate). A disclosure, not

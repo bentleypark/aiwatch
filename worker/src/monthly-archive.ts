@@ -1239,6 +1239,7 @@ type DailyCounters = Record<string, {
   ok: number
   total: number
   officialUptime?: number | null
+  officialUptimeWindowDays?: number | null
   components?: Record<string, { ok: number; total: number; name: string }>
   // Declared for type accuracy against the real `daily:`/`history:` KV shape (uptime-archive.ts's
   // readArchivedWeightedOutageSec reads it directly by key, bypassing this file). Not yet consumed by
@@ -1251,6 +1252,11 @@ type DailyCounters = Record<string, {
  *  transient status-page fetch failure on the last day (the snapshot is the day's last cron cycle)
  *  without tolerating a source that went away mid-month. */
 export const OFFICIAL_UPTIME_TAIL_DAYS = 3
+
+/** #1835 — the per-cycle daily-counter snapshot `computeMonthlyOfficialUptime` reads back. */
+export function officialUptimeSnapshot(s: { uptime30d?: number | null; uptimeWindowDays?: number | null }) {
+  return { officialUptime: s.uptime30d ?? null, officialUptimeWindowDays: s.uptimeWindowDays ?? null }
+}
 
 /** #586 — per-service "Official Uptime" for the month: the status-page rolling-30d value as of the
  *  LATEST day in the window (≈ the month, since uptime30d trails 30 days). Reads the per-cycle daily
@@ -1265,7 +1271,10 @@ export const OFFICIAL_UPTIME_TAIL_DAYS = 3
  *  `uptimeSource`, so an estimate is indistinguishable from an official %) stamped a fabricated
  *  "Official · 100.00%" on Stability/ElevenLabs/Replicate for all of June 2026 — and how Character.AI
  *  kept a real-but-dead 99.58% after its status page was deactivated (#689/#800). Only the final
- *  OFFICIAL_UPTIME_TAIL_DAYS days with data can supply the value now. */
+ *  OFFICIAL_UPTIME_TAIL_DAYS days with data can supply the value now.
+ *
+ *  #1835 — a snapshot computed over fewer days than the 30-day window (`officialUptimeWindowDays`) is
+ *  not that rolling value either, so it supplies nothing. */
 export function computeMonthlyOfficialUptime(
   dailyData: Record<string, DailyCounters>,
 ): Record<string, number> {
@@ -1274,7 +1283,7 @@ export function computeMonthlyOfficialUptime(
   const tail = dates.slice(-OFFICIAL_UPTIME_TAIL_DAYS)
   for (const date of tail) { // ascending → later dates overwrite (most-recent wins)
     for (const [id, c] of Object.entries(dailyData[date])) {
-      if (c.officialUptime !== null && c.officialUptime !== undefined) result[id] = c.officialUptime
+      if (c.officialUptime !== null && c.officialUptime !== undefined && c.officialUptimeWindowDays == null) result[id] = c.officialUptime
     }
   }
   return result

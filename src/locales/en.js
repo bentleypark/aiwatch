@@ -211,13 +211,13 @@ const en = {
   // numbers diverge.
   'uptime.compare.reported.days': 'Computed by AIWatch (status page shows {v}% over {d}d)',
   // When the provider's records don't reach back 30 days (a status-page migration), say so.
-  'uptime.sub.official.partial': "Computed by AIWatch · provider's records go back only {d}d",
-  'uptime.partialWindow.tooltip': "The provider's records for this component only go back {d} days (e.g. a status-page migration). It returns to a full 30-day window automatically.",
+  'uptime.sub.official.partial': 'Computed by AIWatch · only {d} of the last 30 days measured',
+  'uptime.partialWindow.tooltip': 'Only {d} of the last 30 days were measured for this component (e.g. a status-page migration or a newly added monitor). It returns to a full 30-day window automatically.',
   // #1110 — this label is NOT "the same computation on different evidence". `parseBetterStackUptime`
   // weights severity per DAY (#1580): a day's `downtime_duration` counts at 0.3 when its `status` is
   // `degraded` and 1.0 otherwise. Each resource is measured
   // over its OWN monitored-day count before the resources are averaged as equals, so one page's figure
-  // can blend a 7-day monitor with 30-day ones, and no `uptimeWindowDays` is emitted. Only /methodology
+  // can blend a 7-day monitor with 30-day ones. Only /methodology
   // §3 Platform states that difference; this label and the Uptime page's `avg` legend flag different
   // EVIDENCE only. Note `uptime.sub.platform_avg` below is still identical to `uptime.sub.official`.
   'uptime.label.platform_avg': 'Platform Average',

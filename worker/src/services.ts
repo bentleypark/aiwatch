@@ -32,7 +32,7 @@ import {
   synthesizeAistudioComponents,
 } from './parsers/aistudio'
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackUptimeWindowDays, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { parseCloudflareStatusSummary } from './parsers/cloudflare-status'
 import { parseDatadogStatusPage } from './parsers/datadog'
@@ -3685,6 +3685,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // Better Stack uptime + status: parse /index.json for aggregate_state and availability
       let betterStackUptime: number | null = null
       let betterStackReported: number | null = null // #1006 — the page's displayed availability (disclosure)
+      let betterStackWindow: number | null = null
       let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
       let betterStackPartial = 0
       let betterStackComponents: ServiceComponent[] = []
@@ -3705,6 +3706,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         try {
           const bsData: BetterStackIndex = await betterStackRes.json()
           betterStackUptime = parseBetterStackUptime(bsData)
+          betterStackWindow = parseBetterStackUptimeWindowDays(bsData)
           betterStackReported = parseBetterStackReportedUptime(bsData)
           betterStackStat = parseBetterStackStatus(bsData)
           betterStackPartial = parseBetterStackPartialCount(bsData)
@@ -4027,6 +4029,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           ? {
               uptime30d: betterStackUptime,
               uptimeSource: 'platform_avg' as const,
+              ...(betterStackWindow != null ? { uptimeWindowDays: betterStackWindow } : {}),
               // #1006 — Better Stack's own displayed availability (over its ~90-day window), shown beside
               // our 30-day figure when it differs.
               ...(betterStackReported != null && betterStackReported !== betterStackUptime
