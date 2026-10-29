@@ -337,17 +337,35 @@ export function betterStackResourceNames(data: BetterStackIndex): string[] {
 }
 
 /** `componentDenylist` membership by resource name OR its section label. Shared by the component
- *  breakdown and the #1292 status_history synthesis so the two cannot drift into denying different
- *  sets — a second copy of this rule is what would let a denied surface reappear as an incident. */
+ *  breakdown, the #1292 status_history synthesis and `withoutDeniedBetterStackResources` so they cannot
+ *  drift into denying different sets — a second copy of this rule is what would let a denied surface
+ *  reappear as an incident. */
+function isInBetterStackDenylist(r: BetterStackResource, sections: Map<string, string>, deny: Set<string>): boolean {
+  const name = r.attributes?.public_name
+  const group = betterStackResourceGroup(r, sections)
+  return (name != null && deny.has(name.toLowerCase())) || (group != null && deny.has(group.toLowerCase()))
+}
+
+/** A nameless resource is skipped by the breakdown and the synthesis, which both need a name. */
 function isDeniedBetterStackResource(
   r: BetterStackResource,
   sections: Map<string, string>,
   deny: Set<string>,
 ): boolean {
-  const name = r.attributes?.public_name
-  if (!name) return true
-  const group = betterStackResourceGroup(r, sections)
-  return deny.has(name.toLowerCase()) || (group != null && deny.has(group.toLowerCase()))
+  return !r.attributes?.public_name || isInBetterStackDenylist(r, sections, deny)
+}
+
+/** #1829 — the page without its `componentDenylist` resources, so uptime, status, the partial count
+ *  and the calendar read the resources the breakdown shows. A nameless resource stays: these readers
+ *  do not need a name. */
+export function withoutDeniedBetterStackResources(data: BetterStackIndex, denylist: string[] | undefined): BetterStackIndex {
+  if (!denylist?.length) return data
+  const sections = betterStackSectionNames(data)
+  const deny = new Set(denylist.map((n) => n.toLowerCase()))
+  return {
+    ...data,
+    included: data.included?.filter((r) => r.type !== 'status_page_resource' || !isInBetterStackDenylist(r, sections, deny)),
+  }
 }
 
 /** #606 Cat C — normalize a BetterStack resource status to the component union. */
