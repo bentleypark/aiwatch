@@ -4,3 +4,4 @@
 2. PR review + Build/Test before every commit: spawn `review-findings-only` every round, round 1 included — not the /pr-review-toolkit:review-pr fan-out; auto-loop until a round is 0 Critical/Important. A fix adds no justifying prose (docblock, doc paragraph, comment). When the previous round's fix caused this round's finding twice in a row, change the class of fix — delete, or revert and re-scope. Procedure: `ship-issue` steps 5-6.
 3. Commit / push / PR / merge only after the user asks or confirms — a ready/MERGEABLE PR is not a cue to auto-merge.
 4. No nag: never end a turn with "shall I proceed / merge / 진행할까요? / 다음 작업 진행할까요?". Report results and stop.
+5. Evidence line: under every issue proposal, decision request, recommendation or remaining-work item, write `근거: <운영 데이터|공식 기록|코드 읽기만|미확인> — count, quote or command`. Only code/issue text read → `코드 읽기만`; nothing checked → `미확인`, and do not propose it.

@@ -376,9 +376,12 @@ test('the hook writes where the summary reads, with HOOK_AUDIT_LOG UNSET (#1150)
   mkdirSync(join(root, '.claude', 'hooks'), { recursive: true })
   mkdirSync(join(root, 'scripts'), { recursive: true })
   cpSync(HOOK, join(root, '.claude', 'hooks', 'review-loop-gate.mjs'))
-  cpSync(join(REPO, 'scripts', 'hook-audit-summary.mjs'), join(root, 'scripts', 'hook-audit-summary.mjs'))
+  for (const f of ['hook-audit-summary.mjs', 'hook-audit-sync.mjs', 'lint-decision-graph.mjs']) {
+    cpSync(join(REPO, 'scripts', f), join(root, 'scripts', f))
+  }
   const env = { ...process.env }
   delete env.HOOK_AUDIT_LOG
+  env.HOOK_AUDIT_SHARED_DIR = ''
 
   execFileSync('node', [join(root, '.claude', 'hooks', 'review-loop-gate.mjs')], {
     input: JSON.stringify({ tool_name: 'Agent', transcript_path: join(root, 'sess0001.jsonl'), tool_input: review('This is ROUND 4.') }),

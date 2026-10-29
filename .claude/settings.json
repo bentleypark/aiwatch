@@ -79,6 +79,12 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-nag-gate.sh\"",
             "timeout": 10,
             "statusMessage": "Checking for auto-proceed nag (#415)..."
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/evidence-line-gate.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking for evidence lines..."
           }
         ]
       }

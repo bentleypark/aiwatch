@@ -142,7 +142,7 @@ sequential** (single prod Worker/KV). Full workflow + launch-method table + port
 
 ## Development Workflow
 
-> **IMPORTANT**: The full step-by-step runbook (each step's detail, the start-of-work + 4 non-negotiable gates, and
+> **IMPORTANT**: The full step-by-step runbook (each step's detail, the start-of-work + 5 non-negotiable gates, and
 > the cross-issue / refs-not-closes / deferred-reverify / label-exit hygiene) lives in the
 > **`ship-issue` skill** (`.claude/skills/ship-issue/`) — **invoke it at the START of issue work and
 > BEFORE closing**. This outline is the map; the skill is the runbook. The #415 hooks re-inject the
@@ -185,6 +185,7 @@ the decision moment instead:
 | `workflow-gates-reminder.sh` | UserPromptSubmit | Re-injects the non-negotiable gates **every turn** (incl. gate 0 = invoke `ship-issue` first). Soft. |
 | `git-mutation-gate.sh` | PreToolUse/Bash | Warns before `git commit`/`push`/`gh pr create`/`merge` — step-3.5, `--no-verify`, docs-drift, methodology-drift (#937), truncated ids (#1053). Soft. |
 | `stop-nag-gate.sh` | Stop | Blocks a closing "shall I proceed / 진행할까요?" and re-prompts. |
+| `evidence-line-gate.mjs` | Stop | A proposal / decision request / remaining-work list with no `근거:` line gets one re-prompt (gate 5). Soft. |
 | `tooling-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | Reminds, by file path, to fetch the live upstream (parsers) / current docs (SDK, bindings) / modern-web-guidance (UI). Soft. |
 | `korean-copy-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | On a Korean-copy file (ko.js / methodology·intro templates / LegalContent·AnalysisModal), reminds to run `lint:korean` + re-read the whole card (#1094/#1097). Soft. |
 | `public-issue-figures-trigger.sh` | PreToolUse/Bash | This repo is PUBLIC: absolute adoption numbers (subscriber/browser/install counts, and any value that divides into one) belong in the private `aiwatch-wiki` bundle — a public issue carries the verdict, field name or ratio only (#1354). Fires on the command name, never on the text. Soft. |
