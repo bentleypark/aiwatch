@@ -44,7 +44,9 @@ persistent memory (MemPalace retired, #891). This skill is the **ingest** operat
 5. **Log**: append one line to `memory/log.md` — `YYYY-MM-DD ingest: <slug> (<why in a few words>)`.
 6. If a stored fact turned out wrong, delete the page (and its index line) instead of leaving it.
 7. **Audit log**: from the aiwatch repo root run `npm run hook-audit:sync` (#1844), so this machine's
-   `audit/<host>.jsonl` goes into the bundle's next commit with the pages.
+   `audit/<host>.jsonl` is in the bundle with the pages.
+8. **Report** the files this ingest wrote or deleted, plus `audit/`, as the list to commit — and, from the
+   bundle's `git status --short`, any other uncommitted file, named separately. This skill commits and pushes nothing.
 
 ## Relationship
 Complements `memory-lint` (periodic health check). The **query** side (load index → relevant pages) is native session-start auto-load, optionally nudged by a `SessionStart` hook if wired in `settings.local.json`.
