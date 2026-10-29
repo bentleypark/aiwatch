@@ -7,3 +7,7 @@ extension/
 # is the catalog that serves it to `/plugin marketplace add` — read from GitHub, never from Vercel.
 plugin/
 .claude-plugin/
+
+
+# The Mistral Browser Run reader (#1851) is a separate Cloudflare Worker.
+mistral-reader/

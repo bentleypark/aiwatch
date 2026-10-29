@@ -520,8 +520,9 @@ export interface RootlyUptimeComponent {
  * Segment class → our impact level, reusing the SHARED weight vocabulary rather than a private one,
  * so a Rootly day weighs the same as an Atlassian or incident.io day (#259/#1006).
  *
- * Returns null on an unrecognized class. v3 draws every impacted day `bg-red-v2-12` and publishes no
- * severity of its own, so that class reads as `ROOTLY_DEFAULT_IMPACT` (#1557). Any other class is not
+ * Returns null on an unrecognized class. v3 draws an `Impacted` day `bg-red-v2-12`, which carries no
+ * severity of its own, so that class reads as `ROOTLY_DEFAULT_IMPACT` (#1557). A `Partial outage` or
+ * `Degraded performance` day is `bg-tangerine-9` (#1851), the partial/degraded weight. Any other class is not
  * guessed: calling a third one healthy
  * would understate downtime and calling it major would overstate it, so the caller treats the day as
  * unreadable and withholds the figure instead of picking.
@@ -530,6 +531,7 @@ export function rootlySegmentImpact(cls: string): 'major' | 'minor' | null {
   if (cls === 'bg-red-500') return 'major'
   if (cls === 'bg-gray-700') return 'minor'
   if (cls === 'bg-red-v2-12') return ROOTLY_DEFAULT_IMPACT
+  if (cls === 'bg-tangerine-9') return 'minor'
   return null
 }
 

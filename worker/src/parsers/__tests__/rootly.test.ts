@@ -543,6 +543,7 @@ describe('rootlySegmentImpact', () => {
   it('maps each segment class it knows', () => {
     expect(rootlySegmentImpact('bg-red-500')).toBe('major')
     expect(rootlySegmentImpact('bg-red-v2-12')).toBe('minor')
+    expect(rootlySegmentImpact('bg-tangerine-9')).toBe('minor')
     expect(rootlySegmentImpact('bg-gray-700')).toBe('minor')
   })
 

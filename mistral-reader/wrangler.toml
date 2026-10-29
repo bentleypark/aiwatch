@@ -1,0 +1,31 @@
+# #1851 — reads status.mistral.ai through Cloudflare Browser Run and pushes the feed to aiwatch-worker.
+# A separate Worker so the production Worker keeps its runtime: Browser Run's client needs
+# `nodejs_compat`, which aiwatch-worker does not have, and its types would switch off the
+# workers-types-only tsc gate (#533) if production source imported it.
+name = "mistral-reader"
+main = "src/index.mjs"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+# scrape-mistral-status.mjs imports `playwright` inside the Action's main(), which this Worker never runs.
+[alias]
+"playwright" = "./src/no-playwright.mjs"
+
+[browser]
+binding = "BROWSER"
+
+[[services]]
+binding = "AIWATCH"
+service = "aiwatch-worker"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "aiwatch_statusline"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[triggers]
+crons = ["41 * * * *"]
+
+# Secret: MISTRAL_FEED_TOKEN — the same value as aiwatch-worker's secret of that name.
