@@ -177,9 +177,6 @@ test.describe('Is X Down? SSR pages', () => {
   test('<details> incident-group elements render with open attribute (crawler-friendly)', async ({ page }) => {
     // Target Together AI: BetterStack per-model feed consistently produces ≥3 same-day
     // "<model> — recovered" entries, so grouping should materialize at least one row.
-    // (Fireworks used to be this target too, but #1198 moved it off BetterStack to
-    // incident.io, whose titles no longer match the flap-grouping regex — see
-    // src/utils/incidentGrouping.js — so it would reliably degrade to the no-op branch now.)
     // If no data happens to group on the test day, the test degrades to a structural
     // presence check and annotates the run.
     await page.goto('/is-together-down', { waitUntil: 'domcontentloaded' })
