@@ -80,12 +80,20 @@ export interface UpstreamDep {
  * impacted, and an internal integration bug does not come with a live githubstatus outage. That is a
  * containment argument, not an absence of risk: if a false link is ever observed, the fix is to drop
  * the alias, not to widen the gates.
+ *
+ * - copilot → xAI API (#1339). 2026-09-03 (via GET /api/report?month=2026-09):
+ *     xai     `[API] Models outage (regions: us-east-1, us-west-2)`   13:30:00.000Z  (major)
+ *     copilot `Incident with Grok 4.6 Copilot AI Model Provider`       14:17:27.485Z  — a +47m lead.
+ *   `upstreamIds` is the API alone, as for cursor: Grok the app is a sibling surface of the same status
+ *   page, not what Copilot consumes. `aliases: ['grok']` is the token Copilot used; the alias risk it
+ *   carries is recorded in #1339.
  */
 export const UPSTREAM_DEPS: UpstreamDep[] = [
   { id: 'cursor', upstreamIds: ['claude'], aliases: ['anthropic'] },
   { id: 'replicate', upstreamIds: ['huggingface'], aliases: ['huggingface'] },
   { id: 'chatgpt', upstreamIds: ['github-platform'], aliases: ['github'] },
   { id: 'codex', upstreamIds: ['github-platform'], aliases: ['github'] },
+  { id: 'copilot', upstreamIds: ['xai'], aliases: ['grok'] },
 ]
 
 export interface UpstreamLink {
