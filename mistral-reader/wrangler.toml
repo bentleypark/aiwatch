@@ -17,6 +17,10 @@ binding = "BROWSER"
 binding = "AIWATCH"
 service = "aiwatch-worker"
 
+[[kv_namespaces]]
+binding = "STATUS_CACHE"
+id = "e49508d80bb144e9a7ff872f2be771a4"
+
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
 dataset = "aiwatch_statusline"
@@ -26,6 +30,7 @@ enabled = true
 head_sampling_rate = 1
 
 [triggers]
-crons = ["41 * * * *"]
+# Every minute; whether a tick reads is `onReaderTick` (scripts/mistral-browser-run.mjs).
+crons = ["* * * * *"]
 
 # Secret: MISTRAL_FEED_TOKEN — the same value as aiwatch-worker's secret of that name.

@@ -2,13 +2,14 @@
  * #1510 Part B — status.mistral.ai's email notifications as a TRIGGER.
  *
  * A notification carries the incident title, the status word and nothing else (no id, components,
- * impact or start time), so nothing from it is stored. Its arrival only starts an immediate
- * `mistral-feed.yml` dispatch.
+ * impact or start time), so nothing from it is stored. Its arrival only sets `MISTRAL_WAKE_KEY` for the
+ * `mistral-reader` Worker (#1851).
  *
  * Sender check: the From domain and the subject prefix. It is not proof of origin — rootly.com
  * publishes `p=quarantine`, and Email Routing's docs do not say whether that mode is rejected.
  */
-import { maybeDispatchWorkflow, MISTRAL_EMAIL_DISPATCH_CONFIG } from './workflow-dispatch'
+export const MISTRAL_WAKE_KEY = 'mistral:wake'
+const MISTRAL_WAKE_TTL_S = 60 * 60
 
 const ROOTLY_DOMAIN = 'rootly.com'
 const MISTRAL_SUBJECT_PREFIX = 'Mistral AI | '
@@ -29,7 +30,6 @@ export function isMistralRootlyNotification(headers: Headers): boolean {
 
 export interface MistralEmailEnv {
   STATUS_CACHE: KVNamespace
-  GH_DISPATCH_TOKEN?: string
   /** Verified Email Routing destination; every mail is forwarded there, matched or not. */
   MISTRAL_EMAIL_FORWARD_TO?: string
 }
@@ -40,7 +40,8 @@ export async function handleMistralEmail(
   ctx: ExecutionContext,
 ): Promise<void> {
   if (isMistralRootlyNotification(message.headers)) {
-    ctx.waitUntil(maybeDispatchWorkflow(env, MISTRAL_EMAIL_DISPATCH_CONFIG))
+    ctx.waitUntil(env.STATUS_CACHE.put(MISTRAL_WAKE_KEY, '1', { expirationTtl: MISTRAL_WAKE_TTL_S })
+      .catch((err) => console.warn('[email] wake flag write failed:', err instanceof Error ? err.message : err)))
   } else {
     console.warn(`[email] not a Mistral Rootly notification — forwarded only (from ${message.from})`)
   }

@@ -96,16 +96,6 @@ export const MISTRAL_DISPATCH_CONFIG: WorkflowDispatchConfig = {
   failCooldownS: 13 * 60,
 }
 
-// #1510 Part B — a Rootly notification mail dispatches the same workflow at once, outside the cron's
-// cooldown. Its own key: several mails of one burst collapse into one dispatch, and the cron's cadence
-// is left as it is.
-export const MISTRAL_EMAIL_DISPATCH_CONFIG: WorkflowDispatchConfig = {
-  workflowFile: 'mistral-feed.yml',
-  cooldownKey: 'mistral:dispatch:email',
-  cooldownS: 5 * 60,
-  failCooldownS: 5 * 60,
-}
-
 interface DispatchEnv {
   GH_DISPATCH_TOKEN?: string
   STATUS_CACHE: KVNamespace

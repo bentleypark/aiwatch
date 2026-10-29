@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { headerAddress, isMistralRootlyNotification } from '../mistral-email'
-import { MISTRAL_EMAIL_DISPATCH_CONFIG, MISTRAL_DISPATCH_CONFIG } from '../workflow-dispatch'
+import { headerAddress, isMistralRootlyNotification, MISTRAL_WAKE_KEY } from '../mistral-email'
 import workerModule from '../index'
 import { mockKV } from './helpers/unreadable-source'
 
@@ -70,19 +69,7 @@ describe('headerAddress', () => {
   })
 })
 
-describe('worker email() handler (#1510 Part B)', () => {
-  const GH = 'https://api.github.com/repos/bentleypark/aiwatch/actions/workflows/mistral-feed.yml/dispatches'
-
-  function stubFetch() {
-    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url === GH) return new Response(null, { status: 204 })
-      throw new Error(`unexpected fetch ${url}`)
-    })
-    vi.stubGlobal('fetch', fetchSpy)
-    return fetchSpy
-  }
-
+describe('worker email() handler (#1510 Part B, #1851)', () => {
   function message(headers: Headers, forward = vi.fn(async () => ({}))) {
     return { from: 'bounces@em8626.rootly.com', to: 'mistral-status@example.test', headers, forward, raw: new ReadableStream(), rawSize: 0, canBeForwarded: true, setReject: vi.fn(), reply: vi.fn() }
   }
@@ -94,46 +81,35 @@ describe('worker email() handler (#1510 Part B)', () => {
     await Promise.all(pending)
   }
 
-  const dispatches = (spy: ReturnType<typeof stubFetch>) => spy.mock.calls.filter(([u]) => String(u) === GH).length
-
-  it('a notification dispatches the scrape and forwards the mail', async () => {
-    const fetchSpy = stubFetch()
+  it('a notification sets the reader wake flag, dispatches nothing, and forwards the mail', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
     const kv = mockKV()
     const msg = message(headersOf(INVESTIGATING))
     await run(msg, { STATUS_CACHE: kv, GH_DISPATCH_TOKEN: 't', MISTRAL_EMAIL_FORWARD_TO: 'ops@example.test' })
-    expect(dispatches(fetchSpy)).toBe(1)
-    expect(kv.put).toHaveBeenCalledWith(MISTRAL_EMAIL_DISPATCH_CONFIG.cooldownKey, '1', { expirationTtl: 300 })
-    expect(msg.forward).toHaveBeenCalledWith('ops@example.test')
-  })
-
-  it('dispatches even while the cron cooldown is running', async () => {
-    const fetchSpy = stubFetch()
-    const kv = mockKV({ [MISTRAL_DISPATCH_CONFIG.cooldownKey]: '1' })
-    await run(message(headersOf(INVESTIGATING)), { STATUS_CACHE: kv, GH_DISPATCH_TOKEN: 't' })
-    expect(dispatches(fetchSpy)).toBe(1)
-  })
-
-  it('a second mail inside the throttle does not dispatch again', async () => {
-    const fetchSpy = stubFetch()
-    const kv = mockKV()
-    const env = { STATUS_CACHE: kv, GH_DISPATCH_TOKEN: 't' }
-    await run(message(headersOf(INVESTIGATING)), env)
-    await run(message(headersOf(RESOLVED)), env)
-    expect(dispatches(fetchSpy)).toBe(1)
-  })
-
-  it('a mail that is not a Mistral notification dispatches nothing and is still forwarded', async () => {
-    const fetchSpy = stubFetch()
-    const kv = mockKV()
-    const msg = message(withHeader(INVESTIGATING, 'from', 'Rootly <no-reply@evil.example>'))
-    await run(msg, { STATUS_CACHE: kv, GH_DISPATCH_TOKEN: 't', MISTRAL_EMAIL_FORWARD_TO: 'ops@example.test' })
+    expect(kv.put).toHaveBeenCalledWith(MISTRAL_WAKE_KEY, '1', { expirationTtl: 3600 })
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(msg.forward).toHaveBeenCalledWith('ops@example.test')
   })
 
-  it('a failing forward does not throw', async () => {
-    stubFetch()
+  it('a resolved notification wakes the reader too', async () => {
+    const kv = mockKV()
+    await run(message(headersOf(RESOLVED)), { STATUS_CACHE: kv })
+    expect(kv.put).toHaveBeenCalledWith(MISTRAL_WAKE_KEY, '1', { expirationTtl: 3600 })
+  })
+
+  it('a mail that is not a Mistral notification sets nothing and is still forwarded', async () => {
+    const kv = mockKV()
+    const msg = message(withHeader(INVESTIGATING, 'from', 'Rootly <no-reply@evil.example>'))
+    await run(msg, { STATUS_CACHE: kv, MISTRAL_EMAIL_FORWARD_TO: 'ops@example.test' })
+    expect(kv.put).not.toHaveBeenCalled()
+    expect(msg.forward).toHaveBeenCalledWith('ops@example.test')
+  })
+
+  it('a failing wake write or forward does not throw', async () => {
+    const kv = mockKV()
+    kv.put.mockRejectedValueOnce(new Error('KV down'))
     const msg = message(headersOf(INVESTIGATING), vi.fn(async () => { throw new Error('destination not verified') }))
-    await expect(run(msg, { STATUS_CACHE: mockKV(), GH_DISPATCH_TOKEN: 't', MISTRAL_EMAIL_FORWARD_TO: 'ops@example.test' })).resolves.toBeUndefined()
+    await expect(run(msg, { STATUS_CACHE: kv, MISTRAL_EMAIL_FORWARD_TO: 'ops@example.test' })).resolves.toBeUndefined()
   })
 })

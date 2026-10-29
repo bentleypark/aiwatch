@@ -103,8 +103,8 @@ interface Env {
   MISTRAL_FEED_TOKEN?: string
   // #629/#1395: fine-grained GitHub PAT (actions: write on this repo) so the */5 cron can dispatch
   // deepseek-feed AND mistral-feed itself rather than relying on GitHub's own `schedule` alone (see
-  // workflow-dispatch.ts's header), and so the #1510 email() handler can dispatch mistral-feed. Set
-  // via `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the worker skips all three dispatches.
+  // workflow-dispatch.ts's header). Set via `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the
+  // worker skips both dispatches.
   GH_DISPATCH_TOKEN?: string
   // #1510 Part B: verified Email Routing destination the email() handler forwards every mail to. Set
   // via `wrangler secret put MISTRAL_EMAIL_FORWARD_TO`. Absent → mail is not forwarded.
