@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { XAI_REGION_RE, xaiRegionOf, xaiEventKey, collapseXaiRegionalIncidents, mergeXaiRegionalIncidents, xaiGrokSurfaceOf, xaiGrokEventKey, mergeXaiGrokSurfaceIncidents } from '../xai-regions'
+import { XAI_REGION_RE, xaiRegionOf, xaiEventKey, collapseXaiRegionalIncidents, mergeXaiRegionalIncidents, xaiGrokSurfaceOf, xaiGrokEventKey, mergeXaiGrokSurfaceIncidents, xaiCrossEventKey } from '../xai-regions'
 import { filterIncidents, SERVICES } from '../services'
 import type { Incident } from '../types'
 
@@ -876,5 +876,23 @@ describe('xai Grok surface merge (#1337)', () => {
       const b = mergeXaiRegionalIncidents(mergeXaiGrokSurfaceIncidents(feed))
       expect(a.map(i => i.id)).toEqual(b.map(i => i.id))
     })
+  })
+})
+
+describe('xaiCrossEventKey (#1338)', () => {
+  const AT = '2026-09-03T13:30:00.000Z'
+  it('the two axes\' stripped keys of one event agree despite casing', () => {
+    expect(xaiCrossEventKey(xaiEventKey('[Global (api.x.ai)] Models outage'), AT))
+      .toBe(xaiCrossEventKey(xaiGrokEventKey('[Grok (iOS)] Models outage'), AT))
+  })
+  it('an API-axis key is normalized like the Grok one: a trailing period and spacing do not split the event', () => {
+    expect(xaiCrossEventKey(xaiEventKey('[Global (api.x.ai)] Models  outage.'), AT))
+      .toBe(xaiCrossEventKey(xaiGrokEventKey('[Grok (iOS)] Models outage'), AT))
+  })
+  it('a recurrence of the same title at another start is another event', () => {
+    expect(xaiCrossEventKey('Models outage', AT)).not.toBe(xaiCrossEventKey('Models outage', '2026-09-22T01:03:07.000Z'))
+  })
+  it('a different title at the same start is another event', () => {
+    expect(xaiCrossEventKey('Models outage', AT)).not.toBe(xaiCrossEventKey('Enterprise Voice Degraded', AT))
   })
 })

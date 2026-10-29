@@ -88,6 +88,7 @@ const FORWARDERS = {
   'worker/src/incident-presence.ts': 'pageIncidents concatenates incidents and referenceIncidents unchanged (#1698)',
   'worker/src/index.ts': 'persists on /api/v1/status/:id; skips permanently-absent KV probes on /feed',
   'src/utils/archiveMerge.js': 'archive entry → live incident shape',
+  'src/utils/liveIncidentRows.js': '#1338 a row is one member incident\'s fields whole (toLiveRow spread, replaced whole when a more open member joins); resolvedAt only orders two members of one event',
 }
 
 /** Cannot be reached by a derived incident, or reads nothing it could get wrong. Each reason is a
@@ -191,6 +192,7 @@ const RB_FORWARDERS = {
   'worker/src/incident-presence.ts': 'pageIncidents concatenates incidents and referenceIncidents unchanged (#1698)',
   'worker/src/index.ts': '/api/status serializes the whole Incident (including the tag) for SPA/is-down display — the accepted KNOWN LIMIT 1 surface; the judgment call sites this file feeds already route through the now-fixed functions above',
   'src/utils/archiveMerge.js': 'archive entry → live incident shape — moot in practice: a MonthlyIncidentEntry (the archive shape) never carries the tag in the first place (see the SAFE reason on archive-patch.ts below), so there is nothing to forward or drop',
+  'src/utils/liveIncidentRows.js': '#1338 a row is one member incident\'s fields whole, tag included; it makes no is-this-current judgment — resolvedAt only orders two members of one event',
 }
 
 /** Cannot make a wrong "is this fresh" judgment, or reads nothing it could get wrong. Each reason is
@@ -323,6 +325,7 @@ const SU_SAFE = {
   'worker/src/late-resolution.ts': '#1797 the live startedAt only picks which archive month to read; the times it reports come from the stored row and the upstream resolvedAt',
   'worker/src/sitemap-feed.ts': '#887 derives no elapsed time; an anchored row\'s startedAt is collapsed onto its resolvedAt, a real instant, so the latest-instant maximum is the same with or without it',
   'worker/src/incident-presence.ts': 'pageIncidents concatenates two lists; reads no time and no duration (#1698)',
+  'src/utils/liveIncidentRows.js': '#1338 derives no elapsed time; resolvedAt only orders two members of one event, and a row carries one member\'s fields whole, flag included',
   'worker/src/mistral-public-api.ts': 'PRODUCES incidents from the public API and reads back only the ones it stored itself; never reads the startUnknown flag',
   // Producers. `parsers/incident-io.ts` stamps the flag on its own anchored path; #1480's zero-length
   // case is stamped once in `services.ts`, over every parser's output. No parser stamps it itself.
@@ -450,7 +453,7 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 85 → 86: #1772 moved src/utils/predictionAccuracy.js to worker/src/prediction-accuracy.ts and added worker/src/analysis-reads.ts.
     // 86 → 87: #1797 added worker/src/late-resolution.ts, which matches live resolved incidents to a past month's archive rows.
     // 87 → 88: #887 added worker/src/sitemap-feed.ts, which takes a service's latest incident instant as its sitemap lastmod.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(88)
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(89)
   })
 
   it('leaves none unclassified', () => {
@@ -504,7 +507,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(88)
+    expect(all.length).toBe(89)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -550,7 +553,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(88)
+    expect(all.length).toBe(89)
   })
 
   it('leaves none unclassified for startUnknown', () => {

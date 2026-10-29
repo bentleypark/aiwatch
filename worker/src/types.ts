@@ -34,6 +34,8 @@ export interface Incident {
   // `componentNames`, which have no component id at all).
   componentIds?: string[]
   startedAt: string
+  /** #1338 — one xAI event across the SpaceXSI API and Grok cards (`xaiCrossEventKey`). */
+  crossEventKey?: string
   resolvedAt?: string | null
   /** The start is not derivable from this record, so `duration` is null. Set by two paths. Every
    *  duration consumer (Score's recovery sample, the no-TTL corpus, the archive divisor, the group
