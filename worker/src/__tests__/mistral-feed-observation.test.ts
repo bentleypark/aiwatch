@@ -143,12 +143,35 @@ describe('#1383 Mistral feed observations', () => {
     }
   })
 
-  it('clears the contract-change streak after any other terminal observation', async () => {
-    const store: Record<string, string> = { [MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY]: JSON.stringify({ count: 1 }) }
-    const kv = { get: async (key: string) => store[key] ?? null, put: async () => {}, delete: async (key: string) => { delete store[key] } }
-    const clean = parseMistralFeedObservation({ delivery: 'not-posted' })!
-    await observeMistralPageContract(kv, clean, async () => true)
-    expect(store[MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY]).toBeUndefined()
+  it('clears the contract-change streak after a run that read the page', async () => {
+    for (const read of [
+      { delivery: 'stored', listed: 1, fetched: 1, available: 1 },
+      { delivery: 'stored' },
+      { delivery: 'rejected', listed: 1, fetched: 1, available: 1 },
+      { delivery: 'not-posted', listed: 2, fetched: 1, available: 2 },
+    ]) {
+      const store: Record<string, string> = { [MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY]: JSON.stringify({ count: 1 }) }
+      const kv = { get: async (key: string) => store[key] ?? null, put: async () => {}, delete: async (key: string) => { delete store[key] } }
+      await observeMistralPageContract(kv, parseMistralFeedObservation(read)!, async () => true)
+      expect(store[MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY], read.delivery).toBeUndefined()
+    }
+  })
+
+  it('#1853 — a run with no coverage and no stored feed leaves the streak alone, so a challenged client between two reader runs cannot hide a contract change', async () => {
+    const store: Record<string, string> = {}
+    const kv = {
+      get: async (key: string) => store[key] ?? null,
+      put: async (key: string, value: string) => { store[key] = value },
+      delete: async (key: string) => { delete store[key] },
+    }
+    const drift = parseMistralFeedObservation({ delivery: 'not-posted', failure: 'page-contract' })!
+    const challenged = parseMistralFeedObservation({ delivery: 'not-posted' })!
+    const send = vi.fn(async () => true)
+    await expect(observeMistralPageContract(kv, drift, send)).resolves.toEqual({ consecutive: 1, alerted: false })
+    await expect(observeMistralPageContract(kv, challenged, send)).resolves.toEqual({ consecutive: 1, alerted: false })
+    await observeMistralPageContract(kv, challenged, send)
+    await expect(observeMistralPageContract(kv, drift, send)).resolves.toEqual({ consecutive: 2, alerted: true })
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('does not make the internal metric an unauthenticated write surface', async () => {
