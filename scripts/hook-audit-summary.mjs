@@ -9,9 +9,10 @@
 // Defaults: --last 15, --days 14. The log is gitignored; absent log = "nothing
 // logged yet" (not an error).
 
-import { readFileSync, existsSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseLines, subtractOnce, sharedAuditDir } from './hook-audit-sync.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // Default to the real gitignored log; HOOK_AUDIT_LOG overrides it (used by the unit test to point at
@@ -31,20 +32,25 @@ const DAYS = intArg('--days', 14)
 // read as "that branch ran no reviews".
 const BRANCH_ROWS = intArg('--branches', 10)
 
-if (!existsSync(LOG)) {
+// #1844 — every machine's synced lines in the memory bundle. A test pointing HOOK_AUDIT_LOG at a fixture
+// reads the bundle only when HOOK_AUDIT_SHARED_DIR names one, so the real bundle never leaks into it.
+const SHARED = process.env.HOOK_AUDIT_SHARED_DIR !== undefined
+  ? (process.env.HOOK_AUDIT_SHARED_DIR ? resolve(process.env.HOOK_AUDIT_SHARED_DIR) : null)
+  : (process.env.HOOK_AUDIT_LOG ? null : sharedAuditDir())
+const sharedFiles = SHARED && existsSync(SHARED)
+  ? readdirSync(SHARED).filter((f) => f.endsWith('.jsonl')).map((f) => join(SHARED, f))
+  : []
+
+if (!existsSync(LOG) && sharedFiles.length === 0) {
   console.log(`No hook audit log yet (${LOG}).`)
   console.log('Hooks write to it on each fire — run something that triggers a git mutation or end a turn, then re-run this.')
   process.exit(0)
 }
 
-const lines = readFileSync(LOG, 'utf8').split('\n').filter((l) => l.trim())
-const entries = []
-for (const l of lines) {
-  try {
-    const e = JSON.parse(l)
-    if (e && typeof e === 'object') entries.push(e)
-  } catch { /* skip malformed line */ }
-}
+const entries = existsSync(LOG) ? parseLines(readFileSync(LOG, 'utf8')) : []
+// This machine's own synced file repeats lines already in the local log; count each event once.
+for (const file of sharedFiles) entries.push(...subtractOnce(parseLines(readFileSync(file, 'utf8')), entries))
+if (sharedFiles.length) entries.sort((a, b) => String(a.ts).localeCompare(String(b.ts)))
 
 if (entries.length === 0) {
   console.log(`Hook audit log is present but has no parseable entries (${LOG}).`)
@@ -221,7 +227,7 @@ for (let i = DAYS - 1; i >= 0; i--) {
 }
 
 const out = []
-out.push(`Hook audit summary — ${LOG}`)
+out.push(`Hook audit summary — ${LOG}${sharedFiles.length ? ` + ${sharedFiles.length} machine file(s) in ${SHARED}` : ''}`)
 out.push(`Entries: ${entries.length} total · ${last7.length} in the last 7 days · as of ${todayUTC} (UTC)`)
 out.push('')
 out.push('By hook × decision:')
@@ -295,6 +301,18 @@ if (revloop.length) {
     const fo = Object.entries(revloopFailOpen).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`)
     out.push(`  ❗ fail-open=${revloopFailOpenTotal} — instrument health, not a finding: the hook recorded nothing for that spawn (${fo.join(', ')}). Should be ~0; a rising count means the telemetry is blind, not that the loop is healthy.`)
   }
+  out.push('')
+}
+const evidence = entries.filter((e) => e.hook === 'evidence-line-gate' && e.decision !== 'skip')
+if (evidence.length) {
+  const sum = { trigger: 0, lines: 0, ops: 0, official: 0, code: 0, unverified: 0, untyped: 0 }
+  for (const e of evidence) {
+    for (const m of String(e.note ?? '').matchAll(/(\w+)=(\d+)/g)) if (m[1] in sum) sum[m[1]] += Number(m[2])
+  }
+  const warned = evidence.filter((e) => e.decision === 'warn').length
+  out.push('🧾 evidence lines (gate 5):')
+  out.push(`  ${evidence.length} final message(s) checked · ${sum.trigger} had a proposal/decision/remaining-work cue · ${warned} re-prompted for a missing 근거: line`)
+  out.push(`  근거: lines=${sum.lines} — 운영 데이터 ${sum.ops} · 공식 기록 ${sum.official} · 코드 읽기만 ${sum.code} · 미확인 ${sum.unverified} · untyped ${sum.untyped}`)
   out.push('')
 }
 out.push(`Most recent ${LAST_N}:`)
