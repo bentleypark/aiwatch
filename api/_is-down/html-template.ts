@@ -13,7 +13,7 @@ import { audienceBeaconScript } from '../_shared/audience-beacon'
 import { historyLinkAttrs, historyClickBeacon } from '../_shared/history-link'
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
-import { EXTENSION_STORE_URL, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
+import { EXTENSION_STORES, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from '../_shared/slack-install'
 import type { RegionStatusResult } from './region-status'
 import { recoveryBaselineText, type RecoveryBaseline } from '../../worker/src/recovery-baseline-text'
@@ -645,10 +645,9 @@ ${ERRORS_CSS}
 .footer{text-align:center;padding:32px 0;font-size:13px;color:#484f58;border-top:1px solid rgba(255,255,255,0.07);margin-top:40px}
 ${ALERT_CTA_CSS}
 /* #888 — quiet standalone install strip below the answer/alert block (NOT a loud promo banner; muted card tone to avoid banner-blindness). */
-.ext-strip{margin:12px 0 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
-.ext-strip a{color:#8b949e;text-decoration:none}
-.ext-strip a:hover{color:#c9d1d9}
-.ext-strip strong{color:#58a6ff;font-weight:600}
+.ext-strip{margin:12px 0 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45;color:#8b949e}
+.ext-strip a{display:inline-block;margin:8px 8px 0}
+.ext-strip img{display:block}
 /* #575/#744 — floating "Report an issue" entry (mirrors the dashboard Overview FAB): always visible,
    decoupled from the alert CTA. Bottom-right, clears the share bar / mobile footer by scroll. */
 .report-fab{position:fixed;bottom:20px;right:20px;z-index:40;display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:999px;font-size:13px;font-weight:500;font-family:inherit;background:#161b22;color:#e6edf3;border:1px solid rgba(255,255,255,0.18);box-shadow:0 4px 12px rgba(0,0,0,0.4);cursor:pointer}
@@ -700,7 +699,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
-${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
+${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORES, { loc: 'is_down_page', variant: 'is-down' }) : ''}
 ${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service), recoveryBaseline ?? undefined, fallbackGroups)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderUpstreamNote(upstreamNote, seo.displayName)}

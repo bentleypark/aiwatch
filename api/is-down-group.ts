@@ -13,7 +13,7 @@ import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { lastGoodView } from './_shared/last-good-copy'
 import { isDownCacheControl } from './_shared/is-down-cache'
 import { resolveWorkerApi } from './_shared/worker-api'
-import { EXTENSION_STORE_URL, renderExtInstallCta } from './_shared/extension-cta'
+import { EXTENSION_STORES, renderExtInstallCta } from './_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { cookieBannerHtml } from './_shared/cookie-banner'
@@ -468,12 +468,12 @@ ${memberErrors.map(({ member, errors }) => `<details class="err-group"${SLUG_TO_
     : ''
   const otherFamiliesSection = `<p class="also-check">${otherFamiliesLinks}<a class="home" href="/">All AI services on AIWatch</a> &middot; <a href="/reports/" data-ga="click_reports" data-ga-loc="is_down_group_page" data-ga-source="footer">Monthly reports</a></p>`
 
-  // #837/#888 — the Chrome extension is Claude-ONLY, so it's gated to the Anthropic family page only
+  // #837/#888 — the extension is Claude-ONLY, so it's gated to the Anthropic family page only
   // (an install CTA on /is-openai-down would be a mismatch — mirrors isClaudeSurface's gate on the
-  // individual is-down pages). Empty EXTENSION_STORE_URL → renderExtInstallCta returns '' (pre-CWS-
-  // approval), same fail-closed default as the individual pages.
+  // individual is-down pages). With every store URL empty renderExtInstallCta returns '', same
+  // fail-closed default as the individual pages.
   const extCtaSection = family.slug === 'claude'
-    ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_group_page', variant: 'is-down' })
+    ? renderExtInstallCta(EXTENSION_STORES, { loc: 'is_down_group_page', variant: 'is-down' })
     : ''
 
   const latestChecked = members
@@ -579,10 +579,9 @@ ${INCIDENT_TIMELINE_CSS}
   .also-check a { color:#58a6ff; }
 ${ALERT_CTA_CSS}  .cta-member { display:flex; align-items:center; justify-content:center; gap:8px; margin:0 0 10px; color:#8b949e; font-size:12px; }
   .cta-member .report-input { width:auto; padding-top:6px; padding-bottom:6px; font-size:13px; }
-  .ext-strip { margin:20px 0 0; padding:9px 14px; border:1px solid #21262d; border-radius:8px; background:#0d1117; text-align:center; font-size:13px; line-height:1.45; }
-  .ext-strip a { color:#8b949e; text-decoration:none; }
-  .ext-strip a:hover { color:#c9d1d9; }
-  .ext-strip strong { color:#58a6ff; font-weight:600; }
+  .ext-strip { margin:20px 0 0; padding:9px 14px; border:1px solid #21262d; border-radius:8px; background:#0d1117; text-align:center; font-size:13px; line-height:1.45; color:#8b949e; }
+  .ext-strip a { display:inline-block; margin:8px 8px 0; }
+  .ext-strip img { display:block; }
   .share-row { display:flex; gap:10px; margin-top:24px; }
   .share-btn { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px; border:1px solid #1f2937; border-radius:8px; background:#161b22; color:#e6edf3; text-decoration:none; cursor:pointer; font-size:0.9rem; }
   .share-x { background:#000; color:#fff; border-color:#333; }
