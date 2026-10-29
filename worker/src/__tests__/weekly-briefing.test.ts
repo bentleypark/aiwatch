@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getWeekRange, weekDateStrings, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, parseStrategyBrief, isStrategyBriefStale, STRATEGY_STALE_DAYS, STRATEGY_FIELD_MAX, type WeeklyBriefingData } from '../weekly-briefing'
+import { getWeekRange, weekDateStrings, buildIncidentSummary, buildStabilityChanges, liveStabilityUptime, accumulatePrevWeekCounters, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, parseStrategyBrief, isStrategyBriefStale, STRATEGY_STALE_DAYS, STRATEGY_FIELD_MAX, type WeeklyBriefingData } from '../weekly-briefing'
 
 describe('getWeekRange', () => {
   it('returns Mon–Sun for a Wednesday', () => {
@@ -105,6 +105,52 @@ describe('buildStabilityChanges (#733 — live official uptime vs prev-week snap
   it('excludes a service with no prev-week official snapshot', () => {
     expect(buildStabilityChanges({ x: 95 }, { x: { ok: 1, total: 1, officialUptime: null } }, { x: 'X' })).toHaveLength(0)
     expect(buildStabilityChanges({ x: 95 }, {}, { x: 'X' })).toHaveLength(0)
+  })
+})
+
+describe('Stability Trend short-window gate (#1839)', () => {
+  const names = { helicone: 'Helicone', groq: 'GroqCloud' }
+  const stability = (
+    live: Parameters<typeof liveStabilityUptime>[0],
+    rows: Parameters<typeof accumulatePrevWeekCounters>[0],
+  ) => buildStabilityChanges(liveStabilityUptime(live), accumulatePrevWeekCounters(rows), names)
+
+  it('drops a service whose live figure covers fewer than 30 days', () => {
+    const rows = [{ helicone: { ok: 288, total: 288, officialUptime: 91.22 } }]
+    expect(stability([{ id: 'helicone', uptime30d: 100, uptimeWindowDays: 1 }], rows)).toEqual([])
+  })
+
+  it('drops a service whose only previous-week snapshots cover a short window', () => {
+    const rows = [
+      { helicone: { ok: 288, total: 288, officialUptime: 100, officialUptimeWindowDays: 1 } },
+      { helicone: { ok: 288, total: 288, officialUptime: 99, officialUptimeWindowDays: 2 } },
+    ]
+    expect(stability([{ id: 'helicone', uptime30d: 91.22 }], rows)).toEqual([])
+  })
+
+  it('skips a short-window snapshot and takes the next full-window one', () => {
+    const rows = [
+      { groq: { ok: 288, total: 288, officialUptime: 99.9, officialUptimeWindowDays: 3 } },
+      { groq: { ok: 288, total: 288, officialUptime: 97.0 } },
+    ]
+    expect(stability([{ id: 'groq', uptime30d: 99.5 }], rows)).toEqual([
+      { serviceId: 'groq', serviceName: 'GroqCloud', prevUptime: 97.0, currUptime: 99.5 },
+    ])
+  })
+
+  it('still reports a full-window pair, including a row written before the window field existed', () => {
+    const rows = [{ helicone: { ok: 288, total: 288, officialUptime: 99.9 } }]
+    expect(stability([{ id: 'helicone', uptime30d: 98.0 }], rows)).toEqual([
+      { serviceId: 'helicone', serviceName: 'Helicone', prevUptime: 99.9, currUptime: 98.0 },
+    ])
+  })
+
+  it('keeps the existing exclusions for a missing figure and a stale incident source', () => {
+    expect(liveStabilityUptime([
+      { id: 'a', uptime30d: null },
+      { id: 'b', uptime30d: 99, incidentSourceStale: true },
+      { id: 'c', uptime30d: 99 },
+    ])).toEqual({ a: null, b: null, c: 99 })
   })
 })
 

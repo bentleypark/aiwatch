@@ -8,6 +8,7 @@ import type { AiUsageTrend } from './ai-analysis'
 import { formatAiUsageTrendLine } from './ai-analysis'
 import type { BadgeRepoDiscoveryDiff } from './badge-repo-discovery'
 import { formatBadgeRepoDiscoverySection } from './badge-repo-discovery'
+import type { ServiceStatus } from './types'
 
 export interface WeeklyIncidentSummary {
   serviceId: string
@@ -232,14 +233,49 @@ export interface WeeklyUptimeCounter {
   officialUptime?: number | null
 }
 
+/** One service's row in a `history:{date}` value, as far as the Stability Trend reads it. */
+export interface HistoryUptimeRow {
+  ok: number
+  total: number
+  officialUptime?: number | null
+  officialUptimeWindowDays?: number | null
+}
+
+/** #733 — the live "this week" figure per service; `null` excludes it from the comparison. */
+export function liveStabilityUptime(
+  live: Pick<ServiceStatus, 'id' | 'uptime30d' | 'incidentSourceStale' | 'uptimeWindowDays'>[],
+): Record<string, number | null> {
+  const out: Record<string, number | null> = {}
+  for (const s of live) {
+    const unreliable = s.uptime30d == null || !!s.incidentSourceStale || s.uptimeWindowDays != null
+    out[s.id] = unreliable ? null : s.uptime30d!
+  }
+  return out
+}
+
+/** #733 — the previous week's counters from `history:{date}` rows given most-recent day first. */
+export function accumulatePrevWeekCounters(rows: Record<string, HistoryUptimeRow>[]): Record<string, WeeklyUptimeCounter> {
+  const out: Record<string, WeeklyUptimeCounter> = {}
+  for (const row of rows) {
+    for (const [svcId, counts] of Object.entries(row)) {
+      const c = out[svcId] ?? { ok: 0, total: 0, officialUptime: null }
+      c.ok += counts.ok; c.total += counts.total
+      if (c.officialUptime == null && counts.officialUptime != null && counts.officialUptimeWindowDays == null) {
+        c.officialUptime = counts.officialUptime
+      }
+      out[svcId] = c
+    }
+  }
+  return out
+}
+
 /**
  * #733 — Weekly stability = change in OFFICIAL status-page uptime (rolling-30d), NOT the AIWatch
  * ok/total served-status counter (which is noise for incident-only / probeless / sticky-degraded
  * services — Bedrock logged 0–5% on flap days, ElevenLabs 72% vs an official 99%).
  *
- * `currentUptime` is the LIVE `uptime30d` per service read from `services:latest`, with no-official-
- * uptime / stale-source services already set to `null` (= the dashboard's `isUnreliableUptime`,
- * #713). Using the live value as "this week" — rather than a historical snapshot — is what reliably
+ * `currentUptime` is the LIVE `uptime30d` per service read from `services:latest` (`null` = excluded,
+ * see `liveStabilityUptime`). Using the live value as "this week" — rather than a historical snapshot — is what reliably
  * excludes a service like Bedrock whose past `officialUptime` snapshots were intermittently non-null
  * (a pre-#713 estimate residue) even though it currently publishes no uptime. `prevWeek` supplies the
  * ~7-day-ago official snapshot. A service is reported only when BOTH figures exist and differ > 0.5%.
@@ -251,7 +287,7 @@ export function buildStabilityChanges(
 ): WeeklyStabilityChange[] {
   const changes: WeeklyStabilityChange[] = []
   for (const [id, currUptime] of Object.entries(currentUptime)) {
-    if (currUptime == null) continue // no official uptime now (isUnreliableUptime) → excluded
+    if (currUptime == null) continue
     const prevUptime = prevWeek[id]?.officialUptime
     if (prevUptime == null) continue
     const diff = currUptime - prevUptime
