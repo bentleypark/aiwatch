@@ -32,7 +32,7 @@ import {
   synthesizeAistudioComponents,
 } from './parsers/aistudio'
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackUptimeWindowDays, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackUptimeWindowDays, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents, withoutDeniedBetterStackResources } from './parsers/betterstack'
 import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { parseCloudflareStatusSummary } from './parsers/cloudflare-status'
 import { parseDatadogStatusPage } from './parsers/datadog'
@@ -197,6 +197,8 @@ export const SERVICES: ServiceConfig[] = [
   // forever, the per-model catalog is unbounded (20 components live 2026-09-27, all older than 30 days
   // already, including a `Website` id that is not a model at all).
   { id: 'groq', name: 'GroqCloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'], rosterAuditFixedScope: true },
+  // #1821/#1829 — Playground sits in the page's `Website` section with the marketing site, so the
+  // section denial covers it; a playground is Reference (#1821), and this path shows no reference rows.
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true, componentDenylist: ['Website'] },
   // #1198 — migrated off BetterStack (dead: /index.json and /feed both 404) onto the incident.io
   // Statuspage-compat API, same shape as cohere/groq above. Fireworks sets no `statusComponent`/
@@ -331,7 +333,11 @@ export const SERVICES: ServiceConfig[] = [
   // resources sit in their own page section, which parseBetterStackComponents already groups.
   { id: 'fishaudio', name: 'Fish Audio', provider: 'Fish Audio', category: 'api', statusUrl: 'https://status.fish.audio', apiUrl: null, rssFeedUrl: 'https://status.fish.audio/feed', betterStackUrl: 'https://status.fish.audio', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-09-30' }, // #802
   // Inference / Infrastructure
-  { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true, componentDenylist: ['Website'] },
+  // #1821/#1829 — Inference Endpoints UI is Reference: the provider's quick start has users "log in the
+  // Inference Endpoints UI" to create and configure an endpoint. This path shows no reference rows, so it
+  // is denied, like fal's Dashboard. AWS CDN and Google cloud CDN are Counted: the incidents tagged on
+  // AWS CDN are failed and slow file downloads for users served from Singapore (2026-08-07, 2026-09-22).
+  { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true, componentDenylist: ['Website', 'Inference Endpoints UI'] },
   // #1384 — Replicate joined Cloudflare and the retired Statuspage v2 URL now 301s to HTML. The
   // Cloudflare v3 source exposes one Replicate component. It publishes no uptime data at all, so
   // `uptime30d` stays null. Incidents come from BOTH `active_incidents` and `recent_incidents`,
@@ -404,7 +410,10 @@ export const SERVICES: ServiceConfig[] = [
   // rosterAuditExclude = the page's 3 group headers. Every incident on the page (50 read 2026-10-11) is
   // machine-emitted from a P99-latency monitor, all `minor`, mostly 5m — hence holdShortIncidents.
   { id: 'jina', name: 'Jina AI', provider: 'Jina AI', category: 'api', statusUrl: 'https://status.jina.ai', apiUrl: 'https://status.jina.ai/api/v2/summary.json', statusComponentId: 'fc5zn3rkh5bd', statusComponentIds: ['fc5zn3rkh5bd', 'v6lh7spvvvf5', '7b9xrr2ksh44', '67hcttb83zzv', 'skb1snhyjd6h', 'phbgjfg719q6', 'd52c7tz1hnpd', 'b2tt4jb1x7pz', 'd7nnpf4sr394', 'dwcjc0rgg6hn', 'cm0h2r8mw593', '3f6qdtwq4yv6', 'lbtxhdqvr205', 'yxvtk6kpvycp', '895s37lq7d5q'], fallbackComponents: ['jina-embeddings-v4', 'jina-embeddings-v3', 'jina-embeddings-v5-text-small', 'jina-embeddings-v5-text-nano', 'Rest Embeddings', 'jina-reranker-v2-base-multilingual', 'jina-reranker-v3', 'jina-reranker-m0', 'Rest Rerankers'], displayAllComponents: true, holdShortIncidents: true, rosterAuditExclude: ['6d9w2f73tz7v', 'hq1bx2j16lhs', 'ftwn2h2xvr77'], addedAt: '2026-10-11' }, // #802
-  { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website'] },
+  // #1821/#1829 — Dashboard ("Dashboard functionality on modal.com", its own `Web services` section) is
+  // Reference: Modal's docs list running Apps on the apps page and stop them "via the web UI". This path
+  // shows no reference rows, so it is denied, like fal's Dashboard.
+  { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website', 'Dashboard'] },
   // Twelve Labs (#839) — video understanding / multimodal AI platform (search, embed, analyze over
   // video via Marengo & Pegasus foundation models). Atlassian Statuspage (page 5j9dmpdjtybc) →
   // statuspage.ts covers it, no new parser. Single-owner page → no incidentKeywords needed.
@@ -458,6 +467,8 @@ export const SERVICES: ServiceConfig[] = [
   // escalate the live badge, but it STILL surfaces in the incident list/calendar (incidentIoBaseUrl is
   // not component-scoped). Acceptable: a real Langfuse outage hits the primary region; widen the ID set
   // here if cross-region badge escalation is later wanted.
+  // #1821/#1829 — US/EU web app are Counted: Helicone is an observability product its users read in the
+  // web app ("you'll see your request appear in the Requests tab", quick start).
   { id: 'helicone', name: 'Helicone', provider: 'Helicone', category: 'api', statusUrl: 'https://status.helicone.ai', apiUrl: null, rssFeedUrl: 'https://status.helicone.ai/feed', betterStackUrl: 'https://status.helicone.ai', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-06-23' }, // #802
   { id: 'langfuse', name: 'Langfuse', provider: 'Langfuse', category: 'api', statusUrl: 'https://status.langfuse.com', apiUrl: 'https://status.langfuse.com/api/v2/summary.json', statusComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', statusComponentIds: ['01KS5BHY7AKJD8YEM4MFYMB35Z', '01KS5BHY7AX99XYA7AS7AAP7QG', '01KS5BHY7AH52EZHZQ9TYD53TY'], incidentIoBaseUrl: 'https://status.langfuse.com/incidents', incidentIoComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', holdShortIncidents: true, addedAt: '2026-06-23',
     // #1518 — the OTHER 3 regions' copies of Ingestion/Public/Prompts (the paragraph above already
@@ -3721,15 +3732,18 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       if (betterStackRes?.ok) {
         try {
           const bsData: BetterStackIndex = await betterStackRes.json()
-          betterStackUptime = parseBetterStackUptime(bsData)
-          betterStackWindow = parseBetterStackUptimeWindowDays(bsData)
+          // #1829 — uptime, status, partial count and calendar read the resources the breakdown shows.
+          // The reported figure stays page-wide: it is what the provider's page displays.
+          const bsScoped = withoutDeniedBetterStackResources(bsData, config.componentDenylist)
+          betterStackUptime = parseBetterStackUptime(bsScoped)
+          betterStackWindow = parseBetterStackUptimeWindowDays(bsScoped)
           betterStackReported = parseBetterStackReportedUptime(bsData)
-          betterStackStat = parseBetterStackStatus(bsData)
-          betterStackPartial = parseBetterStackPartialCount(bsData)
-          // #606 Cat C — per-resource breakdown grouped by status_page_section (display-only;
-          // status/uptime/incidents are unchanged). componentDenylist drops noise sections (e.g. Website).
+          betterStackStat = parseBetterStackStatus(bsScoped)
+          betterStackPartial = parseBetterStackPartialCount(bsScoped)
+          // #606 Cat C — per-resource breakdown grouped by status_page_section. componentDenylist
+          // drops noise sections (e.g. Website).
           betterStackComponents = parseBetterStackComponents(bsData, { denylist: config.componentDenylist })
-          bsDailyImpact = parseBetterStackDailyImpact(bsData)
+          bsDailyImpact = parseBetterStackDailyImpact(bsScoped)
           // Filter out planned-maintenance events (report_type='maintenance') — signal 3 of 3.
           // Catches custom-titled maintenance events like "Authorization System Restart" (#503)
           // where the title contains no maintenance keyword (signal 1) and pubDate is not future (signal 2).

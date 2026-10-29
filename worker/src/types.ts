@@ -250,7 +250,7 @@ export interface ServiceStatus {
    *                      `customImpactPercentage` wins over 1.0/0.3 (#1110).
    *    'platform_avg'  → an AIWatch computation over BetterStack's OWN monitoring history
    *                      (`status_history`) rather than the provider's incident declarations, averaged
-   *                      across the page's resources. The label marks a DIFFERENT computation, not just
+   *                      across the page's resources outside `componentDenylist` (#1829). The label marks a DIFFERENT computation, not just
    *                      different evidence (#1110): `parseBetterStackUptime` weights severity per DAY
    *                      (#1580) — a day's `downtime_duration` counts at 0.3 when its `status` is
    *                      `degraded` and 1.0 otherwise — and measures each resource only over the days it was
@@ -469,6 +469,7 @@ export interface ServiceConfig {
   uptimeOverLiveComponents?: true
   // Names (case-insensitive exact match) excluded from the displayAllComponents set —
   // non-availability surfaces like Docs/Website. Kept small + stable (unlike the model list).
+  // On a Better Stack page it also scopes uptime, status, the partial count and the calendar (#1829).
   componentDenylist?: string[]
   // Names (case-insensitive) treated as individual "surface" rows in the breakdown; every
   // OTHER displayAllComponents component is folded into a collapsible "Models" group (#606,

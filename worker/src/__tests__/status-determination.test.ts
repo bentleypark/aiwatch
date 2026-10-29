@@ -888,10 +888,15 @@ describe('displayComponentIds config sanity (#606)', () => {
     // config instead — the length pin below is what forces this test to notice the NEXT roster change.
     const betterStackIds = SERVICES.filter((s) => s.betterStackUrl).map((s) => s.id)
     expect(betterStackIds.length, 'BetterStack roster changed — update this comment/count if intentional').toBe(6)
-    for (const id of betterStackIds) {
-      const svc = SERVICES.find((s) => s.id === id)!
-      expect(svc.componentDenylist, id).toEqual(['Website'])
-    }
+    // #1829 — beyond Website, the #1821 Reference verdicts (consoles) this path can only express by denial.
+    expect(Object.fromEntries(betterStackIds.map((id) => [id, SERVICES.find((s) => s.id === id)!.componentDenylist]))).toEqual({
+      together: ['Website'],
+      fishaudio: ['Website'],
+      huggingface: ['Website', 'Inference Endpoints UI'],
+      modal: ['Website', 'Dashboard'],
+      helicone: ['Website'],
+      luma: ['Website'],
+    })
   })
 
   it('#1198 — fireworks migrated off BetterStack to the incident.io compat API (overall-indicator badge, dynamic breakdown, worst-of uptime over every page component)', () => {
