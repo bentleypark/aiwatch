@@ -1,12 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  classifyBrowserRun, browserRunDataPoint, runBrowserRead, BROWSER_RUN_INDEX,
+  classifyBrowserRun, browserRunDataPoint, runBrowserRead, BROWSER_RUN_INDEX, onReaderTick, createReader,
 } from './mistral-browser-run.mjs'
 import {
   CloudflareChallengeError, RosterShortError, MistralPageContractError,
   readV3Roster, readIncidentLinks, readIncidentPage, loadV3Roster,
 } from './scrape-mistral-status.mjs'
+import { readFileSync } from 'node:fs'
+import { handleMistralEmail } from '../worker/src/mistral-email.ts'
 
 // #1851 — cases from the 2026-10-29 Browser Run probe: 15 of 15 cards after scrolling, 10 of 15
 // without, and a 403 carrying `cf-mitigated: challenge`.
@@ -113,4 +115,101 @@ test('a failing record sink does not turn the outcome into a throw', async () =>
 
 test('the data point carries zero counters when no payload was read', () => {
   assert.deepEqual(browserRunDataPoint('error', 5, undefined).doubles, [1, 5, 0, 0, 0])
+})
+
+test('a tick reads at :41 or on a consumed wake; any KV failure means no wake and never costs the :41 read', async () => {
+  const tick = async (hhmm, kv) => {
+    let reads = 0
+    const ran = await onReaderTick({ scheduledTime: Date.parse(`2026-10-29T${hhmm}:00Z`), env: { STATUS_CACHE: kv }, read: async () => { reads++ } })
+    return { ran, reads }
+  }
+  const store = (entries = []) => {
+    const m = new Map(entries)
+    return { m, get: async (k) => m.get(k) ?? null, delete: async (k) => { m.delete(k) } }
+  }
+  const fail = async () => { throw new Error('KV 503') }
+  const cases = [
+    ['08:23', store(), { ran: false, reads: 0 }],
+    ['08:41', store(), { ran: true, reads: 1 }],
+    ['08:40', store(), { ran: false, reads: 0 }],
+    ['08:42', store(), { ran: false, reads: 0 }],
+    ['08:23', store([['mistral:wake', '1']]), { ran: true, reads: 1 }],
+    ['08:41', store([['mistral:wake', '1']]), { ran: true, reads: 1 }],
+    ['08:41', { get: fail, delete: fail }, { ran: true, reads: 1 }],
+    ['08:41', { get: async () => '1', delete: fail }, { ran: true, reads: 1 }],
+    ['08:23', { get: fail, delete: fail }, { ran: false, reads: 0 }],
+    ['08:23', { get: async () => '1', delete: fail }, { ran: false, reads: 0 }],
+  ]
+  for (const [hhmm, kv, want] of cases) assert.deepEqual(await tick(hhmm, kv), want, `${hhmm}`)
+
+  const woken = store([['mistral:wake', '1']])
+  assert.deepEqual(await tick('08:23', woken), { ran: true, reads: 1 })
+  assert.equal(woken.m.has('mistral:wake'), false, 'the flag is consumed')
+  assert.deepEqual(await tick('08:24', woken), { ran: false, reads: 0 }, 'a consumed flag does not read again')
+})
+
+test('the flag the email handler sets is the one a reader tick consumes, from the same STATUS_CACHE namespace', async () => {
+  const m = new Map()
+  const kv = { get: async (k) => m.get(k) ?? null, put: async (k, v) => { m.set(k, v) }, delete: async (k) => { m.delete(k) } }
+  const pending = []
+  const headers = new Headers({ from: 'Mistral AI <notifications@rootly.com>', subject: 'Mistral AI | API errors' })
+  await handleMistralEmail({ headers, from: 'x@rootly.com', forward: async () => {} }, { STATUS_CACHE: kv }, { waitUntil: (p) => pending.push(p) })
+  await Promise.all(pending)
+  let reads = 0
+  await onReaderTick({ scheduledTime: Date.parse('2026-10-29T08:23:00Z'), env: { STATUS_CACHE: kv }, read: async () => { reads++ } })
+  assert.equal(reads, 1)
+  assert.equal(m.size, 0)
+
+  const kvId = (path) => {
+    const block = readFileSync(new URL(path, import.meta.url), 'utf8').split('[[kv_namespaces]]').find((b) => /binding\s*=\s*"STATUS_CACHE"/.test(b))
+    return /\bid\s*=\s*"([^"]+)"/.exec(block ?? '')?.[1]
+  }
+  assert.ok(kvId('../worker/wrangler.toml'))
+  assert.equal(kvId('../mistral-reader/wrangler.toml'), kvId('../worker/wrangler.toml'))
+})
+
+test('a reader with no STATUS_CACHE binding still reads at :41, and says so in the log', async () => {
+  const warns = []
+  const warn = console.warn
+  console.warn = (msg) => warns.push(msg)
+  try {
+    let reads = 0
+    const read = async () => { reads++ }
+    await onReaderTick({ scheduledTime: Date.parse('2026-10-29T08:41:00Z'), env: {}, read })
+    await onReaderTick({ scheduledTime: Date.parse('2026-10-29T08:23:00Z'), env: {}, read })
+    assert.equal(reads, 1)
+  } finally {
+    console.warn = warn
+  }
+  assert.equal(warns.length, 2)
+  assert.match(warns[0], /\[browser-run\] wake flag unreadable/)
+})
+
+test('the reader Worker reads at :41 and on a wake, launching on env.BROWSER and pushing over env.AIWATCH with env.MISTRAL_FEED_TOKEN', async () => {
+  const m = new Map()
+  const launched = []
+  let closed = 0
+  const posts = []
+  const points = []
+  const env = {
+    BROWSER: 'browser-binding',
+    MISTRAL_FEED_TOKEN: 'tok',
+    STATUS_CACHE: { get: async (k) => m.get(k) ?? null, delete: async (k) => { m.delete(k) } },
+    AIWATCH: { fetch: async (url, init) => { posts.push([url, init.headers.Authorization]); return { ok: true, status: 200, text: async () => '{}' } } },
+    ANALYTICS: { writeDataPoint: (p) => points.push(p) },
+  }
+  const reader = createReader(async (binding) => {
+    launched.push(binding)
+    return { newPage: async () => probePage(), close: async () => { closed++ } }
+  })
+  await reader.scheduled({ scheduledTime: Date.parse('2026-10-29T08:23:00Z') }, env)
+  assert.equal(launched.length, 0)
+  await reader.scheduled({ scheduledTime: Date.parse('2026-10-29T08:41:00Z') }, env)
+  m.set('mistral:wake', '1')
+  await reader.scheduled({ scheduledTime: Date.parse('2026-10-29T08:24:00Z') }, env)
+  assert.deepEqual(launched, ['browser-binding', 'browser-binding'])
+  assert.equal(closed, 2)
+  assert.deepEqual(posts.map(([url]) => url), Array(2).fill(['https://aiwatch-worker/api/internal/mistral-feed', 'https://aiwatch-worker/api/internal/mistral-feed-observation']).flat())
+  assert.ok(posts.every(([, auth]) => auth === 'Bearer tok'))
+  assert.deepEqual(points.map((p) => p.blobs[1]), ['pass', 'pass'])
 })
