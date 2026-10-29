@@ -44,6 +44,9 @@ const NAMES: Record<string, string> = {
   cursor: 'Cursor',
   replicate: 'Replicate',
   huggingface: 'Hugging Face',
+  copilot: 'GitHub Copilot',
+  xai: 'SpaceXSI API',
+  grok: 'Grok',
 }
 const svc = (id: string, status: ServiceStatus['status'], incidents: Incident[] = []): ServiceStatus =>
   ({ id, name: NAMES[id] ?? id, status, incidents }) as ServiceStatus
@@ -75,6 +78,13 @@ const REPLICATE_H100 = inc('rp-h100', 'High contention on H100 hardware', '2026-
 // 2026-07-17: claude 06:47:54.909Z → cursor 'Investigating Anthropic degradation' 07:17:15.075Z (+29m)
 const CLAUDE_ERRORS = inc('7gpjd8n56rlq', 'Elevated errors on Sonnet 5 and Haiku 4.5', '2026-07-17T06:47:54.909Z')
 const CURSOR_ANTHROPIC = inc('htxx9vp5s24f', 'Investigating Anthropic degradation', '2026-07-17T07:17:15.075Z')
+
+// 2026-09-03 (GET /api/report?month=2026-09): xai 13:30:00.000Z → copilot 14:17:27.485Z (+47m); the
+// grok row is the same outage on the sibling app surface.
+const XAI_MODELS_OUTAGE = inc('xai-evt:mger3p', '[API] Models outage (regions: us-east-1, us-west-2)', '2026-09-03T13:30:00.000Z', { impact: 'major' })
+const GROK_MODELS_OUTAGE = inc('xai-grok:53g239', '[Grok (iOS, Android, Web, Office/Workspace Plugins)] Models outage', '2026-09-03T13:30:00.000Z', { impact: 'major' })
+const COPILOT_GROK = inc('ktdr5t0xwnhp', 'Incident with Grok 4.6 Copilot AI Model Provider', '2026-09-03T14:17:27.485Z')
+const NOW_COPILOT = Date.parse('2026-09-03T15:00:00Z')
 
 describe('buildUpstreamLinks (#1053) — the two evidenced cross-provider outages', () => {
   it('links replicate → hugging face (dependent names the upstream, upstream started 36m earlier)', () => {
@@ -247,6 +257,34 @@ describe('buildUpstreamLinks (#1053) — the two evidenced cross-provider outage
     // user at claude.ai is noise, not the cause.
     expect(links[0].upstream.map((u) => u.id)).toEqual(['claude'])
     expect(links[0].upstream[0].incidentTitle).toBe('Elevated errors on Sonnet 5 and Haiku 4.5')
+  })
+})
+
+describe('buildUpstreamLinks (#1339) — copilot → xai, 2026-09-03', () => {
+  it('#1339 links copilot → xai (the API only, not the Grok app), with the +47m lead in the payload', () => {
+    const links = build([
+      svc('xai', 'down', [XAI_MODELS_OUTAGE]),
+      svc('grok', 'down', [GROK_MODELS_OUTAGE]),
+      svc('copilot', 'degraded', [COPILOT_GROK]),
+    ], NOW_COPILOT)
+    expect(links).toHaveLength(1)
+    expect(links[0].id).toBe('copilot')
+    expect(links[0].upstream.map((u) => u.id)).toEqual(['xai'])
+    expect(Date.parse(links[0].startedAt) - Date.parse(links[0].upstream[0].startedAt)).toBe((47 * 60 + 27.485) * 1000)
+  })
+
+  it('#1339 copilot naming Grok while xai is healthy → no link', () => {
+    expect(build([
+      svc('xai', 'operational', [XAI_MODELS_OUTAGE]),
+      svc('copilot', 'degraded', [COPILOT_GROK]),
+    ], NOW_COPILOT)).toEqual([])
+  })
+
+  it('#1339 copilot naming only a model while xai is down → no link', () => {
+    expect(build([
+      svc('xai', 'down', [XAI_MODELS_OUTAGE]),
+      svc('copilot', 'degraded', [inc('cp-gpt', 'Several GPT models degraded', '2026-09-03T14:17:27.485Z', { componentNames: ['Copilot AI Model Providers'] })]),
+    ], NOW_COPILOT)).toEqual([])
   })
 })
 
@@ -425,16 +463,17 @@ describe('UPSTREAM_DEPS — the curation discipline', () => {
     }
   })
 
-  it('at least one alias per dep matches the upstream\'s own name or provider (catches a typo)', () => {
+  it('at least one alias per dep matches a service name or provider of the upstream\'s provider (catches a typo)', () => {
     // A typo that is already lowercase and separator-free ('anthropc') passes the stability check
     // below, then matches nothing forever — indistinguishable from gate 3 staying quiet. Anchoring to
-    // the upstream's real name/provider catches it. Asserted over AT LEAST ONE alias, not every one:
+    // the real service names and provider of the upstream's provider catches it. Asserted over AT LEAST ONE alias, not every one:
     // a legitimate future alias may be a token matching neither ("HF", "the Hub"), and this must not
     // block correct curation.
     for (const dep of UPSTREAM_DEPS) {
       const anchors = dep.upstreamIds.flatMap((id) => {
         const cfg = SERVICES.find((s) => s.id === id)
-        if (cfg) return [normalizeForMatch(cfg.name), normalizeForMatch(cfg.provider)]
+        if (cfg) return SERVICES.filter((s) => s.provider === cfg.provider)
+          .flatMap((s) => [normalizeForMatch(s.name), normalizeForMatch(s.provider)])
         // #1072 — a feed upstream has a display name but no `provider` (it is consulted, not monitored).
         const feed = UPSTREAM_FEEDS.find((f) => f.id === id)!
         return [normalizeForMatch(feed.name)]
@@ -453,6 +492,10 @@ describe('UPSTREAM_DEPS — the curation discipline', () => {
         expect(normalizeForMatch(a), `${dep.id}: alias "${a}"`).toBe(a)
       }
     }
+  })
+
+  it('#1339 — no cursor → xai entry', () => {
+    expect(UPSTREAM_DEPS.some((d) => d.id === 'cursor' && d.upstreamIds.includes('xai'))).toBe(false)
   })
 
   it('does NOT alias "claude" for cursor — a model the dependent resells is not a blame token', () => {
