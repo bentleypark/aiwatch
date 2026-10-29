@@ -233,7 +233,7 @@ export function mergeXaiRegionalIncidents(incidents: Incident[]): Incident[] {
     const members = collapseCrossMemberEchoes(group.members)
     // `anchorMs` IS the group's earliest start — the walk that built it is ascending — so the id
     // names the same instant `mergeXaiEventGroup` will emit as `startedAt`, without re-deriving it.
-    out.push(mergeXaiEventGroup(members, {
+    const merged = mergeXaiEventGroup(members, {
       id: uniqueId(`xai-evt:${fnv1aHex(`${group.key}|${new Date(group.anchorMs).toISOString()}`)}`),
       // A single-region event keeps its original title; a multi-region
       // event drops the per-region prefixes for `<eventKey> (regions: …)` — but MUST retain an `[API]`
@@ -241,7 +241,8 @@ export function mergeXaiRegionalIncidents(incidents: Incident[]): Incident[] {
       // carries the `api` keyword (xAI incidents have no componentNames to match on). Without it a real
       // multi-region outage would be silently filtered out → the service would read operational (#940 review).
       title: members.length === 1 ? members[0].title : `[API] ${group.key} (regions: ${[...group.regions].join(', ')})`,
-    }))
+    })
+    out.push({ ...merged, crossEventKey: xaiCrossEventKey(group.key, merged.startedAt) })
   })
   return out
 }
@@ -346,7 +347,17 @@ export function xaiGrokEventKey(title: string): string {
 
 /** The same normalization with the provider's casing preserved — what a merged title reads as. */
 export function xaiGrokDisplayTitle(title: string): string {
-  return title.replace(XAI_GROK_SURFACE_RE, '').trim().replace(/[.\s]+$/, '').replace(/\s+/g, ' ')
+  return normalizeXaiEventTitle(title.replace(XAI_GROK_SURFACE_RE, ''))
+}
+
+function normalizeXaiEventTitle(stripped: string): string {
+  return stripped.trim().replace(/[.\s]+$/, '').replace(/\s+/g, ' ')
+}
+
+/** #1338 — the identity one xAI event carries on both cards: the tag-stripped title (either axis) and
+ *  the merged incident's start. Ids stay per-axis; the SPA groups rows on this key. */
+export function xaiCrossEventKey(strippedTitle: string, startedAt: string): string {
+  return `xai:${fnv1aHex(`${normalizeXaiEventTitle(strippedTitle).toLowerCase()}|${startedAt}`)}`
 }
 
 /**
@@ -533,7 +544,7 @@ function mergeSurfaceGroup(group: SurfaceGroup): Incident {
   const { surfaces } = group
   const members = collapseCrossMemberEchoes(group.members)
   const startedAt = earliestStartedAt(members)
-  return mergeXaiEventGroup(members, {
+  const merged = mergeXaiEventGroup(members, {
     id: `xai-grok:${fnv1aHex(`${group.key}|${startedAt}`)}`,
     // A single-surface event keeps its original title untouched. A merged one
     // names every affected surface — and MUST keep the `Grok (` marker, because `filterIncidents`
@@ -544,4 +555,5 @@ function mergeSurfaceGroup(group: SurfaceGroup): Incident {
       ? members[0].title
       : `[Grok (${[...surfaces].join(', ')})] ${xaiGrokDisplayTitle(members[0].title)}`,
   })
+  return { ...merged, crossEventKey: xaiCrossEventKey(group.key, startedAt) }
 }

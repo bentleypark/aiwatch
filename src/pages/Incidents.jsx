@@ -11,8 +11,9 @@ import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { incidentNote } from '../utils/incidentNote'
 import { getResolvedTime, getContextualTime, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
-import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService } from '../utils/archiveMerge'
-import { mergeReferenceRows, referenceIncidentRows } from '../utils/referenceIncidents'
+import { archiveMonthsForPeriod, archiveSupplementForService } from '../utils/archiveMerge'
+import { referenceIncidentRows } from '../utils/referenceIncidents'
+import { toLiveRow, unfilteredIncidentRows } from '../utils/liveIncidentRows'
 import { filterIncidentList } from '../utils/incidentFilter'
 import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
@@ -359,17 +360,7 @@ export default function Incidents({ filters } = {}) {
     () => {
       if (serviceFilter !== 'all') {
         // With service filter: show all incidents for that service.
-        const live = services.flatMap((svc) =>
-          (svc.incidents ?? []).flatMap((inc) => [{
-            ...inc,
-            id: `${svc.id}:${inc.id}`,
-            status: inc.status === 'resolved' ? 'resolved'
-              : inc.status === 'monitoring' ? 'monitoring'
-              : 'ongoing',
-            serviceName: svc.name,
-            serviceId: svc.id,
-          }])
-        )
+        const live = services.flatMap((svc) => (svc.incidents ?? []).map((inc) => toLiveRow(inc, svc)))
         const withRefs = live.concat(referenceIncidentRows(services)
           .filter((r) => r.serviceId === serviceFilter)
           .map(toReferenceRow))
@@ -378,44 +369,8 @@ export default function Incidents({ filters } = {}) {
         const supplement = archiveSupplementForService(liveCompositeIds, serviceFilter, archives, services)
         return withRefs.concat(supplement)
       }
-      // Without filter: dedup by raw incidentId, collect all affected service names.
-      const incMap = new Map() // raw incidentId → merged incident (composite id assigned at render time below)
-      for (const svc of services) {
-        for (const inc of svc.incidents ?? []) {
-          const existing = incMap.get(inc.id)
-          if (existing) {
-            if (!existing.affectedNames.includes(svc.name)) existing.affectedNames.push(svc.name)
-          } else {
-            incMap.set(inc.id, {
-              ...inc,
-              // Keep raw id as the map key, but assign the composite id used downstream.
-              id: `${svc.id}:${inc.id}`,
-              status: inc.status === 'resolved' ? 'resolved'
-                : inc.status === 'monitoring' ? 'monitoring'
-                : 'ongoing',
-              serviceName: svc.name,
-              serviceId: svc.id,
-              affectedNames: [svc.name],
-            })
-          }
-        }
-      }
-      // Archive supplement uses the same raw-id keying so a single incident that touched
-      // multiple services in the archive accumulates into one row, not duplicates.
-      // We rebuild the map keyed by raw id so mergeArchiveIntoMap can find collisions —
-      // the live phase above wrote composite ids into entry.id but kept the raw id as the
-      // Map key. mergeArchiveIntoMap reads/writes via the raw key only.
-      if (archiveMonths.length > 0) {
-        mergeArchiveIntoMap(incMap, archives, services)
-        // Re-assign composite id for archive-only entries — they're added with the raw id
-        // by mergeArchiveIntoMap so the live convention (`${serviceId}:${rawId}`) is the
-        // job of the consumer that mixes raw + composite worlds, i.e. here.
-        for (const [rawId, entry] of incMap) {
-          if (entry.fromArchive) entry.id = `${entry.serviceId}:${rawId}`
-        }
-      }
-      mergeReferenceRows(incMap, services, toReferenceRow)
-      return [...incMap.values()]
+      // Without filter: one row per incident id or xAI crossEventKey, naming every affected service.
+      return unfilteredIncidentRows(services, archives, archiveMonths, toReferenceRow)
     },
     [services, serviceFilter, archives, archiveMonths]
   )

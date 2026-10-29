@@ -57,4 +57,20 @@ describe('#1634 — the 2026-10-07 status.x.ai feed shape', () => {
     ])
     expect(new Set(svc.incidents.map((i) => i.id)).size).toBe(svc.incidents.length)
   })
+
+  it('#1338 — one event on both cards carries one crossEventKey; ids are unchanged', async () => {
+    stubFeed()
+    const api = await fetchService(xai, undefined, mockKV(), {})
+    const app = await fetchService(grok, undefined, mockKV(), {})
+
+    expect(api.incidents.map((i) => i.id)).toEqual(['xai-evt:w28qgm', 'xai-evt:60k8qx', 'xai-evt:mger3p', 'xai-evt:5fnog2'])
+    expect(app.incidents.map((i) => i.id)).toEqual(['xai-grok:1am6s3t', 'xai-grok:1ffbseu', 'xai-grok:53g239'])
+
+    const keys = (incs: typeof api.incidents) => incs.map((i) => i.crossEventKey)
+    const [outages, voice, models, highError] = keys(api.incidents)
+    const [grokCom, appOutages, appModels] = keys(app.incidents)
+    expect(appOutages).toBe(outages)
+    expect(appModels).toBe(models)
+    expect(new Set([outages, voice, models, highError, grokCom]).size).toBe(5)
+  })
 })
