@@ -102,9 +102,22 @@ interface PageContractKv {
   delete(key: string): Promise<void>
 }
 
+async function readStreak(kv: PageContractKv): Promise<number> {
+  try {
+    const raw = await kv.get(MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY)
+    const parsed = raw ? JSON.parse(raw) : null
+    return Number.isInteger(parsed?.count) && parsed.count >= 0 ? parsed.count : 0
+  } catch {
+    // A failed diagnostic read must not prevent recording the current confirmed run.
+    return 0
+  }
+}
+
 /**
- * Count only adjacent, independently completed scraper runs. Any other terminal observation clears
- * the streak, so a Cloudflare challenge cannot be relabelled as a Rootly contract migration.
+ * Count page-contract runs not separated by a run that produced incident coverage or a stored feed. A
+ * run with neither (a challenge, a short roster, any error before the payload) neither counts nor
+ * clears, so a Cloudflare challenge can neither be relabelled as a Rootly contract migration nor hide
+ * one seen by another client (#1853).
  */
 export async function observeMistralPageContract(
   kv: PageContractKv,
@@ -112,20 +125,15 @@ export async function observeMistralPageContract(
   send: () => Promise<boolean>,
 ): Promise<{ consecutive: number; alerted: boolean }> {
   if (observation.failure !== 'page-contract') {
+    if (observation.coverage === 'unavailable' && observation.delivery !== 'stored') {
+      return { consecutive: await readStreak(kv), alerted: false }
+    }
     await kv.delete(MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY)
     if (observation.delivery === 'stored') await kv.delete(MISTRAL_PAGE_CONTRACT_ALERT_KEY)
     return { consecutive: 0, alerted: false }
   }
 
-  let prior = 0
-  try {
-    const raw = await kv.get(MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY)
-    const parsed = raw ? JSON.parse(raw) : null
-    prior = Number.isInteger(parsed?.count) && parsed.count >= 0 ? parsed.count : 0
-  } catch {
-    // A failed diagnostic read must not prevent recording the current confirmed run.
-  }
-  const consecutive = prior + 1
+  const consecutive = (await readStreak(kv)) + 1
   await kv.put(MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY, JSON.stringify({ count: consecutive }), {
     expirationTtl: MISTRAL_PAGE_CONTRACT_CONSECUTIVE_TTL_S,
   })

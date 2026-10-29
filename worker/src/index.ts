@@ -2609,7 +2609,7 @@ export async function handleMistralFeedObservation(request: Request, env: Env, c
     if (!env.DISCORD_WEBHOOK_URL) return false
     return sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: '⚠️ Mistral Rootly page contract changed',
-      description: 'Two consecutive Mistral scraper runs reached Rootly but could not read the expected v3 page structure, so no new feed was pushed.\n\nThis is distinct from a Cloudflare challenge.',
+      description: 'Two Mistral scraper runs reached Rootly but could not read the expected v3 page structure, with no successful read between them, so no new feed was pushed.\n\nThis is distinct from a Cloudflare challenge.',
       color: 0xFFA500,
     })
   })
