@@ -290,6 +290,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   alert-feed.ts ext-claude.ts sitemap-feed.ts latest-report.ts indexnow.ts badge.ts og.ts og-render.ts slack.ts slack-message.ts  # Feeds, projections, SEO, images, Slack
   parsers/           # one module per status-page platform — `ls` it, or directory-map.md for what each does
 extension/           # Claude-only Chrome extension (MV3, #837) — consumes ?src=ext-claude only
+mistral-reader/      # Mistral page reader, Browser Run (#1851)
 plugin/aiwatch/      # Claude Code plugin (#920) — outage monitor + /aiwatch command
 .claude-plugin/      # marketplace.json — AIWatch's OWN plugin catalog (`aiwatch-dev`); makes plugin/aiwatch/ installable with no third-party review (#920)
 scripts/             # Build/CI/ops scripts (verify-reminders, lint-okf-bundle, check-vercel-function-count, …)

@@ -307,12 +307,13 @@ const v3Tip = (date, inner) =>
 const V3_CLASS = {
   clean: 'h-full w-full rounded-v2-xs bg-pothos-10 hover:bg-pothos-12',
   impacted: 'h-full w-full rounded-v2-xs bg-red-v2-12 hover:bg-red-v2-12',
+  partial: 'h-full w-full rounded-v2-xs bg-tangerine-9 hover:bg-tangerine-12',
   noData: 'h-full w-full rounded-v2-xs bg-dove-grey-5',
 }
-const v3Bar = ({ kind, date, text, titles = [] }) => {
+const v3Bar = ({ kind, date, text, titles = [], status = 'Impacted' }) => {
   const inner = kind === 'clean' ? '<span class="text-base">\n No incidents\n </span>'
     : kind === 'noData' ? '<span class="text-base">\n No data\n </span>'
-      : `<span title="Impacted">\n Impacted\n </span>\n<span class="w-14">\n ${text}\n </span>\n<div>\n Related\n </div>\n${titles.map((t) =>
+      : `<span title="${status}">\n ${status}\n </span>\n<span class="w-14">\n ${text}\n </span>\n<div>\n Related\n </div>\n${titles.map((t) =>
         `<a title="${t}" href="https://status.mistral.ai/incidents/ff51dc3e-2e73-4d0e-9660-e76f166abc64">\n ${t}\n </a>`).join('')}`
   return `<div class="relative flex-1"><div class="${V3_CLASS[kind] ?? kind}" data-uptime-loading="bar"></div>${v3Tip(date, inner)}</div>`
 }
@@ -363,14 +364,37 @@ test('the icon colour maps to a status word the Worker accepts; any other colour
 })
 
 test('a day tooltip reads as its date and minutes, and nothing else is guessed', () => {
-  assert.deepEqual(parseV3DayTooltip('July 24, 2026 Impacted 1m Related Completion API Degraded'), { date: 'July 24, 2026', minutes: 1 })
-  assert.deepEqual(parseV3DayTooltip('August 9, 2026 Impacted 1h 5m Related X'), { date: 'August 9, 2026', minutes: 65 })
-  assert.deepEqual(parseV3DayTooltip('August 13, 2026 Impacted 0m Related X'), { date: 'August 13, 2026', minutes: 0 })
-  assert.deepEqual(parseV3DayTooltip('August 9, 2026 Impacted 2h'), { date: 'August 9, 2026', minutes: 120 })
+  assert.deepEqual(parseV3DayTooltip('July 24, 2026 Impacted 1m Related Completion API Degraded'), { date: 'July 24, 2026', status: 'Impacted', minutes: 1 })
+  assert.deepEqual(parseV3DayTooltip('August 9, 2026 Impacted 1h 5m Related X'), { date: 'August 9, 2026', status: 'Impacted', minutes: 65 })
+  assert.deepEqual(parseV3DayTooltip('August 13, 2026 Impacted 0m Related X'), { date: 'August 13, 2026', status: 'Impacted', minutes: 0 })
+  assert.deepEqual(parseV3DayTooltip('August 9, 2026 Impacted 2h'), { date: 'August 9, 2026', status: 'Impacted', minutes: 120 })
   assert.equal(parseV3DayTooltip('August 9, 2026 Impacted Related X'), null, 'no duration')
   assert.equal(parseV3DayTooltip('August 9, 2026 Impacted 2d Related X'), null, 'a unit this reader does not know')
   assert.equal(parseV3DayTooltip('August 9, 2026 Degraded 5m Related X'), null, 'another status word')
   assert.equal(parseV3DayTooltip('July 28, 2026 No incidents'), null)
+})
+
+// #1851 — read through Browser Run on 2026-10-29: Completion API and Conversations API ("Partial
+// outage") and Vibe ("Degraded performance") each drew October 23 tangerine, which no reader knew.
+const PARTIAL = { kind: 'partial', date: 'October 23, 2026', status: 'Partial outage', text: '51m', titles: ['Mistral Small 4 Availability Degradation'] }
+const DEGRADED = { ...PARTIAL, status: 'Degraded performance' }
+
+test('a tangerine Partial outage or Degraded performance day reads as its minutes under its own class', () => {
+  assert.deepEqual(parseV3DayTooltip('October 23, 2026 Partial outage 51m Related Mistral Small 4 Availability Degradation'),
+    { date: 'October 23, 2026', status: 'Partial outage', minutes: 51 })
+  for (const bar of [PARTIAL, DEGRADED]) {
+    const { chart, days, fetched } = v3Chart([BAR.clean, bar])
+    assert.deepEqual([chart.unreadBars, chart.impacted, fetched], [0, [1], 1], bar.status)
+    assert.deepEqual(days[0].segments, [{ cls: 'bg-tangerine-9', width: (51 / 1440) * 100 }])
+    assert.equal(days[0].label, 'Mistral Small 4 Availability Degradation')
+  }
+})
+
+test('a status word drawn in the other colour is an impacted day this reader does not read', () => {
+  for (const bar of [{ ...BAR.short, kind: 'partial' }, { ...PARTIAL, kind: 'impacted' }]) {
+    const { chart, days, fetched } = v3Chart([BAR.clean, bar])
+    assert.deepEqual([chart.unreadBars, chart.impacted, days.length, fetched], [0, [1], 0, 0])
+  }
 })
 
 test('a chart keeps minutes as a share of the day, excludes leading No data days, and joins titles for attribution', () => {
@@ -453,7 +477,6 @@ const stubPage = ({ goto = response(200), waitForSelector = async () => {}, rost
     calls,
     goto: async () => goto,
     waitForSelector: async (...args) => { calls.waited++; return waitForSelector(...args) },
-    waitForTimeout: async () => {},
     evaluate: async (fn) => {
       if (fn === readV3Roster) return rosters.length > 1 ? rosters.shift() : rosters[0]
       if (fn === readIncidentLinks) return urls

@@ -191,9 +191,25 @@ export function readV3ComponentStatus(iconClass) {
   return hit ? String(hit[1]) : 'Unknown'
 }
 
+/** Cloudflare served its challenge instead of the page. */
+export class CloudflareChallengeError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'CloudflareChallengeError'
+  }
+}
+
+/** The page rendered, but fewer component cards loaded than its own index lists. */
+export class RosterShortError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'RosterShortError'
+  }
+}
+
 /** The error a navigation response deserves when it is not the real page, or null when it is. */
 export function navigationFailure(response, url) {
-  if (isCloudflareChallenge(response?.headers())) return new Error(`cf-mitigated: challenge — served for ${url}; skipping the wait (#1510)`)
+  if (isCloudflareChallenge(response?.headers())) return new CloudflareChallengeError(`cf-mitigated: challenge — served for ${url}; skipping the wait (#1510)`)
   return response?.ok() ? null : new Error(`HTTP ${response?.status() ?? 'none'} from ${url}`)
 }
 
@@ -244,13 +260,16 @@ export function readV3Roster(doc = document) {
 const V3_BAR_CLEAN = 'bg-pothos-10'
 const V3_BAR_IMPACTED = 'bg-red-v2-12'
 const V3_BAR_NO_DATA = 'bg-dove-grey-5'
+const V3_BAR_PARTIAL = 'bg-tangerine-9'
+/** Impacted bar colour → the tooltip status words it may carry (#1851). */
+const V3_IMPACT_BARS = { [V3_BAR_IMPACTED]: ['Impacted'], [V3_BAR_PARTIAL]: ['Partial outage', 'Degraded performance'] }
 const MINUTES_PER_DAY = 1440
 
-/** "July 24, 2026 Impacted 1h 5m Related …" → the day and its downtime; null without a duration after `Impacted`. */
+/** "July 24, 2026 Impacted 1h 5m Related …" → the day, its status word and its downtime; null without a duration after the status. */
 export function parseV3DayTooltip(text) {
-  const m = /^([A-Z][a-z]+ \d{1,2}, \d{4}) Impacted (?:(\d+)h)? ?(?:(\d+)m)?(?: Related .+)?$/.exec(String(text ?? ''))
-  if (!m || (m[2] === undefined && m[3] === undefined)) return null
-  return { date: m[1], minutes: Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0) }
+  const m = /^([A-Z][a-z]+ \d{1,2}, \d{4}) (Impacted|Partial outage|Degraded performance) (?:(\d+)h)? ?(?:(\d+)m)?(?: Related .+)?$/.exec(String(text ?? ''))
+  if (!m || (m[3] === undefined && m[4] === undefined)) return null
+  return { date: m[1], status: m[2], minutes: Number(m[3] ?? 0) * 60 + Number(m[4] ?? 0) }
 }
 
 /**
@@ -271,13 +290,14 @@ export function readV3Chart(card) {
     if (classes.has(V3_BAR_NO_DATA) && /No data$/.test(bar.text) && !started) { leading++; return }
     started = true
     if (classes.has(V3_BAR_CLEAN) && /No incidents$/.test(bar.text)) return
-    if (!classes.has(V3_BAR_IMPACTED)) { unreadBars++; return }
+    const cls = Object.keys(V3_IMPACT_BARS).find((c) => classes.has(c))
+    if (!cls) { unreadBars++; return }
     impacted.push(i)
     const day = bar.statuses.length === 1 ? parseV3DayTooltip(bar.text) : null
-    if (!day) return
+    if (!day || !V3_IMPACT_BARS[cls].includes(day.status)) return
     days.push({
       date: day.date,
-      segments: [{ cls: V3_BAR_IMPACTED, width: Math.min(100, (day.minutes / MINUTES_PER_DAY) * 100) }],
+      segments: [{ cls, width: Math.min(100, (day.minutes / MINUTES_PER_DAY) * 100) }],
       label: bar.titles.join(' | '),
     })
   })
@@ -302,18 +322,18 @@ export async function gotoReadable(page, url, readySelector) {
  * must not become a narrower, falsely clean API scope. A roster that loads short is a failed read;
  * only an unreadable index, no cards at all, or surplus cards say the page itself changed.
  */
-export async function loadV3Roster(page, attempts = 20) {
+export async function loadV3Roster(page, attempts = 20, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
   let roster
   for (let attempt = 0; attempt < attempts; attempt++) {
     roster = await page.evaluate(readV3Roster)
     if (roster.expected > 0 && roster.cards.length >= roster.expected) break
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-    await page.waitForTimeout(500)
+    await sleep(500)
   }
   if (roster.expected === 0 || roster.cards.length === 0 || roster.cards.length > roster.expected) {
     throw new MistralPageContractError(`v3 component roster disagrees with its index: ${roster.cards.length}/${roster.expected}`)
   }
-  if (roster.cards.length < roster.expected) throw new Error(`v3 component roster loaded short: ${roster.cards.length}/${roster.expected}`)
+  if (roster.cards.length < roster.expected) throw new RosterShortError(`v3 component roster loaded short: ${roster.cards.length}/${roster.expected}`)
   if (roster.cards.some((c) => !c.id || !c.name)) throw new MistralPageContractError('v3 component card has no id or name')
   return roster
 }
@@ -398,6 +418,83 @@ export function parseUpdateRows(rows) {
   return dropped > 0 ? { updates: [], dropped } : { updates, dropped }
 }
 
+/**
+ * Read the status page, its history and its incident pages into the payload `/api/internal/mistral-feed`
+ * accepts. Uses only `goto`, `waitForSelector` and `evaluate`, so a Playwright page (the Action) and a
+ * Puppeteer page (Browser Run, #1851) both drive it.
+ */
+export async function readMistralFeed(page, { maxIncidents = DEFAULT_MAX_INCIDENTS, paceMs = DEFAULT_PACE_MS } = {}) {
+  await gotoReadable(page, STATUS_URL, V3_SECTION)
+  const roster = await loadV3Roster(page)
+  const components = roster.cards.map((c) => ({ id: c.id, name: c.name, status: readV3ComponentStatus(c.iconClass) }))
+  const uptime = roster.cards.map((card) => {
+    const { chart, days, fetched } = readV3Chart(card)
+    return buildUptimeEntry(chart, days, fetched)
+  })
+  for (const u of uptime) {
+    if (u.unreadBars > 0 || u.coverage.fetched < u.coverage.impacted) console.warn(`[scrape] unreadable day bars on ${u.componentId}: unread=${u.unreadBars} impacted=${u.coverage.impacted} read=${u.coverage.fetched}`)
+  }
+  for (const c of components) {
+    if (c.status === 'Unknown') console.warn(`[scrape] unmapped component icon on ${c.name}: ${roster.cards.find((card) => card.id === c.id)?.iconClass}`)
+  }
+  console.log(`[scrape] uptime charts=${uptime.length} impactedDays=${uptime.reduce((a, u) => a + u.coverage.impacted, 0)}`)
+
+  const today = new Date().toISOString().slice(0, 10)
+  await gotoReadable(page, `${STATUS_URL}history?date=${today}`, 'a[href*="/incidents/"]')
+
+  // Newest-first, as the page orders them.
+  const allUrls = await readHistoryUrls(page)
+  const urls = allUrls.slice(0, maxIncidents)
+  if (allUrls.length > urls.length) {
+    // The cap bit — expected on most runs, since the page carries a longer tail than the window
+    // needs. `available` in the payload is what lets the Worker decide whether it cost real days.
+    console.log(`[scrape] incident cap bit: page listed ${allUrls.length}, taking ${urls.length}`)
+  }
+
+  const incidents = []
+  let failed = 0
+  for (const url of urls) {
+    const id = (url.match(/\/incidents\/([0-9a-f-]{36})/) || [])[1]
+    if (!id) { failed++; console.warn(`[scrape] unrecognized incident URL: ${url}`); continue }
+    try {
+      const detail = await withRetry(async () => {
+        const r = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })
+        if (!r || !r.ok()) throw new Error(`HTTP ${r ? r.status() : 'none'}`)
+        return await page.evaluate(readIncidentPage);
+      })
+      const { updates, dropped } = parseUpdateRows(detail.rows)
+      if (detail.title === null) {
+        failed++
+        console.warn(`[scrape] incident page has no title element — selector moved?: ${url}`)
+        continue
+      }
+      if (updates.length === 0) {
+        failed++
+        console.warn(`[scrape] incident page had no readable updates (${dropped} rows dropped): ${url}`)
+        continue
+      }
+      incidents.push({ id, title: detail.title, updates })
+      await new Promise((r) => setTimeout(r, paceMs))
+    } catch (err) {
+      failed++
+      console.warn(`[scrape] incident page failed after retries: ${url} — ${err?.message ?? err}`)
+    }
+  }
+
+  const payload = {
+    fetchedAt: new Date().toISOString(),
+    components,
+    incidents,
+    // `listed` is post-cap (what this run ATTEMPTED), so `fetched < listed` keeps meaning "reads
+    // we lost". `available` is what the page offered — the Worker needs both to tell a cap that
+    // merely bit (every run, by design) from one that ate days inside the 30-day window.
+    coverage: { listed: urls.length, fetched: incidents.length, available: allUrls.length },
+    uptime,
+  }
+  console.log(`[scrape] components=${components.length} attempted=${urls.length} read=${incidents.length} failed=${failed}`)
+  return payload
+}
+
 async function main() {
   const WORKER_URL = process.env.WORKER_URL
   const TOKEN = process.env.MISTRAL_FEED_TOKEN
@@ -420,75 +517,7 @@ async function main() {
     // preinstalled Chrome, so no browser download and no `playwright install` step.
       browser = await chromium.launch({ headless: false, channel: 'chrome' })
     const page = await (await browser.newContext()).newPage()
-    await gotoReadable(page, STATUS_URL, V3_SECTION)
-    const roster = await loadV3Roster(page)
-    const components = roster.cards.map((c) => ({ id: c.id, name: c.name, status: readV3ComponentStatus(c.iconClass) }))
-    const uptime = roster.cards.map((card) => {
-      const { chart, days, fetched } = readV3Chart(card)
-      return buildUptimeEntry(chart, days, fetched)
-    })
-    for (const u of uptime) {
-      if (u.unreadBars > 0 || u.coverage.fetched < u.coverage.impacted) console.warn(`[scrape] unreadable day bars on ${u.componentId}: unread=${u.unreadBars} impacted=${u.coverage.impacted} read=${u.coverage.fetched}`)
-    }
-    for (const c of components) {
-      if (c.status === 'Unknown') console.warn(`[scrape] unmapped component icon on ${c.name}: ${roster.cards.find((card) => card.id === c.id)?.iconClass}`)
-    }
-    console.log(`[scrape] uptime charts=${uptime.length} impactedDays=${uptime.reduce((a, u) => a + u.coverage.impacted, 0)}`)
-
-    const today = new Date().toISOString().slice(0, 10)
-    await gotoReadable(page, `${STATUS_URL}history?date=${today}`, 'a[href*="/incidents/"]')
-
-    // Newest-first, as the page orders them.
-    const allUrls = await readHistoryUrls(page)
-    const urls = allUrls.slice(0, maxIncidents)
-    if (allUrls.length > urls.length) {
-      // The cap bit — expected on most runs, since the page carries a longer tail than the window
-      // needs. `available` in the payload is what lets the Worker decide whether it cost real days.
-      console.log(`[scrape] incident cap bit: page listed ${allUrls.length}, taking ${urls.length}`)
-    }
-
-    const incidents = []
-    let failed = 0
-    for (const url of urls) {
-      const id = (url.match(/\/incidents\/([0-9a-f-]{36})/) || [])[1]
-      if (!id) { failed++; console.warn(`[scrape] unrecognized incident URL: ${url}`); continue }
-      try {
-        const detail = await withRetry(async () => {
-          const r = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })
-          if (!r || !r.ok()) throw new Error(`HTTP ${r ? r.status() : 'none'}`)
-          return await page.evaluate(readIncidentPage);
-        })
-        const { updates, dropped } = parseUpdateRows(detail.rows)
-        if (detail.title === null) {
-          failed++
-          console.warn(`[scrape] incident page has no title element — selector moved?: ${url}`)
-          continue
-        }
-        if (updates.length === 0) {
-          failed++
-          console.warn(`[scrape] incident page had no readable updates (${dropped} rows dropped): ${url}`)
-          continue
-        }
-        incidents.push({ id, title: detail.title, updates })
-        await new Promise((r) => setTimeout(r, paceMs))
-      } catch (err) {
-        failed++
-        console.warn(`[scrape] incident page failed after retries: ${url} — ${err?.message ?? err}`)
-      }
-    }
-
-    const payload = {
-      fetchedAt: new Date().toISOString(),
-      components,
-      incidents,
-      // `listed` is post-cap (what this run ATTEMPTED), so `fetched < listed` keeps meaning "reads
-      // we lost". `available` is what the page offered — the Worker needs both to tell a cap that
-      // merely bit (every run, by design) from one that ate days inside the 30-day window.
-      coverage: { listed: urls.length, fetched: incidents.length, available: allUrls.length },
-      uptime,
-    }
-    console.log(`[scrape] components=${components.length} attempted=${urls.length} read=${incidents.length} failed=${failed}`)
-    await deliverMistralFeed(WORKER_URL, TOKEN, state, payload)
+    await deliverMistralFeed(WORKER_URL, TOKEN, state, await readMistralFeed(page, { maxIncidents, paceMs }))
     } finally {
       if (browser) await browser.close()
     }

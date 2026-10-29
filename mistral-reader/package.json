@@ -1,0 +1,8 @@
+{
+  "name": "mistral-reader",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0"
+  }
+}
