@@ -147,7 +147,7 @@ export function figuresFrom(
     totalDowntimeMin: agg.totalMin,
     longestIncidentMin: agg.longestMin,
     avgResolutionMin: avg,
-    countedIncidents: agg.countedCount,
+    countedIncidents: agg.countedCount ?? list.length,
     monthlyScore: m.score,
     monthlyGrade: m.grade,
     monthlyScoreConfidence: m.confidence,
@@ -296,6 +296,25 @@ export const ROW_REPLACEMENTS: Record<string, RowReplacement> = {
       impact: 'minor',
     }],
   },
+  '2026-09-fal': {
+    period: '2026-09',
+    service: 'fal',
+    source: 'https://status.fal.ai — notices cmtn4hy2u0d4r1mqj4tgiir1w and cmumesz6f02sk0wmobbyr9i01, dropped by the parser until #1830',
+    remove: [],
+    add: [{
+      id: 'cmtn4hy2u0d4r1mqj4tgiir1w',
+      title: 'fal.run is unreachable for synchronous requests',
+      startedAt: '2026-09-04T13:58:00.000Z',
+      resolvedAt: '2026-09-04T14:28:00.000Z',
+      impact: 'major',
+    }, {
+      id: 'cmumesz6f02sk0wmobbyr9i01',
+      title: 'Investigating slowness and reduced traffic',
+      startedAt: '2026-09-29T08:23:20.404Z',
+      resolvedAt: '2026-09-29T08:41:50.684Z',
+      impact: 'minor',
+    }],
+  },
   '2026-08-openai': {
     period: '2026-08',
     service: 'openai',
@@ -338,7 +357,7 @@ export function planRowReplacement(
   }
 
   const svc = archive.services?.[spec.service]
-  const list = svc?.incidentList
+  const list = svc?.incidentList ?? (svc?.incidents === 0 ? [] : undefined)
   if (!svc || !Array.isArray(list)) return refuse('no incident list in the archive')
   const entries = list as MonthlyIncidentEntry[]
 

@@ -659,6 +659,40 @@ describe('#1797 — a stuck row is re-added under its own id with the provider\'
   }
 })
 
+// #1830 — a month with no incidents is archived with no `incidentList` key at all (6 of 46 services in
+// archive:monthly:2026-09 before this patch, fal among them), so rows can only be added to it if that absence reads as [].
+describe('#1830 — rows added to a service archived with no incidents', () => {
+  const spec = ROW_REPLACEMENTS['2026-09-fal']
+  const window = monthWindow(spec.period)
+  const emptySvc = (extra: Record<string, unknown> = {}): Record<string, unknown> => {
+    const svc: Record<string, unknown> = { officialUptime: 99.89, ...extra }
+    return { ...svc, ...figuresFrom(spec.service, svc, [], window) }
+  }
+
+  it('reproduces an empty month as the builder stores it: zero counted incidents, not null', () => {
+    expect(figuresFrom(spec.service, { officialUptime: 99.89 }, [], window)).toMatchObject({ incidents: 0, countedIncidents: 0, totalDowntimeMin: null })
+  })
+
+  it('adds both fal notices when the list key is absent and incidents is 0', () => {
+    const svc = emptySvc()
+    expect('incidentList' in svc).toBe(false)
+    const { changes, refusals } = planRowReplacement({ services: { fal: svc } }, window, spec)
+    expect(refusals).toEqual([])
+    expect(changes[0].keptList.map((e) => [e.id, e.durationMin, e.finalStatus])).toEqual([
+      ['cmtn4hy2u0d4r1mqj4tgiir1w', 30, 'resolved'],
+      ['cmumesz6f02sk0wmobbyr9i01', 19, 'resolved'],
+    ])
+    expect(changes[0].after).toMatchObject({ incidents: 2, countedIncidents: 2, longestIncidentMin: 30 })
+  })
+
+  it('still refuses when the list key is absent but the stored count is not 0', () => {
+    const svc = { ...emptySvc(), incidents: 3 }
+    const { changes, refusals } = planRowReplacement({ services: { fal: svc } }, window, spec)
+    expect(changes).toEqual([])
+    expect(refusals).toEqual(['fal: no incident list in the archive'])
+  })
+})
+
 // #1805 — entries copied from `security:monthly:2026-09`. The LangChain advisory was GitHub-reviewed
 // 2025-12-23 and re-modified on 2026-09-10, which is when it was archived; the NVD CVE is genuine.
 describe('#1805 — planSecurityPatch', () => {
