@@ -3,7 +3,7 @@
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { nonceAttr } from '../_shared/csp-nonce'
-import { EXTENSION_STORE_URL, renderExtInstallCta } from '../_shared/extension-cta'
+import { EXTENSION_STORES, renderExtInstallCta } from '../_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from '../_shared/slack-install'
 import type { Announcement } from './announcements'
 
@@ -316,6 +316,9 @@ ${consentInitScript(nonce)}
   .cta-box h2 { font-size: 24px; font-weight: 600; margin-bottom: 10px; }
   .cta-box p { font-size: 14px; color: var(--text2); margin-bottom: 28px; }
   .cta-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .ext-badges { margin-top: 20px; display: flex; gap: 16px; justify-content: center; align-items: center; flex-wrap: wrap; }
+  .ext-badges p { width: 100%; font-size: 13px; color: var(--text2); }
+  .ext-badges img { display: block; }
 
   /* FOOTER */
   footer { border-top: 1px solid var(--border); padding: 24px; }
@@ -1098,8 +1101,8 @@ ${announcementHtml}
       <a href="https://ai-watch.dev" class="btn-primary" style="font-size:16px;padding:14px 32px;" data-i18n="cta.btn1" data-ga="click_dashboard" data-ga-loc="landing_cta">대시보드 열기 →</a>
       <a class="btn-slack" href="${slackInstallUrl()}" style="padding:12px 24px;" data-ga="click_add_to_slack" data-ga-loc="landing_cta">${slackLogoSvg(16)}<span data-i18n="alert.slack.btn">Slack에 추가</span></a>
       <a href="https://ai-watch.dev/#settings?focus=alerts" class="btn-secondary" style="font-size:14px;padding:12px 24px;" data-i18n="cta.btn2" data-ga="click_cta_alerts" data-ga-loc="landing_cta">알림 설정하기</a>
-      ${renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'landing_cta', variant: 'landing' })}
     </div>
+    ${renderExtInstallCta(EXTENSION_STORES, { loc: 'landing_cta', variant: 'landing' })}
     <div class="cta-rss">
       <button type="button" data-action="copy-rss" title="Copy RSS feed URL">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="#f26522" aria-hidden="true"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>

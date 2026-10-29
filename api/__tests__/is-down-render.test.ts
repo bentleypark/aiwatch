@@ -5,6 +5,7 @@ import { renderDelegatedListeners, resolveBeaconSvcId, buildMetaDescription, ren
 import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/utils/predictionAccuracy'
 import { getSEOContent } from '../_is-down/seo-content'
 import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
+import { expectEveryStoreLink } from '../_shared/__tests__/expect-store-links'
 
 // Guard for #842-B: the audience beacon + click delegation live inside ONE `<script>` template
 // literal. A stray backtick in a comment there once truncated the literal → the Edge SSR built a
@@ -924,6 +925,11 @@ describe('is-down handler — which live sections say they could not load (#1742
     const html = await (await handler(req('claude-api'))).text()
     expect(html).toContain('Alternatives can&rsquo;t be shown right now')
     expect(err).toHaveBeenCalledWith(expect.stringContaining('no fallbacks'))
+  })
+
+  it('a Claude page carries one install link per extension store (#1773)', async () => {
+    fetchMock.mockResolvedValueOnce(ok([svc('claude', 'Claude API')]))
+    expectEveryStoreLink(await (await handler(req('claude-api'))).text(), 'is_down_page')
   })
 
   it('status loaded but this service missing from it: alternatives say they could not load (#1831)', async () => {

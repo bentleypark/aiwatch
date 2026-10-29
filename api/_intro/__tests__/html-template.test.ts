@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderLandingPage } from '../html-template'
+import { expectEveryStoreLink } from '../../_shared/__tests__/expect-store-links'
 
 // #482 — CSP Phase 2: the /intro landing page must carry NO inline event handlers (all wired via
 // delegated listeners) and nonce every executable inline <script>, so an enforcing CSP (no
@@ -67,5 +68,11 @@ describe('renderLandingPage — CSP-clean (#482)', () => {
 
   it('omits the nonce attribute entirely when no nonce is passed', () => {
     expect(renderLandingPage()).not.toContain('nonce="')
+  })
+})
+
+describe('renderLandingPage — extension install CTA', () => {
+  it('carries one install link per extension store (#1773)', () => {
+    expectEveryStoreLink(renderLandingPage(), 'landing_cta')
   })
 })

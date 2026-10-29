@@ -7,6 +7,7 @@ import { isDownCacheControl } from '../_shared/is-down-cache'
 import { LAST_CHECKED_CLIENT_JS, REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
 import { makeLocalStorage } from '../../src/utils/__tests__/localStorageStub.js'
 import { spyFetchAsWorker } from './fetch-stub'
+import { expectEveryStoreLink } from '../_shared/__tests__/expect-store-links'
 import { LAST_GOOD_COPY_URL } from '../../worker/src/last-good-copy-path'
 
 // Every handler invocation begins with the status fetch, and a degraded/down fixture may make a
@@ -125,6 +126,15 @@ describe('is-down-group.ts', () => {
     expect(html).toContain("gtag('consent','default'")
     expect(html).toContain('id="aiwatch-cookie-banner"')
     expect(html).toContain('data-aiwatch-cb="accept"')
+  })
+
+  it('the Claude family page carries one install link per extension store (#1773)', async () => {
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+    ]))
+    expectEveryStoreLink(await (await handler(makeReq('claude'))).text(), 'is_down_group_page')
   })
 
   // #1164 follow-up — the group page originally hardcoded the static site-wide og-intro.png for every
