@@ -40,8 +40,8 @@ export function mapInstatusImpact(raw: string | null | undefined): Incident['imp
 // (Perplexity was the original example, until #1177 widened its scope to every component its card
 // displays and #1390 moved it off Instatus entirely.)
 //
-// #911 — three object shapes coexist in the payload and must be told apart to map ONLY top-level
-// component id→name:
+// #911 — three object shapes coexist in the payload and must be told apart; the default `top-level`
+// scope maps ONLY top-level component id→name (`all` also maps children, for incident references, #1830):
 //   - top-level component: `"id":…,"name":{…"default":"X"},"nameHtml":…,"group":<null|…>,"children":[…]`
 //   - CHILD sub-component (e.g. fal's "Model API" under the "API" parent): SAME shape but NO `"group"`
 //   - incident notice: `"name":{"en":…,"default":…}` immediately followed by `"started"` (no `"nameHtml"`)
@@ -51,16 +51,17 @@ export function mapInstatusImpact(raw: string | null | undefined): Incident['imp
 // NOT a reliable discriminator. Instead: (1) tolerate any locale keys before `default` (`[^}]*?`),
 // (2) require the trailing `,"nameHtml"` — excludes notices, and (3) require a `"group"` field reached
 // without crossing into the next object (`(?:(?!"id":")…)*?` tempered scan) — top-level components
-// carry `"group"` before their `"children"`; children have none, so they never match. This preserves
-// fal's intended top-level granularity while picking up Perplexity's Computer.
+// carry `"group"` before their `"children"`; children have none, so they never match.
 // LOAD-BEARING ASSUMPTIONS on the current Instatus serialization (not guaranteed by the format): a
 // top-level component (a) emits `"nameHtml"` right after its name AND (b) emits its `"group"` field
 // BEFORE its `"children"` array. If either changes upstream, that component is silently dropped — so
 // `parseInstatusComponents` warns-once on an all-dropped payload (#911) to make the drift diagnosable
 // rather than mistaken for a code bug.
-function buildInstatusComponentMap(html: string): Map<string, string> {
+function buildInstatusComponentMap(html: string, scope: 'top-level' | 'all' = 'top-level'): Map<string, string> {
   const map = new Map<string, string>()
-  const re = /\\"id\\":\\"([a-z0-9]+)\\",\\"name\\":\{[^}]*?\\"default\\":\\"([^\\"]+)\\"\},\\"nameHtml\\"(?:(?!\\"id\\":\\")[\s\S])*?\\"group\\":/g
+  const re = scope === 'all'
+    ? /\\"id\\":\\"([a-z0-9]+)\\",\\"name\\":\{[^}]*?\\"default\\":\\"([^\\"]+)\\"\},\\"nameHtml\\"/g
+    : /\\"id\\":\\"([a-z0-9]+)\\",\\"name\\":\{[^}]*?\\"default\\":\\"([^\\"]+)\\"\},\\"nameHtml\\"(?:(?!\\"id\\":\\")[\s\S])*?\\"group\\":/g
   let m: RegExpExecArray | null
   while ((m = re.exec(html)) !== null) map.set(m[1], m[2])
   return map
@@ -392,7 +393,7 @@ function parseInstatusNextIncidents(html: string): Incident[] {
       started: string; resolved: string | null; status: string
       components?: Array<{ id: string }> // #623 — affected component ids (resolved → componentNames)
     }>
-    const componentNameById = buildInstatusComponentMap(html)
+    const componentNameById = buildInstatusComponentMap(html, 'all')
 
     const incidents: Incident[] = []
     for (const notice of Object.values(notices)) {
@@ -422,11 +423,10 @@ function parseInstatusNextIncidents(html: string): Incident[] {
       const componentNames = componentRefs
         .map((c) => componentNameById.get(c.id))
         .filter((n): n is string => !!n)
-      // Resolution depends on the Instatus `"id":"…","name":{"default":…}` serialization (key order):
-      // if a notice references components but NONE resolve, the component map likely changed shape —
+      // If a notice references components but NONE resolve, the component map likely changed shape —
       // log it so a future Instatus format change is diagnosable instead of silently scoping wrong.
       if (componentRefs.length > 0 && componentNames.length === 0) {
-        console.debug(`[parseInstatusNext] notice ${notice.id} references ${componentRefs.length} component id(s) but none resolved — Instatus component serialization may have changed`)
+        console.warn(`[parseInstatusNext] notice ${notice.id} references ${componentRefs.length} component id(s) but none resolved — Instatus component serialization may have changed`)
       }
 
       incidents.push({
