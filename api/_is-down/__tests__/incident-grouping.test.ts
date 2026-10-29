@@ -417,6 +417,37 @@ describe('isAutoMonitorTitle (#599)', () => {
   })
 })
 
+describe('Fireworks incident.io "Service Degradation for <model>" (#1200)', () => {
+  const fw = (id: string, model: string, startedAt: string, impact: GroupingIncident['impact'] = 'minor') =>
+    mkInc({ id, title: `Service Degradation for\u00a0${model}`, startedAt, impact })
+
+  it('matches the live title, whose space after "for" is U+00A0, and nothing looser', () => {
+    expect(isAutoMonitorTitle('Service Degradation for\u00a0GLM 5.3 Flash')).toBe(true)
+    expect(isAutoMonitorTitle('Service Degradation for one of our Serverless models')).toBe(true)
+    expect(isAutoMonitorTitle('Service Degradation for')).toBe(false)
+    expect(isAutoMonitorTitle('Partial Service Degradation for GLM 5.3')).toBe(false)
+    expect(isAutoMonitorTitle('We saw a service degradation for some users')).toBe(false)
+    expect(isAutoMonitorTitle('Elevated latency on some serverless models')).toBe(false)
+  })
+
+  it('groups same-day minor repeats per model; a different model, a major or a human title stays separate', () => {
+    const incs = [
+      fw('k1', 'Kimi K3', '2026-10-26T17:59:00Z'),
+      fw('k2', 'Kimi K3', '2026-10-26T18:40:00Z'),
+      fw('k3', 'Kimi K3', '2026-10-26T19:47:00Z'),
+      fw('m1', 'MiniMax M3.1 Flash', '2026-10-26T19:43:00Z'),
+      fw('x1', 'Kimi K3', '2026-10-26T20:00:00Z', 'major'),
+      mkInc({ id: 'h1', title: 'Elevated latency on some serverless models', startedAt: '2026-10-26T21:00:00Z', impact: 'minor' }),
+      mkInc({ id: 'h2', title: 'Elevated latency on some serverless models', startedAt: '2026-10-26T22:00:00Z', impact: 'minor' }),
+    ]
+    const result = groupIncidents(incs)
+    const groups = result.filter((r) => r.kind === 'group')
+    expect(groups).toHaveLength(1)
+    expect((groups[0] as { entries: GroupingIncident[] }).entries.map((e) => e.id).sort()).toEqual(['k1', 'k2', 'k3'])
+    expect(result.filter((r) => r.kind === 'single').map((r) => (r as { incident: GroupingIncident }).incident.id).sort()).toEqual(['h1', 'h2', 'm1', 'x1'])
+  })
+})
+
 describe('worker-tagged autoMonitor incidents (#983)', () => {
   // Lockstep with src/utils/__tests__/incidentGrouping.test.js — the is-down SSR page reads the same
   // `autoMonitor` field off /api/status/cached, so a divergence here means one surface groups the

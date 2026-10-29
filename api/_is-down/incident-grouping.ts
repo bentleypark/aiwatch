@@ -175,8 +175,12 @@ export function isFlapTitle(title: string | null | undefined): boolean {
 // normalized-title) GROUP_THRESHOLD this stays tight. "Down" is deliberately excluded
 // (broader false-positive surface; the observed noise is all "Degraded"). Lockstep with SPA.
 const AUTOMONITOR_TITLE_RE = /\bdegraded(\s+performance)?\b\s*(?:[·\-]\s.*)?$/i
+// #1200 — Fireworks' templated incident.io title: "Service Degradation for <model>", with a U+00A0 after
+// "for" (hence `\s`). Anchored, so it cannot match prose that merely mentions a degradation. Lockstep with SPA.
+const SERVICE_DEGRADATION_FOR_RE = /^Service\s+Degradation\s+for\s+\S.*$/i
 export function isAutoMonitorTitle(title: string | null | undefined): boolean {
-  return AUTOMONITOR_TITLE_RE.test(String(title ?? ''))
+  const t = String(title ?? '')
+  return AUTOMONITOR_TITLE_RE.test(t) || SERVICE_DEGRADATION_FOR_RE.test(t)
 }
 
 function localDayKey(iso: string, timeZone: string): string {
