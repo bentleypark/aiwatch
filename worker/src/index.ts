@@ -2202,7 +2202,7 @@ import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './dai
 import { parseFailKey, parseParseFailDay, reasonsFor } from './parse-failure-log'
 import { collectChangelogs, getStaleSources } from './changelog'
 import { runProviderChanges } from './provider-changes'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, liveStabilityUptime, accumulatePrevWeekCounters, type HistoryUptimeRow, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
 import { searchBadgeEmbeds, diffBadgeRepoDiscovery, parseBadgeReposSeen, type BadgeRepoDiscoveryDiff } from './badge-repo-discovery'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
@@ -3881,16 +3881,13 @@ const workerExport = {
             }
             const incidents = buildIncidentSummary(allMonthlyIncidents, weekStart, weekEnd)
 
-            // #733 — Stability Trend compares OFFICIAL status-page uptime, gated on the LIVE current
-            // value. `currentUptime` = live `uptime30d` from services:latest, with no-official-uptime /
-            // stale-source services set to null (= dashboard `isUnreliableUptime`, #713) so they're
-            // excluded. The previous-week official snapshot comes from the history counters' stored
-            // `officialUptime` (i=7→13 below; i ascending = most-recent-first, so the first non-null is
-            // the most recent). The current week is NOT read from history — a service like Bedrock had
+            // #733 — Stability Trend compares OFFICIAL status-page uptime: the LIVE `uptime30d` from
+            // services:latest against the previous week's `history:` snapshots (i=7→13 below, most-recent
+            // first). Which figures are excluded is decided in `liveStabilityUptime` /
+            // `accumulatePrevWeekCounters`. The current week is NOT read from history — a service like Bedrock had
             // intermittently non-null `officialUptime` snapshots (pre-#713 estimate residue) that would
             // otherwise leak it back in despite publishing no uptime now.
-            type WeekCounter = { ok: number; total: number; officialUptime?: number | null }
-            const prevWeekCounters: Record<string, WeekCounter> = {}
+            const prevWeekRows: Record<string, HistoryUptimeRow>[] = []
             for (let i = 7; i < 14; i++) {
               const pd = new Date(now)
               pd.setUTCDate(pd.getUTCDate() - i)
@@ -3898,28 +3895,19 @@ const workerExport = {
               const praw = await env.STATUS_CACHE.get(pkey).catch(() => null)
               if (!praw) continue
               try {
-                const pdata = JSON.parse(praw) as Record<string, { ok: number; total: number; officialUptime?: number | null }>
-                for (const [svcId, counts] of Object.entries(pdata)) {
-                  const c = prevWeekCounters[svcId] ?? { ok: 0, total: 0, officialUptime: null }
-                  c.ok += counts.ok; c.total += counts.total
-                  if (c.officialUptime == null && counts.officialUptime != null) c.officialUptime = counts.officialUptime
-                  prevWeekCounters[svcId] = c
-                }
+                prevWeekRows.push(JSON.parse(praw) as Record<string, HistoryUptimeRow>)
               } catch { console.warn(`[cron] ${pkey} parse failed`) }
             }
+            const prevWeekCounters = accumulatePrevWeekCounters(prevWeekRows)
             const serviceNames: Record<string, string> = {}
             for (const svc of SERVICES) serviceNames[svc.id] = svc.name
-            // Live current official uptime (isUnreliableUptime → null → excluded)
-            const currentUptime: Record<string, number | null> = {}
+            let currentUptime: Record<string, number | null> = {}
             const latestRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
             if (latestRaw) {
               try {
                 const p = JSON.parse(latestRaw)
                 const live: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
-                for (const s of live) {
-                  const unreliable = s.uptime30d == null || !!s.incidentSourceStale
-                  currentUptime[s.id] = unreliable ? null : s.uptime30d!
-                }
+                currentUptime = liveStabilityUptime(live)
               } catch { console.warn('[cron] services:latest parse failed for stability') }
             }
             const stabilityChanges = buildStabilityChanges(currentUptime, prevWeekCounters, serviceNames)
