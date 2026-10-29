@@ -677,6 +677,23 @@ describe('accumulateMonthlyIncidents', () => {
     })),
   })
 
+  it('#1859 persists crossEventKey on a new row, refreshes it on an existing one, and the partial archive serves it', () => {
+    const withKey = (key: string | undefined): ServiceStatus => {
+      const svc = makeService('xai', [{ id: 'xai-evt:mger3p', startedAt: '2026-10-03T13:30:00.000Z', status: 'resolved', duration: '3h 39m' }])
+      svc.incidents[0].crossEventKey = key
+      return svc
+    }
+    const first = accumulateMonthlyIncidents(null, [withKey('xai:53g239')], '2026-10', [])
+    expect(first.services.xai.incidents![0].crossEventKey).toBe('xai:53g239')
+
+    const legacy = accumulateMonthlyIncidents(null, [withKey(undefined)], '2026-10', [])
+    expect(legacy.services.xai.incidents![0]).not.toHaveProperty('crossEventKey')
+    const refreshed = accumulateMonthlyIncidents(legacy, [withKey('xai:53g239')], '2026-10', [])
+    expect(refreshed.services.xai.incidents![0].crossEventKey).toBe('xai:53g239')
+
+    expect(buildPartialIncidentArchive('2026-10', refreshed).services.xai.incidentList[0].crossEventKey).toBe('xai:53g239')
+  })
+
   it('#1537 reconciles a start-month monitoring row from durable resolution history', () => {
     const accumulated = accumulateMonthlyIncidents(null, [makeService('openai', [
       { id: 'cross-month', startedAt: '2026-08-31T22:27:56Z', status: 'monitoring', duration: null },

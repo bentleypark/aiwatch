@@ -84,6 +84,32 @@ describe('unfilteredIncidentRows (#1338)', () => {
     ])
   })
 
+  describe('archive rows carrying crossEventKey (#1859)', () => {
+    const archived = (inc) => ({ id: inc.id, title: inc.title, startedAt: inc.startedAt, resolvedAt: inc.resolvedAt, durationMin: 219, finalStatus: 'resolved', crossEventKey: inc.crossEventKey })
+    const sept = (xaiRows, grokRows) => ({ '2026-09': { services: { xai: { incidentList: xaiRows }, grok: { incidentList: grokRows } } } })
+
+    it('an event that left the live feed is still ONE row naming both services', () => {
+      const rows = rowsOf([xai([]), grok([])], sept([archived(API)], [archived(GROK)]), ['2026-09'])
+      expect(rows.map((r) => [r.id, r.affectedNames, r.fromArchive])).toEqual([['xai:xai-evt:mger3p', ['SpaceXSI API', 'Grok'], true]])
+    })
+
+    it('a card still live joins its archived twin from the other card without being replaced', () => {
+      const rows = rowsOf([xai([]), grok([GROK])], sept([archived(API)], [archived(GROK)]), ['2026-09'])
+      expect(rows.map((r) => [r.id, r.affectedNames, r.fromArchive])).toEqual([['grok:xai-grok:53g239', ['Grok', 'SpaceXSI API'], undefined]])
+    })
+
+    it('two archived rows of ONE service sharing a key stay two rows', () => {
+      const twin = { ...archived(GROK), id: 'xai-grok:53g239-2' }
+      const rows = rowsOf([grok([])], { '2026-09': { services: { grok: { incidentList: [archived(GROK), twin] } } } }, ['2026-09'])
+      expect(rows.map((r) => [r.id, r.affectedNames])).toEqual([['grok:xai-grok:53g239', ['Grok']], ['grok:xai-grok:53g239-2', ['Grok']]])
+    })
+
+    it('archived rows without a key stay one row per card', () => {
+      const rows = rowsOf([xai([]), grok([])], sept([{ ...archived(API), crossEventKey: undefined }], [{ ...archived(GROK), crossEventKey: undefined }]), ['2026-09'])
+      expect(rows.map((r) => r.affectedNames)).toEqual([['SpaceXSI API'], ['Grok']])
+    })
+  })
+
   it('a shared id keeps the first service\'s row even when another card\'s copy is more open', () => {
     const shared = { id: '461yvfrzpwtt', title: 'Elevated errors for multiple models', status: 'resolved', startedAt: '2026-09-03T13:26:04.201Z', resolvedAt: '2026-09-03T16:00:00.000Z' }
     const [row] = rowsOf([

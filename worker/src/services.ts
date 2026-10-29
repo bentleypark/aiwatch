@@ -4417,6 +4417,7 @@ export function carriedIncidentTags(entry: MonthlyIncidentEntry): Partial<Incide
     ...(entry.derived ? { derived: entry.derived, ...(entry.derivedDay ? { derivedDay: entry.derivedDay } : {}) } : {}),
     ...(entry.startUnknown ? { startUnknown: true } : {}),
     ...(entry.zeroLengthRecord ? { zeroLengthRecord: true } : {}),
+    ...(entry.crossEventKey ? { crossEventKey: entry.crossEventKey } : {}),
   }
 }
 

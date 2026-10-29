@@ -127,6 +127,12 @@ export function archiveIncidentToLive(archIncident, service) {
  * across two services would render as two cards.
  */
 export function mergeArchiveIntoMap(liveMap, archives, services) {
+  // #1859 — an archived row of a cross-card event (#1338) joins the row already holding that event,
+  // from another service only, and never replaces it.
+  const byEvent = new Map()
+  for (const row of liveMap.values()) {
+    if (row.crossEventKey) byEvent.set(row.crossEventKey, row)
+  }
   for (const month of Object.keys(archives)) {
     const archive = archives[month]
     const archServices = archive?.services
@@ -149,8 +155,14 @@ export function mergeArchiveIntoMap(liveMap, archives, services) {
         // /api/status. `resolved` (green) and `monitoring` (amber, impact ended, real duration) have a
         // defined badge → surfaced.
         if (arch.finalStatus === 'investigating' || arch.finalStatus === 'identified') continue
-        const live = archiveIncidentToLive(arch, service)
-        liveMap.set(arch.id, { ...live, affectedNames: [service.name] })
+        const event = arch.crossEventKey ? byEvent.get(arch.crossEventKey) : undefined
+        if (event && !event.affectedNames.includes(service.name)) {
+          event.affectedNames.push(service.name)
+          continue
+        }
+        const row = { ...archiveIncidentToLive(arch, service), affectedNames: [service.name] }
+        liveMap.set(arch.id, row)
+        if (arch.crossEventKey) byEvent.set(arch.crossEventKey, row)
       }
     }
   }
