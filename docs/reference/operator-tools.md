@@ -266,13 +266,14 @@ curl -s "https://<worker>/api/admin/withdrawals?months=12" -H "X-Admin-Key: $ADM
 |---|---|
 | `announced` | The ⚪ notice was accepted by Discord — the thread was closed. Working as designed |
 | `pending` | Not announced YET, and still before its send deadline. Normally a `withdrawalHold` (the provider re-published the id, an incident is still running, or the status source was unreadable) — benign, re-evaluated every 5 min |
-| `neverClosed` | **#1106 recurring.** No operator ⚪ notice went out, and the window for sending it has closed, so nothing can send it now. Scoped to the OPERATOR webhook (see below) — subscribers may still have received it |
+| `neverClosed` | **#1106 recurring.** No operator ⚪ notice went out, and the window for sending it has closed, so nothing can send it now. Scoped to the OPERATOR webhook (see below) — subscribers may still have received it. Rows recorded before #1189 carry no `threadOpened`, so they land here even when no 🔴 was open |
+| `noThread` | Past the deadline, and no `alerted:new:` marker existed at prune time: no 🔴 was ever sent, so there was no thread to close (#1189) |
 | `malformedTimestamp` | An un-announced row whose `prunedAt` is unparseable, so it cannot be aged — counted apart rather than sitting in `pending` forever |
 | `partial` / `ok` | `partial: true` (and `ok: false`) means the counts are computed over LESS than the requested range — some month could not be opened, or some rows failed the shape check. Branch on `ok`; the rows are still returned |
 | `unreadableMonths` | Months whose KV value could not be read at all |
 | `malformedByMonth` | Rows excluded by the shape check, per month — that month's key is the one to repair |
 
-These four buckets partition `count`: `announced + pending + neverClosed + malformedTimestamp === count`.
+These buckets partition `count`: `announced + pending + neverClosed + noThread + malformedTimestamp === count`. Each row also carries its bucket as `outcome`.
 
 A `neverClosed > 0` is the signal to investigate — pair it with the cron's own
 `[cron] #1106 withdrawal notice held — <reason>` lines if they are still inside the Workers Logs window.

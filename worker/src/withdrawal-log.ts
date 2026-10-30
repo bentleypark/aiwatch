@@ -14,14 +14,11 @@
 // noise. The shape mirrors `growth-series.ts` (#986): a volatile signal promoted to a durable series.
 //
 // Two write points, and only two:
-//   1. the prune (`accumulateIncidentsOnlyIfChanged`) records the row with `announcedAt` ABSENT;
+//   1. the prune (`accumulateIncidentsOnlyIfChanged`) records the row with `announcedAt` ABSENT,
+//      and `threadOpened` from the `alerted:new:` marker (#1189);
 //   2. the cron's `alerted:wd:` dedup write stamps `announcedAt`.
-// A row still missing `announcedAt` once its send deadline has passed is therefore a thread that
-// was opened and never closed — the #1106 failure recurring — and it is DERIVED, not separately
-// wired. Holds are not rows on purpose: `withdrawalHold` re-evaluates every 5 minutes, so a held
-// notice is a STATE, not an event, and one row per evaluation would turn a bounded log into a
-// per-cycle write. A hold that never clears simply leaves the row un-announced, which is the fact
-// worth keeping; the reason is in the cron log line for as long as logs live.
+// The verdict is DERIVED on read (`withdrawalOutcome`). Holds are not recorded: `withdrawalHold`
+// re-evaluates every 5 minutes, so a held notice is a STATE, not an event.
 
 import { WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 // ALERTED_NEW_TTL_S only — the second of the two clocks that bound a sendable notice. No cycle:
@@ -49,6 +46,9 @@ export interface WithdrawalLogEntry {
    *  did receive the notice. The error direction is the safe one — it over-reports a failure, loudly
    *  — but it means `neverClosed` is "no operator notice went out", not "nobody was told". */
   announcedAt?: string
+  /** #1189 — whether `alerted:new:{incId}` existed at prune time, i.e. whether a 🔴 thread was open
+   *  to close. */
+  threadOpened?: boolean
 }
 
 /** Month-keyed so the value stays small and a month can be read without scanning the others.
@@ -110,6 +110,7 @@ function isLogEntry(v: unknown): v is WithdrawalLogEntry {
 export function upsertPrunedRows(
   existing: WithdrawalLogEntry[],
   fresh: WithdrawnIncident[],
+  threadOpened: ReadonlyMap<string, boolean> = new Map(),
 ): WithdrawalLogEntry[] {
   const seen = new Set(existing.map((e) => `${e.svcId}:${e.incId}`))
   const merged = [...existing]
@@ -117,7 +118,8 @@ export function upsertPrunedRows(
     const key = `${w.svcId}:${w.incId}`
     if (seen.has(key)) continue
     seen.add(key)
-    merged.push({ svcId: w.svcId, incId: w.incId, title: w.title, startedAt: w.startedAt, prunedAt: w.prunedAt })
+    const opened = threadOpened.get(w.incId)
+    merged.push({ svcId: w.svcId, incId: w.incId, title: w.title, startedAt: w.startedAt, prunedAt: w.prunedAt, ...(opened === undefined ? {} : { threadOpened: opened }) })
   }
   if (merged.length > WITHDRAWAL_LOG_MAX) {
     // Name what is being erased, and single out the rows that were never announced: those are
@@ -188,15 +190,28 @@ export const WITHDRAWN_LOG_UNCLOSED_AFTER_MS = WITHDRAWN_TTL_S * 1000
  *  keying the verdict off `prunedAt` alone would report a row that is ALREADY lost as `pending` for up
  *  to a day — the exact under-reporting #1153 widened the roster and thereby exposed. */
 export function isPermanentlyUnclosed(row: WithdrawalLogEntry, nowMs: number): boolean {
-  if (row.announcedAt) return false
+  return withdrawalOutcome(row, nowMs) === 'neverClosed'
+}
+
+/** #1189 — the one bucket a row falls in. Past its send deadline, an un-announced row is `noThread`
+ *  when no 🔴 was open to close, and otherwise `neverClosed`. A row without `threadOpened` stays
+ *  `neverClosed`. */
+export type WithdrawalOutcome = 'announced' | 'pending' | 'neverClosed' | 'noThread' | 'malformedTimestamp'
+
+export function withdrawalOutcome(row: WithdrawalLogEntry, nowMs: number): WithdrawalOutcome {
+  if (row.announcedAt) return 'announced'
+  if (Number.isNaN(Date.parse(row.prunedAt))) return 'malformedTimestamp'
+  if (!pastSendDeadline(row, nowMs)) return 'pending'
+  if (row.threadOpened === false) return 'noThread'
+  return 'neverClosed'
+}
+
+function pastSendDeadline(row: WithdrawalLogEntry, nowMs: number): boolean {
   const pruned = Date.parse(row.prunedAt)
   const started = Date.parse(row.startedAt)
-  // An unparseable `prunedAt` cannot be aged. Do NOT claim a permanent loss from it — the row is
-  // reported as pending and its malformed timestamp is visible in the row itself.
-  if (Number.isNaN(pruned)) return false
   const rosterDeadline = pruned + WITHDRAWN_LOG_UNCLOSED_AFTER_MS
   // A malformed `startedAt` just drops the marker clock (its absence can only push the deadline
-  // LATER, i.e. toward reporting pending — the safe direction, matching the prunedAt guard above).
+  // LATER, i.e. toward reporting pending — the safe direction).
   const deadline = Number.isNaN(started)
     ? rosterDeadline
     : Math.min(rosterDeadline, started + ALERTED_NEW_TTL_S * 1000)
@@ -307,11 +322,29 @@ export async function recordWithdrawalsPruned(
     // Skip the write when every id is already recorded. Compared by IDENTITY, not by length: the cap
     // can evict as many rows as it adds, so equal lengths do not mean equal contents.
     const known = new Set(rows.map((r) => `${r.svcId}:${r.incId}`))
-    if (fresh.every((w) => known.has(`${w.svcId}:${w.incId}`))) continue
-    const merged = upsertPrunedRows(rows, fresh)
+    const added = fresh.filter((w) => !known.has(`${w.svcId}:${w.incId}`))
+    if (added.length === 0) continue
+    const merged = upsertPrunedRows(rows, fresh, await readThreadOpened(kv, added))
     const ok = await kvPut(kv, withdrawalLogKey(month), JSON.stringify(merged))
     if (!ok) console.error('[withdrawal-log] write FAILED — these withdrawals leave no durable record:', fresh.map((w) => `${w.svcId}/${w.incId}`).join(', '))
   }
+}
+
+/** #1189 — `alerted:new:{incId}` presence per id: the gate `buildWithdrawalAlerts` applies. An absent
+ *  marker counts as `false` only within its TTL of `startedAt`; past that it may have expired. A failed
+ *  read, or an expired window, leaves the id out, so its row keeps the pre-#1189 verdict. */
+async function readThreadOpened(kv: KVLike | KVNamespace, tombstones: WithdrawnIncident[]): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>()
+  for (const w of tombstones) {
+    if (out.has(w.incId)) continue
+    try {
+      if ((await kv.get(`alerted:new:${w.incId}`)) !== null) out.set(w.incId, true)
+      else if (Date.parse(w.prunedAt) - Date.parse(w.startedAt) < ALERTED_NEW_TTL_S * 1000) out.set(w.incId, false)
+    } catch (err) {
+      console.warn('[withdrawal-log] alerted:new read failed — threadOpened left unset:', w.incId, err instanceof Error ? err.message : String(err))
+    }
+  }
+  return out
 }
 
 /**
