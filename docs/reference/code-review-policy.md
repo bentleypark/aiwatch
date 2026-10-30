@@ -14,7 +14,7 @@ This page records why the procedure has the shape it has.
 
 Every round, round 1 included, uses the project's findings-only reviewer: Claude Code spawns
 `.claude/agents/review-findings-only.md`; Codex invokes `$review-findings-only` from
-`.codex/skills/review-findings-only/`. The plugin left the loop because most of what this page used to
+`.agents/skills/review-findings-only/`. The plugin left the loop because most of what this page used to
 say existed only to correct it:
 
 - its command fans out across several agents by file type, so round 1 returned a large batch that was
@@ -37,9 +37,9 @@ that is what the `ship-issue` review-and-fix loop's no-prose rule is for.
 
 **Availability caveat:** Claude agent definitions load at session start, like `.claude/settings.json`
 hooks. A newly added or edited Claude agent is not visible to the session that wrote it —
-`subagent_type` resolution fails with "agent type not found" until a restart. Codex loads installed
-skills from `$CODEX_HOME/skills` (default `~/.codex/skills`); `.codex/skills/` is this repository's
-source, so run `npm run skills:install` before opening a new Codex turn that must invoke it.
+`subagent_type` resolution fails with "agent type not found" until a restart. Codex discovers project
+skills from `.agents/skills/`; restart Codex if a new or edited skill does not appear. Run
+`npm run skills:install` only when a copy in `$CODEX_HOME/skills` is also needed.
 
 ## Verify a finding before acting on it
 
