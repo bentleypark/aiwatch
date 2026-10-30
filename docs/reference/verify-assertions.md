@@ -302,6 +302,7 @@ Add one when the acceptance can be expressed as a predicate over an AIWatch JSON
 | a `/api/status` count/threshold | ✅ | `services[id=turbopuffer].coverageDays >= 30` |
 | presence of a structure | ✅ | `supplyChainBanner exists` |
 | a `/api/report` aggregate | ✅ (verify the field is exposed) | `predictionAccuracy.total >= 1` |
+| a count on a keyed admin read (#1864) | ✅ number/boolean only | `GET /api/admin/withdrawals?months=2 \| closedByResolved >= 1` |
 | GA4 / GSC-CTR / consent-gated | ❌ | leave as a human ping (no `assert:`) |
 | behavioral ("no alert fired", a flap) | ❌ | no static signal — human ping |
 | is-down `<title>` HTML text | ❌ (v1) | JSON-only today; HTML/text-body mode is a follow-up |
@@ -329,6 +330,12 @@ PASS on a line whose date is still ahead is flagged `passes before its date` (#1
   can name a worker `aiwatch-worker`). https-only; userinfo/suffix tricks rejected via `new URL`.
 - **No code execution**: the evaluator is a whitelisted operator set — no `eval`/`Function`/dynamic
   require anywhere.
+- **Read-only key (#1864)**: `VERIFY_READ_KEY` is sent as `X-Verify-Key` only when the URL is https, its
+  host is the pinned prod worker (`DEFAULT_ASSERT_BASE`, not an overridden base or a
+  `VERIFY_ASSERT_ALLOW` extra), and its path is in `KEYED_PATHS`. The worker accepts it only on handlers
+  that call `canReadAdminRecord`. A keyed source that selects anything but a number or boolean is a `skip`, because
+  `actual` is posted to the public issue. Set the same value with
+  `npx wrangler secret put VERIFY_READ_KEY --config worker/wrangler.toml` and `gh secret set VERIFY_READ_KEY`.
 - **Abuse gate**: mutation is trusted-author-gated (ported from `verify-reminders.mjs`), because the
   `assert:` line is read straight from a public issue body.
 

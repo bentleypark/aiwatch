@@ -740,9 +740,13 @@ describe('GET /api/admin/withdrawals', () => {
     expect((await workerModule.fetch(get(), envWith(kv), ctx)).status).toBe(401)
   })
 
-  it('401s when no admin key is configured at all', async () => {
+  it.each([
+    ['no admin key is configured at all', {}, { 'X-Admin-Key': 'anything' }],
+    ['the configured admin key is empty', { ADMIN_API_KEY: '' }, { 'X-Admin-Key': '' }],
+  ] as Array<[string, Record<string, string>, Record<string, string>]>)('401s when %s', async (_label, keys, headers) => {
     const { kv } = makeKV()
-    expect((await workerModule.fetch(get('', { 'X-Admin-Key': 'anything' }), envWith(kv, undefined), ctx)).status).toBe(401)
+    const env = { ALLOWED_ORIGIN: '*', STATUS_CACHE: kv, ...keys } as Parameters<typeof workerModule.fetch>[1]
+    expect((await workerModule.fetch(get('', headers), env, ctx)).status).toBe(401)
   })
 
   it('503s when the KV binding is missing, rather than diagnosing it as an unreadable log', async () => {
@@ -1099,5 +1103,55 @@ describe('#1189 a 🟢 resolved notice closes the thread', () => {
     const b = src.slice(start, src.indexOf('#936 — send the tweet-reply draft', start))
     expect(b).toMatch(/^const resIds = withdrawalIdsFromAlertKeys\(keysToWrite, 'alerted:res:'\)\n\s*if \(operatorSent && resIds\.size > 0\) \{\n\s*try \{\n\s*await markWithdrawalsClosedByResolved\(env\.STATUS_CACHE, resIds, new Date\(\)\)\n\s*\} catch \(err\) \{\n[^\n]*\n\s*\}\n\s*\}\n/)
     expect(b.match(/markWithdrawalsClosedByResolved/g)).toHaveLength(1)
+  })
+})
+
+describe('#1864 the read-only verify key', () => {
+  const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
+  const envWith = (kv: KVNamespace, verify: { VERIFY_READ_KEY?: string } = { VERIFY_READ_KEY: 'test-verify-key' }) =>
+    ({ ALLOWED_ORIGIN: '*', STATUS_CACHE: kv, ADMIN_API_KEY: 'test-admin-key', ANTHROPIC_API_KEY: 'x', ...verify }) as Parameters<typeof workerModule.fetch>[1]
+  const call = (method: string, path: string, headers: Record<string, string>) =>
+    new Request(`https://example.com${path}`, { method, headers, ...(method === 'POST' ? { body: '{}' } : {}) })
+
+  it('reads GET /api/admin/withdrawals', async () => {
+    const { kv } = makeKV()
+    expect((await workerModule.fetch(call('GET', '/api/admin/withdrawals', { 'X-Verify-Key': 'test-verify-key' }), envWith(kv), ctx)).status).toBe(200)
+  })
+
+  it.each([
+    ['a wrong key', { 'X-Verify-Key': 'wrong' }, { VERIFY_READ_KEY: 'test-verify-key' }],
+    ['no key', {}, { VERIFY_READ_KEY: 'test-verify-key' }],
+    ['a key when none is configured', { 'X-Verify-Key': 'anything' }, {}],
+    ['an empty key against an empty configured key', { 'X-Verify-Key': '' }, { VERIFY_READ_KEY: '' }],
+    ['the verify key sent as X-Admin-Key', { 'X-Admin-Key': 'test-verify-key' }, { VERIFY_READ_KEY: 'test-verify-key' }],
+  ] as Array<[string, Record<string, string>, { VERIFY_READ_KEY?: string }]>)('refuses %s', async (_label, headers, configured) => {
+    const { kv } = makeKV()
+    expect((await workerModule.fetch(call('GET', '/api/admin/withdrawals', headers), envWith(kv, configured), ctx)).status).toBe(401)
+  })
+
+  it.each([
+    ['POST', '/api/admin/analyze'],
+    ['POST', '/api/admin/rebuild-archive'],
+    ['GET', '/api/admin/suppress'],
+    ['POST', '/api/admin/suppress'],
+    ['GET', '/api/admin/duration-override'],
+    ['POST', '/api/admin/duration-override'],
+  ])('is refused by %s %s', async (method, path) => {
+    const { kv } = makeKV()
+    for (const headers of [{ 'X-Verify-Key': 'test-verify-key' }, { 'X-Admin-Key': 'test-verify-key' }] as Array<Record<string, string>>) {
+      expect((await workerModule.fetch(call(method, path, headers), envWith(kv), ctx)).status).toBe(401)
+    }
+  })
+
+  it('threadOpenedRecorded counts rows that carry threadOpened, true or false', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-31T00:00:00Z'))
+    const { kv } = makeKV({ [KEY]: JSON.stringify([
+      row({ incId: 'a', threadOpened: true }),
+      row({ incId: 'b', threadOpened: false }),
+      row({ incId: 'c' }),
+    ]) })
+    const res = await workerModule.fetch(call('GET', '/api/admin/withdrawals?month=2026-07', { 'X-Verify-Key': 'test-verify-key' }), envWith(kv), ctx)
+    expect(await res.json()).toMatchObject({ count: 3, threadOpenedRecorded: 2 })
   })
 })

@@ -45,3 +45,4 @@ jobs:
           # Comma-separated sibling repos to also scan (defaults to the reports repo inside the script).
           VERIFY_EXTRA_REPOS: bentleypark/aiwatch-reports
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}  # reuse the operator channel (#541)
+          VERIFY_READ_KEY: ${{ secrets.VERIFY_READ_KEY }}  # #1864 — read-only key for keyed assert sources

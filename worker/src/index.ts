@@ -85,6 +85,9 @@ interface Env {
   // `wrangler secret put ADMIN_API_KEY`. Separate from ANTHROPIC_API_KEY so it
   // can be rotated independently; absent secret → endpoint always 401.
   ADMIN_API_KEY?: string
+  // #1864: read-only key for the daily verify-reminders job, sent as `X-Verify-Key`. Accepted only by
+  // the read endpoints that call `canReadAdminRecord`; absent secret → only ADMIN_API_KEY reads.
+  VERIFY_READ_KEY?: string
   // #378: shared Bearer token between Vercel Edge Functions and the Worker so
   // POST /api/internal/edge-fallback can be authenticated without exposing the
   // operator Discord webhook URL on the public Edge surface. Set via
@@ -3052,6 +3055,14 @@ async function handleAdminOverride(request: Request, env: Env, cors: Record<stri
   return json(200, { ok: true, changed: result.changed, overrides: result.list })
 }
 
+/** #1864 — the admin key, or the read-only verify key. Only read-only handlers call this. */
+function canReadAdminRecord(request: Request, env: Pick<Env, 'ADMIN_API_KEY' | 'VERIFY_READ_KEY'>): boolean {
+  const admin = request.headers.get('X-Admin-Key')
+  if (env.ADMIN_API_KEY && admin !== null && constantTimeEqual(admin, env.ADMIN_API_KEY)) return true
+  const verify = request.headers.get('X-Verify-Key')
+  return Boolean(env.VERIFY_READ_KEY && verify !== null && constantTimeEqual(verify, env.VERIFY_READ_KEY))
+}
+
 // ── #1106 Part 5: GET /api/admin/withdrawals ──────────────────────
 // The read side of the durable withdrawal log (see withdrawal-log.ts). Read-ONLY — this is a record
 // of what happened, not an operator control surface like suppress/duration-override, so there is no
@@ -3068,9 +3079,7 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
-  if (!env.ADMIN_API_KEY) return json(401, { ok: false, error: 'unauthorized' })
-  const provided = request.headers.get('X-Admin-Key') ?? ''
-  if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) return json(401, { ok: false, error: 'unauthorized' })
+  if (!canReadAdminRecord(request, env)) return json(401, { ok: false, error: 'unauthorized' })
   if (!env.STATUS_CACHE) return json(503, { ok: false, error: 'Service unavailable' })
 
   const now = new Date()
@@ -3157,6 +3166,7 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
     noThread: withVerdict.filter((r) => r.outcome === 'noThread').length,
     closedByResolved: withVerdict.filter((r) => r.outcome === 'closedByResolved').length,
     malformedTimestamp: withVerdict.filter((r) => r.outcome === 'malformedTimestamp').length,
+    threadOpenedRecorded: withVerdict.filter((r) => r.threadOpened !== undefined).length,
     withdrawals: withVerdict,
   })
 }

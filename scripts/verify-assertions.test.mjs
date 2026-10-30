@@ -6,7 +6,7 @@ import {
   evaluateAssertion, isAllowedUrl, resolveSource, pairVerifyAssertions, tickBox, runAssertion, findMalformedAssertLines,
   truncate, countOpenBoxes, countOpenVerifyAfter, planIssueAutoVerify, DEFAULT_ASSERT_BASE,
   isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, isBacktickQuotedOccurrence,
-  liveVerifyOccurrences, formatAssertionResult, evaluateItems,
+  liveVerifyOccurrences, formatAssertionResult, evaluateItems, verifyKeyHeaders,
 } from './verify-assertions.mjs'
 
 test('parseAssertionLine — valid GET + selector + quoted expected', () => {
@@ -684,4 +684,49 @@ test('CLI dry-run prints the early-pass flag for a future-dated passing line onl
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+// #1864 — the read-only key goes to the pinned prod host + a keyed path only, and a keyed source yields scalars only.
+test('verifyKeyHeaders — only the pinned prod host, a keyed path, https, and a configured key', () => {
+  const env = { VERIFY_READ_KEY: 'k' }
+  const prod = `${DEFAULT_ASSERT_BASE}/api/admin/withdrawals?months=2`
+  assert.deepEqual(verifyKeyHeaders(prod, env), { 'X-Verify-Key': 'k' })
+  assert.deepEqual(verifyKeyHeaders(prod, {}), {})
+  assert.deepEqual(verifyKeyHeaders(`${DEFAULT_ASSERT_BASE}/api/admin/suppress`, env), {})
+  assert.deepEqual(verifyKeyHeaders(`${DEFAULT_ASSERT_BASE}/api/status`, env), {})
+  assert.deepEqual(verifyKeyHeaders(prod.replace('https:', 'http:'), env), {})
+  assert.deepEqual(verifyKeyHeaders('https://ai-watch.dev/api/admin/withdrawals', env), {})
+  assert.deepEqual(verifyKeyHeaders('not a url', env), {})
+})
+
+test('verifyKeyHeaders — an overridden base or an extra allowlisted host never gets the key', () => {
+  const env = { VERIFY_READ_KEY: 'k', VERIFY_ASSERT_BASE: 'https://other.example', VERIFY_ASSERT_ALLOW: 'extra.example' }
+  assert.deepEqual(verifyKeyHeaders('https://other.example/api/admin/withdrawals', env), {})
+  assert.deepEqual(verifyKeyHeaders('https://extra.example/api/admin/withdrawals', env), {})
+})
+
+test('runAssertion — sends the key on a keyed source only, and never returns it', async () => {
+  const env = { VERIFY_READ_KEY: 'secret-k' }
+  const seen = []
+  const fetchImpl = (url, init) => { seen.push([url, init.headers]); return Promise.resolve({ ok: true, json: () => Promise.resolve({ closedByResolved: 1, rows: [{ title: 't' }] }) }) }
+  const keyed = await runAssertion({ source: '/api/admin/withdrawals?months=2', selector: 'closedByResolved', op: '>=', expected: '1' }, { env, fetchImpl })
+  const plain = await runAssertion({ source: '/api/status', selector: 'closedByResolved', op: '>=', expected: '1' }, { env, fetchImpl })
+  assert.equal(keyed.status, 'pass')
+  assert.equal(plain.status, 'pass')
+  assert.deepEqual(seen.map(([, h]) => h), [{ 'X-Verify-Key': 'secret-k' }, {}])
+  assert.ok(!JSON.stringify([keyed, plain]).includes('secret-k'))
+})
+
+test('runAssertion — a keyed source that selects anything but a number or boolean is a skip, so no row field reaches the public comment', async () => {
+  const env = { VERIFY_READ_KEY: 'k' }
+  const fetchImpl = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ withdrawals: [{ svcId: 'claude', incId: 'abc', title: 't' }], months: ['2026-10'], gone: null }) })
+  for (const selector of ['withdrawals', 'months', 'withdrawals[svcId=claude].title', 'withdrawals[svcId=claude].incId', 'gone']) {
+    const r = await runAssertion({ source: '/api/admin/withdrawals', selector, op: 'exists', expected: null }, { env, fetchImpl })
+    assert.equal(r.status, 'skip')
+    assert.equal(r.actual, undefined)
+  }
+  const unkeyed = await runAssertion({ source: '/api/status', selector: 'withdrawals', op: 'exists', expected: null }, { env, fetchImpl })
+  assert.equal(unkeyed.status, 'pass')
+  const flag = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+  assert.equal((await runAssertion({ source: '/api/admin/withdrawals', selector: 'ok', op: '==', expected: 'true' }, { env, fetchImpl: flag })).status, 'pass')
 })
