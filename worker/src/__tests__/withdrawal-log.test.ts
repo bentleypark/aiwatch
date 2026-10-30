@@ -21,6 +21,7 @@ import {
   upsertPrunedRows,
   markRowsAnnounced,
   isPermanentlyUnclosed,
+  withdrawalOutcome,
   readWithdrawalLog,
   recordWithdrawalsPruned,
   markWithdrawalsAnnounced,
@@ -944,5 +945,92 @@ describe('GET /api/admin/withdrawals', () => {
       envWith(kv), ctx,
     )
     expect(res.status).toBe(404)
+  })
+})
+
+// ── #1189 — telling a lost notice from a row with nothing to close ──────────
+
+describe('#1189 withdrawalOutcome', () => {
+  const now = '2026-09-01T00:00:00Z'
+  const past = (over: Partial<WithdrawalLogEntry> = {}) => row({ ...agedOutBefore(now), ...over })
+
+  it('a genuine loss — a thread was open and the deadline passed — is still neverClosed', () => {
+    expect(withdrawalOutcome(past({ threadOpened: true }), Date.parse(now))).toBe('neverClosed')
+    expect(isPermanentlyUnclosed(past({ threadOpened: true }), Date.parse(now))).toBe(true)
+  })
+
+  it('a row with neither field (every row written before #1189) is still neverClosed', () => {
+    expect(withdrawalOutcome(past(), Date.parse(now))).toBe('neverClosed')
+  })
+
+  it('no alerted:new marker at prune time → noThread, not a loss', () => {
+    expect(withdrawalOutcome(past({ threadOpened: false }), Date.parse(now))).toBe('noThread')
+    expect(isPermanentlyUnclosed(past({ threadOpened: false }), Date.parse(now))).toBe(false)
+  })
+
+  it('before the deadline every un-announced row is pending, whatever it carries', () => {
+    const live = row({ threadOpened: false })
+    expect(withdrawalOutcome(live, Date.parse('2026-07-21T10:00:00Z'))).toBe('pending')
+  })
+
+  it('announced wins over threadOpened', () => {
+    expect(withdrawalOutcome(past({ threadOpened: false, announcedAt: '2026-07-21T09:05:00Z' }), Date.parse(now))).toBe('announced')
+  })
+})
+
+describe('#1189 recordWithdrawalsPruned stamps threadOpened from the alerted:new marker', () => {
+  it('true when the marker exists, false when it does not', async () => {
+    const { kv, store } = makeKV({ 'alerted:new:aud-1': '["mistral"]' })
+    await recordWithdrawalsPruned(kv, [tomb(), tomb({ incId: 'aud-2' })])
+    const rows = JSON.parse(store[KEY]) as WithdrawalLogEntry[]
+    expect(rows.map((r) => [r.incId, r.threadOpened])).toEqual([['aud-1', true], ['aud-2', false]])
+  })
+
+  it('leaves it unset when the marker could have expired — a long incident pruned past the 7d TTL is still a loss', async () => {
+    const { kv, store } = makeKV()
+    const late = tomb({ startedAt: '2026-07-01T00:00:00Z', prunedAt: new Date(Date.parse('2026-07-01T00:00:00Z') + ALERTED_NEW_TTL_S * 1000 + 60_000).toISOString() })
+    await recordWithdrawalsPruned(kv, [late])
+    expect((JSON.parse(store[KEY]) as WithdrawalLogEntry[])[0]).not.toHaveProperty('threadOpened')
+  })
+
+  it('leaves it unset when the marker read throws, so the row keeps the old verdict', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { kv, store } = makeKV()
+    const failing = { ...kv, get: async (k: string) => { if (k.startsWith('alerted:new:')) throw new Error('kv down'); return store[k] ?? null } } as unknown as KVNamespace
+    await recordWithdrawalsPruned(failing, [tomb()])
+    expect((JSON.parse(store[KEY]) as WithdrawalLogEntry[])[0]).not.toHaveProperty('threadOpened')
+  })
+
+  it('the real prune path records it too', async () => {
+    const { kv, store } = makeKV({ 'alerted:new:aud-1': '["mistral"]' })
+    const now = new Date('2026-07-24T12:00:00Z')
+    const both = [svc([inc('aud-1', '2026-07-17T08:18:00Z'), inc('conv-1', '2026-07-17T08:03:00Z')])]
+    await accumulateIncidentsOnlyIfChanged(kv, both, '2026-07', now)
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS; i++) {
+      await accumulateIncidentsOnlyIfChanged(kv, [svc([inc('conv-1', '2026-07-17T08:03:00Z')])], '2026-07', now)
+    }
+    const rows = JSON.parse(store[KEY]) as WithdrawalLogEntry[]
+    expect(rows.map((r) => [r.incId, r.threadOpened])).toEqual([['aud-1', true]])
+  })
+})
+
+describe('#1189 GET /api/admin/withdrawals splits the past-deadline rows', () => {
+  const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
+  it('noThread is counted apart from neverClosed, and every bucket partitions count', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-31T00:00:00Z'))
+    const aged = agedOutBefore('2026-07-31T00:00:00Z')
+    const { kv } = makeKV({ [KEY]: JSON.stringify([
+      row({ incId: 'lost', ...aged, threadOpened: true }),
+      row({ incId: 'old', ...aged }),
+      row({ incId: 'none', ...aged, threadOpened: false }),
+    ]) })
+    const env = { ALLOWED_ORIGIN: '*', STATUS_CACHE: kv, ADMIN_API_KEY: 'test-admin-key' } as Parameters<typeof workerModule.fetch>[1]
+    const res = await workerModule.fetch(new Request('https://example.com/api/admin/withdrawals?month=2026-07', { headers: { 'X-Admin-Key': 'test-admin-key' } }), env, ctx)
+    const body = await res.json() as Record<string, unknown> & { withdrawals: Array<{ incId: string; outcome: string; neverClosed: boolean }> }
+    expect(body).toMatchObject({ count: 3, announced: 0, pending: 0, neverClosed: 2, noThread: 1, malformedTimestamp: 0 })
+    expect(body.withdrawals.map((r) => [r.incId, r.outcome, r.neverClosed])).toEqual([
+      ['lost', 'neverClosed', true], ['old', 'neverClosed', true], ['none', 'noThread', false],
+    ])
   })
 })

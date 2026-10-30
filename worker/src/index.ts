@@ -11,7 +11,7 @@ import { serviceGroupOf } from './service-groups'
 import { createReadCensus, formatCensus } from './kv-read-census'
 import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 import { pageIncidents } from './incident-presence'
-import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
+import { markWithdrawalsAnnounced, readWithdrawalLog, withdrawalOutcome, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry, type WithdrawalOutcome } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
 import { fallbackEmbedSection } from './fallback'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
@@ -3053,7 +3053,7 @@ async function handleAdminOverride(request: Request, env: Env, cors: Record<stri
 // from its own status page. AIWatch republishing that as a permanent public index is a different
 // product decision from closing an alert thread with the subscribers who already saw it.
 //
-// `neverClosed` is DERIVED per row (see `isPermanentlyUnclosed`), so the answer to #1106's actual
+// `neverClosed` is DERIVED per row (see `withdrawalOutcome`), so the answer to #1106's actual
 // question — "did the ⚪ path fire, and did any thread stay open?" — is the response itself and not
 // something the reader has to recompute from timestamps.
 async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
@@ -3089,7 +3089,7 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
   if (months.length === 0) return json(400, { ok: false, error: 'month must be YYYY-MM' })
 
   const nowMs = now.getTime()
-  const withVerdict: Array<WithdrawalLogEntry & { neverClosed: boolean }> = []
+  const withVerdict: Array<WithdrawalLogEntry & { neverClosed: boolean; outcome: WithdrawalOutcome }> = []
   const unreadable: string[] = []
   const malformedByMonth: Record<string, number> = {}
   for (const m of months) {
@@ -3102,7 +3102,10 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
     // Per MONTH, not a range total: the remedy for a partially-eaten month is a by-hand KV repair,
     // and a bare sum tells the operator that rows were lost without saying which key to repair.
     if (res.droppedMalformed > 0) malformedByMonth[m] = res.droppedMalformed
-    for (const r of res.rows) withVerdict.push({ ...r, neverClosed: isPermanentlyUnclosed(r, nowMs) })
+    for (const r of res.rows) {
+      const outcome = withdrawalOutcome(r, nowMs)
+      withVerdict.push({ ...r, neverClosed: outcome === 'neverClosed', outcome })
+    }
   }
   if (unreadable.length === months.length) {
     return json(502, {
@@ -3138,11 +3141,13 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
     // the #1106 bug recurring — collapsing them would make a routine hold look like a regression.
     // A row whose `prunedAt` cannot be parsed is neither: it is unageable, so it is counted apart
     // rather than sitting in `pending` forever and quietly inflating the benign bucket. Scoped to
-    // un-announced rows so the four buckets really do PARTITION `count` — an announced row with a
+    // un-announced rows so the buckets really do PARTITION `count` — an announced row with a
     // malformed timestamp would otherwise be counted twice and the totals would not add up.
-    pending: withVerdict.filter((r) => !r.announcedAt && !r.neverClosed && !Number.isNaN(Date.parse(r.prunedAt))).length,
-    neverClosed: withVerdict.filter((r) => r.neverClosed).length,
-    malformedTimestamp: withVerdict.filter((r) => !r.announcedAt && Number.isNaN(Date.parse(r.prunedAt))).length,
+    pending: withVerdict.filter((r) => r.outcome === 'pending').length,
+    neverClosed: withVerdict.filter((r) => r.outcome === 'neverClosed').length,
+    // #1189 — past the deadline, but no 🔴 was open to close.
+    noThread: withVerdict.filter((r) => r.outcome === 'noThread').length,
+    malformedTimestamp: withVerdict.filter((r) => r.outcome === 'malformedTimestamp').length,
     withdrawals: withVerdict,
   })
 }
