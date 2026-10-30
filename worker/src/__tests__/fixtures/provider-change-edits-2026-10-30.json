@@ -1,0 +1,140 @@
+[
+ {
+  "provider": "anthropic",
+  "date": "2026-08-10",
+  "before": "The introductory pricing for Claude Sonnet 5 ($2 / $10 per MTok) is now the standard price: the previously scheduled increase to $3 / $15 pe",
+  "after": "The introductory pricing for Claude Sonnet 5 ($2 / $10 USD per MTok) is now the standard price: the previously scheduled increase to $3 / $1"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2026-06-02",
+  "before": "The advisor tool now supports a max_tokens parameter to cap the advisor model's output per call, reducing latency and output token cost for ",
+  "after": "The advisor tool now supports a max_tokens parameter to cap the advisor model’s output for each call, reducing latency and output token cost"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2026-05-13",
+  "before": "We've launched cache diagnostics in public beta. Pass diagnostics.previous_message_id on a Messages request and the API reports a cache_miss",
+  "after": "We’ve launched cache diagnostics in beta. Pass diagnostics.previous_message_id on a Messages request and the API reports a cache_miss_reason"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2026-05-06",
+  "before": "Multiagent orchestration and Outcomes are now in public beta under the standard managed-agents-2026-04-01 beta header.",
+  "after": "Multiagent orchestration and Outcomes are now in beta under the standard managed-agents-2026-04-01 beta header."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2026-04-23",
+  "before": "Memory for Claude Managed Agents is now in public beta under the standard managed-agents-2026-04-01 header. See Using agent memory for the f",
+  "after": "Memory for Claude Managed Agents is now in beta under the standard managed-agents-2026-04-01 header. See Using agent memory for the full int"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2026-04-09",
+  "before": "We've launched the advisor tool in public beta. Pair a faster executor model with a higher-intelligence advisor model that provides strategi",
+  "after": "We’ve launched the advisor tool in beta. Pair a faster executor model with a higher-intelligence advisor model that provides strategic guida"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2026-04-08",
+  "before": "We've launched Claude Managed Agents in public beta, a fully managed agent harness for running Claude as an autonomous agent with secure san",
+  "after": "We’ve launched Claude Managed Agents in beta, a fully managed agent harness for running Claude as an autonomous agent with secure sandboxing"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2026-03-13",
+  "before": "We've raised the media limit from 100 to 600 images or PDF pages per request when using the 1M token context window.",
+  "after": "We’ve raised the media limit from 100 to 600 images or PDF pages for each request when using the 1M token context window."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-12-04",
+  "before": "Structured outputs now supports Claude Haiku 4.5.",
+  "after": "Structured outputs now support Claude Haiku 4.5."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-11-24",
+  "before": "We've launched programmatic tool calling in public beta, allowing Claude to call tools from within code execution to reduce latency and toke",
+  "after": "We’ve launched programmatic tool calling in beta, allowing Claude to call tools from within code execution to reduce latency and token usage"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-11-24",
+  "before": "We've launched the tool search tool in public beta, enabling Claude to dynamically discover and load tools on-demand from large tool catalog",
+  "after": "We’ve launched the tool search tool in beta, enabling Claude to dynamically discover and load tools on-demand from large tool catalogs."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-11-24",
+  "before": "We've launched the effort parameter in public beta for Claude Opus 4.5, allowing you to control token usage by trading off between response ",
+  "after": "We’ve launched the effort parameter in beta for Claude Opus 4.5, allowing you to control token usage by trading off between response thoroug"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-11-14",
+  "before": "We've launched structured outputs in public beta, providing guaranteed schema conformance for Claude's responses. Use JSON outputs for struc",
+  "after": "We’ve launched structured outputs in beta, providing guaranteed schema conformance for Claude’s responses. Use JSON outputs for structured d"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-09-02",
+  "before": "We've launched v2 of the Code Execution Tool in public beta, replacing the original Python-only tool with Bash command execution and direct ",
+  "after": "We’ve launched v2 of the Code Execution Tool in beta, replacing the original Python-only tool with Bash command execution and direct file ma"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-08-13",
+  "before": "The 1-hour cache duration for prompt caching no longer requires a beta header. Learn more in Prompt caching.",
+  "after": "The 1-hour cache duration for prompt caching no longer requires a beta header. Learn more in 1-hour cache duration."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-06-23",
+  "before": "Console users with the Developer role can now access the Cost page. Previously, the Developer role allowed access to the Usage page, but not",
+  "after": "In the Console, users with the Developer role can now access the Cost page. Previously, the Developer role allowed access to the Usage page,"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-06-11",
+  "before": "We've launched fine-grained tool streaming in public beta, a feature that enables Claude to stream tool use parameters without buffering / J",
+  "after": "We’ve launched fine-grained tool streaming in beta, a feature that enables Claude to stream tool use parameters without buffering / JSON val"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-05-22",
+  "before": "We've launched interleaved thinking in public beta, a feature that enables Claude to think in between tool calls. To enable interleaved thin",
+  "after": "We’ve launched interleaved thinking in beta, a feature that enables Claude to think in between tool calls. To enable interleaved thinking, u"
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-05-22",
+  "before": "We've launched the Files API in public beta, enabling you to upload files and reference them in the Messages API and code execution tool.",
+  "after": "We’ve launched the Files API in beta, enabling you to upload files and reference them in the Messages API and code execution tool."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-05-22",
+  "before": "We've launched the Code execution tool in public beta, a tool that enables Claude to execute Python code in a secure, sandboxed environment.",
+  "after": "We’ve launched the Code execution tool in beta, a tool that enables Claude to execute Python code in a secure, sandboxed environment."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-05-22",
+  "before": "We've launched the MCP connector in public beta, a feature that allows you to connect to remote MCP servers directly from the Messages API.",
+  "after": "We’ve launched the MCP connector in beta, a feature that allows you to connect to remote MCP servers directly from the Messages API."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2025-05-22",
+  "before": "We've included minute and hour level granularity to the Usage page of Console alongside 429 error rates on the Usage page.",
+  "after": "We’ve added minute and hour level granularity to the Usage page of Console alongside 429 error rates on the Usage page."
+ },
+ {
+  "provider": "anthropic",
+  "date": "2024-11-20",
+  "before": "We've added support for tool use in the Workbench.",
+  "after": "We’ve added support for tool use in the Console Workbench."
+ }
+]

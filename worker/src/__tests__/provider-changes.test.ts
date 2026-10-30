@@ -13,9 +13,12 @@ import {
   buildChangeEmbed,
   detectNewChanges,
   runProviderChanges,
+  changeKey,
+  leadSimilarity,
   seenKey,
   xLength,
   BULK_REKEY_THRESHOLD,
+  EDIT_SIMILARITY,
   type ProviderChange,
   type ProviderChangeSource,
 } from '../provider-changes'
@@ -24,6 +27,10 @@ import { TWEET_MAX } from '../alerts'
 const fixture = (name: string) => readFileSync(join(__dirname, 'fixtures', name), 'utf8')
 const OPENAI_MD = fixture('openai-changelog-2026-10-01.md')
 const ANTHROPIC_XML = fixture('anthropic-release-notes-2026-10-01.xml')
+// Captured four weeks later, September onward: Anthropic had rewritten ' as ’ in the same entries.
+const OPENAI_MD_1030 = fixture('openai-changelog-2026-10-30.md')
+const ANTHROPIC_XML_1030 = fixture('anthropic-release-notes-2026-10-30.xml')
+const EDITS = JSON.parse(fixture('provider-change-edits-2026-10-30.json')) as { provider: string; date: string; before: string; after: string }[]
 
 const BREAKING_BEFORE_JULY = [
   'openai 2026-05-29 breaking',
@@ -37,6 +44,7 @@ const BREAKING_BEFORE_JULY = [
   'anthropic 2026-05-28 breaking',
   'anthropic 2026-04-30 deprecation,breaking',
   'anthropic 2026-04-20 deprecation,breaking',
+  'anthropic 2026-04-16 pricing,breaking',
   'anthropic 2026-03-30 deprecation,breaking',
   'anthropic 2026-03-13 breaking,limits',
   'anthropic 2026-02-19 deprecation,breaking',
@@ -135,8 +143,36 @@ describe('classifyChange', () => {
     ['We replaced and updated the tokens per minute rate limit.', ['limits']],
     ['We increased capacity for Claude Opus 4 on the Claude API and its rate limits.', ['limits']],
     ["We've removed the dedicated 1M rate limits for all supported models.", ['breaking', 'limits']],
+    ['Assistant prefill isn’t supported on Claude Fable 5.', ['breaking']],
+    ['tool_choice types any and tool aren’t supported on Claude Fable 5.1.', ['breaking']],
+    ['We’ve removed fast mode for Claude Opus 4.7.', ['breaking']],
+    ['12-hour cache writes cost 2.5x the input token price.', ['pricing']],
+    ['OpenAI-hosted sandbox compute is now billed during active turns.', ['billing']],
+    ['Billing begins on October 5, 2026.', ['billing']],
+    ['Claude Max and Team plans now include monthly API credits.', ['billing']],
+    ['Eligible ChatGPT Pro and Business subscribers can now claim up to $500 per month in free API credits as a subscription benefit.', ['billing']],
+    ['Simplified API usage tiers from five to three: Build, Launch, and Grow.', ['limits']],
+    ['The new SDK and CLI versions also have breaking changes that don’t depend on the API version.', ['breaking']],
   ])('%s → %j', (text, tags) => {
     expect(classifyChange(text)).toEqual(tags)
+  })
+
+  it('tags exactly these real entries from 2026-10-01 on (2026-10-30 capture, both sources)', () => {
+    const tagged = [...parseOpenAIChangelog(OPENAI_MD_1030), ...parseAnthropicReleaseFeed(ANTHROPIC_XML_1030)]
+      .filter((c) => c.date >= '2026-10-01')
+      .map((c) => ({ c, tags: classifyChange(c.text) }))
+      .filter((x) => x.tags.length > 0)
+      .map((x) => `${x.c.provider} ${x.c.date} ${x.tags.join(',')}`)
+    expect(tagged).toEqual([
+      'openai 2026-10-28 billing',
+      'openai 2026-10-20 pricing',
+      'openai 2026-10-09 billing',
+      'openai 2026-10-06 limits',
+      'anthropic 2026-10-21 breaking',
+      'anthropic 2026-10-07 pricing',
+      'anthropic 2026-10-07 breaking',
+      'anthropic 2026-10-07 billing',
+    ])
   })
 
   it('tags exactly these real entries from 2026-07-01 on (both captured sources)', () => {
@@ -211,6 +247,17 @@ describe('classifyChange', () => {
     'See pricing for available processing tiers.',
     'Released the Agents API in public beta.',
     'Generations up to 20 seconds and 1080p output.',
+    'Creating a prompt-generated voice is free; speech generation uses regular GPT-Live session billing.',
+    'Google Cloud Marketplace handles billing.',
+    'Billing is unchanged.',
+    'With web fetch off, web_fetch calls return an error result to the agent instead.',
+    'The Usage and Cost API is now a legacy API, and so are the usage_report and cost_report endpoints.',
+    'Claude Opus 5.5 now has a default fast mode rate limit in the Start, Build, and Scale usage tiers.',
+    'Billing will be handled through AWS Marketplace.',
+    'See API credits for ChatGPT subscribers for credit amounts, eligibility, and how to claim.',
+    'The Usage and Cost Analytics API is now generally available.',
+    'These SDK releases contain only non-breaking changes.',
+    'This is a non-breaking change.',
   ])('no tag: %s', (text) => {
     expect(classifyChange(text)).toEqual([])
   })
@@ -226,6 +273,13 @@ const change = (over: Partial<ProviderChange> = {}): ProviderChange => ({
 })
 
 describe('isLaunchPricing', () => {
+  it.each([
+    'We’ve launched Claude Opus 5.5 at $4 / $20 USD per MTok.',
+    'We’re launching Claude Opus 5.5 at $4 / $20 USD per MTok.',
+  ])('a launch written with a curly apostrophe is still a launch: %s', (text) => {
+    expect(isLaunchPricing(text)).toBe(true)
+  })
+
   it('splits the real pricing-tagged entries into launches and the rest (both captured sources, all dates)', () => {
     const split = [...parseOpenAIChangelog(OPENAI_MD), ...parseAnthropicReleaseFeed(ANTHROPIC_XML)]
       .filter((c) => classifyChange(c.text).includes('pricing'))
@@ -382,6 +436,10 @@ describe('pickSentence', () => {
   it('falls back to the first sentence when no sentence carries the tag evidence', () => {
     expect(pickSentence('First one. Second one.', 'deprecation')).toBe('First one.')
   })
+
+  it('picks the sentence carrying a price multiple', () => {
+    expect(pickSentence('We added a longer cache option. Writes to it cost 2.5x the input token price. See the docs.', 'pricing')).toBe('Writes to it cost 2.5x the input token price.')
+  })
 })
 
 describe('buildChangeEmbed', () => {
@@ -406,6 +464,155 @@ describe('buildChangeEmbed', () => {
     const e = buildChangeEmbed('Anthropic', change({ text }), [tag])
     expect(e.description).toContain(`[🔍 Search X](https://x.com/search?q=${query}&f=top)`)
     expect(e.description).toContain(draft)
+  })
+})
+
+describe('entry keys', () => {
+  const legacyKey = (c: ProviderChange) => `${c.provider}:${c.date}:${c.text.slice(0, 100)}`
+  const captured = (md: string, xml: string) => [...parseOpenAIChangelog(md), ...parseAnthropicReleaseFeed(xml)]
+  const before = captured(OPENAI_MD, ANTHROPIC_XML)
+  const after = captured(OPENAI_MD_1030, ANTHROPIC_XML_1030)
+
+  it.each([
+    ["We've launched Claude Sonnet 5.5 (claude-sonnet-5-5).", 'We’ve launched Claude Sonnet 5.5 (claude-sonnet-5-5).'],
+    ['Structured outputs now supports Claude Haiku 4.5.', 'Structured  outputs now supports\nClaude Haiku 4.5.'],
+    ['The advisor tool now supports a max_tokens parameter.', 'THE ADVISOR TOOL NOW SUPPORTS A MAX_TOKENS PARAMETER'],
+  ])('one entry keeps one key when its punctuation, case or spacing is rewritten: %s', (a, b) => {
+    expect(changeKey('anthropic', '2026-09-28', a)).toBe(changeKey('anthropic', '2026-09-28', b))
+  })
+
+  it('"a bc" and "ab c" keep different keys', () => {
+    expect(changeKey('openai', '2026-09-28', 'a bc')).not.toBe(changeKey('openai', '2026-09-28', 'ab c'))
+  })
+
+  it('entries that differ only in a digit keep different keys', () => {
+    expect(changeKey('openai', '2026-09-28', 'Deprecated gpt-4.1 in the Assistants API.')).not.toBe(changeKey('openai', '2026-09-28', 'Deprecated gpt-5.1 in the Assistants API.'))
+  })
+
+  it('the key covers the first 100 characters of the entry and no more', () => {
+    const text = 'Word, '.repeat(30)
+    const at = (i: number) => changeKey('anthropic', '2026-09-28', `${text.slice(0, i)}X${text.slice(i + 1)}`)
+    const base = changeKey('anthropic', '2026-09-28', text)
+    expect(at(99)).not.toBe(base)
+    expect(at(100)).toBe(base)
+  })
+
+  it('different dates, providers and wording keep different keys', () => {
+    const base = changeKey('anthropic', '2026-09-28', 'We launched model A.')
+    expect(changeKey('anthropic', '2026-09-29', 'We launched model A.')).not.toBe(base)
+    expect(changeKey('openai', '2026-09-28', 'We launched model A.')).not.toBe(base)
+    expect(changeKey('anthropic', '2026-09-28', 'We launched model B.')).not.toBe(base)
+  })
+
+  it('every September entry of the 2026-10-01 capture keeps its key in the 2026-10-30 capture', () => {
+    const september = before.filter((c) => c.date >= '2026-09-01')
+    expect(september.some((c) => c.text.slice(0, 100).includes("'"))).toBe(true)
+    const afterKeys = new Set(after.map((c) => c.key))
+    expect(september.filter((c) => !afterKeys.has(c.key)).map((c) => `${c.provider} ${c.date} ${c.text.slice(0, 60)}`)).toEqual([])
+  })
+
+  it('normalising merges no two entries that the old key kept apart', () => {
+    for (const set of [before, after]) {
+      expect(new Set(set.map((c) => c.key)).size).toBe(new Set(set.map(legacyKey)).size)
+    }
+  })
+
+  it('entries in Japanese and in Chinese keep distinct keys', () => {
+    expect(changeKey('moonshot', '2026-09-28', '日本語の更新を公開しました')).not.toBe(changeKey('moonshot', '2026-09-28', '中文更新已发布'))
+  })
+
+  it('every September entry in both captures keeps its tags and its launch label across the punctuation rewrite', () => {
+    const afterByKey = new Map(after.map((c) => [c.key, c]))
+    const pairs = before
+      .filter((c) => c.date >= '2026-09-01')
+      .flatMap((b) => { const a = afterByKey.get(b.key); return a ? [{ b, a }] : [] })
+    expect(pairs.some(({ b, a }) => b.text !== a.text)).toBe(true)
+    const changed = pairs
+      .filter(({ b, a }) => classifyChange(b.text).join() !== classifyChange(a.text).join() || isLaunchPricing(b.text) !== isLaunchPricing(a.text))
+      .map(({ b }) => `${b.provider} ${b.date} ${b.text.slice(0, 50)}`)
+    expect(changed).toEqual([])
+  })
+
+  it('a key set stored in the old format is still recognised, so the format change re-keys nothing', () => {
+    const r = detectNewChanges('Anthropic', after, after.map(legacyKey), new Date('2026-10-30T12:00:00Z'))
+    expect(r).toEqual({ alerts: [], bulk: [] })
+  })
+})
+
+describe('an entry the provider edited in place', () => {
+  const now = new Date('2026-10-30T12:00:00Z')
+  const entry = (provider: string, date: string, text: string) => change({ provider, date, text, key: changeKey(provider, date, text) })
+  const stored = EDITS.map((e) => changeKey(e.provider, e.date, e.before))
+  const edited = EDITS.map((e) => entry(e.provider, e.date, e.after))
+
+  it('the fixture holds more edits than a bulk re-key tolerates, and each one changes the key', () => {
+    expect(EDITS.length).toBeGreaterThan(BULK_REKEY_THRESHOLD)
+    expect(EDITS.filter((e) => changeKey(e.provider, e.date, e.before) === changeKey(e.provider, e.date, e.after))).toEqual([])
+  })
+
+  it('re-keys nothing when every edit arrives in one fetch', () => {
+    expect(detectNewChanges('Anthropic', edited, stored, now)).toEqual({ alerts: [], bulk: [] })
+  })
+
+  it('re-keys nothing when the stored keys are in the old raw format and every edit arrives in one fetch', () => {
+    const rawStored = EDITS.map((e) => `${e.provider}:${e.date}:${e.before.slice(0, 100)}`)
+    expect(detectNewChanges('Anthropic', edited, rawStored, now)).toEqual({ alerts: [], bulk: [] })
+  })
+
+  it('still alerts a genuinely new entry that arrives in the same fetch', () => {
+    const added = entry('anthropic', '2026-10-29', 'We’ve lowered the price of prompt cache reads on Claude Sonnet 5.5 to $0.10 USD per million tokens.')
+    const r = detectNewChanges('Anthropic', [added, ...edited], stored, now)
+    expect(r.alerts.map((a) => a.change.key)).toEqual([added.key])
+    expect(r.bulk).toEqual([])
+  })
+
+  it('pairs an edit with a stored key of the same day only: with every date moved it is still read as a re-key', () => {
+    const lines = Array.from({ length: BULK_REKEY_THRESHOLD + 1 }, (_, i) => `Model number${i} is priced at $${i + 1} per 1M tokens for long prompts.`)
+    const before = lines.map((t) => changeKey('anthropic', '2026-10-28', t))
+    const after = lines.map((t) => entry('anthropic', '2026-10-29', t))
+    const r = detectNewChanges('Anthropic', after, before, now)
+    expect(r.alerts).toEqual([])
+    expect(r.bulk).toEqual([{ providerName: 'Anthropic', count: BULK_REKEY_THRESHOLD + 1 }])
+  })
+
+  it.each([
+    ['Batch API deprecated', 'Batch API deprecated today', 0.75, 0],
+    ['Batch API deprecated for tenants', 'Batch API deprecated for users', 0.667, 1],
+  ])('%s → %s: words in common over words in all is %d, so alerts: %i', (was, now_, _similarity, alerts) => {
+    const r = detectNewChanges('Anthropic', [entry('anthropic', '2026-10-29', now_)], [changeKey('anthropic', '2026-10-29', was)], now)
+    expect(r.alerts).toHaveLength(alerts)
+  })
+
+  it('uses each stored key once: of two similar new entries only one is taken for the edit', () => {
+    const base = 'Model alpha is priced at $1 per 1M tokens for long prompts in the batch endpoint today.'
+    const r = detectNewChanges(
+      'Anthropic',
+      [entry('anthropic', '2026-10-29', base.replace('alpha', 'beta')), entry('anthropic', '2026-10-29', base.replace('batch', 'chat'))],
+      [changeKey('anthropic', '2026-10-29', base)],
+      now,
+    )
+    expect(r.alerts).toHaveLength(1)
+  })
+
+  it('does not take a new entry for the edit of an entry that is still in the feed', () => {
+    const base = 'Model alpha is priced at $1 per 1M tokens for long prompts in the batch endpoint today.'
+    const still = entry('anthropic', '2026-10-29', base)
+    const similar = entry('anthropic', '2026-10-29', base.replace('alpha', 'beta'))
+    expect(detectNewChanges('Anthropic', [still, similar], [still.key], now).alerts.map((a) => a.change.key)).toEqual([similar.key])
+  })
+
+  it('no two different entries of one day in the captures are as alike as an edited one, and every edit is', () => {
+    const all = [...parseOpenAIChangelog(OPENAI_MD), ...parseAnthropicReleaseFeed(ANTHROPIC_XML), ...parseOpenAIChangelog(OPENAI_MD_1030), ...parseAnthropicReleaseFeed(ANTHROPIC_XML_1030)]
+    const distinct = [...new Map(all.map((c) => [c.key, c])).values()]
+    const alike: string[] = []
+    for (let i = 0; i < distinct.length; i++) {
+      for (let j = i + 1; j < distinct.length; j++) {
+        const [a, b] = [distinct[i], distinct[j]]
+        if (a.provider === b.provider && a.date === b.date && leadSimilarity(a.key, b.key) >= EDIT_SIMILARITY) alike.push(`${a.date} ${a.text.slice(0, 40)} / ${b.text.slice(0, 40)}`)
+      }
+    }
+    expect(alike).toEqual([])
+    expect(EDITS.filter((e) => leadSimilarity(changeKey(e.provider, e.date, e.before), changeKey(e.provider, e.date, e.after)) < EDIT_SIMILARITY)).toEqual([])
   })
 })
 

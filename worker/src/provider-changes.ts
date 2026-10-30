@@ -41,8 +41,28 @@ function collapse(s: string): string {
   return s.replace(/\s+/g, ' ').trim()
 }
 
-function changeKey(provider: string, date: string, text: string): string {
-  return `${provider}:${date}:${text.slice(0, 100)}`
+const fold = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+export function changeKey(provider: string, date: string, text: string): string {
+  return `${provider}:${date}:${fold(text.slice(0, 100))}`
+}
+
+function splitKey(key: string): [prefix: string, lead: string] {
+  const at = key.indexOf(':', key.indexOf(':') + 1)
+  return [key.slice(0, at + 1), key.slice(at + 1)]
+}
+
+function foldKey(key: string): string {
+  const [prefix, lead] = splitKey(key)
+  return prefix + fold(lead)
+}
+
+export function leadSimilarity(a: string, b: string): number {
+  const A = new Set(splitKey(a)[1].split(' '))
+  const B = new Set(splitKey(b)[1].split(' '))
+  let shared = 0
+  for (const w of A) if (B.has(w)) shared++
+  return shared / (A.size + B.size - shared)
 }
 
 function isoDate(y: number, monthIdx: number, d: number): string {
@@ -137,15 +157,16 @@ export const PROVIDER_CHANGE_SOURCES: ProviderChangeSource[] = [
 ]
 
 const PRICE_AMOUNT = /\$\s?\d[\d,]*(?:\.\d+)?\s*(?:USD\s*)?(?:\/\s*|per\s+)(?:1\s?M\b|M\b|MTok|million|1,000|1K|thousand|image|min(?:ute)?|sec(?:ond)?|hour|call|request|search|session)/i
-const PRICE_WORD = /\b(?:priced at|pricing (?:per|is)\b)|\b(?:pric(?:e|es|ed|ing)|cost(?:s)?)\b[^.]{0,60}\b(?:cut|drop|reduc|increas|lower|higher|chang|now|standard|introductory|discount|less)/i
-const BILLING = /\b(?:billing|billed)\b/i
+const PRICE_MULTIPLE = /\b\d+x\b[^.]{0,30}\bprice\b/i
+const PRICE_WORD = /\b(?:priced at|pricing (?:per|is)\b)|\b(?:pric(?:e|es|ed|ing)|costs)\b[^.]{0,60}\b(?:cut|drop|reduc|increas|lower|higher|chang|now|standard|introductory|discount|less)/i
+const BILLING = /\bbilled\b|\bresum\w*\s+billing\b|\bbilling\s+begin\w*|\bnow\b[^.]{0,60}\bAPI credits\b/i
 const DEPRECATION = /\b(?:deprecat\w*|retire[ds]?|retirement|retiring|sunset\w*)\b/i
-const BREAKING = /\b(?:returns? (?:an? )?(?:4\d\d )?error|can break|breaking change|no longer returns?|(?:isn't|aren't|is not|are not) supported|we've removed|now defaults? to|changes how)\b/i
-const LIMITS = /\b(?:rais|increas|lower|reduc|updat|remov)\w*\b[^.]{0,60}\brate limits?\b/i
+const BREAKING = /\b(?:returns? (?:an? )?(?:4\d\d )?error(?! result\b)|can break|(?<!non-)breaking changes?|no longer returns?|(?:isn['’]t|aren['’]t|is not|are not) supported|we['’]ve removed|now defaults? to|changes how)\b/i
+const LIMITS = /\b(?:rais|increas|lower|reduc|updat|remov)\w*\b[^.]{0,60}\brate limits?\b|\bsimplif\w*\b[^.]{0,40}\busage tiers\b/i
 
 export function classifyChange(text: string): ChangeTag[] {
   const tags: ChangeTag[] = []
-  if (PRICE_AMOUNT.test(text) || PRICE_WORD.test(text)) tags.push('pricing')
+  if (PRICE_AMOUNT.test(text) || PRICE_WORD.test(text) || PRICE_MULTIPLE.test(text)) tags.push('pricing')
   if (BILLING.test(text)) tags.push('billing')
   if (DEPRECATION.test(text)) tags.push('deprecation')
   if (BREAKING.test(text)) tags.push('breaking')
@@ -158,7 +179,7 @@ function sentences(text: string): string[] {
 }
 
 const EVIDENCE: Record<ChangeTag, RegExp[]> = {
-  pricing: [PRICE_AMOUNT, PRICE_WORD],
+  pricing: [PRICE_AMOUNT, PRICE_WORD, PRICE_MULTIPLE],
   billing: [BILLING],
   deprecation: [DEPRECATION],
   breaking: [BREAKING],
@@ -193,7 +214,7 @@ const TAG_PHRASE: Record<ChangeTag, string> = {
   limits: 'rate limit change',
 }
 
-const LAUNCH = /^(?:We've launched|We're launching|Released|Launched|Introducing)\b|\bis now generally available\b/i
+const LAUNCH = /^(?:We['’]ve launched|We['’]re launching|Released|Launched|Introducing)\b|\bis now generally available\b/i
 const PRICE_CHANGE = /\b(?:pric(?:e|es|ing)|costs?)\b[^.]{0,60}\b(?:cut|reduc\w*|lower|less|increas\w*|drop\w*|rais\w*)\b/i
 
 /** A launch announcement that carries the new model's first price, with no price change to an existing model in a later sentence. */
@@ -260,6 +281,7 @@ export function seenKey(providerId: string): string {
 export const ALERT_MAX_AGE_DAYS = 14
 /** More new keys than this in one fetch means the source was re-keyed, not that this many changes shipped. */
 export const BULK_REKEY_THRESHOLD = 15
+export const EDIT_SIMILARITY = 0.7
 
 export interface DetectResult {
   alerts: { providerName: string; change: ProviderChange; tags: ChangeTag[] }[]
@@ -274,8 +296,18 @@ export function detectNewChanges(
   now: Date,
 ): DetectResult {
   if (prev === null) return { alerts: [], bulk: [] }
-  const prevSet = new Set(prev)
-  const fresh = current.filter((c) => !prevSet.has(c.key))
+  const stored = prev.map(foldKey)
+  const storedSet = new Set(stored)
+  const present = new Set(current.map((c) => c.key))
+  const gone = stored.filter((k) => !present.has(k))
+  const fresh = current.filter((c) => {
+    if (storedSet.has(c.key)) return false
+    const [prefix] = splitKey(c.key)
+    const edited = gone.findIndex((k) => splitKey(k)[0] === prefix && leadSimilarity(c.key, k) >= EDIT_SIMILARITY)
+    if (edited < 0) return true
+    gone.splice(edited, 1)
+    return false
+  })
   if (fresh.length > BULK_REKEY_THRESHOLD) return { alerts: [], bulk: [{ providerName, count: fresh.length }] }
   const cutoff = now.getTime() - ALERT_MAX_AGE_DAYS * 86_400_000
   const alerts = fresh
