@@ -11,7 +11,7 @@ import { serviceGroupOf } from './service-groups'
 import { createReadCensus, formatCensus } from './kv-read-census'
 import { readWithdrawn, refreshWithdrawnKey, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
 import { pageIncidents } from './incident-presence'
-import { markWithdrawalsAnnounced, readWithdrawalLog, withdrawalOutcome, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry, type WithdrawalOutcome } from './withdrawal-log'
+import { markWithdrawalsAnnounced, markWithdrawalsClosedByResolved, readWithdrawalLog, withdrawalOutcome, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry, type WithdrawalOutcome } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
 import { fallbackEmbedSection } from './fallback'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
@@ -1843,6 +1843,14 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         }
       }
     }
+    const resIds = withdrawalIdsFromAlertKeys(keysToWrite, 'alerted:res:')
+    if (operatorSent && resIds.size > 0) {
+      try {
+        await markWithdrawalsClosedByResolved(env.STATUS_CACHE, resIds, new Date())
+      } catch (err) {
+        console.error('[cron] #1189 withdrawal-log resolved stamp failed (notice still sent):', err instanceof Error ? err.message : err)
+      }
+    }
     // #936 — send the tweet-reply draft as its OWN plain-text operator message right below the embed so
     // it's one-tap copyable on Discord MOBILE (the embed code block only copies cleanly on desktop; the
     // embed now just points here). Operator channel ONLY (never the per-user relay). Fully isolated: a
@@ -3147,6 +3155,7 @@ async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<s
     neverClosed: withVerdict.filter((r) => r.outcome === 'neverClosed').length,
     // #1189 — past the deadline, but no 🔴 was open to close.
     noThread: withVerdict.filter((r) => r.outcome === 'noThread').length,
+    closedByResolved: withVerdict.filter((r) => r.outcome === 'closedByResolved').length,
     malformedTimestamp: withVerdict.filter((r) => r.outcome === 'malformedTimestamp').length,
     withdrawals: withVerdict,
   })

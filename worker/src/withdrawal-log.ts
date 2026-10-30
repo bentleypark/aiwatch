@@ -13,10 +13,11 @@
 // month-keyed KV value, upserted only when an entry's OUTCOME changes, keeps the write budget in the
 // noise. The shape mirrors `growth-series.ts` (#986): a volatile signal promoted to a durable series.
 //
-// Two write points, and only two:
+// Three write points:
 //   1. the prune (`accumulateIncidentsOnlyIfChanged`) records the row with `announcedAt` ABSENT,
 //      and `threadOpened` from the `alerted:new:` marker (#1189);
-//   2. the cron's `alerted:wd:` dedup write stamps `announcedAt`.
+//   2. the cron stamps `announcedAt` after the ⚪ send;
+//   3. the cron sets `closedByResolved` after a 🟢 resolved send for the id (#1189).
 // The verdict is DERIVED on read (`withdrawalOutcome`). Holds are not recorded: `withdrawalHold`
 // re-evaluates every 5 minutes, so a held notice is a STATE, not an event.
 
@@ -49,6 +50,8 @@ export interface WithdrawalLogEntry {
   /** #1189 — whether `alerted:new:{incId}` existed at prune time, i.e. whether a 🔴 thread was open
    *  to close. */
   threadOpened?: boolean
+  /** #1189 — a 🟢 resolved notice went out for this id. */
+  closedByResolved?: true
 }
 
 /** Month-keyed so the value stays small and a month can be read without scanning the others.
@@ -177,10 +180,7 @@ export function markRowsAnnounced(
  *  ONE of the two clocks that bound the notice — see `isPermanentlyUnclosed`. */
 export const WITHDRAWN_LOG_UNCLOSED_AFTER_MS = WITHDRAWN_TTL_S * 1000
 
-/** Was this row's 🔴 thread left permanently open? The verdict #1106 exists to make answerable — and
- *  the reason it is computed on READ rather than stored: it is a function of elapsed time, so a
- *  stored flag would need a writer to come back and flip it, which is exactly the extra wiring this
- *  design avoids.
+/** Was this row's 🔴 thread left permanently open? The verdict #1106 exists to make answerable.
  *
  *  Two independent clocks can each make the notice unsendable, so the deadline is the EARLIER of them
  *  (#1153 review): the tombstone ages out at `prunedAt + WITHDRAWN_LOG_UNCLOSED_AFTER_MS`, and the
@@ -193,13 +193,14 @@ export function isPermanentlyUnclosed(row: WithdrawalLogEntry, nowMs: number): b
   return withdrawalOutcome(row, nowMs) === 'neverClosed'
 }
 
-/** #1189 — the one bucket a row falls in. Past its send deadline, an un-announced row is `noThread`
- *  when no 🔴 was open to close, and otherwise `neverClosed`. A row without `threadOpened` stays
- *  `neverClosed`. */
-export type WithdrawalOutcome = 'announced' | 'pending' | 'neverClosed' | 'noThread' | 'malformedTimestamp'
+/** #1189 — the one bucket a row falls in. A 🟢 resolved notice closes the thread as surely as the ⚪
+ *  one (`closedByResolved`). Past its send deadline, an un-announced row is `noThread` when no 🔴 was
+ *  open to close, and otherwise `neverClosed`. A row without `threadOpened` stays `neverClosed`. */
+export type WithdrawalOutcome = 'announced' | 'closedByResolved' | 'pending' | 'neverClosed' | 'noThread' | 'malformedTimestamp'
 
 export function withdrawalOutcome(row: WithdrawalLogEntry, nowMs: number): WithdrawalOutcome {
   if (row.announcedAt) return 'announced'
+  if (row.closedByResolved === true) return 'closedByResolved'
   if (Number.isNaN(Date.parse(row.prunedAt))) return 'malformedTimestamp'
   if (!pastSendDeadline(row, nowMs)) return 'pending'
   if (row.threadOpened === false) return 'noThread'
@@ -224,7 +225,7 @@ function pastSendDeadline(row: WithdrawalLogEntry, nowMs: number): boolean {
  * `readable` is the load-bearing part. Unlike the tombstone roster — where an empty read only ever
  * costs a notification — an empty read HERE is a REPORTING answer, and `[]` would read as "no
  * provider ever withdrew an incident", the exact false negative this module exists to remove. Every
- * caller must consume the flag: both writers refuse to write on `false` (an empty start would
+ * caller must consume the flag: every writer refuses to write on `false` (an empty start would
  * republish the month and erase its history), and the admin endpoint 502s rather than answering zero.
  *
  * `droppedMalformed` is the same distinction one level down. A partially-eaten value is still
@@ -419,6 +420,30 @@ export async function markWithdrawalsAnnounced(
   }
 }
 
+/** Write point 3 (#1189) — set `closedByResolved` on the rows whose incident just had its 🟢 resolved
+ *  notice accepted by the operator webhook. Most resolved incidents were never withdrawn, so an id with
+ *  no row is the normal case. A row the ⚪ already closed is left alone. */
+export async function markWithdrawalsClosedByResolved(
+  kv: KVLike | KVNamespace,
+  incIds: ReadonlySet<string>,
+  now: Date,
+): Promise<void> {
+  const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString()
+  const months = [...new Set([monthOfIso(now.toISOString()), monthOfIso(prev)].filter((m): m is string => m !== null))]
+  for (const month of months) {
+    const { rows } = await readWithdrawalLog(kv, month)
+    const stamped: string[] = []
+    const updated = rows.map((r) => {
+      if (!incIds.has(r.incId) || r.announcedAt || r.closedByResolved) return r
+      stamped.push(r.incId)
+      return { ...r, closedByResolved: true as const }
+    })
+    if (stamped.length === 0) continue
+    const ok = await kvPut(kv, withdrawalLogKey(month), JSON.stringify(updated))
+    if (!ok) console.error('[withdrawal-log] resolved stamp FAILED — these rows exist but will read as never-closed:', month, stamped.join(', '))
+  }
+}
+
 /**
  * The incident ids to stamp, extracted from a cron cycle's just-written dedup keys.
  *
@@ -428,8 +453,7 @@ export async function markWithdrawalsAnnounced(
  * report as never-closed — the module's headline verdict inverted, silently. (`fix_the_called_path`:
  * pin the call graph, unit-test the logic.)
  */
-export function withdrawalIdsFromAlertKeys(keys: readonly string[]): Set<string> {
-  const prefix = 'alerted:wd:'
+export function withdrawalIdsFromAlertKeys(keys: readonly string[], prefix = 'alerted:wd:'): Set<string> {
   const ids = new Set<string>()
   for (const k of keys) {
     if (!k.startsWith(prefix)) continue

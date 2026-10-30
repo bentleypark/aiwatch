@@ -265,6 +265,7 @@ curl -s "https://<worker>/api/admin/withdrawals?months=12" -H "X-Admin-Key: $ADM
 | Field | Means |
 |---|---|
 | `announced` | The ⚪ notice was accepted by Discord — the thread was closed. Working as designed |
+| `closedByResolved` | After the prune, a 🟢 resolved notice was accepted by the operator webhook for the incident, which closed the thread (#1189) |
 | `pending` | Not announced YET, and still before its send deadline. Normally a `withdrawalHold` (the provider re-published the id, an incident is still running, or the status source was unreadable) — benign, re-evaluated every 5 min |
 | `neverClosed` | **#1106 recurring.** No operator ⚪ notice went out, and the window for sending it has closed, so nothing can send it now. Scoped to the OPERATOR webhook (see below) — subscribers may still have received it. Rows recorded before #1189 carry no `threadOpened`, so they land here even when no 🔴 was open |
 | `noThread` | Past the deadline, and no `alerted:new:` marker existed at prune time: no 🔴 was ever sent, so there was no thread to close (#1189) |
@@ -273,7 +274,7 @@ curl -s "https://<worker>/api/admin/withdrawals?months=12" -H "X-Admin-Key: $ADM
 | `unreadableMonths` | Months whose KV value could not be read at all |
 | `malformedByMonth` | Rows excluded by the shape check, per month — that month's key is the one to repair |
 
-These buckets partition `count`: `announced + pending + neverClosed + noThread + malformedTimestamp === count`. Each row also carries its bucket as `outcome`.
+These buckets partition `count`: `announced + closedByResolved + pending + neverClosed + noThread + malformedTimestamp === count`. Each row also carries its bucket as `outcome`.
 
 A `neverClosed > 0` is the signal to investigate — pair it with the cron's own
 `[cron] #1106 withdrawal notice held — <reason>` lines if they are still inside the Workers Logs window.
@@ -288,7 +289,7 @@ operator notice went out", not "nobody was told".
 
 **Failure modes:** 401 `unauthorized` (no/incorrect `X-Admin-Key`), 400 (`month` not `YYYY-MM` with a
 real 01-12 month, or `months` outside 1-24), 503 (`STATUS_CACHE` unavailable), 502 when **every** month
-in the range is unreadable. That 502 is deliberate and is **not transient**: both writers refuse to
+in the range is unreadable. That 502 is deliberate and is **not transient**: every writer refuses to
 start from `[]` (an empty start would republish the month and erase its history), so a corrupt value
 freezes that month permanently — no further withdrawal is recorded in it until the KV value is
 repaired or deleted by hand. There is no POST: nothing an operator could edit here would be anything

@@ -25,6 +25,7 @@ import {
   readWithdrawalLog,
   recordWithdrawalsPruned,
   markWithdrawalsAnnounced,
+  markWithdrawalsClosedByResolved,
   withdrawalIdsFromAlertKeys,
   withdrawalLogKey,
   WITHDRAWAL_LOG_MAX,
@@ -1024,13 +1025,79 @@ describe('#1189 GET /api/admin/withdrawals splits the past-deadline rows', () =>
       row({ incId: 'lost', ...aged, threadOpened: true }),
       row({ incId: 'old', ...aged }),
       row({ incId: 'none', ...aged, threadOpened: false }),
+      row({ incId: 'closed', ...aged, threadOpened: true, closedByResolved: true }),
     ]) })
     const env = { ALLOWED_ORIGIN: '*', STATUS_CACHE: kv, ADMIN_API_KEY: 'test-admin-key' } as Parameters<typeof workerModule.fetch>[1]
     const res = await workerModule.fetch(new Request('https://example.com/api/admin/withdrawals?month=2026-07', { headers: { 'X-Admin-Key': 'test-admin-key' } }), env, ctx)
     const body = await res.json() as Record<string, unknown> & { withdrawals: Array<{ incId: string; outcome: string; neverClosed: boolean }> }
-    expect(body).toMatchObject({ count: 3, announced: 0, pending: 0, neverClosed: 2, noThread: 1, malformedTimestamp: 0 })
+    expect(body).toMatchObject({ count: 4, announced: 0, pending: 0, neverClosed: 2, noThread: 1, closedByResolved: 1, malformedTimestamp: 0 })
     expect(body.withdrawals.map((r) => [r.incId, r.outcome, r.neverClosed])).toEqual([
-      ['lost', 'neverClosed', true], ['old', 'neverClosed', true], ['none', 'noThread', false],
+      ['lost', 'neverClosed', true], ['old', 'neverClosed', true], ['none', 'noThread', false], ['closed', 'closedByResolved', false],
     ])
+  })
+})
+
+describe('#1189 a 🟢 resolved notice closes the thread', () => {
+  const now = '2026-09-01T00:00:00Z'
+  const past = (over: Partial<WithdrawalLogEntry> = {}) => row({ ...agedOutBefore(now), ...over })
+
+  it('a row whose 🟢 went out is closedByResolved, not a loss', () => {
+    const r = past({ threadOpened: true, closedByResolved: true })
+    expect(withdrawalOutcome(r, Date.parse(now))).toBe('closedByResolved')
+    expect(isPermanentlyUnclosed(r, Date.parse(now))).toBe(false)
+  })
+
+  it('a re-published incident that got no 🟢 (the yc7mr2gvl914 shape: pruned 40h after it started) is still neverClosed', () => {
+    const r = past({ svcId: 'claude', incId: 'yc7mr2gvl914', startedAt: '2026-07-22T17:56:10.087Z', prunedAt: '2026-07-24T09:50:03.060Z', threadOpened: true })
+    expect(withdrawalOutcome(r, Date.parse(now))).toBe('neverClosed')
+  })
+
+  it('a 🟢 before the deadline already closes the thread', () => {
+    expect(withdrawalOutcome(row({ closedByResolved: true }), Date.parse('2026-07-21T11:00:00Z'))).toBe('closedByResolved')
+  })
+
+  it('extracts resolved ids from the dedup keys written this cycle', () => {
+    expect([...withdrawalIdsFromAlertKeys(['alerted:res:r-1', 'alerted:wd:w-1', 'alerted:res:'], 'alerted:res:')]).toEqual(['r-1'])
+    expect([...withdrawalIdsFromAlertKeys(['alerted:res:r-1', 'alerted:wd:w-1'])]).toEqual(['w-1'])
+  })
+
+  it('markWithdrawalsClosedByResolved stamps the row after the prune, in the previous month too', async () => {
+    const junKey = withdrawalLogKey('2026-06')
+    const { kv, store } = makeKV({ [junKey]: JSON.stringify([row({ prunedAt: '2026-06-30T23:50:00Z' })]) })
+    await markWithdrawalsClosedByResolved(kv, new Set(['aud-1']), new Date('2026-07-01T00:10:00Z'))
+    const stamped = JSON.parse(store[junKey])[0] as WithdrawalLogEntry
+    expect(stamped.closedByResolved).toBe(true)
+    expect(stamped).not.toHaveProperty('announcedAt')
+  })
+
+  it('a failed 🟢 stamp is logged with the rows it tried to stamp', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { kv } = makeKV({ [KEY]: JSON.stringify([row()]) })
+    const failing = { ...kv, put: async () => { throw new Error('kv down') } } as unknown as KVNamespace
+    await markWithdrawalsClosedByResolved(failing, new Set(['aud-1']), new Date('2026-07-21T09:05:00Z'))
+    expect(err.mock.calls.some((c) => String(c[0]).includes('resolved stamp FAILED') && c.includes('aud-1'))).toBe(true)
+  })
+
+  it('a row the ⚪ already closed is left alone', async () => {
+    const { kv, put } = makeKV({ [KEY]: JSON.stringify([row({ announcedAt: '2026-07-21T09:00:00Z' })]) })
+    await markWithdrawalsClosedByResolved(kv, new Set(['aud-1']), new Date('2026-07-21T09:05:00Z'))
+    expect(put).not.toHaveBeenCalled()
+  })
+
+  it('a 🟢 for an incident that was never withdrawn writes nothing and logs nothing', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { kv, put } = makeKV({ [KEY]: JSON.stringify([row()]) })
+    await markWithdrawalsClosedByResolved(kv, new Set(['not-withdrawn']), new Date('2026-07-21T09:05:00Z'))
+    expect(put).not.toHaveBeenCalled()
+    expect(err).not.toHaveBeenCalled()
+  })
+
+  it('the cron stamps resolved ids only inside the operator-send gate, fail-soft', () => {
+    const src = readFileSync(join(__dirname, '..', 'index.ts'), 'utf8')
+    const start = src.indexOf('const resIds = withdrawalIdsFromAlertKeys(keysToWrite, \'alerted:res:\')')
+    expect(start).toBeGreaterThan(src.indexOf('const operatorSent = await sendDiscordAlert'))
+    const b = src.slice(start, src.indexOf('#936 — send the tweet-reply draft', start))
+    expect(b).toMatch(/^const resIds = withdrawalIdsFromAlertKeys\(keysToWrite, 'alerted:res:'\)\n\s*if \(operatorSent && resIds\.size > 0\) \{\n\s*try \{\n\s*await markWithdrawalsClosedByResolved\(env\.STATUS_CACHE, resIds, new Date\(\)\)\n\s*\} catch \(err\) \{\n[^\n]*\n\s*\}\n\s*\}\n/)
+    expect(b.match(/markWithdrawalsClosedByResolved/g)).toHaveLength(1)
   })
 })

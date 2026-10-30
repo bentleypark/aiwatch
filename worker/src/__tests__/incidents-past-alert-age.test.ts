@@ -418,3 +418,32 @@ describe('wiring — the cron defers to the plan (#1224)', () => {
     expect(statementAt('if (readPending) pendingReads++')).toBe('if (readPending) pendingReads++')
   })
 })
+
+// #1189 — a 🟢 says when an incident RESOLVED, so a resolved incident's window runs from `resolvedAt`.
+// Gated on `startedAt` alone, an outage that ran past 24h closed its 🔴 thread with no 🟢 at all.
+describe('a long incident that resolved recently still gets its 🟢 (#1189)', () => {
+  const OLD = agoMs(3 * 24 * HOUR)
+
+  it.each([
+    { label: 'resolved 1h ago', o: { status: 'resolved', resolvedAt: agoMs(HOUR) }, alertable: true },
+    { label: 'resolved exactly at the bound', o: { status: 'resolved', resolvedAt: agoMs(INCIDENT_ALERT_MAX_AGE_MS) }, alertable: true },
+    { label: 'resolved 2 days ago', o: { status: 'resolved', resolvedAt: agoMs(2 * 24 * HOUR) }, alertable: false },
+    { label: 'resolved, resolvedAt unparseable', o: { status: 'resolved', resolvedAt: 'garbage' }, alertable: false },
+    { label: 'resolved, no resolvedAt', o: { status: 'resolved', resolvedAt: null }, alertable: false },
+    { label: 'still ongoing, resolvedAt set by a provider', o: { status: 'investigating', resolvedAt: agoMs(HOUR) }, alertable: false },
+  ] as Array<{ label: string; o: Partial<Incident>; alertable: boolean }>)('started 3d ago, $label → alertable=$alertable', ({ o, alertable }) => {
+    expect(canIncidentStillAlert(incAt(OLD, o), NOW)).toBe(alertable)
+    expect(markerReadPlan(incAt(OLD, o), NOW)).toEqual({ alertable, readPending: false })
+  })
+
+  it('buildIncidentAlerts emits the 🟢 for it when the 🔴 was sent', () => {
+    const inc = incAt(OLD, { status: 'resolved', resolvedAt: agoMs(HOUR) })
+    const alerts = buildIncidentAlerts([svcWith([inc])], new Map([['inc_1', new Set(['openai'])]]), NOW)
+    expect(alerts.map((a) => a.key)).toEqual(['alerted:res:inc_1'])
+  })
+
+  it('and emits nothing when no 🔴 was sent', () => {
+    const inc = incAt(OLD, { status: 'resolved', resolvedAt: agoMs(HOUR) })
+    expect(buildIncidentAlerts([svcWith([inc])], new Map(), NOW)).toEqual([])
+  })
+})

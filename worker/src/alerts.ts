@@ -214,7 +214,7 @@ export function pendingNewKey(incId: string): string {
  *
  * `buildIncidentAlerts` drops every incident older than this, on BOTH its new and resolved branches
  * (the `incAge` cutoff below), so an incident past it cannot produce an alert for the roster read to
- * dedup.
+ * dedup. A resolved incident is measured from `resolvedAt` as well (#1189).
  *
  * Deliberately ONE constant shared by the gate and the cutoff it is reasoning about, rather than two
  * numbers that happen to agree: the gate is safe exactly while it skips no more than the build already
@@ -245,6 +245,8 @@ export const INCIDENT_ALERT_MAX_AGE_MS = 86_400_000
  */
 export function canIncidentStillAlert(inc: Incident, nowMs: number): boolean {
   if (inc.derived === 'status_history') return false // #1623 — a synthesized day row never alerts
+  // #1189 — a 🟢 says when the incident resolved, so a resolved one is also young by `resolvedAt`.
+  if (inc.status === 'resolved' && nowMs - Date.parse(inc.resolvedAt ?? '') <= INCIDENT_ALERT_MAX_AGE_MS) return true
   const startedMs = Date.parse(inc.startedAt)
   if (!Number.isFinite(startedMs)) return true
   return nowMs - startedMs <= INCIDENT_ALERT_MAX_AGE_MS
