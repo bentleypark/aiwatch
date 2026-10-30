@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.dirname(scriptDir)
-const sourceRoot = path.join(repoRoot, '.codex', 'skills')
+const sourceRoot = path.join(repoRoot, '.agents', 'skills')
 const codexRoot = process.env.CODEX_HOME || path.join(process.env.HOME || process.env.USERPROFILE, '.codex')
 const targetRoot = path.join(codexRoot, 'skills')
 
