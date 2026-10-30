@@ -472,6 +472,19 @@ export function planIssueAutoVerify(body, evaluated) {
   return { newBody, ticked, passCount: ticked.length, dropLabel, close }
 }
 
+// #1864 — the paths that get the read-only key, on the pinned prod worker host only. A keyed source
+// may yield a number or boolean only: `actual` is posted to the public issue as the auto-verify evidence.
+export const KEYED_PATHS = new Set(['/api/admin/withdrawals'])
+
+/** The `X-Verify-Key` header for a keyed source, else `{}`. Never throws. */
+export function verifyKeyHeaders(urlStr, env = process.env) {
+  if (!env.VERIFY_READ_KEY) return {}
+  let u
+  try { u = new URL(urlStr) } catch { return {} }
+  if (u.protocol !== 'https:' || u.hostname !== new URL(DEFAULT_ASSERT_BASE).hostname || !KEYED_PATHS.has(u.pathname)) return {}
+  return { 'X-Verify-Key': env.VERIFY_READ_KEY }
+}
+
 /**
  * Fetch the allowlisted source + evaluate → {status, pass, actual, url, error}.
  * status: 'pass' | 'fail' | 'skip' (non-allowlisted / fetch error / bad JSON — fail-open, keep reminder).
@@ -480,12 +493,13 @@ export function planIssueAutoVerify(body, evaluated) {
 export async function runAssertion(assertion, { env = process.env, fetchImpl = fetch, timeoutMs = 8000 } = {}) {
   const url = resolveSource(assertion.source, env)
   if (!url) return { status: 'skip', error: `source not allowlisted: ${assertion.source}`, url: null }
+  const headers = verifyKeyHeaders(url, env)
   let json
   try {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
-      const res = await fetchImpl(url, { signal: ctrl.signal })
+      const res = await fetchImpl(url, { signal: ctrl.signal, headers })
       if (!res.ok) return { status: 'skip', error: `HTTP ${res.status}`, url }
       json = await res.json()
     } finally { clearTimeout(t) }
@@ -493,6 +507,9 @@ export async function runAssertion(assertion, { env = process.env, fetchImpl = f
     return { status: 'skip', error: e?.message || String(e), url }
   }
   const { pass, actual } = evaluateAssertion(assertion, json)
+  if (headers['X-Verify-Key'] && typeof actual !== 'number' && typeof actual !== 'boolean') {
+    return { status: 'skip', error: 'a keyed source may only yield a number or boolean', url }
+  }
   return { status: pass ? 'pass' : 'fail', pass, actual, url }
 }
 

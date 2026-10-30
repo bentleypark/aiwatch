@@ -270,6 +270,7 @@ curl -s "https://<worker>/api/admin/withdrawals?months=12" -H "X-Admin-Key: $ADM
 | `neverClosed` | **#1106 recurring.** No operator ⚪ notice went out, and the window for sending it has closed, so nothing can send it now. Scoped to the OPERATOR webhook (see below) — subscribers may still have received it. Rows recorded before #1189 carry no `threadOpened`, so they land here even when no 🔴 was open |
 | `noThread` | Past the deadline, and no `alerted:new:` marker existed at prune time: no 🔴 was ever sent, so there was no thread to close (#1189) |
 | `malformedTimestamp` | An un-announced row whose `prunedAt` is unparseable, so it cannot be aged — counted apart rather than sitting in `pending` forever |
+| `threadOpenedRecorded` | Rows carrying `threadOpened`, true or false. Not a bucket (#1864) |
 | `partial` / `ok` | `partial: true` (and `ok: false`) means the counts are computed over LESS than the requested range — some month could not be opened, or some rows failed the shape check. Branch on `ok`; the rows are still returned |
 | `unreadableMonths` | Months whose KV value could not be read at all |
 | `malformedByMonth` | Rows excluded by the shape check, per month — that month's key is the one to repair |
@@ -287,7 +288,7 @@ the send loop, so a `neverClosed` row can coexist with subscribers who *did* get
 error direction is the safe one (it over-reports a failure, loudly), but read the bucket as "no
 operator notice went out", not "nobody was told".
 
-**Failure modes:** 401 `unauthorized` (no/incorrect `X-Admin-Key`), 400 (`month` not `YYYY-MM` with a
+**Failure modes:** 401 `unauthorized` (neither a correct `X-Admin-Key` nor a correct `X-Verify-Key`, #1864), 400 (`month` not `YYYY-MM` with a
 real 01-12 month, or `months` outside 1-24), 503 (`STATUS_CACHE` unavailable), 502 when **every** month
 in the range is unreadable. That 502 is deliberate and is **not transient**: every writer refuses to
 start from `[]` (an empty start would republish the month and erase its history), so a corrupt value
