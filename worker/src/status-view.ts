@@ -36,6 +36,7 @@ export interface LeanStatusPayload<S extends ViewService = ViewService> {
   supplyChainBanner?: unknown
   upstreamLinks?: unknown[]
   recoveryBaseline?: Record<string, unknown>
+  estimateAccuracy?: unknown
 }
 
 // #787 — competition ranking by ROUNDED score: tied services share the first position.
@@ -105,6 +106,7 @@ export interface IsDownView<S extends ViewService = ViewService> {
   supplyChainBanner?: unknown
   upstreamLinks?: unknown[]
   recoveryBaseline?: Record<string, unknown>
+  estimateAccuracy?: unknown
 }
 
 /** One is-down page: the target (with its rank), its fallbacks, and only its own share of the
@@ -128,6 +130,7 @@ export function buildIsDownView<S extends ViewService>(payload: LeanStatusPayloa
     ...(payload.supplyChainBanner ? { supplyChainBanner: payload.supplyChainBanner } : {}),
     upstreamLinks: payload.upstreamLinks ?? [],
     ...(baseline ? { recoveryBaseline: { [id]: baseline } } : {}),
+    ...(payload.estimateAccuracy ? { estimateAccuracy: payload.estimateAccuracy } : {}),
   }
 }
 

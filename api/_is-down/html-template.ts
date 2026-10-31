@@ -16,7 +16,7 @@ import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { EXTENSION_STORES, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from '../_shared/slack-install'
 import type { RegionStatusResult } from './region-status'
-import { recoveryBaselineText, type RecoveryBaseline } from '../../worker/src/recovery-baseline-text'
+import { estimateAccuracyText, isEstimateAccuracy, recoveryBaselineText, type EstimateAccuracy, type RecoveryBaseline } from '../../worker/src/recovery-baseline-text'
 // #1053 — the note shape is owned by upstream-note.ts (where the claim is built); importing it keeps
 // one definition of the contract instead of a second copy that can drift.
 import type { UpstreamNote as UpstreamNoteLike } from './upstream-note'
@@ -471,6 +471,7 @@ export function renderPage(
   fallbacksUnavailable = false,
   // #1753 — a listed service's substitutes, one entry per use; rendered under "For <use>" subheadings.
   fallbackGroups?: Array<{ use: string; items: Fallback[] }>,
+  estimateAccuracy?: EstimateAccuracy | null,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -700,7 +701,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORES, { loc: 'is_down_page', variant: 'is-down' }) : ''}
-${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service), recoveryBaseline ?? undefined, fallbackGroups)}
+${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service), recoveryBaseline ?? undefined, fallbackGroups, estimateAccuracy ?? undefined)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderUpstreamNote(upstreamNote, seo.displayName)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
@@ -902,7 +903,7 @@ export function hasLiveIncident(service: ServiceData | null | undefined): boolea
 // true and collapse `isResolved` back to the badge — re-shipping this bug silently at a second call
 // site, with no type error. Same reason `filterByComponentStatus` takes `components` required (#970),
 // and the exact class `debugging_optional_param_reempties_derived_set` records as recurring.
-function renderAIInsight(insight: AIInsight | AIInsight[] | null | undefined, serviceStatus: string | undefined, fallbacks: Fallback[] | undefined, capabilityLabel: string | undefined, ongoing: boolean, baseline: RecoveryBaseline | undefined, groups?: Array<{ use: string; items: Fallback[] }>): string {
+function renderAIInsight(insight: AIInsight | AIInsight[] | null | undefined, serviceStatus: string | undefined, fallbacks: Fallback[] | undefined, capabilityLabel: string | undefined, ongoing: boolean, baseline: RecoveryBaseline | undefined, groups: Array<{ use: string; items: Fallback[] }> | undefined, estimateAccuracy: EstimateAccuracy | undefined): string {
   if (!insight) return ''
   const list = Array.isArray(insight) ? insight : [insight]
   if (list.length === 0) return ''
@@ -959,6 +960,7 @@ ${resolvedBadge}
 </div>
 ${bodies}
 ${renderRecoveryBaseline(baseline)}
+${renderEstimateAccuracy(estimateAccuracy)}
 ${fallbackHtml}
 <p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
 </div>`
@@ -968,6 +970,11 @@ ${fallbackHtml}
 export function renderRecoveryBaseline(b: RecoveryBaseline | undefined): string {
   if (!b) return ''
   return `<div class="mono" data-recovery-baseline style="font-size:11px;color:#8b949e;margin-top:8px">📊 ${esc(recoveryBaselineText(b))}</div>`
+}
+
+export function renderEstimateAccuracy(a: EstimateAccuracy | undefined): string {
+  if (!isEstimateAccuracy(a)) return ''
+  return `<div class="mono" data-estimate-accuracy style="font-size:11px;color:#8b949e;margin-top:4px">🎯 ${esc(estimateAccuracyText(a))}</div>`
 }
 
 // One incident's analysis block inside the shared card. `multi`/`idx` control the separator + the
