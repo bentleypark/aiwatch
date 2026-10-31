@@ -342,3 +342,68 @@ test('#1697 — a service on a shared card and its own card gets its past recove
   await expect(modal.locator('[data-recovery-baseline="claude"]')).toHaveCount(1)
   await expect(modal.locator('[data-recovery-baseline="claudeai"]')).toHaveText(/^📊 claude\.ai — /)
 })
+
+test.describe('AnalysisModal — estimate track record (#1205)', () => {
+  const ACCURACY = { total: 32, accurate: 12, overPredicted: 14, underPredicted: 6, since: '2026-09-01' }
+
+  for (const [label, payload, count] of [
+    ['shown once, however many cards the modal has', { ...MIXED_MOCK, estimateAccuracy: ACCURACY }, 1],
+    ['hidden without it', MIXED_MOCK, 0],
+    ['hidden below the floor', { ...MIXED_MOCK, estimateAccuracy: { ...ACCURACY, total: 29, accurate: 9 } }, 0],
+  ]) {
+    test(label, async ({ page }) => {
+      await page.route('**/api/status', (route) => route.fulfill({ json: payload }))
+      await page.route('**/api/status/cached', (route) => route.fulfill({ json: payload }))
+      await page.goto('/')
+      await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
+      await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+      const modal = page.locator('.fixed.inset-0').last()
+      await expect(modal).toBeVisible()
+      const line = modal.locator('[data-estimate-accuracy]')
+      await expect(line).toHaveCount(count)
+      if (count) await expect(line).toHaveText(/🎯 (AIWatch's recovery estimates, all services \(32 scored since 2026-09-01\): 44% recovered in under half the estimate, 37% in half to all of it, 19% took longer\.|AIWatch의 복구 예측 적중 기록, 전체 서비스 \(2026-09-01 이후 결과가 확인된 32건\): 예측의 절반 미만 시간에 복구 44%, 예측의 절반~전체 시간에 복구 37%, 예측보다 오래 걸림 19%)/)
+    })
+  }
+
+  for (const only of ['claude', 'claudeai']) test(`sits directly under the past-recovery-times line of ${only}, and not in the footer`, async ({ page }) => {
+    const BASELINE = { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' }
+    const payload = { ...MIXED_MOCK, estimateAccuracy: ACCURACY, recoveryBaseline: { [only]: BASELINE } }
+    await page.route('**/api/status', (route) => route.fulfill({ json: payload }))
+    await page.route('**/api/status/cached', (route) => route.fulfill({ json: payload }))
+    await page.goto('/')
+    await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
+    await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+    const modal = page.locator('.fixed.inset-0').last()
+    await expect(modal).toBeVisible()
+    await expect(modal.locator('[data-recovery-baseline] + [data-estimate-accuracy]')).toHaveCount(1)
+    await expect(modal.locator('[data-estimate-accuracy]')).toHaveCount(1)
+    await expect(modal.locator('.border-t [data-estimate-accuracy]')).toHaveCount(0)
+  })
+
+  test('goes under the first card that has past recovery times when two cards do', async ({ page }) => {
+    const BASELINE = { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' }
+    const payload = { ...MIXED_MOCK, estimateAccuracy: ACCURACY, recoveryBaseline: { claude: BASELINE, claudeai: BASELINE } }
+    await page.route('**/api/status', (route) => route.fulfill({ json: payload }))
+    await page.route('**/api/status/cached', (route) => route.fulfill({ json: payload }))
+    await page.goto('/')
+    await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
+    await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+    const modal = page.locator('.fixed.inset-0').last()
+    await expect(modal).toBeVisible()
+    await expect(modal.locator('[data-recovery-baseline="claude"] + [data-estimate-accuracy]')).toHaveCount(1)
+    await expect(modal.locator('[data-estimate-accuracy]')).toHaveCount(1)
+  })
+
+  test('still shows once, inside a card and not in the footer, when no service has past recovery times', async ({ page }) => {
+    const payload = { ...MIXED_MOCK, estimateAccuracy: ACCURACY }
+    await page.route('**/api/status', (route) => route.fulfill({ json: payload }))
+    await page.route('**/api/status/cached', (route) => route.fulfill({ json: payload }))
+    await page.goto('/')
+    await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
+    await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+    const modal = page.locator('.fixed.inset-0').last()
+    await expect(modal).toBeVisible()
+    await expect(modal.locator('[data-estimate-accuracy]')).toHaveCount(1)
+    await expect(modal.locator('.border-t [data-estimate-accuracy]')).toHaveCount(0)
+  })
+})

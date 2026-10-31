@@ -14,12 +14,13 @@ import type { ServiceConfig } from './types'
 import { readOverridesFreshResult } from './overrides'
 import { isAutoMonitorIncident } from './services'
 import { isFeedEventTitle } from './parsers/betterstack'
-import type { RecoveryBaseline } from './recovery-baseline-text'
+import { ESTIMATE_ACCURACY_MIN_N, isEstimateAccuracy, type EstimateAccuracy, type RecoveryBaseline } from './recovery-baseline-text'
 
 export type { RecoveryBaseline }
 
 export const RECOVERY_BASELINE_KEY = 'incident:recovery-baseline'
 export const RECOVERY_BASELINE_MIN_N = 10
+export const ESTIMATE_ACCURACY_ENTRY = '_estimateAccuracy'
 
 /**
  * Pure. Counts an incident once (by `incId`) and only when its duration is an editorial record of the
@@ -106,8 +107,19 @@ export function compareWithRecoveryBaseline(
   return ai.length ? { ai: tallyAccuracy(ai), pastMedian: tallyAccuracy(pastMedian), pastP80: tallyAccuracy(pastP80) } : null
 }
 
-export function writeRecoveryBaselines(kv: KVLike, baselines: Record<string, RecoveryBaseline>): Promise<boolean> {
-  return kvPut(kv, RECOVERY_BASELINE_KEY, JSON.stringify(baselines))
+export function summarizeEstimateAccuracy(records: IncidentHistoryRecord[]): EstimateAccuracy | null {
+  const scored = scoredPredictions(records)
+  if (scored.length < ESTIMATE_ACCURACY_MIN_N) return null
+  const { total, accurate, overPredicted, underPredicted } = tallyAccuracy(scored)
+  return { total, accurate, overPredicted, underPredicted, since: scored.map((r) => r.resolvedAt).sort()[0].slice(0, 10) }
+}
+
+export function writeRecoveryBaselines(
+  kv: KVLike,
+  baselines: Record<string, RecoveryBaseline>,
+  estimateAccuracy: EstimateAccuracy | null = null,
+): Promise<boolean> {
+  return kvPut(kv, RECOVERY_BASELINE_KEY, JSON.stringify(estimateAccuracy ? { ...baselines, [ESTIMATE_ACCURACY_ENTRY]: estimateAccuracy } : baselines))
 }
 
 export async function rebuildRecoveryBaselines(
@@ -117,7 +129,9 @@ export async function rebuildRecoveryBaselines(
 ): Promise<'written' | 'write-failed' | 'unreadable' | 'malformed'> {
   const overrides = await readOverridesFreshResult(kv)
   if (overrides.state !== 'ok') return overrides.state
-  return (await writeRecoveryBaselines(kv, buildRecoveryBaselines(historyBySvc, overrides.list, configs))) ? 'written' : 'write-failed'
+  const baselines = buildRecoveryBaselines(historyBySvc, overrides.list, configs)
+  const estimateAccuracy = summarizeEstimateAccuracy([...historyBySvc.values()].flat())
+  return (await writeRecoveryBaselines(kv, baselines, estimateAccuracy)) ? 'written' : 'write-failed'
 }
 
 function isBaseline(v: unknown): v is RecoveryBaseline {
@@ -128,16 +142,25 @@ function isBaseline(v: unknown): v is RecoveryBaseline {
     && typeof b.since === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.since)
 }
 
-/** `{}` on a miss, a KV error or an unusable value — the line is then hidden. */
-export async function readRecoveryBaselines(kv: KVLike): Promise<Record<string, RecoveryBaseline>> {
+export async function readRecoveryValue(kv: KVLike): Promise<{ baselines: Record<string, RecoveryBaseline>; estimateAccuracy: EstimateAccuracy | null }> {
+  const none = { baselines: {}, estimateAccuracy: null }
   try {
     const raw = await kv.get(RECOVERY_BASELINE_KEY)
-    if (!raw) return {}
+    if (!raw) return none
     const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return Object.fromEntries(Object.entries(parsed).filter(([, v]) => isBaseline(v)))
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return none
+    const entries = parsed as Record<string, unknown>
+    const accuracy = entries[ESTIMATE_ACCURACY_ENTRY]
+    return {
+      baselines: Object.fromEntries(Object.entries(entries).filter(([, v]) => isBaseline(v))) as Record<string, RecoveryBaseline>,
+      estimateAccuracy: isEstimateAccuracy(accuracy) ? accuracy : null,
+    }
   } catch (err) {
     console.warn('[recovery-baseline] read failed:', err instanceof Error ? err.message : err)
-    return {}
+    return none
   }
+}
+
+export async function readRecoveryBaselines(kv: KVLike): Promise<Record<string, RecoveryBaseline>> {
+  return (await readRecoveryValue(kv)).baselines
 }
