@@ -235,7 +235,7 @@ reads the same durations — so the report's Score/ranking is corrected too, not
   robust at ≥3 resolved incidents). General MTTR robustness is #1019 Part B.
 
 **Request body** (POST, JSON): `action` (`'add' | 'remove'`), `id`, `durationMin` (add only, finite ≥ 0),
-optional `reason`. **Response**: `{ ok, changed, overrides }` on 200. Failure modes and the GET
+optional `reason`. **Response**: `{ ok, changed, overrides }` on 200, plus `match` on an `add` (#1319). Failure modes and the GET
 `listState` fields mirror suppress (401/400/409/502/503). No isolate cache (the apply sites read fresh).
 
 # Operator Tools — `GET /api/admin/withdrawals` (#1106 Part 5)

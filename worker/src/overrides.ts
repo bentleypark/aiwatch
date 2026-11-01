@@ -93,8 +93,22 @@ export function overrideMap(list: DurationOverride[]): Map<string, number> {
  *  Identity-preserving when nothing applies (no needless object churn). Structurally-corrupt input is
  *  returned as-is, mirroring `filterSuppressedFromMonthly`, so a caller outside a try/catch can't throw. */
 export function applyDurationOverrides(data: MonthlyIncidents, list: DurationOverride[]): MonthlyIncidents {
-  if (!list.length || !data?.services || typeof data.services !== 'object') return data
+  return applyDurationOverridesCounted(data, list).data
+}
+
+export interface OverrideMatches { matched: string[]; unmatched: string[] }
+
+/** The ids in `list`, each once, as an outcome in which none was applied. */
+export function noOverridesApplied(list: DurationOverride[]): OverrideMatches {
+  return { matched: [], unmatched: [...new Set(list.map((o) => o.id))] }
+}
+
+/** `applyDurationOverrides` and the ids it actually pinned: `matched` is every listed id whose
+ *  `durations` entry or `incidents` row it rewrote, so the count comes from the apply step itself. */
+export function applyDurationOverridesCounted(data: MonthlyIncidents, list: DurationOverride[]): { data: MonthlyIncidents; matches: OverrideMatches } {
+  if (!list.length || !data?.services || typeof data.services !== 'object') return { data, matches: noOverridesApplied(list) }
   const byId = overrideMap(list)
+  const applied = new Set<string>()
   const services: Record<string, MonthlyIncidentServiceData> = {}
   let anyChange = false
   for (const [svcId, svc] of Object.entries(data.services)) {
@@ -103,10 +117,11 @@ export function applyDurationOverrides(data: MonthlyIncidents, list: DurationOve
     anyChange = true
     const durations: Record<string, number> = { ...(svc.durations ?? {}) }
     for (const id of Object.keys(durations)) {
-      if (byId.has(id)) durations[id] = byId.get(id)!
+      if (byId.has(id)) { durations[id] = byId.get(id)!; applied.add(id) }
     }
     const incidents = (svc.incidents ?? []).map((e) => {
       if (!byId.has(e.id)) return e
+      applied.add(e.id)
       const durationMin = byId.get(e.id)!
       const next = { ...e, durationMin }
       // #1390 — KNOWN LIMIT, deliberately not "fixed" here. An override on a `startUnknown` row is
@@ -134,7 +149,35 @@ export function applyDurationOverrides(data: MonthlyIncidents, list: DurationOve
       incidents,
     }
   }
-  return anyChange ? { ...data, services } : data
+  const ids = [...new Set(list.map((o) => o.id))]
+  return {
+    data: anyChange ? { ...data, services } : data,
+    matches: { matched: ids.filter((id) => applied.has(id)), unmatched: ids.filter((id) => !applied.has(id)) },
+  }
+}
+
+/** The current UTC month and the two before it, newest first — the months whose `incidents:monthly`
+ *  accumulator is still inside its 60-day TTL. */
+export function recentAccumulatorMonths(now: Date): string[] {
+  return [0, 1, 2].map((back) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1)).toISOString().slice(0, 7))
+}
+
+export interface OverrideIdLookup { searched: string[]; months: string[] }
+
+/** Which of the recent accumulators name `id`. null when any read throws or holds an unparseable value,
+ *  since "not found" would then be a guess. */
+export async function findOverrideId(kv: Pick<KVNamespace, 'get'>, id: string, now: Date = new Date()): Promise<OverrideIdLookup | null> {
+  const searched = recentAccumulatorMonths(now)
+  const months: string[] = []
+  try {
+    for (const month of searched) {
+      const raw = await kv.get(`incidents:monthly:${month}`)
+      if (raw && applyDurationOverridesCounted(JSON.parse(raw) as MonthlyIncidents, [{ id, durationMin: 0 }]).matches.matched.length) months.push(month)
+    }
+  } catch {
+    return null
+  }
+  return { searched, months }
 }
 
 // ── Admin mutation (mirrors mutateSuppressions) ──────────────────────────────

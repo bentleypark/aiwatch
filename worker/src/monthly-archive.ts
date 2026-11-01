@@ -21,7 +21,7 @@ import { pageIncidents } from './incident-presence'
 import { incidentDay, isEntryWithoutEnd, isResolvedWithoutEnd, normalizeIncidentTimes } from './utils'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
-import { readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
+import { readOverridesFresh, applyDurationOverridesCounted, type DurationOverride, type OverrideMatches } from './overrides'
 import { compareWithRecoveryBaseline, type BaselineComparison } from './recovery-baseline'
 import { kvPut, isNonReliabilityAdvisory } from './utils'
 import { diffPrunedIncidents, appendWithdrawn, type WithdrawnIncident } from './withdrawn'
@@ -2057,6 +2057,7 @@ export async function buildMonthlyArchive(
   // census is structurally unable to see; see `readOverridesFreshResult`.
   overridesOverride?: DurationOverride[],
   priorArchive?: MonthlyArchive | null,
+  onOverrides?: (matches: OverrideMatches) => void,
 ): Promise<MonthlyArchive> {
   const mm = String(month).padStart(2, '0')
   const period = `${year}-${mm}`
@@ -2161,7 +2162,9 @@ export async function buildMonthlyArchive(
     // caller that passes nothing (tests, and any future one), and it is the weaker contract — a KV
     // fault there yields `[]`, which is indistinguishable from "no overrides configured".
     const overrides = overridesOverride ?? await readOverridesFresh(kv)
-    if (overrides.length) incidentData = applyDurationOverrides(incidentData, overrides)
+    const pinned = applyDurationOverridesCounted(incidentData, overrides)
+    incidentData = pinned.data
+    onOverrides?.(pinned.matches)
   }
 
   // Snapshot accumulated security alerts before their 60d TTL lapses (#290). Missing
