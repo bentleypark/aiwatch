@@ -1,14 +1,31 @@
 ---
 type: reference
 title: "Workflow-gate hooks (#415/#657) — the enforcement layer"
-description: "The .claude/hooks workflow hooks plus the .githooks/pre-push agent gate: what each fires on, hard vs soft, the audit log, and how to monitor + tune the step-3.5 hard gate."
+description: "The Claude and Codex workflow hooks plus the .githooks/pre-push agent gate: what each fires on, hard vs soft, the audit log, and how to monitor + tune the step-3.5 hard gate."
 tags: [workflow, hooks, enforcement, ci]
 ---
 
 # Workflow-gate hooks (#415/#657) — the enforcement layer
 
 Hook internals and operations, split out of CLAUDE.md so the always-loaded schema layer stays lean
-(#1076). The hooks live in `.claude/hooks/` and are wired in `.claude/settings.json`.
+(#1076). The implementation lives in `.claude/hooks/`. Claude wires all of it through
+`.claude/settings.json`; Codex wires the compatible soft subset through `.codex/hooks.json`.
+
+## Codex compatibility (#1868)
+
+Codex runs `workflow-gates-reminder.sh`, `git-mutation-gate.sh`,
+`public-issue-figures-trigger.sh`, `tooling-trigger.sh`, and `korean-copy-trigger.sh` from
+`.codex/hooks.json`. Their command is rooted with
+`git rev-parse --show-toplevel`, so it follows the active worktree rather than requiring
+`$CLAUDE_PROJECT_DIR`. The scripts retain the same `additionalContext` output and the same local
+`.claude/hook-audit.jsonl` audit stream.
+
+The project `.codex/` layer must be trusted in Codex before these hooks run; a changed definition
+needs review again. The two edit reminders parse the documented Codex `apply_patch` command payload
+for changed paths, while preserving Claude's `file_path` input. They do not observe files written
+through Bash. This configuration intentionally does **not** claim parity for the transcript-based
+step-3.5 hard gate, Stop hooks, or review-loop telemetry: their Claude input fields are not a stable
+Codex contract. Those remain deferred work in #1868.
 
 `.claude/settings.json` wires the workflow hooks below, because written rules alone (CLAUDE.md + auto-memory) are passive context loaded once per session, which compaction drops: probabilistic compliance. A hook fires at the decision moment.
 - **`workflow-gates-reminder.sh`** (UserPromptSubmit) — re-injects the non-negotiable gates (a start-of-work gate 0 = "invoke `ship-issue` first on any new issue/code task", then the 5 decision-moment gates; text in `.claude/hooks/workflow-gates.txt`) as `additionalContext` on **every turn**. Gate 0 closes the coverage gap where "invoke ship-issue at the START" lived only in CLAUDE.md (a passive session-start surface) and was the one workflow step with no every-turn backstop. Targets the root cause (rules are passive context loaded once at session start; compaction drops methodology), and is the only hook surface that fires each turn + survives compaction. Soft (cannot block); logged as `inject`. Mirrors memory note `feedback_workflow_gates`. **#1412 — gate 2 names the reviewer the loop spawns (`review-findings-only`)**, not the plugin command.

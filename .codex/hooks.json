@@ -1,0 +1,53 @@
+{
+  "description": "Compatible AIWatch workflow reminders for Codex.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/workflow-gates-reminder.sh\"",
+            "timeout": 10,
+            "statusMessage": "Re-injecting workflow gates (#415)..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/git-mutation-gate.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking git-mutation gate (#415)..."
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/public-issue-figures-trigger.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking public-issue disclosure trigger (#1354)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/tooling-trigger.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking reference-tooling triggers..."
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/korean-copy-trigger.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking Korean-copy triggers (#1094)..."
+          }
+        ]
+      }
+    ]
+  }
+}

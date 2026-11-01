@@ -73,8 +73,8 @@ Docs give the API *shape*; these are verified in our code.
 
 ## Which tool, when (the trigger map)
 
-`.claude/hooks/tooling-trigger.sh` (PreToolUse / `Edit|Write|MultiEdit`) inspects the target
-`file_path` and emits a **soft** `hookSpecificOutput.additionalContext` reminder (exit 0, never blocks) — the deterministic
+`.claude/hooks/tooling-trigger.sh` (PreToolUse / `Edit|Write|MultiEdit`) inspects the target path and
+emits a **soft** `hookSpecificOutput.additionalContext` reminder (exit 0, never blocks) — the deterministic
 backstop for the probabilistic triggers above:
 
 | Editing this surface | Before coding | Audit note |
@@ -91,9 +91,10 @@ backstop for the probabilistic triggers above:
 > into `upstream:` and `docs:`. The routing is pinned by `scripts/tooling-trigger.test.mjs`.
 
 Every fire is logged to `.claude/hook-audit.jsonl` as `inject` (`npm run hook-audit` summarizes). Soft
-on purpose; if the audit shows the reminders are ignored, tighten the path globs or escalate. The hook
-is wired in `.claude/settings.json` alongside the #415 gates — a new `settings.json` only takes effect
-after `/hooks` is opened once or a restart.
+on purpose; if the audit shows the reminders are ignored, tighten the path globs or escalate. Claude
+wires the hook in `.claude/settings.json` with `file_path`; Codex wires it in `.codex/hooks.json` and
+extracts paths from `apply_patch` input. Neither observes Bash-written files. Codex must trust the
+project hook definition before it runs.
 
 ## Why both layers
 - **Skill trigger** (model-invoked): fires whenever the model recognizes a relevant *task* from the

@@ -21,13 +21,19 @@ audit() { bash "${HOOK_DIR}/_audit.sh" "tooling-trigger" "$1" "$2" 2>/dev/null |
 
 command -v jq >/dev/null 2>&1 || exit 0
 INPUT="$(cat 2>/dev/null)" || exit 0
-FP="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)" || exit 0
+[ -r "${HOOK_DIR}/_tool-input-paths.sh" ] || exit 0
+. "${HOOK_DIR}/_tool-input-paths.sh"
+FP=""
+while IFS= read -r candidate; do
+  case "$candidate" in
+    *__tests__*|*.test.*|*.spec.*) continue ;;
+    */worker/src/parsers/*|*/worker/src/services.ts|*/worker/src/changelog.ts|*/worker/src/security-monitor.ts|*/worker/src/platform-monitor.ts|*/worker/src/reddit.ts|*/worker/src/ai-analysis.ts|*/worker/src/anthropic.ts|*/package.json|*/src/components/*|*/src/pages/*|*.jsx|*.css|*html-template.ts|*/api/is-down.ts|*/api/intro.ts)
+      FP="$candidate"
+      break
+      ;;
+  esac
+done < <(hook_input_paths "$INPUT")
 [ -z "$FP" ] && exit 0
-
-# Test/spec files need neither API-currency nor web-platform guidance — stay silent there.
-case "$FP" in
-  *__tests__*|*.test.*|*.spec.*) exit 0 ;;
-esac
 
 msg=""
 note=""
