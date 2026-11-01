@@ -161,9 +161,10 @@ is the *procedure* — follow it top to bottom.
      A KV key's TTL is the usual trap: check it against the date. The daily job labels
      **`verify-undecidable`** on any not-yet-due line carrying neither marker, so this is caught within
      a day either way — but fixing it while the context is warm is the point.
-   - **The date is a UTC day, and the reminder is scheduled for 00:00 UTC.** When the check reads the output of a
-     job that runs later in the day (the roster audit runs 06:00 UTC), write the day AFTER that run —
-     otherwise the ping arrives hours before the artifact exists (#1706 was dated for the run's own day).
+   - **When the check reads the output of a job that runs later in the day, write the time on the token:**
+     `**verify-after 2026-11-01T12:15Z**` — the earliest UTC instant the check can be made. The reminder runs
+     once at 00:00 UTC, so a time after midnight pings on the next day's run (#1873). A bare date pings at
+     00:00 UTC that day, hours before a 06:00/12:00 UTC artifact exists (#1706, #1627).
    - **An overdue item is not extended forever.** Past **30 days** overdue the daily report escalates it
      as *needs a disposition* rather than pinging again (#1206). The disposition is a human one: make
      the check observable, or close the issue with a written reopen trigger. Never "push the date".

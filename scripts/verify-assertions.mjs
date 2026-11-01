@@ -188,7 +188,24 @@ const VERIFY_RE = /verify-after[\s:-]+\d{4}-\d{2}-\d{2}/i
 // misclassifies it. A token-only pattern has no such tail to be greedy with, so every occurrence is
 // found regardless of order; each match's own trailing note is then derived by
 // slicing `line` from the match's end, which is exactly what VERIFY_RE's group 2 was doing anyway.
-const VERIFY_TOKEN_RE_G = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})/gi
+const VERIFY_TOKEN_RE_G = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2})(Z?))?/gi
+
+/**
+ * The day a `verify-after` token is due on (#1873). A bare date is due that day. `DATETHH:MMZ` names the
+ * earliest instant the check can be made; the reminder job runs once a day at 00:00 UTC, so any time
+ * after midnight is first checkable on the NEXT day's run. An out-of-range time, or one with no `Z`,
+ * returns the raw token, which `isValidIsoDate` rejects.
+ */
+export function verifyDueDay(match) {
+  const [, date, hh, mm, z] = match
+  if (hh === undefined) return date
+  if (z !== 'Z' || Number(hh) > 23 || Number(mm) > 59) return `${date}T${hh}:${mm}${z}`
+  const d = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) return date
+  if (hh === '00' && mm === '00') return date
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
 
 /**
  * True when the SPECIFIC `verify-after <date>` occurrence starting at `index` on `line` is wrapped in
@@ -354,7 +371,7 @@ export function pairVerifyAssertions(body) {
       const d = parseDurableLine(raw)
       if (d) { durable ??= d; continue }
     }
-    out.push({ date: v[1], note, lineIndex: i, assertion, durable })
+    out.push({ date: verifyDueDay(v), notBefore: v[0].replace(/^verify-after[\s:-]+/i, ''), note, lineIndex: i, assertion, durable })
   }
   return out
 }
@@ -557,7 +574,7 @@ async function main() {
   }
 
   console.log(`#${number} ${issue.title}\n${apply ? '(apply)' : '(dry-run)'} — ${items.length} assertion(s):`)
-  const { statuses, evaluated, lines } = await evaluateItems(items, todayUTC())
+  const { statuses, evaluated, lines } = await evaluateItems(items, new Date().toISOString())
   for (const line of lines) console.log(line)
   // #1408 — the tick AND the label decision come from `planIssueAutoVerify`, the same function the
   // daily job calls (`verify-reminders.mjs`). This path used to re-implement both, and the second copy
@@ -598,7 +615,7 @@ async function main() {
 }
 
 /** Evaluate each asserted item → {statuses, evaluated, lines}. `run` is injectable for tests. */
-export async function evaluateItems(items, today, run = runAssertion) {
+export async function evaluateItems(items, now, run = runAssertion) {
   const statuses = []
   const evaluated = []
   const lines = []
@@ -606,20 +623,20 @@ export async function evaluateItems(items, today, run = runAssertion) {
     const r = await run(it.assertion)
     statuses.push(r.status)
     evaluated.push({ lineIndex: it.lineIndex, status: r.status })
-    lines.push(...formatAssertionResult(it, r, today))
+    lines.push(...formatAssertionResult(it, r, now))
   }
   return { statuses, evaluated, lines }
 }
 
-/** The dry-run lines for one evaluated item. `today` is a UTC `YYYY-MM-DD`. */
-export function formatAssertionResult(item, r, today) {
+/** The dry-run lines for one evaluated item. `now` is a UTC `YYYY-MM-DD` or an ISO instant. */
+export function formatAssertionResult(item, r, now) {
   const mark = r.status === 'pass' ? '✅ PASS' : r.status === 'fail' ? '❌ FAIL' : '⚠️  SKIP'
   const lines = [
     `  ${mark}  ${item.assertion.selector} ${item.assertion.op} ${item.assertion.expected ?? ''}`,
     `         → actual=${truncate(JSON.stringify(r.actual))} ${r.error ? `(${r.error})` : `[${r.url}]`}`,
   ]
-  if (r.status === 'pass' && item.date > today) {
-    lines.push(`         ⚠️  passes before its date (${item.date}): unless this signal is itself the condition, the assert cannot tell before from after.`)
+  if (r.status === 'pass' && Date.parse(item.notBefore) > Date.parse(now)) {
+    lines.push(`         ⚠️  passes before its date (${item.notBefore}): unless this signal is itself the condition, the assert cannot tell before from after.`)
   }
   return lines
 }
