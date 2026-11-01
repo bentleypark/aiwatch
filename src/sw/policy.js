@@ -7,6 +7,7 @@
 export const BYPASS = 'bypass'
 export const NETWORK_FIRST = 'network-first'
 export const STALE_WHILE_REVALIDATE = 'stale-while-revalidate'
+export const CACHE_FIRST = 'cache-first'
 
 // Real-time / server-rendered paths the SW must never answer from cache. Substring match on the
 // full URL, carried over verbatim from the pre-#1386 handler. Deliberately over-broad: a built chunk
@@ -35,6 +36,9 @@ export function routeFor(request, swOrigin) {
   // a fast path: a timeout race would reopen the stale-document path on a slow network, which is the
   // path this rule exists to close.
   if (request.mode === 'navigate') return NETWORK_FIRST
+
+  // Vite content-hashes every file it emits under /assets/, so a cached copy can never be stale.
+  if (new URL(url).pathname.startsWith('/assets/')) return CACHE_FIRST
 
   return STALE_WHILE_REVALIDATE
 }

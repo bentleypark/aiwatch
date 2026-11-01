@@ -1,8 +1,8 @@
 // #1386 — the SW's fetch handler, driven against stub globals.
 //
 // `policy.test.js` proves the two decisions are right. This file proves the handlers ASK them — a
-// green pure function is not a green call site (#966/#1268). Each of the three write paths
-// (navigation, stale-while-revalidate, install precache) has a case that fails when its
+// green pure function is not a green call site (#966/#1268). Each of the four write paths
+// (navigation, cache-first, stale-while-revalidate, install precache) has a case that fails when its
 // `mayCache` gate is removed or its call site is deleted.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
@@ -226,6 +226,94 @@ describe('fetch handler', () => {
     await settle()
     await new Promise((r) => setTimeout(r, 10))
     expect(await slow.api.match(request('/assets/index-new.js'))).toBeTruthy()
+  })
+
+  describe('hashed assets (cache-first)', () => {
+    const asset = () => request('/assets/index-D_6fVe87.js', { destination: 'script' })
+
+    async function seed(url, body, contentType) {
+      const store = await cachesStub.api.open('aiwatch-test')
+      await store.put(request(url), response(body, contentType))
+    }
+
+    it('answers a cached asset without touching the network', async () => {
+      const { fetch: onFetch } = await loadHandlers(cachesStub.api)
+      await seed('/assets/index-D_6fVe87.js', 'cached', 'text/javascript')
+      const net = vi.fn(async () => response('fresh', 'text/javascript'))
+      vi.stubGlobal('fetch', net)
+
+      const res = await dispatch(onFetch, asset())
+      await settle()
+
+      await expect(res.text()).resolves.toBe('cached')
+      expect(net).not.toHaveBeenCalled()
+    })
+
+    it('fetches and caches an asset on a miss', async () => {
+      const { fetch: onFetch } = await loadHandlers(cachesStub.api)
+      vi.stubGlobal('fetch', vi.fn(async () => response('fresh', 'text/javascript')))
+
+      const res = await dispatch(onFetch, asset())
+      await settle()
+
+      await expect(res.text()).resolves.toBe('fresh')
+      expect(await cachesStub.api.match(asset())).toBeTruthy()
+    })
+
+    it('goes to the network when Cache Storage rejects', async () => {
+      const { fetch: onFetch } = await loadHandlers({
+        ...cachesStub.api,
+        match: vi.fn(async () => { throw new Error('cache broken') }),
+      })
+      vi.stubGlobal('fetch', vi.fn(async () => response('fresh', 'text/javascript')))
+
+      const res = await dispatch(onFetch, asset())
+      await expect(res.text()).resolves.toBe('fresh')
+    })
+
+    it('answers 503 offline on a miss with no network', async () => {
+      const { fetch: onFetch } = await loadHandlers(cachesStub.api)
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline') }))
+
+      const res = await dispatch(onFetch, asset())
+      expect(res.status).toBe(503)
+    })
+
+    // The unhashed files keep revalidating: a cache hit is served and the network is still asked.
+    it('still revalidates an unhashed file behind a cache hit', async () => {
+      const { fetch: onFetch } = await loadHandlers(cachesStub.api)
+      await seed('/manifest.json', '{"old":1}', 'application/json')
+      const net = vi.fn(async () => response('{"new":1}', 'application/json'))
+      vi.stubGlobal('fetch', net)
+
+      const res = await dispatch(onFetch, request('/manifest.json'))
+      await settle()
+
+      await expect(res.text()).resolves.toBe('{"old":1}')
+      expect(net).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('unhashed files (stale-while-revalidate)', () => {
+    it('caches what it revalidated', async () => {
+      const { fetch: onFetch } = await loadHandlers(cachesStub.api)
+      vi.stubGlobal('fetch', vi.fn(async () => response('{}', 'application/json')))
+
+      await dispatch(onFetch, request('/manifest.json'))
+      await settle()
+
+      expect(await cachesStub.api.match(request('/manifest.json'))).toBeTruthy()
+    })
+
+    it('does not cache HTML answered under a script request', async () => {
+      const { fetch: onFetch } = await loadHandlers(cachesStub.api)
+      vi.stubGlobal('fetch', vi.fn(async () => response('<!doctype html>', 'text/html')))
+
+      await dispatch(onFetch, request('/widget.js', { destination: 'script' }))
+      await settle()
+
+      expect(await cachesStub.api.match(request('/widget.js'))).toBeUndefined()
+    })
   })
 
   describe('navigations', () => {

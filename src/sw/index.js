@@ -1,11 +1,11 @@
-// AIWatch Service Worker — precache build assets, then network-first for navigations and
-// stale-while-revalidate for everything else it caches.
+// AIWatch Service Worker — precache build assets, then network-first for navigations, cache-first
+// for hashed /assets/, and stale-while-revalidate for everything else it caches.
 // Cache name is auto-derived from asset-manifest.json version on install.
 //
 // #1386 — this used to be a hand-written `public/sw.js`. It is now built from source so its two
 // decisions can live in `./policy.js` as pure functions and be unit-tested: the SW is registered in
 // production only (#432), which puts every line here out of reach of a dev-server e2e.
-import { BYPASS, NETWORK_FIRST, routeFor, mayCache } from './policy.js'
+import { BYPASS, CACHE_FIRST, NETWORK_FIRST, routeFor, mayCache } from './policy.js'
 
 const STATIC_ASSETS = ['/', '/index.html', '/manifest.json', '/favicon.png', '/asset-manifest.json']
 const FALLBACK_CACHE = 'aiwatch-static-v1'
@@ -126,6 +126,25 @@ self.addEventListener('fetch', (event) => {
             // promise is a network error in the page, which for a navigation is the browser's own
             // error page rather than the app shell.
             .catch(() => offline())
+        )
+    )
+    return
+  }
+
+  if (route === CACHE_FIRST) {
+    event.respondWith(
+      caches
+        .match(request)
+        .catch(() => undefined)
+        .then(
+          (cached) =>
+            cached ||
+            fetch(request)
+              .then((networkRes) => {
+                cacheIfAllowed(event, request, networkRes)
+                return networkRes
+              })
+              .catch(() => offline())
         )
     )
     return

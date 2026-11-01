@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { BYPASS, NETWORK_FIRST, STALE_WHILE_REVALIDATE, routeFor, mayCache } from '../policy.js'
+import { BYPASS, CACHE_FIRST, NETWORK_FIRST, STALE_WHILE_REVALIDATE, routeFor, mayCache } from '../policy.js'
 
 const ORIGIN = 'https://ai-watch.dev'
 
@@ -45,11 +45,20 @@ describe('routeFor', () => {
     expect(routeFor(req('/assets/reports-BLrweZ9s.js', { destination: 'script' }), ORIGIN)).toBe(BYPASS)
   })
 
-  it('revalidates hashed assets in the background', () => {
-    expect(routeFor(req('/assets/index-D_6fVe87.js', { destination: 'script' }), ORIGIN)).toBe(
-      STALE_WHILE_REVALIDATE
-    )
-    expect(routeFor(req('/assets/index-Du56x5t1.css', { destination: 'style' }), ORIGIN)).toBe(
+  it('serves hashed assets cache-first', () => {
+    expect(routeFor(req('/assets/index-D_6fVe87.js', { destination: 'script' }), ORIGIN)).toBe(CACHE_FIRST)
+    expect(routeFor(req('/assets/index-Du56x5t1.css', { destination: 'style' }), ORIGIN)).toBe(CACHE_FIRST)
+  })
+
+  it.each(['/manifest.json', '/favicon.png', '/asset-manifest.json', '/icon-192.png'])(
+    'revalidates the unhashed file %s in the background',
+    (path) => {
+      expect(routeFor(req(path), ORIGIN)).toBe(STALE_WHILE_REVALIDATE)
+    }
+  )
+
+  it('does not treat a path that merely contains /assets/ as a hashed asset', () => {
+    expect(routeFor(req('/x/assets/index-D_6fVe87.js', { destination: 'script' }), ORIGIN)).toBe(
       STALE_WHILE_REVALIDATE
     )
   })
