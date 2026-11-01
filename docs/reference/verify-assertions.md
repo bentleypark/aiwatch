@@ -14,7 +14,9 @@ pinging a human. Read this before authoring an `assert:` line or changing the ev
 ## Why
 
 `verify-reminders` (#541, `scripts/verify-reminders.mjs`) scans open issues for a
-`- [ ] **verify-after YYYY-MM-DD** — …` line and pings the operator Discord when due. The *check*
+`- [ ] **verify-after YYYY-MM-DD** — …` line and pings the operator Discord when due. The token may
+carry the earliest UTC time the check can be made, `YYYY-MM-DDTHH:MMZ`; any time after 00:00Z is due
+on the next day's 00:00 UTC run (#1873). The *check*
 stayed manual, so `verify-blocked` issues piled up. Most AIWatch verify targets, though, are
 machine-checkable signals AIWatch already emits (a field on `/api/status`, `/api/report`, a counter
 surfaced in an endpoint). A `verify-after` line can therefore carry an optional `assert:` clause the

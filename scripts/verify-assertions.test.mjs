@@ -644,6 +644,19 @@ test('formatAssertionResult — a future-dated line whose assert already passes 
   assert.equal(formatAssertionResult(item, pass, '2026-10-03')[0], '  ✅ PASS  services[id=windsurf].uptime30d exists ')
 })
 
+test('formatAssertionResult — a timed line is flagged only before its written time, by that time (#1873)', () => {
+  const body = [
+    '- [ ] **verify-after 2026-11-01T12:15Z** — the archive exists',
+    '      assert: GET /api/status/cached | services[id=x].v exists',
+  ].join('\n')
+  const [item] = pairVerifyAssertions(body)
+  const pass = { status: 'pass', actual: 1, url: 'https://x' }
+  const flagged = (now) => formatAssertionResult(item, pass, now).some((l) => l.includes('passes before its date (2026-11-01T12:15Z)'))
+  assert.equal(flagged('2026-11-01T12:00:00.000Z'), true)
+  assert.equal(flagged('2026-11-01T13:00:00.000Z'), false)
+  assert.equal(flagged('2026-11-02'), false)
+})
+
 test('evaluateItems — the CLI report carries the early-pass flag (#1760)', async () => {
   const body = [
     '- [ ] **verify-after 2026-10-24** — after the retention bridge lapses, the card still publishes its own uptime',
@@ -681,6 +694,39 @@ test('CLI dry-run prints the early-pass flag for a future-dated passing line onl
     assert.equal((r.stdout.match(/✅ PASS/g) ?? []).length, 2)
     assert.equal((r.stdout.match(/passes before its date/g) ?? []).length, 1)
     assert.match(r.stdout, /passes before its date \(2099-01-01\)/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('CLI dry-run judges a timed line by the clock time, not the UTC day (#1873)', async () => {
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const path = await import('node:path')
+  const { spawnSync } = await import('node:child_process')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-cli-'))
+  try {
+    const body = [
+      '- [ ] **verify-after 2026-11-01T12:15Z** — passed time',
+      '      assert: GET /api/status/cached | services[id=x].v exists',
+      '- [ ] **verify-after 2026-11-01T14:00Z** — later today',
+      '      assert: GET /api/status/cached | services[id=x].v exists',
+    ].join('\n')
+    fs.writeFileSync(path.join(dir, 'issue.json'), JSON.stringify({ number: 1, title: 't', body, author: { login: 'a' } }))
+    fs.writeFileSync(path.join(dir, 'gh'), `#!/bin/sh\ncat "${path.join(dir, 'issue.json')}"\n`, { mode: 0o755 })
+    const preload = path.join(dir, 'stub.mjs')
+    fs.writeFileSync(preload, [
+      `globalThis.fetch = async () => ({ ok: true, json: async () => ({ services: [{ id: 'x', v: 1 }] }) })`,
+      `const RealDate = Date, NOW = RealDate.parse('2026-11-01T13:00:00Z')`,
+      `globalThis.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [NOW])) } static now() { return NOW } }`,
+    ].join('\n'))
+    const r = spawnSync(process.execPath, ['--import', preload, path.resolve('scripts/verify-assertions.mjs'), '--issue', '1'], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    })
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal((r.stdout.match(/✅ PASS/g) ?? []).length, 2)
+    assert.equal((r.stdout.match(/passes before its date/g) ?? []).length, 1)
+    assert.match(r.stdout, /passes before its date \(2026-11-01T14:00Z\)/)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

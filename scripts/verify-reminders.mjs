@@ -14,7 +14,7 @@
 import { execFileSync } from 'node:child_process'
 // #873 — Tier-A auto-verify: evaluate a machine-checkable `assert:` clause on a verify-after line and
 // close the loop (tick + comment + drop verify-blocked) instead of only pinging. See verify-assertions.mjs.
-import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate, isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, liveVerifyOccurrences, findMalformedAssertLines } from './verify-assertions.mjs'
+import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate, isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, liveVerifyOccurrences, findMalformedAssertLines, verifyDueDay } from './verify-assertions.mjs'
 
 // Which lines a verify-after scan must SKIP (checked box `- [x]` / blockquote `>`) lives in
 // verify-assertions.mjs as `isSuppressedReminderLine` — one definition shared by both scanners (#966).
@@ -382,9 +382,10 @@ export function parseVerifyAfter(body) {
   for (const line of body.split('\n')) {
     if (isSuppressedReminderLine(line)) continue
     const m = liveVerifyOccurrences(line)[0]
-    if (!m || !isValidIsoDate(m[1])) continue
+    const date = m && verifyDueDay(m)
+    if (!m || !isValidIsoDate(date)) continue
     const note = line.slice(m.index + m[0].length).replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
-    out.push({ date: m[1], note })
+    out.push({ date, note })
   }
   return out
 }

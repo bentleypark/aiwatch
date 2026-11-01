@@ -3,6 +3,7 @@
 // script, not src/worker code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates, planClosedScarRemovals, mergeClosedIssues, LIFECYCLE_LABELS, CLOSED_SCAR_LIMIT, findUndecidableVerifyAfter, hasUndecidableLabel, findNewlyUndecidable, findOverdueEscalations, OVERDUE_ESCALATION_DAYS, buildReminderEmbeds, splitEscalatedDue, reminderLineKey, hasNothingToDo, planDiscordPost } from './verify-reminders.mjs'
 import { pairVerifyAssertions, parseDurableLine } from './verify-assertions.mjs'
 
@@ -835,4 +836,39 @@ test('findUndecidableVerifyAfter — a calendar-invalid date is never flagged, e
   const body = '- [ ] **verify-after 2026-02-30** — typo'
   assert.equal(findUndecidableVerifyAfter(body, '2026-01-01').length, 0)
   assert.equal(findInvalidVerifyAfterDates(body).length, 1, 'and it IS reported, by the scanner that owns it')
+})
+
+test('verify-after with a time — a time after 00:00Z is due on the next daily run, not the same day (#1873)', () => {
+  // #1627's check reads the monthly archive built at 12:00 UTC; dated by day alone it pinged at 00:00 UTC.
+  const body = '- [ ] **verify-after 2026-11-01T12:15Z** — `archive:monthly:2026-10` exists'
+  for (const items of [parseVerifyAfter(body), pairVerifyAssertions(body)]) {
+    assert.equal(items.length, 1)
+    assert.equal(items[0].date, '2026-11-02')
+    assert.equal(items[0].note, '`archive:monthly:2026-10` exists')
+    assert.equal(shouldFire(items[0].date, '2026-11-01'), false)
+    assert.equal(shouldFire(items[0].date, '2026-11-02'), true)
+  }
+})
+
+test('verify-after with a time — T00:00Z stays on its day; month and year roll over; bare date unchanged (#1873)', () => {
+  const due = (tok) => parseVerifyAfter(`- [ ] **verify-after ${tok}** — x`)[0]?.date
+  assert.equal(due('2026-11-01T00:00Z'), '2026-11-01')
+  assert.equal(due('2026-11-01T00:01Z'), '2026-11-02')
+  assert.equal(due('2026-10-31T23:59Z'), '2026-11-01')
+  assert.equal(due('2026-12-31T06:00Z'), '2027-01-01')
+  assert.equal(due('2028-02-28T12:00Z'), '2028-02-29')
+  assert.equal(due('2026-11-01'), '2026-11-01')
+})
+
+test('verify-after with a malformed time — reported invalid, never pinged on the bare date (#1873)', () => {
+  for (const tok of ['2026-11-01T25:00Z', '2026-11-01T12:60Z', '2026-11-01T12:15', '2026-02-30T12:00Z', '2026-13-01T12:00Z']) {
+    const body = `- [ ] **verify-after ${tok}** — x`
+    assert.deepEqual(parseVerifyAfter(body), [], tok)
+    assert.equal(findInvalidVerifyAfterDates(body).length, 1, tok)
+  }
+})
+
+test('the reminder workflow still runs once a day at 00:00 UTC — the next-day shift assumes it (#1873)', () => {
+  const yml = readFileSync(new URL('../.github/workflows/verify-reminders.yml', import.meta.url), 'utf8')
+  assert.deepEqual([...yml.matchAll(/cron:\s*'([^']+)'/g)].map((m) => m[1]), ['0 0 * * *'])
 })
