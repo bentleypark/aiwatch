@@ -160,7 +160,7 @@
 
 | 계층 | 기술 |
 |------|------|
-| 프론트엔드 | React 19, Vite 6, TailwindCSS v4, Chart.js |
+| 프론트엔드 | React 19, Vite 8, TailwindCSS v4, Chart.js |
 | 백엔드 | Cloudflare Workers (TypeScript) |
 | 캐시 | Cloudflare KV (상태 캐시, 지연시간 스냅샷) |
 | 호스팅 | Vercel |
