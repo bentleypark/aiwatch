@@ -2222,7 +2222,7 @@ import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent
 import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, degradationEventFor, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount, officialUptimeSnapshot } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, degradationEventFor, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount, readGuard3Holds, officialUptimeSnapshot } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
 import { parseStatusView, buildStatusView, type LeanStatusPayload } from './status-view'
 import { checkInfraStatus, runInfraStatusCycle } from './infra-status'
@@ -4343,6 +4343,7 @@ const workerExport = {
             webhookCounts.newTodayByType = newTodayByType
 
             const guardSkips = await readGuardSkipCount(env.STATUS_CACHE, today)
+            const guard3Holds = await readGuard3Holds(env.STATUS_CACHE, today)
 
             // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
             let deliveryCounts: { discord: number; failed: number } | null = null
@@ -4629,6 +4630,7 @@ const workerExport = {
               webhookCounts,
               fanoutCounts,
               guardSkips,
+              guard3Holds,
               deliveryCounts,
               redditCount,
               redditSourceDead,

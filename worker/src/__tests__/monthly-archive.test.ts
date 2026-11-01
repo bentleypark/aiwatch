@@ -3125,6 +3125,49 @@ describe('prunePhantomIncidents (#975)', () => {
     expect(d.services.pinecone.incidents![0].missedRuns).toBe(1)
   })
 
+  describe('guard-3 hold report (#1154)', () => {
+    const NOTICE = { id: 'rNB9qLkp-dOw', startedAt: '2026-07-09T21:17:36.517Z' }
+    const holdsOf = (data: MonthlyIncidents, services: ServiceStatus[], suppressions: Parameters<typeof prunePhantomIncidents>[2] = []) => {
+      const holds: Array<{ svcId: string; id: string; title: string; startedAt: string; oldestLiveStart: string }> = []
+      const out = prunePhantomIncidents(data, services, suppressions, (h) => holds.push(h))
+      return { holds, out }
+    }
+
+    it('reports the entry a newer retraction notice leaves held, and still keeps it', () => {
+      const { holds, out } = holdsOf(stored([PHANTOM]), [liveSvc([NOTICE])])
+      expect(holds).toEqual([{ svcId: 'pinecone', id: 'xqp5fkvlyg6t', title: 'Incident xqp5fkvlyg6t', startedAt: PHANTOM.startedAt, oldestLiveStart: NOTICE.startedAt }])
+      expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    })
+
+    it('reports an entry that shares its start with the oldest live incident', () => {
+      const { holds } = holdsOf(stored([PHANTOM]), [liveSvc([{ id: 'same-start', startedAt: PHANTOM.startedAt }])])
+      expect(holds.map((h) => h.id)).toEqual(['xqp5fkvlyg6t'])
+    })
+
+    it('reports it on every run it stays held', () => {
+      let d = stored([PHANTOM])
+      const seen: number[] = []
+      for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) {
+        const r = holdsOf(d, [liveSvc([NOTICE])])
+        seen.push(r.holds.length)
+        d = r.out
+      }
+      expect(seen).toEqual([1, 1, 1, 1, 1])
+    })
+
+    it.each([
+      ['an older live sibling lets guard 3 pass, so the prune counts it instead', () => holdsOf(stored([PHANTOM]), [liveSvc([REPLACEMENT])])],
+      ['the entry is still on the page', () => holdsOf(stored([PHANTOM]), [liveSvc([NOTICE, { id: 'xqp5fkvlyg6t', startedAt: PHANTOM.startedAt, status: 'monitoring' }])])],
+      ['the entry is resolved', () => holdsOf(stored([{ ...PHANTOM, finalStatus: 'resolved', resolvedAt: '2026-07-09T15:00:00.000Z' }]), [liveSvc([NOTICE])])],
+      ['the live list is empty', () => holdsOf(stored([PHANTOM]), [liveSvc([])])],
+      ['the live list is active-only', () => holdsOf(stored([PHANTOM]), [liveSvc([NOTICE], { activeOnly: true })])],
+      ['the entry is suppressed', () => holdsOf(stored([PHANTOM]), [liveSvc([NOTICE])], [{ scope: 'incident' as const, incId: 'xqp5fkvlyg6t' }])],
+      ['the suppression list is unreadable', () => holdsOf(stored([PHANTOM]), [liveSvc([NOTICE])], null)],
+    ])('reports nothing when %s', (_name, run) => {
+      expect(run().holds).toEqual([])
+    })
+  })
+
   it('a malformed stored startedAt is held, never pruned (lexicographic trap)', () => {
     // 'pending' sorts AFTER any '2xxx-…' ISO string, so an unvalidated compare would pass guard 3.
     const bad = entry({ id: 'bad-start', startedAt: 'pending' })
