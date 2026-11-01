@@ -160,6 +160,16 @@ describe('#1470 Statuspage source-read reasons', () => {
 
     expect(result.liveIncidentsActiveOnly).toBeUndefined()
   })
+
+  it('does not mark a readable shared-prefetch incidents feed active-only', async () => {
+    const result = await fetchService(claudeai, {
+      summary: JSON.parse(SUMMARY_WITH_ACTIVE_INCIDENT),
+      incidents: { incidents: [ACTIVE_INCIDENT] },
+    } as never, mockKV() as never, {})
+
+    expect(result.incidents.map((incident) => incident.id)).toEqual(['active-1'])
+    expect(result.liveIncidentsActiveOnly).toBeUndefined()
+  })
 })
 
 describe('#1470 booking a reason stays out of the published latency', () => {

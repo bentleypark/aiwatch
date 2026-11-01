@@ -297,12 +297,13 @@ export interface ServiceStatus {
    *  `withUnreadFeedFlag`). Cleared when a fresh Flashduty feed supersedes the
    *  frozen mirror. Absent when false. */
   incidentSourceStale?: boolean
-  /** This cycle's `incidents` came from an ACTIVE-ONLY source: Mistral's Rootly overlay while its
-   *  scrape feed is unreadable, or an Atlassian Statuspage `summary.json` fallback when its full
-   *  `incidents.json` feed cannot be read (#1510, #1691). A normal resolution then stops appearing
-   *  without a `status: 'resolved'` row. `prunePhantomIncidents` and `alerted-gone` read this so
-   *  absence is never mistaken for an upstream deletion or a reason to send a false withdrawal.
-   *  Runtime-only; absent when the current source includes resolved incidents. */
+  /** This cycle's `incidents` came from a source that lists ACTIVE incidents only (#1510, #1691;
+   *  `grep -n liveIncidentsActiveOnly worker/src/services.ts` for the producers), so an incident can
+   *  stop appearing without ever appearing with `status: 'resolved'` — except for the resolved rows a
+   *  producer records itself (Mistral's `mistral:overlay-resolved`, #1510 Part E).
+   *  `prunePhantomIncidents` and `alerted-gone` read this so absence is never mistaken for an upstream
+   *  deletion or a reason to send a false withdrawal. Runtime-only; absent when the source lists
+   *  resolved incidents. */
   liveIncidentsActiveOnly?: true
   /** #689 — the status-page API returned a 4xx (the page is deactivated/gone). The service is shown
    *  unknown+stale unless a healthy direct probe independently confirms it operational;

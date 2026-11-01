@@ -564,9 +564,9 @@ export function prunePhantomIncidents(
 
   const liveBySvc = new Map<string, Incident[]>()
   const onPageBySvc = new Map<string, Incident[]>()
-  // #1510 — services whose THIS-CYCLE live list only ever lists active incidents (Mistral's
-  // active-incident overlay, when its scrape feed is unreadable — `grep -n liveIncidentsActiveOnly
-  // worker/src/types.ts` for why absence from a list like that is not evidence of deletion).
+  // #1510 — services whose THIS-CYCLE live list only ever lists active incidents (`grep -n
+  // liveIncidentsActiveOnly worker/src/types.ts` for why absence from a list like that is not
+  // evidence of deletion).
   const activeOnlySvcIds = new Set<string>()
   for (const svc of services) {
     liveBySvc.set(svc.id, svc.incidents ?? [])
