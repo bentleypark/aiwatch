@@ -4,7 +4,7 @@ const ORIG_TZ = process.env.TZ
 process.env.TZ = 'Asia/Seoul' // UTC+9
 
 import { describe, it, expect, afterAll, beforeEach, afterEach, vi } from 'vitest'
-import { buildCalendarFromIncidents } from './calendar'
+import { buildCalendarFromIncidents, incidentsOnOperationalDays } from './calendar'
 
 // Restore TZ so this file's global side effect can't leak into other date-sensitive test files
 // sharing the same vitest worker.
@@ -212,5 +212,83 @@ describe('#1623 — today\'s cell for a running Better Stack outage', () => {
     const published = { ...ongoing(day(1)), derived: undefined, derivedDay: undefined }
     const m = calMap(buildCalendarFromIncidents([published], { [day(1)]: 'critical' }, 30, 'degraded', true), 30)
     expect(m[day(0)]).toBe('minor')
+  })
+})
+
+describe('incidentsOnOperationalDays — a bare-UTC-date record is not contradicted by a marker (#1421)', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-16T03:00:00Z')) })
+  afterEach(() => vi.useRealTimers())
+
+  it('an incident whose UTC day carries recorded downtime gets no "no downtime" marker on its own local day', () => {
+    // KST: A starts 09-14 23:00 local, B 09-15 01:00 local — both on the provider's UTC day 09-14,
+    // which the record paints major on the noon-UTC guess (09-14 local).
+    const incidents = [
+      { title: 'A degraded', impact: 'minor', status: 'resolved', startedAt: '2026-09-14T14:00:00Z', resolvedAt: '2026-09-14T14:30:00Z' },
+      { title: 'B partial outage', impact: 'major', status: 'resolved', startedAt: '2026-09-14T16:00:00Z', resolvedAt: '2026-09-14T17:00:00Z' },
+    ]
+    const record = { '2026-09-14': 'major' }
+    const cells = buildCalendarFromIncidents(incidents, record, 30, 'operational', true)
+    const m = calMap(cells, 30)
+    expect(m['2026-09-14']).toBe('major')
+    expect(m['2026-09-15']).toBe('operational')
+    expect(incidentsOnOperationalDays({ incidents, dailyImpact: record }, cells).flat()).toEqual([])
+  })
+
+  it('a record keyed on the page\'s own timezone day (Better Stack, PT) is not contradicted either', () => {
+    // 09-14 19:00 PDT = 09-15 02:00Z: the page files it under 09-14, its UTC start is 09-15.
+    const incidents = [{ title: 'API partial outage', impact: 'major', status: 'resolved', startedAt: '2026-09-15T02:00:00Z', resolvedAt: '2026-09-15T03:00:00Z' }]
+    const record = { '2026-09-14': 'major' }
+    const cells = buildCalendarFromIncidents(incidents, record, 30, 'operational', true)
+    expect(calMap(cells, 30)['2026-09-15']).toBe('operational')
+    expect(incidentsOnOperationalDays({ incidents, dailyImpact: record }, cells).flat()).toEqual([])
+  })
+
+  it('a record keyed on a page day east of UTC is not contradicted either', () => {
+    // 09-14 10:30Z = 09-15 00:30 on a UTC+14 page, which files it under 09-15; KST sees 09-14.
+    const incidents = [{ title: 'Late outage', impact: 'major', status: 'resolved', startedAt: '2026-09-14T10:30:00Z', resolvedAt: '2026-09-14T11:00:00Z' }]
+    const record = { '2026-09-15': 'major' }
+    const cells = buildCalendarFromIncidents(incidents, record, 30, 'operational', true)
+    expect(calMap(cells, 30)['2026-09-14']).toBe('operational')
+    expect(incidentsOnOperationalDays({ incidents, dailyImpact: record }, cells).flat()).toEqual([])
+  })
+
+  it('a multi-day incident whose later days carry recorded downtime is not marked on its start day', () => {
+    const incidents = [{ title: 'Elevated errors on API', impact: 'major', status: 'resolved', startedAt: '2026-09-10T03:00:00Z', resolvedAt: '2026-09-13T03:00:00Z' }]
+    const record = { '2026-09-12': 'major', '2026-09-13': 'major' }
+    const cells = buildCalendarFromIncidents(incidents, record, 30, 'operational', true)
+    expect(calMap(cells, 30)['2026-09-10']).toBe('operational')
+    expect(incidentsOnOperationalDays({ incidents, dailyImpact: record }, cells).flat()).toEqual([])
+  })
+
+  it('an ongoing incident whose record lands today is not marked on its start day', () => {
+    const incidents = [{ title: 'Degraded, then down', impact: 'major', status: 'investigating', startedAt: '2026-09-12T03:00:00Z' }]
+    const record = { '2026-09-16': 'major' }
+    const cells = buildCalendarFromIncidents(incidents, record, 30, 'operational', true)
+    expect(calMap(cells, 30)['2026-09-12']).toBe('operational')
+    expect(incidentsOnOperationalDays({ incidents, dailyImpact: record }, cells).flat()).toEqual([])
+  })
+
+  it('an ongoing incident that paints today is not marked on its start day', () => {
+    const incidents = [{ title: 'Elevated errors', impact: 'minor', status: 'investigating', startedAt: '2026-09-14T03:00:00Z' }]
+    const record = { '2026-09-01': 'major' }
+    const cells = buildCalendarFromIncidents(incidents, record, 30, 'degraded', true)
+    expect(calMap(cells, 30)['2026-09-14']).toBe('operational')
+    expect(calMap(cells, 30)['2026-09-16']).toBe('minor')
+    expect(incidentsOnOperationalDays({ incidents, dailyImpact: record }, cells).flat()).toEqual([])
+  })
+
+  it('an ongoing status_history row is not marked either', () => {
+    const incidents = [{ title: 'API — down', status: 'investigating', derived: 'status_history', derivedDay: '2026-09-15', accruing: true, startedAt: '2026-09-16T02:55:00Z', resolvedAt: null }]
+    const record = { '2026-09-01': 'major' }
+    const cells = buildCalendarFromIncidents(incidents, record, 30, 'down', true)
+    expect(calMap(cells, 30)['2026-09-15']).toBe('operational')
+    expect(incidentsOnOperationalDays({ incidents, dailyImpact: record }, cells).flat()).toEqual([])
+  })
+
+  it('an incident on a UTC day with no record is still marked', () => {
+    const incidents = [{ title: 'C degraded', impact: 'minor', status: 'resolved', startedAt: '2026-09-14T16:00:00Z', resolvedAt: '2026-09-14T17:00:00Z' }]
+    const record = { '2026-09-10': 'major' }
+    const cells = buildCalendarFromIncidents(incidents, record, 30, 'operational', true)
+    expect(incidentsOnOperationalDays({ incidents, dailyImpact: record }, cells).flat()).toEqual(['C degraded'])
   })
 })

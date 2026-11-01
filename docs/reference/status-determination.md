@@ -386,6 +386,11 @@ repaints **34 cells across 9** — the same six plus `fireworks` (11), `elevenla
 (1). Every `complete: true` service is byte-identical on both. Since #1406 both surfaces draw
 `calendarDays`.
 
+**#1421 — a complete record can still leave an incident off the calendar.** A provider's per-day record
+can show no downtime on a day the service has an incident (Atlassian's buckets, for one, carry only
+partial and major outage time — `parsers/statuspage.ts`). The ServiceDetails calendar keeps that cell green
+and marks it instead (`incidentsOnOperationalDays`); the Overview sparkline does not.
+
 **#1390 — the impact calendar painted announced MAINTENANCE as an outage.** `parseIncidentIoComponentImpacts`
 mapped `component_impacts[].status` with a trailing CATCH-ALL whose comment said `degraded_performance`,
 so `under_maintenance` fell into it and became a `minor` cell. Every other reader of those same rows

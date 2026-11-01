@@ -12,7 +12,7 @@ import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
 import { incidentNote } from '../utils/incidentNote'
-import { buildCalendarFromIncidents, calendarDaysOf } from '../utils/calendar'
+import { buildCalendarFromIncidents, calendarDaysOf, incidentsOnOperationalDays } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { buildBadgeMarkdown } from '../utils/badge'
 import { compareGroupedRows, dominantGroupStatus, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
@@ -591,8 +591,16 @@ function RegionalAvailability({ service, t }) {
 
 
 const CALENDAR_OPACITY = { operational: 0.7, major: 0.8, critical: 0.9 } // minor → default 1 (was degraded_perf)
+const CALENDAR_TITLES_SHOWN = 3
 
-function CalendarCell({ status, date, t }) {
+function NoDowntimeCorner({ size }) {
+  return (
+    <span aria-hidden="true" className="absolute pointer-events-none"
+          style={{ width: size, height: size, top: 0, right: 0, background: 'var(--text0)', clipPath: 'polygon(0 0, 100% 0, 100% 100%)', borderTopRightRadius: '2px' }} />
+  )
+}
+
+function CalendarCell({ status, date, t, incidentTitles = [] }) {
   const [hovered, setHovered] = useState(false)
   // #662/#663 — show the translated label ("Minor"/"Major"/"Critical"/…), not the raw internal cell
   // key (minor/major/critical). cal.status.* is the calendar's own namespace, decoupled from the
@@ -600,6 +608,7 @@ function CalendarCell({ status, date, t }) {
   const label = t ? t(`cal.status.${status}`) : status
   const bgCls = CALENDAR_CLASS[status] ?? 'bg-[var(--bg3)]'
   const opacity = CALENDAR_OPACITY[status] ?? 1
+  const noDowntime = incidentTitles.length > 0 && t ? t('cal.noDowntime') : null
 
   // Dismiss tooltip on scroll to prevent stale fixed positioning
   useEffect(() => {
@@ -612,12 +621,14 @@ function CalendarCell({ status, date, t }) {
   return (
     <div className="relative">
       <div
-        className={`${bgCls} cursor-pointer transition-opacity`}
+        className={`${bgCls} relative cursor-pointer transition-opacity`}
         style={{ width: '18px', height: '18px', borderRadius: '2px', opacity: hovered ? opacity * 0.8 : opacity }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        aria-label={`${date}: ${label}`}
-      />
+        aria-label={noDowntime ? `${date}: ${label} · ${noDowntime}` : `${date}: ${label}`}
+      >
+        {incidentTitles.length > 0 && <NoDowntimeCorner size="7px" />}
+      </div>
       {hovered && (
         <div className="fixed z-50 bg-[var(--bg4)] border border-[var(--border)] rounded px-2 py-1
                         text-[10px] mono text-[var(--text1)] whitespace-nowrap pointer-events-none"
@@ -632,7 +643,13 @@ function CalendarCell({ status, date, t }) {
                  }
                }
              }}>
-          {date} — {label}
+          {date} — {label}{noDowntime && ` · ${noDowntime}`}
+          {incidentTitles.slice(0, CALENDAR_TITLES_SHOWN).map((title, i) => (
+            <div key={i} className="truncate text-[var(--text2)]" style={{ maxWidth: '280px' }}>{title}</div>
+          ))}
+          {incidentTitles.length > CALENDAR_TITLES_SHOWN && (
+            <div className="text-[var(--text2)]">{t('cal.noDowntime.more').replace('{n}', String(incidentTitles.length - CALENDAR_TITLES_SHOWN))}</div>
+          )}
         </div>
       )}
     </div>
@@ -825,6 +842,7 @@ export default function ServiceDetails({ serviceId }) {
   const calendarDays = calendarDaysOf(service)
 
   const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays, service.status, service.dailyImpactComplete)
+  const calendarIncidentTitles = incidentsOnOperationalDays(service, calendarData)
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -1183,13 +1201,21 @@ export default function ServiceDetails({ serviceId }) {
           <div style={{ padding: '16px' }}>
             <div className="flex flex-wrap" style={{ gap: '2px' }}>
               {calendarData.map((status, i) => (
-                <CalendarCell key={i} status={status} date={calendarDate(i, lang, calendarDays)} t={t} />
+                <CalendarCell key={i} status={status} date={calendarDate(i, lang, calendarDays)} t={t} incidentTitles={calendarIncidentTitles[i]} />
               ))}
             </div>
             <div className="flex justify-between mono text-[9px] text-[var(--text2)]" style={{ marginTop: '6px' }}>
               <span>{calendarDays}{t('settings.period.suffix')} {t('svc.cal.ago.suffix')}</span>
               <span>{t('svc.cal.today')}</span>
             </div>
+            {calendarIncidentTitles.some((titles) => titles.length > 0) && (
+              <div className="flex items-center gap-1" style={{ marginTop: '8px' }}>
+                <span className={`relative rounded-sm shrink-0 ${CALENDAR_CLASS.operational}`} style={{ width: '8px', height: '8px', opacity: CALENDAR_OPACITY.operational }}>
+                  <NoDowntimeCorner size="4px" />
+                </span>
+                <span className="text-[9px] mono text-[var(--text2)]">{t('cal.noDowntime.legend')}</span>
+              </div>
+            )}
           </div>
         </section>}
 

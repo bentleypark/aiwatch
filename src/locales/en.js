@@ -42,6 +42,9 @@ const en = {
   'cal.status.minor': 'Minor',
   'cal.status.major': 'Major',
   'cal.status.critical': 'Critical',
+  'cal.noDowntime': 'No downtime recorded',
+  'cal.noDowntime.legend': 'Incident, no recorded downtime',
+  'cal.noDowntime.more': '+{n} more',
   'status.partial': 'Partial',
   'status.partial.tooltip': 'Some components are reporting issues on the provider status page; overall service availability is still nominal.',
 
