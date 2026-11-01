@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { buildCalendarFromIncidents } from '../calendar'
+import { buildCalendarFromIncidents, incidentsOnOperationalDays } from '../calendar'
 
 // Anchor incident dates to LOCAL noon so day-key math is stable regardless of the test runner's
 // timezone (the calendar buckets by local date; noon never crosses a date boundary on a ±14h offset).
@@ -324,5 +324,55 @@ describe('buildCalendarFromIncidents — the Phase 2 gate asks provenance, not w
       const cal = buildCalendarFromIncidents(incidents, undefined, 30, 'operational', flag)
       expect(cellFor(cal, 13, 30), `flag=${String(flag)}`).toBe('minor')
     }
+  })
+})
+
+// #1421 — a day the calendar paints operational but the incident list has an entry for.
+describe('incidentsOnOperationalDays (#1421)', () => {
+  it('a degraded-only incident on a dailyImpactComplete service keeps a green cell and is listed for that day', () => {
+    vi.setSystemTime(new Date('2026-09-15T09:00:00Z'))
+    // Cursor-shaped: the provider's day record has an outage on day -5 only; the degraded incident on day -2 is not in it.
+    const incidents = [
+      { status: 'resolved', impact: 'minor', title: 'Investigating Grok service degradation', startedAt: iso(2), resolvedAt: iso(2) },
+      { status: 'resolved', impact: 'major', title: 'Agents partial outage', startedAt: iso(5), resolvedAt: iso(5) },
+    ]
+    const dailyImpact = { [iso(5).slice(0, 10)]: 'major' }
+    const cells = buildCalendarFromIncidents(incidents, dailyImpact, 30, 'operational', true)
+    const titles = incidentsOnOperationalDays({ incidents, dailyImpact }, cells)
+    expect(cells[27]).toBe('operational')
+    expect(titles[27]).toEqual(['Investigating Grok service degradation'])
+    expect(cells[24]).toBe('major')
+    expect(titles[24]).toEqual([])
+    expect(titles.filter((t) => t.length > 0)).toHaveLength(1)
+  })
+
+  it('an incident on a cell that is already coloured gets no marker (non-complete service paints it)', () => {
+    vi.setSystemTime(new Date('2026-09-15T09:00:00Z'))
+    const incidents = [{ status: 'resolved', impact: 'minor', title: 'Slow responses', startedAt: iso(3), resolvedAt: iso(3) }]
+    const cells = buildCalendarFromIncidents(incidents, undefined, 14, 'operational')
+    expect(cells[10]).toBe('minor')
+    expect(incidentsOnOperationalDays({ incidents }, cells).every((t) => t.length === 0)).toBe(true)
+  })
+
+  it('a status_history-derived row is placed by derivedDay, not its synthetic startedAt', () => {
+    vi.setSystemTime(new Date('2026-09-15T09:00:00Z'))
+    const derivedDay = iso(4).slice(0, 10)
+    const incidents = [{ status: 'resolved', impact: 'minor', title: 'Kimi K3 — recovered', derived: 'status_history', derivedDay, startedAt: iso(1), resolvedAt: iso(1) }]
+    const titles = incidentsOnOperationalDays({ incidents }, Array(14).fill('operational'))
+    expect(titles.findIndex((t) => t.length > 0)).toBe(9)
+  })
+
+  it('several incidents on one day are all listed; none outside the window; missing input is safe', () => {
+    vi.setSystemTime(new Date('2026-09-15T09:00:00Z'))
+    const incidents = [
+      { title: 'A', status: 'resolved', startedAt: iso(1), resolvedAt: iso(1) },
+      { title: 'B', status: 'resolved', startedAt: iso(1), resolvedAt: iso(1) },
+      { title: 'too old', status: 'resolved', startedAt: iso(40), resolvedAt: iso(40) },
+      { title: 'no start' },
+    ]
+    const titles = incidentsOnOperationalDays({ incidents }, Array(14).fill('operational'))
+    expect(titles[12]).toEqual(['A', 'B'])
+    expect(titles.flat()).toEqual(['A', 'B'])
+    expect(incidentsOnOperationalDays({}, ['operational'])).toEqual([[]])
   })
 })
