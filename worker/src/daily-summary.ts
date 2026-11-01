@@ -12,7 +12,7 @@ import { wholeShares } from './recovery-baseline-text'
 import type { SnapshotCoverage } from './prediction-snapshot'
 import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
-import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth } from './monthly-archive'
+import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth, type Guard3HoldRecord } from './monthly-archive'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
 import { FAMILY_OF_SERVICE } from './alerts'
 import type { HistoryClickCounts } from './history-click'
@@ -103,6 +103,7 @@ export interface DailySummaryData {
   fanoutCounts?: { discord: { delivered: number; failed: number }; slack: { delivered: number; failed: number } } | null
   // #1295 — synthesized day-totals the monthly dedup guard declined to bank, this month and last (null = unread).
   guardSkips?: number | null
+  guard3Holds?: Guard3HoldRecord[] | null
   deliveryCounts?: { discord: number; failed: number } | null
   redditCount: number
   // #820 — Reddit source health: a marker (blocked / partially blocked / unreachable streak),
@@ -317,6 +318,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   if (fanoutLine) lines.push(fanoutLine)
   const guardLine = formatGuardSkipLine(data.guardSkips)
   if (guardLine) lines.push(guardLine)
+  const guard3Line = formatGuard3HoldLine(data.guard3Holds)
+  if (guard3Line) lines.push(guard3Line)
   // Health outranks the count. `reddit:seen:*` keys live 24h, so a source that dies at noon still
   // shows a real non-zero count — and printing it would read as health on the very day detection
   // went dark. The reason is carried through because the remediations differ: `block` is the
@@ -438,6 +441,14 @@ export function formatGuardSkipLine(n: number | null | undefined): string {
   if (n === undefined || n === 0) return ''
   if (n === null) return '🛡️ **Monthly dedup guard**: record unreadable'
   return `🛡️ **Monthly dedup guard**: ${n} synthesized day${n === 1 ? '' : 's'} skipped (this month and last)`
+}
+
+export function formatGuard3HoldLine(records: ReadonlyArray<Guard3HoldRecord> | null | undefined): string {
+  if (records === null) return '🕳️ **Phantom prune holds**: record unreadable'
+  if (records === undefined || records.length === 0) return ''
+  const shown = records.slice(-3).map((r) => `${r.svc}/${r.id}`).join(', ')
+  const more = records.length > 3 ? ` (+${records.length - 3} earlier)` : ''
+  return `🕳️ **Phantom prune holds**: ${records.length} ${records.length === 1 ? 'hold' : 'holds'} (this month and last) — latest ${shown}${more}`
 }
 
 /** #1590 — what the per-user fan-out sent in the report window; empty on a day it sent nothing. */

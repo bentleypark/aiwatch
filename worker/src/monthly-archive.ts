@@ -476,6 +476,8 @@ function isIsoish(v: unknown): v is string {
   return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)
 }
 
+export interface Guard3Hold { svcId: string; id: string; title: string; startedAt: string; oldestLiveStart: string }
+
 /**
  * #975 — remove entries stranded by an upstream **delete + re-publish**, and recompute the affected
  * service's aggregates. Pure; the input is not mutated.
@@ -550,6 +552,7 @@ export function prunePhantomIncidents(
   data: MonthlyIncidents,
   services: ServiceStatus[],
   suppressions: SuppressionEntry[] | null,
+  onHold?: (hold: Guard3Hold) => void,
 ): MonthlyIncidents {
   // Unreadable suppression list → we cannot tell "hidden by policy" from "deleted upstream". Hold.
   // Logged: otherwise the self-heal silently does nothing and no operator can tell it was skipped.
@@ -641,6 +644,7 @@ export function prunePhantomIncidents(
       // one. Without the reset a phantom whose older live sibling ages out freezes mid-count forever.
       if (oldestLiveStart === null || !(oldestLiveStart < e.startedAt)) {
         if (e.missedRuns !== undefined) { delete e.missedRuns; svcTouched = true }
+        if (oldestLiveStart !== null) onHold?.({ svcId, id: String(e.id), title: e.title, startedAt: e.startedAt, oldestLiveStart })
         nextDetails.push(e)
         continue
       }
@@ -761,6 +765,7 @@ export function accumulateMonthlyIncidents(
   period: string, // YYYY-MM
   suppressions: SuppressionEntry[] | null,
   onGuardSkip?: (svcId: string, inc: Incident) => void,
+  onHold?: (hold: Guard3Hold) => void,
 ): MonthlyIncidents {
   const base: MonthlyIncidents = existing
     ? { lastUpdated: new Date().toISOString(), services: structuredClone(existing.services) }
@@ -773,7 +778,7 @@ export function accumulateMonthlyIncidents(
   // still be prunable on a cycle where the service reports no incident *for this period* (its only
   // remaining live incidents may be from an earlier month). The prune reads the service's FULL live
   // list, not the period-filtered one, because feed truncation is global rather than per-month.
-  const result = prunePhantomIncidents(base, services, suppressions)
+  const result = prunePhantomIncidents(base, services, suppressions, onHold)
 
   for (const svc of services) {
     const counted = new Set((svc.incidents ?? []).map((i) => i.id))
@@ -948,6 +953,73 @@ export async function readGuardSkipCount(kv: KVNamespace, today: string): Promis
   }
 }
 
+export const GUARD3_HOLD_LOG_MAX = 10
+
+export function formatGuard3Holds(holds: ReadonlyArray<Guard3Hold>): string | null {
+  if (holds.length === 0) return null
+  const shown = holds.slice(0, GUARD3_HOLD_LOG_MAX).map((h) => `${h.svcId}/${h.id} "${h.title}" (started ${h.startedAt}, oldest live start considered ${h.oldestLiveStart})`)
+  const more = holds.length > shown.length ? ` … +${holds.length - shown.length} more` : ''
+  return `[monthly-archive] #1154 phantom prune held ${holds.length} unresolved ${holds.length === 1 ? 'entry' : 'entries'} absent from the live list: ${shown.join('; ')}${more}`
+}
+
+export interface Guard3HoldRecord { svc: string; id: string; title: string; startedAt: string; firstSeen: string }
+
+export const guard3HoldKey = (period: string): string => `incidents:monthly-guard3:${period}`
+export const GUARD3_HOLD_TTL_SECONDS = 90 * 86400
+export const GUARD3_HOLD_RECORD_MAX = 50
+
+export function mergeGuard3Holds(
+  existing: Guard3HoldRecord[] | null,
+  holds: ReadonlyArray<Guard3Hold>,
+  nowIso: string,
+): { list: Guard3HoldRecord[]; added: number } {
+  const list = existing ? [...existing] : []
+  const seen = new Set(list.map((r) => `${r.svc}|${r.id}`))
+  let added = 0
+  for (const h of holds) {
+    const k = `${h.svcId}|${h.id}`
+    if (seen.has(k) || list.length >= GUARD3_HOLD_RECORD_MAX) continue
+    seen.add(k)
+    list.push({ svc: h.svcId, id: h.id, title: h.title, startedAt: h.startedAt, firstSeen: nowIso })
+    added++
+  }
+  return { list, added }
+}
+
+export function parseGuard3HoldRecords(raw: string | null): Guard3HoldRecord[] {
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter((r): r is Guard3HoldRecord => !!r && typeof r.svc === 'string' && typeof r.id === 'string' && typeof r.firstSeen === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
+export async function readGuard3Holds(kv: KVNamespace, today: string): Promise<Guard3HoldRecord[] | null> {
+  const lastMonth = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 2, 1)).toISOString().slice(0, 7)
+  try {
+    const [thisRaw, lastRaw] = await Promise.all([kv.get(guard3HoldKey(today.slice(0, 7))), kv.get(guard3HoldKey(lastMonth))])
+    return [...parseGuard3HoldRecords(lastRaw), ...parseGuard3HoldRecords(thisRaw)]
+  } catch (err) {
+    console.warn('[daily-summary] guard-3 hold read failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+async function recordGuard3Holds(kv: KVNamespace, period: string, holds: ReadonlyArray<Guard3Hold>, now: Date): Promise<void> {
+  if (holds.length === 0) return
+  const key = guard3HoldKey(period)
+  try {
+    const { list, added } = mergeGuard3Holds(parseGuard3HoldRecords(await kv.get(key)), holds, now.toISOString())
+    if (added > 0) await kvPut(kv, key, JSON.stringify(list), { expirationTtl: GUARD3_HOLD_TTL_SECONDS })
+  } catch (err) {
+    console.warn(`[monthly-archive] #1154 guard-3 hold record failed for ${period}:`, err instanceof Error ? err.message : String(err))
+  }
+}
+
 /** Best-effort: a failure here must never affect the accumulation that called it. Reads once per
  *  cycle that skipped something, writes only when a skip is new. */
 async function recordGuardSkips(
@@ -1043,11 +1115,17 @@ export async function accumulateIncidentsOnlyIfChanged(
   // destructive caller must be able to tell that apart, and `null` disables the prune for this run.
   const suppressions = await readSuppressionsFreshOrNull(kv)
   const guardSkips: Array<{ svc: string; id: string; day: string }> = []
+  const holds: Guard3Hold[] = []
   const updated = accumulateMonthlyIncidents(existing, services, month, suppressions, (svc, inc) => {
     guardSkips.push({ svc, id: inc.id, day: inc.derivedDay ?? '' })
-  })
+  }, (hold) => holds.push(hold))
+  if (now.getUTCMinutes() < 5) {
+    const line = formatGuard3Holds(holds)
+    if (line) console.warn(line)
+  }
   // A skip by itself changes nothing, so this must run before the `unchanged` return.
   await recordGuardSkips(kv, month, guardSkips, now)
+  await recordGuard3Holds(kv, month, holds, now)
   // Compare incident payload only — `lastUpdated` is bumped every call, so a whole-object compare
   // would always differ. No service-payload change → nothing to persist → skip the write.
   const existingServices = existing ? JSON.stringify(existing.services) : null
