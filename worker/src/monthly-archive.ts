@@ -212,7 +212,7 @@ export type SecuritySeverityBucket = 'critical' | 'high' | 'medium' | 'low'
 export interface MonthlySecurityEntry {
   title: string
   url: string
-  source: 'osv' | 'hackernews' | 'nvd'
+  source: string
   severity?: string
   service?: string
   detectedAt: string             // ISO 8601
@@ -227,10 +227,10 @@ export interface MonthlySecurityTopFinding extends MonthlySecurityEntry {
 
 export interface MonthlySecuritySummary {
   totalAlerts: number
-  bySource: { osv: number; hackernews: number; nvd: number }
+  bySource: Record<string, number>
   bySeverity: Record<SecuritySeverityBucket, number>
   byService: Record<string, number>                // service name → count
-  byServiceSource?: Record<string, Partial<Record<MonthlySecurityEntry['source'], number>>> // #1805; absent from archives built before it
+  byServiceSource?: Record<string, Record<string, number>> // #1805; absent from archives built before it
   topFindings: MonthlySecurityTopFinding[]         // sorted by severity desc, max 10
 }
 
@@ -1705,9 +1705,7 @@ export function summarizeSecurityAlerts(entries: MonthlySecurityEntry[]): Monthl
   const byServiceSource: NonNullable<MonthlySecuritySummary['byServiceSource']> = {}
 
   for (const e of entries) {
-    if (e.source === 'osv') bySource.osv++
-    else if (e.source === 'hackernews') bySource.hackernews++
-    else if (e.source === 'nvd') bySource.nvd++
+    bySource[e.source] = (bySource[e.source] ?? 0) + 1
     const sev = normalizeSeverity(e.severity)
     if (sev) bySeverity[sev]++
     if (e.service) {
