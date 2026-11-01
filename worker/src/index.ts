@@ -5,6 +5,7 @@
 import { fetchAllServices, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
+import { edgeFallbackLead } from './edge-fallback-text'
 import { OVERRIDES_KEY, normalizeOverridesCounted, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, noOverridesApplied, findOverrideId, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
@@ -2446,8 +2447,7 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
 }
 
 // ── POST /api/internal/edge-fallback ───────────────────────────
-// #378: Vercel Edge Functions (api/is-down.ts, api/reports.ts) call this when they
-// fall back to a degraded render because the upstream Worker fetch failed. Worker
+// #378: Edge SSR pages call this when they serve a degraded or unverifiable answer. Worker
 // dedups via KV (5-minute cooldown per surface+slug) and fires a single Discord
 // alert to the operator webhook so silent CDN-cached failures get noticed.
 //
@@ -2458,7 +2458,7 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
 // `wrangler dev` rejects const exports from the entry module (see that file).
 
 interface EdgeFallbackRequest {
-  surface?: string  // 'is-down' | 'reports'
+  surface?: string  // 'is-down' | 'is-down-group' | 'reports'
   slug?: string     // service slug for is-down, path for reports (free-form, capped)
   reason?: string   // short reason string ('worker_unreachable', 'parse_error', etc.)
 }
@@ -2496,9 +2496,7 @@ export async function handleEdgeFallbackAlert(request: Request, env: Env, cors: 
     if (!webhookUrl) return
     await sendDiscordAlert(webhookUrl, {
       title: `:warning: Edge SSR fallback: ${surface}/${slug}`,
-      description: `${reason.endsWith('_served_copy')
-        ? 'Vercel Edge rendered the page from the hourly last-good copy in Vercel Blob (#1531) because the upstream Worker fetch failed.'
-        : `Vercel Edge rendered the degraded "Status data is temporarily unavailable" page because the upstream Worker fetch failed.${surface === 'is-down' ? ' Visitors may still have received the CDN\'s last good copy (\`stale-if-error\`, #1531).' : ''}`}\n\n**Reason**: \`${reason}\`\n**Surface**: \`${surface}\`\n**Slug**: \`${slug}\`\n\nThe Edge response is now \`Cache-Control: no-store\` (#378) so subsequent requests retry instead of serving stale failure. If this fires repeatedly, check Worker logs and KV health.`,
+      description: `${edgeFallbackLead(surface, reason)}\n\n**Reason**: \`${reason}\`\n**Surface**: \`${surface}\`\n**Slug**: \`${slug}\`\n\nThe Edge response is now \`Cache-Control: no-store\` (#378) so subsequent requests retry instead of serving stale failure. If this fires repeatedly, check Worker logs and KV health.`,
       color: 0xf0883e,
     })
   })())

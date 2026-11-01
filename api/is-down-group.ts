@@ -13,6 +13,7 @@ import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { lastGoodView } from './_shared/last-good-copy'
 import { isDownCacheControl } from './_shared/is-down-cache'
 import { resolveWorkerApi } from './_shared/worker-api'
+import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { EXTENSION_STORES, renderExtInstallCta } from './_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
@@ -26,6 +27,7 @@ const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 
 const workerApi = resolveWorkerApi(WORKER_API)
 const REPORT_ENDPOINT = `${WORKER_API}/api/report-issue`
+const warnedMissingMembers = new Set<string>()
 
 interface MemberStatus {
   id: string
@@ -778,16 +780,21 @@ export default async function handler(req: Request) {
     let shareIncidentToken: string | null = null
     let shareIncidentStartedMs = -Infinity
     let isFallback = true
-    let servedCopy = false
+    let copyReason: string | null = null
+    let fallbackReason = 'unexpected_error'
+    let missingMembers: string[] = []
     try {
       // #1831 — this family's members in full; the other families' members for their status only.
       const statusOnlyIds = Object.values(FAMILY_GROUPS).filter((f) => f.slug !== family.slug).flatMap((f) => f.members)
       const statusUrl = `${workerApi}/api/status/cached?series=0&view=is-down-group&ids=${family.members.map(encodeURIComponent).join(',')}&status=${statusOnlyIds.map(encodeURIComponent).join(',')}`
       const statusFetch = await hedgedJsonFetch(statusUrl, { lastGood: lastGoodView<unknown>(statusUrl) })
       if (statusFetch.ok && statusFetch.attempt === 2) console.warn(`[is-down-group/${familyKey}] status fetch answered by the hedged second request`)
-      servedCopy = statusFetch.ok && statusFetch.attempt === 'copy'
+      copyReason = statusFetch.ok && statusFetch.attempt === 'copy' ? statusFetch.reason : null
       if (statusFetch.ok && statusFetch.attempt === 'copy') console.warn(`[is-down-group/${familyKey}] status fetch failed (${statusFetch.reason}); served the last-good copy`)
-      if (!statusFetch.ok) console.warn(`[is-down-group/${familyKey}] status fetch failed: ${statusFetch.reason}`)
+      if (!statusFetch.ok) {
+        fallbackReason = statusFetch.reason
+        console.warn(`[is-down-group/${familyKey}] status fetch failed: ${statusFetch.reason}`)
+      }
       if (statusFetch.ok) {
         const data = statusFetch.data as {
           services: Array<{
@@ -825,6 +832,13 @@ export default async function handler(req: Request) {
           aiAnalysis?: Record<string, Array<{ incidentId: string; summary: string; progress?: string; estimatedRecovery: string }>>
         }
         const byId = new Map(data.services.map((s) => [s.id, s]))
+        missingMembers = family.members.filter((id) => !byId.has(id))
+        for (const id of missingMembers) {
+          const warnKey = `${familyKey}:${id}`
+          if (warnedMissingMembers.has(warnKey)) continue
+          warnedMissingMembers.add(warnKey)
+          console.error(`[is-down-group/${familyKey}] member id "${id}" not in API response — FAMILY_GROUPS is out of sync with worker/src/services.ts`)
+        }
         members = family.members.map((id) => {
           const s = byId.get(id)
           const slug = SERVICE_ID_TO_SLUG[id] ?? id
@@ -997,6 +1011,11 @@ export default async function handler(req: Request) {
       console.warn(`[is-down-group/${familyKey}] status fetch failed:`, err instanceof Error ? err.message : err)
     }
 
+    const memberMissing = missingMembers.length > 0
+    if (isFallback) await notifyEdgeFallback(WORKER_API, { surface: 'is-down-group', slug: familyKey, reason: fallbackReason }, `is-down-group/${familyKey}`)
+    else if (copyReason) await notifyEdgeFallback(WORKER_API, { surface: 'is-down-group', slug: familyKey, reason: `${copyReason}_served_copy` }, `is-down-group/${familyKey}`)
+    else if (memberMissing) await notifyEdgeFallback(WORKER_API, { surface: 'is-down-group', slug: familyKey, reason: 'service_missing' }, `is-down-group/${familyKey}`)
+
     const html = renderGroupPage(family, members, incidents, summary, communityReports, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken, referenceComponents)
     const csp = await cspForHtml(html, { enforce: true })
     // Mirrors is-down.ts's fallback semantics: a fetch failure renders "unknown" for every member
@@ -1006,7 +1025,7 @@ export default async function handler(req: Request) {
       status: isFallback ? 503 : 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': isDownCacheControl(isFallback || servedCopy),
+        'Cache-Control': isDownCacheControl(isFallback || copyReason !== null || memberMissing),
         [csp.key]: csp.value,
       },
     })

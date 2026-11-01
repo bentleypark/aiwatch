@@ -1,10 +1,10 @@
-// #378 — Worker endpoint that fires Discord alert when Vercel Edge falls back
-// to the degraded "Status data is temporarily unavailable" render. Tests cover
+// #378 — Worker endpoint that fires a Discord alert for an Edge SSR fallback. Tests cover
 // auth, dedup, dispatch toggle on missing webhook, and input sanitization.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { handleEdgeFallbackAlert } from '../index'
 import { EDGE_FALLBACK_ALERT_KEY_PREFIX, EDGE_FALLBACK_ALERT_TTL_S } from '../edge-fallback-alert-keys'
+import { edgeFallbackLead } from '../edge-fallback-text'
 
 function makeKV(initial: Record<string, string> = {}) {
   const store = { ...initial }
@@ -118,6 +118,18 @@ describe('handleEdgeFallbackAlert (#378)', () => {
     const { description } = (JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { embeds: Array<{ description: string }> }).embeds[0]
     expect(description.includes('last-good copy in Vercel Blob')).toBe(servedCopy)
     expect(description.includes('temporarily unavailable')).toBe(!servedCopy)
+  })
+
+  it.each([
+    ['is-down', 'service_missing'], ['is-down-group', 'service_missing'],
+    ['is-down', 'worker_http_502'], ['is-down-group', 'worker_http_502'],
+  ] as const)('the %s alert text for reason %s is built from the surface and reason it was sent', async (surface, reason) => {
+    const { kv } = makeKV()
+    const env = { STATUS_CACHE: kv, EDGE_ALERT_TOKEN: 'correct', DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/x/y' } as unknown as Parameters<typeof handleEdgeFallbackAlert>[1]
+    await call(makeReq({ surface, slug: 'claude', reason }, 'correct'), env)
+    const { description } = (JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { embeds: Array<{ description: string }> }).embeds[0]
+    expect(description).toContain(edgeFallbackLead(surface, reason))
+    expect(description).toContain(`**Reason**: \`${reason}\``)
   })
 
   it('#1531 — answers even while the dedup read stalls, with the whole dispatch under waitUntil', async () => {
