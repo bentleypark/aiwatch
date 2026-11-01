@@ -102,7 +102,7 @@ const RECENT_INCIDENTS_MAX = 5
 // 2h, not a guess: matches worker/src/recovery-mark.ts's RESOLVED_TTL_S (7200s) — the single constant
 // that already governs how long BOTH the `recovered:{svcId}:{incId}` marker and the resolved
 // `ai:analysis:*` value live in KV. Past that TTL, `/api/status/cached`'s aiAnalysis simply stops
-// carrying the entry at all (worker/src/index.ts's recoveryCutoff there is a 3h READ-side query margin
+// carrying the entry at all (worker/src/analysis-reads.ts's RECENT_RECOVERY_MS there is a 3h READ-side query margin
 // for clock/cron skew, not the actual data lifetime — the KV key itself is gone by 2h regardless), so
 // this local gate is redundant with the upstream cutoff today. Kept anyway as defense-in-depth (same
 // posture as STATUS_RANK's unknown-outranks-operational gate above) rather than trusting the upstream
