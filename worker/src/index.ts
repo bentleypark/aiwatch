@@ -5,7 +5,7 @@
 import { fetchAllServices, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
-import { OVERRIDES_KEY, normalizeOverridesCounted, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, type DurationOverride } from './overrides'
+import { OVERRIDES_KEY, normalizeOverridesCounted, mutateOverrides, readOverridesFresh, readOverridesFreshResult, applyDurationOverrides, noOverridesApplied, findOverrideId, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
 import { createReadCensus, formatCensus } from './kv-read-census'
@@ -2810,9 +2810,10 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
   }
   const overrides = overrideRead.list
 
+  let overrideMatches = noOverridesApplied(overrides)
   let archive: MonthlyArchive
   try {
-    archive = await buildMonthlyArchive(env.STATUS_CACHE, year, monthNum, scoreData, undefined, suppressions, overrides, priorParsed)
+    archive = await buildMonthlyArchive(env.STATUS_CACHE, year, monthNum, scoreData, undefined, suppressions, overrides, priorParsed, (m) => { overrideMatches = m })
   } catch (err) {
     return json(502, { ok: false, error: 'archive build failed', detail: err instanceof Error ? err.message : String(err) })
   }
@@ -2910,6 +2911,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
     services: Object.keys(archive.services).length,
     daysCollected: archive.daysCollected,
     servicesWithScore: Object.values(archive.services).filter((s) => s.score != null).length,
+    overrides: { applied: overrideMatches.matched.length, notInThisMonth: overrideMatches.unmatched.length, appliedIds: overrideMatches.matched },
   })
 }
 
@@ -3052,7 +3054,13 @@ async function handleAdminOverride(request: Request, env: Env, cors: Record<stri
       return json(502, { ok: false, error: 'failed to write override list' })
     }
   }
-  return json(200, { ok: true, changed: result.changed, overrides: result.list })
+  const lookup = body.action === 'add' && typeof body.id === 'string' ? await findOverrideId(env.STATUS_CACHE, body.id) : undefined
+  return json(200, {
+    ok: true,
+    changed: result.changed,
+    overrides: result.list,
+    ...(lookup !== undefined ? { match: lookup === null ? { matched: null } : { matched: lookup.months.length > 0, months: lookup.months, searched: lookup.searched } } : {}),
+  })
 }
 
 /** #1864 — the admin key, or the read-only verify key. Only read-only handlers call this. */

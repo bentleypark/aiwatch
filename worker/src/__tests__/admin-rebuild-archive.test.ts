@@ -713,6 +713,39 @@ describe('POST /api/admin/rebuild-archive', () => {
     })
   }
 
+  it('reports how many overrides the month took and how many it did not', async () => {
+    const month = monthsAgo(1)
+    const store: Record<string, string> = {
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      'incident:duration-overrides': JSON.stringify([{ id: 'inc-1', durationMin: 18 }, { id: 'inc-typo', durationMin: 18 }]),
+      [`incidents:monthly:${month}`]: paperworkAccumulator(),
+    }
+    const kv = {
+      get: vi.fn(async (k: string) => store[k] ?? null),
+      put: vi.fn(async (k: string, v: string) => { store[k] = v }),
+      delete: vi.fn(async () => {}),
+      list: vi.fn(async () => ({ keys: [], list_complete: true, cacheStatus: null })),
+    } as unknown as KVNamespace
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+    expect((await res.json() as { overrides: unknown }).overrides).toEqual({ applied: 1, notInThisMonth: 1, appliedIds: ['inc-1'] })
+  })
+
+  it('reports no override applied when the month has no accumulator to apply them to', async () => {
+    const month = monthsAgo(1)
+    const { kv } = makeKV({
+      'services:latest': JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' }),
+      'incident:duration-overrides': JSON.stringify([{ id: 'inc-1', durationMin: 18 }]),
+    })
+
+    const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+    expect(res.status).toBe(200)
+    expect((await res.json() as { overrides: unknown }).overrides).toEqual({ applied: 0, notInThisMonth: 1, appliedIds: [] })
+  })
+
   it('hands the override list to the build instead of letting it re-read fail-open', async () => {
     // Pins BOTH directions of the wiring in one run: the read happens exactly once (so the build is
     // consuming the handler's fail-closed read, not taking its own), and the pinned duration is what
