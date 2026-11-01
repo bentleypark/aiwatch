@@ -17,7 +17,17 @@ audit() { bash "${HOOK_DIR}/_audit.sh" "korean-copy-trigger" "$1" "$2" 2>/dev/nu
 
 command -v jq >/dev/null 2>&1 || exit 0
 INPUT="$(cat 2>/dev/null)" || exit 0
-FP="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)" || exit 0
+[ -r "${HOOK_DIR}/_tool-input-paths.sh" ] || exit 0
+. "${HOOK_DIR}/_tool-input-paths.sh"
+FP=""
+while IFS= read -r candidate; do
+  case "$candidate" in
+    */src/locales/ko.js|*/api/_methodology/html-template.ts|*/api/_intro/html-template.ts|*/src/components/LegalContent.jsx|*/src/components/AnalysisModal.jsx)
+      FP="$candidate"
+      break
+      ;;
+  esac
+done < <(hook_input_paths "$INPUT")
 [ -z "$FP" ] && exit 0
 
 # Only the copy surfaces the lint actually scans (keep in sync with SURFACES in lint-korean-copy.mjs).

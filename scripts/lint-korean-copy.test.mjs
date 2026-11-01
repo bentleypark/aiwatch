@@ -291,7 +291,7 @@ test('the hook targets exactly the SURFACES files — the "kept in sync" comment
   // they are kept in sync; without this, adding a 6th surface leaves the hook silent on it forever,
   // and a hook that stops firing is invisible by construction.
   const hook = readFileSync(join(REPO, '.claude/hooks/korean-copy-trigger.sh'), 'utf8')
-  const m = hook.match(/case "\$FP" in\n\s*([^\n]+)\)\s*;;/)
+  const m = hook.match(/case "\$candidate" in\n\s*([^\n]+)\)\n\s*FP=/)
   assert.ok(m, 'could not parse the case list out of the hook — parser drifted, fix the parser')
   const hooked = m[1].split('|').map((p) => p.replace(/^\*\//, '')).sort()
   assert.deepEqual(hooked, SURFACES.map((s) => s.file).sort())
@@ -403,7 +403,7 @@ test('the hook actually EMITS a reminder — not just logs that it fired', () =>
   const sandbox = mkdtempSync(join(tmpdir(), 'kohook-'))
   const hooksDir = join(sandbox, 'hooks')
   mkdirSync(hooksDir, { recursive: true })
-  for (const f of ['korean-copy-trigger.sh', '_audit.sh']) {
+  for (const f of ['korean-copy-trigger.sh', '_audit.sh', '_tool-input-paths.sh']) {
     writeFileSync(join(hooksDir, f), readFileSync(join(REPO, '.claude/hooks', f)))
   }
   const hook = join(hooksDir, 'korean-copy-trigger.sh')
