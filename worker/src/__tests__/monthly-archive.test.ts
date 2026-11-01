@@ -1186,6 +1186,18 @@ describe('summarizeSecurityAlerts', () => {
     expect(s.topFindings[0]).toEqual(entries[0])
   })
 
+  it('#1380 — buckets an added source so the source total always reconciles', () => {
+    const entries: MonthlySecurityEntry[] = [
+      { title: 'Known', url: 'u1', source: 'osv', severity: 'high', detectedAt: '2026-03-01T00:00:00Z' },
+      { title: 'New source', url: 'u2', source: 'vendorfeed', severity: 'medium', detectedAt: '2026-03-02T00:00:00Z' },
+    ]
+
+    const summary = summarizeSecurityAlerts(entries)
+
+    expect(summary.bySource).toEqual({ osv: 1, hackernews: 0, nvd: 0, vendorfeed: 1 })
+    expect(Object.values(summary.bySource).reduce((total, count) => total + count, 0)).toBe(summary.totalAlerts)
+  })
+
   it('#1805 — splits each service count by source, summing to byService', () => {
     const entries: MonthlySecurityEntry[] = [
       { title: 'A', url: 'u1', source: 'nvd', severity: 'high', service: 'Claude Code', detectedAt: '2026-10-01T00:00:00Z' },
