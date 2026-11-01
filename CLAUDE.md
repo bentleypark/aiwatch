@@ -214,7 +214,7 @@ When adding a new monitored service, files across worker, frontend, docs, SEO me
 - **6 coding agents**: Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Junie
 
 ### Tech Stack
-- **React 19 + Vite 6** — SPA, no router library
+- **React 19 + Vite 8** — SPA, no router library
 - **TailwindCSS v4** — utility classes + CSS custom properties for design tokens (see below)
 - **Cloudflare Workers** — status polling proxy with KV cache
 - **Cloudflare Workers AI** — Gemma 4 26B incident analysis (primary, via `[ai]` binding)

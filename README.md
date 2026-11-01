@@ -161,7 +161,7 @@ Grouped by the dashboard's category taxonomy (49 total — sidebar filters / Ove
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 19, Vite 6, TailwindCSS v4, Chart.js |
+| Frontend | React 19, Vite 8, TailwindCSS v4, Chart.js |
 | Backend | Cloudflare Workers (TypeScript) |
 | Cache | Cloudflare KV (status cache, latency snapshots) |
 | Hosting | Vercel |
