@@ -25,6 +25,30 @@ function assetManifestPlugin() {
   }
 }
 
+// #1886 — Tailwind v4's stated floor (tailwindcss.com/docs/compatibility). Pinned here so a Vite
+// default change cannot move it: Vite 8 raised its default from safari14 to safari16.4 with no diff.
+export const BROWSER_FLOOR = ['chrome111', 'edge111', 'firefox128', 'safari16.4', 'ios16.4']
+
+// A separate `build()` call does not inherit the SPA config, so the floor is passed here too.
+export function serviceWorkerBuildConfig(outDir) {
+  return {
+    configFile: false,
+    logLevel: 'warn',
+    build: {
+      outDir,
+      target: BROWSER_FLOOR,
+      emptyOutDir: false,
+      copyPublicDir: false,
+      lib: {
+        entry: resolve('src/sw/index.js'),
+        formats: ['iife'],
+        name: 'aiwatchServiceWorker',
+        fileName: () => 'sw.js',
+      },
+    },
+  }
+}
+
 // #1386 — the service worker is built from `src/sw/`, not copied from `public/`, so its caching
 // decisions can be imported as pure functions and unit-tested (the SW registers in production only,
 // #432, so nothing else can reach them). Emitted unhashed at the dist root: `/sw.js` is the scope
@@ -43,21 +67,7 @@ function serviceWorkerPlugin() {
     },
     async closeBundle() {
       const { build } = await import('vite')
-      await build({
-        configFile: false,
-        logLevel: 'warn',
-        build: {
-          outDir,
-          emptyOutDir: false,
-          copyPublicDir: false,
-          lib: {
-            entry: resolve('src/sw/index.js'),
-            formats: ['iife'],
-            name: 'aiwatchServiceWorker',
-            fileName: () => 'sw.js',
-          },
-        },
-      })
+      await build(serviceWorkerBuildConfig(outDir))
 
       // The build must fail LOUDLY if the artifact is missing, because nothing downstream would say
       // so: `/sw.js` is not under `/assets/`, so the SPA catch-all answers it with index.html at 200
@@ -83,6 +93,7 @@ function serviceWorkerPlugin() {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), cloudflare(), assetManifestPlugin(), serviceWorkerPlugin()],
+  build: { target: BROWSER_FLOOR, cssTarget: BROWSER_FLOOR },
   // Local-only read proxy for the production monthly archive. The production Worker
   // intentionally serves /api/report same-origin; this lets a local source-migration
   // Worker be verified against the already-collected archive without weakening CORS.
