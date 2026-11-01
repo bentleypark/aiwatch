@@ -10,6 +10,8 @@ afterEach(() => vi.unstubAllGlobals())
 
 const CHALLENGE = '<html>challenge</html>'
 const NOT_A_SUMMARY = JSON.stringify({ message: 'Not Found' })
+const ACTIVE_INCIDENT = { id: 'active-1', name: 'Current incident', status: 'investigating', impact: 'minor', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z', incident_updates: [] }
+const SUMMARY_WITH_ACTIVE_INCIDENT = JSON.stringify({ status: { indicator: 'minor', description: 'Investigating' }, components: [], incidents: [ACTIVE_INCIDENT], scheduled_maintenances: [] })
 
 /** Drive the direct (non-prefetched) Statuspage path with a chosen outcome per endpoint. */
 function stubStatuspage(summary: () => Response | never, incidents: () => Response | never) {
@@ -123,6 +125,50 @@ describe('#1470 Statuspage source-read reasons', () => {
     await fetchService(claudeai, undefined, kv as never, {})
 
     expect(bookedReasons(kv, 'claudeai')).toEqual(['statuspage-incidents-unreadable'])
+  })
+
+  it.each([
+    ['transport failure', () => { throw new Error('ECONNRESET') }],
+    ['non-OK response', () => new Response('rate limited', { status: 429 })],
+    ['body without an incidents array', () => json(JSON.stringify({ message: 'rate limited' }))],
+  ])('marks the summary fallback active-only after an incidents.json %s', async (_label, incidents) => {
+    stubStatuspage(() => json(SUMMARY_WITH_ACTIVE_INCIDENT), incidents)
+
+    const result = await fetchService(claudeai, undefined, mockKV() as never, {})
+
+    expect(result.incidents.map((incident) => incident.id)).toEqual(['active-1'])
+    expect(result.liveIncidentsActiveOnly).toBe(true)
+  })
+
+  it('marks the shared-prefetch summary fallback active-only too', async () => {
+    const result = await fetchService(claudeai, {
+      summary: JSON.parse(SUMMARY_WITH_ACTIVE_INCIDENT),
+      incidents: null,
+    } as never, mockKV() as never, {})
+
+    expect(result.incidents.map((incident) => incident.id)).toEqual(['active-1'])
+    expect(result.liveIncidentsActiveOnly).toBe(true)
+  })
+
+  it('does not mark a readable full incidents feed active-only', async () => {
+    stubStatuspage(
+      () => json(SUMMARY_WITH_ACTIVE_INCIDENT),
+      () => json(JSON.stringify({ incidents: [ACTIVE_INCIDENT] })),
+    )
+
+    const result = await fetchService(claudeai, undefined, mockKV() as never, {})
+
+    expect(result.liveIncidentsActiveOnly).toBeUndefined()
+  })
+
+  it('does not mark a readable shared-prefetch incidents feed active-only', async () => {
+    const result = await fetchService(claudeai, {
+      summary: JSON.parse(SUMMARY_WITH_ACTIVE_INCIDENT),
+      incidents: { incidents: [ACTIVE_INCIDENT] },
+    } as never, mockKV() as never, {})
+
+    expect(result.incidents.map((incident) => incident.id)).toEqual(['active-1'])
+    expect(result.liveIncidentsActiveOnly).toBeUndefined()
   })
 })
 

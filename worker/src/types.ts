@@ -297,17 +297,13 @@ export interface ServiceStatus {
    *  `withUnreadFeedFlag`). Cleared when a fresh Flashduty feed supersedes the
    *  frozen mirror. Absent when false. */
   incidentSourceStale?: boolean
-  /** #1510 Slice 2 — set only on Mistral's paths while its scrape feed is unreadable (`services.ts`):
-   *  this cycle's `incidents` came from Mistral's public Rootly API, which lists ACTIVE incidents only —
-   *  unlike every other source's live list, an incident can stop appearing without ever appearing with
-   *  `status: 'resolved'`. The resolved entries this list does carry are only the ones #1510 Part E
-   *  recorded (`mistral:overlay-resolved`). `prunePhantomIncidents` (`monthly-archive.ts`) reads this: without it, a
-   *  normal resolution looks identical to "upstream deleted the incident" (the #975 phantom-prune
-   *  premise, which assumes absence-from-live means deletion — true for every OTHER source, false for
-   *  this one), so a resolved-but-not-yet-synced incident would get pruned and a false public
-   *  withdrawal notice drafted for an outage nobody withdrew. Runtime-only; absent on every other
-   *  return path, including Mistral's own scrape-feed path (`readRootlyStatus`), whose live list DOES
-   *  include recently-resolved entries. */
+  /** This cycle's `incidents` came from a source that lists ACTIVE incidents only (#1510, #1691;
+   *  `grep -n liveIncidentsActiveOnly worker/src/services.ts` for the producers), so an incident can
+   *  stop appearing without ever appearing with `status: 'resolved'` — except for the resolved rows a
+   *  producer records itself (Mistral's `mistral:overlay-resolved`, #1510 Part E).
+   *  `prunePhantomIncidents` and `alerted-gone` read this so absence is never mistaken for an upstream
+   *  deletion or a reason to send a false withdrawal. Runtime-only; absent when the source lists
+   *  resolved incidents. */
   liveIncidentsActiveOnly?: true
   /** #689 — the status-page API returned a 4xx (the page is deactivated/gone). The service is shown
    *  unknown+stale unless a healthy direct probe independently confirms it operational;

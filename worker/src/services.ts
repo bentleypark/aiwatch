@@ -2849,8 +2849,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // #1268 — this read was unguarded, and a deleted Statuspage answers 200 HTML here too, so it
           // threw out of the whole function into the outer catch: one unreadable supplementary feed
           // destroyed the readable summary alongside it. It now degrades exactly like the `!ok` branch
-          // below — `parseIncidents(summaryData)` is the fallback. Deliberately NOT stale-flagged: the
-          // summary parsed, so the incident feed WAS read; incidents.json only widens it.
+          // below — `parseIncidents(summaryData)` is the fallback. The summary is still a fresh status
+          // reading, but its incident list has ACTIVE entries only: downstream absence readers must not
+          // treat a missing resolved incident as a provider deletion (#1691).
           let incText: string | null = null
           try { incText = await incidentsRes.text() }
           catch (err) { console.warn(`[fetchService] ${config.id} incidents.json body read failed:`, err instanceof Error ? err.message : err) }
@@ -2912,7 +2913,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         }
       }
 
-      // incidents.json has full history; summary.json only has active ones
+      // incidents.json has full history; summary.json only has active ones. `rawIncData === null`
+      // means this cycle fell back to that active-only summary list, whether the direct secondary
+      // request failed or the shared prefetch could not validate it. Keep that provenance on the
+      // result: `prunePhantomIncidents` and `alerted-gone` must not infer a withdrawal from absence.
+      const liveIncidentsActiveOnly = rawIncData === null
       let incidents: Incident[] = []
       let feedDepthStart: string | undefined
       const pageUrls = new Map<string, string>()
@@ -3344,6 +3349,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         ...(referenceIncidents.length > 0 ? { referenceIncidents } : {}),
         ...(referenceCountable.length > 0 ? { referenceCountable } : {}),
         ...(referenceComponents.length > 0 ? { referenceComponents } : {}),
+        ...(liveIncidentsActiveOnly ? { liveIncidentsActiveOnly: true as const } : {}),
         ...(feedDepthStart ? { feedDepthStart } : {}),
         ...(components.length > 0 ? { components } : {}),
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete } : {}),
