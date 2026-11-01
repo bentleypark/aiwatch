@@ -6384,56 +6384,9 @@ const workerExport = {
       })
 
       // Read AI analysis from KV — per-incident keys, active incidents + recently resolved
-      const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
-      const recentlyRecovered: Record<string, string[]> = {}
-      if (env.STATUS_CACHE) {
-        // Active incidents: read ai:analysis:{svcId}:{incId} for each
-        // monitoring = "recovery confirmed" — exclude from active analysis display
-        const withActiveInc = servicesWithScore.filter(s =>
-          (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
-        )
-        await Promise.all(withActiveInc.flatMap(svc =>
-          (svc.incidents ?? []).filter(i => i.status !== 'resolved' && i.status !== 'monitoring').map(async (inc) => {
-            const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
-            if (!raw) return
-            try {
-              const parsed = JSON.parse(raw) as AIAnalysisResult
-              if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
-              aiAnalysis[svc.id].push(parsed)
-            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
-          })
-        ))
-        // Recently recovered: operational services with recovered:{svcId}:{incId} KV (independent of AI analysis)
-        // Only check recently resolved incidents — recovered: keys have 2h TTL, 3h cutoff for safety margin
-        const recoveryCutoff = Date.now() - 3 * 3600_000
-        const operationalSvcs = servicesWithScore.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
-        await Promise.all(operationalSvcs.flatMap(svc =>
-          // #1292 — a synthesized incident can never have a `recovered:` marker (isMarkableOnStatusEdge
-          // refuses it, and it never alerts), so probing for one is a guaranteed miss. It would fire for
-          // ~3h/day per day-bucket, since a full-day bucket "resolves" at the next day's local noon.
-          // Same skip the /feed handler applies for the same reason.
-          (svc.incidents ?? []).filter(i => i.derived !== 'status_history' && i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
-            // Check independent recovery marker first
-            const recoveredRaw = await env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null)
-            if (recoveredRaw) {
-              if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
-              if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
-            }
-            // Also check AI analysis for enrichment (optional — banner shows regardless)
-            const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
-            if (!raw) return
-            try {
-              const parsed = JSON.parse(raw) as AIAnalysisResult
-              if (parsed.resolvedAt) {
-                if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
-                aiAnalysis[svc.id].push(parsed)
-                if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
-                if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
-              }
-            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
-          })
-        ))
-      }
+      const { aiAnalysis, recentlyRecovered } = env.STATUS_CACHE
+        ? await readStatusAnalyses(env.STATUS_CACHE, servicesWithScore, Date.now())
+        : { aiAnalysis: {} as Record<string, AIAnalysisResult[]>, recentlyRecovered: {} as Record<string, string[]> }
 
       // See readRecentSecurityAlerts — both endpoints must emit this field.
       const securityAlerts = env.STATUS_CACHE ? await readRecentSecurityAlerts(env.STATUS_CACHE) : []

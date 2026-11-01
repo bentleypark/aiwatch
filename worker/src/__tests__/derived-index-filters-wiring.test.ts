@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * #1292 — `worker/src/index.ts` carries five `derived` guards (four literal, one forwarding) and had NO test of any kind.
+ * #1292 — `worker/src/index.ts` carries `derived` guards and had NO test of any kind.
  *
  * The consumer registry's grep was satisfied by the two doc COMMENTS beside them (round 12's finding),
  * and `derived-tag-sync` reaches this file only through the projection. Deleting any one filter —
@@ -32,11 +32,11 @@ describe('#1292 — index.ts routes every derived-incident path through a guard'
   it('skips the guaranteed-miss recovered: probe on both status paths', () => {
     // `/api/status` and `/api/status/cached`. A full-day bucket "resolves" at the next day's local
     // anchor, so it enters the 3h recently-recovered window for ~3h every day, per bucket.
-    // #1772 — `/api/status/cached` and the ext-claude projection read through readStatusAnalyses
-    // (analysis-reads.ts, which carries the guard); `/api/status` keeps its own loop.
+    // #1772, #1781 — `/api/status`, `/api/status/cached` and the ext-claude projection all read through
+    // readStatusAnalyses (analysis-reads.ts, which carries the guard), so index.ts holds no copy of it.
     const probeGuards = CODE.match(/i\.derived !== 'status_history' && i\.resolvedAt/g) ?? []
-    expect(probeGuards.length, 'the /api/status path must skip the probe').toBe(1)
-    expect(CODE.match(/readStatusAnalyses\(/g) ?? []).toHaveLength(2)
+    expect(probeGuards.length, 'index.ts must not carry its own copy of the probe guard').toBe(0)
+    expect(CODE.match(/readStatusAnalyses\(/g) ?? []).toHaveLength(3)
   })
 
   it('forwards BOTH halves of the pair on the public /api/v1/status/:id projection', () => {
@@ -45,14 +45,13 @@ describe('#1292 — index.ts routes every derived-incident path through a guard'
   })
 
   it('the scan is not vacuous — it finds the tag in CODE, not only in prose', () => {
-    // Exactly four literal comparisons: the two /feed loops and the two status-path probes. The fifth
-    // guard is the projection, which forwards `i.derived` without naming the literal. Pinned rather
-    // than floored, because the failure this file exists for is the scan going quiet. (The doc
-    // comments beside these guards write the tag in backticks, so they never match this pattern —
-    // it is the REGISTRY's looser grep that they satisfied.)
+    // Pinned rather than floored, because the failure this file exists for is the scan going quiet.
+    // (The doc comments beside these guards write the tag in backticks, so they never match this
+    // pattern — it is the REGISTRY's looser grep that they satisfied.)
     const inCode = (CODE.match(/'status_history'/g) ?? []).length
     // #1623 — 4 → 7: the two /feed stamp loops and the `detected:` active-incident pick.
     // #1772 — 7 → 6: the `/api/status/cached` probe moved to analysis-reads.ts.
-    expect(inCode, 'index.ts must branch on the tag in executable code').toBe(6)
+    // #1781 — 6 → 5: so did the `/api/status` one.
+    expect(inCode, 'index.ts must branch on the tag in executable code').toBe(5)
   })
 })
