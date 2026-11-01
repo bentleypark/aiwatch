@@ -3,16 +3,19 @@ import {
   summarizeRecoveryHistory,
   buildRecoveryBaselines,
   readRecoveryBaselines,
+  readRecoveryValue,
   writeRecoveryBaselines,
   rebuildRecoveryBaselines,
   compareWithRecoveryBaseline,
+  summarizeEstimateAccuracy,
+  ESTIMATE_ACCURACY_ENTRY,
   RECOVERY_BASELINE_KEY,
 } from '../recovery-baseline'
-import { recoveryBaselineText } from '../recovery-baseline-text'
+import { recoveryBaselineText, estimateAccuracyText, wholeShares, ESTIMATE_ACCURACY_MIN_N, type EstimateAccuracy } from '../recovery-baseline-text'
 import { OVERRIDES_KEY } from '../overrides'
 import { SERVICES } from '../services'
 import { feedEventTitle, isFeedEventTitle } from '../parsers/betterstack'
-import type { IncidentHistoryRecord } from '../incident-history'
+import { summarizeAccuracy, type IncidentHistoryRecord } from '../incident-history'
 import type { KVLike } from '../utils'
 
 const rec = (i: number, durationMin: number, over: Partial<IncidentHistoryRecord> = {}): IncidentHistoryRecord => ({
@@ -217,5 +220,129 @@ describe('compareWithRecoveryBaseline (#1777)', () => {
     const out = compareWithRecoveryBaseline(history, [], SERVICES, '2026-09')
     expect(out?.ai.total).toBe(1)
     expect(out?.pastMedian.total).toBe(1)
+  })
+})
+
+describe('estimate accuracy (#1205)', () => {
+  const WITHIN = 90, FAST = 30, LONGER = 180
+  const scored = (i: number, durationMin: number, over: Partial<IncidentHistoryRecord> = {}) =>
+    rec(i, durationMin, { incId: `s-${i}`, predictedRecoveryHours: 2, resolvedAt: `2026-09-${String((i % 27) + 1).padStart(2, '0')}T12:00:00.000Z`, ...over })
+  const mix = (within: number, fast: number, longer: number) =>
+    [...Array(within).fill(WITHIN), ...Array(fast).fill(FAST), ...Array(longer).fill(LONGER)].map((d, i) => scored(i, d))
+  const stats = (): EstimateAccuracy => ({ total: 32, accurate: 12, overPredicted: 14, underPredicted: 6, since: '2026-09-01' })
+
+  describe('summarizeEstimateAccuracy', () => {
+    it('counts the three outcomes apart and names the earliest resolved date', () => {
+      expect(summarizeEstimateAccuracy(mix(12, 14, 6))).toEqual(stats())
+    })
+
+    it('takes the earliest resolved date wherever that record sits in the input', () => {
+      const records = mix(12, 14, 6)
+      records[10] = { ...records[10], resolvedAt: '2026-07-03T12:00:00.000Z' }
+      expect(records.map((r) => r.resolvedAt).sort()[0]).toBe('2026-07-03T12:00:00.000Z')
+      expect(summarizeEstimateAccuracy(records)?.since).toBe('2026-07-03')
+    })
+
+    it('names the earliest date among the scored records, not a record with no estimate', () => {
+      const earlier = scored(100, WITHIN, { predictedRecoveryHours: undefined, resolvedAt: '2026-07-01T12:00:00.000Z' })
+      expect(summarizeEstimateAccuracy([earlier, ...mix(12, 14, 6)])?.since).toBe('2026-09-01')
+    })
+
+    it('shows nothing one scored estimate below the floor, and something at it', () => {
+      expect(summarizeEstimateAccuracy(mix(ESTIMATE_ACCURACY_MIN_N - 1, 0, 0))).toBeNull()
+      expect(summarizeEstimateAccuracy(mix(ESTIMATE_ACCURACY_MIN_N, 0, 0))?.total).toBe(ESTIMATE_ACCURACY_MIN_N)
+    })
+
+    it('counts a grouped incident once, so sibling surfaces do not lift it over the floor', () => {
+      const distinct = mix(ESTIMATE_ACCURACY_MIN_N - 1, 0, 0)
+      const sibling = { ...distinct[0], svcId: 'claudeai' }
+      expect(summarizeEstimateAccuracy([...distinct, sibling])).toBeNull()
+    })
+
+    it('does not count a record with no estimate toward the floor', () => {
+      const noEstimate = Array.from({ length: 5 }, (_, i) => scored(100 + i, WITHIN, { predictedRecoveryHours: undefined }))
+      expect(summarizeEstimateAccuracy([...mix(ESTIMATE_ACCURACY_MIN_N - 1, 0, 0), ...noEstimate])).toBeNull()
+    })
+
+    it('gives the same counts as the figure the daily Discord line and the monthly report publish', () => {
+      const records = mix(12, 14, 6)
+      const published = summarizeAccuracy(records)
+      const { total, accurate, overPredicted, underPredicted } = summarizeEstimateAccuracy(records)!
+      expect({ total, accurate, overPredicted, underPredicted }).toEqual({
+        total: published.total, accurate: published.accurate, overPredicted: published.overPredicted, underPredicted: published.underPredicted,
+      })
+    })
+  })
+
+  describe('estimateAccuracyText', () => {
+    it('states the count, the earliest date and the three outcomes apart', () => {
+      expect(estimateAccuracyText(stats())).toBe(
+        "AIWatch's recovery estimates, all services (32 scored since 2026-09-01): 44% recovered in under half the estimate, 37% in half to all of it, 19% took longer.",
+      )
+    })
+
+    it.each([[1, 1, 1], [1, 2, 3], [7, 7, 7], [100, 1, 1], [0, 1, 0], [33, 33, 34]])('whole percentages of %j add up to 100', (...counts) => {
+      expect(wholeShares(counts).reduce((a, b) => a + b, 0)).toBe(100)
+    })
+  })
+
+  describe('rebuildRecoveryBaselines', () => {
+    const configs = [{ id: 'claude' }]
+
+    it('writes the figure beside the service baselines when the corpus clears the floor', async () => {
+      const kv = makeKV()
+      await rebuildRecoveryBaselines(kv as unknown as KVNamespace, new Map([['claude', [...ten(), ...mix(12, 14, 6)]]]), configs)
+      const stored = JSON.parse(kv._store.get(RECOVERY_BASELINE_KEY)!)
+      expect(stored[ESTIMATE_ACCURACY_ENTRY]).toEqual(stats())
+      expect(stored.claude.n).toBeGreaterThanOrEqual(10)
+    })
+
+    it('leaves the figure out below the floor, and drops one stored by an earlier run', async () => {
+      const kv = makeKV({ [RECOVERY_BASELINE_KEY]: JSON.stringify({ [ESTIMATE_ACCURACY_ENTRY]: stats() }) })
+      await rebuildRecoveryBaselines(kv as unknown as KVNamespace, new Map([['claude', ten()]]), configs)
+      expect(Object.keys(JSON.parse(kv._store.get(RECOVERY_BASELINE_KEY)!))).toEqual(['claude'])
+    })
+  })
+
+  describe('read', () => {
+    const base = { n: 12, medianMin: 40, p80Min: 90, since: '2026-07-12' }
+    const read = (value: unknown) => readRecoveryValue(makeKV({ [RECOVERY_BASELINE_KEY]: JSON.stringify(value) }))
+
+    it('returns both figures from the one value, and keeps the figure out of the service map', async () => {
+      const kv = makeKV()
+      await writeRecoveryBaselines(kv, { claude: base }, stats())
+      expect(await readRecoveryValue(kv)).toEqual({ baselines: { claude: base }, estimateAccuracy: stats() })
+      expect(await readRecoveryBaselines(kv)).toEqual({ claude: base })
+    })
+
+    it('reads a figure of exactly the floor', async () => {
+      const atFloor = { total: ESTIMATE_ACCURACY_MIN_N, accurate: 10, overPredicted: 10, underPredicted: 10, since: '2026-09-01' }
+      expect((await read({ claude: base, [ESTIMATE_ACCURACY_ENTRY]: atFloor })).estimateAccuracy).toEqual(atFloor)
+    })
+
+    it('reads a value written before the figure existed as having none', async () => {
+      expect(await read({ claude: base })).toEqual({ baselines: { claude: base }, estimateAccuracy: null })
+    })
+
+    it.each([
+      ['below the floor', { ...stats(), total: ESTIMATE_ACCURACY_MIN_N - 1, accurate: 10, overPredicted: 14, underPredicted: 5 }],
+      ['counts that do not add up to the total', { ...stats(), accurate: 13 }],
+      ['a negative count', { ...stats(), accurate: -1, overPredicted: 27 }],
+      ['a negative over-predicted count', { ...stats(), accurate: 13, overPredicted: -1, underPredicted: 20 }],
+      ['a negative under-predicted count', { ...stats(), accurate: 13, overPredicted: 20, underPredicted: -1 }],
+      ['a fractional count', { ...stats(), accurate: 11.5, overPredicted: 14.5 }],
+      ['a date that is not a day', { ...stats(), since: 'July' }],
+      ['a string where a count belongs', { ...stats(), total: '32' }],
+      ['an array', [stats()]],
+    ])('drops a figure with %s, and still returns the service baselines', async (_name, bad) => {
+      expect(await read({ claude: base, [ESTIMATE_ACCURACY_ENTRY]: bad })).toEqual({ baselines: { claude: base }, estimateAccuracy: null })
+    })
+
+    it('returns neither on a miss, a corrupt value and a KV error', async () => {
+      const none = { baselines: {}, estimateAccuracy: null }
+      expect(await readRecoveryValue(makeKV())).toEqual(none)
+      expect(await readRecoveryValue(makeKV({ [RECOVERY_BASELINE_KEY]: '{' }))).toEqual(none)
+      expect(await readRecoveryValue({ get: async () => { throw new Error('kv down') } } as unknown as KVLike)).toEqual(none)
+    })
   })
 })

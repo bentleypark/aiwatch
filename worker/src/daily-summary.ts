@@ -8,6 +8,7 @@ import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily, type ProbeDailyData } from './probe-archival'
 import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
+import { wholeShares } from './recovery-baseline-text'
 import type { SnapshotCoverage } from './prediction-snapshot'
 import type { SourceHealthRead } from './reddit'
 import type { AiUsageCounters } from './ai-analysis'
@@ -564,17 +565,6 @@ export function formatAudienceScreenRow(byScreen: AudienceByScreen | null | unde
   if (named.length > shown.length) parts.push(`+${named.length - shown.length} more (${hiddenViews})`)
   if (unattributed > 0) parts.push(`${unattributed} unattributed`)
   return `\n   Screens: ${parts.join(' · ')}`
-}
-
-/** Whole percentages of `counts` (total > 0) that sum to exactly 100 (largest remainder). */
-function wholeShares(counts: number[]): number[] {
-  const total = counts.reduce((a, b) => a + b, 0)
-  const exact = counts.map((c) => (c / total) * 100)
-  const out = exact.map(Math.floor)
-  const order = exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => b.r - a.r)
-  const deficit = 100 - out.reduce((a, b) => a + b, 0)
-  for (let k = 0; k < deficit; k++) out[order[k].i]++
-  return out
 }
 
 /** #827 Feature 1 — AI recovery-prediction accuracy, rendered as a labeled multi-line block so an

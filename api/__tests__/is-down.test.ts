@@ -249,6 +249,41 @@ describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => 
     expect(hidden).not.toContain('data-recovery-baseline')
   })
 
+  describe('#1205 — the estimate track record under the AI card', () => {
+    const ACCURACY = { total: 32, accurate: 12, overPredicted: 14, underPredicted: 6, since: '2026-09-01' }
+    const THREE_OUTCOMES = '44% recovered in under half the estimate, 37% in half to all of it, 19% took longer.'
+    const pageWith = async (extra: object) => {
+      const body = { ...JSON.parse(await makeWorkerResolved().text()), ...extra }
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      return (await handler(makeReq('claude-api'))).text()
+    }
+
+    it('shows the count, the earliest date and the three outcomes apart', async () => {
+      const html = await pageWith({ estimateAccuracy: ACCURACY })
+      expect(html).toContain('data-estimate-accuracy')
+      expect(html).toContain('(32 scored since 2026-09-01)')
+      expect(html).toContain(THREE_OUTCOMES)
+    })
+
+    it('sits under the service\'s own past recovery times, inside the same card', async () => {
+      const html = await pageWith({ estimateAccuracy: ACCURACY, recoveryBaseline: { claude: { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' } } })
+      expect(html.indexOf('data-recovery-baseline')).toBeGreaterThan(0)
+      expect(html.indexOf('data-estimate-accuracy')).toBeGreaterThan(html.indexOf('data-recovery-baseline'))
+      expect(html.indexOf('data-estimate-accuracy')).toBeLessThan(html.indexOf('AI-generated estimation based on historical data'))
+    })
+
+    it.each([
+      ['a worker that does not send it', {}],
+      ['one estimate below the floor', { estimateAccuracy: { ...ACCURACY, total: 29, accurate: 9 } }],
+      ['counts that do not add up', { estimateAccuracy: { ...ACCURACY, accurate: 13 } }],
+      ['a count that is text', { estimateAccuracy: { ...ACCURACY, total: '32' } }],
+    ])('shows nothing for %s, and the page still renders', async (_name, extra) => {
+      const html = await pageWith(extra)
+      expect(html).not.toContain('data-estimate-accuracy')
+      expect(html).toContain('Predicted vs actual:')
+    })
+  })
+
   // Review finding #1 — `target` is undefined on the service_missing config-drift path, but
   // `aiAnalysis` can still carry an entry for the slug. The startedAt lookup must optional-chain
   // `target?.incidents`; the buggy `target.incidents` threw a TypeError that the JSON-parse catch

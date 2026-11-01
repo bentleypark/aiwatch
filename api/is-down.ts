@@ -3,7 +3,7 @@
 import { SLUG_TO_SERVICE } from './_is-down/slug-map'
 import { getSEOContent } from './_is-down/seo-content'
 import { renderPage } from './_is-down/html-template'
-import type { RecoveryBaseline } from '../worker/src/recovery-baseline-text'
+import type { EstimateAccuracy, RecoveryBaseline } from '../worker/src/recovery-baseline-text'
 import { EXCLUDE_FALLBACK } from '../worker/src/fallback'
 import { cspForHtml } from './_shared/csp-hash'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
@@ -84,6 +84,7 @@ export default async function handler(req: Request) {
     let supplyChainNote: SupplyChainNote | null = null
     let upstreamNote: UpstreamNote | null = null
     let recoveryBaseline: RecoveryBaseline | null = null
+    let estimateAccuracy: EstimateAccuracy | null = null
     // Track the precise reason for the fallback render so the Discord alert can
     // distinguish operational classes (timeout vs HTTP failure vs missing service
     // vs JSON parse error). Defaults to a generic label that should never ship —
@@ -125,6 +126,7 @@ export default async function handler(req: Request) {
           // itself down). Optional: a worker predating #1053 omits the key entirely (deploy skew).
           upstreamLinks?: UpstreamLinkLike[]
           recoveryBaseline?: Record<string, RecoveryBaseline>
+          estimateAccuracy?: EstimateAccuracy
           fallbacks?: typeof fallbacks
           fallbackGroups?: typeof fallbackGroups
           fallbackCapabilityLabel?: string
@@ -182,6 +184,7 @@ export default async function handler(req: Request) {
         // #1053 — cross-provider upstream note (the dependent's OWN claim; see upstream-note.ts).
         upstreamNote = buildUpstreamNote(data.upstreamLinks, entry.id)
         recoveryBaseline = data.recoveryBaseline?.[entry.id] ?? null
+        estimateAccuracy = data.estimateAccuracy ?? null
       } catch (parseErr) {
         fallbackReason = 'parse_error'
         console.error(`[is-down/${slug}] status payload unreadable:`, parseErr instanceof Error ? parseErr.message : parseErr)
@@ -235,7 +238,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline, (serviceData === null || viewMissing) && !EXCLUDE_FALLBACK.includes(entry.id), fallbackGroups)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline, (serviceData === null || viewMissing) && !EXCLUDE_FALLBACK.includes(entry.id), fallbackGroups, estimateAccuracy)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT

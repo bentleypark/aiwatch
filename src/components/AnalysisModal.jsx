@@ -4,7 +4,7 @@ import { isDisplayAffected, displayStatusOf } from '../utils/statusDisplay'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
 import { recoveryLine, scopeLine } from '../utils/predictionAccuracy'
 import { hasLiveIncident, readsResolved } from '../utils/liveIncident'
-import { recoveryBaselineText } from '../utils/recoveryBaseline'
+import { estimateAccuracyText, recoveryBaselineText } from '../utils/recoveryBaseline'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -30,8 +30,9 @@ export function groupWorstStatus(svcs) {
   return 'operational'
 }
 
-export default function AnalysisModal({ aiAnalysis, recoveryBaseline, services, onClose }) {
+export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAccuracy, services, onClose }) {
   const { t, lang } = useLang()
+  const accuracyLine = estimateAccuracyText(estimateAccuracy, lang)
   // aiAnalysis: Record<svcId, AIAnalysisResult[]>
   //
   // Two-pass grouping (avoids cross-service bleed — see #315):
@@ -102,6 +103,7 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, services, 
   const totalCount = groups.reduce((sum, g) => sum + g.analyses.length, 0)
   const baselineCardOf = new Map()
   groups.forEach((g, gi) => g.svcIds.forEach(id => { if (!baselineCardOf.has(id)) baselineCardOf.set(id, gi) }))
+  const accuracyCardGi = Math.max(0, groups.findIndex((g, gi) => g.svcIds.some(id => recoveryBaseline?.[id] && baselineCardOf.get(id) === gi)))
 
   return (
     <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -243,6 +245,11 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, services, 
                     📊 {svcs.length > 1 ? `${s.name} — ` : ''}{recoveryBaselineText(recoveryBaseline[s.id], lang)}
                   </div>
                 ))}
+                {gi === accuracyCardGi && accuracyLine && (
+                  <div data-estimate-accuracy className="mono text-[10px] text-[var(--text2)]" style={{ marginTop: '8px' }}>
+                    🎯 {accuracyLine}
+                  </div>
+                )}
 
                 {/* Contextual fallback recommendation — per category for the service group.
                     #641 — only render when we actually have a recommendation; no

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { RSS_ICON_SVG, buildMetaDescription, renderIncidents, renderErrors, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
+import { renderEstimateAccuracy, RSS_ICON_SVG, buildMetaDescription, renderIncidents, renderErrors, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl, SERVICE_SITE_URL } from '../slug-map'
 import { getSEOContent } from '../seo-content'
@@ -2004,5 +2004,22 @@ describe('30-day figures include the records past the feed depth (#1614)', () =>
   it('the AIWatch Data sentence counts them and averages their recovery', () => {
     const html = renderPage('claude', svc, mkSeo(), [])
     expect(html).toContain('Based on AIWatch data from the last 30 days, it experienced 3 incidents with an average recovery time of 1h.')
+  })
+})
+
+describe('renderEstimateAccuracy (#1205)', () => {
+  const since = daysAgo(60).slice(0, 10)
+  const accuracy = { total: 32, accurate: 12, overPredicted: 14, underPredicted: 6, since }
+
+  it('escapes the sentence and marks the line for the page tests', () => {
+    const html = renderEstimateAccuracy(accuracy)
+    expect(html).toContain('data-estimate-accuracy')
+    expect(html).toContain(`AIWatch&#39;s recovery estimates, all services (32 scored since ${since})`)
+  })
+
+  it('renders nothing for an absent or unusable figure', () => {
+    expect(renderEstimateAccuracy(undefined)).toBe('')
+    expect(renderEstimateAccuracy({ ...accuracy, total: 29, accurate: 9 })).toBe('')
+    expect(renderEstimateAccuracy({ ...accuracy, since: 'soon' })).toBe('')
   })
 })

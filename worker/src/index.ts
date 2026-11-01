@@ -22,7 +22,7 @@ import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
 import { rosterAgedInFindings, nextRosterFindingSeen, formatRosterAuditAlert } from './roster-audit'
 import { restoreArchivedCalendar, isArchiveRestoreEligible } from './uptime-archive'
 import { recordRestoreObservations, type RestoreObservation } from './uptime-archive-trace'
-import { readRecoveryBaselines, rebuildRecoveryBaselines } from './recovery-baseline'
+import { readRecoveryBaselines, readRecoveryValue, rebuildRecoveryBaselines } from './recovery-baseline'
 import { readStatusAnalyses } from './analysis-reads'
 import { appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { markIncidentResolved, isMarkableOnStatusEdge, buildResolvedRecord } from './recovery-mark'
@@ -3206,7 +3206,7 @@ export async function buildCachedStatusPayload(
   // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
   const reportFeedRead = track('report-feed', buildReportFeedMap(env.STATUS_CACHE!, cached.services))
   const probeSummariesRead = track('probe-summaries', readProbeSummaries(env.STATUS_CACHE, 'status-cached'))
-  const recoveryBaselineRead = track('recovery-baseline', readRecoveryBaselines(env.STATUS_CACHE!))
+  const recoveryBaselineRead = track('recovery-baseline', readRecoveryValue(env.STATUS_CACHE!))
 
   const probeRaw = await seriesRead
   await analysesRead
@@ -3214,7 +3214,7 @@ export async function buildCachedStatusPayload(
   const alertFeed = await alertFeedRead
   const reportFeed = await reportFeedRead
   const cachedProbeSummaries = await probeSummariesRead
-  const recoveryBaseline = await recoveryBaselineRead
+  const { baselines: recoveryBaseline, estimateAccuracy } = await recoveryBaselineRead
   if (probeRaw) {
     try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
   }
@@ -3256,6 +3256,7 @@ export async function buildCachedStatusPayload(
     ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
     ...(supplyChainBanner ? { supplyChainBanner } : {}),
     ...(Object.keys(recoveryBaseline).length > 0 ? { recoveryBaseline } : {}),
+    ...(estimateAccuracy ? { estimateAccuracy } : {}),
     upstreamLinks,
   }
   return payload
@@ -6441,7 +6442,7 @@ const workerExport = {
       // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
       const reportFeed = env.STATUS_CACHE ? await buildReportFeedMap(env.STATUS_CACHE, servicesWithScore) : {}
       // #1697 — both endpoints emit it: the dashboard polls this one after its cached first load.
-      const recoveryBaseline = env.STATUS_CACHE ? await readRecoveryBaselines(env.STATUS_CACHE) : {}
+      const { baselines: recoveryBaseline, estimateAccuracy } = env.STATUS_CACHE ? await readRecoveryValue(env.STATUS_CACHE) : { baselines: {}, estimateAccuracy: null }
       // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
       const supplyChainBanner = buildSupplyChainBanner(servicesWithScore)
       // #1053 — cross-provider upstream links (a dependent's own incident blames a provider that is
@@ -6460,6 +6461,7 @@ const workerExport = {
         ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
         ...(supplyChainBanner ? { supplyChainBanner } : {}),
         ...(Object.keys(recoveryBaseline).length > 0 ? { recoveryBaseline } : {}),
+        ...(estimateAccuracy ? { estimateAccuracy } : {}),
         upstreamLinks,
       }), {
         status: 200,

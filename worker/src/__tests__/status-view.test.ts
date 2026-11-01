@@ -108,6 +108,12 @@ describe('buildIsDownView', () => {
     expect(view.supplyChainBanner).toEqual({ affectedNow: [] })
   })
 
+  it('passes the fleet-wide estimate accuracy through whole, and omits it when the payload has none', () => {
+    const accuracy = { total: 32, accurate: 12, overPredicted: 14, underPredicted: 6, since: '2026-09-01' }
+    expect(buildIsDownView(payload([svc('claude')], { estimateAccuracy: accuracy }), 'claude').estimateAccuracy).toEqual(accuracy)
+    expect(buildIsDownView(payload([svc('claude')]), 'claude')).not.toHaveProperty('estimateAccuracy')
+  })
+
   it('an unknown id yields no service and no fallbacks', () => {
     const view = buildIsDownView(payload([svc('openai')]), 'claude')
     expect(view.services).toEqual([])
