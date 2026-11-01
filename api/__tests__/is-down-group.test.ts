@@ -2124,3 +2124,114 @@ describe('is-down-group.ts — reference components (#1669)', () => {
     expect(html).toContain('0 incidents across monitored services')
   })
 })
+
+describe('is-down-group.ts — what it records when it degrades (#1250)', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  let alerts: Array<{ surface: string; slug: string; reason: string }>
+  let errorSpy: ReturnType<typeof vi.spyOn>
+
+  const freshHandler = async () => {
+    vi.resetModules()
+    return (await import('../is-down-group')).default
+  }
+
+  beforeEach(() => {
+    process.env.EDGE_ALERT_TOKEN = 'test-token'
+    alerts = []
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock = spyFetchAsWorker().mockImplementation(async (input, init) => {
+      const u = String(input)
+      if (u.includes('/api/internal/edge-fallback')) {
+        alerts.push(JSON.parse(String(init?.body ?? '{}')))
+        return new Response(null, { status: 200 })
+      }
+      if (u === LAST_GOOD_COPY_URL) return new Response('', { status: 404 })
+      if (u.includes('/api/report-feed')) return new Response(JSON.stringify({ reports: [] }), { status: 200 })
+      throw new Error('worker unreachable')
+    })
+  })
+
+  afterEach(() => {
+    delete process.env.EDGE_ALERT_TOKEN
+    vi.restoreAllMocks()
+  })
+
+  const allThree = () => statusResponse([
+    { id: 'claude', name: 'Claude API', status: 'operational' },
+    { id: 'claudeai', name: 'claude.ai', status: 'operational' },
+    { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+  ])
+  const memberLogs = () => errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).filter((l: string) => l.includes('FAMILY_GROUPS'))
+
+  it('a member the Worker left out stays a 200, is not cached, is logged by id, and is alerted', async () => {
+    const handler = await freshHandler()
+    fetchMock.mockResolvedValueOnce(statusResponse([{ id: 'claude', name: 'Claude API', status: 'operational' }]))
+    const res = await handler(makeReq('claude'))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Cache-Control')).toBe(isDownCacheControl(true))
+    expect(memberLogs()).toHaveLength(2)
+    expect(memberLogs().join('\n')).toContain('"claudeai"')
+    expect(memberLogs().join('\n')).toContain('"claudecode"')
+    expect(memberLogs().join('\n')).not.toContain('"claude"')
+    expect(alerts).toEqual([{ surface: 'is-down-group', slug: 'claude', reason: 'service_missing' }])
+  })
+
+  it('logs a missing member once per isolate, not on every request', async () => {
+    const handler = await freshHandler()
+    for (let i = 0; i < 3; i++) {
+      fetchMock.mockResolvedValueOnce(statusResponse([{ id: 'claude', name: 'Claude API', status: 'operational' }]))
+      await handler(makeReq('claude'))
+    }
+    expect(memberLogs()).toHaveLength(2)
+  })
+
+  it('a family the Worker answered in full is cached as before and records nothing', async () => {
+    const handler = await freshHandler()
+    fetchMock.mockResolvedValueOnce(allThree())
+    const res = await handler(makeReq('claude'))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Cache-Control')).toBe(isDownCacheControl(false))
+    expect(memberLogs()).toEqual([])
+    expect(alerts).toEqual([])
+  })
+
+  it.each([
+    ['an HTTP 502', () => fetchMock.mockResolvedValueOnce(new Response('upstream', { status: 502 })), 'worker_http_502'],
+    ['an unparseable body', () => fetchMock.mockResolvedValueOnce(new Response('{not json', { status: 200 })), 'parse_error'],
+    ['an unreachable Worker', () => fetchMock.mockRejectedValueOnce(new TypeError('fetch failed')), 'worker_unreachable'],
+  ])('%s is a 503 that alerts with its own reason', async (_label, arrange, reason) => {
+    const handler = await freshHandler()
+    arrange()
+    const res = await handler(makeReq('openai'))
+    expect(res.status).toBe(503)
+    expect(res.headers.get('Cache-Control')).toBe(isDownCacheControl(true))
+    expect(alerts).toEqual([{ surface: 'is-down-group', slug: 'openai', reason }])
+  })
+
+  it('a 200 with no services array is a 503 that alerts as unexpected_error', async () => {
+    const handler = await freshHandler()
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const res = await handler(makeReq('openai'))
+    expect(res.status).toBe(503)
+    expect(res.headers.get('Cache-Control')).toBe(isDownCacheControl(true))
+    expect(alerts).toEqual([{ surface: 'is-down-group', slug: 'openai', reason: 'unexpected_error' }])
+  })
+
+  it('a page served from the last-good copy alerts with the served_copy suffix', async () => {
+    const handler = await freshHandler()
+    fetchMock.mockImplementation(async (input, init) => {
+      const u = String(input)
+      if (u.includes('/api/internal/edge-fallback')) {
+        alerts.push(JSON.parse(String(init?.body ?? '{}')))
+        return new Response(null, { status: 200 })
+      }
+      if (u === LAST_GOOD_COPY_URL) return new Response(JSON.stringify({ ...(await allThree().json()), lastUpdated: new Date().toISOString() }), { status: 200 })
+      if (u.includes('/api/status/cached')) return new Response('upstream error', { status: 502 })
+      return new Response(JSON.stringify({ reports: [] }), { status: 200 })
+    })
+    const res = await handler(makeReq('claude'))
+    expect(res.status).toBe(200)
+    expect(alerts).toEqual([{ surface: 'is-down-group', slug: 'claude', reason: 'worker_http_502_served_copy' }])
+  })
+})

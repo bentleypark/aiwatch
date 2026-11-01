@@ -1,5 +1,5 @@
-// #378 / #1368 — the operator Discord alert an Edge SSR surface fires when it serves the degraded
-// "Status data is temporarily unavailable" render. The Worker (`POST /api/internal/edge-fallback`)
+// #378 / #1368 — the operator Discord alert an Edge SSR surface fires when it serves a degraded
+// or unverifiable answer. The Worker (`POST /api/internal/edge-fallback`)
 // dedups on a 5-minute KV cooldown per surface+slug and sends the Discord message; this module is
 // only the caller side.
 //

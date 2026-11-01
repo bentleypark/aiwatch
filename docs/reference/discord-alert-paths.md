@@ -250,10 +250,7 @@ The authenticated scraper posts the bounded failure class `page-contract` only w
 ### Edge SSR fallback (#378) — operator ops alert
 A Vercel Edge Function fires this from the REQUEST path, not the Worker's cron: it POSTs to the
 Worker's `/api/internal/edge-fallback` (bearer `EDGE_ALERT_TOKEN`), which dedups on a 5-minute KV
-cooldown per surface+slug and sends the message. Callers are `api/is-down.ts` and `api/reports.ts`,
-both through `api/_shared/edge-fallback-alert.ts`. Their triggers differ: is-down alerts when its
-status read leaves no service data (the same flag that makes the response a 503), while the reports
-proxy alerts both when the upstream is unreachable and when it ANSWERS with a 5xx it passes through.
+cooldown per surface+slug and sends the message. Every caller goes through `api/_shared/edge-fallback-alert.ts`.
 
 **#1531 Part 5 — the status read is hedged.** `api/is-down.ts` and `api/is-down-group.ts` read
 `/api/status/cached` through `api/_shared/hedged-fetch.ts`: a second request starts at 2.5 s if the
@@ -265,7 +262,7 @@ rescued sends no alert.
 render of either page carries `stale-if-error` (`api/_shared/is-down-cache.ts`), so when a later
 render is the 503 fallback the Vercel CDN can answer with the good copy it still holds
 ([Vercel docs](https://vercel.com/docs/caching/cache-control-headers#stale-if-error)). On
-`api/is-down.ts` the alert still fires, because the function still rendered the fallback; it does not
+either page the alert still fires, because the function still rendered the fallback; it does not
 say which of the two the visitor received. The Worker answers the alert POST at once and runs the
 dedup read, the marker, the Discord post and its `discord-sent:` record under `waitUntil`, marker
 before post. Before this the Edge's
@@ -278,7 +275,7 @@ writes the `?series=0` payload (`buildCachedStatusPayload`) to one public Vercel
 `BLOB_READ_WRITE_TOKEN`, abandoning an upload still unfinished after `LAST_GOOD_COPY_UPLOAD_MS`. Both is-down pages pass `lastGoodView` (`api/_shared/last-good-copy.ts`)
 to `hedgedJsonFetch`: the copy read starts with the hedge, or at an earlier failure, and is used
 only once every Worker request has failed, within the same 5 s, and only if its `lastUpdated` is within `LAST_GOOD_MAX_AGE_MS`. The page is then a 200 cut from the
-copy, sent `no-store`, and `api/is-down.ts` still alerts, with `_served_copy` appended to the reason.
+copy, sent `no-store`, and each page still alerts, with `_served_copy` appended to the reason.
 R2 was ruled out because its reads enter the same Cloudflare colo as the Worker request
 ([#1531 comment](https://github.com/bentleypark/aiwatch/issues/1531#issuecomment-6467051908)).
 
@@ -300,12 +297,6 @@ observed `VERCEL_ENV` in both lines so an unreadable one is visible rather than 
 the response — the Worker RETURNS 401 (its own copy of the secret absent, or disagreeing with the
 caller's) and 400 rather than throwing, so a discarded `Response` would have left the next likely
 failure, a secret rotated on one end only, exactly as silent as the empty token.
-
-**Not wired: `api/is-down-group.ts`.** It serves `/is-claude-down`, `/is-openai-down` and
-`/is-xai-down` (`vercel.json`), returns the same 503 + `no-store` degraded render, and alerts nothing
-— so on those URLs a 503 with no alert is the normal state, and the is-down inference above does not
-hold there. That gap is #1250's scope; it is named here so the next investigation does not start from
-the wrong premise.
 
 ### Single source of truth (#475)
 The cron appends every embed it sends the operator to a rolling KV feed (`alert:feed:recent`, built in `worker/src/alert-feed.ts`), surfaced as the `alertFeed` field on `/api/status` (+`/cached`) for external readers. In the same cron cycle it fans those exact entries out to confirmed subscribers, so operator/user alerts are **byte-identical** (Detection Lead, AI analysis, grouping, fallback, region all included) and duplicate suppression — incl. the #473 cross-poll status↔incident race — lives server-side.
