@@ -280,6 +280,20 @@ export function findNewlyUndecidable(undecidableScanned) {
     })))
 }
 
+// #1901 — a merged PR whose body still has an unchecked box.
+/** Merged PRs with at least one line that starts with an unchecked box, and those boxes' text. */
+export function findMergedOpenBoxes(prs) {
+  return prs.flatMap((pr) => {
+    const boxes = (pr.body || '').split('\n').filter((l) => UNCHECKED_BOX_RE.test(l)).map((l) => l.replace(UNCHECKED_BOX_RE, '').trim())
+    return boxes.length ? [{ pr: pr.number, prTitle: pr.title, prRef: displayRef(pr.repo, pr.number), boxes }] : []
+  })
+}
+
+/** The `gh pr list --search` qualifier: PRs merged on the UTC day before `today`. */
+export function mergedSearchQuery(today) {
+  return `merged:${new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)}`
+}
+
 /**
  * Days past due after which an overdue verify-after stops being a routine ping and becomes a decision
  * to make (#1206). 30 days is four unanswered weekly pings: enough that "it will resolve itself next
@@ -478,8 +492,8 @@ function gh(args) {
  * `newlyUndecidable` clause from this condition left 81/81 tests green while making the whole feature
  * a silent no-op on the one day it exists for (an undecidable-only day, nothing else due). Pure — no I/O.
  */
-export function hasNothingToDo({ autoVerified = [], due = [], toClearOverdue = [], newlyUndecidable = [] } = {}) {
-  return autoVerified.length === 0 && due.length === 0 && toClearOverdue.length === 0 && newlyUndecidable.length === 0
+export function hasNothingToDo({ autoVerified = [], due = [], toClearOverdue = [], newlyUndecidable = [], openBoxPrs = [] } = {}) {
+  return autoVerified.length === 0 && due.length === 0 && toClearOverdue.length === 0 && newlyUndecidable.length === 0 && openBoxPrs.length === 0
 }
 
 /**
@@ -489,9 +503,9 @@ export function hasNothingToDo({ autoVerified = [], due = [], toClearOverdue = [
  * reach Discord?) lives in one pure, tested place instead of an inline `if` a future edit can narrow
  * back down without any test noticing. Same rationale as `hasNothingToDo` above. Pure — no I/O.
  */
-export function planDiscordPost(routineDue, escalatedNow, newlyUndecidable) {
-  if (routineDue.length === 0 && escalatedNow.length === 0 && newlyUndecidable.length === 0) return null
-  return { routineDue, escalatedNow, newlyUndecidable }
+export function planDiscordPost(routineDue, escalatedNow, newlyUndecidable, openBoxPrs = []) {
+  if (routineDue.length === 0 && escalatedNow.length === 0 && newlyUndecidable.length === 0 && openBoxPrs.length === 0) return null
+  return { routineDue, escalatedNow, newlyUndecidable, openBoxPrs }
 }
 
 /**
@@ -502,7 +516,7 @@ export function planDiscordPost(routineDue, escalatedNow, newlyUndecidable) {
  * an authoring fix is not filed behind a list of routine checks and skipped with them. Pure —
  * exported for unit tests.
  */
-export function buildReminderEmbeds(items, escalated = [], undecidable = []) {
+export function buildReminderEmbeds(items, escalated = [], undecidable = [], openBoxPrs = []) {
   const line = (it) => {
     const when = it.overdueDays > 0 ? `due ${it.date}, ${it.overdueDays}d overdue` : 'due today'
     return `• **${it.ref || `#${it.number}`}** ${it.title}\n  → ${it.note || 'verify production data'} _(${when})_`
@@ -540,11 +554,23 @@ export function buildReminderEmbeds(items, escalated = [], undecidable = []) {
       footer: { text: 'AIWatch · verify-after undecidable guard (#1206)' },
     })
   }
+  if (openBoxPrs.length) {
+    const boxLines = (u) => u.boxes.slice(0, 3).map((t) => `\n  ☐ ${truncate(t, 100)}`).join('')
+      + (u.boxes.length > 3 ? `\n  … +${u.boxes.length - 3} more` : '')
+    embeds.push({
+      title: '🧾 Merged PR with an unchecked box',
+      description: `${openBoxPrs.length} PR(s) merged yesterday still have an unchecked box. Tick a box that is done or N/A, `
+        + 'delete one that is not needed, and move a post-deploy check to its issue as a `verify-after` line.\n\n'
+        + openBoxPrs.map((u) => `• **PR ${u.prRef}** ${u.prTitle}${boxLines(u)}`).join('\n'),
+      color: 0xe67e22,
+      footer: { text: 'AIWatch · merged-PR open-box guard (#1901)' },
+    })
+  }
   return embeds
 }
 
-async function postDiscord(webhook, items, escalated = [], undecidable = []) {
-  const body = { embeds: buildReminderEmbeds(items, escalated, undecidable) }
+async function postDiscord(webhook, items, escalated = [], undecidable = [], openBoxPrs = []) {
+  const body = { embeds: buildReminderEmbeds(items, escalated, undecidable, openBoxPrs) }
   const res = await fetch(webhook, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -592,6 +618,19 @@ function fetchClosedScars(repo) {
       return []
     }
   })
+}
+
+// Merged PRs for one repo matching `query`.
+// Best-effort like fetchRepoIssues: a failure warns and contributes nothing.
+function fetchMergedPrs(repo, query) {
+  const args = ['pr', 'list', '--state', 'merged', '--search', query, '--limit', '100', '--json', 'number,title,body']
+  if (repo) args.push('--repo', repo)
+  try {
+    return JSON.parse(gh(args)).map((p) => ({ ...p, repo }))
+  } catch (e) {
+    console.warn(`[verify-reminders] could not list merged PRs for ${repo || 'current repo'} (skipping): ${e.message.split('\n')[0]}`)
+    return []
+  }
 }
 
 async function main() {
@@ -707,6 +746,13 @@ async function main() {
     }
   }
 
+  // ── Merged-PR open-box guard (#1901) ──────────────────────────────────────────
+  // Each run reads one merge day and keeps no label; a skipped run skips that day.
+  const prQuery = mergedSearchQuery(today)
+  const mergedPrs = repos.flatMap((r) => fetchMergedPrs(r, prQuery))
+  const openBoxPrs = findMergedOpenBoxes(mergedPrs)
+  console.log(`[verify-reminders] ${today}: ${mergedPrs.length} PR(s) ${prQuery}, ${openBoxPrs.length} with an unchecked box${openBoxPrs.length ? ' → ' + openBoxPrs.map((u) => u.prRef).join(', ') : ''}`)
+
   // ── Silent-drop guards (#966) ─────────────────────────────────────────────────
   // This system exists so a verification is never forgotten, so every way a line can go dark must be
   // observable. Warn-only (never mutating, never fatal) — a run that drops a real reminder must not
@@ -780,7 +826,7 @@ async function main() {
   // nothing to ping is exactly when a previous ping's label needs clearing.
   const toClearOverdue = findStaleOverdueLabels(considered, today, tickedKeys)
 
-  if (hasNothingToDo({ autoVerified, due, toClearOverdue, newlyUndecidable })) {
+  if (hasNothingToDo({ autoVerified, due, toClearOverdue, newlyUndecidable, openBoxPrs })) {
     console.log(`[verify-reminders] ${today}: nothing to auto-verify, ping, or unlabel.`)
     return
   }
@@ -797,6 +843,7 @@ async function main() {
     if (routineDue.length) console.log('[verify-reminders] --dry-run: would PING:\n' + JSON.stringify(routineDue, null, 2))
     if (escalatedNow.length) console.log('[verify-reminders] --dry-run: would ESCALATE (needs a disposition):\n' + JSON.stringify(escalatedNow, null, 2))
     if (newlyUndecidable.length) console.log('[verify-reminders] --dry-run: would POST undecidable to Discord:\n' + JSON.stringify(newlyUndecidable, null, 2))
+    if (openBoxPrs.length) console.log('[verify-reminders] --dry-run: would POST merged PRs with unchecked boxes to Discord:\n' + JSON.stringify(openBoxPrs, null, 2))
     if (toClearOverdue.length) console.log('[verify-reminders] --dry-run: would CLEAR verify-overdue on: ' + toClearOverdue.map((i) => displayRef(i.repo, i.number)).join(', '))
     return
   }
@@ -842,7 +889,7 @@ async function main() {
     try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear verify-overdue on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
   }
 
-  const discordPlan = planDiscordPost(routineDue, escalatedNow, newlyUndecidable)
+  const discordPlan = planDiscordPost(routineDue, escalatedNow, newlyUndecidable, openBoxPrs)
   if (!discordPlan) {
     console.log(`[verify-reminders] no reminders to ping (auto-verify / unlabel only).`)
     return
@@ -853,7 +900,7 @@ async function main() {
     console.error('[verify-reminders] DISCORD_WEBHOOK_URL not set — cannot send. (Add it as a repo Actions secret.)')
     process.exit(1)
   }
-  await postDiscord(webhook, discordPlan.routineDue, discordPlan.escalatedNow, discordPlan.newlyUndecidable)
+  await postDiscord(webhook, discordPlan.routineDue, discordPlan.escalatedNow, discordPlan.newlyUndecidable, discordPlan.openBoxPrs)
   // #1206 — label a NEWLY-discovered undecidable issue only AFTER the post that succeeded. Labeling
   // first (as originally shipped) would let a run that dies between the label call and the post leave
   // the issue marked "already known" — which is exactly what excludes it from ever being announced —

@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates, planClosedScarRemovals, mergeClosedIssues, LIFECYCLE_LABELS, CLOSED_SCAR_LIMIT, findUndecidableVerifyAfter, hasUndecidableLabel, findNewlyUndecidable, findOverdueEscalations, OVERDUE_ESCALATION_DAYS, buildReminderEmbeds, splitEscalatedDue, reminderLineKey, hasNothingToDo, planDiscordPost } from './verify-reminders.mjs'
+import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates, planClosedScarRemovals, mergeClosedIssues, LIFECYCLE_LABELS, CLOSED_SCAR_LIMIT, findUndecidableVerifyAfter, hasUndecidableLabel, findNewlyUndecidable, findOverdueEscalations, OVERDUE_ESCALATION_DAYS, buildReminderEmbeds, splitEscalatedDue, reminderLineKey, hasNothingToDo, planDiscordPost, findMergedOpenBoxes, mergedSearchQuery } from './verify-reminders.mjs'
 import { pairVerifyAssertions, parseDurableLine } from './verify-assertions.mjs'
 
 test('parseVerifyAfter — extracts date + note from a checklist line', () => {
@@ -688,8 +688,8 @@ test('hasNothingToDo — true only when every field is empty; each field alone f
 // that would fail if the `newlyUndecidable` clause were dropped from either of them).
 test('planDiscordPost — null when all three are empty; non-null (and carries newlyUndecidable) otherwise', () => {
   assert.equal(planDiscordPost([], [], []), null)
-  assert.deepEqual(planDiscordPost([1], [], []), { routineDue: [1], escalatedNow: [], newlyUndecidable: [] })
-  assert.deepEqual(planDiscordPost([], [1], []), { routineDue: [], escalatedNow: [1], newlyUndecidable: [] })
+  assert.deepEqual(planDiscordPost([1], [], []), { routineDue: [1], escalatedNow: [], newlyUndecidable: [], openBoxPrs: [] })
+  assert.deepEqual(planDiscordPost([], [1], []), { routineDue: [], escalatedNow: [1], newlyUndecidable: [], openBoxPrs: [] })
   // The crux case: NOTHING routinely due or escalated, but a newly undecidable item exists. Before the
   // fix this went entirely unposted — this is the case that must return non-null.
   const plan = planDiscordPost([], [], [{ ref: '#1', title: 't', note: 'n', date: '2026-10-01' }])
@@ -871,4 +871,99 @@ test('verify-after with a malformed time — reported invalid, never pinged on t
 test('the reminder workflow still runs once a day at 00:00 UTC — the next-day shift assumes it (#1873)', () => {
   const yml = readFileSync(new URL('../.github/workflows/verify-reminders.yml', import.meta.url), 'utf8')
   assert.deepEqual([...yml.matchAll(/cron:\s*'([^']+)'/g)].map((m) => m[1]), ['0 0 * * *'])
+})
+
+// ── #1901 merged-PR open-box guard ─────────────────────────────────────────────
+// Box lines taken from real merged PR bodies: #1676 and #1685 (the two leaks), #1890, #1826 (N/A boxes).
+const PR_1676_BODY = "- [ ] After deploy: spot-check the next real incident's alert (title dot, colour, impact line, single fallback header) and the `/feed` item\n\ncloses #1674"
+const PR_1685_BODY = '- [ ] After the worker deploy: with a coding agent down, the Discord alert / `/feed` item / `/is-*-down` Alternatives do not put Windsurf first\n\ncloses #1682'
+const PR_1890_BODY = '## Test plan\n- [x] `npm run test:worker`\n- [ ] After deploy: read one real daily summary on a day with a hold or an overrun (production-gated)\n\nrefs #1262'
+const PR_1826_BODY = '## Checklist\n- [x] Code review completed\n- [ ] `npm run build` passes — N/A, no build input changed\n* [ ] Worker changes deployed — N/A\n+ [ ] i18n keys — N/A'
+
+test('findMergedOpenBoxes — every line that starts with an unchecked box, whatever it says (#1901)', () => {
+  const prs = [
+    { number: 1676, title: 'a', body: PR_1676_BODY, repo: null },
+    { number: 1685, title: 'b', body: PR_1685_BODY, repo: 'o/aiwatch-reports' },
+    { number: 1890, title: 'c', body: PR_1890_BODY, repo: null },
+    { number: 1826, title: 'd', body: PR_1826_BODY, repo: null },
+  ]
+  assert.deepEqual(findMergedOpenBoxes(prs).map((u) => [u.prRef, u.boxes]), [
+    ['#1676', ["After deploy: spot-check the next real incident's alert (title dot, colour, impact line, single fallback header) and the `/feed` item"]],
+    ['aiwatch-reports#1685', ['After the worker deploy: with a coding agent down, the Discord alert / `/feed` item / `/is-*-down` Alternatives do not put Windsurf first']],
+    ['#1890', ['After deploy: read one real daily summary on a day with a hold or an overrun (production-gated)']],
+    ['#1826', ['`npm run build` passes — N/A, no build input changed', 'Worker changes deployed — N/A', 'i18n keys — N/A']],
+  ])
+})
+
+test('findMergedOpenBoxes — ticked boxes, quoted boxes, prose and an empty body are not open boxes (#1901)', () => {
+  const prs = [
+    { number: 1, title: 't', body: '- [x] done\n- [X] done too\n> - [ ] quoted from the issue', repo: null },
+    { number: 2, title: 't', body: '', repo: null },
+    { number: 3, title: 't', body: null, repo: null },
+  ]
+  assert.deepEqual(findMergedOpenBoxes(prs), [])
+})
+
+test('mergedSearchQuery — the previous UTC day, across a month boundary (#1901)', () => {
+  assert.equal(mergedSearchQuery('2026-11-02'), 'merged:2026-11-01')
+  assert.equal(mergedSearchQuery('2026-11-01'), 'merged:2026-10-31')
+})
+
+test('open-box findings alone reach Discord, with up to three boxes each (#1901)', () => {
+  const u = [{ prRef: '#10', prTitle: 'leaked', boxes: ['After deploy: spot-check'] },
+    { prRef: '#12', prTitle: 'many', boxes: ['one', 'two', 'three', 'four', 'five'] }]
+  assert.equal(hasNothingToDo({ openBoxPrs: u }), false)
+  assert.notEqual(planDiscordPost([], [], [], u), null)
+  const embeds = buildReminderEmbeds([], [], [], u)
+  assert.equal(embeds.length, 1)
+  assert.match(embeds[0].description, /^2 PR\(s\) merged yesterday still have an unchecked box/)
+  assert.match(embeds[0].description, /• \*\*PR #10\*\* leaked\n  ☐ After deploy: spot-check\n• /)
+  assert.match(embeds[0].description, /• \*\*PR #12\*\* many\n  ☐ one\n  ☐ two\n  ☐ three\n  … \+2 more$/)
+})
+
+// Wiring: the real main() against a stub `gh` on PATH and a local Discord endpoint. Deleting the
+// #1901 block in main(), or the `openBoxPrs` argument at any of its call sites, leaves no embed.
+test('main() posts a merged PR with an unchecked box to Discord (#1901 wiring)', async () => {
+  const { mkdtempSync, writeFileSync, chmodSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { spawn } = await import('node:child_process')
+  const { createServer } = await import('node:http')
+  const dir = mkdtempSync(join(tmpdir(), 'vr-gh-'))
+  writeFileSync(join(dir, 'gh'), `#!/usr/bin/env node
+const a = process.argv.slice(2).join(' ')
+if (a.startsWith('pr list')) {
+  const i = process.argv.indexOf('--limit')
+  const limit = i === -1 ? 30 : Number(process.argv[i + 1])
+  const prs = Array.from({ length: 39 }, (_, k) => ({ number: 100 + k, title: 'quiet', body: '- [x] all ticked' }))
+  prs.push({ number: 10, title: 'leaked', body: '- [ ] After deploy: spot-check\\n\\ncloses #1674' })
+  console.log(JSON.stringify(prs.slice(0, limit)))
+}
+else if (a.startsWith('issue list')) console.log('[]')
+`)
+  chmodSync(join(dir, 'gh'), 0o755)
+  const posts = []
+  const server = createServer((req, res) => {
+    let b = ''
+    req.on('data', (c) => { b += c })
+    req.on('end', () => { posts.push(JSON.parse(b)); res.end() })
+  })
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  try {
+    const code = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [new URL('./verify-reminders.mjs', import.meta.url).pathname], {
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_REPOSITORY: 'o/r', VERIFY_EXTRA_REPOS: '', DRY_RUN: '',
+          DISCORD_WEBHOOK_URL: `http://127.0.0.1:${server.address().port}/hook` },
+        stdio: 'ignore',
+      })
+      child.on('exit', resolve)
+    })
+    assert.equal(code, 0)
+    const embeds = posts.flatMap((p) => p.embeds)
+    assert.equal(embeds.length, 1)
+    assert.match(embeds[0].title, /Merged PR with an unchecked box/)
+    assert.match(embeds[0].description, /^1 PR\(s\)[^]*• \*\*PR #10\*\* leaked\n  ☐ After deploy: spot-check$/)
+  } finally {
+    server.close()
+  }
 })

@@ -17,6 +17,7 @@ on:
 
 permissions:
   issues: write           # add the `verify-overdue` label on fire
+  pull-requests: read     # #1901 — read merged PR bodies for unchecked boxes
   contents: read
 
 # A scheduled run + a manual dispatch should never double-post.

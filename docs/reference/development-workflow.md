@@ -131,6 +131,9 @@ Then run the Monthly Reports command from the table above.
     ```
 
     Use `closes #N` only when every issue item is implemented and verified; otherwise use `refs #N`.
+    At merge, every PR-body box is ticked or deleted (N/A included); a post-deploy check moves to the
+    issue's `verify-after` line (step 17). What the daily job reports:
+    [verify-assertions.md](verify-assertions.md#unchecked-boxes-in-merged-prs-1901).
 16. Verify the Vercel Preview for frontend changes. Worker deployment is a separate, approved,
     sequential operation using `npm run deploy:worker`; confirm the output says `Uploaded aiwatch-worker`.
 17. After merge, re-read the issue, verify every checklist item against the shipped code, and close
