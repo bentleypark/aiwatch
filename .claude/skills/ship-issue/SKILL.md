@@ -138,6 +138,8 @@ is the *procedure* — follow it top to bottom.
      `- [ ] **verify-after YYYY-MM-DD** — what to check + where` (pick a realistic date). The daily
      `verify-reminders` GitHub Action pings the operator Discord when due (and weekly while open);
      closing the issue / removing the line cancels it. This replaces "remember to check the board".
+   - **The check lives only in the issue (#1901).** At merge, every PR-body box is ticked or deleted (N/A
+     included); a post-deploy check moves to the issue's `verify-after` line. What the daily job reports: [verify-assertions.md](../../../docs/reference/verify-assertions.md#unchecked-boxes-in-merged-prs-1901).
    - **If the check is machine-checkable, add a Tier-A `assert:` line (#873)** so the daily job
      **auto-verifies** it (ticks the box + drops `verify-blocked` + closes) instead of pinging you.
      Indent it directly under the verify-after line:

@@ -294,6 +294,16 @@ the main board nor its scars:
 GITHUB_REPOSITORY=bentleypark/aiwatch node scripts/verify-reminders.mjs --dry-run
 ```
 
+### Unchecked boxes in merged PRs (#1901)
+
+A post-deploy check lives in exactly one place: the issue's `verify-after` line. Before #1901 it was
+often a box in the PR body (`- [ ] After deploy: …`), which nothing reads: #1674 and #1682 were closed
+with such a box open and no record of the check. So at merge every PR-body box is ticked or deleted.
+
+The daily job reads the PRs merged on the previous UTC day and lists, in a fourth Discord embed, each
+one with a line that starts with an unchecked box, whatever the box says. Each run reads one merge day
+and keeps no label, so a skipped run skips that day and a second run on the same day reports it again.
+
 ## When to add an `assert:` (and when not)
 
 Add one when the acceptance can be expressed as a predicate over an AIWatch JSON endpoint:

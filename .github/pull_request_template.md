@@ -10,6 +10,7 @@
 -
 
 ## Checklist
+<!-- Before merge, tick or delete every box (N/A too). A post-deploy check goes in the issue as a verify-after line, not here. -->
 - [ ] `npm run build` passes
 - [ ] `npm test` passes (Playwright E2E)
 - [ ] `npm run test:src` passes (frontend vitest — incl. CSP hash pin, #877 CI-gated)
