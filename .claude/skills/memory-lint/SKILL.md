@@ -4,8 +4,8 @@ description: >-
   Periodic health check of the file-based LLM Wiki memory (the `~/.claude/.../memory/` bundle) — the "lint"
   operation of the Karpathy LLM-Wiki pattern. Invoke every week or two, or after a batch of memory-ingest
   writes, or when the memory "feels stale". Finds contradictions, stale/superseded claims, orphan pages,
-  broken `[[wikilinks]]`, index drift (file↔MEMORY.md mismatch), unquoted-`#` frontmatter truncation, and
-  redundant clusters worth merging — then records findings in log.md. Read-only proposals for anything
+  broken `[[wikilinks]]`, index drift (file↔MEMORY.md mismatch), unquoted-`#` frontmatter truncation, workflow
+  rules whose copies disagree, and redundant clusters worth merging — then records findings in log.md. Read-only proposals for anything
   destructive; the user confirms merges/deletions.
 ---
 
@@ -46,6 +46,12 @@ time; without periodic linting it drifts. This is the **lint** operation of the 
 
    Structural findings exit non-zero. The lint cannot run in CI — the bundle is a private repo
    Actions has no credential for — but its pure functions are CI-gated via `npm run test:scripts`.
+7. **Guidance copies disagree** (#1902) — a workflow rule is written in more than one of
+   `~/.claude/CLAUDE.md`, `CLAUDE.md`, `.claude/hooks/workflow-gates.txt`, `.claude/skills/ship-issue/SKILL.md`,
+   `docs/reference/development-workflow.md` and the memory pages. Grep each rule's key phrase across all of
+   them and read the copies side by side. A copy that repeats the rule is not a finding.
+   Report a copy that permits what another forbids, names a different command,
+   or states a count the file it describes no longer has.
 
 ## Output
 - Write a `YYYY-MM-DD lint: <n> findings (<summary>)` line to `memory/log.md`.
@@ -55,4 +61,5 @@ time; without periodic linting it drifts. This is the **lint** operation of the 
   wait for user confirmation (user feedback is never deleted unilaterally; merge preserves the Why).
 
 ## Relationship
-Pairs with `memory-ingest` (the write side). Neither touches the aiwatch repo.
+Pairs with `memory-ingest` (the write side). Neither touches the aiwatch repo, except a check-7 fix whose
+wrong copy is a repo file, which ships as its own change.
