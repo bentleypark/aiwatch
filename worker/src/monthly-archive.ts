@@ -236,8 +236,8 @@ export interface MonthlySecuritySummary {
 
 // ── Monthly RTT degradation summary (#511, follow-up to #464) ───────
 //
-// Accumulated from probe-degradation:monthly:{YYYY-MM} (60d TTL) — incremented on each
-// probe-spike rising edge alongside the daily counter so the archive cron on the 1st can carry
+// Accumulated from probe-degradation:monthly:{YYYY-MM} (60d TTL) — incremented alongside
+// the daily counter so the archive cron on the 1st can carry
 // month-complete figures past the 48h TTL on the per-day keys.
 // `noStatus*` = degradations flagged while the service's official status was still
 // operational (NOT on the status page) — the headline differentiator from #464.
@@ -265,7 +265,7 @@ export const DEGRADATION_EVENTS_CAP = 3000
 
 /** Raw monthly accumulator shape stored at probe-degradation:monthly:{period}. */
 export interface DegradationMonthly {
-  byService: Record<string, number>          // svcId → total RTT-degradation rising edges this month
+  byService: Record<string, number>          // svcId → total counted RTT degradations this month
   noStatusByService: Record<string, number>  // svcId → subset not reflected on the official status page
   events?: DegradationEvent[]                // #1778 — absent on accumulators written before it
 }
@@ -299,7 +299,7 @@ export function degradationMonthlyKey(date: Date = new Date()): string {
 
 export const DEGRADATION_MONTHLY_TTL_SECONDS = 60 * 86400 // 60 days — covers archive cron + late catch-up
 
-/** Pure: fold one rising-edge degradation into the monthly accumulator. Returns a NEW object
+/** Pure: fold one counted degradation into the monthly accumulator. Returns a NEW object
  *  (input not mutated). `existing` null/garbage → start fresh. Increments byService always; also
  *  noStatusByService when the degradation wasn't on the official status page. Unit-testable so the
  *  index.ts read-modify-write stays a thin I/O wrapper. */

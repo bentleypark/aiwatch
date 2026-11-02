@@ -35,7 +35,7 @@ import { checkLateResolutions } from './late-resolution'
 import { runMistralPublicApiProbe } from './mistral-public-api'
 import { handleMistralEmail } from './mistral-email'
 import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
-import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
+import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp } from './detection'
 import { XREPLY_PATH, buildXReplyMarkMessage, handleXReplyMarkRequest, xReplyMarkTarget } from './x-reply-mark'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
 import { buildSupplyChainBanner } from './supply-chain'
@@ -427,7 +427,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
-import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes, DEGRADATION_DEDUP_TTL_SEC } from './probe'
+import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes } from './probe'
 
 const PROBED_SERVICE_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
 
@@ -2210,7 +2210,7 @@ import { generateOgSvg } from './og'
 import { detectRedditPosts, isRedditScanTick, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, promoteIncidentWindows, matchPromoteIncident, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading, type PromoteIncidentWindow } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, appendSecurityMonthly, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
-import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
+import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { parseFailKey, parseParseFailDay, reasonsFor } from './parse-failure-log'
 import { collectChangelogs, getStaleSources } from './changelog'
 import { runProviderChanges } from './provider-changes'
@@ -2222,8 +2222,9 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
 import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
+import { recordDegradation } from './degradation-count'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, degradationEventFor, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount, readGuard3Holds, officialUptimeSnapshot } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount, readGuard3Holds, officialUptimeSnapshot } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
 import { parseStatusView, buildStatusView, type LeanStatusPayload } from './status-view'
 import { checkInfraStatus, runInfraStatusCycle } from './infra-status'
@@ -3329,7 +3330,7 @@ const workerExport = {
         )
       }
 
-      // Probe spike detection — record earliest detection for Detection Lead (no Discord alert, aggregated in daily report)
+      // Probe spike detection — record earliest detection (no Discord alert, aggregated in daily report)
       if (env.STATUS_CACHE) {
         try {
           const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
@@ -3352,48 +3353,9 @@ const workerExport = {
             } catch (err) {
               console.warn('[cron] degradation status read failed:', err instanceof Error ? err.message : err)
             }
-            const degradationDate = new Date().toISOString().split('T')[0]
+            const degradationNow = new Date()
             for (const spike of spikes) {
-              const alertKey = `alerted:probe-spike:${spike.serviceId}`
-              const existing = await env.STATUS_CACHE.get(alertKey).catch(() => null)
-              if (existing) continue
-              await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: DEGRADATION_DEDUP_TTL_SEC })
-              // #464 — rising edge of a spike streak: count this RTT degradation. If the service's
-              // official status is still operational, the degradation isn't on the status page → the
-              // `nostatus` figure. Best-effort, mirrors the fetch-fail:daily counter (48h TTL).
-              // #1233 KNOWN LIMITATION — `classifyDegradation` is a two-way boolean, so an `unknown` service
-              // answers `false` and its RTT degradation is booked as "already on the status page" when in fact
-              // we could not read that page. Reachable: `detectConsecutiveSpikes` has a lower bar than
-              // `isProbeFailing`, so a spiking service can stay `unknown` through cross-validation and land
-              // here. Left as-is deliberately — the honest fix is a third outcome, and changing a second durable
-              // counter in this PR is what the uptime-sampling revert (see `cacheWrite`'s #1233 note) exists to
-              // avoid. Tracked as a follow-up.
-              const svcOperational = statusByService.get(spike.serviceId) === 'operational'
-              const outcome = classifyDegradation(svcOperational)
-              const isNoStatus = outcome === 'degradation_nostatus'
-              const degBase = `probe-degradation:daily:${spike.serviceId}:${degradationDate}`
-              const prevDeg = parseInt(await env.STATUS_CACHE.get(degBase).catch(() => null) ?? '0', 10) || 0
-              await kvPut(env.STATUS_CACHE, degBase, String(prevDeg + 1), { expirationTtl: 172800 })
-              if (isNoStatus) {
-                const nsKey = `probe-degradation:nostatus:daily:${spike.serviceId}:${degradationDate}`
-                const prevNs = parseInt(await env.STATUS_CACHE.get(nsKey).catch(() => null) ?? '0', 10) || 0
-                await kvPut(env.STATUS_CACHE, nsKey, String(prevNs + 1), { expirationTtl: 172800 })
-              }
-              // #511 — dual-write the monthly accumulator (60d TTL) so the archive cron can read
-              // month-complete figures past the daily 48h TTL. Mirrors detection lead's monthly write.
-              const degMonthKey = degradationMonthlyKey()
-              const degMonthRaw = await env.STATUS_CACHE.get(degMonthKey).catch(() => null)
-              let degMonth = null
-              try { degMonth = degMonthRaw ? normalizeDegradationMonthly(JSON.parse(degMonthRaw)) : null } catch { degMonth = null }
-              const nextDegMonth = addDegradationToMonthly(degMonth, spike.serviceId, isNoStatus,
-                degradationEventFor(spike, isNoStatus, statusByService.get(spike.serviceId) ?? null, new Date().toISOString()))
-              await kvPut(env.STATUS_CACHE, degMonthKey, JSON.stringify(nextDegMonth), { expirationTtl: DEGRADATION_MONTHLY_TTL_SECONDS })
-              // Record probe spike as earliest detection (Detection Lead feature)
-              const detectKey = `detected:${spike.serviceId}`
-              const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
-              if (isProbeEarlier(existingDetect, spike.since)) {
-                await kvPut(env.STATUS_CACHE, detectKey, serializeDetectionEntry({ t: spike.since, incId: null }), { expirationTtl: 604800 })
-              }
+              await recordDegradation(env.STATUS_CACHE, spike, statusByService.get(spike.serviceId), degradationNow)
             }
           }
         } catch (err) {
@@ -4403,7 +4365,7 @@ const workerExport = {
             })
 
             // #464 — RTT degradation observability: read per-service daily counters.
-            // probe-degradation:daily — every probe-spike rising edge; :nostatus — subset not on the
+            // probe-degradation:daily — RTT degradation count; :nostatus — subset not on the
             // official status page (the differentiator). Probe targets only; best-effort.
             const degradationCounts: Record<string, number> = {}
             const degradationNoStatusCounts: Record<string, number> = {}

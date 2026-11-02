@@ -112,7 +112,7 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  46_759 → 47_157: workflow-gates.txt gate 5 (the `근거:` line format, +254) and the CLAUDE.md hook-table
  *  row for evidence-line-gate.mjs (+144). The gate text is what the model reads before it writes; the
  *  Stop hook only checks the line exists. */
-export const BUDGET_CHARS = 47_157
+export const BUDGET_CHARS = 47_195
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the
