@@ -91,9 +91,16 @@ function serviceWorkerPlugin() {
   }
 }
 
+// #1881 — React in its own chunk.
+export const REACT_CHUNK = { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ }
+
 export default defineConfig({
   plugins: [react(), tailwindcss(), cloudflare(), assetManifestPlugin(), serviceWorkerPlugin()],
-  build: { target: BROWSER_FLOOR, cssTarget: BROWSER_FLOOR },
+  build: {
+    target: BROWSER_FLOOR,
+    cssTarget: BROWSER_FLOOR,
+    rolldownOptions: { output: { codeSplitting: { groups: [REACT_CHUNK] } } },
+  },
   // Local-only read proxy for the production monthly archive. The production Worker
   // intentionally serves /api/report same-origin; this lets a local source-migration
   // Worker be verified against the already-collected archive without weakening CORS.
