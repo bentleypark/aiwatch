@@ -36,6 +36,12 @@ function readStoredTheme() {
   }
 }
 
+// The browser/PWA status bar sits above the top bar, so it takes the top bar's surface (--bg1).
+export function syncThemeColor(root, meta) {
+  const color = getComputedStyle(root).getPropertyValue('--bg1').trim()
+  if (meta && color) meta.setAttribute('content', color)
+}
+
 function applyTheme(theme) {
   const root = document.documentElement
   if (theme === 'system') {
@@ -49,6 +55,7 @@ function applyTheme(theme) {
       ? root.setAttribute('data-theme', 'light')
       : root.removeAttribute('data-theme')
   }
+  syncThemeColor(root, document.querySelector('meta[name="theme-color"]'))
 }
 
 export function useTheme() {
