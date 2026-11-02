@@ -75,8 +75,8 @@ export function isStrategyBriefStale(updatedAt: string, refDateISO: string, hori
 }
 
 export interface WeeklyBriefingData {
-  weekStart: string // ISO date (Mon)
-  weekEnd: string   // ISO date (Sun)
+  weekStart: string // ISO date, first day of the window
+  weekEnd: string   // ISO date, last day of the window
   changelog: ChangelogEntry[]
   incidents: WeeklyIncidentSummary[]
   stabilityChanges: WeeklyStabilityChange[]
@@ -104,7 +104,7 @@ export interface WeeklyBriefingData {
 }
 
 /**
- * Filter accumulated changelog entries to the given week window (Mon 00:00Z – Sun 23:59:59Z).
+ * Filter accumulated changelog entries to the given week window (weekStart 00:00Z – weekEnd 23:59:59Z).
  * changelog:entries KV keeps the last 50 entries over 14 days; without this filter
  * the briefing would include entries from before the current week.
  */
@@ -153,22 +153,20 @@ export function parseMonthlyIncidents(
 }
 
 /**
- * Compute week date range (Mon–Sun) for a given date.
+ * The briefing window for a run at `date`: the 7 complete UTC days before `date`'s day. The run is
+ * Sunday 00:00–00:04, so a calendar Mon–Sun week would stop at 00:04 and no later run would read the
+ * rest of that Sunday; two consecutive runs' windows are contiguous instead.
  */
-export function getWeekRange(date: Date): { start: string; end: string } {
-  const d = new Date(date)
-  const day = d.getUTCDay()
-  // Monday = start of week (day 0=Sun → offset 6, day 1=Mon → offset 0, ...)
-  const diffToMon = day === 0 ? 6 : day - 1
-  const mon = new Date(d)
-  mon.setUTCDate(d.getUTCDate() - diffToMon)
-  const sun = new Date(mon)
-  sun.setUTCDate(mon.getUTCDate() + 6)
+export function getBriefingWindow(date: Date): { start: string; end: string } {
+  const day = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  const iso = (offsetDays: number) => new Date(day + offsetDays * 86_400_000).toISOString().split('T')[0]
+  return { start: iso(-7), end: iso(-1) }
+}
 
-  return {
-    start: mon.toISOString().split('T')[0],
-    end: sun.toISOString().split('T')[0],
-  }
+/** The days of the window before `weekStart`'s, most recent first. */
+export function previousWindowDates(weekStart: string): string[] {
+  const { start, end } = getBriefingWindow(new Date(`${weekStart}T00:00:00Z`))
+  return weekDateStrings(start, end).reverse()
 }
 
 /**

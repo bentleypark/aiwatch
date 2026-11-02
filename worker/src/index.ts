@@ -2214,7 +2214,7 @@ import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './dai
 import { parseFailKey, parseParseFailDay, reasonsFor } from './parse-failure-log'
 import { collectChangelogs, getStaleSources } from './changelog'
 import { runProviderChanges } from './provider-changes'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, liveStabilityUptime, accumulatePrevWeekCounters, type HistoryUptimeRow, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
+import { getBriefingWindow, previousWindowDates, buildIncidentSummary, buildStabilityChanges, liveStabilityUptime, accumulatePrevWeekCounters, type HistoryUptimeRow, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
 import { searchBadgeEmbeds, diffBadgeRepoDiscovery, parseBadgeReposSeen, type BadgeRepoDiscoveryDiff } from './badge-repo-discovery'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
@@ -3870,7 +3870,7 @@ const workerExport = {
           const weeklyKey = `weekly-briefing:${todayUTC()}`
           const alreadySent = await env.STATUS_CACHE.get(weeklyKey).catch(() => null)
           if (!alreadySent) {
-            const { start: weekStart, end: weekEnd } = getWeekRange(now)
+            const { start: weekStart, end: weekEnd } = getBriefingWindow(now)
 
             // Read changelog entries accumulated this week, filtered to the briefing window
             const changelogRaw = await env.STATUS_CACHE.get('changelog:entries').catch(() => null)
@@ -3913,16 +3913,14 @@ const workerExport = {
             const incidents = buildIncidentSummary(allMonthlyIncidents, weekStart, weekEnd)
 
             // #733 — Stability Trend compares OFFICIAL status-page uptime: the LIVE `uptime30d` from
-            // services:latest against the previous week's `history:` snapshots (i=7→13 below, most-recent
+            // services:latest against the previous week's `history:` snapshots (the window before this one, below, most-recent
             // first). Which figures are excluded is decided in `liveStabilityUptime` /
             // `accumulatePrevWeekCounters`. The current week is NOT read from history — a service like Bedrock had
             // intermittently non-null `officialUptime` snapshots (pre-#713 estimate residue) that would
             // otherwise leak it back in despite publishing no uptime now.
             const prevWeekRows: Record<string, HistoryUptimeRow>[] = []
-            for (let i = 7; i < 14; i++) {
-              const pd = new Date(now)
-              pd.setUTCDate(pd.getUTCDate() - i)
-              const pkey = `history:${pd.toISOString().split('T')[0]}`
+            for (const pdate of previousWindowDates(weekStart)) {
+              const pkey = `history:${pdate}`
               const praw = await env.STATUS_CACHE.get(pkey).catch(() => null)
               if (!praw) continue
               try {

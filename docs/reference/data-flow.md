@@ -49,7 +49,7 @@ Cron Trigger (*/5 min)
   → archive-ready Discord ping → links to `aiwatch-reports/generate-report.yml` workflow_dispatch so operator clicks "Run workflow" to open draft PR; dedup via archive:notified:{YYYY-MM} (aiwatch-reports#4)
   → changelog RSS/HTML collection (hourly at :00) → KV accumulate new entries from OpenAI/Google/Anthropic
   → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan (24 AI SDK packages · two-phase: querybatch → KV dedup → per-vuln GET enrichment; #323/#325) → EPSS enrichment via GitHub Advisories (24h KV cache, #326) → Discord digest on findings
-  → weekly briefing on Sunday UTC 00:00 (KST 09:00) → aggregate changelog + incidents + stability → Discord embed
+  → weekly briefing on Sunday UTC 00:00 (KST 09:00) over the 7 complete UTC days before it → aggregate changelog + incidents + stability → Discord embed
 
 Web Vitals Pipeline (per-request, 100% collection):
   Browser (web-vitals) → POST /api/vitals → Worker → KV merge (vitals:{date})

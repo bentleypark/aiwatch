@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { findSimilarIncidents, buildAnalysisPrompt, ANALYSIS_SYSTEM_PROMPT, PROGRESS_EMBED_MAX, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, applyHoldEvent, timedOutAttribution, holdLedger, recordHoldEvent, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
+import type { AiUsageCounters } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import { ANTHROPIC_TIMEOUT_MS } from '../anthropic'
 import type { Incident, ServiceStatus } from '../types'
@@ -1035,6 +1036,58 @@ describe('summarizeAiUsageTrend / formatAiUsageTrendLine (#995)', () => {
   it('returns empty string when there were no calls (nothing to report)', () => {
     expect(formatAiUsageTrendLine(summarizeAiUsageTrend([]))).toBe('')
     expect(formatAiUsageTrendLine(summarizeAiUsageTrend([{ calls: 0, success: 0, failed: 0 }]))).toBe('')
+  })
+
+  describe('AI-hold ledger roll-up (#1262)', () => {
+    const day = { calls: 5, success: 5, failed: 0 }
+    const trendLine = (days: AiUsageCounters[]) => formatAiUsageTrendLine(summarizeAiUsageTrend(days))
+    const holdPart = (line: string) => line.split(' · ').find((p) => p.startsWith('AI-hold'))
+
+    it.each([
+      ['no day carries a counter', [day, day], null],
+      ['a window with no days', [], null],
+      ['one day with only a held counter', [{ ...day, held: 1 }], { held: 1, releasedWithAi: 0, releasedWithoutAi: 0 }],
+      ['one day with only a release counter', [{ ...day, heldReleasedWithoutAi: 2 }], { held: 0, releasedWithAi: 0, releasedWithoutAi: 2 }],
+      ['every counter nonzero on two days, so each is a sum', [
+        { ...day, held: 2, heldReleasedWithAi: 1, heldReleasedWithoutAi: 1 },
+        { ...day, held: 3, heldReleasedWithAi: 2, heldReleasedWithoutAi: 2 },
+      ], { held: 5, releasedWithAi: 3, releasedWithoutAi: 3 }],
+      ['a day that holds events but has no calls still counts', [
+        { calls: 0, success: 0, failed: 0, heldReleasedWithoutAi: 1 },
+        day,
+      ], { held: 0, releasedWithAi: 0, releasedWithoutAi: 1 }],
+      ['days summed, a day without counters adds nothing', [
+        { ...day, held: 2, heldReleasedWithAi: 1, heldReleasedWithoutAi: 1 },
+        day,
+        { ...day, held: 1, heldReleasedWithAi: 1 },
+      ], { held: 3, releasedWithAi: 2, releasedWithoutAi: 1 }],
+    ])('hold roll-up: %s', (_name, days, expected) => {
+      expect(summarizeAiUsageTrend(days).hold).toEqual(expected)
+    })
+
+    it.each([
+      ['no ledger', [day], undefined],
+      ['held only, so no share', [{ ...day, held: 2 }], 'AI-hold 2 held, 0 released with AI, 0 released AI-less'],
+      ['all released with AI', [{ ...day, held: 2, heldReleasedWithAi: 2 }], 'AI-hold 2 held, 2 released with AI, 0 released AI-less (0% AI-less)'],
+      ['all released AI-less', [{ ...day, held: 1, heldReleasedWithoutAi: 1 }], 'AI-hold 1 held, 0 released with AI, 1 released AI-less (100% AI-less)'],
+      ['releases booked the day after their hold, so no held', [{ ...day, heldReleasedWithAi: 1, heldReleasedWithoutAi: 1 }], 'AI-hold 0 held, 1 released with AI, 1 released AI-less (50% AI-less)'],
+      ['a share that rounds down', [{ ...day, held: 3, heldReleasedWithAi: 2, heldReleasedWithoutAi: 1 }], 'AI-hold 3 held, 2 released with AI, 1 released AI-less (33% AI-less)'],
+      ['a share across days', [
+        { ...day, held: 5, heldReleasedWithAi: 5 },
+        { ...day, held: 3, heldReleasedWithoutAi: 2 },
+      ], 'AI-hold 8 held, 5 released with AI, 2 released AI-less (29% AI-less)'],
+    ])('hold part of the trend line: %s', (_name, days, expected) => {
+      expect(holdPart(trendLine(days))).toBe(expected)
+    })
+
+    it('puts the hold part after the failed count', () => {
+      const parts = trendLine([{ ...day, held: 1, heldReleasedWithAi: 1 }]).split(' · ')
+      expect(parts.findIndex((p) => p.endsWith('failed'))).toBeLessThan(parts.findIndex((p) => p.startsWith('AI-hold')))
+    })
+
+    it('leaves the line empty when nothing was called, whatever the ledger says', () => {
+      expect(trendLine([{ calls: 0, success: 0, failed: 0, held: 1, heldReleasedWithAi: 1 }])).toBe('')
+    })
   })
 
   it('retains ai:usage for 30 days so a weekly trend has data (was 2d — #995)', () => {
