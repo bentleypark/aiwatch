@@ -90,6 +90,7 @@ async function loadHandlers(cachesApi) {
     clients: { claim: vi.fn() },
   })
   vi.stubGlobal('caches', cachesApi)
+  vi.stubGlobal('__ASSET_VERSION__', 'swbuild1')
   vi.resetModules()
   await import('../index.js')
   return listeners
@@ -138,7 +139,7 @@ describe('install handler', () => {
 
     await install(onInstall)
 
-    expect(cachesStub.stores.has('aiwatch-abc12345')).toBe(true)
+    expect(cachesStub.stores.has('aiwatch-swbuild1')).toBe(true)
     expect(await cachesStub.api.match('/assets/a.js')).toBeTruthy()
   })
 
@@ -163,7 +164,7 @@ describe('install handler', () => {
 
     await install(onInstall)
 
-    expect(cachesStub.stores.has('aiwatch-abc12345')).toBe(true)
+    expect(cachesStub.stores.has('aiwatch-swbuild1')).toBe(true)
     expect(cachesStub.stores.has('aiwatch-static-v1')).toBe(false)
     expect(await cachesStub.api.match('/assets/a.js')).toBeTruthy()
     expect(await cachesStub.api.match('/assets/gone.js')).toBeUndefined()
