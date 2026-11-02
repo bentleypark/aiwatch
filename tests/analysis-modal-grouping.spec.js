@@ -75,7 +75,7 @@ test.describe('AnalysisModal grouping — same service multi-incident', () => {
     const analyzeBtn = page.locator('button').filter({ hasText: /Analyze|분석/ })
     await analyzeBtn.click()
 
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
 
     // Service header should render exactly once
@@ -94,7 +94,7 @@ test.describe('AnalysisModal grouping — same service multi-incident', () => {
     await expect(page.getByText('Together AI').first()).toBeVisible({ timeout: 20000 })
 
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
 
     const alternatives = modal.getByText(/🔄 (Alternatives|대안 서비스)/)
@@ -129,7 +129,7 @@ test.describe('AnalysisModal grouping — operational service with active analys
     await expect(page.getByText('Together AI').first()).toBeVisible({ timeout: 20000 })
 
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
 
     await expect(modal.getByText(/Isolated issue|부분 이슈/)).toBeVisible()
@@ -140,7 +140,7 @@ test.describe('AnalysisModal grouping — operational service with active analys
     await expect(page.getByText('Together AI').first()).toBeVisible({ timeout: 20000 })
 
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
 
     await expect(modal.getByText(/🔄 (Alternatives|대안 서비스)/)).toHaveCount(0)
@@ -175,7 +175,7 @@ test.describe('AnalysisModal — fully resolved group', () => {
     await expect(page.getByText('Together AI').first()).toBeVisible({ timeout: 20000 })
 
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
 
     await expect(modal.getByText(/🔄 (Alternatives|대안 서비스)/)).toHaveCount(0)
@@ -212,7 +212,7 @@ test.describe('AnalysisModal — EXCLUDE_FALLBACK service', () => {
     await expect(page.getByText('Hugging Face').first()).toBeVisible({ timeout: 20000 })
 
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
 
     await expect(modal.getByText(/🔄 (Alternatives|대안 서비스)/)).toHaveCount(0)
@@ -282,7 +282,7 @@ test.describe('AnalysisModal — mixed sibling-shared + service-private', () => 
     await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
 
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
 
     // Shared admin-api summary appears once
@@ -320,7 +320,7 @@ test.describe('AnalysisModal — past recovery times (#1697)', () => {
       await page.goto('/')
       await expect(page.getByText('Together AI').first()).toBeVisible({ timeout: 20000 })
       await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-      const modal = page.locator('.fixed.inset-0').last()
+      const modal = page.locator('dialog')
       await expect(modal).toBeVisible()
       const line = modal.locator('[data-recovery-baseline="together"]')
       await expect(line).toHaveCount(count)
@@ -337,7 +337,7 @@ test('#1697 — a service on a shared card and its own card gets its past recove
   await page.goto('/')
   await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
   await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-  const modal = page.locator('.fixed.inset-0').last()
+  const modal = page.locator('dialog')
   await expect(modal).toBeVisible()
   await expect(modal.locator('[data-recovery-baseline="claude"]')).toHaveCount(1)
   await expect(modal.locator('[data-recovery-baseline="claudeai"]')).toHaveText(/^📊 claude\.ai — /)
@@ -357,7 +357,7 @@ test.describe('AnalysisModal — estimate track record (#1205)', () => {
       await page.goto('/')
       await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
       await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-      const modal = page.locator('.fixed.inset-0').last()
+      const modal = page.locator('dialog')
       await expect(modal).toBeVisible()
       const line = modal.locator('[data-estimate-accuracy]')
       await expect(line).toHaveCount(count)
@@ -373,7 +373,7 @@ test.describe('AnalysisModal — estimate track record (#1205)', () => {
     await page.goto('/')
     await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
     await expect(modal.locator('[data-recovery-baseline] + [data-estimate-accuracy]')).toHaveCount(1)
     await expect(modal.locator('[data-estimate-accuracy]')).toHaveCount(1)
@@ -388,7 +388,7 @@ test.describe('AnalysisModal — estimate track record (#1205)', () => {
     await page.goto('/')
     await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
     await expect(modal.locator('[data-recovery-baseline="claude"] + [data-estimate-accuracy]')).toHaveCount(1)
     await expect(modal.locator('[data-estimate-accuracy]')).toHaveCount(1)
@@ -401,7 +401,7 @@ test.describe('AnalysisModal — estimate track record (#1205)', () => {
     await page.goto('/')
     await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
     await expect(modal.locator('[data-estimate-accuracy]')).toHaveCount(1)
     await expect(modal.locator('.border-t [data-estimate-accuracy]')).toHaveCount(0)

@@ -1,7 +1,9 @@
 // Ticker Bar — auto-scrolling service status strip (desktop only)
 // Design: gap 20px, font 11px mono, dot 5px, scrolls 40s linear infinite.
 
+import { useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
+import { useLang } from '../hooks/useLang'
 import { SERVICE_CATEGORIES } from '../utils/constants'
 
 // Ticker follows the dev-audience category order (#658): LLM APIs → Coding Agents → Voice →
@@ -75,6 +77,8 @@ function TickerItem({ name, status }) {
 
 export default function TickerBar() {
   const { services: rawServices } = usePolling()
+  const { t } = useLang()
+  const [paused, setPaused] = useState(false)
   const services = orderServicesForTicker(rawServices)
 
   if (services.length === 0) {
@@ -94,16 +98,26 @@ export default function TickerBar() {
   )
 
   return (
-    <div className="w-full overflow-hidden h-full flex items-center pl-5">
-      <div
-        className="flex gap-5 will-change-transform"
-        style={{ animation: 'ticker-scroll 50s linear infinite' }}
-      >
-        {renderItems('a')}
-        <div aria-hidden="true" className="flex gap-5">
-          {renderItems('b')}
+    <div className="w-full h-full flex items-center">
+      <div className="flex-1 min-w-0 overflow-hidden h-full flex items-center pl-5">
+        <div className="ticker-track flex gap-5 will-change-transform" data-paused={paused}>
+          {renderItems('a')}
+          <div aria-hidden="true" className="flex gap-5">
+            {renderItems('b')}
+          </div>
         </div>
       </div>
+      <button
+        type="button"
+        onClick={() => setPaused((p) => !p)}
+        aria-pressed={paused}
+        aria-label={t('ticker.pause')}
+        title={t('ticker.pause')}
+        className="ticker-pause shrink-0 h-full mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] cursor-pointer border-l border-[var(--border)] bg-[var(--bg1)]"
+        style={{ padding: '0 12px' }}
+      >
+        {paused ? '▶' : '❚❚'}
+      </button>
     </div>
   )
 }

@@ -79,7 +79,7 @@ test.describe('Modal / Detail Panel', () => {
     // Close by clicking the backdrop. boundingBox() returns the PANEL rect (the <dialog> is the panel);
     // a click 20px above it lands on the ::backdrop region, where e.target === dialog and the point is
     // outside the panel rect → the JS handleClick guard (and native closedby) closes it. Assumes the
-    // panel is centered with backdrop above (true at min(600,90vw)/80vh on the default test viewport).
+    // panel is centered with backdrop above (true at min(600,90vw)/80dvh on the default test viewport).
     const box = await page.locator('dialog').boundingBox()
     await page.mouse.click(box.x + box.width / 2, Math.max(2, box.y - 20))
     await expect(page.getByRole('dialog')).toBeHidden()

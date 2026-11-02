@@ -6,7 +6,7 @@ import { useLang } from '../hooks/useLang'
 function Block({ style, className = '' }) {
   return (
     <div
-      className={`bg-[var(--bg3)] rounded animate-[skeleton-shimmer_1.4s_ease-in-out_infinite] ${className}`}
+      className={`bg-[var(--bg3)] rounded skeleton-shimmer ${className}`}
       style={style}
     />
   )

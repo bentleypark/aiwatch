@@ -213,6 +213,32 @@ dialog::backdrop {
   50%      { opacity: 0.7; box-shadow: 0 0 0 4px transparent; }
 }
 
+/* #1879 — the three animations that run indefinitely. Each carries its own reduced-motion rule. */
+.ticker-track {
+  animation: ticker-scroll 50s linear infinite;
+}
+.ticker-track[data-paused="true"] {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; }
+  .ticker-pause { display: none; }
+}
+
+.skeleton-shimmer {
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer { animation: none; }
+}
+
+.live-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-pulse { animation: none; }
+}
+
 /* ─── Card Fade-in (stagger via animationDelay inline style) */
 @keyframes fade-in {
   from { transform: translateY(4px); }
