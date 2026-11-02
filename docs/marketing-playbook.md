@@ -6,7 +6,7 @@ Operational reference for opportunistic, organic distribution of AIWatch during 
 - [Reddit](#reddit)
 - [Shared rules](#shared-rules)
 
-**Not covered here:** journalist outreach (Casey Newton, Hard Fork, AI beat reporters). That channel requires verified statistics (MTTD + RTT-degradation counts the official status pages don't report — the honest pillars after the #464 redefinition, not a "faster than official" average) and a permanent embeddable URL — tracked separately in issue #266 (`/press` page). Once `/press` ships, a third section will be added here for journalist DM/email flow.
+**Not covered here:** journalist outreach (Casey Newton, Hard Fork, AI beat reporters). That channel requires verified statistics (RTT-degradation counts, reported as a signal — not a "faster than official" average) and a permanent embeddable URL — tracked separately in issue #266 (`/press` page). Once `/press` ships, a third section will be added here for journalist DM/email flow.
 
 ---
 
@@ -52,16 +52,12 @@ different from Downdetector / StatusGator:
   binding) as primary, Claude Sonnet (via AI Gateway) as fallback. Per-incident
   KV caching keeps costs near zero. Analyses update as the incident timeline
   evolves.
-- RTT degradation detection — direct API probes run every 5 minutes and flag
-  latency degradation that provider status pages often never report (status
-  pages report hard-down, not slowness). This is the honest differentiator for a
-  synthetic-probe architecture (#464). Independent detection lands within the
-  ~5-min polling cycle of the official report (MTTD); we do NOT claim "faster
-  than the official status page" as a headline — diagnostic data showed status-
-  page-based detection is structurally bounded by polling lag. Occasional genuine
-  early-RTT signals (probe flagged degradation before the official update) are
-  shown per-event; the averaged figure is gated behind a minimum sample size so a
-  marketing claim never rests on thin data. Surfaced in the dashboard + Discord.
+- RTT degradation detection — counted from direct API probes (definition:
+  /methodology#detection), with how many were not on the status page at the time.
+  A detection is a signal, not a confirmed outage
+  (aiwatch-reports#178). We do NOT claim "faster than the official status page"
+  as a headline — status-page-based detection is structurally bounded by polling
+  lag (#464). Surfaced in the Discord daily summary + the monthly report.
 - Score — single 0-100 reliability metric combining uptime, incident impact
   days (Atlassian-weighted), recovery time, and response consistency for probed
   services.
@@ -176,8 +172,6 @@ Author here (I built AIWatch) — it's down for everyone, just pulled this from
 AIWatch (ai-watch.dev/is-claude-api-down?utm_source=reddit):
 
 - Status: Down (confirmed [HH:MM UTC — pull from dashboard])
-- Early RTT signal: [X minutes — ONLY if the dashboard shows one] — our probe
-  flagged latency degradation before the official status update
 - AI analysis: [paste the current AIWatch AI analysis summary, 1-2 sentences]
 
 Fallback recommendation from the dashboard: [top 1-2 fallbacks by Score].
@@ -189,7 +183,7 @@ Link to the **specific service page** (`/is-claude-api-down`, `/is-openai-api-do
 
 **Always append `?utm_source=reddit`** to the link — it is what reliably attributes the visit to the Reddit channel in AIWatch's audience classifier (`worker/src/outage-audience.ts`); without the tag the visit may not be counted as Reddit at all. Paste the link the Discord alert gives you as-is; hand-built links need `?utm_source=reddit` at minimum.
 
-A genuine early-RTT signal is **rare** (most incidents are component/connector degradations that don't spike the probed endpoint's RTT, and status-page detection is structurally bounded by polling lag — #464). If the dashboard does not show one, **drop the line entirely** rather than guess or claim "ahead of official." The rest of the template still stands — confirmed outage + AI analysis + fallback recs are useful on their own. Never frame AIWatch as "faster than the official status page" as a blanket claim; the verifiable pillars are independent detection (MTTD) + RTT degradation that status pages don't report.
+Never frame AIWatch as "faster than the official status page"; RTT-degradation counts are a signal, not a confirmed outage (aiwatch-reports#178).
 
 ### Frequency limit
 
@@ -238,7 +232,7 @@ have to pull.
 - **One link per post.** Multiple AIWatch URLs in a single comment = spam signal.
 - **No vote manipulation.** Never ask anyone — Twitter, Discord, colleagues — to upvote. Both HN and Reddit detect coordinated voting and penalize the domain permanently.
 - **Disclose affiliation.** "I built this" / "Author here" in the first line. Hiding authorship on a self-promo post is grounds for immediate removal on most subs and HN flags.
-- **No fabricated screenshots.** Every screenshot in a post or comment must be a live capture of ai-watch.dev at the time claimed. Placeholder values in the response templates above (timestamps, lead minutes) are for dry-run planning only — never ship them.
+- **No fabricated screenshots.** Every screenshot in a post or comment must be a live capture of ai-watch.dev at the time claimed. Placeholder values in the response templates above (timestamps) are for dry-run planning only — never ship them.
 - **Track everything.** Append an entry to the log table below after every logged action — takes ~30 seconds and compounds so we can learn which subs/times actually convert.
 
 ### Pre-post dry run
@@ -246,7 +240,7 @@ have to pull.
 Every post and every link-bearing comment, every channel, no exceptions. Run through this in order before hitting submit:
 
 - [ ] All `[bracket placeholders]` in the template replaced with live values pulled from ai-watch.dev at posting time (the service count is published on `/methodology`, not on the dashboard)
-- [ ] Numbers (timestamps, early-RTT signal minutes if shown, uptime %) match what ai-watch.dev shows right now — not a cached tab from 30 minutes ago
+- [ ] Numbers (timestamps, uptime %) match what ai-watch.dev shows right now — not a cached tab from 30 minutes ago
 - [ ] Link points to the specific service page (`/is-<service>-down`), not the homepage
 - [ ] **Reddit posts and comments:** the link carries `?utm_source=reddit` — otherwise the visit may be unattributable (see Reddit § "Response template")
 - [ ] Authorship disclosed in the first line ("Author here" / "I built this")

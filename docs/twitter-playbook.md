@@ -42,17 +42,7 @@ https://ai-watch.dev/is-${slug}-down?utm_source=twitter&utm_medium=manual&utm_ca
 ```
 - `${duration}` = e.g., `1h 12m` (round to nearest minute)
 
-### 3. Early RTT signal — only when a genuine lead ≥ 10 min is shown
-Rare by design (#464) — only when the dashboard surfaces an early-RTT signal; never a blanket "faster than official" claim.
-```
-⚡ RTT degradation on ${SERVICE_NAME} flagged by AIWatch at ${HH:MM} UTC, ${N} min before the upstream status page update.
-https://ai-watch.dev/is-${slug}-down?utm_source=twitter&utm_medium=manual&utm_campaign=phase1&utm_content=${incidentId}
-```
-- Soft phrasing — no "we beat them" tone
-- `${N}` = full minutes (no decimals)
-- Skip if lead < 10 min — **why**: under 10 minutes can read as a public callout of upstream operators rather than a measurement, which carries reputational risk for AIWatch. The threshold is for tone safety, not data quality.
-
-### 4. Cluster (≥3 services down simultaneously)
+### 3. Cluster (≥3 services down simultaneously)
 Lead tweet:
 ```
 🔴 Multiple AI services reporting incidents right now — thread below.

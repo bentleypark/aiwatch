@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderMethodologyPage } from '../html-template'
-import { PROBE_TARGETS } from '../../../worker/src/probe' // #678 — lockstep source of truth
+import { PROBE_TARGETS, SPIKE_RTT_MULTIPLIER, SPIKE_MIN_CONSECUTIVE, DEGRADATION_DEDUP_TTL_SEC } from '../../../worker/src/probe' // #678 — lockstep source of truth
 import { SERVICES } from '../../../worker/src/services'
 import { BETTERSTACK_DEGRADE_THRESHOLD, BS_HISTORY_MIN_DOWNTIME_SEC, BS_HISTORY_WINDOW_DAYS } from '../../../worker/src/parsers/betterstack' // #1498 — reconstruction bounds lockstep
 
@@ -331,14 +331,32 @@ describe('renderMethodologyPage', () => {
     }
   })
 
-  it('keeps the honest detection framing — MTTD + RTT, explicitly disclaiming "faster than official" (#464)', () => {
+  it('keeps the honest detection framing — no measured detection time, RTT degradation as a signal, disclaiming "faster than official" (#464, aiwatch-reports#178)', () => {
     // #464: the page must NOT positively claim speed superiority over the official status page.
-    // The honest framing is MTTD + RTT degradation; a sentence that explicitly DISCLAIMS the
-    // "faster than official" headline is the correct treatment, so assert the disclaimer is present
-    // rather than naively banning the substring (which would flag the disclaimer itself).
-    expect(html).toMatch(/MTTD|mean time to detect/i)
+    // A sentence that explicitly DISCLAIMS the "faster than official" headline is the correct
+    // treatment, so assert the disclaimer is present rather than naively banning the substring
+    // (which would flag the disclaimer itself).
+    expect(html).not.toMatch(/MTTD|mean time to detect/i)
+    expect(html).toMatch(/does not measure how quickly it detects/i)
+    expect(html).toMatch(/signal, not a confirmed outage/i)
+    expect(html).toContain('<h3 id="detection"')
     expect(html).toMatch(/RTT degradation/i)
     expect(html).toMatch(/never claims?[^.]*faster than the official/i)
+  })
+
+  it('states the RTT degradation counting rule the worker applies (aiwatch-reports#178)', () => {
+    const key = 's6.detection.body'
+    const hours = DEGRADATION_DEDUP_TTL_SEC / 3600
+    expect(hours).toBe(1)
+    for (const [where, text] of [['inline', inline(key, 'p')], ['ko map', entry(koBlock, key)]] as const) {
+      expect(text, `KO ${where}: run length`).toContain(`${SPIKE_MIN_CONSECUTIVE}회 연속`)
+      expect(text, `KO ${where}: slow threshold`).toContain(`중앙값의 ${SPIKE_RTT_MULTIPLIER}배`)
+      expect(text, `KO ${where}: hourly dedup`).toContain(`${hours}시간에 최대 1건`)
+    }
+    const en = entry(enBlock, key)
+    expect(en, 'EN: run length').toContain(`${SPIKE_MIN_CONSECUTIVE} times in a row`)
+    expect(en, 'EN: slow threshold').toContain(`more than ${SPIKE_RTT_MULTIPLIER}× their usual median`)
+    expect(en, 'EN: hourly dedup').toContain('at most once per service per hour')
   })
 
   // i18n integrity (#673): setLang() only swaps an element when its key exists in i18n[lang]

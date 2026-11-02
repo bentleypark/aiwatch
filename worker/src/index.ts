@@ -427,7 +427,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
-import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes } from './probe'
+import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes, DEGRADATION_DEDUP_TTL_SEC } from './probe'
 
 const PROBED_SERVICE_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
 
@@ -3336,7 +3336,7 @@ const workerExport = {
           if (probeRaw) {
             const snapshots: ProbeSnapshot[] = JSON.parse(probeRaw).snapshots ?? []
             const serviceIds = PROBE_TARGETS.map((t) => t.id)
-            const spikes = detectConsecutiveSpikes(snapshots, serviceIds, 3)
+            const spikes = detectConsecutiveSpikes(snapshots, serviceIds)
             // #464 — read cached service status once so we can tag each RTT degradation as
             // "on the official status page" vs "not reported there" (the headline differentiator).
             // `scored` isn't in scope in scheduled(); the services:latest cache is the same snapshot
@@ -3357,7 +3357,7 @@ const workerExport = {
               const alertKey = `alerted:probe-spike:${spike.serviceId}`
               const existing = await env.STATUS_CACHE.get(alertKey).catch(() => null)
               if (existing) continue
-              await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 3600 })
+              await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: DEGRADATION_DEDUP_TTL_SEC })
               // #464 — rising edge of a spike streak: count this RTT degradation. If the service's
               // official status is still operational, the degradation isn't on the status page → the
               // `nostatus` figure. Best-effort, mirrors the fetch-fail:daily counter (48h TTL).

@@ -229,12 +229,16 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      timeless principle a regular reader has already seen in prior reports. **Read the last 2–3 months' Key
      Insight pattern titles before writing** — if a title paraphrases a prior month's, reframe. (The per-model-
      count caveat in the bullet above is the sharpest case; here the concern is the broader analytical *framing*.)
-     **Carve-out (the only one):** the **probe / RTT-degradation differentiator** (AIWatch's direct-probe data
-     that status pages typically don't report — "probes caught latency the status pages didn't") is a DELIBERATE
-     recurring product message, so it MAY repeat monthly and is exempt from the reframe rule — *provided* each
-     month it leads with that month's fresh degradations (specific services + counts, e.g. "Mistral 41, Replicate
-     25") and links to the `#rtt-degradation-detection` detail section, not restated as a bare pitch with no new
-     data. No other recurring framing gets this exemption.
+     **Carve-out (the only one):** the **probe / RTT-degradation signal** (AIWatch's direct-probe detections and
+     how many were not on the status page at the time) is a DELIBERATE recurring item, so it MAY repeat monthly
+     and is exempt from the reframe rule — *provided* each month it leads with that month's fresh detections
+     (specific services + counts, e.g. "Mistral 41, Replicate 25") and links to the `#rtt-degradation-detection`
+     detail section, not restated as a bare pitch with no new data. No other recurring framing gets this
+     exemption. **Write it as a signal, not a finding (aiwatch-reports#178):** the probes *flagged* or *detected*;
+     never that they *caught* degradations or outages the status pages *missed*. Whether a detection was
+     followed by a provider incident is what aiwatch#1778 measures — cite that share only once the generated
+     report shows it. Do not set a service's detection count against its status-page incident count as evidence
+     the page under-reported.
    - **Notation conventions — keep uniform report-wide.** Score is **bare `N`**, no `/100` suffix anywhere —
      Summary, Recommendations, Key Insight, Notable Incidents, Observations all use the same plain form, and
      a Score change is bare both ends (`86 → 79`, never `86/100 → 79/100`). When a grade rides with a score,

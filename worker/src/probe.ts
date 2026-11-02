@@ -143,6 +143,10 @@ export interface ProbeSpike {
   failedCount: number // #1778 — probes in the streak with no measured RTT (`measuredRtt` null)
 }
 
+export const SPIKE_RTT_MULTIPLIER = 3
+export const SPIKE_MIN_CONSECUTIVE = 3
+export const DEGRADATION_DEDUP_TTL_SEC = 3600
+
 /**
  * Detect services with consecutive RTT spikes in the most recent probes.
  * Returns a ProbeSpike for each service that has >= minConsecutive spikes.
@@ -151,13 +155,13 @@ export interface ProbeSpike {
 export function detectConsecutiveSpikes(
   snapshots: ProbeSnapshot[],
   serviceIds: string[],
-  minConsecutive: number = 3,
+  minConsecutive: number = SPIKE_MIN_CONSECUTIVE,
 ): ProbeSpike[] {
   const results: ProbeSpike[] = []
   for (const serviceId of serviceIds) {
     const median = computeMedianRtt(snapshots, serviceId)
     if (median === null) continue
-    const threshold = median * 3
+    const threshold = median * SPIKE_RTT_MULTIPLIER
 
     // Walk backwards from the most recent snapshot
     let count = 0
