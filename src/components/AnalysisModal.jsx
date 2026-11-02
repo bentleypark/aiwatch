@@ -1,5 +1,8 @@
 // AI Analysis Modal — shows incident analysis results from Claude
+// #1879 — native <dialog> + showModal(), via useModalDialog (shared with Modal.jsx).
+import { useId, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
+import { useModalDialog } from '../hooks/useModalDialog'
 import { isDisplayAffected, displayStatusOf } from '../utils/statusDisplay'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
 import { recoveryLine, scopeLine } from '../utils/predictionAccuracy'
@@ -32,6 +35,8 @@ export function groupWorstStatus(svcs) {
 
 export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAccuracy, services, onClose }) {
   const { t, lang } = useLang()
+  const titleId = useId()
+  const dialogRef = useRef(null)
   const accuracyLine = estimateAccuracyText(estimateAccuracy, lang)
   // aiAnalysis: Record<svcId, AIAnalysisResult[]>
   //
@@ -98,7 +103,11 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
     }
   }
   groups.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-  if (groups.length === 0) return null
+  const hasGroups = groups.length > 0
+
+  useModalDialog(dialogRef, hasGroups, onClose)
+
+  if (!hasGroups) return null
 
   const totalCount = groups.reduce((sum, g) => sum + g.analyses.length, 0)
   const baselineCardOf = new Map()
@@ -106,22 +115,23 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
   const accuracyCardGi = Math.max(0, groups.findIndex((g, gi) => g.svcIds.some(id => recoveryBaseline?.[id] && baselineCardOf.get(id) === gi)))
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="bg-[var(--bg1)] border border-[var(--border-hi)] rounded-lg w-full max-w-[480px] mx-4"
-        style={{ maxHeight: '80vh', overflow: 'auto' }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <dialog
+      ref={dialogRef}
+      closedby="any"
+      aria-labelledby={titleId}
+      className="bg-[var(--bg1)] border border-[var(--border-hi)] rounded-lg p-0"
+      style={{ width: 'min(480px, calc(100vw - 32px))', maxHeight: '80dvh', overflow: 'auto', margin: 'auto' }}
+    >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '14px 16px' }}>
           <div className="flex items-center gap-2">
             <span style={{ fontSize: '16px' }}>🤖</span>
-            <span className="mono text-[12px] font-medium text-[var(--text0)]">AI Analysis</span>
-            <span className="mono text-[9px] rounded" style={{ color: 'var(--purple)', background: 'rgba(124,58,237,0.15)', padding: '2px 6px' }}>Beta</span>
+            <h2 id={titleId} className="mono text-[12px] font-medium text-[var(--text0)]">AI Analysis</h2>
+            <span className="mono text-[9px] rounded" style={{ color: 'var(--purple)', background: 'color-mix(in srgb, var(--purple) 15%, transparent)', padding: '2px 6px' }}>Beta</span>
             <span className="mono text-[9px] text-[var(--text2)]">({totalCount})</span>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => dialogRef.current?.close()}
             className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] border border-[var(--border)] rounded hover:opacity-80 transition-opacity cursor-pointer"
             style={{ padding: '4px 10px' }}
           >
@@ -279,7 +289,6 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
             This analysis is provided for informational purposes only.
           </p>
         </div>
-      </div>
-    </div>
+    </dialog>
   )
 }

@@ -27,7 +27,7 @@ test.describe('AnalysisModal fallback section', () => {
     // hidden-first-match flakiness).
     await expect(page.getByText('OpenAI API').first()).toBeVisible({ timeout: 20000 })
     await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
-    const modal = page.locator('.fixed.inset-0').last()
+    const modal = page.locator('dialog')
     await expect(modal).toBeVisible()
     return modal
   }

@@ -83,7 +83,7 @@ export default function Topbar({ onMenuToggle }) {
 
       {/* Center: LIVE · time */}
       <div className="flex items-center gap-1.5 mono text-[10px] md:text-[11px] text-[var(--text2)] min-w-0">
-        <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-[pulse_2s_ease-in-out_infinite]" />
+        <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] live-pulse" />
         <span>{t('topbar.live')} · {lastUpdated ? formatTime(lastUpdated, lang) : '—'}</span>
       </div>
 

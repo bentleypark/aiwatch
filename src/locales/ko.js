@@ -23,6 +23,7 @@ const ko = {
 
   // Topbar
   'topbar.live': 'LIVE',
+  'ticker.pause': '상태 티커 일시정지',
   'topbar.refresh': '↻ 새로고침',
   'topbar.refresh.loading': '↻ 로딩 중...',
   'topbar.analyze': '분석',

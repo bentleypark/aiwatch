@@ -247,7 +247,7 @@ api/                 # Vercel Edge Functions (SSR pages + proxies). `_`-prefixed
 src/                 # React 19 SPA (Vite, no router — hash routing in App.jsx)
   components/        # StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/             # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
-  hooks/             # usePolling, useTheme, useLang, useSettings, useGitHubStars
+  hooks/             # usePolling, useTheme, useLang, useSettings, useGitHubStars, useModalDialog
   utils/             # analytics, calendar, time, pageContext, constants, hashRoute, webhookSubscription, liveIncident (#1104 — the one "is this service still carrying a live incident?" rule the SPA's resolved-claims share), reportGuard (#1369 — one crowd report per service per UTC day; the Edge is-down page carries the same rule as inline source), referenceIncidents (#1669)
   locales/           # ko.js, en.js — flat key→string maps
   sw/                # PWA service worker → /sw.js (#1386); policy.js = cache decisions
@@ -347,5 +347,5 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 - **Cron `*/5`** — incident detection + Discord alerts (KV ID dedup), AI analysis inline (cancellable 15s budget), holds, cache refresh on a status edge (#488 cron edge + #1057 live-poll edge — so the is-down/OG card flips ahead of the alert, not in lockstep; see product-constraints.md). Alert paths: [docs/reference/discord-alert-paths.md](docs/reference/discord-alert-paths.md).
 - **Frontend deployment** — Vercel, `ai-watch.dev`; `git push origin main` auto-deploys. `npm run build` is local only. `api/` files count against the Hobby **12-Serverless-Function cap** unless edge-runtime or `_`-prefixed (#862/#867; CI guard `check-vercel-function-count`).
 - **CSP (#482)** — enforced on the SPA (`vercel.json`, hash-locked) and per-response on every Edge SSR page (nonce for no-store surfaces, content-hash for cached is-down). Policy + rationale: [docs/reference/reference-csp.md](docs/reference/reference-csp.md).
-- **PWA** — `public/manifest.json` + `src/sw/` → `/sw.js` (#1386); navigations **network-first**, assets cache-first (#1880). `/sw.js` embeds the asset version, so deploys re-install it (#1889) — no manual bump; registered in prod only (#432).
+- **PWA** — `public/manifest.json` + `src/sw/` → `/sw.js` (#1386); navigations **network-first**, assets cache-first (#1880). `/sw.js` embeds the asset version, so deploys re-install it (#1889); registered in prod only (#432).
 - **Edge SSR surfaces** — is-down (SEO, `?e=`/`?i=` social-card pinning), intro, methodology, plugin, plugin-privacy, badges, reports proxy.
