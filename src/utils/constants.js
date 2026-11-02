@@ -433,10 +433,13 @@ export const SCORE_BG_CLASS = {
   unstable: 'bg-[var(--red)]',
 }
 
+export const SCORE_BADGE_CLASS = Object.fromEntries(Object.entries(SCORE_BG_CLASS).map(([grade, bg]) =>
+  [grade, `${bg} ${grade === 'fair' ? 'text-[var(--on-yellow)]' : 'text-[var(--on-accent)]'}`]))
+
 export const SCORE_TEXT_CLASS = {
   excellent: 'text-[var(--green)]',
   good: 'text-[var(--green)]',
-  fair: 'text-[var(--yellow)]',
+  fair: 'text-[var(--yellow-text)]',
   degrading: 'text-[var(--amber)]',
   unstable: 'text-[var(--red)]',
 }

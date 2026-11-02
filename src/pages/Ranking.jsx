@@ -5,7 +5,7 @@ import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { usePage } from '../utils/pageContext'
 import { useSettings } from '../hooks/useSettings'
-import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
+import { SCORE_BADGE_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
 import { formatTime } from '../utils/time'
 import { formatMttrHours } from '../utils/incidentSort'
 import { buildRanking, MIN_COVERAGE_DAYS } from '../utils/serviceReliability'
@@ -59,7 +59,7 @@ function RankingTable({ t, setPage, rows, label, note }) {
                   {svc.aiwatchScore}
                 </td>
                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                  <span className={`inline-block rounded text-[9px] ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '3px 8px' }}>
+                  <span className={`inline-block rounded text-[9px] ${SCORE_BADGE_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)] text-[var(--text0)]'}`} style={{ padding: '3px 8px' }}>
                     {svc.scoreGrade}
                   </span>
                 </td>
@@ -114,7 +114,7 @@ function RankingTable({ t, setPage, rows, label, note }) {
                 <span className={`mono text-[13px] font-semibold shrink-0 ${SCORE_TEXT_CLASS[svc.scoreGrade] ?? ''}`}>
                   {svc.aiwatchScore}
                 </span>
-                <span className={`mono text-[9px] rounded shrink-0 ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '2px 6px' }}>
+                <span className={`mono text-[9px] rounded shrink-0 ${SCORE_BADGE_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)] text-[var(--text0)]'}`} style={{ padding: '2px 6px' }}>
                   {svc.scoreGrade}
                 </span>
                 {metaParts.length > 0 && (
@@ -181,7 +181,7 @@ export default function Ranking() {
                 <span className={`mono text-[22px] font-semibold ${SCORE_TEXT_CLASS[svc.scoreGrade] ?? 'text-[var(--text2)]'}`}>
                   {svc.aiwatchScore}
                 </span>
-                <span className={`mono text-[10px] rounded ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '3px 8px' }}>
+                <span className={`mono text-[10px] rounded ${SCORE_BADGE_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)] text-[var(--text0)]'}`} style={{ padding: '3px 8px' }}>
                   {svc.scoreGrade}
                 </span>
               </div>

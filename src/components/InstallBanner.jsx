@@ -99,7 +99,7 @@ export default function InstallBanner() {
           </div>
           <button
             onClick={handleInstall}
-            style={{ padding: '6px 14px', background: 'var(--green)', color: 'var(--bg0)', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+            style={{ padding: '6px 14px', background: 'var(--green)', color: 'var(--on-accent)', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
             {t('install.btn')}
           </button>

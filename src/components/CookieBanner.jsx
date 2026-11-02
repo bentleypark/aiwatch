@@ -42,7 +42,7 @@ export default function CookieBanner() {
           </button>
           <button
             onClick={handleAccept}
-            className="mono text-[11px] text-[var(--bg0)] bg-[var(--green)] hover:opacity-90 cursor-pointer transition-opacity"
+            className="mono text-[11px] text-[var(--on-accent)] bg-[var(--green)] hover:opacity-90 cursor-pointer transition-opacity"
             style={{ padding: '6px 14px', borderRadius: '4px' }}>
             {t('cookie.accept')}
           </button>
