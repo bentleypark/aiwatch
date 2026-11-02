@@ -115,6 +115,7 @@ ${consentInitScript(nonce)}
 
   /* SECTIONS */
   .section { max-width: 880px; margin: 0 auto; padding: 56px 40px; border-bottom: 1px solid var(--border); scroll-margin-top: 72px; }
+  #detection { scroll-margin-top: 72px; }
   .section-label { font-family: var(--font-mono); font-size: 11px; color: var(--green); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 10px; }
   .section h2 { font-size: 26px; font-weight: 600; margin-bottom: 14px; overflow-wrap: break-word; }
   .section h3 { font-size: 16px; font-weight: 600; margin: 28px 0 10px; color: var(--text0); }
@@ -205,6 +206,7 @@ ${consentInitScript(nonce)}
     .toc-nav a.active { border-left: none; border-bottom-color: var(--green); background: transparent; }
     .doc-content { border-left: none; }
     .doc-content .section { max-width: none; scroll-margin-top: 108px; }
+    #detection { scroll-margin-top: 108px; }
   }
   @media (max-width: 768px) {
     .nav-links { display: none; }
@@ -402,8 +404,8 @@ ${consentInitScript(nonce)}
   <p data-i18n="s6.mttr.body">Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 서로 다를 수 있으며, 이는 정상입니다.</p>
   <p data-i18n="s6.pastRecovery">“Is X Down?” 페이지, 대시보드 AI 분석 창, Discord 새 인시던트 알림, Slack 피드에서는 AI 복구 예상 시간 옆에 그 서비스의 과거 인시던트가 복구되기까지 걸린 시간도 함께 보여 줍니다 — 중앙값, 그리고 80%가 그 안에 복구된 시간입니다. AI 모델이 아니라 AIWatch가 기록한 해결된 인시던트(서비스당 최근 최대 50건)로 하루 한 번 계산합니다. 인시던트 하나는 한 번만 셉니다. 제공사의 자동 모니터가 연 인시던트, Better Stack 피드에서 재구성한 인시던트, 길이를 잴 수 없는 기록은 빼고, 운영자가 바로잡은 길이가 있으면 그 값을 씁니다. 남은 인시던트가 10건 이상일 때만 표시하며, 몇 건으로 계산했는지와 가장 이른 날짜를 함께 밝힙니다.</p>
 
-  <h3 data-i18n="s6.detection.title">탐지 (Detection)</h3>
-  <p data-i18n="s6.detection.body">탐지 지표는 두 가지입니다 — MTTD(평균 탐지 시간, AIWatch가 인시던트를 감지하기까지 걸린 시간)와 RTT 저하 탐지(probe RTT 급증으로 잡는 조기 신호). 상태 페이지 폴링은 공식 발표보다 늦을 수밖에 없으므로, AIWatch는 <strong>"공식 상태 페이지보다 빠르다"고 절대 주장하지 않고</strong> 이 두 지표로만 정직하게 표현합니다. 이 지표는 월간 리포트에 집계되며, AIWatch Score나 대시보드 숫자에는 반영되지 않습니다.</p>
+  <h3 id="detection" data-i18n="s6.detection.title">탐지 (Detection)</h3>
+  <p data-i18n="s6.detection.body">AIWatch는 인시던트를 얼마나 빨리 감지하는지 측정하지 않습니다. 상태 페이지 폴링은 공식 발표보다 늦을 수밖에 없으므로 <strong>"공식 상태 페이지보다 빠르다"고 주장하지 않습니다</strong>. 월간 리포트에 싣는 것은 RTT 저하 탐지 건수입니다. 한 서비스에 대한 직접 프로브가 실패(응답 없음 또는 서버 오류)하거나 평소 응답 시간 중앙값의 3배를 넘는 일이 3회 연속 이어지면 1건으로 세고, 같은 서비스는 1시간에 최대 1건만 셉니다. 그중 탐지 당시 상태 페이지에 없던 건수를 함께 보여 줍니다. 탐지는 신호일 뿐 확인된 장애가 아닙니다. 이 수치는 AIWatch Score나 대시보드 숫자에는 반영되지 않습니다.</p>
 
   <div class="limits">
     <div class="limits-label">⚠ <span data-i18n="s6.limit.label">한계</span></div>
@@ -640,7 +642,7 @@ const i18n = {
     's6.mttr.body': 'Score의 Recovery 항목은 30일 중앙값을 사용합니다. 반면 ServiceDetails의 "Recovery" 카드는 7일 중앙값 + 최악값("일반 15분 · 최악 29시간34분")을 보여줍니다. 두 값은 서로 다를 수 있으며, 이는 정상입니다.',
     's6.pastRecovery': '“Is X Down?” 페이지, 대시보드 AI 분석 창, Discord 새 인시던트 알림, Slack 피드에서는 AI 복구 예상 시간 옆에 그 서비스의 과거 인시던트가 복구되기까지 걸린 시간도 함께 보여 줍니다 — 중앙값, 그리고 80%가 그 안에 복구된 시간입니다. AI 모델이 아니라 AIWatch가 기록한 해결된 인시던트(서비스당 최근 최대 50건)로 하루 한 번 계산합니다. 인시던트 하나는 한 번만 셉니다. 제공사의 자동 모니터가 연 인시던트, Better Stack 피드에서 재구성한 인시던트, 길이를 잴 수 없는 기록은 빼고, 운영자가 바로잡은 길이가 있으면 그 값을 씁니다. 남은 인시던트가 10건 이상일 때만 표시하며, 몇 건으로 계산했는지와 가장 이른 날짜를 함께 밝힙니다.',
     's6.detection.title': '탐지 (Detection)',
-    's6.detection.body': '탐지 지표는 두 가지입니다 — MTTD(평균 탐지 시간, AIWatch가 인시던트를 감지하기까지 걸린 시간)와 RTT 저하 탐지(probe RTT 급증으로 잡는 조기 신호). 상태 페이지 폴링은 공식 발표보다 늦을 수밖에 없으므로, AIWatch는 <strong>"공식 상태 페이지보다 빠르다"고 절대 주장하지 않고</strong> 이 두 지표로만 정직하게 표현합니다. 이 지표는 월간 리포트에 집계되며, AIWatch Score나 대시보드 숫자에는 반영되지 않습니다.',
+    's6.detection.body': 'AIWatch는 인시던트를 얼마나 빨리 감지하는지 측정하지 않습니다. 상태 페이지 폴링은 공식 발표보다 늦을 수밖에 없으므로 <strong>"공식 상태 페이지보다 빠르다"고 주장하지 않습니다</strong>. 월간 리포트에 싣는 것은 RTT 저하 탐지 건수입니다. 한 서비스에 대한 직접 프로브가 실패(응답 없음 또는 서버 오류)하거나 평소 응답 시간 중앙값의 3배를 넘는 일이 3회 연속 이어지면 1건으로 세고, 같은 서비스는 1시간에 최대 1건만 셉니다. 그중 탐지 당시 상태 페이지에 없던 건수를 함께 보여 줍니다. 탐지는 신호일 뿐 확인된 장애가 아닙니다. 이 수치는 AIWatch Score나 대시보드 숫자에는 반영되지 않습니다.',
     's6.limit.label': '한계',
     's6.limit.body': '최근 항목만 짧게 노출되는 출처(Azure·Bedrock)는 잠깐 발생했다 사라지는 인시던트를 놓칠 수 있습니다.',
     's7.title': '독립성 · 프라이버시',
@@ -735,7 +737,7 @@ const i18n = {
     's6.mttr.body': 'The Score\\\'s Recovery component uses a 30-day median. The ServiceDetails "Recovery" card is a separate display — a 7-day median + worst ("typical 15m · worst 29h34m"). The figures can legitimately differ.',
     's6.pastRecovery': 'On the “Is X Down?” page, in the dashboard analysis window, in Discord new-incident alerts and in the Slack feed, AIWatch shows beside the AI recovery estimate how long past incidents of that service took to recover: the median, and the time within which 80% of them recovered. It is computed once a day from AIWatch’s own record of resolved incidents (up to the last 50 per service), not by the AI model. Each incident counts once. Incidents opened by a provider’s automatic monitor, incidents reconstructed from a Better Stack feed and records with no measurable duration are left out, and an operator-corrected duration replaces the published one. The line appears only when at least 10 incidents remain, and it states how many it is based on and the earliest date.',
     's6.detection.title': 'Detection',
-    's6.detection.body': 'Detection is measured two ways — MTTD (mean time to detect: how long AIWatch took to spot the incident) and RTT degradation detection (an early signal from probe RTT spikes). Because status-page polling is necessarily later than an official publish, AIWatch <strong>never claims to be "faster than the official status page"</strong> and reports only these two honest metrics. This is surfaced in the monthly report and does not feed the AIWatch Score or any dashboard number.',
+    's6.detection.body': 'AIWatch does not measure how quickly it detects an incident. Because status-page polling is necessarily later than an official publish, it <strong>never claims to be "faster than the official status page"</strong>. What the monthly report shows is the number of RTT degradation detections. One detection is counted when direct probes to a service fail (no answer or a server error) or take more than 3× their usual median 3 times in a row, at most once per service per hour. The report also shows how many of those were not on the status page at the time of detection. A detection is a signal, not a confirmed outage. None of this feeds the AIWatch Score or any dashboard number.',
     's6.limit.label': 'Limit',
     's6.limit.body': 'Sources that only retain recent items (Azure · Bedrock) can miss short-lived incidents that appear and disappear quickly.',
     's7.title': 'Independence · Privacy',

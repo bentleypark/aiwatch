@@ -299,7 +299,7 @@ caller's) and 400 rather than throwing, so a discarded `Response` would have lef
 failure, a secret rotated on one end only, exactly as silent as the empty token.
 
 ### Single source of truth (#475)
-The cron appends every embed it sends the operator to a rolling KV feed (`alert:feed:recent`, built in `worker/src/alert-feed.ts`), surfaced as the `alertFeed` field on `/api/status` (+`/cached`) for external readers. In the same cron cycle it fans those exact entries out to confirmed subscribers, so operator/user alerts are **byte-identical** (Detection Lead, AI analysis, grouping, fallback, region all included) and duplicate suppression — incl. the #473 cross-poll status↔incident race — lives server-side.
+The cron appends every embed it sends the operator to a rolling KV feed (`alert:feed:recent`, built in `worker/src/alert-feed.ts`), surfaced as the `alertFeed` field on `/api/status` (+`/cached`) for external readers. In the same cron cycle it fans those exact entries out to confirmed subscribers, so operator/user alerts are **byte-identical** (AI analysis, grouping, fallback, region all included) and duplicate suppression — incl. the #473 cross-poll status↔incident race — lives server-side.
 
 Consequence: user alerts fire at **cron cadence (≤~5min, same time as the operator)** whether or not a tab is open. The two target *different* webhooks (no cross-source dupe).
 

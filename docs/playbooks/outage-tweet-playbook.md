@@ -14,9 +14,8 @@ Only tweet an incident that is **already confirmed**, never a raw signal:
 
 - ✅ **Degraded** incident: it cleared AIWatch's anti-flapping gate (**2 consecutive cron cycles, ~10 min**) **and** has a confirmed upstream status-page entry.
 - ✅ **Down** incident: AIWatch alerts immediately (no multi-cycle gate, by design — high urgency), so for a Down tweet the gate is the **confirmed upstream status-page entry**, not elapsed cycles.
-- ❌ Do **not** tweet on a probe spike alone (the 3-consecutive-spike probe detection feeds Detection Lead and fires **no** Discord alert), or on anything that could be an AIWatch Worker bug → ghost outage. A false-positive outage tweet is public and reputational.
+- ❌ Do **not** tweet on a probe spike alone (the 3-consecutive-spike probe detection feeds the RTT degradation count and fires **no** Discord alert), or on anything that could be an AIWatch Worker bug → ghost outage. A false-positive outage tweet is public and reputational.
 - ❌ Do **not** pile on during a multi-service event — use the **Cluster** template (one thread), not N separate tweets.
-- **Detection Lead tone:** soft phrasing only, and only when the lead is **≥ 10 min** — a manual editorial threshold for tweeting, **not** a code-enforced constant. Frame it as "AIWatch noticed early," never as a callout of the upstream operator.
 
 ---
 
@@ -46,16 +45,6 @@ Live status → https://ai-watch.dev/is-{slug}-down?utm_source=twitter
 https://ai-watch.dev/is-{slug}-down?utm_source=twitter
 ```
 
-**Early RTT signal** (only when a genuine lead ≥ 10 min is shown — soft phrasing).
-Rare by design (#464): most incidents don't spike the probed endpoint's RTT, and
-status-page detection is bounded by polling lag — so only use this when the
-dashboard actually surfaces an early-RTT signal, never as a blanket "faster" claim:
-```
-⚡ RTT degradation on {Service} flagged by AIWatch at {HH:MM} UTC,
-~{X} min before the upstream status page update.
-→ https://ai-watch.dev/is-{slug}-down?utm_source=twitter
-```
-
 **Cluster** (≥ 3 services down in the same window — one lead tweet + one reply per service):
 ```
 Lead:  🔴 Multiple AI services are reporting incidents right now — thread 👇
@@ -68,7 +57,7 @@ Reply: • {Service}: {impact} — https://ai-watch.dev/is-{slug}-down?utm_sourc
 ## Process per outage
 
 1. Confirm the incident meets the guardrails above.
-2. Pick the template, fill `{…}` from the dashboard / Analyze modal (impact, title, duration, Detection Lead).
+2. Pick the template, fill `{…}` from the dashboard / Analyze modal (impact, title, duration).
 3. Post from the personal account.
 4. Log it in the tracking table below (date, service, tweet URL, likes/RTs at +24h).
 

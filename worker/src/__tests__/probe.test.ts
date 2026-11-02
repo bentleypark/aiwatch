@@ -185,6 +185,21 @@ describe('computeMedianRtt', () => {
 
 
 describe('detectConsecutiveSpikes', () => {
+  it('by default counts a run of 3 probes, each failed or over 3× the median, mixed (aiwatch-reports#178)', () => {
+    const base = (): ProbeSnapshot[] => Array.from({ length: 20 }, (_, i) => ({
+      t: `2026-03-24T00:${String(i).padStart(2, '0')}:00Z`,
+      data: { gemini: { status: 200, rtt: 100 } },
+    }))
+    const run = (...rtts: Array<[number, number]>) => [...base(), ...rtts.map(([status, rtt], i) => ({
+      t: `2026-03-24T01:${String(i).padStart(2, '0')}:00Z`,
+      data: { gemini: { status, rtt } },
+    }))]
+    expect(detectConsecutiveSpikes(run([200, 301], [200, 301]), ['gemini'])).toHaveLength(0)
+    expect(detectConsecutiveSpikes(run([200, 301], [200, 301], [200, 301]), ['gemini'])).toHaveLength(1)
+    expect(detectConsecutiveSpikes(run([200, 300], [200, 300], [200, 300]), ['gemini'])).toHaveLength(0)
+    expect(detectConsecutiveSpikes(run([200, 0], [200, 301], [503, 120]), ['gemini'])).toHaveLength(1)
+  })
+
   it('detects 3+ consecutive spikes at tail', () => {
     // Enough baseline to keep median low (~50ms), so threshold ~150ms
     const snapshots: ProbeSnapshot[] = Array.from({ length: 10 }, (_, i) => ({

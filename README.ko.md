@@ -47,12 +47,12 @@
 - **한국어/영어** — 이중 언어 지원
 - **모바일 반응형** — 사이드바 오버레이, 모바일 액션 바
 - **AIWatch Score** — uptime, 인시던트, 복구 시간, probe 기반 응답성을 결합한 종합 신뢰도 점수 ([계산 방식](https://ai-watch.dev/methodology#score))
-- **RTT 저하 감지** — AIWatch의 직접 API probe가 공식 상태 페이지에 보고되지 않는 지연(latency) 저하를 포착 (대시보드 배지 + Discord 일일 요약). 공식 발표 대비 ~5분 폴링 주기 내 독립 감지(MTTD)
+- **RTT 저하 감지** — AIWatch의 직접 API probe로 집계하고, 그중 당시 상태 페이지에 없던 건수를 함께 표시 (Discord 일일 요약 + 월간 리포트; 무엇을 세는지는 [/methodology](https://ai-watch.dev/methodology#detection)). 감지는 신호일 뿐 확인된 장애가 아님
 - **리전별 가용성** — SpaceXSI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
 - **Is X Down SEO 페이지** — 47개 서비스 (Bedrock/Azure OpenAI 제외한 모든 모니터링 대상), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위 (대시보드와 동일한 동률 표기), 대체 서비스 추천
-- **헬스체크 프로빙** — 서비스 엔드포인트 직접 RTT 측정 (36개 probe 대상) + 연속 스파이크 조기 장애 감지 및 RTT 저하 추적
+- **헬스체크 프로빙** — 서비스 엔드포인트 직접 RTT 측정 (36개 probe 대상) + RTT 저하 추적
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 하이브리드 AI 자동 분석 (Gemma 4 primary + Sonnet fallback): 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 - **랜딩 페이지** — 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, `?banner=` 캠페인 슬롯(선택), GA4 트래킹
