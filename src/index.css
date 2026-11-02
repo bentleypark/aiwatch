@@ -204,6 +204,10 @@ pre,
 dialog::backdrop {
   background: color-mix(in srgb, var(--bg0) 60%, transparent);
 }
+dialog:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
 
 /* ─── Ticker Bar Animation ───────────────────────────────── */
 @keyframes ticker-scroll {
