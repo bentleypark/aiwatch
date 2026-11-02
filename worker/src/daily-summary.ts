@@ -11,7 +11,7 @@ import type { AccuracyStats } from './incident-history'
 import { wholeShares } from './recovery-baseline-text'
 import type { SnapshotCoverage } from './prediction-snapshot'
 import type { SourceHealthRead } from './reddit'
-import type { AiUsageCounters } from './ai-analysis'
+import { holdLedger, timedOutAttribution, type AiUsageCounters } from './ai-analysis'
 import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth, type Guard3HoldRecord } from './monthly-archive'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
 import { FAMILY_OF_SERVICE } from './alerts'
@@ -41,6 +41,14 @@ export function classifyDegradation(svcStatusOperational: boolean): DegradationO
  * pre-response abort costs nothing, which is why the line counts `sonnet`, not `sonnetAttempts`.
  */
 export const SONNET_COST_PER_CALL_USD = 0.009
+
+function formatOverruns({ by, unattributed }: NonNullable<ReturnType<typeof timedOutAttribution>>): string {
+  const parts = Object.entries(by)
+    .sort(([aId, a], [bId, b]) => b - a || aId.localeCompare(bId))
+    .map(([id, n]) => `${id} ${n}`)
+  if (unattributed > 0) parts.push(`unattributed ${unattributed}`)
+  return parts.join(', ')
+}
 
 /**
  * Render the 🤖 AI Analysis Usage section, or '' when nothing ran today.
@@ -72,8 +80,14 @@ export function formatAiUsageSection(aiUsage: AiUsageCounters | null): string {
   const lines = [
     '\n🤖 **AI Analysis Usage**',
     `   Today: ${aiUsage.calls} calls (${outcomes.join(', ')})${breakdown}`,
-    `   Est. cost: $${cost} (Sonnet only)`,
   ]
+  if (timedOut > 0) {
+    const overruns = timedOutAttribution(aiUsage)
+    lines.push(`   Overruns by service: ${overruns ? formatOverruns(overruns) : 'not recorded'}`)
+  }
+  const hold = holdLedger(aiUsage)
+  if (hold) lines.push(`   AI-hold: ${hold.held} held, ${hold.releasedWithAi} released with AI, ${hold.releasedWithoutAi} released AI-less`)
+  lines.push(`   Est. cost: $${cost} (Sonnet only)`)
   // A fallback that is always reached and never succeeds is a broken fallback, not bad luck.
   if (sonnetAttempts > 0 && sonnet === 0) {
     lines.push(`   ⚠️ Sonnet fallback: ${sonnetAttempts} attempts, 0 successes — check the model id / API key`)

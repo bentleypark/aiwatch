@@ -1392,6 +1392,66 @@ describe('formatAiUsageSection', () => {
     expect(out).toContain('(Gemma: 3, Sonnet: 1)')
     expect(out).not.toContain('/')
   })
+
+  describe('overrun attribution and the AI-hold ledger (#1262)', () => {
+    const populated = {
+      calls: 29, success: 26, failed: 0, timedOut: 3, gemma: 25, gemmaAttempts: 29,
+      timedOutBy: { fireworks: 1, claude: 1, mistral: 1 },
+      held: 2, heldReleasedWithAi: 2, heldReleasedWithoutAi: 0,
+    }
+
+    const lineStarting = (out: string, prefix: string) => out.split('\n').map((l) => l.trim()).find((l) => l.startsWith(prefix))
+
+    it('renders both when both readers have data, overruns by count then name, with nothing appended to a balanced map', () => {
+      const out = formatAiUsageSection({ ...populated, timedOut: 5, timedOutBy: { mistral: 1, claude: 1, fireworks: 3 } })
+      expect(lineStarting(out, 'Overruns by service:')).toBe('Overruns by service: fireworks 3, claude 1, mistral 1')
+      expect(lineStarting(out, 'AI-hold:')).toBe('AI-hold: 2 held, 2 released with AI, 0 released AI-less')
+    })
+
+    it.each([
+      [{ timedOut: 0 }, undefined],
+      [{ timedOut: 0, held: 1, heldReleasedWithAi: 1 }, undefined],
+      [{ timedOut: 1, timedOutBy: { claude: 1 } }, 'Overruns by service: claude 1'],
+      [{ timedOut: 2, timedOutBy: { claude: 2 } }, 'Overruns by service: claude 2'],
+      [{ timedOut: 2, timedOutBy: { mistral: 1 } }, 'Overruns by service: mistral 1, unattributed 1'],
+      [{ timedOut: 3, timedOutBy: { mistral: 1 } }, 'Overruns by service: mistral 1, unattributed 2'],
+      [{ timedOut: 2 }, 'Overruns by service: not recorded'],
+    ] as const)('overrun line for %j is %j', (counters, expected) => {
+      const out = formatAiUsageSection({ calls: 7, success: 5, failed: 2, ...counters })
+      expect(lineStarting(out, 'Overruns by service:')).toBe(expected)
+    })
+
+    it.each([
+      [{}, undefined],
+      [{ timedOut: 1, timedOutBy: { claude: 1 } }, undefined],
+      [{ held: 1 },'AI-hold: 1 held, 0 released with AI, 0 released AI-less'],
+      [{ heldReleasedWithAi: 1 }, 'AI-hold: 0 held, 1 released with AI, 0 released AI-less'],
+      [{ heldReleasedWithoutAi: 1 }, 'AI-hold: 0 held, 0 released with AI, 1 released AI-less'],
+      [{ held: 3, heldReleasedWithAi: 2, heldReleasedWithoutAi: 1 }, 'AI-hold: 3 held, 2 released with AI, 1 released AI-less'],
+    ] as const)('hold line for %j is %j', (counters, expected) => {
+      const out = formatAiUsageSection({ calls: 7, success: 5, failed: 2, ...counters })
+      expect(lineStarting(out, 'AI-hold:')).toBe(expected)
+    })
+
+    it('puts the new lines between the usage line and the cost line', () => {
+      const lines = formatAiUsageSection(populated).split('\n')
+      const at = (prefix: string) => lines.findIndex((l) => l.trimStart().startsWith(prefix))
+      expect(at('Today:')).toBeLessThan(at('Overruns by service:'))
+      expect(at('Overruns by service:')).toBeLessThan(at('AI-hold:'))
+      expect(at('AI-hold:')).toBeLessThan(at('Est. cost:'))
+    })
+
+    it('reaches the assembled daily summary', () => {
+      const result = buildDailySummary({
+        services: [makeSvc()],
+        aiUsage: populated,
+        incidentCountToday: { newCount: 0, resolvedCount: 0 },
+        redditCount: 0,
+      })
+      expect(result).toContain('Overruns by service: claude 1, fireworks 1, mistral 1')
+      expect(result).toContain('AI-hold: 2 held, 2 released with AI, 0 released AI-less')
+    })
+  })
 })
 
 describe('#820 Reddit source-dead warning', () => {
