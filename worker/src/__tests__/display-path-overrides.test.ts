@@ -20,8 +20,8 @@ const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown
 const CURRENT_MONTH = new Date().toISOString().slice(0, 7)
 
 /** One resolved incident whose stored duration is the provider's inflated paperwork span. */
-function paperworkAccumulator(month: string) {
-  const day = `${month}-02`
+function paperworkAccumulator(month: string, dayOfMonth = '02') {
+  const day = `${month}-${dayOfMonth}`
   return JSON.stringify({
     lastUpdated: `${day}T00:00:00Z`,
     services: {
@@ -131,7 +131,7 @@ describe('weekly briefing incident summary applies duration overrides (#1019 / #
   async function briefingBody(overridesRaw: string | null, faultOn?: RegExp) {
     const store: Record<string, string> = {
       // The briefing reads the CURRENT and previous month relative to the event clock.
-      'incidents:monthly:2026-08': paperworkAccumulator('2026-08'),
+      'incidents:monthly:2026-08': paperworkAccumulator('2026-08', '01'),
     }
     if (overridesRaw !== null) store['incident:duration-overrides'] = overridesRaw
     const kv = makeKv(store, faultOn)

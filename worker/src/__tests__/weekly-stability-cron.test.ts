@@ -6,11 +6,11 @@ import workerModule from '../index'
 
 const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
 
-// Sunday 00:02 UTC — the briefing window. The previous week is `history:` 7..13 days back.
+// Sunday 00:02 UTC — the briefing run. Its window is 07-26..08-01; the previous window is 07-19..07-25.
 const SUNDAY = { scheduledTime: Date.parse('2026-08-02T00:02:00.000Z'), cron: '*/5 * * * *' } as ScheduledEvent
-const PREV_WEEK_DAY = '2026-07-26'
+const PREV_WEEK_DAY = '2026-07-25'
 // The oldest day of that week. Its GroqCloud figure differs, so reading the week oldest-first shows.
-const PREV_WEEK_OLDEST = '2026-07-20'
+const PREV_WEEK_OLDEST = '2026-07-19'
 
 function makeKv(store: Record<string, string>) {
   return {
@@ -29,6 +29,8 @@ async function stabilitySection(live: object[], prevRow: Record<string, object>)
     'services:latest': JSON.stringify(live),
     [`history:${PREV_WEEK_DAY}`]: JSON.stringify(prevRow),
     [`history:${PREV_WEEK_OLDEST}`]: JSON.stringify({ groq: { ok: 288, total: 288, officialUptime: 95.0 } }),
+    // A day of the briefing's own window: it is not the previous week, whatever it holds.
+    'history:2026-07-31': JSON.stringify({ groq: { ok: 288, total: 288, officialUptime: 10.0 } }),
   })
   vi.spyOn(console, 'log').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})

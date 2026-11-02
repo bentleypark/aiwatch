@@ -1,23 +1,37 @@
 import { describe, it, expect } from 'vitest'
-import { getWeekRange, weekDateStrings, buildIncidentSummary, buildStabilityChanges, liveStabilityUptime, accumulatePrevWeekCounters, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, parseStrategyBrief, isStrategyBriefStale, STRATEGY_STALE_DAYS, STRATEGY_FIELD_MAX, type WeeklyBriefingData } from '../weekly-briefing'
+import { getBriefingWindow, previousWindowDates, weekDateStrings, buildIncidentSummary, buildStabilityChanges, liveStabilityUptime, accumulatePrevWeekCounters, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, parseStrategyBrief, isStrategyBriefStale, STRATEGY_STALE_DAYS, STRATEGY_FIELD_MAX, type WeeklyBriefingData } from '../weekly-briefing'
 
-describe('getWeekRange', () => {
-  it('returns Mon–Sun for a Wednesday', () => {
-    const { start, end } = getWeekRange(new Date('2026-04-08T12:00:00Z')) // Wednesday
-    expect(start).toBe('2026-04-06')
-    expect(end).toBe('2026-04-12')
+describe('getBriefingWindow', () => {
+  it.each([
+    ['a Sunday run, as the cron fires', '2026-11-01T00:02:00Z', '2026-10-25', '2026-10-31'],
+    ['the same Sunday late in the day', '2026-11-01T23:59:00Z', '2026-10-25', '2026-10-31'],
+    ['a Wednesday', '2026-04-08T12:00:00Z', '2026-04-01', '2026-04-07'],
+    ['across a month boundary', '2026-03-01T00:02:00Z', '2026-02-22', '2026-02-28'],
+    ['across a year boundary', '2027-01-03T00:02:00Z', '2026-12-27', '2027-01-02'],
+    ['across a leap day', '2028-03-05T00:02:00Z', '2028-02-27', '2028-03-04'],
+  ])('%s: the 7 complete days before the run day', (_name, runAt, start, end) => {
+    expect(getBriefingWindow(new Date(runAt))).toEqual({ start, end })
   })
 
-  it('returns Mon–Sun for a Monday', () => {
-    const { start, end } = getWeekRange(new Date('2026-04-06T00:00:00Z')) // Monday
-    expect(start).toBe('2026-04-06')
-    expect(end).toBe('2026-04-12')
+  it.each(['2026-11-01T00:02:00Z', '2026-12-27T00:02:00Z', '2028-02-27T00:02:00Z'])('the window of the run after %s starts the day after this one ends', (first) => {
+    const run = new Date(first)
+    const next = new Date(run.getTime() + 7 * 86_400_000)
+    const dayAfterEnd = new Date(new Date(`${getBriefingWindow(run).end}T00:00:00Z`).getTime() + 86_400_000).toISOString().split('T')[0]
+    expect(getBriefingWindow(next).start).toBe(dayAfterEnd)
+    expect(weekDateStrings(getBriefingWindow(run).start, getBriefingWindow(run).end)).toHaveLength(7)
+  })
+})
+
+describe('previousWindowDates', () => {
+  it('is the 7 days before the window start, most recent first', () => {
+    expect(previousWindowDates('2026-10-25')).toEqual([
+      '2026-10-24', '2026-10-23', '2026-10-22', '2026-10-21', '2026-10-20', '2026-10-19', '2026-10-18',
+    ])
   })
 
-  it('returns Mon–Sun for a Sunday', () => {
-    const { start, end } = getWeekRange(new Date('2026-04-12T23:59:00Z')) // Sunday
-    expect(start).toBe('2026-04-06')
-    expect(end).toBe('2026-04-12')
+  it('ends the day before the window it precedes begins', () => {
+    const { start } = getBriefingWindow(new Date('2026-11-08T00:02:00Z'))
+    expect(previousWindowDates(start)[0]).toBe(getBriefingWindow(new Date('2026-11-01T00:02:00Z')).end)
   })
 })
 
@@ -206,7 +220,7 @@ describe('buildWeeklyBriefing', () => {
       changelog: [],
       incidents: [],
       stabilityChanges: [],
-      aiUsageTrend: { days: 7, calls: 12, gemma: 9, gemmaAttempts: 11, sonnet: 2, sonnetAttempts: 3, timedOut: 2, failed: 0, gemmaSuccessRate: 9 / 11, timedOutRate: 2 / 12 },
+      aiUsageTrend: { days: 7, calls: 12, gemma: 9, gemmaAttempts: 11, sonnet: 2, sonnetAttempts: 3, timedOut: 2, failed: 0, gemmaSuccessRate: 9 / 11, timedOutRate: 2 / 12, hold: null },
     }
     const result = buildWeeklyBriefing(data)
     expect(result).toContain('AI Analysis')
@@ -214,10 +228,22 @@ describe('buildWeeklyBriefing', () => {
     expect(result).toContain('0 failed')
   })
 
+  it('#1262 — carries the AI-hold roll-up into the assembled briefing', () => {
+    const result = buildWeeklyBriefing({
+      weekStart: '2026-04-06',
+      weekEnd: '2026-04-12',
+      changelog: [],
+      incidents: [],
+      stabilityChanges: [],
+      aiUsageTrend: { days: 7, calls: 12, gemma: 9, gemmaAttempts: 11, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: 9 / 11, timedOutRate: 0, hold: { held: 7, releasedWithAi: 5, releasedWithoutAi: 2 } },
+    })
+    expect(result).toContain('AI-hold 7 held, 5 released with AI, 2 released AI-less (29% AI-less)')
+  })
+
   it('#995 — omits the AI-analysis line when aiUsageTrend is absent or had no calls', () => {
     const base = { weekStart: '2026-04-06', weekEnd: '2026-04-12', changelog: [], incidents: [], stabilityChanges: [] }
     expect(buildWeeklyBriefing(base)).not.toContain('AI Analysis')
-    expect(buildWeeklyBriefing({ ...base, aiUsageTrend: { days: 7, calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: null, timedOutRate: null } })).not.toContain('AI Analysis')
+    expect(buildWeeklyBriefing({ ...base, aiUsageTrend: { days: 7, calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: null, timedOutRate: null, hold: null } })).not.toContain('AI Analysis')
   })
 
   it('#1158 — renders the Badge Adopters section when badgeRepoDiscovery has new repos', () => {

@@ -1055,6 +1055,8 @@ export interface AiUsageTrend {
   gemmaSuccessRate: number | null
   /** timedOut / calls — null when there were no calls. */
   timedOutRate: number | null
+  /** #1262 — the window's `holdLedger()` readings summed; null when no day carried a hold counter. */
+  hold: { held: number; releasedWithAi: number; releasedWithoutAi: number } | null
 }
 
 /**
@@ -1075,11 +1077,18 @@ export function summarizeAiUsageTrend(entries: AiUsageCounters[]): AiUsageTrend 
     }),
     { calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0 },
   )
+  const ledgers = entries.flatMap((u) => holdLedger(u) ?? [])
   return {
     days: entries.length,
     ...s,
     gemmaSuccessRate: s.gemmaAttempts > 0 ? s.gemma / s.gemmaAttempts : null,
     timedOutRate: s.calls > 0 ? s.timedOut / s.calls : null,
+    hold: ledgers.length === 0
+      ? null
+      : ledgers.reduce(
+        (a, l) => ({ held: a.held + l.held, releasedWithAi: a.releasedWithAi + l.releasedWithAi, releasedWithoutAi: a.releasedWithoutAi + l.releasedWithoutAi }),
+        { held: 0, releasedWithAi: 0, releasedWithoutAi: 0 },
+      ),
   }
 }
 
@@ -1096,6 +1105,12 @@ export function formatAiUsageTrendLine(trend: AiUsageTrend): string {
   if (trend.sonnet > 0) parts.push(`Sonnet ${trend.sonnet} fallback`)
   if (trend.timedOut > 0) parts.push(`${trend.timedOut} timed out`)
   parts.push(`${trend.failed} failed`)
+  if (trend.hold) {
+    const { held, releasedWithAi, releasedWithoutAi } = trend.hold
+    const released = releasedWithAi + releasedWithoutAi
+    const share = released > 0 ? ` (${Math.round((releasedWithoutAi / released) * 100)}% AI-less)` : ''
+    parts.push(`AI-hold ${held} held, ${releasedWithAi} released with AI, ${releasedWithoutAi} released AI-less${share}`)
+  }
   return `🤖 **AI Analysis** (${trend.days}d): ${parts.join(' · ')}`
 }
 
