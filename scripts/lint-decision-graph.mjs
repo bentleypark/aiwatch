@@ -311,7 +311,7 @@ export function deliveredLiveness(issue, payload) {
 
 /**
  * Fold candidates: `delivered::` issues closed longer ago than the horizon and not pinned.
- * A REPORT, never a finding — folding is lossy, so `memory-lint`'s rule applies: propose, don't apply.
+ * A REPORT, never a finding.
  * `closedAt` is the GitHub `closed_at` string; `now` is injected so this stays pure and testable.
  */
 export function foldCandidates(deliveredWithClosedAt, pinned, now, horizonDays = FOLD_HORIZON_DAYS) {
@@ -457,7 +457,6 @@ function main(argv) {
   if (foldable.length) {
     console.log(`\n  📦 foldable delivered edges (closed >${FOLD_HORIZON_DAYS}d, unpinned): ${foldable.map((n) => `#${n}`).join(' ')}`)
     console.log('     Collapse into `delivered:: YYYY-MM ×N`, or pin one that still binds a decision.')
-    console.log('     Folding is lossy — the lint proposes, you apply.')
   }
 
   if (findings.length === 0) console.log('✅ 0 structural findings — edge grammar, claims, and wikilinks all clean.')

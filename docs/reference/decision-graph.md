@@ -294,9 +294,9 @@ applies equally to the work you did. The lint reports a missing gloss; a folded 
   regardless of age. If you cannot say in one clause *why* a delivered issue still binds a future
   decision, it is not a pin.
 
-**The lint proposes; it never folds.** Folding is lossy, and `memory-lint`'s standing rule is that
-lossy edits are proposed, not applied. `lint:graph --github` reports foldable edges (closed > 90d,
-unpinned) at exit 0, exactly like unclaimed candidates.
+**The script reports; the `memory-lint` run disposes (#1905).** `lint:graph --github` reports foldable
+edges (closed > 90d, unpinned) at exit 0, exactly like unclaimed candidates, and never edits a page.
+The run that sees a candidate pins or folds it, so a candidate does not come back on the next run.
 
 **Where the edge flips.** `ship-issue` step 12 (close): if the issue advanced an initiative, move its
 `advances::` to `delivered::` on the initiative page. One write, at the one moment the fact becomes
