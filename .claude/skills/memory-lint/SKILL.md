@@ -57,8 +57,11 @@ time; without periodic linting it drifts. This is the **lint** operation of the 
 - Write a `YYYY-MM-DD lint: <n> findings (<summary>)` line to `memory/log.md`.
 - **Auto-fix only the safe, mechanical issues** (repoint a broken wikilink to its renamed target, add a missing
   index line, quote a `#`-truncated description).
-- **Propose — do NOT auto-apply — anything lossy** (merging pages, deleting stale claims). Present the plan and
+- **Propose — do NOT auto-apply — merging pages or deleting stale claims.** Present the plan and
   wait for user confirmation (user feedback is never deleted unilaterally; merge preserves the Why).
+- **Dispose of every fold candidate check 6 reports, in this run** (#1905): pin it with its one-clause reason,
+  or fold it ([decision-graph.md](../../../docs/reference/decision-graph.md#delivered-and-the-fold-rule-969)).
+  Name each disposition in the `log.md` line.
 
 ## Relationship
 Pairs with `memory-ingest` (the write side). Neither touches the aiwatch repo, except a check-7 fix whose
