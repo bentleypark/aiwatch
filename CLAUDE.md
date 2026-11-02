@@ -278,7 +278,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   uptime-liveness.ts late-resolution.ts # Alerts: uptime stopped publishing (#1389/#957); archive row left open (#1797)
   suppression.ts     # Operator incident-suppression layer (#904)
   overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident
-  probe.ts probe-archival.ts   # Direct RTT probing (36 targets) + daily archival
+  probe.ts probe-archival.ts degradation-count.ts # Direct RTT probing (36 targets) + daily archival + degradation count
   daily-summary.ts weekly-briefing.ts monthly-archive.ts monthly-narrative.ts  # Discord reports + archives
   api-traffic.ts outage-audience.ts history-click.ts x-reply-mark.ts referral.ts vitals.ts mistral-feed-observation.ts mistral-public-api.ts status-fetch-run.ts   # WAE/KV instrumentation
   mistral-email.ts   # email() handler — Mistral notification mail triggers a scrape (#1510)
