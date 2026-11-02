@@ -13,6 +13,6 @@ describe('browser floor', () => {
   })
 
   it('is what the separate service-worker build targets', () => {
-    expect(serviceWorkerBuildConfig('dist').build.target).toBe(BROWSER_FLOOR)
+    expect(serviceWorkerBuildConfig('dist', 'v').build.target).toBe(BROWSER_FLOOR)
   })
 })

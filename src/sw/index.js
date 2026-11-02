@@ -1,6 +1,6 @@
 // AIWatch Service Worker — precache build assets, then network-first for navigations, cache-first
 // for hashed /assets/, and stale-while-revalidate for everything else it caches.
-// Cache name is auto-derived from asset-manifest.json version on install.
+// Cache name is the asset-manifest version inlined at build time as __ASSET_VERSION__.
 //
 // #1386 — this used to be a hand-written `public/sw.js`. It is now built from source so its two
 // decisions can live in `./policy.js` as pure functions and be unit-tested: the SW is registered in
@@ -10,7 +10,7 @@ import { BYPASS, CACHE_FIRST, NETWORK_FIRST, routeFor, mayCache } from './policy
 const STATIC_ASSETS = ['/', '/index.html', '/manifest.json', '/favicon.png', '/asset-manifest.json']
 const FALLBACK_CACHE = 'aiwatch-static-v1'
 
-// Module-scoped variable set during install to avoid re-fetching manifest
+// Module-scoped variable set during install
 let activeCacheName = null
 
 self.addEventListener('install', (e) => {
@@ -18,7 +18,7 @@ self.addEventListener('install', (e) => {
     fetch('/asset-manifest.json')
       .then((res) => res.json())
       .then((manifest) => {
-        activeCacheName = 'aiwatch-' + manifest.version
+        activeCacheName = 'aiwatch-' + __ASSET_VERSION__
         // Precached entry by entry, not `addAll`. Two reasons, both consequences of #1386.
         // `addAll` is all-or-nothing AND admits on status alone: one asset that 404s would reject
         // the whole install, drop `activeCacheName` to the 5-entry fallback, and `activate` would

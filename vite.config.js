@@ -30,10 +30,12 @@ function assetManifestPlugin() {
 export const BROWSER_FLOOR = ['chrome111', 'edge111', 'firefox128', 'safari16.4', 'ios16.4']
 
 // A separate `build()` call does not inherit the SPA config, so the floor is passed here too.
-export function serviceWorkerBuildConfig(outDir) {
+export function serviceWorkerBuildConfig(outDir, assetVersion) {
   return {
     configFile: false,
     logLevel: 'warn',
+    // #1889 — the browser re-installs a SW only when /sw.js changes byte-for-byte.
+    define: { __ASSET_VERSION__: JSON.stringify(assetVersion) },
     build: {
       outDir,
       target: BROWSER_FLOOR,
@@ -67,7 +69,8 @@ function serviceWorkerPlugin() {
     },
     async closeBundle() {
       const { build } = await import('vite')
-      await build(serviceWorkerBuildConfig(outDir))
+      const { version } = JSON.parse(readFileSync(resolve(outDir, 'asset-manifest.json'), 'utf-8'))
+      await build(serviceWorkerBuildConfig(outDir, version))
 
       // The build must fail LOUDLY if the artifact is missing, because nothing downstream would say
       // so: `/sw.js` is not under `/assets/`, so the SPA catch-all answers it with index.html at 200
@@ -86,6 +89,9 @@ function serviceWorkerPlugin() {
         throw new Error(
           `service-worker: ${swPath} carries a top-level import/export — a classic worker cannot load it`
         )
+      }
+      if (!readFileSync(swPath, 'utf-8').includes(version)) {
+        throw new Error(`service-worker: ${swPath} does not carry asset version ${version}`)
       }
     },
   }
