@@ -16,6 +16,10 @@
   --bg2: #161b22;
   --bg3: #1c2230;
   --bg4: #242b38;
+  --bg-selected: #242b38;  /* the selected segment of a segmented control / filter chip */
+  --on-accent: #080c10;    /* text on a solid status/accent fill */
+  --yellow-text: #faa72a;
+  --on-yellow: #080c10;
 
   /* Service badge (availability axis, #674): Operational (green) / Degraded (amber) / Down (red) */
   --green: #3fb950;
@@ -53,14 +57,20 @@
 
 }
 
-/* Light theme: only overrides tokens that differ. Font tokens are intentionally shared. */
+/* Light theme: only overrides tokens that differ. Font tokens are intentionally shared.
+   #1893 — values follow each token's role, not the dark ladder's order: cards and bars (bg1)
+   are the lightest surface and sit above the page (bg0). */
 [data-theme="light"] {
   color-scheme: light;
-  --bg0: #ffffff;
-  --bg1: #f6f8fa;
-  --bg2: #eaeef2;
-  --bg3: #d0d7de;
-  --bg4: #c0c8d0;
+  --bg0: #f6f8fa;
+  --bg1: #ffffff;
+  --bg2: #f6f8fa;
+  --bg3: #eaeef2;
+  --bg4: #d0d7de;
+  --bg-selected: #ffffff;
+  --on-accent: #ffffff;
+  --yellow-text: #8f6000;
+  --on-yellow: #1f2328;
   --text0: #1f2328;
   --text1: #4e5660;
   --text2: #636c77;
@@ -68,20 +78,20 @@
   --border-hi: rgba(0, 0, 0, 0.14);
 
   /* Status colors adjusted for light backgrounds (WCAG AA contrast) */
-  --green: #1a7f37;
+  --green: #197c36;
   --yellow: #b08800;
-  --amber: #d4551a;
+  --amber: #b74a00;
   --red: #cf222e;
-  --blue: #0969da;
-  --teal: #1b7c83;
+  --blue: #0968d8;
+  --teal: #1a777e;
   --purple: #7C3AED;
 
   /* Status pill backgrounds (light mode) */
   --status-bg-green: #dcfce7;
   --status-bg-yellow: #fef9c3;
-  --status-bg-amber: #fee4d6;
-  --status-bg-red: #fee2e2;
-  --blue-dim: #dbeafe;
+  --status-bg-amber: #feeadf;
+  --status-bg-red: #fee6e6;
+  --blue-dim: #e3effe;
   --green-glow: rgba(26, 127, 55, 0.08);
 }
 

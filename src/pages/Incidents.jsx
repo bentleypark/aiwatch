@@ -21,6 +21,7 @@ import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
 import { trackEvent } from '../utils/analytics'
 import { INCIDENT_PERIODS } from '../utils/hashRoute'
+import { rowHighlight } from '../utils/rowHighlight'
 
 const toReferenceRow = (r) => ({
   ...r,
@@ -128,7 +129,7 @@ export function DetailPanel({ incident, onClose, hideHeader, t, lang }) {
 
 // Desktop table row — grid layout matching design mockup: title+badge | time | service | duration | status
 // Accordion: detail panel renders inline below the selected row
-export function IncidentRow({ incident, isSelected, onClick, onClose, t, lang, hideStatus = false }) {
+export function IncidentRow({ incident, isSelected, onClick, onClose, t, lang, hideStatus = false, onInset = false }) {
   const shownStatus = incidentDisplayStatus(incident)
   const statusCls = STATUS_BADGE_CLASS[shownStatus] ?? STATUS_BADGE_CLASS.resolved
   const ctx = getContextualTime(incident, t)
@@ -141,7 +142,7 @@ export function IncidentRow({ incident, isSelected, onClick, onClose, t, lang, h
         role="row"
         className={`cursor-pointer transition-colors
           focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]
-          ${isSelected ? 'bg-[var(--bg2)] border-l-2 border-l-[var(--blue)]' : 'hover:bg-[var(--bg2)]'}`}
+          ${isSelected ? `${rowHighlight(onInset).selected} border-l-2 border-l-[var(--blue)]` : rowHighlight(onInset).hover}`}
         style={{ display: 'grid', gridTemplateColumns: '190px 1fr 100px 80px 80px', gap: '12px', padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}
       >
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}><span style={{ color: 'var(--text2)', opacity: 0.7 }}>{ctx.label}</span> {formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day })}</span>
@@ -249,6 +250,7 @@ export function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSele
               key={inc.id}
               incident={inc}
               hideStatus={hidesEntryStatus(group, inc)}
+              onInset
               isSelected={inc.id === selectedId}
               onClick={() => onSelect(inc.id)}
               onClose={onClose}

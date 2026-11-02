@@ -12,7 +12,7 @@ import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
 import { buildRecoveredRows, recoveredDetailText } from '../utils/recoveredGrouping'
-import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL, outboundReferralUrl, sendReferralBeacon } from '../utils/constants'
+import { SCORE_BG_CLASS, SCORE_BADGE_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL, outboundReferralUrl, sendReferralBeacon } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import SlackInstallLink from '../components/SlackInstallLink'
 import { regionStatusOf } from '../utils/regionStatus'
@@ -30,6 +30,7 @@ import { showRecoveredChip } from '../utils/liveIncident'
 import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
 import { mergeReferenceRows } from '../utils/referenceIncidents'
+import { rowHighlight } from '../utils/rowHighlight'
 
 // ── Status color maps ────────────────────────────────────────
 
@@ -201,7 +202,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
               <div className={`rounded-full ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'}`}
                    style={{ height: '4px', width: `${service.aiwatchScore}%` }} />
             </div>
-            <span className={`mono text-[10px] font-medium rounded ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`}
+            <span className={`mono text-[10px] font-medium rounded ${SCORE_BADGE_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)] text-[var(--text0)]'}`}
                   style={{ padding: '2px 6px' }}>
               {service.aiwatchScore} {service.scoreGrade}
             </span>
@@ -238,7 +239,7 @@ function FilterTabs({ filter, setFilter, total, operationalCount, issueCount, do
             padding: '4px 10px',
             letterSpacing: '0.04em',
             whiteSpace: 'nowrap',
-            background: filter === tab.key ? 'var(--bg4)' : 'transparent',
+            background: filter === tab.key ? 'var(--bg-selected)' : 'transparent',
             color: filter === tab.key ? 'var(--text0)' : 'var(--text2)',
           }}
         >
@@ -283,7 +284,7 @@ function CategoryTabs({ categoryFilter, setCategoryFilter, t }) {
               padding: '4px 10px',
               letterSpacing: '0.03em',
               whiteSpace: 'nowrap',
-              background: active ? 'var(--bg4)' : 'var(--bg2)',
+              background: active ? 'var(--bg-selected)' : 'var(--bg2)',
               color: active ? 'var(--text0)' : 'var(--text2)',
               border: active ? '1px solid var(--border-hi)' : '1px solid var(--border)',
             }}
@@ -366,7 +367,7 @@ export function GroupIncidentItem({ group, lang, t }) {
           style={{ marginLeft: '6px', paddingLeft: '8px', paddingTop: '4px', background: 'var(--bg0)', borderRadius: '0 4px 4px 0' }}
         >
           {group.entries.map(inc => (
-            <IncidentItem key={inc.id} incident={{ ...inc, serviceName: inc.serviceName ?? serviceName, affectedNames: inc.affectedNames ?? [serviceName] }} hideStatus={hidesEntryStatus(group, inc)} lang={lang} t={t} />
+            <IncidentItem key={inc.id} incident={{ ...inc, serviceName: inc.serviceName ?? serviceName, affectedNames: inc.affectedNames ?? [serviceName] }} hideStatus={hidesEntryStatus(group, inc)} onInset lang={lang} t={t} />
           ))}
         </div>
       )}
@@ -375,7 +376,7 @@ export function GroupIncidentItem({ group, lang, t }) {
 }
 
 // Incident item with time + bar + content + accordion timeline
-export function IncidentItem({ incident, lang, t, hideStatus = false }) {
+export function IncidentItem({ incident, lang, t, hideStatus = false, onInset = false }) {
   const [expanded, setExpanded] = useState(false)
   const barCls = hideStatus ? 'bg-[var(--border-hi)]' : INC_BAR_CLASS[incidentDisplayStatus(incident)] ?? INC_BAR_CLASS.resolved
   const hasTimeline = (incident.timeline ?? []).length > 0
@@ -383,7 +384,7 @@ export function IncidentItem({ incident, lang, t, hideStatus = false }) {
   return (
     <div style={{ marginBottom: '8px' }}>
       <div
-        className={`flex gap-2.5 items-start ${expandable ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors' : ''}`}
+        className={`flex gap-2.5 items-start ${expandable ? `cursor-pointer ${rowHighlight(onInset).hover} rounded transition-colors` : ''}`}
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
         onClick={expandable ? () => setExpanded((v) => !v) : undefined}
       >
@@ -671,7 +672,7 @@ export function ActionBanner({ services, setPage, t }) {
                       {outUrl && (
                         <a
                           href={outUrl} target="_blank" rel="nofollow noopener noreferrer"
-                          className="text-[9px] rounded-sm border border-[var(--green)] text-[var(--green)] hover:bg-[var(--green)] hover:text-[var(--bg0)] no-underline"
+                          className="text-[9px] rounded-sm border border-[var(--green)] text-[var(--green)] hover:bg-[var(--green)] hover:text-[var(--on-accent)] no-underline"
                           style={{ marginLeft: '4px', padding: '0 4px', verticalAlign: 'middle', lineHeight: '1.4' }}
                           onClick={() => { trackEvent('outbound_fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); sendReferralBeacon('', f.id) }}
                           aria-label={`Open ${f.name} (opens provider site)`}

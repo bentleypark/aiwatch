@@ -297,21 +297,23 @@ scripts/             # Build/CI/ops scripts (verify-reminders, lint-okf-bundle, 
 docs/reference/      # OKF knowledge bundle — read index.md first
 ```
 ### Design System
-All colors are CSS custom properties defined in `src/index.css`. **Never use hardcoded hex values** — always reference tokens:
+All colors are CSS custom properties in `src/index.css`. **Never hardcode hex** — use tokens:
 
 | Token | Purpose |
 |---|---|
-| `--bg0…--bg4` | Background layers (darkest → lighter) |
+| `--bg0…--bg4` | Surface backgrounds |
+| `--bg-selected` | Selected tab |
+| `--on-accent / --on-yellow` | Text on a fill / on yellow |
 | `--green / --amber / --red` | Operational / Degraded / Down |
-| `--yellow` | Warning / Score fair |
+| `--yellow / --yellow-text` | Partial, fair: fill / text |
 | `--purple` | AI Analysis accent |
 | `--blue / --teal` | Informational |
 | `--text0…--text2` | Primary → muted text |
 | `--border / --border-hi` | Subtle / prominent borders |
 
-Theme switching: add `data-theme="light"` to `<html>` — CSS variables remap automatically. Default is dark.
+Theme: `data-theme="light"` on `<html>` remaps tokens. Default: dark.
 
-**Footgun — Tailwind margin/padding utilities silently compute to `0`.** `src/index.css` declares an *unlayered* `* { margin: 0; padding: 0 }` reset, and unlayered rules outrank **any** `@layer`ed rule — which is where Tailwind v4 emits its utilities. So `pt-[48px]`, `py-[7px]`, `mt-auto`, … apply to nothing, on every element (not just buttons). Only margin/padding are affected; `height`/`top`/`flex`/`gap`/`overflow` utilities work normally. Use an inline `style` for spacing, or express the layout with a non-reset property. This has bitten twice: the sidebar's inline `navItemStyle`, and #978 (the mobile drawer's dead `pt-[48px]` + an inert `mt-auto` footer).
+**Footgun — Tailwind margin/padding utilities silently compute to `0`.** `src/index.css` declares an *unlayered* `* { margin: 0; padding: 0 }` reset, and unlayered rules outrank **any** `@layer`ed rule — which is where Tailwind v4 emits its utilities. So `pt-[48px]`, `py-[7px]`, `mt-auto`, … apply to nothing, on every element (not just buttons). Only margin/padding are affected; `height`/`top`/`flex`/`gap`/`overflow` utilities work normally. Use an inline `style` for spacing, or express the layout with a non-reset property. Bitten twice: the sidebar's `navItemStyle`, and #978 (mobile drawer's dead `pt-[48px]` + inert `mt-auto`).
 
 ### i18n
 `src/locales/ko.js` and `en.js` export flat `{ 'dot.key': 'string' }` maps (default exports).

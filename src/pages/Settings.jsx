@@ -37,7 +37,7 @@ function FieldRow({ label, desc, children, last }) {
   )
 }
 
-// Segment control: bg2 capsule with active: bg4/text0 per design mockup
+// Segment control: bg2 capsule with active: bg-selected/text0
 function SegmentControl({ options, value, onChange }) {
   return (
     <div role="radiogroup" className="flex bg-[var(--bg2)] border border-[var(--border)]" style={{ borderRadius: '6px', padding: '2px', gap: '1px' }}>
@@ -52,7 +52,7 @@ function SegmentControl({ options, value, onChange }) {
             padding: '4px 10px',
             borderRadius: '4px',
             letterSpacing: '0.04em',
-            background: value === opt.value ? 'var(--bg4)' : 'transparent',
+            background: value === opt.value ? 'var(--bg-selected)' : 'transparent',
             color: value === opt.value ? 'var(--text0)' : 'var(--text2)',
             border: 'none',
           }}
@@ -483,7 +483,7 @@ export default function Settings({ focus } = {}) {
           style={{
             fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none',
             background: hasNoChanges ? 'var(--bg3)' : 'var(--green)',
-            color: hasNoChanges ? 'var(--text2)' : 'var(--bg0)',
+            color: hasNoChanges ? 'var(--text2)' : 'var(--on-accent)',
             fontWeight: 500,
             cursor: hasNoChanges ? 'not-allowed' : 'pointer',
             opacity: hasNoChanges ? 0.5 : 1,
@@ -535,7 +535,7 @@ export default function Settings({ focus } = {}) {
               style={{
                 fontSize: '11px', padding: '6px 12px', borderRadius: '5px', border: 'none',
                 background: rssCopied ? 'var(--green)' : 'var(--bg3)',
-                color: rssCopied ? 'var(--bg0)' : 'var(--text1)', cursor: 'pointer',
+                color: rssCopied ? 'var(--on-accent)' : 'var(--text1)', cursor: 'pointer',
               }}
             >
               {rssCopied ? t('settings.rss.copied') : t('settings.rss.copy')}
@@ -578,7 +578,7 @@ export default function Settings({ focus } = {}) {
               style={{
                 fontSize: '11px', padding: '6px 12px', borderRadius: '5px', border: 'none',
                 background: slackFeedCopied ? 'var(--green)' : 'var(--bg3)',
-                color: slackFeedCopied ? 'var(--bg0)' : 'var(--text1)', cursor: 'pointer',
+                color: slackFeedCopied ? 'var(--on-accent)' : 'var(--text1)', cursor: 'pointer',
               }}
             >
               {slackFeedCopied ? t('settings.rss.copied') : t('settings.rss.copy')}
@@ -643,7 +643,7 @@ export default function Settings({ focus } = {}) {
                     type="button"
                     onClick={handleSubscribe}
                     className="mono"
-                    style={{ fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none', background: 'var(--green)', color: 'var(--bg0)', cursor: 'pointer' }}
+                    style={{ fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none', background: 'var(--green)', color: 'var(--on-accent)', cursor: 'pointer' }}
                   >
                     {t('settings.discord.subscribe')}
                   </button>
@@ -782,7 +782,7 @@ export default function Settings({ focus } = {}) {
               className="mono"
               style={{
                 fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none',
-                background: 'var(--blue)', color: 'var(--bg0)', cursor: 'pointer', opacity: testResult === 'sending' ? 0.6 : 1,
+                background: 'var(--blue)', color: 'var(--on-accent)', cursor: 'pointer', opacity: testResult === 'sending' ? 0.6 : 1,
               }}
             >
               {testResult === 'sending' ? t('settings.alert.testing') : testResult === 'ok' ? t('settings.alert.test.ok') : testResult === 'error' ? t('settings.alert.test.error') : t('settings.alert.test')}

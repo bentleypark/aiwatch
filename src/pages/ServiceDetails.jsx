@@ -33,6 +33,7 @@ import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
 import { showRecoveredChip } from '../utils/liveIncident'
 import SlackInstallLink from '../components/SlackInstallLink'
+import { rowHighlight } from '../utils/rowHighlight'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -206,7 +207,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
 
 // Exported for the render test that pins which rows are expandable (same reason `ComponentBreakdown`
 // below is): the #1292 defect was a row that silently did nothing on click.
-export function IncidentRow({ incident, isRecentlyRecovered, t, lang, hideStatus = false }) {
+export function IncidentRow({ incident, isRecentlyRecovered, t, lang, hideStatus = false, onInset = false }) {
   const [expanded, setExpanded] = useState(false)
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
@@ -233,7 +234,7 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang, hideStatus
   return (
     <div>
       <div
-        className={`flex items-start gap-[10px] ${expandable ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors' : ''}`}
+        className={`flex items-start gap-[10px] ${expandable ? 'cursor-pointer rounded transition-colors ' + rowHighlight(onInset).hover : ''}`}
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
         onClick={expandable ? () => setExpanded((v) => !v) : undefined}
       >
@@ -336,7 +337,7 @@ export function IncidentGroupRow({ group, t, lang }) {
           }}
         >
           {group.entries.map((inc) => (
-            <IncidentRow key={inc.id} incident={inc} isRecentlyRecovered={false} hideStatus={hidesEntryStatus(group, inc)} t={t} lang={lang} />
+            <IncidentRow key={inc.id} incident={inc} isRecentlyRecovered={false} hideStatus={hidesEntryStatus(group, inc)} onInset t={t} lang={lang} />
           ))}
         </div>
       )}
@@ -696,7 +697,7 @@ function BadgeCode({ serviceId, serviceName, t }) {
         style={{
           fontSize: '10px', padding: '5px 10px', borderRadius: '4px', border: 'none',
           background: copied ? 'var(--green)' : 'var(--bg3)',
-          color: copied ? 'var(--bg0)' : 'var(--text1)',
+          color: copied ? 'var(--on-accent)' : 'var(--text1)',
           cursor: 'pointer',
         }}
       >
