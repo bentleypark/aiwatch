@@ -19,7 +19,7 @@ import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { cookieBannerHtml } from './_shared/cookie-banner'
 import { getSEOContent } from './_is-down/seo-content'
-import { ALERT_CTA_CSS, ERRORS_CSS, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, displayDuration, formatRecoveryMinutes, renderErrorList, LAST_CHECKED_CLIENT_JS, lastCheckedTime, renderIncidentTimeline } from './_is-down/html-template'
+import { ALERT_CTA_CSS, ERRORS_CSS, renderScheduledMaintenance, type ServiceData, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, displayDuration, formatRecoveryMinutes, renderErrorList, LAST_CHECKED_CLIENT_JS, lastCheckedTime, renderIncidentTimeline } from './_is-down/html-template'
 
 export const config = { runtime: 'edge' }
 
@@ -219,6 +219,7 @@ function renderGroupPage(
   shareIncidentToken?: string | null,
   /** #1669 — the family's console/dashboard components: not services, listed apart from members. */
   referenceComponents: Array<{ name: string; status: MemberStatus['status'] }> = [],
+  maintenances: NonNullable<ServiceData['scheduledMaintenances']> = [],
 ): string {
   const headline = worstStatus(members)
   // #1193 — the member the audience beacon attributes a view to: the one carrying the headline
@@ -616,6 +617,7 @@ ${referenceSection}${summarySection}
 ${monthlyReportSection}
 ${alertSection}
 ${extCtaSection}
+${renderScheduledMaintenance(maintenances, 'ongoing')}${renderScheduledMaintenance(maintenances, 'upcoming')}
 ${incidentSection}
 ${communityReportSection}
 ${errorsSection}
@@ -772,6 +774,7 @@ export default async function handler(req: Request) {
     })
     let incidents: FamilyIncident[] = []
     let referenceComponents: Array<{ name: string; status: MemberStatus['status'] }> = []
+    let maintenances: NonNullable<ServiceData['scheduledMaintenances']> = []
     let communityReports: CommunityReport[] = []
     let summary: FamilySummary | null = null
     // #1243 — the NEWEST unresolved incident id across the family, taken from the RAW worker payload
@@ -821,6 +824,7 @@ export default async function handler(req: Request) {
               componentNames?: string[]
               timeline?: Array<{ stage: string; text: string | null; at: string }>
             }>
+            scheduledMaintenances?: ServiceData['scheduledMaintenances']
             // #1614 — records older than the live feed reaches; the 30-day summary only.
             incidentsBeyondFeed?: Array<{
               id: string; title: string; status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
@@ -852,6 +856,15 @@ export default async function handler(req: Request) {
             probeConfirmed: s.probeConfirmed, probeContradicted: s.probeContradicted,
           }
         })
+        const windowsById = new Map<string, NonNullable<ServiceData['scheduledMaintenances']>[number] & { services: string[] }>()
+        for (const member of members) {
+          for (const w of byId.get(member.id)?.scheduledMaintenances ?? []) {
+            const seen = windowsById.get(w.id)
+            if (seen) seen.services.push(member.name)
+            else windowsById.set(w.id, { ...w, services: [member.name] })
+          }
+        }
+        maintenances = [...windowsById.values()].sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor))
         // #1164 review — the group view also carries the other families' members (status only, #1831), so the sibling family's worst-of status is derived from the same `byId`
         // map with zero extra fetches — see the "🔄 Alternative" recommendation in renderGroupPage.
         otherFamilies = otherFamilies.map((f) => ({
@@ -1016,7 +1029,7 @@ export default async function handler(req: Request) {
     else if (copyReason) await notifyEdgeFallback(WORKER_API, { surface: 'is-down-group', slug: familyKey, reason: `${copyReason}_served_copy` }, `is-down-group/${familyKey}`)
     else if (memberMissing) await notifyEdgeFallback(WORKER_API, { surface: 'is-down-group', slug: familyKey, reason: 'service_missing' }, `is-down-group/${familyKey}`)
 
-    const html = renderGroupPage(family, members, incidents, summary, communityReports, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken, referenceComponents)
+    const html = renderGroupPage(family, members, incidents, summary, communityReports, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken, referenceComponents, maintenances)
     const csp = await cspForHtml(html, { enforce: true })
     // Mirrors is-down.ts's fallback semantics: a fetch failure renders "unknown" for every member
     // (never a fabricated status), and the 503 + no-store tells caches/crawlers not to trust or cache

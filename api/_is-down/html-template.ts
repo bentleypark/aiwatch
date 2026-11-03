@@ -16,6 +16,7 @@ import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { EXTENSION_STORES, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from '../_shared/slack-install'
 import type { RegionStatusResult } from './region-status'
+import { maintenanceHasEnded, maintenanceIsOngoing } from '../../worker/src/maintenance-phase'
 import { estimateAccuracyText, isEstimateAccuracy, recoveryBaselineText, type EstimateAccuracy, type RecoveryBaseline } from '../../worker/src/recovery-baseline-text'
 // #1053 — the note shape is owned by upstream-note.ts (where the claim is built); importing it keeps
 // one definition of the contract instead of a second copy that can drift.
@@ -148,6 +149,7 @@ export interface ServiceData {
      *  TypeScript's weak-type check prove the guards that read it can never fire. */
     startUnknown?: boolean
   }>
+  scheduledMaintenances?: Array<{ id: string; title: string; scheduledFor: string; scheduledUntil: string | null; componentNames: string[]; description?: string; services?: string[] }>
   // #1614 — AIWatch's own records older than the live feed reaches (worker `incidentsBeyondFeed`).
   incidentsBeyondFeed?: ServiceData['incidents']
   aiwatchScore: number | null
@@ -418,6 +420,27 @@ function formatElapsed(iso: string): string {
   if (h < 24) return `${h}h ${min % 60}m ago`
   const d = Math.floor(h / 24)
   return `${d}d ${h % 24}h ago`
+}
+
+export function renderScheduledMaintenance(windows: ServiceData['scheduledMaintenances'] | undefined, phase: 'ongoing' | 'upcoming', now = Date.now()): string {
+  if (!windows?.length) return ''
+  return windows.filter((window) => !maintenanceHasEnded(window, now) && maintenanceIsOngoing(window, now) === (phase === 'ongoing')).map((window) => {
+    const start = new Date(window.scheduledFor)
+    const end = window.scheduledUntil ? new Date(window.scheduledUntil) : null
+    if (Number.isNaN(start.getTime())) return ''
+    const full = (d: Date) => d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })
+    const range = end && !Number.isNaN(end.getTime())
+      ? `${full(start)}–${end.toISOString().slice(0, 10) === start.toISOString().slice(0, 10) ? end.toLocaleString('en-US', { timeStyle: 'short', timeZone: 'UTC' }) : full(end)} UTC`
+      : `${full(start)} UTC`
+    const components = window.componentNames.length ? `<div style="font-size:13px;color:#8b949e;margin:6px 0 0">Affected: ${esc(window.componentNames.join(', '))}</div>` : ''
+    const description = window.description ? `<p style="margin:6px 0 0">${esc(window.description)}</p>` : ''
+    const services = window.services?.length ? `<div style="font-size:13px;color:#8b949e;margin:6px 0 0">Services: ${esc(window.services.join(', '))}</div>` : ''
+    return `<div style="background:#0d1117;border:1px solid rgba(255,255,255,0.07);border-left:3px solid #58a6ff;border-radius:8px;padding:16px;margin:12px 0">
+<div style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#8b949e;margin-bottom:6px">${phase === 'ongoing' ? 'Maintenance in progress' : 'Scheduled maintenance'}</div>
+<div style="font-weight:600">${esc(window.title)}</div>
+<div style="font-size:13px;color:#8b949e;margin:4px 0 0">${esc(range)}</div>${description}${components}${services}
+</div>`
+  }).join('')
 }
 
 export function renderPage(
@@ -706,6 +729,8 @@ ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS 
 ${renderUpstreamNote(upstreamNote, seo.displayName)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderComponents(service)}
+${renderScheduledMaintenance(service?.scheduledMaintenances, 'ongoing')}
+${renderScheduledMaintenance(service?.scheduledMaintenances, 'upcoming')}
 ${renderIncidents(service)}
 ${renderReportFeed(reports, seo)}
 ${renderDescription(seo, service)}

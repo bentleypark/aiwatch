@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackUptimeWindowDays, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from '../betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackUptimeWindowDays, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackScheduledMaintenances, parseBetterStackPartialCount, parseBetterStackComponents } from '../betterstack'
 
 describe('parseBetterStackComponents (#606 Cat C)', () => {
   const fixture = {
@@ -1423,6 +1423,20 @@ describe('parseBetterStackMaintenanceIds (#503)', () => {
     expect(parseBetterStackMaintenanceIds({})).toEqual(new Set())
     const data = { included: [{ type: 'status_report', id: '1', attributes: { report_type: 'manual' } }] }
     expect(parseBetterStackMaintenanceIds(data)).toEqual(new Set())
+  })
+})
+
+describe('parseBetterStackScheduledMaintenances (#1405)', () => {
+  it('keeps upcoming and in-progress maintenance, and removes only resolved history', () => {
+    const data = { included: [
+      { type: 'status_report', id: 'future', attributes: { report_type: 'maintenance', title: 'Network work', starts_at: '2026-11-03T01:00:00Z', aggregate_state: 'investigating' } },
+      { type: 'status_report', id: 'active', attributes: { report_type: 'maintenance', title: 'In progress', starts_at: '2026-11-01T01:00:00Z', aggregate_state: 'maintenance' } },
+      { type: 'status_report', id: 'done', attributes: { report_type: 'maintenance', title: 'Done', starts_at: '2026-10-01T01:00:00Z', aggregate_state: 'resolved' } },
+    ] }
+    expect(parseBetterStackScheduledMaintenances(data)).toEqual([
+      { id: 'betterstack:future', title: 'Network work', scheduledFor: '2026-11-03T01:00:00.000Z', scheduledUntil: null, componentNames: [] },
+      { id: 'betterstack:active', title: 'In progress', scheduledFor: '2026-11-01T01:00:00.000Z', scheduledUntil: null, componentNames: [] },
+    ])
   })
 })
 

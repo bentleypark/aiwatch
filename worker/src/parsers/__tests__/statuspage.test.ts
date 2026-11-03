@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { normalizeStatus, parseIncidents, parseUptimeData } from '../statuspage'
+import { MAINTENANCE_DESCRIPTION_MAX, maintenanceDescription, normalizeStatus, parseIncidents, parseScheduledMaintenances, parseUptimeData } from '../statuspage'
 
 describe('normalizeStatus', () => {
   it('maps none/operational to operational', () => {
@@ -82,6 +82,61 @@ describe('parseIncidents', () => {
     }
     const result = parseIncidents(data)
     expect(result[0].timeline).toHaveLength(2) // deduped from 3
+  })
+})
+
+describe('parseScheduledMaintenances (#1405)', () => {
+  it('keeps a future window separate from incidents and skips completed history', () => {
+    const result = parseScheduledMaintenances({
+      status: { indicator: 'none', description: 'ok' },
+      scheduled_maintenances: [
+        { id: 'next', name: 'API maintenance', status: 'scheduled', scheduled_for: '2026-11-04T04:00:00Z', scheduled_until: '2026-11-04T06:00:00Z', components: [{ id: 'api', name: 'API' }] },
+        { id: 'old', name: 'Completed maintenance', status: 'completed', scheduled_for: '2026-10-01T04:00:00Z', scheduled_until: '2026-10-01T06:00:00Z' },
+      ],
+    }, [], Date.parse('2026-11-02T00:00:00Z'))
+    expect(result).toEqual([{ id: 'next', title: 'API maintenance', scheduledFor: '2026-11-04T04:00:00.000Z', scheduledUntil: '2026-11-04T06:00:00.000Z', componentNames: ['API'] }])
+  })
+
+  it('drops a window the provider marked completed before its planned end', () => {
+    const data = {
+      status: { indicator: 'none', description: 'ok' },
+      scheduled_maintenances: [{ id: 'early', name: 'Finished early', status: 'completed', scheduled_for: '2026-11-02T04:00:00Z', scheduled_until: '2026-11-04T06:00:00Z' }],
+    }
+    expect(parseScheduledMaintenances(data, undefined, Date.parse('2026-11-03T00:00:00Z'))).toEqual([])
+  })
+
+  it('drops a window once its planned end has passed, even while the provider still says in_progress', () => {
+    const data = {
+      status: { indicator: 'none', description: 'ok' },
+      scheduled_maintenances: [{ id: 'x', name: 'US Compute Maintenance', status: 'in_progress', scheduled_for: '2026-11-03T00:00:00Z', scheduled_until: '2026-11-03T06:00:00Z' }],
+    }
+    expect(parseScheduledMaintenances(data, undefined, Date.parse('2026-11-03T05:00:00Z'))).toHaveLength(1)
+    expect(parseScheduledMaintenances(data, undefined, Date.parse('2026-11-03T07:00:00Z'))).toEqual([])
+  })
+
+  it('carries the provider\'s latest note as the description (status.bfl.ml, 2026-11-03)', () => {
+    const body = 'DC team carries out work targeting storage reliability improvements, no downtime is expected, there can be occasional latency spikes.'
+    const data = {
+      status: { indicator: 'none', description: 'ok' },
+      scheduled_maintenances: [
+        { id: 'd6t9c8tqbz25', name: 'EU cluster storage maintenance', status: 'scheduled', scheduled_for: '2026-11-04T04:00:00.000Z', scheduled_until: '2026-11-04T10:00:00.000Z', incident_updates: [{ body, created_at: '2026-10-30T12:38:59.940Z' }] },
+        { id: 'silent', name: 'No note', status: 'scheduled', scheduled_for: '2026-11-05T04:00:00.000Z', scheduled_until: null, incident_updates: [] },
+      ],
+    }
+    const [bfl, silent] = parseScheduledMaintenances(data, undefined, Date.parse('2026-11-03T00:00:00Z'))
+    expect(bfl.description).toBe(body)
+    expect(silent).not.toHaveProperty('description')
+  })
+
+  it('on a shared page, keeps a window only for the service whose components it names', () => {
+    // Shape of status.claude.com's 2025-08-29 window: claude.ai only.
+    const data = {
+      status: { indicator: 'none', description: 'ok' },
+      scheduled_maintenances: [{ id: 'mw', name: 'claude.ai maintenance', status: 'scheduled', scheduled_for: '2026-11-04T01:25:00Z', scheduled_until: '2026-11-04T02:40:00Z', components: [{ id: 'rwppv331jlwc', name: 'claude.ai' }] }],
+    }
+    const now = Date.parse('2026-11-03T00:00:00Z')
+    expect(parseScheduledMaintenances(data, ['rwppv331jlwc'], now)).toHaveLength(1)
+    expect(parseScheduledMaintenances(data, ['k8w3r06qmzrp'], now)).toEqual([])
   })
 })
 
@@ -209,5 +264,30 @@ describe('parseUptimeData', () => {
     parseUptimeData(makeHtml({}), 'compA') // empty uptimeData object → quiet
     expect(warn).not.toHaveBeenCalled()
     warn.mockRestore()
+  })
+})
+
+describe('maintenanceDescription (#1405)', () => {
+  it('takes the most recent update, whatever order they arrive in', () => {
+    expect(maintenanceDescription([
+      { text: 'Scheduled for Tuesday.', at: '2026-11-01T00:00:00Z' },
+      { text: 'Moved to Wednesday.', at: '2026-11-02T00:00:00Z' },
+    ])).toBe('Moved to Wednesday.')
+  })
+
+  it('keeps plain text as written, on one line', () => {
+    expect(maintenanceDescription([{ text: 'Requests > 30s may time out\nin us_east_1 (ticket #42, 2 * 3 retries)', at: null }]))
+      .toBe('Requests > 30s may time out in us_east_1 (ticket #42, 2 * 3 retries)')
+  })
+
+  it('caps the length with an ellipsis', () => {
+    const out = maintenanceDescription([{ text: 'word '.repeat(200), at: null }])!
+    expect(out.length).toBe(MAINTENANCE_DESCRIPTION_MAX)
+    expect(out.endsWith('…')).toBe(true)
+  })
+
+  it('is undefined when no update carries text', () => {
+    expect(maintenanceDescription([])).toBeUndefined()
+    expect(maintenanceDescription([{ text: '   ', at: null }, { text: 42, at: null }])).toBeUndefined()
   })
 })

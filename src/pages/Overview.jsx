@@ -31,6 +31,7 @@ import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
 import { mergeReferenceRows } from '../utils/referenceIncidents'
 import { rowHighlight } from '../utils/rowHighlight'
+import { formatMaintenanceRange, maintenancePhaseKey, maintenanceWindowsOf } from '../utils/maintenance'
 
 // ── Status color maps ────────────────────────────────────────
 
@@ -104,7 +105,7 @@ function HistoryBars({ history, compact }) {
   )
 }
 
-function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
+function ServiceCard({ service, index, onClick, t, lang, isRecovered, latencyCell }) {
   const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
   // #591 — blank UPTIME / score for estimate-no-data OR stale-source (showing frozen/assumed figures
   // as current would mislead). #653 — the incident COUNT, however, is the LIVE list and blanks only for
@@ -121,6 +122,13 @@ function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
   // filters, so those surfaces can never disagree about whether this service is affected.
   const [sourceDead, sourceUnknown] = sourceFlagsOf(service)
   const statusDisplay = resolveStatusDisplay(service.status, service.partialCount, sourceDead, sourceUnknown)
+  const nextMaintenance = maintenanceWindowsOf(service)[0]
+  const maintenanceChip = nextMaintenance && (
+    <span data-testid="maintenance-chip" className="mono text-[9px] rounded border border-[var(--blue)] whitespace-nowrap" style={{ color: 'var(--blue)', padding: '2px 7px' }}
+          title={`${nextMaintenance.title} · ${formatMaintenanceRange(nextMaintenance, lang)}`}>
+      {t(maintenancePhaseKey(nextMaintenance))}
+    </span>
+  )
 
   return (
     <button
@@ -161,6 +169,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
             {!incidentsBlanked && incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
             {!incidentsBlanked && scoreStr && <>{' · '}{scoreStr}</>}
           </span>
+          {maintenanceChip}
         </div>
         <HistoryBars history={buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays, service.status, service.dailyImpactComplete)} compact />
       </div>
@@ -177,6 +186,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, latencyCell }) {
             <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
           </div>
         </div>
+        {maintenanceChip && <div className="flex justify-end" style={{ marginTop: '-4px', marginBottom: '10px' }}>{maintenanceChip}</div>}
 
         <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
           <div>
@@ -940,6 +950,7 @@ export default function Overview() {
                   service={svc}
                   index={i}
                   t={t}
+                  lang={lang}
                   latencyCell={overviewLatencyCell(latencyCardState(svc, probeServiceIds, latestProbe, allServices), t)}
                   // #1104 — the marker is per-INCIDENT; this chip is a claim about the SERVICE.
                   // Ungated, it sat on the card of a service still carrying a live incident. Same

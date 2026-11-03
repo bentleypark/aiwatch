@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js'
-import { waitForDataLoad } from './helpers.js'
+import { maintenanceChipBoxes, serveMaintenanceCard, waitForDataLoad } from './helpers.js'
 
 test.describe('Mobile viewport', () => {
   test.beforeEach(async ({ page }) => {
@@ -251,5 +251,14 @@ test.describe('Mobile viewport', () => {
     // ≥8px gap distinguishes the two without being brittle to sub-pixel font rounding.
     const gap = scoreBox.x - (noticeBox.x + noticeBox.width)
     expect(gap).toBeGreaterThanOrEqual(8)
+  })
+
+  test('#1405 — the maintenance chip sits below the status pill', async ({ page }) => {
+    await serveMaintenanceCard(page)
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    const { chip, pill } = await maintenanceChipBoxes(page)
+    expect(chip.y).toBeGreaterThanOrEqual(pill.y + pill.height - 1)
   })
 })

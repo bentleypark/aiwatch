@@ -1,7 +1,7 @@
 // incident.io Parsers — uptime, component impacts, incident text enrichment
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
-import type { StatuspageResponse } from './statuspage'
+import { maintenanceDescription, maintenanceInScope, withDescription, type StatuspageResponse } from './statuspage'
 import { fetchTracked, formatDuration, isTimeOrderImpossible, type FetchTracker } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
@@ -510,12 +510,56 @@ export function applyIncidentIoPageStructure(
 }
 
 
+/** #1405 — an incident.io maintenance note is markdown; keep its words, drop its marks. */
+export function flattenMaintenanceMarkdown(md: string): string {
+  return md
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^[ \t]*(?:#{1,6}|>|[-*•])[ \t]+/gm, '')
+}
+
 /** Parse the FIRST `"<key>":[…]` array from an unescaped RSC string into a typed list, [] on absence/error. */
 function parseRscArray<T>(s: string, key: string): T[] {
   const arr = extractJsonArray(s, key)
   if (!arr) return []
   try { return JSON.parse(arr) as T[] }
   catch (err) { console.warn(`[parseIncidentIoGlobalPage] "${key}" array unparseable:`, err instanceof Error ? err.message : err); return [] }
+}
+
+export function parseIncidentIoScheduledMaintenances(
+  html: string,
+  components: ReadonlyArray<{ id: string; name: string }>,
+  scope: readonly string[] = [],
+  now = Date.now(),
+) {
+  const s = html.replace(/\\(["\\])/g, '$1').replace(/"\$undefined"/g, 'null')
+  const nameById = new Map(components.map((c) => [c.id, c.name]))
+  return parseRscArray<Record<string, unknown>>(s, 'scheduled_maintenances').flatMap((m) => {
+    const id = typeof m.id === 'string' ? m.id : null
+    const title = typeof m.name === 'string' ? m.name.trim() : null
+    if (!id || !title || m.status === 'maintenance_complete') return []
+    const impacts = (Array.isArray(m.component_impacts) ? m.component_impacts : []).flatMap((i) => {
+      const r = i as { component_id?: unknown; start_at?: unknown; end_at?: unknown }
+      const start = typeof r.start_at === 'string' ? Date.parse(r.start_at) : NaN
+      const end = typeof r.end_at === 'string' ? Date.parse(r.end_at) : NaN
+      return typeof r.component_id === 'string' && Number.isFinite(start) ? [{ componentId: r.component_id, start, end }] : []
+    })
+    if (impacts.length === 0) return []
+    const start = Math.min(...impacts.map((i) => i.start))
+    const ends = impacts.map((i) => i.end)
+    const end = ends.every(Number.isFinite) ? Math.max(...ends) : NaN
+    if (Number.isFinite(end) && end < now) return []
+    const componentIds = [...new Set(impacts.map((i) => i.componentId))]
+    if (!maintenanceInScope(componentIds, scope)) return []
+    const componentNames = componentIds.flatMap((cid) => nameById.has(cid) ? [nameById.get(cid)!] : [])
+    const updates = (Array.isArray(m.updates) ? m.updates : []).map((u) => {
+      const r = u as { message?: { markdown?: unknown }; published_at?: unknown }
+      return { text: typeof r.message?.markdown === 'string' ? flattenMaintenanceMarkdown(r.message.markdown) : undefined, at: r.published_at }
+    })
+    return [{ id: `incidentio:${id}`, title, scheduledFor: new Date(start).toISOString(), scheduledUntil: Number.isFinite(end) ? new Date(end).toISOString() : null, componentNames, ...withDescription(maintenanceDescription(updates)) }]
+  })
 }
 
 /** Every `component_impacts` entry on the page, grouped by the incident it belongs to

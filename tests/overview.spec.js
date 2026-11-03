@@ -1,5 +1,5 @@
 import { test, expect, blockGaHits } from './fixtures.js'
-import { waitForDataLoad } from './helpers.js'
+import { maintenanceChipBoxes, serveMaintenanceCard, twinNameHeights, waitForDataLoad } from './helpers.js'
 
 test.describe('Overview page', () => {
   test.beforeEach(async ({ page }) => {
@@ -747,5 +747,16 @@ test.describe('Overview — supply-chain banner (#574)', () => {
     await page.goto('/')
     await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
     await expect(page.locator('main').getByText(/AWS infrastructure issue|AWS 인프라 이슈/)).toHaveCount(0)
+  })
+
+  test('#1405 — the maintenance chip sits below the status pill and leaves the name its width', async ({ page }) => {
+    await serveMaintenanceCard(page)
+    await page.setViewportSize({ width: 1024, height: 900 })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    const { chip, pill } = await maintenanceChipBoxes(page)
+    const [withChip, without] = await twinNameHeights(page)
+    expect(withChip).toBe(without)
+    expect(chip.y).toBeGreaterThanOrEqual(pill.y + pill.height - 1)
   })
 })

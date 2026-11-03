@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { renderEstimateAccuracy, RSS_ICON_SVG, buildMetaDescription, renderIncidents, renderErrors, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
+import { renderEstimateAccuracy, RSS_ICON_SVG, buildMetaDescription, renderIncidents, renderErrors, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, renderScheduledMaintenance, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl, SERVICE_SITE_URL } from '../slug-map'
 import { getSEOContent } from '../seo-content'
@@ -55,6 +55,58 @@ function mkService(overrides: Partial<ServiceData> = {}): ServiceData {
     ...overrides,
   }
 }
+
+describe('renderScheduledMaintenance (#1405)', () => {
+  const NOW = Date.UTC(2026, 7, 1)
+  const upcoming = (w: Parameters<typeof renderScheduledMaintenance>[0]) => renderScheduledMaintenance(w, 'upcoming', NOW)
+
+  it('renders a separate notice, never an incident row', () => {
+    const html = upcoming([{ id: 'mw-1', title: 'API maintenance', scheduledFor: new Date(Date.UTC(2026, 10, 4, 4)).toISOString(), scheduledUntil: new Date(Date.UTC(2026, 10, 4, 10)).toISOString(), componentNames: ['API'] }])
+    expect(html).toContain('Scheduled maintenance')
+    expect(html).toContain('API maintenance')
+    expect(html).toContain('Nov 4, 2026, 4:00 AM–10:00 AM UTC')
+    expect(html).toContain('Affected: API')
+    expect(html).not.toContain('incident-item')
+  })
+
+  it('names the end date of a window that runs past its start day', () => {
+    // BFL's 52-hour window from the issue.
+    const html = upcoming([{ id: 'mw-2', title: 'US Compute Maintenance', scheduledFor: new Date(Date.UTC(2026, 8, 14, 0)).toISOString(), scheduledUntil: new Date(Date.UTC(2026, 8, 16, 4)).toISOString(), componentNames: [] }])
+    expect(html).toContain('Sep 14, 2026, 12:00 AM–Sep 16, 2026, 4:00 AM UTC')
+  })
+  it('shows the start alone when no end is published (Better Stack), and skips an unreadable start', () => {
+    const startOnly = upcoming([{ id: 'mw-3', title: 'Gateway upgrade', scheduledFor: new Date(Date.UTC(2026, 10, 4, 1)).toISOString(), scheduledUntil: null, componentNames: [] }])
+    expect(startOnly).toContain('>Nov 4, 2026, 1:00 AM UTC<')
+    expect(upcoming([{ id: 'mw-4', title: 'Broken', scheduledFor: 'not a date', scheduledUntil: null, componentNames: [] }])).toBe('')
+  })
+
+  it('splits windows by phase: each call renders only its own, under its own label', () => {
+    const windows = [
+      { id: 'now', title: 'Running now', scheduledFor: new Date(NOW - 3_600_000).toISOString(), scheduledUntil: null, componentNames: [] },
+      { id: 'soon', title: 'Starts later', scheduledFor: new Date(NOW + 3_600_000).toISOString(), scheduledUntil: null, componentNames: [] },
+    ]
+    const ongoing = renderScheduledMaintenance(windows, 'ongoing', NOW)
+    expect(ongoing).toContain('>Maintenance in progress<')
+    expect(ongoing).toContain('Running now')
+    expect(ongoing).not.toContain('Starts later')
+    const later = renderScheduledMaintenance(windows, 'upcoming', NOW)
+    expect(later).toContain('>Scheduled maintenance<')
+    expect(later).toContain('Starts later')
+    expect(later).not.toContain('Running now')
+  })
+
+  it('renders an ended window under neither label (a last-good copy can be hours old)', () => {
+    const ended = [{ id: 'done', title: 'Already over', scheduledFor: new Date(NOW - 7_200_000).toISOString(), scheduledUntil: new Date(NOW - 3_600_000).toISOString(), componentNames: [] }]
+    expect(renderScheduledMaintenance(ended, 'ongoing', NOW)).toBe('')
+    expect(renderScheduledMaintenance(ended, 'upcoming', NOW)).toBe('')
+  })
+
+  it('shows the provider note, escaped, and nothing when there is none', () => {
+    const base = { id: 'mw-5', title: 'EU cluster storage maintenance', scheduledFor: new Date(Date.UTC(2026, 10, 4, 4)).toISOString(), scheduledUntil: null, componentNames: [] }
+    expect(upcoming([{ ...base, description: 'No downtime is expected <b>' }])).toContain('>No downtime is expected &lt;b&gt;</p>')
+    expect(upcoming([base])).not.toContain('<p')
+  })
+})
 
 describe('outboundReferralUrl (#842)', () => {
   it('returns the curated provider URL with a disclosed ref param', () => {

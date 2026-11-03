@@ -50,6 +50,7 @@ interface MockService {
   probeConfirmed?: boolean
   probeContradicted?: boolean
   incidents?: MockIncident[]
+  scheduledMaintenances?: Array<{ id: string; title: string; scheduledFor: string; scheduledUntil: string | null; componentNames: string[]; description?: string }>
 }
 
 function statusResponse(
@@ -67,6 +68,45 @@ describe('is-down-group.ts', () => {
 
   afterEach(() => {
     fetchMock?.mockRestore()
+  })
+
+  it('#1405 — shows each member window once, ongoing then upcoming, directly above Recent Incidents', async () => {
+    const shared = { id: 'm-shared', title: 'Console and claude.ai maintenance', scheduledFor: '2099-11-04T04:00:00Z', scheduledUntil: '2099-11-04T06:00:00Z', componentNames: ['claude.ai'], description: 'No downtime is expected.' }
+    const earlier = { id: 'm-earlier', title: 'Code session storage upgrade', scheduledFor: '2099-11-01T04:00:00Z', scheduledUntil: null, componentNames: ['Claude Code'] }
+    const ongoing = { id: 'm-now', title: 'API gateway maintenance', scheduledFor: '2000-01-01T00:00:00Z', scheduledUntil: '2099-01-01T00:00:00Z', componentNames: ['Claude API'] }
+    const ended = { id: 'm-ended', title: 'Finished maintenance', scheduledFor: '2000-01-01T00:00:00Z', scheduledUntil: '2000-01-01T02:00:00Z', componentNames: [] }
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational', scheduledMaintenances: [ongoing, ended],
+        incidents: [{ id: 'i1', title: 'Elevated errors', status: 'resolved', startedAt: new Date(Date.now() - 3_600_000).toISOString(), resolvedAt: new Date().toISOString(), duration: '1h 0m' }] },
+      { id: 'claudeai', name: 'claude.ai', status: 'operational', scheduledMaintenances: [shared] },
+      { id: 'claudecode', name: 'Claude Code', status: 'operational', scheduledMaintenances: [shared, earlier] },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    const count = (s: string) => html.split(s).length - 1
+    expect(count('Console and claude.ai maintenance')).toBe(1)
+    expect(count('No downtime is expected.')).toBe(1)
+    expect(html).not.toContain('Finished maintenance')
+    const at = (s: string) => { const i = html.indexOf(s); expect(i).toBeGreaterThan(-1); return i }
+    const list = at('<ul class="member-list">')
+    const incidents = at('Recent Incidents')
+    expect(list).toBeLessThan(at('Maintenance in progress'))
+    expect(at('API gateway maintenance')).toBeLessThan(at('Code session storage upgrade'))
+    expect(at('Code session storage upgrade')).toBeLessThan(at('Console and claude.ai maintenance'))
+    expect(at('Console and claude.ai maintenance')).toBeLessThan(incidents)
+    expect(html.slice(at('Maintenance in progress'), at('<h2>Recent Incidents'))).not.toMatch(/<h2|<section/)
+  })
+
+  it('#1405 — each card names the member services the window came from', async () => {
+    const window = { id: 'c1', title: 'Scheduled maintenance', scheduledFor: '2000-01-01T00:00:00Z', scheduledUntil: '2099-01-01T00:00:00Z', componentNames: [] }
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
+      { id: 'xai', name: 'SpaceXSI', status: 'operational' },
+      { id: 'grok', name: 'Grok', status: 'operational' },
+      { id: 'grokbot', name: 'Grok Bot', status: 'operational', scheduledMaintenances: [window] },
+      { id: 'cursor', name: 'Cursor', status: 'operational', scheduledMaintenances: [window] },
+    ]))
+    const html = await (await handler(makeReq('xai'))).text()
+    const card = html.slice(html.indexOf('Maintenance in progress'), html.indexOf('Recent Incidents'))
+    expect(card).toContain('Services: Grok Bot, Cursor')
   })
 
   it('requests the cached payload without the time series it never reads (#1531)', async () => {

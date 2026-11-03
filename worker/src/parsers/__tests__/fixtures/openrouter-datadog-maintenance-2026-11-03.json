@@ -1,0 +1,78 @@
+{
+  "maintenances": [
+    {
+      "componentsAffected": [
+        {
+          "id": "2347916e-1f82-448c-b07d-8cfbbad57322",
+          "name": "Web & Application Services",
+          "position": 1,
+          "status": "operational",
+          "type": "Component"
+        }
+      ],
+      "currentStatus": "completed",
+      "scheduledDescription": "We will be conducting site maintenance. Certain dashboard functionality (eg adding credits, creating or modifying API keys, or updating user settings) will not available during this period. Inference is not affected.",
+      "inProgressDescription": "We are conducting site maintenance. Certain dashboard functionality (eg adding credits, creating or modifying API keys, or updating user settings) is not available. Inference is not affected.",
+      "completedDescription": "Maintenance is complete. Full dashboard functionality has been restored.",
+      "id": "e9f33261-2512-4159-ad12-6862de956da0",
+      "lastModifiedAt": "2026-11-01T22:00:00.683114Z",
+      "publishedDate": "2026-10-26T20:17:41.143826Z",
+      "startDate": "2026-11-01T21:00:00Z",
+      "completedDate": "2026-11-01T22:00:00Z",
+      "timeline": [
+        {
+          "componentsAffected": [
+            {
+              "id": "2347916e-1f82-448c-b07d-8cfbbad57322",
+              "name": "Web & Application Services",
+              "position": 1,
+              "status": "operational",
+              "type": "Component"
+            }
+          ],
+          "createdAt": "2026-11-01T22:00:00.683114Z",
+          "startedAt": "2026-11-01T22:00:00.683114Z",
+          "lastModifiedAt": "2026-11-01T22:00:00.683114Z",
+          "description": "Maintenance is complete. Full dashboard functionality has been restored.",
+          "id": "19af4d80-f5d0-4b02-9b01-3a7e42d2130d",
+          "status": "completed"
+        },
+        {
+          "componentsAffected": [
+            {
+              "id": "2347916e-1f82-448c-b07d-8cfbbad57322",
+              "name": "Web & Application Services",
+              "position": 1,
+              "status": "maintenance",
+              "type": "Component"
+            }
+          ],
+          "createdAt": "2026-11-01T21:00:04.666073Z",
+          "startedAt": "2026-11-01T21:00:04.666073Z",
+          "lastModifiedAt": "2026-11-01T21:00:04.666073Z",
+          "description": "We are conducting site maintenance. Certain dashboard functionality (eg adding credits, creating or modifying API keys, or updating user settings) is not available. Inference is not affected.",
+          "id": "a89c85ff-dec6-44ff-ac59-5656933b7a0b",
+          "status": "in_progress"
+        },
+        {
+          "componentsAffected": [
+            {
+              "id": "2347916e-1f82-448c-b07d-8cfbbad57322",
+              "name": "Web & Application Services",
+              "position": 1,
+              "status": "operational",
+              "type": "Component"
+            }
+          ],
+          "createdAt": "2026-10-26T20:17:41.143826Z",
+          "startedAt": "2026-10-26T20:17:41.143826Z",
+          "lastModifiedAt": "2026-10-27T18:52:16.504629Z",
+          "description": "We will be conducting site maintenance. Certain dashboard functionality (eg adding credits, creating or modifying API keys, or updating user settings) will not available during this period. Inference is not affected.",
+          "id": "4462b69b-2df7-4bc9-ab0c-a3ca5bad0a85",
+          "status": "scheduled"
+        }
+      ],
+      "title": "Scheduled site maintenance"
+    }
+  ]
+}

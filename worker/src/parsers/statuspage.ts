@@ -28,6 +28,56 @@ export interface StatuspageResponse {
       affected_components?: Array<{ code: string; name: string; new_status: string }> | null
     }>
   }>
+  scheduled_maintenances?: Array<{
+    id: string
+    name: string
+    status: string
+    scheduled_for: string
+    scheduled_until: string | null
+    components?: Array<{ id?: string; name: string }>
+    incident_updates?: Array<{ body?: string; created_at?: string }>
+  }>
+}
+
+/** A window naming components keeps only when one of them is in `scope`; an empty scope, or a window
+ *  naming no component, keeps it. */
+export function maintenanceInScope(componentIds: readonly string[], scope: readonly string[]): boolean {
+  return scope.length === 0 || componentIds.length === 0 || componentIds.some((id) => scope.includes(id))
+}
+
+export const MAINTENANCE_DESCRIPTION_MAX = 280
+
+export const withDescription = (description: string | undefined) => description ? { description } : {}
+
+/** #1405 — the provider's latest note on a window, on one line, capped at MAINTENANCE_DESCRIPTION_MAX.
+ *  Undefined when there is no text. */
+export function maintenanceDescription(updates: ReadonlyArray<{ text: unknown; at: unknown }>): string | undefined {
+  const latest = updates
+    .filter((u): u is { text: string; at: unknown } => typeof u.text === 'string' && u.text.trim() !== '')
+    .sort((a, b) => (Date.parse(String(b.at)) || 0) - (Date.parse(String(a.at)) || 0))[0]
+  if (!latest) return undefined
+  const plain = latest.text.replace(/\s+/g, ' ').trim()
+  return plain.length > MAINTENANCE_DESCRIPTION_MAX ? `${plain.slice(0, MAINTENANCE_DESCRIPTION_MAX - 1).trimEnd()}…` : plain
+}
+
+/** Planned maintenance is a disclosure, never an Incident. Keep only active/upcoming, well-formed
+ * entries so completed history cannot appear as a current notice. */
+export function parseScheduledMaintenances(data: StatuspageResponse, scope: readonly string[] = [], now = Date.now()) {
+  return (data.scheduled_maintenances ?? []).flatMap((m) => {
+    const start = Date.parse(m.scheduled_for)
+    const end = m.scheduled_until ? Date.parse(m.scheduled_until) : NaN
+    if (!m.id || !m.name || !Number.isFinite(start)) return []
+    if (m.status === 'completed' || (Number.isFinite(end) && end < now)) return []
+    if (!maintenanceInScope((m.components ?? []).flatMap((c) => c.id ? [c.id] : []), scope)) return []
+    return [{
+      id: m.id,
+      title: m.name,
+      scheduledFor: new Date(start).toISOString(),
+      scheduledUntil: Number.isFinite(end) ? new Date(end).toISOString() : null,
+      componentNames: (m.components ?? []).map((c) => c.name).filter(Boolean),
+      ...withDescription(maintenanceDescription((m.incident_updates ?? []).map((u) => ({ text: u.body, at: u.created_at })))),
+    }]
+  })
 }
 
 export function normalizeStatus(indicator: string): 'operational' | 'degraded' | 'down' {
