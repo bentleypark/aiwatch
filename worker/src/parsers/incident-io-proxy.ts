@@ -41,8 +41,7 @@ export function buildIncidentIoProxyHtml(summary: unknown, impacts: unknown, fee
     component_impacts: impacts.component_impacts,
     component_uptimes: impacts.component_uptimes,
   }
-  const pushed = JSON.stringify(rsc).replace(/"/g, '\\"')
-  return `<script>self.__next_f.push([1,"${pushed}"])</script>`
+  return `<script>self.__next_f.push([1,${JSON.stringify(JSON.stringify(rsc))}])</script>`
 }
 
 async function readJson(res: Response, what: string): Promise<unknown> {

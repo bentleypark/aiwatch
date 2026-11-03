@@ -293,6 +293,12 @@ describe('parseIncidentIoUpdates', () => {
     expect(updates[1].stage).toBe('resolved')
   })
 
+  it('reads an update that quotes a word and carries a newline and a backslash, as the page escapes it', () => {
+    const rsc = { message_string: 'error: "START node"\nC:\\path', published_at: '2026-03-20T10:00:00Z', to_status: 'identified' }
+    const html = `<script>self.__next_f.push([1,${JSON.stringify(JSON.stringify(rsc))}])</script>`
+    expect(parseIncidentIoUpdates(html)).toEqual([{ stage: 'identified', text: 'error: "START node"\nC:\\path', at: '2026-03-20T10:00:00Z' }])
+  })
+
   it('returns empty for HTML without __next_f', () => {
     expect(parseIncidentIoUpdates('<html>no data</html>')).toEqual([])
   })

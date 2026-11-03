@@ -40,6 +40,12 @@ const nameOf = new Map(API_ORDER)
 const rsc = (structure: unknown) => `<script>self.__next_f.push([1,"${JSON.stringify({ structure }).replace(/"/g, '\\"')}"])</script>`
 
 describe('parseIncidentIoPageStructure', () => {
+  it('reads a group whose name carries a quote', () => {
+    const structure = { items: [{ group: { name: 'Models "beta"', components: [{ component_id: 'C1' }] } }] }
+    const page = `<script>self.__next_f.push([1,${JSON.stringify(JSON.stringify({ structure }))}])</script>`
+    expect(parseIncidentIoPageStructure(page)).toEqual([{ group: 'Models "beta"', ids: ['C1'] }])
+  })
+
   it('reads the rendered order and the group name from the captured fireworks page', () => {
     const structure = parseIncidentIoPageStructure(PAGE)
     expect(structure.map((i) => i.group)).toEqual(['Serverless'])

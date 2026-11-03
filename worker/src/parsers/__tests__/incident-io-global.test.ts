@@ -196,6 +196,11 @@ describe('parseIncidentIoGlobalPage (#1066)', () => {
     expect(incidents[0].timeline.map((t) => t.text)).toEqual(['trace ingestion failing'])
   })
 
+  it('reads a component name that quotes a word and carries a backslash', () => {
+    const res = parseIncidentIoGlobalPage(page([comp(API, 'Models \\\\\\"beta\\\\\\" A\\\\\\\\B')], []))
+    expect(res!.components).toEqual([{ id: API, name: 'Models "beta" A\\B', status: 'operational' }])
+  })
+
   it('returns null when the page carries no component catalog (shape change / wrong format)', () => {
     expect(parseIncidentIoGlobalPage('<html>not incident.io</html>')).toBeNull()
     expect(parseIncidentIoGlobalPage('')).toBeNull()
@@ -321,6 +326,19 @@ describe('parseIncidentIoGlobalPage — fail-safe (#1066/#713)', () => {
     const broken = `<script>self.__next_f.push([1,"x:[{${comp(API, 'LangSmith API')}}],\\"component_uptimes\\":[],` +
       `\\"incidents\\":[{\\"id\\":\\"BAD\\",\\"status\\":\\"investigating\\",\\"affected_\`corrupt"])</script>`
     expect(parseIncidentIoGlobalPage(broken)).toBeNull()
+  })
+
+  it('reads an incident whose title quotes a word and whose update carries a newline and a backslash', () => {
+    const html = page([comp(API, 'LangSmith API')], [
+      incident({ id: 'Q1', name: 'Errors on \\\\\\"v2\\\\\\" runs', status: 'investigating', published_at: '2026-07-18T10:00:00Z',
+        affected: [{ id: API, current: 'partial_outage', status: 'partial_outage' }],
+        updates: [{ to: 'investigating', msg: 'Line one\\\\nC:\\\\\\\\path', at: '2026-07-18T10:00:00Z' }] }),
+    ])
+    const res = parseIncidentIoGlobalPage(html)
+    expect(res).not.toBeNull()
+    expect(res!.incidents![0].name).toBe('Errors on "v2" runs')
+    expect(res!.incidents![0].incident_updates![0].body).toBe('Line one\nC:\\path')
+    expect(res!.components![0].status).toBe('partial_outage')
   })
 
   it('a missing/empty `incidents` array is a VALID no-active-incidents state (not a failure)', () => {
