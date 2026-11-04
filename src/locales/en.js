@@ -106,6 +106,8 @@ const en = {
   'overview.banner.healthy': 'Healthy alternatives:',
   'overview.card.incidents.compact': ' inc',
   'overview.recovered': 'Recently Resolved',
+  'overview.maintenance.ongoing': 'In maintenance',
+  'overview.maintenance.upcoming': 'Maintenance planned',
   'overview.recentlyResolved': 'Recently Resolved',
   'overview.seeAnalysis': 'See details in Analyze',
   'analysis.recoveredAt': 'Recovered',
@@ -324,6 +326,9 @@ const en = {
   // the pill at all.
   'svc.sourceUnknown.bodyAffected': "AIWatch can't currently read this provider's status page, so its uptime, score and ranking are omitted until the source is readable again.",
   'svc.sourceUnknown.bodyProbe': "AIWatch can't read this provider's status page, but the service answers AIWatch's own direct probe — so it's shown as operational on our measurement, not the provider's. Uptime and incidents resume when the source is readable again.",
+  'svc.maintenance.title': 'Scheduled Maintenance',
+  'svc.maintenance.sub': 'Announced by the provider; not counted in status, uptime or Score',
+  'svc.maintenance.affected': 'Affected: {names}',
   'svc.components.title': 'Component Status',
   'svc.components.sub': 'Per-component breakdown from the official status page',
   'svc.components.groupCount': '{n} components',

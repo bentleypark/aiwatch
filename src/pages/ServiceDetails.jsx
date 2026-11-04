@@ -31,6 +31,7 @@ import { sourceFlagsOf, isDisplayAffected } from '../utils/statusDisplay'
 import { STATUS_URL } from '../utils/statusPageUrls'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
+import { formatMaintenanceRange, maintenancePhaseKey, maintenanceWindowsOf } from '../utils/maintenance'
 import { showRecoveredChip } from '../utils/liveIncident'
 import SlackInstallLink from '../components/SlackInstallLink'
 import { rowHighlight } from '../utils/rowHighlight'
@@ -754,6 +755,41 @@ const INCIDENT_HISTORY_PREVIEW = 5
 // Security Alerts shown before the "show more" toggle (#785) — same convention as incidents.
 const SECURITY_PREVIEW = 5
 
+function ScheduledMaintenance({ service, t, lang }) {
+  const windows = maintenanceWindowsOf(service)
+  if (windows.length === 0) return null
+  return (
+    <section data-testid="scheduled-maintenance" className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center flex-wrap gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
+          {t('svc.maintenance.title')}
+          <span className="text-[var(--text2)] font-normal normal-case tracking-normal">— {t('svc.maintenance.sub')}</span>
+        </div>
+      </div>
+      <div className="flex flex-col" style={{ padding: '12px 16px', gap: '10px' }}>
+        {windows.map((w) => (
+          <div key={w.id} className="border-l-2 border-[var(--blue)]" style={{ paddingLeft: '10px' }}>
+            <div className="flex items-center flex-wrap gap-1.5">
+              <span className="mono text-[9px] rounded border border-[var(--blue)]" style={{ color: 'var(--blue)', padding: '1px 6px' }}>
+                {t(maintenancePhaseKey(w))}
+              </span>
+              <span className="text-[13px] font-medium text-[var(--text0)]">{w.title}</span>
+            </div>
+            <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '2px' }}>{formatMaintenanceRange(w, lang)}</div>
+            {w.description && (
+              <div className="text-[12px] text-[var(--text1)]" style={{ marginTop: '4px' }}>{w.description}</div>
+            )}
+            {w.componentNames?.length > 0 && (
+              <div className="text-[11px] text-[var(--text2)]" style={{ marginTop: '2px' }}>{t('svc.maintenance.affected').replace('{names}', w.componentNames.join(', '))}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
@@ -1130,6 +1166,8 @@ export default function ServiceDetails({ serviceId }) {
           per-dimension status pattern) in the drill-down zone, right before the
           incident history block ── */}
       <ComponentBreakdown service={service} t={t} />
+
+      <ScheduledMaintenance service={service} t={t} lang={lang} />
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>

@@ -524,6 +524,13 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
     expect(byName['Official Models']).toBe('degraded_performance') // DEGRADEDPERFORMANCE → degraded_performance
   })
 
+  it('reads a component whose name quotes a word and carries a backslash, as the page escapes it', () => {
+    const comp = { id: 'c1', name: { default: 'Models "beta" A\\B' }, nameHtml: { default: 'x' }, isCollapsed: false,
+      order: 1, showUptime: true, status: 'MAJOROUTAGE', isParent: false, group: null, children: [] }
+    const html = `<script>self.__next_f.push([1,${JSON.stringify(`x:${JSON.stringify(comp)}`)}])</script>`
+    expect(parseInstatusComponents(html)).toEqual([{ id: 'c1', name: 'Models "beta" A\\B', status: 'major_outage' }])
+  })
+
   it('maps PARTIALOUTAGE → partial_outage and UNDERMAINTENANCE → operational', () => {
     const comps = parseInstatusComponents(nextHtmlWithComponents({ api: 'PARTIALOUTAGE', models: 'UNDERMAINTENANCE' }))
     const byName = Object.fromEntries(comps.map((c) => [c.name, c.status]))
@@ -630,7 +637,7 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const noGroup =
-        `\\"id\\":\\"nogroupid001\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"isParent\\":false,\\"children\\":[]`
+        `\\"id\\":\\"nogroupid001\\",\\"name\\":{\\"default\\":\\"API \\\\\\"v2\\\\\\"\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"isParent\\":false,\\"children\\":[]`
       const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${noGroup}"])</script>`)
       expect(comps).toEqual([]) // dropped — the documented `group`-presence fragility
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('top-level (`group`-gated) discriminator'))

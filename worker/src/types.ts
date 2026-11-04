@@ -150,6 +150,14 @@ export interface ServiceStatus {
   uptime30d: number | null
   lastChecked: string
   incidents: Incident[]
+  scheduledMaintenances?: Array<{
+    id: string
+    title: string
+    scheduledFor: string
+    scheduledUntil: string | null
+    componentNames: string[]
+    description?: string
+  }>
   // #1614 — AIWatch's own resolved records older than the capped feed reaches, inside the trailing 30
   // days (`attachRecordedIncidentHistory`, services.ts). Read by the live Score and the is-down 30-day
   // figures; alerts, withdrawal and AI analysis read `incidents` as current state and never see these.

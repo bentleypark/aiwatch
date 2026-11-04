@@ -23,6 +23,7 @@
 import type { Incident, ServiceComponent, TimelineEntry } from '../types'
 import { formatDuration } from '../utils'
 import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
+import { maintenanceDescription, withDescription } from './statuspage'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
 
 /**
@@ -62,6 +63,20 @@ export interface DatadogStatusPage {
 export type DatadogParseResult =
   | { ok: true; page: DatadogStatusPage }
   | { ok: false; reason: DatadogParseFailure }
+
+export function parseDatadogScheduledMaintenances(raw: unknown, now = Date.now()) {
+  if (!isRecord(raw) || !Array.isArray(raw.maintenances)) return []
+  return raw.maintenances.flatMap((m) => {
+    if (!isRecord(m) || typeof m.id !== 'string' || typeof m.title !== 'string') return []
+    const start = typeof m.startDate === 'string' ? Date.parse(m.startDate) : NaN
+    const completed = typeof m.completedDate === 'string' ? Date.parse(m.completedDate) : NaN
+    if (!Number.isFinite(start) || m.currentStatus === 'completed' || (Number.isFinite(completed) && completed < now)) return []
+    const components = Array.isArray(m.componentsAffected) ? m.componentsAffected.filter(isRecord)
+      .map((c) => typeof c.name === 'string' ? c.name : null).filter((n): n is string => !!n) : []
+    const note = m[m.currentStatus === 'in_progress' ? 'inProgressDescription' : 'scheduledDescription']
+    return [{ id: `datadog:${m.id}`, title: m.title, scheduledFor: new Date(start).toISOString(), scheduledUntil: Number.isFinite(completed) ? new Date(completed).toISOString() : null, componentNames: components, ...withDescription(maintenanceDescription([{ text: note, at: null }])) }]
+  })
+}
 
 /** The component-status vocabulary this platform publishes (read off the page's own bundle, which
  *  validates against exactly this list). An unknown word is refused rather than defaulted — a new
@@ -347,12 +362,6 @@ const WINDOW_DAYS = 30
  * `ok: true` with `incidents: []` and `uptime30d: 100` is a REAL clean window. `ok: false` means the
  * document could not be read, and the caller must NOT publish that as "operational, no incidents" —
  * route it through the source-unknown path instead.
- *
- * `maintenances` is a SEPARATE top-level array and is never read here, so the "scheduled maintenance
- * leaks in as an incident" class that hit the previous OpenRouter parser twice (#894 structural,
- * #896 the completed-window backstop) has no path into this one — there is no shared container to
- * disambiguate. It is also legitimately `null` rather than `[]` when a page has none, which is why
- * nothing in this file indexes it.
  *
  * The uptime window is bounded by {@link recordReachDays}, and a short one is disclosed as
  * `uptimeWindowDays` (#1004) rather than published as a confident 30-day figure.

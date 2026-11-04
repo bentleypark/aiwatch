@@ -1,7 +1,8 @@
 // incident.io Parsers — uptime, component impacts, incident text enrichment
 
+import { unescapeJsString, decodeJsonString, JSON_STRING_CHAR } from './js-string'
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
-import type { StatuspageResponse } from './statuspage'
+import { maintenanceDescription, maintenanceInScope, withDescription, type StatuspageResponse } from './statuspage'
 import { fetchTracked, formatDuration, isTimeOrderImpossible, type FetchTracker } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
@@ -52,6 +53,10 @@ export interface IncidentIoUptime {
   missing: string[]
 }
 
+function unescapeRsc(s: string): string {
+  return unescapeJsString(s).replace(/"\$undefined"/g, 'null')
+}
+
 /** The page-level `component_impacts` array of one RSC chunk, unescaped for `JSON.parse`. `undefined` when
  *  the chunk carries none, `null` when the marker is there but no array follows it. Anchored on the marker
  *  nearest `component_uptimes` because maintenance and incident objects embed arrays of the same name
@@ -65,7 +70,7 @@ function pageImpactsJson(chunk: string): string | null | undefined {
   const arrStart = segment.indexOf('[')
   const arrEnd = segment.lastIndexOf(']')
   if (arrStart === -1 || arrEnd === -1) return null
-  return segment.substring(arrStart, arrEnd + 1).replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+  return unescapeRsc(segment.substring(arrStart, arrEnd + 1))
 }
 
 /** Every `component_impacts` entry on the page, parsed once. Returns [] when the page has no impacts
@@ -461,7 +466,7 @@ export type IncidentIoPageItem = { group: string | null; ids: string[] }
 /** The page's rendered structure from the RSC `structure.items` list — the Statuspage-compat
  *  `components.json` carries neither this order nor group membership. [] when absent or unparseable. */
 export function parseIncidentIoPageStructure(html: string): IncidentIoPageItem[] {
-  const s = html.replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+  const s = unescapeRsc(html)
   const at = s.indexOf('"structure":{')
   if (at === -1) return []
   const arr = extractJsonArray(s.substring(at), 'items')
@@ -510,12 +515,56 @@ export function applyIncidentIoPageStructure(
 }
 
 
+/** #1405 — an incident.io maintenance note is markdown; keep its words, drop its marks. */
+export function flattenMaintenanceMarkdown(md: string): string {
+  return md
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^[ \t]*(?:#{1,6}|>|[-*•])[ \t]+/gm, '')
+}
+
 /** Parse the FIRST `"<key>":[…]` array from an unescaped RSC string into a typed list, [] on absence/error. */
 function parseRscArray<T>(s: string, key: string): T[] {
   const arr = extractJsonArray(s, key)
   if (!arr) return []
   try { return JSON.parse(arr) as T[] }
   catch (err) { console.warn(`[parseIncidentIoGlobalPage] "${key}" array unparseable:`, err instanceof Error ? err.message : err); return [] }
+}
+
+export function parseIncidentIoScheduledMaintenances(
+  html: string,
+  components: ReadonlyArray<{ id: string; name: string }>,
+  scope: readonly string[] = [],
+  now = Date.now(),
+) {
+  const s = unescapeRsc(html)
+  const nameById = new Map(components.map((c) => [c.id, c.name]))
+  return parseRscArray<Record<string, unknown>>(s, 'scheduled_maintenances').flatMap((m) => {
+    const id = typeof m.id === 'string' ? m.id : null
+    const title = typeof m.name === 'string' ? m.name.trim() : null
+    if (!id || !title || m.status === 'maintenance_complete') return []
+    const impacts = (Array.isArray(m.component_impacts) ? m.component_impacts : []).flatMap((i) => {
+      const r = i as { component_id?: unknown; start_at?: unknown; end_at?: unknown }
+      const start = typeof r.start_at === 'string' ? Date.parse(r.start_at) : NaN
+      const end = typeof r.end_at === 'string' ? Date.parse(r.end_at) : NaN
+      return typeof r.component_id === 'string' && Number.isFinite(start) ? [{ componentId: r.component_id, start, end }] : []
+    })
+    if (impacts.length === 0) return []
+    const start = Math.min(...impacts.map((i) => i.start))
+    const ends = impacts.map((i) => i.end)
+    const end = ends.every(Number.isFinite) ? Math.max(...ends) : NaN
+    if (Number.isFinite(end) && end < now) return []
+    const componentIds = [...new Set(impacts.map((i) => i.componentId))]
+    if (!maintenanceInScope(componentIds, scope)) return []
+    const componentNames = componentIds.flatMap((cid) => nameById.has(cid) ? [nameById.get(cid)!] : [])
+    const updates = (Array.isArray(m.updates) ? m.updates : []).map((u) => {
+      const r = u as { message?: { markdown?: unknown }; published_at?: unknown }
+      return { text: typeof r.message?.markdown === 'string' ? flattenMaintenanceMarkdown(r.message.markdown) : undefined, at: r.published_at }
+    })
+    return [{ id: `incidentio:${id}`, title, scheduledFor: new Date(start).toISOString(), scheduledUntil: Number.isFinite(end) ? new Date(end).toISOString() : null, componentNames, ...withDescription(maintenanceDescription(updates)) }]
+  })
 }
 
 /** Every `component_impacts` entry on the page, grouped by the incident it belongs to
@@ -571,12 +620,12 @@ function isMaintenanceStatus(status: string | null | undefined): boolean {
 export function parseIncidentIoGlobalPage(html: string): StatuspageResponse | null {
   // The RSC is JS-string-escaped inside `self.__next_f.push([1,"…"])`. Unescape once; `"$undefined"` is
   // incident.io's null sentinel. (Matches the per-segment unescaping the sibling parsers do.)
-  const s = html.replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+  const s = unescapeRsc(html)
 
   // 1) Component catalog: id → display name. `[^{}]` keeps the match inside a single component object.
   const nameById = new Map<string, string>()
-  const compRe = /\{"component_id":"([0-9A-Z]{26})"[^{}]*?"name":"([^"]+)"[^{}]*\}/g
-  for (let m = compRe.exec(s); m !== null; m = compRe.exec(s)) nameById.set(m[1], m[2])
+  const compRe = new RegExp(`\\{"component_id":"([0-9A-Z]{26})"[^{}]*?"name":"(${JSON_STRING_CHAR}+)"[^{}]*\\}`, 'g')
+  for (let m = compRe.exec(s); m !== null; m = compRe.exec(s)) nameById.set(m[1], decodeJsonString(m[2]))
   if (nameById.size === 0) return null // no components on the page → withhold (shape change / not this format)
 
   // 2) Data sources. The `incidents` array is LOAD-BEARING (it drives live component status in step 3), so
@@ -1009,15 +1058,13 @@ export function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
   const results: IncidentIoUpdate[] = []
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
-    // Quotes inside __next_f JS strings are escaped as \" so match \\"...\\"
-    const re = /\\"message_string\\":\\"((?:[^\\"\\\\]|\\\\.)*)\\",\\"published_at\\":\\"([^\\"]+)\\",\\"to_status\\":\\"([^\\"]+)\\"/g
+    const json = unescapeRsc(chunk)
+    const re = new RegExp(`"message_string":"(${JSON_STRING_CHAR}*)","published_at":"([^"]+)","to_status":"([^"]+)"`, 'g')
     let m
-    while ((m = re.exec(chunk)) !== null) {
+    while ((m = re.exec(json)) !== null) {
       const [, rawText, at, toStatus] = m
       if (!rawText) continue
-      // Unescape JS-string double-encoding (\\n → \n, \\\\ → \\, etc.)
-      let text: string
-      try { text = JSON.parse(`"${rawText}"`) } catch { text = rawText }
+      const text = decodeJsonString(rawText)
       const stage: TimelineEntry['stage'] =
         toStatus === 'resolved' ? 'resolved'
         : toStatus === 'monitoring' ? 'monitoring'

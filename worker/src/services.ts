@@ -9,7 +9,7 @@ import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, applyProbeLate
 import { readSuppressions, applySuppressions } from './suppression'
 import { buildUpstreamFeeds, UPSTREAM_FEEDS, type UpstreamCandidate } from './upstream-feed'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
-import { type StatuspageResponse, type UptimeTimelines, type UptimeDataResult, normalizeStatus, parseIncidents, parseUptimeData, computeUptimeData, hasLazyUptimeShowcase } from './parsers/statuspage'
+import { type StatuspageResponse, type UptimeTimelines, type UptimeDataResult, normalizeStatus, parseIncidents, parseScheduledMaintenances, parseUptimeData, computeUptimeData, hasLazyUptimeShowcase } from './parsers/statuspage'
 import { readThroughUptimeShowcase } from './uptime-showcase'
 import {
   MISTRAL_FEED_KV_KEY, isStorableRootlyFeed, normalizeRootlyIncidents,
@@ -19,7 +19,7 @@ import {
 } from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { fetchIncidentIoProxyHtml } from './parsers/incident-io-proxy'
-import { computeIncidentIoUptime, parseIncidentIoAllComponentUptimes, parseIncidentIoReportedUptime, parseIncidentIoReportedDays, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoAllComponentUptimes, parseIncidentIoReportedUptime, parseIncidentIoReportedDays, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, parseIncidentIoScheduledMaintenances, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -32,10 +32,10 @@ import {
   synthesizeAistudioComponents,
 } from './parsers/aistudio'
 import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackUptimeWindowDays, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents, withoutDeniedBetterStackResources } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackUptimeWindowDays, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackDowntimeIncidents, parseBetterStackResolvedIds, betterStackResourceNames, resolveBetterStackTimeZone, zonedDayOf, parseBetterStackMaintenanceIds, parseBetterStackScheduledMaintenances, parseBetterStackPartialCount, parseBetterStackComponents, withoutDeniedBetterStackResources } from './parsers/betterstack'
 import { parseAwsRssIncidentsResult, parseAwsHealthEventsResult, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { parseCloudflareStatusSummary } from './parsers/cloudflare-status'
-import { parseDatadogStatusPage } from './parsers/datadog'
+import { parseDatadogStatusPage, parseDatadogScheduledMaintenances } from './parsers/datadog'
 import { mergeXaiRegionalIncidents, mergeXaiGrokSurfaceIncidents } from './xai-regions'
 import type { MonthlyArchive, MonthlyIncidentEntry, MonthlyIncidents } from './monthly-archive'
 
@@ -1958,6 +1958,24 @@ export function filterByComponentStatus(
   })
 }
 
+/** #1405 — the components a maintenance window must name to show on this service: its badge scope when
+ *  another service reads the same status page, else none. */
+export function maintenanceScopeFor(config: ServiceConfig): string[] {
+  if (!SERVICES.some((s) => s.id !== config.id && s.statusUrl === config.statusUrl)) return []
+  return badgeGroupIds(config)
+}
+
+export function withoutReferenceOnlyWindows<W extends { componentNames: string[] }>(
+  windows: W[],
+  config: ServiceConfig,
+  pageComponents: ReadonlyArray<{ id: string; name: string }>,
+): W[] {
+  const ids = config.referenceComponentIds
+  if (!ids?.length) return windows
+  const names = new Set(pageComponents.filter((c) => ids.includes(c.id)).map((c) => c.name))
+  return windows.filter((w) => !(w.componentNames.length > 0 && w.componentNames.every((n) => names.has(n))))
+}
+
 /** The component ids this service's badge is scoped to (#970 helper) — `statusComponentIds` when set,
  *  else the single `statusComponentId`, else none (a `statusComponent`-name-only service). */
 function badgeGroupIds(config: ServiceConfig): string[] {
@@ -2723,7 +2741,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         const shouldDegrade = await trackFetchFailure(trackingStore, kv, config.id, 3, Date.now(), sourceReadFailure)
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
       }
-      const parsed = parseDatadogStatusPage(safeJsonParse(configText), config.datadogComponentGroupId ?? '')
+      const datadogConfig = safeJsonParse(configText)
+      const parsed = parseDatadogStatusPage(datadogConfig, config.datadogComponentGroupId ?? '')
       if (!parsed.ok) {
         console.warn(`[fetchService] ${config.id} Datadog config.json unreadable (${parsed.reason}) content-type=${configRes.headers.get('content-type') ?? 'none'} body[0..120]=${JSON.stringify(configText.slice(0, 120))}`)
         await recordParseFailure(kv, Date.now(), config.id, parsed.reason)
@@ -2731,6 +2750,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         return { ...base, status: shouldDegrade ? 'unknown' : 'operational', sourceUnknown: true }
       }
       resetFetchFailure(trackingStore, config.id)
+      const scheduledMaintenances = withoutReferenceOnlyWindows(parseDatadogScheduledMaintenances(datadogConfig), config, parsed.page.pageComponents)
       const referenceIncidents = referenceIncidentsOf(parsed.page.incidents, config, parsed.page.pageComponents)
       const referenceIds = new Set(referenceIncidents.map((i) => i.id))
       const referenceComponents = parsed.page.pageComponents.filter((c) => config.referenceComponentIds?.includes(c.id))
@@ -2738,6 +2758,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         ...base,
         status: parsed.page.status,
         incidents: parsed.page.incidents.filter((i) => !referenceIds.has(i.id)),
+        ...(scheduledMaintenances.length > 0 ? { scheduledMaintenances } : {}),
         ...(referenceIncidents.length > 0 ? { referenceIncidents } : {}),
         ...(referenceComponents.length > 0 ? { referenceComponents } : {}),
         ...(parsed.page.components.length >= 2 ? { components: parsed.page.components } : {}),
@@ -3341,11 +3362,16 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         ? applyIncidentIoPageStructure(breakdownComponents, parseIncidentIoPageStructure(uptimeHtml))
         : breakdownComponents
       const components = resolveSvcComponents(config, { ...summaryData, components: pageOrdered })
+      const maintenanceScope = maintenanceScopeFor(config)
+      const scheduledMaintenances = withoutReferenceOnlyWindows(summaryData.scheduled_maintenances === undefined && uptimeHtml
+        ? parseIncidentIoScheduledMaintenances(uptimeHtml, summaryData.components ?? [], maintenanceScope)
+        : parseScheduledMaintenances(summaryData, maintenanceScope), config, summaryData.components ?? [])
 
       return {
         ...base,
         status: svcStatus,
         incidents: filtered,
+        ...(scheduledMaintenances.length > 0 ? { scheduledMaintenances } : {}),
         ...(referenceIncidents.length > 0 ? { referenceIncidents } : {}),
         ...(referenceCountable.length > 0 ? { referenceCountable } : {}),
         ...(referenceComponents.length > 0 ? { referenceComponents } : {}),
@@ -3723,6 +3749,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       let betterStackPartial = 0
       let betterStackComponents: ServiceComponent[] = []
       let bsDailyImpact: Record<string, DailyImpactLevel> | null = null
+      let betterStackMaintenances: ServiceStatus['scheduledMaintenances'] = []
       // #1234 — an unreadable `index.json` is a lost STATUS VERDICT, not just lost uptime:
       // `derivedStatus` below reads `betterStackStat ?? httpStatus`, so a null `betterStackStat`
       // silently substitutes the marketing page's HTTP code for the provider's own aggregate state.
@@ -3754,6 +3781,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
           // Catches custom-titled maintenance events like "Authorization System Restart" (#503)
           // where the title contains no maintenance keyword (signal 1) and pubDate is not future (signal 2).
           const maintenanceIds = parseBetterStackMaintenanceIds(bsData)
+          betterStackMaintenances = parseBetterStackScheduledMaintenances(bsData)
           if (maintenanceIds.size > 0) {
             const before = incidents.length
             incidents = incidents.filter(inc => !maintenanceIds.has(inc.id))
@@ -4057,6 +4085,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         status: legFalseGreen && legShouldDegrade ? 'unknown' : derivedStatus,
         ...(legFalseGreen ? { sourceUnknown: true } : {}),
         incidents: filtered,
+        ...(betterStackMaintenances.length > 0 ? { scheduledMaintenances: betterStackMaintenances } : {}),
         ...(incidentHistoryStart ? { incidentHistoryStart } : {}),
         // Better Stack publishes its own per-day record, the same class as Atlassian's buckets. AI Studio's
         // map is derived from `filtered` (#1788), so the calendar still paints the incidents themselves.

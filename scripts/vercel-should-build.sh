@@ -19,6 +19,7 @@ diff_exit=0
 WORKER_IMPORTS=(
   worker/src/fallback.ts
   worker/src/last-good-copy-path.ts
+  worker/src/maintenance-phase.ts
   worker/src/prediction-accuracy.ts
   worker/src/probe.ts
   worker/src/recovery-baseline-text.ts

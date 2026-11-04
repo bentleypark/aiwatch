@@ -105,6 +105,8 @@ const ko = {
   'overview.banner.healthy': '정상 대안:',
   'overview.card.incidents.compact': '건',
   'overview.recovered': '최근 복구',
+  'overview.maintenance.ongoing': '점검 중',
+  'overview.maintenance.upcoming': '점검 예정',
   'overview.recentlyResolved': '최근 복구됨',
   'overview.seeAnalysis': '분석 상세 보기',
   'analysis.recoveredAt': '복구 시각',
@@ -320,6 +322,9 @@ const ko = {
   // 아예 없기 때문이다.
   'svc.sourceUnknown.bodyAffected': 'AIWatch가 이 서비스의 공식 상태 페이지를 현재 읽지 못하고 있어 업타임·점수·랭킹은 출처가 복구될 때까지 표시하지 않습니다.',
   'svc.sourceUnknown.bodyProbe': 'AIWatch가 이 서비스의 공식 상태 페이지를 읽지 못하고 있지만, AIWatch가 직접 호출한 결과 서비스가 정상 응답합니다 — 제공자 발표가 아니라 우리 측정에 근거해 운영 중으로 표시합니다. 업타임·인시던트는 출처를 다시 읽을 수 있게 되면 제공됩니다.',
+  'svc.maintenance.title': '점검 일정',
+  'svc.maintenance.sub': '제공업체가 공지한 일정이며 상태·업타임·Score에 반영하지 않음',
+  'svc.maintenance.affected': '대상: {names}',
   'svc.components.title': '구성요소 상태',
   'svc.components.sub': '공식 상태 페이지의 구성요소별 상태',
   'svc.components.groupCount': '구성요소 {n}개',

@@ -432,6 +432,15 @@ export function parseBetterStackMaintenanceIds(data: BetterStackIndex): Set<stri
   return ids
 }
 
+export function parseBetterStackScheduledMaintenances(data: BetterStackIndex) {
+  return (data.included ?? []).flatMap((r) => {
+    if (r.type !== 'status_report' || r.attributes?.report_type !== 'maintenance' || !r.id || !r.attributes.title || !r.attributes.starts_at) return []
+    const start = Date.parse(r.attributes.starts_at)
+    if (!Number.isFinite(start) || r.attributes.aggregate_state === 'resolved') return []
+    return [{ id: `betterstack:${r.id}`, title: r.attributes.title, scheduledFor: new Date(start).toISOString(), scheduledUntil: null, componentNames: [] }]
+  })
+}
+
 /** Extract resolved incident IDs from index.json status_reports */
 export function parseBetterStackResolvedIds(data: BetterStackIndex): Set<string> {
   const resolved = new Set<string>()

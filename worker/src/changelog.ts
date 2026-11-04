@@ -1,6 +1,7 @@
 // Changelog / News collection — detect new AI service updates
 // Pilot: OpenAI (blog RSS), Google (AI blog RSS), Anthropic (news page HTML)
 
+import { unescapeJsString, decodeJsonString, JSON_STRING_CHAR } from './parsers/js-string'
 import { kvPut } from './utils'
 
 export interface ChangelogEntry {
@@ -79,11 +80,11 @@ export function parseRssEntries(xml: string, source: string): ChangelogEntry[] {
 export function parseAnthropicNews(html: string): ChangelogEntry[] {
   const entries: ChangelogEntry[] = []
   const seen = new Set<string>()
-  // Unescape the JSON (Next.js RSC payload uses escaped quotes)
-  const u = html.replace(/\\"/g, '"')
+  const u = unescapeJsString(html)
 
   // 1. Featured grid items (e.g. Project Glasswing — published at /glasswing, not /news/)
-  const featRe = /"_type":"featuredGridLink","date":"([^"]+)","(?:subject":"[^"]*",")?(summary":"[^"]*",")?title":"([^"]+)","url":"([^"]+)"/g
+  const S = JSON_STRING_CHAR
+  const featRe = new RegExp(`"_type":"featuredGridLink","date":"([^"]+)","(?:subject":"${S}*",")?(summary":"${S}*",")?title":"(${S}+)","url":"([^"]+)"`, 'g')
   let m
   // Track filter outcomes for schema-drift detection. featRe's non-greedy match
   // can grab an inline `image.url` (sanity.io CDN .svg) before the actual article
@@ -95,7 +96,7 @@ export function parseAnthropicNews(html: string): ChangelogEntry[] {
   let featRejectedSample = ''
   while ((m = featRe.exec(u)) !== null) {
     const date = m[1]
-    const title = m[3]
+    const title = decodeJsonString(m[3])
     const urlPath = m[4]
     // Article URLs are absolute paths (`/foo`) or full anthropic.com URLs.
     // Explicitly reject protocol-relative `//host/path` (would double-prefix to
@@ -135,13 +136,13 @@ export function parseAnthropicNews(html: string): ChangelogEntry[] {
     const pos = u.indexOf(searchStr)
     if (pos < 0) continue
     const after = u.substring(pos, pos + 1500)
-    const titleMatch = after.match(/"title":"([^"]{5,300})"/)
+    const titleMatch = after.match(new RegExp(`"title":"(${S}{5,300})"`))
     if (!titleMatch) continue
 
     const parsed = new Date(m[1])
     if (isNaN(parsed.getTime())) continue
 
-    entries.push({ source: 'anthropic', title: titleMatch[1], url: fullUrl, date: parsed.toISOString() })
+    entries.push({ source: 'anthropic', title: decodeJsonString(titleMatch[1]), url: fullUrl, date: parsed.toISOString() })
   }
   return entries
 }

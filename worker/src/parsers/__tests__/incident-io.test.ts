@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { computeIncidentIoUptime, parseIncidentIoComponentImpacts, parseIncidentIoIncidentComponentIds, parseIncidentIoUpdates, applyTextCache, buildTextCache } from '../incident-io'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { computeIncidentIoUptime, flattenMaintenanceMarkdown, parseIncidentIoComponentImpacts, parseIncidentIoIncidentComponentIds, parseIncidentIoScheduledMaintenances, parseIncidentIoUpdates, applyTextCache, buildTextCache } from '../incident-io'
 import type { IncidentTextCache } from '../incident-io'
 import type { Incident } from '../../types'
 
@@ -291,6 +293,12 @@ describe('parseIncidentIoUpdates', () => {
     expect(updates[1].stage).toBe('resolved')
   })
 
+  it('reads an update that quotes a word and carries a newline and a backslash, as the page escapes it', () => {
+    const rsc = { message_string: 'error: "START node"\nC:\\path', published_at: '2026-03-20T10:00:00Z', to_status: 'identified' }
+    const html = `<script>self.__next_f.push([1,${JSON.stringify(JSON.stringify(rsc))}])</script>`
+    expect(parseIncidentIoUpdates(html)).toEqual([{ stage: 'identified', text: 'error: "START node"\nC:\\path', at: '2026-03-20T10:00:00Z' }])
+  })
+
   it('returns empty for HTML without __next_f', () => {
     expect(parseIncidentIoUpdates('<html>no data</html>')).toEqual([])
   })
@@ -428,4 +436,57 @@ it('#1474 — a later push carrying component_uptimes alone does not withhold up
     `\\"id\\":\\"IMP\\",\\"start_at\\":\\"${iso(NOW - 5 * day)}\\",\\"status\\":\\"full_outage\\",\\"status_page_incident_id\\":\\"INC\\"}],${uptimes}}"])</script>` +
     `<script>self.__next_f.push([1,"b:{${uptimes}}"])</script>`
   expect(computeIncidentIoUptime(html, 'c1', NOW)).toEqual({ pct: 96.66, days: 30, todayWeightedOutageSec: 0, missing: [] })
+})
+
+describe('parseIncidentIoScheduledMaintenances (#1405)', () => {
+  // Captured groqstatus.com page: one `maintenance_scheduled` record whose window lives only in its
+  // `component_impacts` (2025-11-03 00:00–03:00Z) and whose `affected_components` carry ids, no names.
+  const html = readFileSync(resolve(__dirname, 'fixtures/groq-page-2026-09-29.html'), 'utf8')
+  const MAVERICK = '01K6Y7AE9BSWJ2SGHJT92HG53X'
+  const components = [{ id: MAVERICK, name: 'meta-llama/llama-4-maverick-17b-128e-instruct' }]
+  const window = {
+    id: 'incidentio:01K8BQGTR04CGHB0Y254CSPX90',
+    title: 'Planned Maintenance: meta-llama/llama-4-maverick-17b-128e-instruct (me-central-1)',
+    scheduledFor: '2025-11-03T00:00:00.000Z', scheduledUntil: '2025-11-03T03:00:00.000Z',
+    componentNames: ['meta-llama/llama-4-maverick-17b-128e-instruct'],
+    description: 'When: Monday, Nov 3, 2025 00:00 to 03:00 UTC (Sunday, Nov 2, 16:00 to 19:00 PT) What We’re performing planned maintenance on the me-central-1 deployment of meta-llama/llama-4-maverick-17b-128e-instruct to keep systems current. Other regions remain available. Impact No customer a…',
+  }
+
+  it('reads the window from the record\'s component impacts, before it ends', () => {
+    expect(parseIncidentIoScheduledMaintenances(html, components, [], Date.parse('2025-11-02T00:00:00Z'))).toEqual([window])
+  })
+
+  it('survives a quoted word in the note, in the encoding the cohere capture shows', () => {
+    const quoted = html.replace('remain available.\\\\n\\\\n**Im', 'remain \\\\\\"available\\\\\\".\\\\n\\\\n**Im')
+    expect(quoted).not.toBe(html)
+    const [w] = parseIncidentIoScheduledMaintenances(quoted, components, [], Date.parse('2025-11-02T00:00:00Z'))
+    expect(w?.description).toContain('Other regions remain "available".')
+  })
+
+  it('drops the window once it has ended, even while the provider still marks it scheduled', () => {
+    expect(parseIncidentIoScheduledMaintenances(html, components, [], Date.parse('2026-09-29T00:00:00Z'))).toEqual([])
+  })
+
+  it('keeps the window only for a service whose scope includes an affected component', () => {
+    const now = Date.parse('2025-11-02T00:00:00Z')
+    expect(parseIncidentIoScheduledMaintenances(html, components, [MAVERICK], now)).toEqual([window])
+    expect(parseIncidentIoScheduledMaintenances(html, components, ['other-component'], now)).toEqual([])
+  })
+
+  it('drops a record the provider marked complete, even before its window ends', () => {
+    const complete = html.replaceAll('maintenance_scheduled', 'maintenance_complete')
+    expect(parseIncidentIoScheduledMaintenances(complete, components, [], Date.parse('2025-11-02T00:00:00Z'))).toEqual([])
+  })
+
+  it('publishes nothing for a record with no component impacts (no structured window)', () => {
+    const bare = '<script>self.__next_f.push([1,"a:{\\"scheduled_maintenances\\":[{\\"affected_components\\":[],\\"component_impacts\\":[],\\"id\\":\\"X\\",\\"name\\":\\"Planned\\",\\"status\\":\\"maintenance_scheduled\\"}]}"])</script>'
+    expect(parseIncidentIoScheduledMaintenances(bare, [], [], 0)).toEqual([])
+  })
+})
+
+describe('flattenMaintenanceMarkdown (#1405)', () => {
+  it('drops markdown marks and line markers but keeps the characters plain text uses', () => {
+    expect(flattenMaintenanceMarkdown('**When:** Monday\n\n• 00:00 UTC, see [notes](https://x.test "notes")\n\n## Impact\n- `model_v2` in us_east_1, > 30s, #42'))
+      .toBe('When: Monday\n\n00:00 UTC, see notes\n\nImpact\nmodel_v2 in us_east_1, > 30s, #42')
+  })
 })

@@ -179,6 +179,15 @@ describe('parseAnthropicNews', () => {
     "])</script></html>`
     expect(parseAnthropicNews(protocolRelHtml)).toHaveLength(0)
   })
+
+  it('reads a featured and a listed title that quote a word, as the page escapes them', () => {
+    const rsc = JSON.stringify([
+      { _type: 'featuredGridLink', date: '2026-04-07', subject: 'The "big" one', summary: 'Say "hi"', title: 'Meet "Glasswing"', url: '/glasswing' },
+      { publishedOn: '2026-02-17T18:00:00.000Z', slug: { _type: 'slug', current: 'quoted' }, subjects: [], title: 'Why "quoted" titles \\ work' },
+    ])
+    const html = `<html><script>self.__next_f.push([1,${JSON.stringify(rsc)}])</script></html>`
+    expect(parseAnthropicNews(html).map((e) => e.title)).toEqual(['Meet "Glasswing"', 'Why "quoted" titles \\ work'])
+  })
 })
 
 describe('isRelevantEntry', () => {

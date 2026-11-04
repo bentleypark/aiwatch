@@ -82,6 +82,57 @@ describe('per-service structured data', () => {
   })
 })
 
+describe('scheduled maintenance disclosure (#1405)', () => {
+  it('renders an announced window separately from the service verdict and incidents', () => {
+    const html = renderPage('flux', {
+      id: 'bfl', name: 'Black Forest Labs', provider: 'Black Forest Labs', category: 'api',
+      status: 'operational', latency: null, uptime30d: 100, lastChecked: '2026-11-02T00:00:00Z', incidents: [],
+      components: [{ id: 'api', name: 'API', status: 'operational' }],
+      scheduledMaintenances: [
+        { id: 'later', title: 'Gateway upgrade', scheduledFor: '2099-11-04T01:00:00Z', scheduledUntil: null, componentNames: [] },
+        { id: 'now', title: 'Scheduled infrastructure maintenance', scheduledFor: '2000-01-01T01:00:00Z', scheduledUntil: '2099-01-01T02:00:00Z', componentNames: ['API'] },
+      ],
+    } as never, getSEOContent('flux')!, [], null)
+    expect(html).toContain('Scheduled infrastructure maintenance')
+    expect(html).toContain('Affected: API')
+    expect(html).toContain('Operational')
+    expect(html).not.toContain('Recent Incidents</h2>')
+    const ongoing = html.indexOf('Maintenance in progress')
+    const components = html.indexOf('Component Status')
+    const upcoming = html.indexOf('Scheduled maintenance</div>')
+    expect(ongoing).toBeGreaterThan(-1)
+    expect(ongoing).toBeLessThan(html.indexOf('Scheduled infrastructure maintenance'))
+    expect(components).toBeLessThan(ongoing)
+    expect(ongoing).toBeLessThan(upcoming)
+    expect(upcoming).toBeLessThan(html.indexOf('Gateway upgrade'))
+  })
+
+  it('puts every window, ongoing or upcoming, directly above Recent Incidents', () => {
+    const html = renderPage('flux', {
+      id: 'bfl', name: 'Black Forest Labs', provider: 'Black Forest Labs', category: 'api',
+      status: 'operational', latency: null, uptime30d: 100, lastChecked: '2026-11-02T00:00:00Z',
+      incidents: [{ id: 'p1', title: 'API errors', status: 'resolved', impact: 'minor', timeline: [], duration: '1h 0m',
+        startedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), resolvedAt: new Date(Date.now() - 2 * 3_600_000).toISOString() }],
+      components: [{ id: 'api', name: 'API', status: 'operational' }],
+      scheduledMaintenances: [
+        { id: 'later', title: 'Gateway upgrade', scheduledFor: '2099-11-04T01:00:00Z', scheduledUntil: null, componentNames: [] },
+        { id: 'now', title: 'Scheduled infrastructure maintenance', scheduledFor: '2000-01-01T01:00:00Z', scheduledUntil: '2099-01-01T02:00:00Z', componentNames: [] },
+      ],
+    } as never, getSEOContent('flux')!, [], null)
+    const components = html.indexOf('Component Status')
+    const ongoing = html.indexOf('Maintenance in progress')
+    const upcoming = html.indexOf('Scheduled maintenance</div>')
+    const incidents = html.indexOf('Recent Incidents')
+    expect(components).toBeGreaterThan(-1)
+    expect(ongoing).toBeGreaterThan(-1)
+    expect(incidents).toBeGreaterThan(-1)
+    expect(components).toBeLessThan(ongoing)
+    expect(ongoing).toBeLessThan(upcoming)
+    expect(upcoming).toBeLessThan(incidents)
+    expect(html.slice(html.indexOf('Gateway upgrade'), html.indexOf('<h2>Recent Incidents'))).not.toContain('<h2')
+  })
+})
+
 // #1287 — the beacon's service id on the path where the status read FAILED, which includes the paths
 // where the worker is under strain, i.e. the outage window this metric measures.
 describe('resolveBeaconSvcId (#1287 — the id survives a failed status read)', () => {

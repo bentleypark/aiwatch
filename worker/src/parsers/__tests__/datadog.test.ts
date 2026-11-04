@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { parseDatadogStatusPage } from '../datadog'
+import { parseDatadogScheduledMaintenances, parseDatadogStatusPage } from '../datadog'
 
 // Captured from https://status.openrouter.ai/config.json on 2026-09-15 (#1403) — the whole document,
 // unedited, so a shape assumption that only holds on a hand-written literal fails here instead.
@@ -22,6 +22,30 @@ const API_SCOPE = '62d944d3-1acb-471b-81a0-099b3da0164f'
 const WEB = '2347916e-1f82-448c-b07d-8cfbbad57322'
 /** The group every `doc()` fixture builds, so a test's own components are in scope by default. */
 const GROUP = 'group'
+
+describe('parseDatadogScheduledMaintenances (#1405)', () => {
+  // status.openrouter.ai `maintenances[0]` as read 2026-11-03 (completed), unedited; `completedDate` is
+  // the planned end the record was created with.
+  const live = JSON.parse(readFileSync(join(__dirname, 'fixtures/openrouter-datadog-maintenance-2026-11-03.json'), 'utf8'))
+  const asOf = (currentStatus: string) => ({ maintenances: live.maintenances.map((m: object) => ({ ...m, currentStatus })) })
+  const window = {
+    id: 'datadog:e9f33261-2512-4159-ad12-6862de956da0', title: 'Scheduled site maintenance',
+    scheduledFor: '2026-11-01T21:00:00.000Z', scheduledUntil: '2026-11-01T22:00:00.000Z',
+    componentNames: ['Web & Application Services'],
+  }
+  const scheduledNote = 'We will be conducting site maintenance. Certain dashboard functionality (eg adding credits, creating or modifying API keys, or updating user settings) will not available during this period. Inference is not affected.'
+  const inProgressNote = 'We are conducting site maintenance. Certain dashboard functionality (eg adding credits, creating or modifying API keys, or updating user settings) is not available. Inference is not affected.'
+
+  it('reads the window, with its planned end and the note for its current status', () => {
+    expect(parseDatadogScheduledMaintenances(asOf('scheduled'), Date.parse('2026-10-30T00:00:00Z'))).toEqual([{ ...window, description: scheduledNote }])
+    expect(parseDatadogScheduledMaintenances(asOf('in_progress'), Date.parse('2026-11-01T21:30:00Z'))).toEqual([{ ...window, description: inProgressNote }])
+  })
+
+  it('drops it once completed, or once its planned end has passed', () => {
+    expect(parseDatadogScheduledMaintenances(live, Date.parse('2026-11-01T21:30:00Z'))).toEqual([])
+    expect(parseDatadogScheduledMaintenances(asOf('in_progress'), Date.parse('2026-11-01T22:30:00Z'))).toEqual([])
+  })
+})
 
 /** A minimal document in the platform's real shape — one group with one leaf, plus one incident. */
 function doc(overrides: Record<string, unknown> = {}) {
