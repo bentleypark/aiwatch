@@ -86,12 +86,16 @@ describe('#1686 evaluateRum — 4 of the last 5', () => {
     const p: RumSample = { totalMs: 60_000, serverMs: 200, outcome: 'pending' }
     expect(evaluateRum([p, p, p, p, p])).toMatchObject({ kind: 'slow', cause: 'network-path' })
   })
-  it('an alert with no worker time carries no cause line', () => {
-    const v = evaluateRum(Array.from({ length: 5 }, () => ok(SLOW, null)))
+  it('an alert whose slow polls all timed out says the cause could not be split, and how to split it', () => {
+    const t: RumSample = { totalMs: 15_000, serverMs: null, outcome: 'timeout' }
+    const v = evaluateRum([t, t, t, t, t])
     if (v.kind !== 'slow') throw new Error(v.kind)
-    const { description } = formatRumAlert(v, 'SEA', 'KR', [])
-    expect(description.split('\n')).toHaveLength(2)
-    expect(description).not.toContain('undefined')
+    expect(v.cause).toBe('unknown')
+    const lines = formatRumAlert(v, 'PDX', 'KR', []).description.split('\n')
+    expect(lines).toHaveLength(3)
+    expect(lines[1]).toContain('worker time n/a')
+    expect(lines[2]).toContain("None of the slow polls carried the worker's time")
+    expect(lines[2]).toContain('`status-fetch-run`')
   })
   it('a fast error is not slow', () => {
     const e: RumSample = { totalMs: 100, serverMs: null, outcome: 'error' }
@@ -115,25 +119,27 @@ describe('#1686 applyRumVerdict', () => {
     expect(await applyRumVerdict(kv as never, send, slow, 'SEA', 'KR')).toBe('alerted')
     expect(await applyRumVerdict(kv as never, send, slow, 'SEA', 'KR')).toBe('none')
     expect(send).toHaveBeenCalledTimes(1)
-    expect(kv.store[rumAlertKey('KR', 'SEA')]).toBe('slow')
+    expect(kv.store[rumAlertKey('KR')]).toBe('slow')
     const embed = (send.mock.calls[0] as unknown as [{ title: string; description: string }])[0]
     expect(embed.title).toContain('KR via SEA')
     expect(embed.description).toContain('network path')
   })
   it('a healthy batch after an alert sends the recovery and holds the path as recovered', async () => {
-    const kv = mockKV({ [rumAlertKey('KR', 'SEA')]: 'slow' })
+    const kv = mockKV({ [rumAlertKey('KR')]: 'slow' })
     const send = vi.fn(async () => true)
     expect(await applyRumVerdict(kv as never, send, healthy, 'SEA', 'KR')).toBe('recovered')
-    expect(kv.store[rumAlertKey('KR', 'SEA')]).toBe('recovered')
+    expect(kv.store[rumAlertKey('KR')]).toBe('recovered')
   })
-  it('alerts and recovers per country AND colo — a user served normally elsewhere does not clear a slow path', async () => {
+  it('one session moving across colos raises one alert per country, not one per colo (2026-11-03: PDX, SJC, LAX, SEA)', async () => {
     const kv = mockKV()
     const send = vi.fn(async () => true)
-    expect(await applyRumVerdict(kv as never, send, slow, 'SEA', 'KR')).toBe('alerted')
-    expect(await applyRumVerdict(kv as never, send, healthy, 'ICN', 'KR')).toBe('none')
-    expect(await applyRumVerdict(kv as never, send, slow, 'NRT', 'KR')).toBe('alerted')
-    expect(await applyRumVerdict(kv as never, send, healthy, 'SEA', 'KR')).toBe('recovered')
-    expect(kv.store[rumAlertKey('KR', 'NRT')]).toBe('slow')
+    expect(await applyRumVerdict(kv as never, send, slow, 'PDX', 'KR')).toBe('alerted')
+    for (const colo of ['SJC', 'LAX', 'SEA']) expect(await applyRumVerdict(kv as never, send, slow, colo, 'KR')).toBe('none')
+    expect(await applyRumVerdict(kv as never, send, slow, 'SIN', 'SG')).toBe('alerted')
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(await applyRumVerdict(kv as never, send, healthy, 'ICN', 'KR')).toBe('recovered')
+    expect(kv.store[rumAlertKey('KR')]).toBe('recovered')
+    expect(kv.store[rumAlertKey('SG')]).toBe('slow')
   })
   it('alternating slow and healthy batches on one path send at most one alert and one recovery per hold', async () => {
     const kv = mockKV()
@@ -152,7 +158,7 @@ describe('#1686 applyRumVerdict', () => {
   it('keeps the key unset when the send fails, so the next batch retries', async () => {
     const kv = mockKV()
     expect(await applyRumVerdict(kv as never, async () => false, slow, 'SEA', 'KR')).toBe('none')
-    expect(kv.store[rumAlertKey('KR', 'SEA')]).toBeUndefined()
+    expect(kv.store[rumAlertKey('KR')]).toBeUndefined()
   })
   it('attaches the affected platforms from the last infra cycle', async () => {
     const kv = mockKV({
@@ -261,7 +267,7 @@ describe('#1686 worker wiring', () => {
     await Promise.all(pending)
     expect(res.status).toBe(204)
     expect(discord).toHaveBeenCalledWith('https://discord.example/hook', expect.objectContaining({ method: 'POST' }))
-    expect(kv.store[rumAlertKey('XX', 'UNK')]).toBe('slow')
+    expect(kv.store[rumAlertKey('XX')]).toBe('slow')
   })
   it('/api/rum rejects a malformed batch', async () => {
     const res = await workerModule.fetch(
