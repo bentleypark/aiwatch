@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   parseRssEntries,
   parseAnthropicNews,
+  collectChangelogs,
   isRelevantEntry,
   formatChangelogSection,
   fetchWithRetry,
@@ -89,104 +92,118 @@ describe('parseRssEntries', () => {
 })
 
 describe('parseAnthropicNews', () => {
-  // Minimal mock of the Next.js SSR payload structure
-  const mockHtml = `<html><script>self.__next_f.push([1,"
-    \\"publishedOn\\":\\"2026-04-07T18:00:00.000Z\\",\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"project-glasswing\\"},\\"subjects\\":[],\\"title\\":\\"Project Glasswing\\"
-    \\"publishedOn\\":\\"2026-02-17T18:00:00.000Z\\",\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"claude-sonnet-4-6\\"},\\"subjects\\":[],\\"title\\":\\"Introducing Claude Sonnet 4.6\\"
-    \\"publishedOn\\":\\"2026-02-05T18:00:00.000Z\\",\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"claude-opus-4-6\\"},\\"subjects\\":[],\\"title\\":\\"Introducing Claude Opus 4.6\\"
-    \\"publishedOn\\":\\"2026-03-12T14:39:00.000Z\\",\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"claude-partner-network\\"},\\"subjects\\":[],\\"title\\":\\"Anthropic invests $100 million into the Claude Partner Network\\"
-    \\"publishedOn\\":\\"2025-12-02T18:00:00.000Z\\",\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"anthropic-acquires-bun\\"},\\"subjects\\":[],\\"title\\":\\"Anthropic acquires Bun as Claude Code reaches $1B milestone\\"
-  "])</script></html>`
+  const livePage = readFileSync(fileURLToPath(new URL('./fixtures/anthropic-news-2026-11-04.html', import.meta.url)), 'utf8')
+  const rscPage = (records: unknown[]) =>
+    `<html><script>self.__next_f.push([1,${JSON.stringify(JSON.stringify(records))}])</script></html>`
+  const article = (fields: Record<string, unknown>) => ({ _id: 'a1', _type: 'article', title: 'Introducing Claude Sonnet 4.6', ...fields })
 
-  it('extracts news list posts with title, slug, date', () => {
-    const entries = parseAnthropicNews(mockHtml)
-    expect(entries.length).toBeGreaterThanOrEqual(4)
-    const sonnet = entries.find((e) => e.title === 'Introducing Claude Sonnet 4.6')
-    expect(sonnet).toBeDefined()
-    expect(sonnet!.url).toBe('https://www.anthropic.com/news/claude-sonnet-4-6')
-    expect(sonnet!.date).toContain('2026-02-17')
+  it('reads every article on the 2026-11-04 /news page (#1908)', () => {
+    const entries = parseAnthropicNews(livePage)
+    expect(entries).toHaveLength(110)
+    expect(new Set(entries.map((e) => e.url)).size).toBe(110)
   })
 
-  it('extracts featured grid items (e.g. Project Glasswing)', () => {
-    const featuredHtml = `<html><script>self.__next_f.push([1,"
-      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-04-07\\",\\"subject\\":\\"Announcements\\",\\"summary\\":\\"A new initiative...\\",\\"title\\":\\"Project Glasswing\\",\\"url\\":\\"/glasswing\\"
-      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-03-18\\",\\"summary\\":\\"We invited Claude.ai users...\\",\\"title\\":\\"What 81,000 people want from AI\\",\\"url\\":\\"/news/what-81000-people-want\\"
-    "])</script></html>`
-    const entries = parseAnthropicNews(featuredHtml)
-    expect(entries.length).toBe(2)
-    const glasswing = entries.find((e) => e.title === 'Project Glasswing')
-    expect(glasswing).toBeDefined()
-    expect(glasswing!.url).toBe('https://www.anthropic.com/glasswing')
-    expect(glasswing!.date).toContain('2026-04-07')
+  it.each([
+    ['a list record (title before slug, slug without _type)', 'https://www.anthropic.com/news/formal-verification', '2026-10-22', 'LLMs are making formal software verification feasible at a much larger scale'],
+    ['a full record (slug after other fields)', 'https://www.anthropic.com/news/s1-sec', '2026-10-26', 'Anthropic files S-1 with the SEC for proposed initial public offering'],
+    ['a record with no slug, only linkedUrl', 'https://www.anthropic.com/research/early-progress-drug-development', '2026-10-27', 'Early progress on accelerating drug development with Claude'],
+    ['a record with both, which links to linkedUrl', 'https://www.anthropic.com/claude-fable-and-mythos-5-1', '2026-09-15', 'Introducing Claude Mythos and Fable 5.1'],
+    ['a title the page prefixes with a space', 'https://www.anthropic.com/news/redesigning-source-control', '2026-10-13', 'Redesigning source control at Anthropic'],
+    ['a title with a curly apostrophe', 'https://www.anthropic.com/news/rare-disease-research-grants', '2026-07-20', 'Apply for Anthropic’s AI for Science rare disease research grants'],
+  ])('reads %s from the 2026-11-04 page', (_shape, url, day, title) => {
+    const entry = parseAnthropicNews(livePage).find((e) => e.url === url)
+    expect(entry).toEqual({ source: 'anthropic', title, url, date: `${day}T00:00:00.000Z` })
   })
 
-  it('combines featured + news list and deduplicates', () => {
-    const combinedHtml = `<html><script>self.__next_f.push([1,"
-      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-04-07\\",\\"summary\\":\\"test\\",\\"title\\":\\"Project Glasswing\\",\\"url\\":\\"/glasswing\\"
-      \\"publishedOn\\":\\"2026-02-17T18:00:00.000Z\\",\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"claude-sonnet-4-6\\"},\\"subjects\\":[],\\"title\\":\\"Introducing Claude Sonnet 4.6\\"
-    "])</script></html>`
-    const entries = parseAnthropicNews(combinedHtml)
-    expect(entries.length).toBe(2)
-    expect(entries.map((e) => e.title)).toContain('Project Glasswing')
-    expect(entries.map((e) => e.title)).toContain('Introducing Claude Sonnet 4.6')
+  it('does not depend on field order', () => {
+    const fields = { publishedOn: '2026-02-17', slug: { current: 'claude-sonnet-4-6' } }
+    const forward = rscPage([article(fields)])
+    const reversed = rscPage([Object.fromEntries(Object.entries(article(fields)).reverse())])
+    expect(parseAnthropicNews(reversed)).toEqual(parseAnthropicNews(forward))
+    expect(parseAnthropicNews(forward)).toHaveLength(1)
   })
 
   it('deduplicates by URL', () => {
-    const duped = mockHtml + mockHtml
-    const entries = parseAnthropicNews(duped)
-    const urls = entries.map((e) => e.url)
-    expect(new Set(urls).size).toBe(urls.length)
+    const record = article({ publishedOn: '2026-02-17', slug: { current: 'claude-sonnet-4-6' } })
+    expect(parseAnthropicNews(rscPage([record, record]))).toHaveLength(1)
   })
 
   it('returns empty for non-Anthropic HTML', () => {
     expect(parseAnthropicNews('<html><body>Hello</body></html>')).toEqual([])
   })
 
-  it('rejects featured-grid items where the regex matches an inline image URL (sanity.io) instead of the article URL (#275)', () => {
-    // Real production case: featured grid item with an inline `image.url` that
-    // appears before the article `url`. The non-greedy regex captures the image URL,
-    // so we must reject anything that isn't an anthropic.com path.
-    const sanityImageHtml = `<html><script>self.__next_f.push([1,"
-      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-04-07\\",\\"summary\\":\\"intro\\",\\"title\\":\\"Introducing Claude Opus 4.7\\",\\"url\\":\\"https://cdn.sanity.io/images/abc/c0af2a56-1000x1000.svg\\"
-      \\"publishedOn\\":\\"2026-04-16T14:30:00.000Z\\",\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"claude-opus-4-7\\"},\\"subjects\\":[],\\"title\\":\\"Introducing Claude Opus 4.7\\"
-    "])</script></html>`
-    const entries = parseAnthropicNews(sanityImageHtml)
-    // Only the slug-based news-list entry should be present, with the canonical /news/ URL
-    expect(entries).toHaveLength(1)
-    expect(entries[0].url).toBe('https://www.anthropic.com/news/claude-opus-4-7')
-    // No CDN asset URL leaks through
-    for (const e of entries) {
-      expect(e.url).not.toMatch(/cdn\.sanity\.io|\.svg$/)
+  it.each([
+    ['a CDN asset (#275)', 'https://cdn.sanity.io/images/abc/x.svg'],
+    ['a protocol-relative URL', '//evil.com/news/x'],
+  ])('ignores a linkedUrl that is %s and falls back to the slug', (_kind, linkedUrl) => {
+    const withSlug = article({ publishedOn: '2026-02-17', slug: { current: 'claude-sonnet-4-6' }, linkedUrl })
+    expect(parseAnthropicNews(rscPage([withSlug])).map((e) => e.url)).toEqual(['https://www.anthropic.com/news/claude-sonnet-4-6'])
+    const withoutSlug = article({ publishedOn: '2026-02-17', slug: null, linkedUrl })
+    expect(parseAnthropicNews(rscPage([withoutSlug]))).toEqual([])
+  })
+
+  it('skips a record with no title or no valid date', () => {
+    const records = [
+      article({ title: '', publishedOn: '2026-02-17', slug: { current: 'a' } }),
+      article({ publishedOn: 'not-a-date', slug: { current: 'b' } }),
+      article({ slug: { current: 'c' } }),
+    ]
+    expect(parseAnthropicNews(rscPage(records))).toEqual([])
+  })
+
+  it('reads a record whose strings hold braces and quotes before and after its _type', () => {
+    const record = {
+      title: 'Braces } { and "quotes" \\ before',
+      summary: '} "} {" \\"',
+      _type: 'article',
+      cardImage: { alt: '{ "nested" }' },
+      slug: { current: 'braces' },
+      publishedOn: '2026-02-17',
     }
-  })
-
-  it('rejects featured-grid item with sanity.io URL even when no slug-list fallback exists (#275 isolation)', () => {
-    // Locks down the featRe rejection path independently — without a slug-list entry
-    // to recover via, a regression that disables the URL filter would produce a bogus
-    // entry instead of cleanly returning 0. The combined-fallback test alone would
-    // still pass length=1 if the filter broke and slug recovered.
-    const featuredOnlyBadUrl = `<html><script>self.__next_f.push([1,"
-      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-04-07\\",\\"summary\\":\\"x\\",\\"title\\":\\"Bad URL Item\\",\\"url\\":\\"https://cdn.sanity.io/images/abc/x.svg\\"
-    "])</script></html>`
-    expect(parseAnthropicNews(featuredOnlyBadUrl)).toHaveLength(0)
-  })
-
-  it('rejects protocol-relative URLs (//host/path) — would otherwise produce double-prefixed broken URL', () => {
-    // Without the `!startsWith('//')` guard, `urlPath = '//evil.com/x'` passes the
-    // `startsWith('/')` check, then gets prefixed to `https://www.anthropic.com//evil.com/x`.
-    const protocolRelHtml = `<html><script>self.__next_f.push([1,"
-      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-04-07\\",\\"summary\\":\\"x\\",\\"title\\":\\"Bad PR URL\\",\\"url\\":\\"//evil.com/news/x\\"
-    "])</script></html>`
-    expect(parseAnthropicNews(protocolRelHtml)).toHaveLength(0)
-  })
-
-  it('reads a featured and a listed title that quote a word, as the page escapes them', () => {
-    const rsc = JSON.stringify([
-      { _type: 'featuredGridLink', date: '2026-04-07', subject: 'The "big" one', summary: 'Say "hi"', title: 'Meet "Glasswing"', url: '/glasswing' },
-      { publishedOn: '2026-02-17T18:00:00.000Z', slug: { _type: 'slug', current: 'quoted' }, subjects: [], title: 'Why "quoted" titles \\ work' },
+    expect(parseAnthropicNews(rscPage([{ _id: 'x', blurb: '{ "' }, record]))).toEqual([
+      { source: 'anthropic', title: 'Braces } { and "quotes" \\ before', url: 'https://www.anthropic.com/news/braces', date: '2026-02-17T00:00:00.000Z' },
     ])
-    const html = `<html><script>self.__next_f.push([1,${JSON.stringify(rsc)}])</script></html>`
-    expect(parseAnthropicNews(html).map((e) => e.title)).toEqual(['Meet "Glasswing"', 'Why "quoted" titles \\ work'])
+  })
+
+  it('keeps an absolute anthropic.com linkedUrl as is', () => {
+    const record = article({ publishedOn: '2026-02-17', slug: { current: 'x' }, linkedUrl: 'https://www.anthropic.com/glasswing' })
+    expect(parseAnthropicNews(rscPage([record])).map((e) => e.url)).toEqual(['https://www.anthropic.com/glasswing'])
+  })
+
+  it('reads a title that quotes a word, as the page escapes it', () => {
+    const record = article({ title: 'Why "quoted" titles \\ work', publishedOn: '2026-02-17', slug: { current: 'quoted' } })
+    expect(parseAnthropicNews(rscPage([record])).map((e) => e.title)).toEqual(['Why "quoted" titles \\ work'])
+  })
+})
+
+describe('collectChangelogs last-fetch marker (#1908)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const makeKV = () => {
+    const data = new Map<string, string>()
+    const kv = {
+      get: async (key: string) => data.get(key) ?? null,
+      put: async (key: string, value: string) => { data.set(key, value) },
+    } as unknown as KVNamespace
+    return { kv, data }
+  }
+  const rss = '<rss><channel><item><title>Introducing GPT-5</title><link>https://openai.com/blog/gpt-5</link><pubDate>Wed, 09 Apr 2026 12:00:00 GMT</pubDate></item></channel></rss>'
+
+  const livePage = () => readFileSync(fileURLToPath(new URL('./fixtures/anthropic-news-2026-11-04.html', import.meta.url)), 'utf8')
+
+  it.each([
+    ['writes it for each source whose page yields entries', livePage, rss, true, true],
+    ['does not write it for an HTML page that yields none', () => '<html><body>Hello</body></html>', rss, false, true],
+    ['does not write it for an RSS feed that yields none', livePage, '<rss><channel></channel></rss>', true, false],
+  ])('%s', async (_case, anthropicBody, rssBody, anthropicWritten, openaiWritten) => {
+    const page = anthropicBody()
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      new Response(url.includes('anthropic.com') ? page : rssBody, { status: 200 })))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { kv, data } = makeKV()
+    await collectChangelogs(kv)
+    expect(data.has(lastFetchKey('anthropic'))).toBe(anthropicWritten)
+    expect(data.has(lastFetchKey('openai'))).toBe(openaiWritten)
   })
 })
 

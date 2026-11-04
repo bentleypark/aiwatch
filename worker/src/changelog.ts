@@ -1,7 +1,7 @@
 // Changelog / News collection — detect new AI service updates
 // Pilot: OpenAI (blog RSS), Google (AI blog RSS), Anthropic (news page HTML)
 
-import { unescapeJsString, decodeJsonString, JSON_STRING_CHAR } from './parsers/js-string'
+import { unescapeJsString } from './parsers/js-string'
 import { kvPut } from './utils'
 
 export interface ChangelogEntry {
@@ -68,81 +68,68 @@ export function parseRssEntries(xml: string, source: string): ChangelogEntry[] {
   return entries
 }
 
-/**
- * Parse Anthropic /news HTML page (Next.js SSR payload).
- * Extracts from two data structures:
- * 1. Featured grid items: {"_type":"featuredGridLink","date":"...","title":"...","url":"..."}
- *    URL must be relative (`/...`) or anthropic.com — rejects image-asset URLs
- *    (e.g. `cdn.sanity.io/...svg`) that the non-greedy regex would otherwise match
- *    when an inline `image.url` precedes the article `url` in the JSON. (#275)
- * 2. News list items: publishedOn + slug + title pattern (canonical /news/{slug})
- */
+/** The JSON object that opens at `start` (a `{`), or null when it does not close or parse. */
+function readJsonObjectAt(text: string, start: number): Record<string, unknown> | null {
+  let depth = 0
+  let inString = false
+  for (let i = start; i < text.length; i++) {
+    const c = text[i]
+    if (inString) {
+      if (c === '\\') i++
+      else if (c === '"') inString = false
+    } else if (c === '"') inString = true
+    else if (c === '{') depth++
+    else if (c === '}' && --depth === 0) {
+      try { return JSON.parse(text.slice(start, i + 1)) as Record<string, unknown> } catch { return null }
+    }
+  }
+  return null
+}
+
+/** Index of the `{` that opens the object enclosing `at`, or -1. */
+function enclosingObjectStart(text: string, at: number): number {
+  let depth = 0
+  let inString = false
+  for (let i = at - 1; i >= 0; i--) {
+    const c = text[i]
+    if (c === '"') {
+      let slashes = 0
+      while (text[i - 1 - slashes] === '\\') slashes++
+      if (slashes % 2 === 0) inString = !inString
+    } else if (inString) continue
+    else if (c === '}') depth++
+    else if (c === '{' && depth-- === 0) return i
+  }
+  return -1
+}
+
+/** `linkedUrl` if it is an anthropic.com page, else `/news/{slug}` (#275 rejects CDN and `//host` URLs). */
+function anthropicArticleUrl(article: Record<string, unknown>): string | null {
+  const linked = article.linkedUrl
+  if (typeof linked === 'string') {
+    if (linked.startsWith('/') && !linked.startsWith('//')) return `https://www.anthropic.com${linked}`
+    if (linked.startsWith('https://www.anthropic.com/')) return linked
+  }
+  const slug = (article.slug as { current?: unknown } | null | undefined)?.current
+  return typeof slug === 'string' && slug ? `https://www.anthropic.com/news/${slug}` : null
+}
+
+/** Every `"_type":"article"` object in the /news page's Next.js RSC payload, read by field name (#1908). */
 export function parseAnthropicNews(html: string): ChangelogEntry[] {
   const entries: ChangelogEntry[] = []
   const seen = new Set<string>()
   const u = unescapeJsString(html)
-
-  // 1. Featured grid items (e.g. Project Glasswing — published at /glasswing, not /news/)
-  const S = JSON_STRING_CHAR
-  const featRe = new RegExp(`"_type":"featuredGridLink","date":"([^"]+)","(?:subject":"${S}*",")?(summary":"${S}*",")?title":"(${S}+)","url":"([^"]+)"`, 'g')
-  let m
-  // Track filter outcomes for schema-drift detection. featRe's non-greedy match
-  // can grab an inline `image.url` (sanity.io CDN .svg) before the actual article
-  // `url` (#275); the filter rejects these. In normal operation N rejected per fetch
-  // is expected — only escalate to a warn if EVERY match was rejected (i.e., the
-  // regex is firing but our gate is letting nothing through, indicating drift).
-  let featAccepted = 0
-  let featRejected = 0
-  let featRejectedSample = ''
-  while ((m = featRe.exec(u)) !== null) {
-    const date = m[1]
-    const title = decodeJsonString(m[3])
-    const urlPath = m[4]
-    // Article URLs are absolute paths (`/foo`) or full anthropic.com URLs.
-    // Explicitly reject protocol-relative `//host/path` (would double-prefix to
-    // `https://www.anthropic.com//host/path`) and external CDN/asset URLs.
-    const isAbsolutePath = urlPath.startsWith('/') && !urlPath.startsWith('//')
-    const isAnthropicUrl = urlPath.startsWith('https://www.anthropic.com')
-    if (!(isAbsolutePath || isAnthropicUrl)) {
-      if (featRejected === 0) featRejectedSample = urlPath.slice(0, 120)
-      featRejected++
-      continue
-    }
-    const parsed = new Date(date)
-    if (isNaN(parsed.getTime())) continue
-    const fullUrl = isAnthropicUrl ? urlPath : `https://www.anthropic.com${urlPath}`
-    if (seen.has(fullUrl)) continue
-    seen.add(fullUrl)
-    entries.push({ source: 'anthropic', title, url: fullUrl, date: parsed.toISOString() })
-    featAccepted++
-  }
-  // Only warn when the regex matched but EVERY match was filtered — that's the
-  // signal that something changed upstream (e.g., article URL field renamed).
-  // Steady-state log noise (per-hour) would dilute the regression signal.
-  if (featRejected > 0 && featAccepted === 0) {
-    console.warn(`[changelog] anthropic featRe: rejected ${featRejected} URL(s), accepted 0 — possible schema drift (sample: ${featRejectedSample})`)
-  }
-
-  // 2. News list items: publishedOn + slug pairs
-  const slugRe = /"publishedOn":"([^"]+)","slug":\{"_type":"slug","current":"([^"]+)"\}/g
-  while ((m = slugRe.exec(u)) !== null) {
-    const slug = m[2]
-    const fullUrl = `https://www.anthropic.com/news/${slug}`
-    if (seen.has(fullUrl)) continue
-    seen.add(fullUrl)
-
-    // Find title AFTER slug (the JSON structure has: ...slug...subjects...title)
-    const searchStr = `"current":"${slug}"`
-    const pos = u.indexOf(searchStr)
-    if (pos < 0) continue
-    const after = u.substring(pos, pos + 1500)
-    const titleMatch = after.match(new RegExp(`"title":"(${S}{5,300})"`))
-    if (!titleMatch) continue
-
-    const parsed = new Date(m[1])
-    if (isNaN(parsed.getTime())) continue
-
-    entries.push({ source: 'anthropic', title: decodeJsonString(titleMatch[1]), url: fullUrl, date: parsed.toISOString() })
+  const marker = '"_type":"article"'
+  for (let at = u.indexOf(marker); at >= 0; at = u.indexOf(marker, at + marker.length)) {
+    const start = enclosingObjectStart(u, at)
+    const article = start < 0 ? null : readJsonObjectAt(u, start)
+    if (!article || article._type !== 'article') continue
+    const title = typeof article.title === 'string' ? article.title.trim() : ''
+    const url = anthropicArticleUrl(article)
+    const date = typeof article.publishedOn === 'string' ? new Date(article.publishedOn) : null
+    if (!title || !url || !date || isNaN(date.getTime()) || seen.has(url)) continue
+    seen.add(url)
+    entries.push({ source: 'anthropic', title, url, date: date.toISOString() })
   }
   return entries
 }
@@ -211,8 +198,8 @@ async function fetchSource(src: ChangelogSource): Promise<ChangelogEntry[]> {
   const entries = src.type === 'html'
     ? parseAnthropicNews(text)
     : parseRssEntries(text, src.id)
-  if (entries.length === 0 && text.length > 1000) {
-    console.warn(`[changelog] ${src.id}: fetched ${text.length} bytes but parsed 0 entries — possible format change`)
+  if (entries.length === 0) {
+    throw new Error(`${src.id}: fetched ${text.length} bytes but parsed 0 entries — possible format change`)
   }
 
   // Filter to last 7 days + relevance
@@ -290,8 +277,6 @@ export async function collectChangelogs(
       console.warn(`[changelog] ${src.id} fetch failed:`, result.reason instanceof Error ? result.reason.message : result.reason)
       continue
     }
-    // Record successful fetch (independent of how many entries it produced —
-    // fetching the page successfully is the signal that the source is reachable).
     lastFetchWrites.push(kvPut(kv, lastFetchKey(src.id), nowIso, { expirationTtl: LAST_FETCH_TTL }))
     for (const entry of result.value) {
       const key = `${entry.source}:${entry.title}`
