@@ -1005,7 +1005,7 @@ describe('pickBreakdownComponents (#606 Cat B)', () => {
 })
 
 describe('SERVICES multi-component config sanity (#379)', () => {
-  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI + Review Agents + Cursor IDE (iOS) + BugBot + Origin + Third-party models', () => {
+  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI + Cursor IDE (iOS) + BugBot + Origin + Third-party models', () => {
     const cursor = SERVICES.find((s) => s.id === 'cursor')!
     expect(cursor.statusComponentId).toBe('rflc60xp5jp2') // IDE
     expect(cursor.statusComponentIds).toEqual([
@@ -1013,7 +1013,6 @@ describe('SERVICES multi-component config sanity (#379)', () => {
       'mwv1g9sc7kdh', // Cloud Agents
       'k0trcq273dr6', // Automations
       'vsny1qv7v86c', // CLI
-      '2x2chyqwmkzl', // Review Agents (#1420)
       'cursor-ios', // Cursor IDE (iOS) (#1814)
       'bugbot', // BugBot (#1814)
       'xwjpvdf81qh9', // Origin (#1814)
