@@ -71,7 +71,7 @@ Per-service status is resolved in `worker/src/services.ts` with this priority:
 ## Scheduled maintenance (#1405)
 
 Announced maintenance is **not outage evidence**: it changes no verdict, badge, uptime, Score or impact
-calendar, and sends no alert. It is published as `scheduledMaintenances` on the service and rendered apart
+calendar, and sends only maintenance alerts ([discord-alert-paths.md](discord-alert-paths.md#maintenance-alerts-1405)). It is published as `scheduledMaintenances` on the service and rendered apart
 from the status: on the is-down page and the group page (`api/is-down-group.ts`, each window
 once across members) as a separate card (`renderScheduledMaintenance`), and on the
 dashboard as a chip on the Overview card and a section in ServiceDetails (`src/utils/maintenance.js`).

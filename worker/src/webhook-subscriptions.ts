@@ -20,7 +20,7 @@ import { kvPut, kvDel, isAllowedAlertWebhook, appendUtm } from './utils'
 import { postSlackAlert, classifySlackDelivery } from './slack-message'
 import { isDownUrl } from './rss'
 import { FAMILY_OF_SERVICE } from './alerts'
-import type { AlertFeedEntry, AlertKind } from './alert-feed'
+import { isMaintenanceKind, type AlertFeedEntry, type AlertKind } from './alert-feed'
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -31,6 +31,8 @@ export interface SubscriptionFilters {
   alertTarget: 'all' | 'custom'
   alertServices: string[]
   alertIncidents: boolean
+  /** #1405 — opt-in, default off. */
+  alertMaintenance: boolean
 }
 
 /** A pending (unconfirmed) subscription — holds the encrypted URL + the one-time code until the
@@ -175,7 +177,8 @@ export function normalizeFilters(raw: unknown): SubscriptionFilters {
     ? r.alertServices.filter((s): s is string => typeof s === 'string').slice(0, 100)
     : []
   const alertIncidents = r.alertIncidents !== false // default on
-  return { alertCondition, alertTarget, alertServices, alertIncidents }
+  const alertMaintenance = r.alertMaintenance === true
+  return { alertCondition, alertTarget, alertServices, alertIncidents, alertMaintenance }
 }
 
 // #1106 — `withdrawn` is an INCIDENT kind: it closes a thread the subscriber's own `new` alert
@@ -187,17 +190,13 @@ export function normalizeFilters(raw: unknown): SubscriptionFilters {
 const INCIDENT_KINDS = new Set<AlertKind>(['new', 'resolved', 'withdrawn'])
 const STATUS_KINDS = new Set<AlertKind>(['down', 'degraded', 'recovered'])
 
-/** Whether a feed entry should be delivered to a subscriber, given their filters. Ported verbatim
- *  from the former client `shouldRelay` (webhookAlerts.js) so server delivery matches what the
- *  browser relay did (pinned by a parity test):
- *   - alertTarget 'custom' → at least one covered service must be in alertServices.
- *   - incident kinds (new/resolved/withdrawn — #1106) → gated by alertIncidents (default on).
- *   - status kinds → alertCondition 'down' drops degraded; 'all' keeps everything. */
+/** Whether a feed entry should be delivered to a subscriber, given their filters. */
 export function shouldDeliver(entry: AlertFeedEntry, filters: SubscriptionFilters): boolean {
   if (filters.alertTarget === 'custom' && !entry.svcIds?.some((id) => filters.alertServices.includes(id))) {
     return false
   }
   if (INCIDENT_KINDS.has(entry.kind)) return filters.alertIncidents !== false
+  if (isMaintenanceKind(entry.kind)) return filters.alertMaintenance === true
   if (STATUS_KINDS.has(entry.kind)) {
     if (filters.alertCondition === 'down' && entry.kind === 'degraded') return false
     return true

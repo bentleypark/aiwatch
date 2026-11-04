@@ -6,6 +6,7 @@ import {
   updateWebhookFilters,
   unsubscribeWebhook,
   reconcileSubscription,
+  filtersDiffer,
 } from '../webhookSubscription'
 
 // happy-dom (vitest 4) doesn't expose a usable Storage API, so install an in-memory polyfill —
@@ -21,7 +22,7 @@ function makeLocalStorage() {
 }
 
 const URL1 = 'https://discord.com/api/webhooks/111/aaa'
-const SETTINGS = { alertCondition: 'down', alertTarget: 'all', alertServices: ['claude'], alertIncidents: true }
+const SETTINGS = { alertCondition: 'down', alertTarget: 'all', alertServices: ['claude'], alertIncidents: true, alertMaintenance: true }
 
 beforeEach(() => {
   vi.restoreAllMocks()
@@ -167,5 +168,17 @@ describe('reconcileSubscription', () => {
     const f = mockFetch(200, { ok: true, status: 'confirmed' })
     expect((await reconcileSubscription('', SETTINGS)).ok).toBe(false)
     expect(f).not.toHaveBeenCalled()
+  })
+})
+
+describe('filtersDiffer (#1405)', () => {
+  const saved = { alertCondition: 'down', alertTarget: 'custom', alertServices: ['claude', 'openai'], alertIncidents: true, alertMaintenance: false }
+  it('is false for the same filters, ignoring service order and non-filter settings', () => {
+    expect(filtersDiffer({ ...saved, alertServices: ['openai', 'claude'] }, { ...saved, discordUrl: 'x', period: '7d' })).toBe(false)
+  })
+  it.each([
+    ['alertCondition', 'all'], ['alertTarget', 'all'], ['alertServices', ['claude']], ['alertIncidents', false], ['alertMaintenance', true],
+  ])('is true when %s differs', (field, value) => {
+    expect(filtersDiffer({ ...saved, [field]: value }, saved)).toBe(true)
   })
 })

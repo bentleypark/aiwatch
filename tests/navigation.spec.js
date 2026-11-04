@@ -27,7 +27,7 @@ test.describe('Sidebar navigation', () => {
 
     // Back to Overview
     await sidebar.getByRole('button', { name: 'Overview' }).click()
-    await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toBeVisible()
+    await expect(page.locator('main').getByRole('button', { name: /^Claude API / })).toBeVisible()
   })
 
   test('Monthly Reports link points to consolidated /reports/ path', async ({ page }) => {

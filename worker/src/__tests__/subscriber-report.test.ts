@@ -43,7 +43,7 @@ function makeKV() {
 const KEY = 'c'.repeat(64)
 const NOW = '2026-10-04T00:00:00.000Z'
 const HOOK = 'https://hooks.slack.com/services/T1/B1/xxxxxxxxxxxxxxxxxxxxxxxx'
-const FILTERS_ALL: SubscriptionFilters = { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true }
+const FILTERS_ALL: SubscriptionFilters = { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: false }
 const INSTALL = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install'
 const NOTICE = (fetchFn: typeof fetch) => ({ encKey: KEY, fetchFn, site: 'https://ai-watch.dev', installUrl: INSTALL })
 const entry = (key = 'alerted:new:i1'): AlertFeedEntry => ({ key, kind: 'new', svcIds: ['claude'], embed: { title: 't', description: 'd', color: 1 }, ts: 1 })
@@ -110,9 +110,9 @@ describe('unsubscribe notice (#1590)', () => {
 
   it('the re-add link restores every previous setting, not only the services', () => {
     for (const filters of [
-      { alertCondition: 'down', alertTarget: 'custom', alertServices: ['claude'], alertIncidents: false },
-      { alertCondition: 'down', alertTarget: 'all', alertServices: [], alertIncidents: true },
-      { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: false },
+      { alertCondition: 'down', alertTarget: 'custom', alertServices: ['claude'], alertIncidents: false, alertMaintenance: false },
+      { alertCondition: 'down', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: true },
+      { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: false, alertMaintenance: false },
       FILTERS_ALL,
     ] as SubscriptionFilters[]) {
       const link = /<([^|>]+)\|Add to Slack>/.exec(buildGoodbyeMessage('https://ai-watch.dev', INSTALL, filters).text)![1]

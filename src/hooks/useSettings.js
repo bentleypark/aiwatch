@@ -65,6 +65,7 @@ function readStored() {
         ? parsed.alertServices.filter((id) => ALL_SERVICE_IDS.includes(id))
         : DEFAULT_SETTINGS.alertServices,
       alertIncidents: typeof parsed.alertIncidents === 'boolean' ? parsed.alertIncidents : DEFAULT_SETTINGS.alertIncidents,
+      alertMaintenance: typeof parsed.alertMaintenance === 'boolean' ? parsed.alertMaintenance : DEFAULT_SETTINGS.alertMaintenance,
     }
   } catch (err) {
     if (err instanceof SyntaxError || err instanceof DOMException) {
@@ -101,6 +102,7 @@ export function useSettings() {
         ? next.alertServices.filter((id) => ALL_SERVICE_IDS.includes(id))
         : settings.alertServices,
       alertIncidents: typeof next.alertIncidents === 'boolean' ? next.alertIncidents : settings.alertIncidents,
+      alertMaintenance: typeof next.alertMaintenance === 'boolean' ? next.alertMaintenance : settings.alertMaintenance,
     }
     if (canUseStorage) {
       try {

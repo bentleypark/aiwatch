@@ -53,7 +53,7 @@ const URL_OK = 'https://discord.com/api/webhooks/123456789/abcdefgABCDEFG_token-
 const URL_LEGACY = 'https://discordapp.com/api/webhooks/123/tok'
 const URL_BAD = 'https://evil.example.com/api/webhooks/123/tok'
 
-const FILTERS_ALL: SubscriptionFilters = { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true }
+const FILTERS_ALL: SubscriptionFilters = { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: false }
 
 function feedEntry(over: Partial<AlertFeedEntry>): AlertFeedEntry {
   return { key: 'alerted:new:i1', kind: 'new', svcIds: ['claude'], embed: { title: 't', description: 'd', color: 1 }, ts: 1, ...over }
@@ -97,9 +97,9 @@ describe('AES-GCM encrypt/decrypt', () => {
 
 describe('normalizeFilters', () => {
   it('defaults missing/invalid to permissive baseline', () => {
-    expect(normalizeFilters(undefined)).toEqual({ alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true })
+    expect(normalizeFilters(undefined)).toEqual({ alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: false })
     expect(normalizeFilters({ alertCondition: 'bogus', alertTarget: 'x', alertIncidents: false }))
-      .toEqual({ alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: false })
+      .toEqual({ alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: false, alertMaintenance: false })
   })
   it('keeps valid values + caps services', () => {
     const f = normalizeFilters({ alertCondition: 'down', alertTarget: 'custom', alertServices: ['claude', 'openai', 5], alertIncidents: true })

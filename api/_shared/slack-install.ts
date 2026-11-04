@@ -1,5 +1,5 @@
 // #1581 — the "Add to Slack" link every surface uses, Edge pages and the SPA alike. The worker route
-// starts Slack's OAuth flow; `services` scopes the install (none = every service).
+// starts Slack's OAuth flow; the query carries the install's filters (none = every service, defaults).
 
 export const SLACK_INSTALL_URL = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/slack/install'
 
@@ -15,7 +15,23 @@ export function slackLogoSvg(size = 14): string {
     + '</svg>'
 }
 
-export function slackInstallUrl(serviceIds: readonly string[] = []): string {
+export interface SlackInstallOptions {
+  alertCondition?: string
+  alertIncidents?: boolean
+  alertMaintenance?: boolean
+}
+
+export function slackInstallQuery(serviceIds: readonly string[] = [], opts: SlackInstallOptions = {}): string {
   const ids = [...new Set(serviceIds.filter((id) => SERVICE_ID_RE.test(id)))]
-  return ids.length > 0 ? `${SLACK_INSTALL_URL}?services=${ids.join(',')}` : SLACK_INSTALL_URL
+  const params = [
+    ...(ids.length > 0 ? [`services=${ids.join(',')}`] : []),
+    ...(opts.alertCondition === 'down' ? ['condition=down'] : []),
+    ...(opts.alertIncidents === false ? ['incidents=0'] : []),
+    ...(opts.alertMaintenance === true ? ['maintenance=1'] : []),
+  ]
+  return params.length > 0 ? `?${params.join('&')}` : ''
+}
+
+export function slackInstallUrl(serviceIds: readonly string[] = [], opts: SlackInstallOptions = {}): string {
+  return SLACK_INSTALL_URL + slackInstallQuery(serviceIds, opts)
 }

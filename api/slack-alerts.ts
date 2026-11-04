@@ -98,6 +98,7 @@ export function renderManage(nonce: string): string {
       </fieldset>
       <h2>Incident updates</h2>
       <label><input type="checkbox" id="incidents"> New and resolved incidents</label>
+      <label><input type="checkbox" id="maintenance"> Scheduled maintenance (announced and started)</label>
       <div class="row">
         <button type="submit" class="btn btn-primary" id="save">Save</button>
         <button type="button" class="btn btn-danger" id="unsub">Unsubscribe this channel</button>
@@ -133,6 +134,7 @@ export function renderManage(nonce: string): string {
     radio('target', f.alertTarget === 'custom' ? 'custom' : 'all');
     radio('condition', f.alertCondition === 'down' ? 'down' : 'all');
     document.getElementById('incidents').checked = f.alertIncidents !== false;
+    document.getElementById('maintenance').checked = f.alertMaintenance === true;
     status.className = 'muted'; status.textContent = 'Changes apply to the Slack channel this link was posted in.';
     form.hidden = false;
   }
@@ -158,7 +160,7 @@ export function renderManage(nonce: string): string {
     var target = form.querySelector('input[name="target"]:checked').value;
     if (target === 'custom' && ids.length === 0) { msg.className = 'err'; msg.textContent = 'Pick at least one service, or choose every service.'; return; }
     save.disabled = true; msg.className = 'muted'; msg.textContent = 'Saving…';
-    call('update', { alertTarget: target, alertServices: target === 'custom' ? ids : [], alertCondition: form.querySelector('input[name="condition"]:checked').value, alertIncidents: document.getElementById('incidents').checked })
+    call('update', { alertTarget: target, alertServices: target === 'custom' ? ids : [], alertCondition: form.querySelector('input[name="condition"]:checked').value, alertIncidents: document.getElementById('incidents').checked, alertMaintenance: document.getElementById('maintenance').checked })
       .then(function(r){
         save.disabled = false;
         if (r.status === 200) { msg.className = 'ok'; msg.textContent = '✓ Saved.'; }

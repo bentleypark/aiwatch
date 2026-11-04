@@ -20,7 +20,11 @@ import type { ServiceStatus } from './services'
 // provider deleted the incident from its status page instead of resolving it. It is a distinct kind
 // precisely so a downstream reader cannot mistake it for one (an external /api/status consumer
 // filtering on 'resolved' must not pick this up as "the outage ended").
-export type AlertKind = 'new' | 'resolved' | 'down' | 'degraded' | 'recovered' | 'withdrawn'
+export type AlertKind = 'new' | 'resolved' | 'down' | 'degraded' | 'recovered' | 'withdrawn' | 'maintenance' | 'maintenance-started'
+
+export function isMaintenanceKind(kind: AlertKind | null): boolean {
+  return kind === 'maintenance' || kind === 'maintenance-started'
+}
 
 /** The verbatim Discord embed core shared by the operator send and the per-user relay (the #475
  *  "byte-identical" contract). Footer + timestamp are added at delivery, not stored here.
@@ -59,6 +63,8 @@ const KEY_PREFIXES: ReadonlyArray<readonly [string, AlertKind]> = [
   ['alerted:degraded:', 'degraded'],
   ['alerted:recovered:', 'recovered'],
   ['alerted:wd:', 'withdrawn'], // #1106
+  ['alerted:mnt:', 'maintenance'], // #1405
+  ['alerted:mnt-start:', 'maintenance-started'],
 ]
 
 export function kindFromKey(key: string): AlertKind | null {

@@ -423,6 +423,7 @@ export const DEFAULT_SETTINGS = {
   alertTarget: 'all',      // 'all' | 'custom'
   alertServices: ALL_SERVICE_IDS,
   alertIncidents: true,    // on by default — a configured Discord webhook gets incident alerts without a second opt-in (no-op until discordUrl is set)
+  alertMaintenance: false, // #1405 — opt-in
 }
 
 export const SCORE_BG_CLASS = {

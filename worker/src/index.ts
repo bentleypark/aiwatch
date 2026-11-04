@@ -15,7 +15,7 @@ import { pageIncidents } from './incident-presence'
 import { markWithdrawalsAnnounced, markWithdrawalsClosedByResolved, readWithdrawalLog, withdrawalOutcome, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry, type WithdrawalOutcome } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
 import { fallbackEmbedSection } from './fallback'
-import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildWithdrawalAlerts, buildMaintenanceAlerts, sinkDeferrableAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, settleWithin, omitsTimeSeries, isResolvedWithoutEnd } from './utils'
@@ -1205,11 +1205,13 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // Build alerts using pure functions
   const incidentAlerts = buildIncidentAlerts(scored, alertedNewMap, runNowMs, suppressedIncIds)
   const serviceAlerts = buildServiceAlerts(scored, alertedDownMap, alertedDegradedMap)
-  // #1106 — withdrawals go LAST. `sent` is capped at 5 per cycle, so ordering is a priority: a
-  // retraction of a days-old incident must never evict a live `down`/`degraded` alert. A withdrawal
-  // pushed past the cap is simply retried next cycle (its dedup key is only written on send, and the
-  // tombstone lives 6d), whereas a delayed outage alert is the thing users actually wait on.
-  const allAlerts = [...incidentAlerts, ...serviceAlerts, ...withdrawalAlerts]
+  let maintenanceAlerts: AlertCandidate[] = []
+  try {
+    maintenanceAlerts = buildMaintenanceAlerts(scored, runNowMs)
+  } catch (err) {
+    console.error('[cron] #1405 maintenance alert build failed (other alerts still sent):', err instanceof Error ? err.message : err)
+  }
+  const allAlerts = [...incidentAlerts, ...serviceAlerts, ...withdrawalAlerts, ...maintenanceAlerts]
 
   // Dedup: skip alerts already sent + same-batch dedup + anti-flapping for degraded
   const toSend = []
@@ -1346,17 +1348,10 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
 
   // Merge concurrent Together AI model-level (#283) + xAI per-region (#686) alerts into single grouped
   // alerts. Disjoint services, so order is irrelevant; both set `_mergedKeys` for the roster write below.
-  // #1106 — re-sink withdrawals to the tail AFTER merging, because merging is what reorders them:
-  // both merge fns return `[...rest, ...merged]`, so a collapsed live Together/xAI alert is appended
-  // BEHIND the `⚪` retractions that rode through in `rest`. Ordering `allAlerts` alone therefore does
-  // not survive to the cap below — and `mergedToSend`, not `allAlerts`, is the array that gets sliced.
-  // A withdrawal pushed past the cap is retried next cycle (no dedup key is written for an unsent
-  // alert, and the tombstone lives 6d); a live outage alert delayed a cycle is the real cost.
   const merged = mergeXaiRegionalAlerts(mergeTogetherAlerts(toSend))
-  const isWithdrawal = (a: AlertCandidate) => a.key.startsWith('alerted:wd:')
-  const mergedToSend = [...merged.filter((a) => !isWithdrawal(a)), ...merged.filter(isWithdrawal)]
+  const mergedToSend = sinkDeferrableAlerts(merged)
 
-  // Send + mark as alerted (down/degraded: 2h TTL, incidents/recovery: 7d TTL)
+  // Send + mark as alerted
   // For new incidents, run AI analysis with timeout so it can be merged into the embed
   const sent = mergedToSend.slice(0, 5)
   const DIV = '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈'
@@ -1376,7 +1371,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     // subject is a tombstone that survives 6d and reproduces the alert deterministically, so a 2h
     // TTL would re-post the same public retraction to the operator AND every subscriber dozens of times.
     // Pinned by a test — see `ALERTED_NEW_TTL_S` below, which is the same 7d window.
-    const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : ALERTED_NEW_TTL_S
+    const ttl = alert.dedupTtlS ?? ((isStatusAlert || isRecoveryAlert) ? 7200 : ALERTED_NEW_TTL_S)
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
     // Write dedup keys for all merged alerts (Together AI grouping)
     const keysToWrite = alert._mergedKeys ?? [alert.key]

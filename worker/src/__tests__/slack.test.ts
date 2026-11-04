@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { slackInstallQuery } from '../../../api/_shared/slack-install'
 import {
   parseInstallFilters,
   signState,
@@ -77,7 +78,7 @@ const NO_NOTICE = { encKey: undefined, fetchFn: (() => { throw new Error('no pos
 const SECRET = 'slack-client-secret'
 const HOOK_A = 'https://hooks.slack.com/services/T0001/B0001/aaaaaaaaaaaaaaaaaaaaaaaa'
 const HOOK_B = 'https://hooks.slack.com/services/T0001/B0002/bbbbbbbbbbbbbbbbbbbbbbbb'
-const FILTERS_ALL: SubscriptionFilters = { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true }
+const FILTERS_ALL: SubscriptionFilters = { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: false }
 const NOW = '2026-10-03T00:00:00.000Z'
 
 function feedEntry(over: Partial<AlertFeedEntry> = {}): AlertFeedEntry {
@@ -85,9 +86,20 @@ function feedEntry(over: Partial<AlertFeedEntry> = {}): AlertFeedEntry {
 }
 
 describe('parseInstallFilters', () => {
+  it('reads back every setting the install link builder writes', () => {
+    const cases = [
+      { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: false },
+      { alertCondition: 'down', alertTarget: 'custom', alertServices: ['claude', 'openai'], alertIncidents: false, alertMaintenance: true },
+      { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: true },
+    ] as const
+    for (const f of cases) {
+      const q = slackInstallQuery(f.alertTarget === 'custom' ? f.alertServices : [], f)
+      expect(parseInstallFilters(new URLSearchParams(q))).toEqual(f)
+    }
+  })
   it('scopes to the known services in ?services=', () => {
     const f = parseInstallFilters(new URLSearchParams('services=claude,openai,claude'))
-    expect(f).toEqual({ alertCondition: 'all', alertTarget: 'custom', alertServices: ['claude', 'openai'], alertIncidents: true })
+    expect(f).toEqual({ alertCondition: 'all', alertTarget: 'custom', alertServices: ['claude', 'openai'], alertIncidents: true, alertMaintenance: false })
   })
   it('drops unknown ids and falls back to every service when none is left', () => {
     expect(parseInstallFilters(new URLSearchParams('services=nope,also-nope'))).toEqual(FILTERS_ALL)
@@ -232,7 +244,7 @@ describe('manage link', () => {
   it('update normalizes the filters and drops unknown service ids', async () => {
     const { kv, manageToken, hash } = await installed()
     const r = await manageSlack(kv, manageToken, 'update', { alertTarget: 'custom', alertServices: ['claude', 'bogus'], alertCondition: 'down', alertIncidents: false }, NO_NOTICE)
-    expect(r).toEqual({ ok: true, filters: { alertTarget: 'custom', alertServices: ['claude'], alertCondition: 'down', alertIncidents: false } })
+    expect(r).toEqual({ ok: true, filters: { alertTarget: 'custom', alertServices: ['claude'], alertCondition: 'down', alertIncidents: false, alertMaintenance: false } })
     expect((await readConfirmed(kv, hash))?.filters.alertServices).toEqual(['claude'])
     expect((await readConfirmed(kv, hash))?.type).toBe('slack')
   })
@@ -329,7 +341,7 @@ describe('toSlackPayload — the is-down link stays out of the collapsible attac
 
 describe('buildWelcomeMessage', () => {
   it('names the subscribed services and carries the manage link', () => {
-    const f: SubscriptionFilters = { alertCondition: 'down', alertTarget: 'custom', alertServices: ['claude', 'openai'], alertIncidents: false }
+    const f: SubscriptionFilters = { alertCondition: 'down', alertTarget: 'custom', alertServices: ['claude', 'openai'], alertIncidents: false, alertMaintenance: false }
     const { text } = buildWelcomeMessage(f, 'https://ai-watch.dev/slack/manage#t=TOKEN')
     expect(text).toContain('Services: Claude API, OpenAI API')
     expect(text).toContain('Status changes: outages only')
