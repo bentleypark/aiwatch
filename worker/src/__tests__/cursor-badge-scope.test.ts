@@ -89,7 +89,8 @@ describe('#1420 Cursor badge scope — the 2026-09-03 17:02Z state through fetch
   })
 })
 
-// #1814 — components as status.x.ai/api/compat/summary.json served them on 2026-10-28 (Cursor page).
+// #1814 — components as status.x.ai/api/compat/summary.json served them on 2026-10-28 (Cursor page),
+// plus Third-party models (#1916).
 const liveComponent = (id: string, name: string, status: string, position: number) => ({
   id, name, status, created_at: '2026-10-28T09:14:35.193Z', updated_at: '2026-10-28T09:14:35.193Z', position,
   description: null, showcase: true, start_date: null, group_id: null, page_id: '0tp9ssgtptvs', group: false,
@@ -99,6 +100,7 @@ const LIVE = (statuses: Record<string, string> = {}) => [
   ['cursor-ios', 'Cursor IDE (iOS)', 1], ['rflc60xp5jp2', 'IDE', 2], ['mwv1g9sc7kdh', 'Cloud Agents', 3], ['vsny1qv7v86c', 'CLI', 4],
   ['k0trcq273dr6', 'Automations', 5], ['bugbot', 'BugBot', 6], ['2x2chyqwmkzl', 'Review Agents', 7], ['sm5wkcnqkvr9', 'Grok Bot', 8],
   ['jh0714rgjgt4', 'cursor.com', 9], ['xwjpvdf81qh9', 'Origin', 10], ['enterprise-dashboard', 'Enterprise Dashboard', 11],
+  ['third-party-models', 'Third-party models', 12],
 ].map(([id, name, pos]) => liveComponent(id as string, name as string, statuses[id as string] ?? 'operational', pos as number))
 
 const xaiIncident = (id: string, name: string, status: string, componentIds: string[], statuses: Record<string, string>) => ({
@@ -130,6 +132,13 @@ describe('#1814 Cursor components added after the move to status.x.ai', () => {
     const svc = await fetchCursor({ [id]: 'degraded_performance' }, [inc])
     expect(svc.status).not.toBe('operational')
     expect(svc.incidents.map((i) => i.id)).toEqual([inc.id])
+  })
+
+  it.each(['investigating', 'resolved'])('a %s incident tagged Third-party models alone stays on the card (#1916)', async (status) => {
+    const inc = xaiIncident('ps_tpm', 'Elevated errors for Claude Sonnet 5.5', status, ['third-party-models'], { 'third-party-models': 'degraded_performance' })
+    const svc = await fetchCursor({ 'third-party-models': 'degraded_performance' }, [inc])
+    expect(svc.incidents.map((i) => i.id)).toEqual([inc.id])
+    if (status === 'investigating') expect(svc.status).not.toBe('operational')
   })
 
   it('an Enterprise Dashboard-only incident is a reference incident, and the outage leaves the badge operational', async () => {
