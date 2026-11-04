@@ -72,8 +72,8 @@ describe('#1017 — cacheWrite wiring for the durable per-day archive', () => {
     expect(index).toMatch(/counters\[s\.id\]\.weightedOutageSec\s*=\s*s\.todayWeightedOutageSec\s*\?\?\s*null/)
   })
 
-  it('#1835 — cacheWrite itself runs the counter update before writing daily:{date}', () => {
-    const body = index.slice(index.indexOf('async function cacheWrite('))
+  it('#1835 — writeSnapshot (the writes of cacheWrite) runs the counter update before writing daily:{date}', () => {
+    const body = index.slice(index.indexOf('export async function writeSnapshot('))
     const fnBody = body.slice(0, body.indexOf('\n}\n'))
     const call = fnBody.search(/\n\s+updateDailyCounters\(counters, services\)\n/)
     expect(call).toBeGreaterThan(-1)

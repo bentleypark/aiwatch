@@ -1,4 +1,4 @@
-// #1686 — how long each /api/status poll took for this user, sent to the Worker in batches of five
+// #1686 — how long each status poll (/api/status/cached, else /api/status) took for this user, sent to the Worker in batches of five
 // for the operator's slow-dashboard alert. Anonymous timing values only (the Worker adds the colo and
 // country Cloudflare attaches to the beacon). Each batch also carries a random id minted once per page
 // load and held only in this module's memory (no storage, no cookie). Sent without a consent check,

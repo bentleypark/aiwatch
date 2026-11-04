@@ -33,3 +33,12 @@ head_sampling_rate = 1
 
 [triggers]
 crons = ["*/5 * * * *"]
+
+# #1910 — the singleton that runs the live status fetch for /api/status/cached readers (see status-refresh.ts).
+[[durable_objects.bindings]]
+name = "STATUS_REFRESHER"
+class_name = "StatusRefresher"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["StatusRefresher"]

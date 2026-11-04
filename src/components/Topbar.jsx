@@ -34,6 +34,7 @@ export default function Topbar({ onMenuToggle }) {
   const { page, setPage } = usePage()
   const { lang, t } = useLang()
   const { services, lastUpdated, refresh, refreshing, aiAnalysis, recoveryBaseline, estimateAccuracy } = usePolling()
+  const [checkedBefore, checkedAfter = ''] = t('topbar.checked').split('{time}')
   const stars = useGitHubStars()
   const isSettings = page.name === 'settings'
   const [showAnalysis, setShowAnalysis] = useState(false)
@@ -84,7 +85,7 @@ export default function Topbar({ onMenuToggle }) {
       {/* Center: LIVE · time */}
       <div className="flex items-center gap-1.5 mono text-[10px] md:text-[11px] text-[var(--text2)] min-w-0">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] live-pulse" />
-        <span>{t('topbar.live')} · {lastUpdated ? formatTime(lastUpdated, lang) : '—'}</span>
+        <span>{t('topbar.live')} · {lastUpdated ? <><span className="hidden md:inline">{checkedBefore}</span>{formatTime(lastUpdated, lang)}<span className="hidden md:inline">{checkedAfter}</span></> : '—'}</span>
       </div>
 
       {/* Right: actions */}

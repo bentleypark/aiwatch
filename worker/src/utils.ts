@@ -223,11 +223,10 @@ export async function kvDel(kv: KVLike | KVNamespace, key: string): Promise<void
 // ── #1224 — consolidated per-service tracking state ─────────────────────────────────────────────
 //
 // `trackFetchFailure`/`resetFetchFailure`/`trackComponentMiss`/`resetComponentMiss` sit on the hot
-// per-service path (`fetchServiceUntagged`, `services.ts`), reached on every live `/api/status`
-// request (60s browser polling). Cron rarely reaches it independently — `cronAlertCheck` only
-// re-runs `fetchAllServices` when the cache is >10min stale, and the live handler's throttled
-// `cacheWrite` refreshes that cache every ~10min whenever there is any traffic at all — so the live
-// path is effectively the primary driver. Previously each of the 45 services read up to 3 separate
+// per-service path (`fetchServiceUntagged`, `services.ts`), reached on every live run — since #1910
+// mostly the StatusRefresher's, which a stale `/api/status/cached` read triggers. Cron rarely reaches it
+// independently — `cronAlertCheck` only re-runs `fetchAllServices` when the cache is >10min stale — so
+// traffic is effectively the primary driver. Previously each of the 45 services read up to 3 separate
 // KV keys per invocation (`fetch-fail:{id}`, `fetch-fail:since:{id}`, `component-missing:{id}`) — an
 // estimated dominant share of the account's ~1.9M KV reads/day (measured via Cloudflare's GraphQL
 // Analytics API at the namespace level, not per call site; #1224's issue body has the derivation).
@@ -578,7 +577,7 @@ export const PERSISTENT_FAILURE_THRESHOLD_MS = 3_600_000 // 1h
  *
  * Frequency-INDEPENDENT — it keys off a first-observation wall-clock timestamp, not a count of
  * polling cycles. That property is the whole point: `fetchAllServices` runs on every `/api/status`
- * request (60s browser polling), as well as the cron when its snapshot is stale, so a
+ * request and StatusRefresher run (#1910), as well as the cron when its snapshot is stale, so a
  * consecutive-cycle counter measures traffic, not duration. Absent/unparseable timestamp → false:
  * it never alerts off a garbage timestamp (the caller is responsible for repairing the record).
  *
@@ -664,8 +663,8 @@ export function trackComponentMiss(store: TrackingStateBlob, svcId: string, thre
 }
 
 /** #1389 — how long `uptime30d` must be CONTINUOUSLY absent from a service that was publishing it
- *  before the operator is told. Wall-clock, not a cycle count: `/api/status` runs this tracker on every
- *  browser poll as well as on the five-minute cron, so a count would mean something different on a busy
+ *  before the operator is told. Wall-clock, not a cycle count: this tracker runs on every live fetch
+ *  (`/api/status`, the #1910 StatusRefresher) as well as on the five-minute cron, so a count would mean something different on a busy
  *  day than on a quiet one.
  *
  *  6h is sized against the known false-positive class, not against detection speed: a single status-page

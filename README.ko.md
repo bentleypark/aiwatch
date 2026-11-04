@@ -174,6 +174,7 @@
 브라우저 (React SPA, 60초 폴링)
   ↓
 Cloudflare Worker
+  ├── GET /api/status/cached → KV 스냅샷; 오래되면 StatusRefresher Durable Object가 실시간 fetch 실행
   ├── GET /api/status    → 병렬 fetch (49개 서비스) → 정규화
   ├── GET /api/uptime    → 일별 가동률 이력
   └── POST /api/alert   → Discord Webhook 프록시 (SSRF 보호)
@@ -271,7 +272,7 @@ npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
 | 엔드포인트 | 메서드 | 설명 |
 |-----------|--------|------|
 | `/api/status` | GET | 전체 서비스 상태 + 인시던트 + 가동률 + aiAnalysis |
-| `/api/status/cached` | GET | KV 캐시 전용 (Edge SSR용, ~1.2초) |
+| `/api/status/cached` | GET | KV 캐시 전용 (대시보드 폴링 + Edge SSR, ~1.2초) |
 | `/api/uptime?days=30` | GET | 일별 가동률 이력 (1-90일) |
 | `/api/report?month=YYYY-MM` | GET | 월간 안정성 아카이브 (가동률, 점수, 인시던트, 레이턴시) |
 | `/api/alert` | POST | Discord Webhook 프록시 (SSRF 보호) |

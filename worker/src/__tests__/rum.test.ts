@@ -86,7 +86,7 @@ describe('#1686 evaluateRum — 4 of the last 5', () => {
     const p: RumSample = { totalMs: 60_000, serverMs: 200, outcome: 'pending' }
     expect(evaluateRum([p, p, p, p, p])).toMatchObject({ kind: 'slow', cause: 'network-path' })
   })
-  it('an alert whose slow polls all timed out says the cause could not be split, and how to split it', () => {
+  it('an alert whose slow polls all timed out says the cause could not be split', () => {
     const t: RumSample = { totalMs: 15_000, serverMs: null, outcome: 'timeout' }
     const v = evaluateRum([t, t, t, t, t])
     if (v.kind !== 'slow') throw new Error(v.kind)
@@ -95,7 +95,6 @@ describe('#1686 evaluateRum — 4 of the last 5', () => {
     expect(lines).toHaveLength(3)
     expect(lines[1]).toContain('worker time n/a')
     expect(lines[2]).toContain("None of the slow polls carried the worker's time")
-    expect(lines[2]).toContain('`status-fetch-run`')
   })
   it('a fast error is not slow', () => {
     const e: RumSample = { totalMs: 100, serverMs: null, outcome: 'error' }

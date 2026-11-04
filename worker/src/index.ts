@@ -60,6 +60,7 @@ import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, rootlySc
 import { atlassianRosterEntries } from './parsers/statuspage'
 import { parseMistralFeedObservation, recordMistralFeedObservation, observeMistralPageContract } from './mistral-feed-observation'
 import { recordStatusFetchRun } from './status-fetch-run'
+import { isDue, REFRESH_COMPONENT_INTERVAL_MS, REFRESH_COUNTER_INTERVAL_MS, shouldRequestRefresh, shouldScheduleRun } from './status-refresh'
 import { maybeDispatchWorkflow, DEEPSEEK_DISPATCH_CONFIG, MISTRAL_DISPATCH_CONFIG } from './workflow-dispatch'
 import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, extReportCountKey, isExtReportSource, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
 
@@ -136,6 +137,8 @@ interface Env {
   // → absent → the daily v1-traffic section is skipped gracefully (queryV1Traffic returns null).
   CF_ACCOUNT_ID?: string
   CF_ANALYTICS_TOKEN?: string
+  // #1910 — the singleton that runs the live fetch for /api/status/cached readers.
+  STATUS_REFRESHER?: DurableObjectNamespace
 }
 
 // ── KV Cache + Daily Counters ──
@@ -351,7 +354,7 @@ export function updateDailyCounters(counters: DailyCounters, services: ServiceSt
 // next throttled write. Defence in depth rather than a live hole: `fetchAllServices` pads its results
 // to `SERVICES.length` even when a batch throws, so no writer produces an empty array today.
 
-async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFeeds: UpstreamCandidate[], discordUrl?: string): Promise<boolean> {
+export async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFeeds: UpstreamCandidate[], discordUrl?: string): Promise<boolean> {
   if (!shouldPersistSnapshot(services)) {
     console.error('[kv] refusing to write an EMPTY services snapshot to CACHE_KEY')
     return false
@@ -359,19 +362,27 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
   const now = Date.now()
   if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return false
   lastKvWrite = now
+  await writeSnapshot(kv, services, upstreamFeeds, discordUrl, true)
+  return true
+}
 
-  const nowISO = new Date().toISOString()
+/** The writes of `cacheWrite` without its throttle. #1910 — the StatusRefresher writes CACHE_KEY on every
+ *  run and the counters only when `writeCounters`. */
+export async function writeSnapshot(kv: KVNamespace, services: ServiceStatus[], upstreamFeeds: UpstreamCandidate[], discordUrl: string | undefined, writeCounters: boolean): Promise<void> {
+  const now = Date.now()
+  const nowISO = new Date(now).toISOString()
   const today = nowISO.slice(0, 10)
   const dailyKey = `daily:${today}`
 
   // Read today's counters from separate daily key (survives cache TTL expiry)
   let counters: DailyCounters = {}
-  try {
-    const existing = await kv.get(dailyKey)
-    if (existing) counters = JSON.parse(existing)
-  } catch (err) { console.warn('[kv] daily counter parse failed:', dailyKey, err instanceof Error ? err.message : err) }
-
-  updateDailyCounters(counters, services)
+  if (writeCounters) {
+    try {
+      const existing = await kv.get(dailyKey)
+      if (existing) counters = JSON.parse(existing)
+    } catch (err) { console.warn('[kv] daily counter parse failed:', dailyKey, err instanceof Error ? err.message : err) }
+    updateDailyCounters(counters, services)
+  }
 
   // #1017 — restored BEFORE CACHE_KEY is serialized below, so every reader of the live snapshot
   // (frontend calendar, is-down SSR) sees the restored days with no changes on their end. See
@@ -388,9 +399,9 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
       upstreamFeeds,
       cachedAt: new Date().toISOString(),
     }), { expirationTtl: CACHE_TTL_SECONDS }),
-    kv.put(dailyKey, JSON.stringify(counters), {
+    ...(writeCounters ? [kv.put(dailyKey, JSON.stringify(counters), {
       expirationTtl: 2 * 86400, // 2 days — enough to survive overnight low traffic
-    }),
+    })] : []),
   ]).catch(async (err) => {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[kv] cache write failed:', msg)
@@ -414,7 +425,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
   // deeper source to widen a window against (#988; reading the clamp as a query limit over durable
   // data cost a wrong fix in aiwatch-reports#77).
   const yesterday = new Date(now - 86_400_000).toISOString().split('T')[0]
-  if (lastArchivedDate !== yesterday) {
+  if (writeCounters && lastArchivedDate !== yesterday) {
     const yesterdayKey = `daily:${yesterday}`
     const yesterdayData = await kv.get(yesterdayKey).catch(() => null)
     if (yesterdayData) {
@@ -422,8 +433,136 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFe
       lastArchivedDate = yesterday
     }
   }
+}
 
-  return true
+/** #1910 — one live run for the refresher: the same fetch as /api/status, then the snapshot write. */
+export async function runStatusRefresh(env: Env, writeCounters: boolean, detectComponents: boolean): Promise<void> {
+  let probe24h: ProbeSnapshot[] = []
+  const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
+  if (probeRaw) {
+    try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[refresh] probe24h parse failed:', err instanceof Error ? err.message : err) }
+  }
+  const startedAt = Date.now()
+  const { raw, fetchStats, upstreamFeeds, pageComponents } = await fetchAllServices(env.STATUS_CACHE, probe24h)
+  recordStatusFetchRun(env.ANALYTICS, 'refresh', Date.now() - startedAt, raw, fetchStats)
+  if (!shouldPersistSnapshot(raw)) {
+    console.error('[refresh] refusing to write an EMPTY services snapshot to CACHE_KEY')
+    return
+  }
+  await writeSnapshot(env.STATUS_CACHE, raw, upstreamFeeds, env.DISCORD_WEBHOOK_URL, writeCounters)
+  if (detectComponents && env.DISCORD_WEBHOOK_URL) {
+    await detectNewComponents(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, await collectDetectablePages(env.STATUS_CACHE, pageComponents, true), raw)
+  }
+}
+
+/** #1910 — singleton Durable Object. A cached read asks it for a run; its alarm runs one at a time, with no
+ *  client attached, so a slow run is not cancelled the way a request's `waitUntil` is after 30 s. */
+export class StatusRefresher {
+  constructor(private readonly state: DurableObjectState, private readonly env: Env) {}
+
+  async fetch(): Promise<Response> {
+    const storage = this.state.storage
+    const [alarmAt, runStartedAt, runFinishedAt] = await Promise.all([
+      storage.getAlarm(),
+      storage.get<number>('runStartedAt'),
+      storage.get<number>('runFinishedAt'),
+    ])
+    const now = Date.now()
+    const scheduled = shouldScheduleRun({ alarmAt, runStartedAt: runStartedAt ?? 0, runFinishedAt: runFinishedAt ?? 0 }, now)
+    if (scheduled) await storage.setAlarm(now)
+    return new Response(null, { status: scheduled ? 202 : 204 })
+  }
+
+  async alarm(): Promise<void> {
+    discordSendLogKv = this.env.STATUS_CACHE
+    const storage = this.state.storage
+    const now = Date.now()
+    const [counterWriteAt, componentCheckAt] = await Promise.all([storage.get<number>('counterWriteAt'), storage.get<number>('componentCheckAt')])
+    const writeCounters = isDue(counterWriteAt ?? 0, now, REFRESH_COUNTER_INTERVAL_MS)
+    const detectComponents = isDue(componentCheckAt ?? 0, now, REFRESH_COMPONENT_INTERVAL_MS)
+    await storage.put('runStartedAt', now)
+    try {
+      await runStatusRefresh(this.env, writeCounters, detectComponents)
+      if (writeCounters) await storage.put('counterWriteAt', now)
+      if (detectComponents) await storage.put('componentCheckAt', now)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[refresh] run failed:', message)
+      await alertWorkerError(this.env, message)
+    } finally {
+      await storage.put('runFinishedAt', Date.now())
+    }
+  }
+}
+
+let lastRefreshRequestAt = 0
+
+/** #1910 — ask the refresher for a run when the snapshot a cached read served is stale. Off the response path. */
+function requestStatusRefresh(env: Env, ctx: ExecutionContext, cachedAt: string | undefined): void {
+  if (!env.STATUS_REFRESHER) return
+  const now = Date.now()
+  if (!shouldRequestRefresh(cachedAt, lastRefreshRequestAt, now)) return
+  lastRefreshRequestAt = now
+  const stub = env.STATUS_REFRESHER.get(env.STATUS_REFRESHER.idFromName('status'))
+  ctx.waitUntil(stub.fetch('https://status-refresher/refresh', { method: 'POST' })
+    .then(() => undefined)
+    .catch((err) => console.error('[refresh] request failed:', err instanceof Error ? err.message : err)))
+}
+
+/** #992 / #1481 — diff each page's components against `component-seen:` and alert on new ones. #1910 — also
+ *  called from the StatusRefresher run, whose live fetch keeps the cron's snapshot fresh. */
+async function detectNewComponents(kv: KVNamespace, webhook: string, pages: Record<string, Array<{ id: string; name: string }>>, services: ServiceStatus[]): Promise<void> {
+  for (const [apiUrl, components] of Object.entries(pages)) {
+    try {
+      // Fail-CLOSED on a KV read error: a transient get() fault must NOT be read as "first sight"
+      // (which bootstraps silently + overwrites the durable snapshot, permanently dropping the
+      // one-shot alert). Distinguish a genuinely-absent key (→ bootstrap) from a read that threw
+      // (→ skip this page this cycle, retry next cron with the real snapshot).
+      let readFailed = false
+      const seenRaw = await kv.get(`component-seen:${apiUrl}`).catch(() => { readFailed = true; return null })
+      if (readFailed) continue
+      let seen: string[] | null = null
+      if (seenRaw !== null) {
+        // corrupt snapshot → treat as empty (re-alerts current components, never bootstraps a page we
+        // already watched); warn so the rare event is observable rather than silent.
+        try { seen = JSON.parse(seenRaw) } catch { console.warn(`[cron] corrupt component-seen snapshot for ${apiUrl} — re-alerting current components`); seen = [] }
+      }
+      const { newComponents, nextSeen, bootstrap } = diffPageComponents(components, seen)
+      if (bootstrap) {
+        await kvPut(kv, `component-seen:${apiUrl}`, JSON.stringify(nextSeen)) // no TTL — a page's component identity is durable
+        continue
+      }
+      if (newComponents.length === 0) continue // nextSeen == seen → no write (KV budget)
+      // #1125 — a component AIWatch already reads needs no "decide whether to track it" from anyone.
+      // Filters the ALERT only: nextSeen still unions every current id below, so a component recorded
+      // silently here can never come back as a new-component alert later.
+      const { alertable, absorbed } = partitionFirstSeen(newComponents, TRACKED_COMPONENT_IDS)
+      if (alertable.length === 0) {
+        // Nothing to send, so there is no send to gate the write on — but it must still happen, or the
+        // same set is re-diffed and re-written every cron tick. Logged only once the write succeeded:
+        // until then nothing is recorded, and the suppression this line describes has not happened.
+        if (await kvPut(kv, `component-seen:${apiUrl}`, JSON.stringify(nextSeen))) {
+          console.warn(`[cron] ${apiUrl}: recorded ${absorbed.length} first-seen component(s) AIWatch already tracks, without alerting (#1125): ${absorbed.map(c => `${c.name} (${c.id})`).join(', ')}`)
+        }
+        continue
+      }
+      if (absorbed.length > 0) {
+        console.warn(`[cron] ${apiUrl}: ${absorbed.length} of ${newComponents.length} first-seen component(s) suppressed as already tracked (#1125): ${absorbed.map(c => `${c.name} (${c.id})`).join(', ')}`)
+      }
+      const pageSvcs = SERVICES.filter(s => s.apiUrl === apiUrl || (s.rootlyFeed && s.statusUrl === apiUrl))
+      const sent = await sendDiscordAlert(webhook, {
+        title: `🆕 New status-page component${alertable.length === 1 ? '' : 's'}: ${pageSvcs.map(s => s.name).join(', ') || apiUrl}`,
+        description: formatNewComponentAlert(pageSvcs.map(s => s.name), placeNewComponents(alertable, pageSvcs, services)),
+        color: 0x3B82F6,
+      })
+      // Persist ONLY after a CONFIRMED send — sendDiscordAlert returns false (does NOT throw) on a
+      // webhook failure, so gating the write on `sent` makes a Discord hiccup retry next cron instead
+      // of silently marking the component seen and dropping the one-shot alert.
+      if (sent) await kvPut(kv, `component-seen:${apiUrl}`, JSON.stringify(nextSeen))
+    } catch (err) {
+      console.error(`[cron] new-component detection failed for ${apiUrl}:`, err instanceof Error ? err.message : err)
+    }
+  }
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
@@ -887,7 +1026,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   let upstreamFeeds = cachedFeeds as UpstreamCandidate[]
 
   // If cache is stale (>10min) or empty, fetch live data to avoid alert decisions on outdated status.
-  // The routine writer stays the throttled /api/status handler's cacheWrite() (10-min throttle). The
+  // The routine writer is the #1910 StatusRefresher run (and the throttled /api/status cacheWrite). The
   // ONE write in this block persists whatever THIS fetch read (#1371) — on any stale tick, not only
   // after the key has already gone. Discarding it is what let the key expire with no writer.
   let cronProbes: ProbeSnapshot[] = []
@@ -919,7 +1058,8 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         // only roughly 1-in-2 to 1-in-3 ticks instead of every tick (exact ratio depends on where the
         // fetch's own latency lands `cachedAt` relative to the tick boundary) — bounded by the same
         // 10-min tolerance the threshold already declares acceptable. Up to two consecutive ticks can
-        // skip #992 new-component detection this way; it resumes on the next stale-triggered fetch.
+        // skip #992 new-component detection this way; it resumes on the next stale-triggered fetch, and
+        // the #1910 StatusRefresher run checks too.
         const persisted = await refreshStatusCacheAfterCronFetch(env.STATUS_CACHE, freshServices, freshFeeds, CACHE_KEY, CACHE_TTL_SECONDS)
         if (!persisted) {
           // #1371 — `error`, not `warn`, in BOTH cases. A write that does not land is what lets the TTL
@@ -2112,57 +2252,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // the prefetch map, so `buildPageComponents` never saw it and its new components landed silently.
   // Its feed read sits off the status path, so a fault there costs this page's detection for a cycle
   // and nothing else.
-  for (const [apiUrl, components] of Object.entries(await collectDetectablePages(env.STATUS_CACHE, cronPageComponents, stale))) {
-    try {
-      // Fail-CLOSED on a KV read error: a transient get() fault must NOT be read as "first sight"
-      // (which bootstraps silently + overwrites the durable snapshot, permanently dropping the
-      // one-shot alert). Distinguish a genuinely-absent key (→ bootstrap) from a read that threw
-      // (→ skip this page this cycle, retry next cron with the real snapshot).
-      let readFailed = false
-      const seenRaw = await env.STATUS_CACHE.get(`component-seen:${apiUrl}`).catch(() => { readFailed = true; return null })
-      if (readFailed) continue
-      let seen: string[] | null = null
-      if (seenRaw !== null) {
-        // corrupt snapshot → treat as empty (re-alerts current components, never bootstraps a page we
-        // already watched); warn so the rare event is observable rather than silent.
-        try { seen = JSON.parse(seenRaw) } catch { console.warn(`[cron] corrupt component-seen snapshot for ${apiUrl} — re-alerting current components`); seen = [] }
-      }
-      const { newComponents, nextSeen, bootstrap } = diffPageComponents(components, seen)
-      if (bootstrap) {
-        await kvPut(env.STATUS_CACHE, `component-seen:${apiUrl}`, JSON.stringify(nextSeen)) // no TTL — a page's component identity is durable
-        continue
-      }
-      if (newComponents.length === 0) continue // nextSeen == seen → no write (KV budget)
-      // #1125 — a component AIWatch already reads needs no "decide whether to track it" from anyone.
-      // Filters the ALERT only: nextSeen still unions every current id below, so a component recorded
-      // silently here can never come back as a new-component alert later.
-      const { alertable, absorbed } = partitionFirstSeen(newComponents, TRACKED_COMPONENT_IDS)
-      if (alertable.length === 0) {
-        // Nothing to send, so there is no send to gate the write on — but it must still happen, or the
-        // same set is re-diffed and re-written every cron tick. Logged only once the write succeeded:
-        // until then nothing is recorded, and the suppression this line describes has not happened.
-        if (await kvPut(env.STATUS_CACHE, `component-seen:${apiUrl}`, JSON.stringify(nextSeen))) {
-          console.warn(`[cron] ${apiUrl}: recorded ${absorbed.length} first-seen component(s) AIWatch already tracks, without alerting (#1125): ${absorbed.map(c => `${c.name} (${c.id})`).join(', ')}`)
-        }
-        continue
-      }
-      if (absorbed.length > 0) {
-        console.warn(`[cron] ${apiUrl}: ${absorbed.length} of ${newComponents.length} first-seen component(s) suppressed as already tracked (#1125): ${absorbed.map(c => `${c.name} (${c.id})`).join(', ')}`)
-      }
-      const pageSvcs = SERVICES.filter(s => s.apiUrl === apiUrl || (s.rootlyFeed && s.statusUrl === apiUrl))
-      const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-        title: `🆕 New status-page component${alertable.length === 1 ? '' : 's'}: ${pageSvcs.map(s => s.name).join(', ') || apiUrl}`,
-        description: formatNewComponentAlert(pageSvcs.map(s => s.name), placeNewComponents(alertable, pageSvcs, services)),
-        color: 0x3B82F6,
-      })
-      // Persist ONLY after a CONFIRMED send — sendDiscordAlert returns false (does NOT throw) on a
-      // webhook failure, so gating the write on `sent` makes a Discord hiccup retry next cron instead
-      // of silently marking the component seen and dropping the one-shot alert.
-      if (sent) await kvPut(env.STATUS_CACHE, `component-seen:${apiUrl}`, JSON.stringify(nextSeen))
-    } catch (err) {
-      console.error(`[cron] new-component detection failed for ${apiUrl}:`, err instanceof Error ? err.message : err)
-    }
-  }
+  await detectNewComponents(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, await collectDetectablePages(env.STATUS_CACHE, cronPageComponents, stale), services)
 
   // #1118 — announced, never closed, missing from a card it was announced on. After every send, so this cycle's markers exist.
   if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && withdrawnIncIds) {
@@ -6134,6 +6224,7 @@ const workerExport = {
         }
         const payload = await buildCachedStatusPayload(env, withSeries, (stage, work) => watchdog!.track(stage, work))
         if (payload) {
+          requestStatusRefresh(env, ctx, payload.lastUpdated)
           const res = new Response(JSON.stringify(payload), {
             status: 200,
             headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
@@ -6305,7 +6396,7 @@ const workerExport = {
         // bypassed) so the social card flips on this poll instead of waiting for the next throttled
         // write or the cron's #488 alert-edge refresh — decoupling OG freshness from the Discord alert
         // timing. Off the response path (ctx.waitUntil). The cache READ inside runs on the throttled
-        // path — i.e. MOST polls (60s poll vs 10-min throttle) — but KV reads are cheap and not the
+        // path, but KV reads are cheap and not the
         // budgeted resource; the WRITE is, and it fires only on a rare status edge (self-silencing: the
         // next poll reads the fresh snapshot → no edge). Counters stay with cacheWrite (the #488 rule).
         ctx.waitUntil(
@@ -6357,7 +6448,7 @@ const workerExport = {
       const alertFeed = env.STATUS_CACHE ? await readAlertFeed(env.STATUS_CACHE) : []
       // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
       const reportFeed = env.STATUS_CACHE ? await buildReportFeedMap(env.STATUS_CACHE, servicesWithScore) : {}
-      // #1697 — both endpoints emit it: the dashboard polls this one after its cached first load.
+      // #1697 — both endpoints emit it.
       const { baselines: recoveryBaseline, estimateAccuracy } = env.STATUS_CACHE ? await readRecoveryValue(env.STATUS_CACHE) : { baselines: {}, estimateAccuracy: null }
       // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
       const supplyChainBanner = buildSupplyChainBanner(servicesWithScore)
