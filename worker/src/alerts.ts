@@ -5,7 +5,8 @@ import { buildGroupedFallbackText } from './fallback'
 import { CRON_CADENCE_MS } from './cache-ttl'
 import { isAffectedStatus } from './status-verdict'
 import { sanitize, formatDuration, appendStatusHint, appendUtm, isNonReliabilityAdvisory, severityEmoji, impactLabel } from './utils'
-import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
+import { kindFromKey, svcIdsForAlert, isMaintenanceKind, type AlertKind } from './alert-feed'
+import { maintenanceIsOngoing, maintenanceHasEnded } from './maintenance-phase'
 import { xaiRegionOf, xaiEventKey } from './xai-regions'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
 // Edge TS port rather than adding a third copy of SERVICE_REGIONS: the Worker
@@ -438,12 +439,13 @@ export interface AlertCandidate {
    *  Downstream consumers read it through the shared `isNonOutageAlert` predicate. The dedup `key`
    *  is unchanged. */
   advisory?: boolean
+  /** #1405 — dedup-key TTL for an alert whose subject outlives the default window. */
+  dedupTtlS?: number
 }
 
-/** #1106 — this alert must never produce outage PROMOTION tooling. Both cases are "AIWatch is not
- *  claiming an outage is happening right now": an advisory (#1021) never was one, a withdrawal
- *  (#1106) is the provider taking the claim back. Drafting "X is having an outage" off either would
- *  be factually false at the moment it is posted.
+/** #1106 — this alert must never produce outage PROMOTION tooling: AIWatch is not claiming an outage
+ *  is happening right now, so drafting "X is having an outage" off it would be factually false at the
+ *  moment it is posted.
  *
  *  A withdrawal is identified by its KIND, not by a flag on the candidate: `alerted:wd:` already
  *  states it, `kindFromKey` is the single source of truth every other consumer reads (`alert-feed.ts`),
@@ -452,7 +454,7 @@ export interface AlertCandidate {
  *  state that cannot exist. `advisory` stays a flag because it genuinely is one: an advisory alert's
  *  key is an ordinary `alerted:new:`, so nothing in the key distinguishes it. */
 export function isNonOutageAlert(alert: { advisory?: boolean }, kind: AlertKind | null): boolean {
-  return alert.advisory === true || kind === 'withdrawn'
+  return alert.advisory === true || kind === 'withdrawn' || isMaintenanceKind(kind)
 }
 
 /** #714 — the status SOURCE's observed liveness this cron cycle, distinct from the service's status.
@@ -878,6 +880,61 @@ export function buildWithdrawalAlerts(
     })
   }
   return alerts
+}
+
+const MAINTENANCE_DEDUP_TTL_S = 365 * 86_400
+
+function utcMinute(iso: string): string {
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`
+}
+
+/** #1405 — one alert per maintenance window: `alerted:mnt:` while it is upcoming, `alerted:mnt-start:`
+ *  once it is ongoing. A window first seen already ongoing yields only the start alert. */
+export function buildMaintenanceAlerts(services: ServiceStatus[], now: number): AlertCandidate[] {
+  type Window = NonNullable<ServiceStatus['scheduledMaintenances']>[number]
+  const grouped = new Map<string, { window: Window; ids: string[]; names: string[]; providers: string[]; components: string[] }>()
+  for (const svc of services) {
+    for (const w of svc.scheduledMaintenances ?? []) {
+      if (maintenanceHasEnded(w, now)) continue
+      const g = grouped.get(w.id) ?? { window: w, ids: [], names: [], providers: [], components: [] }
+      if (!g.ids.includes(svc.id)) {
+        g.ids.push(svc.id)
+        g.names.push(svc.name)
+        g.providers.push(svc.provider)
+      }
+      for (const c of w.componentNames) if (!g.components.includes(c)) g.components.push(c)
+      grouped.set(w.id, g)
+    }
+  }
+
+  const alerts: AlertCandidate[] = []
+  for (const [id, { window: w, ids, names, providers, components }] of grouped) {
+    const started = maintenanceIsOngoing(w, now)
+    const when = w.scheduledUntil
+      ? `${utcMinute(w.scheduledFor)} → ${utcMinute(w.scheduledUntil)}`
+      : `${utcMinute(w.scheduledFor)} → no end time published`
+    const lines = [sanitize(w.title), `🕒 ${when}`]
+    if (components.length > 0) lines.push(`Components: ${components.map((c) => sanitize(c)).join(', ')}`)
+    alerts.push({
+      key: `${started ? 'alerted:mnt-start:' : 'alerted:mnt:'}${id}`,
+      title: `🔧 ${mergedAlertName(names, providers)} — ${started ? 'Maintenance Started' : 'Maintenance Scheduled'}`,
+      description: lines.join('\n'),
+      color: 0x5865F2,
+      url: `https://ai-watch.dev/#${ids[0]}`,
+      svcIds: ids,
+      dedupTtlS: MAINTENANCE_DEDUP_TTL_S,
+    })
+  }
+  return alerts
+}
+
+/** #1106/#1405 — the per-cycle send cap is a priority order: live alerts, then withdrawals, then maintenance. */
+export function sinkDeferrableAlerts(alerts: AlertCandidate[]): AlertCandidate[] {
+  const rank = (a: AlertCandidate) => {
+    const kind = kindFromKey(a.key)
+    return kind === 'withdrawn' ? 1 : isMaintenanceKind(kind) ? 2 : 0
+  }
+  return [0, 1, 2].flatMap((r) => alerts.filter((a) => rank(a) === r))
 }
 
 const isIncidentAlertOf = (a: AlertCandidate, svcId: string) =>

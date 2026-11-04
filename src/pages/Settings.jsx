@@ -10,7 +10,7 @@ import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { slackInstallUrl } from '../../api/_shared/slack-install'
 import { SlackLogo } from '../components/SlackInstallLink'
-import { subscribeWebhook, updateWebhookFilters, unsubscribeWebhook, getLocalSubStatus, reconcileSubscription } from '../utils/webhookSubscription'
+import { subscribeWebhook, updateWebhookFilters, unsubscribeWebhook, getLocalSubStatus, reconcileSubscription, filtersDiffer } from '../utils/webhookSubscription'
 
 // ── Styles matching design mockup ────────────────────────
 
@@ -117,6 +117,7 @@ export default function Settings({ focus } = {}) {
   const [alertTarget, setAlertTarget] = useState(settings.alertTarget)
   const [alertServices, setAlertServices] = useState(settings.alertServices)
   const [alertIncidents, setAlertIncidents] = useState(settings.alertIncidents)
+  const [alertMaintenance, setAlertMaintenance] = useState(settings.alertMaintenance)
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState(null) // null | 'sending' | 'ok' | 'error'
   // #486 PR2 — server-side subscription flow state.
@@ -168,6 +169,7 @@ export default function Settings({ focus } = {}) {
     setAlertTarget(settings.alertTarget)
     setAlertServices(settings.alertServices)
     setAlertIncidents(settings.alertIncidents)
+    setAlertMaintenance(settings.alertMaintenance)
   }, [settings])
 
   // Auto-dismiss the subscription error so a stale failure message doesn't linger forever (the user
@@ -234,13 +236,14 @@ export default function Settings({ focus } = {}) {
     saveTimerRef.current = setTimeout(() => setSaved(false), 1800)
   }
 
-  const currentFilters = () => ({ alertCondition, alertTarget, alertServices, alertIncidents })
+  const onScreenFilters = { alertCondition, alertTarget, alertServices, alertIncidents, alertMaintenance }
+  const slackBlocked = alertTarget === 'custom' && alertServices.length === 0
 
   // Persist the Discord URL + filters to localStorage (the subscription's own save path, separate from
   // the general "Save settings" button). Keeps localStorage in sync with what the server subscription
   // holds, so the UI survives reload and the reconcile effect (keyed on settings.discordUrl) works.
   function persistWebhookSettings(url) {
-    save({ period, sla: sla === '' ? DEFAULT_SETTINGS.sla : Number(sla), enabledServices, discordUrl: url, ...currentFilters() })
+    save({ period, sla: sla === '' ? DEFAULT_SETTINGS.sla : Number(sla), enabledServices, discordUrl: url, ...onScreenFilters })
   }
 
   // Subscribe the current webhook URL: persist URL+filters locally, then send the channel confirm
@@ -251,7 +254,7 @@ export default function Settings({ focus } = {}) {
     const isNewUrl = !settings.discordUrl
     persistWebhookSettings(url)
     setSubAction('subscribing')
-    subscribeWebhook(url, currentFilters()).then((res) => {
+    subscribeWebhook(url, onScreenFilters).then((res) => {
       if (res.ok) {
         setSubStatus(res.status === 'confirmed' ? 'confirmed' : 'pending')
         setSubAction(null)
@@ -269,7 +272,7 @@ export default function Settings({ focus } = {}) {
     if (!settings.discordUrl) return
     persistWebhookSettings(settings.discordUrl)
     setSubAction('subscribing')
-    updateWebhookFilters(settings.discordUrl, currentFilters()).then((res) => {
+    updateWebhookFilters(settings.discordUrl, onScreenFilters).then((res) => {
       setSubAction(res.ok ? 'updated' : 'error')
       if (res.ok) { clearTimeout(saveTimerRef.current); saveTimerRef.current = setTimeout(() => setSubAction(null), 1800) }
     }).catch(() => setSubAction('error'))
@@ -291,7 +294,7 @@ export default function Settings({ focus } = {}) {
   // now confirmed, pushes any filters edited during the pending window.
   function handleReconcile() {
     if (!settings.discordUrl) return
-    const filters = { alertCondition, alertTarget, alertServices, alertIncidents }
+    const filters = onScreenFilters
     setSubAction('subscribing')
     reconcileSubscription(settings.discordUrl, filters).then((res) => {
       if (res.ok) {
@@ -547,17 +550,24 @@ export default function Settings({ focus } = {}) {
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', marginBottom: '2px' }}>{t('settings.slack')}</div>
           <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '8px' }}>{t('settings.slack.desc')}</div>
           <a
-            href={slackInstallUrl(alertTarget === 'custom' ? alertServices : [])}
-            onClick={() => trackEvent('click_add_to_slack', { location: 'settings' })}
-            className="mono inline-flex items-center bg-[var(--bg2)] hover:bg-[var(--bg3)]"
+            href={slackBlocked ? undefined : slackInstallUrl(alertTarget === 'custom' ? alertServices : [], onScreenFilters)}
+            role="link"
+            aria-disabled={slackBlocked || undefined}
+            aria-describedby={slackBlocked ? 'slack-install-blocked' : undefined}
+            onClick={slackBlocked ? undefined : () => trackEvent('click_add_to_slack', { location: 'settings' })}
+            className={`mono inline-flex items-center bg-[var(--bg2)]${slackBlocked ? '' : ' hover:bg-[var(--bg3)]'}`}
             style={{
               gap: '6px', fontSize: '11px', padding: '5px 14px', borderRadius: '5px', marginBottom: '10px',
               border: '1px solid var(--border-hi)', color: 'var(--text0)', fontWeight: 600, textDecoration: 'none',
+              ...(slackBlocked ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
             }}
           >
             <SlackLogo size={13} />
             {t('settings.slack.install')}
           </a>
+          {slackBlocked && (
+            <div id="slack-install-blocked" className="mono" style={{ fontSize: '10px', color: 'var(--amber)', lineHeight: 1.5, marginBottom: '6px' }}>{t('settings.slack.needsService')}</div>
+          )}
           <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '6px' }}>{t('settings.slack.feedAlt')}</div>
           <div className="flex items-center gap-2">
             <input
@@ -619,10 +629,7 @@ export default function Settings({ focus } = {}) {
             // Are the on-screen filters out of sync with what the server subscription holds? settings.*
             // mirrors the last value pushed to the server (persisted by Subscribe/Update), so any diff
             // means there are unsaved filter changes the user must apply via [Update alert filters].
-            const filtersDirty = alertCondition !== settings.alertCondition
-              || alertTarget !== settings.alertTarget
-              || alertIncidents !== settings.alertIncidents
-              || JSON.stringify([...alertServices].sort()) !== JSON.stringify([...settings.alertServices].sort())
+            const filtersDirty = filtersDiffer(onScreenFilters, settings)
             return (
               <div style={{ marginTop: '8px' }}>
                 {subAction === 'subscribing' && (
@@ -697,8 +704,8 @@ export default function Settings({ focus } = {}) {
             )
           })()}
 
-          {/* #486 PR2 — alert filters live INSIDE the Discord block (they only shape Discord webhook
-              delivery). Persisted by Subscribe / Update, never by the general Save button. */}
+          {/* #486 PR2 — alert filters live INSIDE the Discord block. Persisted by Subscribe / Update,
+              never by the general Save button. */}
           <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid var(--border)' }}>
         <FieldRow label={t('settings.alert.condition')} desc={t('settings.alert.condition.desc')}>
           <SegmentControl
@@ -759,8 +766,11 @@ export default function Settings({ focus } = {}) {
           </div>
         )}
 
-        <FieldRow label={t('settings.alert.incidents')} desc={t('settings.alert.incidents.desc')} last>
+        <FieldRow label={t('settings.alert.incidents')} desc={t('settings.alert.incidents.desc')}>
           <Toggle checked={alertIncidents} onChange={() => setAlertIncidents((v) => !v)} />
+        </FieldRow>
+        <FieldRow label={t('settings.alert.maintenance')} desc={t('settings.alert.maintenance.desc')} last>
+          <Toggle checked={alertMaintenance} onChange={() => setAlertMaintenance((v) => !v)} />
         </FieldRow>
           </div>
 

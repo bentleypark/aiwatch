@@ -64,6 +64,7 @@ describe('/slack/manage', () => {
       expect((document.querySelector('input[name="target"][value="custom"]') as HTMLInputElement).checked).toBe(true)
       expect((document.querySelector('input[name="condition"][value="down"]') as HTMLInputElement).checked).toBe(true)
       expect((document.getElementById('incidents') as HTMLInputElement).checked).toBe(false)
+      expect((document.getElementById('maintenance') as HTMLInputElement).checked).toBe(false)
       expect([...document.querySelectorAll('#svcs label')].map((l) => l.textContent!.trim())).toEqual(['Claude API', 'OpenAI API', 'Amazon Bedrock'])
       expect(document.querySelectorAll('#svcs h3')).toHaveLength(0)
     })
@@ -75,7 +76,7 @@ describe('/slack/manage', () => {
       ;(document.getElementById('form') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
       await vi.waitFor(() => expect(document.getElementById('msg')!.textContent).toBe('✓ Saved.'))
       const body = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body))
-      expect(body).toEqual({ token: TOKEN, action: 'update', filters: { alertTarget: 'custom', alertServices: ['claude', 'openai'], alertCondition: 'down', alertIncidents: false } })
+      expect(body).toEqual({ token: TOKEN, action: 'update', filters: { alertTarget: 'custom', alertServices: ['claude', 'openai'], alertCondition: 'down', alertIncidents: false, alertMaintenance: false } })
     })
 
     it('groups the services under their category headings', async () => {
@@ -99,7 +100,7 @@ describe('/slack/manage', () => {
     })
 
     it('picking a service on an every-service channel saves just that service', async () => {
-      const all = { alertTarget: 'all', alertServices: [], alertCondition: 'all', alertIncidents: true }
+      const all = { alertTarget: 'all', alertServices: [], alertCondition: 'all', alertIncidents: true, alertMaintenance: true }
       const fetchMock = boot(`#t=${TOKEN}`, [{ status: 200, body: { ok: true, filters: all, services } }, { status: 200, body: { ok: true } }])
       await vi.waitFor(() => expect((document.getElementById('form') as HTMLFormElement).hidden).toBe(false))
       ;(document.querySelector('input[value="openai"]') as HTMLInputElement).click()
@@ -107,7 +108,7 @@ describe('/slack/manage', () => {
       ;(document.getElementById('form') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
       await vi.waitFor(() => expect(document.getElementById('msg')!.textContent).toBe('✓ Saved.'))
       const body = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body))
-      expect(body.filters).toEqual({ alertTarget: 'custom', alertServices: ['openai'], alertCondition: 'all', alertIncidents: true })
+      expect(body.filters).toEqual({ alertTarget: 'custom', alertServices: ['openai'], alertCondition: 'all', alertIncidents: true, alertMaintenance: true })
     })
 
     it('every service clears the picks, and going back to only these restores them', async () => {

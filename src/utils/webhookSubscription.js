@@ -60,7 +60,16 @@ function filtersFrom(settings) {
     alertTarget: settings.alertTarget,
     alertServices: settings.alertServices,
     alertIncidents: settings.alertIncidents,
+    alertMaintenance: settings.alertMaintenance,
   }
+}
+
+export function filtersDiffer(a, b) {
+  const x = filtersFrom(a)
+  const y = filtersFrom(b)
+  return Object.keys(x).some((k) => (k === 'alertServices'
+    ? JSON.stringify([...x[k]].sort()) !== JSON.stringify([...y[k]].sort())
+    : x[k] !== y[k]))
 }
 
 // All four calls return { ok, status?, error? }. `status` on subscribe is 'sent'|'pending'|'confirmed'

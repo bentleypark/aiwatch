@@ -11,6 +11,7 @@ import { SERVICES } from './services'
 import { GROUP_MEMBERS, GROUP_LABEL, type ServiceGroup } from './service-groups'
 import { kvPut, kvDel } from './utils'
 import { escapeSlack, SLACK_WEBHOOK_PREFIX } from './slack-message'
+import { slackInstallQuery } from '../../api/_shared/slack-install'
 import {
   SLACK_CHANNEL_PREFIX,
   SLACK_MANAGE_PREFIX,
@@ -39,7 +40,7 @@ const SERVICE_NAME = new Map(SERVICES.map((s) => [s.id, s.name]))
 
 // ── Install filters ──────────────────────────────────────────────────────────
 
-/** `?services=claude,openai&condition=down&incidents=0` → filters. Unknown ids are dropped; no known
+/** `?services=claude,openai&condition=down&incidents=0&maintenance=1` → filters. Unknown ids are dropped; no known
  *  id left means every service. */
 export function parseInstallFilters(params: URLSearchParams): SubscriptionFilters {
   const services = (params.get('services') ?? '')
@@ -51,6 +52,7 @@ export function parseInstallFilters(params: URLSearchParams): SubscriptionFilter
     alertServices: [...new Set(services)],
     alertCondition: params.get('condition') === 'down' ? 'down' : 'all',
     alertIncidents: params.get('incidents') !== '0',
+    alertMaintenance: params.get('maintenance') === '1',
   })
 }
 
@@ -255,12 +257,7 @@ export interface UnsubscribeNotice {
 export function buildGoodbyeMessage(site: string, installUrl: string, filters: SubscriptionFilters): { text: string } {
   const settings = `${site.replace(/\/$/, '')}/#settings?focus=alerts`
   const services = filters.alertTarget === 'custom' ? filters.alertServices.filter((id) => KNOWN_SERVICE_IDS.has(id)) : []
-  const params = [
-    ...(services.length > 0 ? [`services=${services.join(',')}`] : []),
-    ...(filters.alertCondition === 'down' ? ['condition=down'] : []),
-    ...(filters.alertIncidents === false ? ['incidents=0'] : []),
-  ]
-  const reinstall = params.length > 0 ? `${installUrl}?${params.join('&')}` : installUrl
+  const reinstall = installUrl + slackInstallQuery(services, filters)
   return {
     text: [
       ':no_bell: *AIWatch alerts are turned off for this channel.*',
@@ -318,6 +315,7 @@ export function buildWelcomeMessage(filters: SubscriptionFilters, manageUrl: str
     `Services: ${escapeSlack(services)}`,
     `Status changes: ${filters.alertCondition === 'down' ? 'outages only' : 'outages and degraded performance'}`,
     `Incident updates: ${filters.alertIncidents ? 'on' : 'off'}`,
+    `Scheduled maintenance: ${filters.alertMaintenance ? 'on' : 'off'}`,
     `<${manageUrl}|Change services or unsubscribe> — anyone who can read this channel can use this link.`,
   ]
   return { text: lines.join('\n') }

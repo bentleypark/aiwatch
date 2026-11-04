@@ -103,7 +103,7 @@ describe('#1590 the manage route posts the goodbye before it deletes', () => {
       }),
     } as unknown as KVNamespace
     const installed = await completeInstall(kv, KEY, { webhookUrl: HOOK, teamId: 'T1', channelId: 'C1' },
-      { alertCondition: 'down', alertTarget: 'all', alertServices: [], alertIncidents: true }, '2026-10-04T00:00:00.000Z')
+      { alertCondition: 'down', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: false }, '2026-10-04T00:00:00.000Z')
 
     const posts: Array<{ text: string; subStillThere: boolean }> = []
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

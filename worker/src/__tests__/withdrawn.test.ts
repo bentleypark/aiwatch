@@ -569,11 +569,11 @@ describe('withdrawal fan-out (#1106)', () => {
   // `return false`, so a kind in neither of its sets is silently dropped for EVERY subscriber.
   it('is delivered to per-user webhook subscribers, under their existing incident filter', () => {
     const entry = buildFeedEntry(ALERT, ALERT.description, [svc('mistral')], 1)!
-    expect(shouldDeliver(entry, { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true })).toBe(true)
+    expect(shouldDeliver(entry, { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: true, alertMaintenance: false })).toBe(true)
     // Both directions: a subscriber who turned incident alerts off still gets none.
-    expect(shouldDeliver(entry, { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: false })).toBe(false)
+    expect(shouldDeliver(entry, { alertCondition: 'all', alertTarget: 'all', alertServices: [], alertIncidents: false, alertMaintenance: false })).toBe(false)
     // And the custom-service filter still scopes it.
-    expect(shouldDeliver(entry, { alertCondition: 'all', alertTarget: 'custom', alertServices: ['openai'], alertIncidents: true })).toBe(false)
+    expect(shouldDeliver(entry, { alertCondition: 'all', alertTarget: 'custom', alertServices: ['openai'], alertIncidents: true, alertMaintenance: false })).toBe(false)
   })
 })
 
@@ -784,8 +784,7 @@ describe('#1106 index.ts wiring', () => {
     // collapsed live Together/xAI alert lands BEHIND the ⚪ retractions that rode through in `rest`.
     it('and the array the send cap actually slices re-sinks them to the tail after merging', () => {
       const b = block('const merged = mergeXaiRegionalAlerts', 'const sent = mergedToSend.slice')
-      expect(b).toMatch(/const mergedToSend = \[[\s\S]*!isWithdrawal\(a\)[\s\S]*\.filter\(isWithdrawal\)\]/)
-      expect(b).toMatch(/alerted:wd:/)
+      expect(b).toMatch(/const mergedToSend = sinkDeferrableAlerts\(merged\)/)
       // and the cap really reads that array
       expect(src).toMatch(/const sent = mergedToSend\.slice\(0, 5\)/)
     })
