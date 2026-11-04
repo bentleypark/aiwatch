@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseInstatusIncidents } from '../instatus'
+import { parseInstatusIncidents, parseInstatusIncidentsResult } from '../instatus'
 
 describe('parseInstatusIncidents — Nuxt SSR', () => {
   it('returns empty when no __NUXT_DATA__ found', () => {
@@ -37,6 +37,20 @@ describe('parseInstatusIncidents — Next.js SSR (Perplexity format)', () => {
     expect(result[0].title).toBe('API Outage')
     expect(result[0].status).toBe('resolved')
     expect(result[0].impact).toBe('major') // MAJOROUTAGE → major
+  })
+
+  it('reads a notice whose name quotes a word and carries a backslash, as the page escapes it', () => {
+    const notice = { id1: { id: 'id1', name: { default: 'Errors on "v2" C:\\path' }, impact: 'MAJOROUTAGE',
+      started: '2026-03-01T10:00:00Z', resolved: '2026-03-01T12:00:00Z', status: 'RESOLVED' } }
+    const html = `<script>self.__next_f.push([1,${JSON.stringify(`notices":${JSON.stringify(notice)},"metrics`)}])</script>`
+    expect(parseInstatusIncidents(html).map((i) => i.title)).toEqual(['Errors on "v2" C:\\path'])
+  })
+
+  it('reads a page whose only notice quotes a word and is filtered out as a quiet page, not a shape change', () => {
+    const notice = { id1: { id: 'id1', name: { default: 'Blip on "v2"' }, impact: 'MAJOROUTAGE',
+      started: '2026-03-01T10:00:00Z', resolved: '2026-03-01T10:00:10Z', status: 'RESOLVED' } }
+    const html = `<script>self.__next_f.push([1,${JSON.stringify(`notices":${JSON.stringify(notice)},"metrics`)}])</script>`
+    expect(parseInstatusIncidentsResult(html)).toEqual({ ok: true, incidents: [] })
   })
 
   it('maps PARTIALOUTAGE to minor impact', () => {

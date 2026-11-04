@@ -1,5 +1,6 @@
 // incident.io Parsers — uptime, component impacts, incident text enrichment
 
+import { unescapeJsString, decodeJsonString, JSON_STRING_CHAR } from './js-string'
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { maintenanceDescription, maintenanceInScope, withDescription, type StatuspageResponse } from './statuspage'
 import { fetchTracked, formatDuration, isTimeOrderImpossible, type FetchTracker } from '../utils'
@@ -53,7 +54,7 @@ export interface IncidentIoUptime {
 }
 
 function unescapeRsc(s: string): string {
-  return s.replace(/\\(["\\])/g, '$1').replace(/"\$undefined"/g, 'null')
+  return unescapeJsString(s).replace(/"\$undefined"/g, 'null')
 }
 
 /** The page-level `component_impacts` array of one RSC chunk, unescaped for `JSON.parse`. `undefined` when
@@ -623,10 +624,8 @@ export function parseIncidentIoGlobalPage(html: string): StatuspageResponse | nu
 
   // 1) Component catalog: id → display name. `[^{}]` keeps the match inside a single component object.
   const nameById = new Map<string, string>()
-  const compRe = /\{"component_id":"([0-9A-Z]{26})"[^{}]*?"name":"((?:[^"\\]|\\.)+)"[^{}]*\}/g
-  for (let m = compRe.exec(s); m !== null; m = compRe.exec(s)) {
-    try { nameById.set(m[1], JSON.parse(`"${m[2]}"`)) } catch { nameById.set(m[1], m[2]) }
-  }
+  const compRe = new RegExp(`\\{"component_id":"([0-9A-Z]{26})"[^{}]*?"name":"(${JSON_STRING_CHAR}+)"[^{}]*\\}`, 'g')
+  for (let m = compRe.exec(s); m !== null; m = compRe.exec(s)) nameById.set(m[1], decodeJsonString(m[2]))
   if (nameById.size === 0) return null // no components on the page → withhold (shape change / not this format)
 
   // 2) Data sources. The `incidents` array is LOAD-BEARING (it drives live component status in step 3), so
@@ -1060,13 +1059,12 @@ export function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
     const json = unescapeRsc(chunk)
-    const re = /"message_string":"((?:[^"\\]|\\.)*)","published_at":"([^"]+)","to_status":"([^"]+)"/g
+    const re = new RegExp(`"message_string":"(${JSON_STRING_CHAR}*)","published_at":"([^"]+)","to_status":"([^"]+)"`, 'g')
     let m
     while ((m = re.exec(json)) !== null) {
       const [, rawText, at, toStatus] = m
       if (!rawText) continue
-      let text: string
-      try { text = JSON.parse(`"${rawText}"`) } catch { text = rawText }
+      const text = decodeJsonString(rawText)
       const stage: TimelineEntry['stage'] =
         toStatus === 'resolved' ? 'resolved'
         : toStatus === 'monitoring' ? 'monitoring'

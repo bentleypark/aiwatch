@@ -2,6 +2,7 @@
 // migration — `grep -n instatusUrl services.ts` for today's set; the historical names below record
 // where each behaviour was OBSERVED, not who is on the parser now.
 
+import { unescapeJsString, decodeJsonString, JSON_STRING_CHAR } from './js-string'
 import type { TimelineEntry, Incident } from '../types'
 import { formatDuration } from '../utils'
 import { weightedDowntimeSeconds, startOfTodayUTC, type OutageInterval } from './uptime-interval'
@@ -59,11 +60,11 @@ export function mapInstatusImpact(raw: string | null | undefined): Incident['imp
 // rather than mistaken for a code bug.
 function buildInstatusComponentMap(html: string, scope: 'top-level' | 'all' = 'top-level'): Map<string, string> {
   const map = new Map<string, string>()
-  const re = scope === 'all'
-    ? /\\"id\\":\\"([a-z0-9]+)\\",\\"name\\":\{[^}]*?\\"default\\":\\"([^\\"]+)\\"\},\\"nameHtml\\"/g
-    : /\\"id\\":\\"([a-z0-9]+)\\",\\"name\\":\{[^}]*?\\"default\\":\\"([^\\"]+)\\"\},\\"nameHtml\\"(?:(?!\\"id\\":\\")[\s\S])*?\\"group\\":/g
+  const head = `"id":"([a-z0-9]+)","name":\\{[^}]*?"default":"(${JSON_STRING_CHAR}+)"\\},"nameHtml"`
+  const re = new RegExp(scope === 'all' ? head : `${head}(?:(?!"id":")[\\s\\S])*?"group":`, 'g')
+  const u = unescapeJsString(html)
   let m: RegExpExecArray | null
-  while ((m = re.exec(html)) !== null) map.set(m[1], m[2])
+  while ((m = re.exec(u)) !== null) map.set(m[1], decodeJsonString(m[2]))
   return map
 }
 
@@ -270,9 +271,7 @@ function warnNuxtOverlayNoop(): void {
 export function parseInstatusComponents(html: string): Array<{ id: string; name: string; status: string }> {
   if (html.includes('__NUXT_DATA__')) return parseInstatusNuxtComponents(html)
   if (!html.includes('__next_f')) return []
-  // Blanket `\"`→`"` unescape (safe — same rationale as parseInstatusNextUptime): component objects
-  // carry no embedded quotes in the fields we read (id, name.default, status enum).
-  const u = html.replace(/\\"/g, '"')
+  const u = unescapeJsString(html)
   const out: Array<{ id: string; name: string; status: string }> = []
   for (const [id, name] of buildInstatusComponentMap(html)) {
     // Locale-agnostic anchor (#911) — the name object may be `{"default":…}` or `{"en":…,"default":…}`,
@@ -290,7 +289,7 @@ export function parseInstatusComponents(html: string): Array<{ id: string; name:
   // exact silent-miss class #911 fixed. If the payload clearly HAS component-shaped objects (a permissive
   // `nameHtml`-anchored match) yet the strict top-level pass matched none, warn once so an upstream shape
   // change surfaces as a diagnosable signal instead of an empty breakdown mistaken for a code bug.
-  if (out.length === 0 && /\\"id\\":\\"[a-z0-9]+\\",\\"name\\":\{[^}]*?\\"default\\":\\"[^\\"]+\\"\},\\"nameHtml\\"/.test(html)) {
+  if (out.length === 0 && new RegExp(`"id":"[a-z0-9]+","name":\\{[^}]*?"default":"${JSON_STRING_CHAR}+"\\},"nameHtml"`).test(u)) {
     warnEmptyInstatusComponents()
   }
   return out
@@ -348,7 +347,7 @@ function parseInstatusNextIncidentsResult(html: string): InstatusIncidentsResult
   // Next payload (`{\"n1\":{...`) the backslash before each quote sits OUTSIDE a string as far as it is
   // concerned, so the first `\"` opens a string that never closes and the scan runs to the end. Found
   // by probing a realistically-escaped fixture rather than trusting the fixture was at fault.
-  const unescaped = html.replace(/\\"/g, '"')
+  const unescaped = unescapeJsString(html)
   const at = unescaped.indexOf('"notices":{')
   if (at === -1) return { ok: false, reason: 'no-next-notices' }
   const open = unescaped.indexOf('{', at)
@@ -386,8 +385,7 @@ function parseInstatusNextIncidents(html: string): Incident[] {
     // Find the notices section and unescape
     const match = html.match(/notices\\":\{(\\"[a-z0-9][\s\S]*?)\},\\"metrics/)
     if (!match) return []
-    // Unescape the JSON: \" → "
-    const raw = '{' + match[1].replace(/\\"/g, '"') + '}'
+    const raw = '{' + unescapeJsString(match[1]) + '}'
     const notices = JSON.parse(raw) as Record<string, {
       id: string; name: { default: string }; impact: string
       started: string; resolved: string | null; status: string
@@ -521,7 +519,7 @@ export function parseInstatusReportedUptime(html: string, componentName: string 
       if (name === componentName) { id = cid; break }
     }
     if (!id) return null
-    const u = html.replace(/\\"/g, '"')
+    const u = unescapeJsString(html)
     const ki = u.indexOf('"componentsUptime":')
     if (ki < 0) return null
     const objStart = u.indexOf('{', ki + '"componentsUptime":'.length)
@@ -679,17 +677,13 @@ function warnNextUptimeShape(componentName: string, reason: string): null {
 }
 
 function parseInstatusNextUptime(html: string, componentName: string, nowMs: number, windowDays: number): InstatusUptime | null {
-  // Resolve component name → id from the escaped payload (buildInstatusComponentMap reads the `\"`
-  // form), then read componentsUptime[id] from the unescaped JSON.
+  // Resolve component name → id, then read componentsUptime[id] from the unescaped JSON.
   let id: string | undefined
   for (const [cid, name] of buildInstatusComponentMap(html)) {
     if (name === componentName) { id = cid; break }
   }
   if (!id) return warnNextUptimeShape(componentName, 'component not found in the Next.js component map')
-  // Blanket `\"`→`"` unescape is safe here: componentsUptime values are all quote-free (uptime %,
-  // ISO dates, status enums, numeric day-keys). A value with an embedded quote would corrupt the
-  // slice and fail JSON.parse below → null (caught) — acceptable, since the data doesn't carry them.
-  const u = html.replace(/\\"/g, '"')
+  const u = unescapeJsString(html)
   const key = '"componentsUptime":'
   const ki = u.indexOf(key)
   if (ki < 0) return warnNextUptimeShape(componentName, 'componentsUptime block absent')
