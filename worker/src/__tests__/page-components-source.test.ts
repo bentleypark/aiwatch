@@ -642,7 +642,7 @@ describe('prefetch + alert wiring (#1125)', () => {
     // re-writing the identical set every cron tick, which is what it exists to stop. The log follows
     // the write and is gated on it, so it can never claim a record that does not exist.
     const branch = INDEX_SRC.slice(INDEX_SRC.indexOf('if (alertable.length === 0)'), INDEX_SRC.indexOf('if (absorbed.length > 0)'))
-    expect(branch).toMatch(/if \(await kvPut\(env\.STATUS_CACHE, `component-seen:\$\{apiUrl\}`, JSON\.stringify\(nextSeen\)\)\)/)
+    expect(branch).toMatch(/if \(await kvPut\(kv, `component-seen:\$\{apiUrl\}`, JSON\.stringify\(nextSeen\)\)\)/)
     expect(branch.indexOf('console.warn')).toBeGreaterThan(branch.indexOf('kvPut'))
   })
 

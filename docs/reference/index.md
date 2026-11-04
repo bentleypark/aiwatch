@@ -12,7 +12,7 @@ cross-linked with normal markdown links. `CLAUDE.md` is the schema layer; `log.m
 Read this index first, then load only the pages you need.
 
 ## architecture — how the system works
-- [Status Data Flow](data-flow.md) — browser polling → `/api/status` fetch/normalize/KV → React, plus the `*/5` cron + Web Vitals pipeline.
+- [Status Data Flow](data-flow.md) — browser polling, fetch/normalize/KV, React, plus the `*/5` cron + Web Vitals pipeline.
 - [Service Status Determination](status-determination.md) — the ordered per-service status resolution chain in `services.ts`, with #-rationale.
 - [Discord Alert Delivery Paths](discord-alert-paths.md) — operator + per-user alerts delivered server-side, incl. the request-path Edge SSR fallback alert.
 

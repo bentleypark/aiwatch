@@ -30,7 +30,7 @@ export function statusFetchLegIndex(leg: { leg: string; budgetMs: number }): str
   return `${STATUS_FETCH_LEG_INDEX}:${leg.leg}@${leg.budgetMs}`
 }
 
-export type StatusFetchRoute = 'cron' | 'live'
+export type StatusFetchRoute = 'cron' | 'live' | 'refresh'
 
 export function recordStatusFetchRun(
   analytics: AnalyticsEngineDataset | undefined,

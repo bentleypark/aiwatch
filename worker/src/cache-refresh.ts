@@ -1,18 +1,12 @@
 // #488/#1057/#1371 — refresh the status cache outside the throttled traffic write.
 //
-// Every OG/SEO surface reads CACHE_KEY (via /api/status/cached). That key is otherwise written only
-// by the /api/status fetch handler's cacheWrite, throttled to once per 10 min and dependent on
-// incidental live traffic. So an incident the cron just detected (and alerted on) stays invisible to
-// SEO/OG for up to ~10 min — a shared "Is X Down?" card previews the pre-incident state.
+// Every OG/SEO surface reads CACHE_KEY (via /api/status/cached).
 //
-// Refreshes that bypass that throttle all go through `writeStatusCache`, which writes CACHE_KEY only
-// (never the daily uptime counters, so incident edges don't bias the sampling). The edge-triggered ones:
+// The edge-triggered refreshes go through `writeStatusCache`, which writes CACHE_KEY only (never the
+// daily uptime counters, so incident edges don't bias the sampling):
 //   #488 — the CRON, when a status-change alert fired (sentCount > 0). Covers the no-live-traffic case.
 //   #1057 — the LIVE /api/status handler, when a poll's fresh snapshot shows a status edge the cached
-//           snapshot doesn't yet reflect. This is what decouples the OG card's freshness from the alert
-//           timing: while the operator watches the (live) dashboard flip to down, their browser is
-//           polling /api/status, so the OG card flips on that poll — AHEAD of the */5 cron/Discord
-//           alert, instead of in lockstep with it (the whole-turn root cause of #1057).
+//           snapshot doesn't yet reflect.
 // `refreshStatusCacheAfterCronFetch` (#1371) is the cron's write after its own live fetch, edge or not.
 // Extracted here as thin, KV-only functions so the decisions are unit-testable without invoking the
 // whole cron / fetch handler.

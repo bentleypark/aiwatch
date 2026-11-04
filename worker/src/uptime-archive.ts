@@ -110,7 +110,7 @@ export async function readArchivedWeightedOutageSec(
  * cost) or isn't actually narrower than `calendarDays`, or when the archive had nothing to add.
  *
  * NOT wired into the event-driven edge refreshes (`cache-refresh.ts`'s on-status-change /
- * on-live-edge paths, #488/#1057) — only the throttled `cacheWrite` cycle calls this. An edge
+ * on-live-edge paths, #488/#1057) — only `writeSnapshot` (the throttled `cacheWrite`, the #1910 StatusRefresher run) calls this. An edge
  * refresh can therefore briefly re-serve a service's live-only (gap still blank) dailyImpact until
  * the next throttled cycle re-applies the restore; acceptable since edge refreshes exist for
  * immediate STATUS visibility, not calendar completeness, and the throttle window is short (~10min).

@@ -1,15 +1,19 @@
 ---
 type: architecture
 title: "Status Data Flow"
-description: "Annotated status data flow — browser polling to /api/status fetch/normalize/KV to React, plus the */5 cron and Web Vitals pipeline."
+description: "Annotated status data flow — browser polling, fetch/normalize/KV, React, plus the */5 cron and Web Vitals pipeline."
 tags: [worker, cron, data-flow]
 ---
 
 # Status Data Flow
 
 ```
-Browser (React SPA, 60s polling)
-  → Cloudflare Worker (/api/status)
+Browser (React SPA, 60s polling — every poll reads /api/status/cached first, /api/status only as the fallback, #1910)
+  → /api/status/cached serves the snapshot; when it is older than 60 s it asks the singleton `StatusRefresher`
+    Durable Object (off the response path), whose alarm runs the live fetch below and writes the snapshot every
+    run and the daily counters at most every 5 min (`status-refresh.ts`). A poll that received such a snapshot
+    polls once more 20 s later to pick up that run (`followUpPollDelay`, `src/utils/dataTimestamp.js`)
+  → Cloudflare Worker (/api/status, and the StatusRefresher run)
     → parallel fetch (49 services) through one per-invocation `createFetchTracker` (#1489). It never delays a
       fetch, and each `fetchWithTimeout` timeout starts at the `fetch()` call. It records, per run, how many other
       fetches were waiting for headers when each one started, for the timeouts and the answers apart.
@@ -18,11 +22,9 @@ Browser (React SPA, 60s polling)
     → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes (#717: failed aistudio read holds last-known ACTIVE aistudio incidents from services:latest instead of dropping to vertex-only, so the incident doesn't flap in/out per refresh; successful read is authoritative)
     → normalize to ServiceStatus[]
     → #1489: a service whose uptime read failed this run publishes services:latest's last figure (`carryForwardUptime`, marked `uptimeCarriedFrom`) for up to 6h after that figure was read — the same 6h after which the uptime-missing alert fires
-    → write to KV (cache + daily counters), THROTTLED to 10-min (cacheWrite)
+    → write to KV (cache + daily counters)
     → #1057: if this poll's status differs from the cached snapshot while throttled, force an immediate
-      CACHE_KEY-only refresh (refreshStatusCacheOnLiveEdge, off-response via ctx.waitUntil) so the
-      is-down/OG social card (which reads /api/status/cached) flips on the live poll, ahead of the cron
-      #488 alert-edge refresh — not welded to the Discord alert timing
+      CACHE_KEY-only refresh (refreshStatusCacheOnLiveEdge, off-response via ctx.waitUntil)
     → (Mistral-only probe corroboration filter removed in #373 — same-title incident grouping in `src/utils/incidentGrouping.js` now consolidates auto-monitoring noise uniformly across all services)
     → metastatuspage preemptive signal: platform:status:atlassian KV non-operational → hold all Atlassian services operational
     → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services

@@ -175,6 +175,7 @@ Grouped by the dashboard's category taxonomy (49 total — sidebar filters / Ove
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
+  ├── GET /api/status/cached → KV snapshot; when stale, a StatusRefresher Durable Object runs the live fetch
   ├── GET /api/status    → parallel fetch (49 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → Discord webhook proxy (SSRF protected)
@@ -272,7 +273,7 @@ npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/status` | GET | All service statuses + incidents + uptime + aiAnalysis |
-| `/api/status/cached` | GET | KV-only cached status (for Edge SSR, fast ~1.2s) |
+| `/api/status/cached` | GET | KV-only cached status (dashboard polls + Edge SSR, fast ~1.2s) |
 | `/api/uptime?days=30` | GET | Daily uptime history (1-90 days) |
 | `/api/report?month=YYYY-MM` | GET | Monthly reliability archive (uptime, score, incidents, latency) |
 | `/api/alert` | POST | Discord webhook proxy (SSRF protected) |

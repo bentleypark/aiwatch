@@ -23,6 +23,7 @@ const en = {
 
   // Topbar
   'topbar.live': 'LIVE',
+  'topbar.checked': 'checked {time}',
   'ticker.pause': 'Pause status ticker',
   'topbar.refresh': '↻ Refresh',
   'topbar.refresh.loading': '↻ Loading...',

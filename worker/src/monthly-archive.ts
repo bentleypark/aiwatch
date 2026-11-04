@@ -2082,8 +2082,8 @@ export async function buildMonthlyArchive(
       missingHistoryIdx.push(i)
     }
   })
-  // #1355 — `history:{date}` is written lazily by the traffic-dependent /api/status request path
-  // (index.ts cacheWrite), not by cron, so the month's final day(s) can still be missing here when
+  // #1355 — `history:{date}` is written lazily by traffic (index.ts writeSnapshot, from the #1910
+  // StatusRefresher run or the /api/status cacheWrite), not by cron, so the month's final day(s) can still be missing here when
   // this build runs at 12:00-12:14 UTC on the 1st. `daily:{date}` (2-day TTL) is written directly
   // by every request throughout that day and is very likely still live at that point, so fall back
   // to it for whichever dates `history:` missed rather than let an un-archived day silently shrink

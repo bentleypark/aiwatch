@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useRef, createContext, useContext, createElement } from 'react'
 import { resolveApiUrl, cachedUrlFor } from '../utils/apiUrl'
 import { startApiTiming, noteHeaders, finishApiTiming } from '../utils/apiTiming'
+import { dataTimestamp, followUpPollDelay } from '../utils/dataTimestamp'
 
 const POLL_INTERVAL = 60_000 // 60s
 
@@ -785,11 +786,14 @@ function usePollingInternal() {
   const controllerRef = useRef(null)
   const hasDataRef = useRef(false)
   const refreshingRef = useRef(false) // prevent silent polls from aborting refresh
+  const followUpRef = useRef(null) // #1910 — one re-poll after a stale snapshot
+  const pollRef = useRef(null)
   const prevServicesRef = useRef([])  // backup for recovery on refresh failure
 
-  const poll = useCallback(async (mode = 'silent') => {
+  const poll = useCallback(async (mode = 'silent', allowFollowUp = true) => {
     // Skip silent polls while refresh is in progress
     if (mode === 'silent' && refreshingRef.current) return
+    clearTimeout(followUpRef.current)
 
     // Create new controller BEFORE aborting previous to avoid race condition
     const controller = new AbortController()
@@ -819,15 +823,13 @@ function usePollingInternal() {
     }
 
     try {
-      // Initial + refresh: try cached endpoint first (~1s), fall back to full fetch
-      // Silent polls: full endpoint for fresh data from every service
+      // Every poll tries the cached endpoint first (~1s) and falls back to the full fetch. #1910 — the
+      // Worker refreshes the cache in the background when a cached read finds it stale.
       let res
-      if (isInitial || isRefresh) {
-        try {
-          res = await fetch(CACHED_URL, { signal: controller.signal })
-          if (!res.ok) res = null
-        } catch { res = null }
-      }
+      try {
+        res = await fetch(CACHED_URL, { signal: controller.signal, cache: 'no-cache' })
+        if (!res.ok) res = null
+      } catch { res = null }
       if (!res) {
         res = await fetch(API_URL, { signal: controller.signal })
       }
@@ -853,13 +855,16 @@ function usePollingInternal() {
 
       hasDataRef.current = true
       refreshingRef.current = false
+      const dataAt = dataTimestamp(data)
+      const followUpIn = allowFollowUp && !document.hidden ? followUpPollDelay(dataAt, Date.now()) : null
+      if (followUpIn != null && !cancelledRef.current) followUpRef.current = setTimeout(() => pollRef.current?.('silent', false), followUpIn)
       if (!cancelledRef.current) {
         setState({
           services: merged,
           loading: false,
           refreshing: false,
           error: null,
-          lastUpdated: new Date(),
+          lastUpdated: dataAt,
           probe24h: probeSnapshots,
           probeServiceIds,
           aiAnalysis: data.aiAnalysis ?? {},
@@ -951,6 +956,7 @@ function usePollingInternal() {
   }, [])
 
   useEffect(() => {
+    pollRef.current = poll
     cancelledRef.current = false
     poll('initial')
 
@@ -972,6 +978,7 @@ function usePollingInternal() {
       cancelledRef.current = true
       controllerRef.current?.abort()
       clearInterval(interval)
+      clearTimeout(followUpRef.current)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [poll])

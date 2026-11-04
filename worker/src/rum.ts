@@ -1,4 +1,4 @@
-// #1686 — real-user `/api/status` timing from the dashboard, for the operator channel only.
+// #1686 — real-user status-poll timing (`/api/status/cached`, else `/api/status`) from the dashboard, for the operator channel only.
 // The dashboard batches one sample per poll and POSTs them to /api/rum. Each sample is written to
 // WAE with the colo and country Cloudflare attached to the beacon and the batch's random per-page-load
 // id (no IP; not kept in KV). A batch of RUM_WINDOW samples is judged by the 4-of-5 rule derived in
@@ -115,7 +115,7 @@ export const rumAlertKey = (country: string): string => `alerted:rum:${country}`
 const CAUSE_LINE: Record<RumCause, string> = {
   'network-path': 'The worker answered quickly, so the time was spent on the network path to the user (Cloudflare edge/routing or the user\'s network), not in our code.',
   worker: 'The worker itself was slow to answer — look at our code, KV and the runtime first.',
-  unknown: `None of the slow polls carried the worker's time: a poll that gets no response headers within 15s, or is cut off when its tab is hidden, reports none. The worker answers only after its status run, so a long run and a stalled network path look the same here — compare the platform status below with this hour's \`status-fetch-run\` rows.`,
+  unknown: `None of the slow polls carried the worker's time: a poll that gets no response headers within 15s, or is cut off when its tab is hidden, reports none. These samples cannot tell the worker from the network path.`,
 }
 
 export function formatRumAlert(
