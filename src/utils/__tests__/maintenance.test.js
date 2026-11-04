@@ -17,7 +17,8 @@ describe('#1405 maintenanceWindowsOf', () => {
   it('drops a window with no readable start and orders the rest by start', () => {
     const later = { ...BFL, id: 'later', scheduledFor: '2026-11-10T00:00:00.000Z', scheduledUntil: null }
     const broken = { ...BFL, id: 'broken', scheduledFor: 'not a date' }
-    expect(maintenanceWindowsOf({ scheduledMaintenances: [later, broken, BFL] }).map((w) => w.id)).toEqual(['d6t9c8tqbz25', 'later'])
+    const duringBfl = Date.parse('2026-11-04T05:00:00Z')
+    expect(maintenanceWindowsOf({ scheduledMaintenances: [later, broken, BFL] }, duringBfl).map((w) => w.id)).toEqual(['d6t9c8tqbz25', 'later'])
   })
 })
 
