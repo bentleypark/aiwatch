@@ -1005,7 +1005,7 @@ describe('pickBreakdownComponents (#606 Cat B)', () => {
 })
 
 describe('SERVICES multi-component config sanity (#379)', () => {
-  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI + Review Agents + Cursor IDE (iOS) + BugBot + Origin', () => {
+  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI + Review Agents + Cursor IDE (iOS) + BugBot + Origin + Third-party models', () => {
     const cursor = SERVICES.find((s) => s.id === 'cursor')!
     expect(cursor.statusComponentId).toBe('rflc60xp5jp2') // IDE
     expect(cursor.statusComponentIds).toEqual([
@@ -1017,6 +1017,7 @@ describe('SERVICES multi-component config sanity (#379)', () => {
       'cursor-ios', // Cursor IDE (iOS) (#1814)
       'bugbot', // BugBot (#1814)
       'xwjpvdf81qh9', // Origin (#1814)
+      'third-party-models', // Third-party models (#1916)
     ])
     expect(cursor.referenceComponentIds).toEqual(['jh0714rgjgt4', 'enterprise-dashboard']) // cursor.com, Enterprise Dashboard (#1814)
     expect(cursor.scopeIncidentsToComponent).toBe(true) // #1814 — Grok Bot-only incidents leave the card

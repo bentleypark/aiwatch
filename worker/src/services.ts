@@ -602,7 +602,8 @@ export const SERVICES: ServiceConfig[] = [
   // #1814 — components decided by the #1821 criterion: Origin (Cursor's git forge), Cursor IDE (iOS) and
   //   BugBot are Counted; cursor.com (sign-in, payments) and Enterprise Dashboard (billing, usage, team
   //   settings) are Reference; Grok Bot is another product, so its incidents are scoped off this card.
-  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponent: 'IDE', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl', 'cursor-ios', 'bugbot', 'xwjpvdf81qh9'], scopeIncidentsToComponent: true, rosterAuditExclude: ['sm5wkcnqkvr9', 'jh0714rgjgt4', 'enterprise-dashboard'], referenceComponentIds: ['jh0714rgjgt4', 'enterprise-dashboard'] },
+  // #1916 — Third-party models is Counted by the same criterion.
+  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponent: 'IDE', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c', '2x2chyqwmkzl', 'cursor-ios', 'bugbot', 'xwjpvdf81qh9', 'third-party-models'], scopeIncidentsToComponent: true, rosterAuditExclude: ['sm5wkcnqkvr9', 'jh0714rgjgt4', 'enterprise-dashboard'], referenceComponentIds: ['jh0714rgjgt4', 'enterprise-dashboard'] },
   // copilot badge reflects worst-of: Copilot + Copilot AI Model Providers (direct upstream) (#379).
   // #1518 — the other 10 components on this page are GitHub's own platform (Git/Webhooks/API Requests/
   // Issues/PRs/Actions/Packages/Pages/Codespaces/the www redirect notice), not Copilot's — the same
