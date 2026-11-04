@@ -25,7 +25,7 @@ Operator-only. Hourly at `:00`, `provider-changes.ts` posts one embed per new pr
 Operator-only; neither alert reaches a per-user webhook, the feed or the phone push.
 
 - **Infrastructure** — every `*/5` cron, `infra-status.ts` reads the Cloudflare, Vercel and GitHub status pages and alerts when a tracked component (pinned by id in `INFRA_PLATFORMS`) is non-operational, once per platform per 2h, with a recovery message.
-- **Real-user latency** — the dashboard batches its `/api/status` poll timings to `POST /api/rum`. When 4 of a batch's last 5 polls took ≥ `RUM_SLOW_MS`, `rum.ts` alerts once per country + colo (e.g. `KR:SEA`) per 2h. Any affected platform from the last infrastructure read is attached. A healthy batch over the same country + colo sends the recovery, so a user served normally by another colo does not clear it.
+- **Real-user latency** — the dashboard batches its `/api/status` poll timings to `POST /api/rum`. When 4 of a batch's last 5 polls took ≥ `RUM_SLOW_MS`, `rum.ts` alerts once per country (e.g. `KR`) per 2h and names the colo that served the batch. Any affected platform from the last infrastructure read is attached. A healthy batch from the same country, over any colo, sends the recovery.
 
 ### Announced but missing from a card (#1118)
 

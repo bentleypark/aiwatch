@@ -110,11 +110,12 @@ export function recordRumSamples(
   }
 }
 
-export const rumAlertKey = (country: string, colo: string): string => `alerted:rum:${country}:${colo}`
+export const rumAlertKey = (country: string): string => `alerted:rum:${country}`
 
-const CAUSE_LINE: Partial<Record<RumCause, string>> = {
+const CAUSE_LINE: Record<RumCause, string> = {
   'network-path': 'The worker answered quickly, so the time was spent on the network path to the user (Cloudflare edge/routing or the user\'s network), not in our code.',
   worker: 'The worker itself was slow to answer — look at our code, KV and the runtime first.',
+  unknown: `None of the slow polls carried the worker's time: a poll that gets no response headers within 15s, or is cut off when its tab is hidden, reports none. The worker answers only after its status run, so a long run and a stalled network path look the same here — compare the platform status below with this hour's \`status-fetch-run\` rows.`,
 }
 
 export function formatRumAlert(
@@ -127,8 +128,7 @@ export function formatRumAlert(
     `Country **${country}**, served by colo **${colo}** — ${verdict.slow}/${RUM_WINDOW} recent dashboard polls took ≥ ${RUM_SLOW_MS / 1000}s.`,
     `Median poll ${(verdict.medianTotalMs / 1000).toFixed(1)}s · worker time ${verdict.medianServerMs === null ? 'n/a' : `${verdict.medianServerMs}ms`}`,
   ]
-  const cause = CAUSE_LINE[verdict.cause]
-  if (cause) lines.push(cause)
+  lines.push(CAUSE_LINE[verdict.cause])
   if (infraLines.length > 0) lines.push('', '**Platform status**', ...infraLines)
   return {
     title: `🐢 Dashboard API slow for real users — ${country} via ${colo}`,
@@ -145,8 +145,8 @@ export function formatRumRecovery(country: string, colo: string): { title: strin
   }
 }
 
-/** Per country + colo: at most one alert and one recovery per ALERT_TTL_S hold. The hold is shared by
- *  every tab on that path while the 4-of-5 rule is per tab, so a recovery keeps the hold rather than
+/** Per country: at most one alert and one recovery per ALERT_TTL_S hold. The hold is shared by
+ *  every tab in that country while the 4-of-5 rule is per tab, so a recovery keeps the hold rather than
  *  clearing it. Only `slow` and `healthy` verdicts can change anything. */
 export async function applyRumVerdict(
   kv: KVNamespace,
@@ -156,7 +156,7 @@ export async function applyRumVerdict(
   country: string,
 ): Promise<'alerted' | 'recovered' | 'none'> {
   if (verdict.kind !== 'slow' && verdict.kind !== 'healthy') return 'none'
-  const key = rumAlertKey(country, colo)
+  const key = rumAlertKey(country)
   const state = await kv.get(key).catch(() => null)
   if (verdict.kind === 'slow' && !state) {
     const embed = formatRumAlert(verdict, colo, country, await readInfraContext(kv))
