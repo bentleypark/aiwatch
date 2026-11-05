@@ -36,7 +36,6 @@ Shared workflow — especially:
 
 - **CSS**: Use design tokens (`var(--green)`, not `#3fb950`). See `src/index.css`
 - **i18n**: Add keys to both `src/locales/ko.js` and `en.js`
-- **Components**: Prefer inline styles for values Tailwind v4 doesn't generate reliably
 - **Worker**: TypeScript, error logging with `console.error/warn`
 
 ## Testing

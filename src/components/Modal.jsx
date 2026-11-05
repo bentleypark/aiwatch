@@ -25,9 +25,8 @@ export default function Modal({ isOpen, onClose, title, children }) {
 
   return (
     // Native <dialog> has implicit role="dialog"; showModal() makes it modal (no aria-modal needed).
-    // `margin: auto` MUST be inline, not a Tailwind `.m-auto` util: index.css's unlayered
-    // `* { margin: 0 }` reset beats @layer-utilities classes, which would kill the UA dialog's
-    // margin:auto centering and pin the panel to the top-left. Inline style outranks both.
+    // `margin: auto` restores the UA dialog's centering, which Tailwind preflight's
+    // `* { margin: 0 }` removes; without it the panel pins to the top-left.
     <dialog
       ref={dialogRef}
       closedby="any"
