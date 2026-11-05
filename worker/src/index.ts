@@ -612,7 +612,7 @@ let lastProbeSummaryCacheSlot = ''
 
 // Exported for direct testing of the #1256 fail-closed guard — only the wiring shows that an
 // unreadable window never reaches the kv.put below.
-export async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
+export async function writeProbeSnapshot(kv: KVNamespace, analytics: AnalyticsEngineDataset | undefined): Promise<void> {
   const currentSlot = computeProbeSlot(new Date())
   if (lastProbeSlot === currentSlot) return
 
@@ -629,10 +629,11 @@ export async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
     console.error('[probe] KV read failed — skipping this slot:', err instanceof Error ? err.message : err)
     return null
   })
-  if (readFailed) return
+  if (readFailed) { recordDrop(analytics, 'probe-snapshot', 'read-failed'); return }
   const snapshots = parseSnapshotWindow<ProbeSnapshot>(existing)
   if (snapshots === null) {
     console.error('[probe] stored window is unreadable — skipping the write so it is not overwritten')
+    recordDrop(analytics, 'probe-snapshot', 'window-unreadable')
     return
   }
 
@@ -666,6 +667,7 @@ export async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
     // Reached only by the append/put itself now that the read and parse are guarded above, so this
     // no longer conflates "the stored window is corrupt" with "KV rejected the write".
     console.warn('[probe] snapshot write rejected:', err instanceof Error ? err.message : err)
+    recordDrop(analytics, 'probe-snapshot', 'write-rejected')
   }
 }
 
@@ -2297,7 +2299,7 @@ import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDet
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { parseFailKey, parseParseFailDay, reasonsFor } from './parse-failure-log'
-import { collectChangelogs, getStaleSources } from './changelog'
+import { collectChangelogs, readStaleSourcesCounted } from './changelog'
 import { runProviderChanges } from './provider-changes'
 import { getBriefingWindow, previousWindowDates, buildIncidentSummary, buildStabilityChanges, liveStabilityUptime, accumulatePrevWeekCounters, type HistoryUptimeRow, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
 import { searchBadgeEmbeds, diffBadgeRepoDiscovery, parseBadgeReposSeen, type BadgeRepoDiscoveryDiff } from './badge-repo-discovery'
@@ -2306,6 +2308,7 @@ import { parseReferralBody, recordReferral, type ReferralCounts } from './referr
 import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOutageWindows, nominalWindowEnd, previousPeriod, periodsCoveringWindow, type GrowthDailyRow } from './growth-series'
 import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
 import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
+import { recordDrop, queryDrops } from './drop-log'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import { recordDegradation } from './degradation-count'
 import type { ProbeSummary, Incident } from './types'
@@ -3410,7 +3413,7 @@ const workerExport = {
 
       // Health check probing (Phase 2) — runs every cron cycle
       if (env.STATUS_CACHE) {
-        await writeProbeSnapshot(env.STATUS_CACHE).catch((err) =>
+        await writeProbeSnapshot(env.STATUS_CACHE, env.ANALYTICS).catch((err) =>
           console.warn('[cron] probe failed:', err instanceof Error ? err.message : err)
         )
       }
@@ -4007,7 +4010,7 @@ const workerExport = {
             } catch { console.warn('[cron] security summary list failed') }
 
             // Per-source last-fetch staleness check — surfaces silent collection gaps (#274)
-            const staleSources = await getStaleSources(env.STATUS_CACHE).catch(() => [])
+            const staleSources = await readStaleSourcesCounted(env.STATUS_CACHE, env.ANALYTICS)
 
             // #995 — AI-analysis usage trend from the retained ai:usage:{date} keys across the week.
             // parseUsage(null) → zeros, so missing days contribute nothing but keep the window at 7d.
@@ -4541,6 +4544,7 @@ const workerExport = {
               console.warn('[daily-summary] outage audience read failed:', err instanceof Error ? err.message : err)
             }
             const historyClicks = await queryHistoryClicks(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            const drops = await queryDrops(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
 
             // #837 — Chrome-extension activity (consent-free): last-24h poll volume (WAE `ext-claude`
             // tag) + today's extension-sourced report count (KV). Both best-effort/null-tolerant.
@@ -4698,6 +4702,7 @@ const workerExport = {
               badgeTraffic,
               audience,
               historyClicks,
+              drops,
               extActivity,
               statuslineTraffic,
               pluginTraffic,

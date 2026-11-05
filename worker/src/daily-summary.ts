@@ -12,6 +12,7 @@ import { wholeShares } from './recovery-baseline-text'
 import type { SnapshotCoverage } from './prediction-snapshot'
 import type { SourceHealthRead } from './reddit'
 import { holdLedger, timedOutAttribution, type AiUsageCounters } from './ai-analysis'
+import { formatDropLine, type DropCount } from './drop-log'
 import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth, type Guard3HoldRecord } from './monthly-archive'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
 import { FAMILY_OF_SERVICE } from './alerts'
@@ -154,6 +155,8 @@ export interface DailySummaryData {
   audience?: AudienceCounts | null
   // #1612 — last-24h is-down "30-day history" clicks and views by phase (WAE). null when unconfigured.
   historyClicks?: HistoryClickCounts | null
+  /** #1257 — `null` = not read (no credentials, or the query failed); the line says so. */
+  drops?: DropCount[] | null
   // #837 — Chrome-extension activity (consent-free engagement proxy): last-24h poll volume (WAE
   // `ext-claude` tag; null when the SQL API isn't configured) + today's extension-sourced report
   // count (KV). Absent when neither signal exists → section omitted.
@@ -334,6 +337,7 @@ export function buildDailySummary(data: DailySummaryData): string {
   if (guardLine) lines.push(guardLine)
   const guard3Line = formatGuard3HoldLine(data.guard3Holds)
   if (guard3Line) lines.push(guard3Line)
+  lines.push(formatDropLine(data.drops))
   // Health outranks the count. `reddit:seen:*` keys live 24h, so a source that dies at noon still
   // shows a real non-zero count — and printing it would read as health on the very day detection
   // went dark. The reason is carried through because the remediations differ: `block` is the
