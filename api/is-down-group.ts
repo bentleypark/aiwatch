@@ -318,7 +318,7 @@ function renderGroupPage(
   // only real service ids so reports remain attributable and its per-service, per-day deduplication
   // remains true. The picker deliberately makes that attribution explicit instead of inventing a
   // family id or silently assigning a report to whichever member happens to be worst right now.
-  const reportServiceOptions = members.map((member) => `<option value="${esc(member.id)}">${esc(member.name)}</option>`).join('')
+  const reportServiceOptions = members.map((member) => `<option value="${esc(member.id)}"${member.id === beaconSvcId ? ' selected' : ''}>${esc(member.name)}</option>`).join('')
   const reportSection = `<button type="button" class="report-fab" id="report-open" aria-haspopup="dialog" aria-controls="report-modal"><span aria-hidden="true">⚠️</span> Report an issue</button>
 <div id="report-modal" class="report-modal" hidden>
   <div class="report-modal-card" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
@@ -985,8 +985,13 @@ export default async function handler(req: Request) {
             })
           }
         }
-        referenceComponents = family.members.flatMap((id) =>
-          (byId.get(id)?.referenceComponents ?? []).map((c) => ({ name: c.name, status: normalizeStatus(c.status) })))
+        const referenceById = new Map<string, { name: string; status: MemberStatus['status'] }>()
+        for (const id of family.members) {
+          for (const c of byId.get(id)?.referenceComponents ?? []) {
+            if (!referenceById.has(c.id)) referenceById.set(c.id, { name: c.name, status: normalizeStatus(c.status) })
+          }
+        }
+        referenceComponents = Array.from(referenceById.values())
         incidents = Array.from(byIncidentId.values())
           .sort((a, b) => {
             const aOngoing = a.status === 'resolved' ? 0 : 1
