@@ -191,8 +191,7 @@ test.describe('Mobile viewport', () => {
     const sidebar = page.locator('aside.md\\:hidden')
     await expect(sidebar).toBeVisible()
 
-    // The drawer sits below the 48px topbar. `pt-[48px]` silently computed to 0 because the
-    // unlayered `* { padding: 0 }` reset in index.css outranks Tailwind's layered utilities.
+    // The drawer sits below the 48px topbar (#978).
     expect((await sidebar.boundingBox()).y).toBeCloseTo(48, 0)
 
     const list = sidebar.getByRole('navigation', { name: /Services|서비스/ })

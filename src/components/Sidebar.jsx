@@ -220,10 +220,6 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
     <div className="flex flex-col md:h-full" style={{ padding: '16px 0' }}>
 
       {/* ── Dashboard section ── */}
-      {/* NOTE: inline styles used because index.css's unlayered `* { margin: 0; padding: 0 }` reset
-           outranks Tailwind v4's *layered* utilities, so py-[7px]/px-[8px] compute to 0 — on every
-           element, not just buttons. It is what silently nullified the mobile drawer's `pt-[48px]`
-           too (#978). gap-[8px] is kept inline alongside them for consistency. */}
       <nav style={{ padding: '0 12px', marginBottom: '8px' }} aria-label="Dashboard">
         <div style={sectionTitleStyle}>{t('nav.dashboard')}</div>
         {DASHBOARD_ITEMS.map((item) => {

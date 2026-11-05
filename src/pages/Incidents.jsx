@@ -457,7 +457,6 @@ export default function Incidents({ filters } = {}) {
                 </span>
               ))}
             </div>
-            {/* Rows — inline styles required: Tailwind v4 base reset zeroes padding on interactive elements */}
             <div role="rowgroup">
               {grouped.map((row) => row.kind === 'group' ? (
                 <IncidentGroupRow

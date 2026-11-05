@@ -541,24 +541,6 @@ function RegionalAvailability({ service, t }) {
               )
             })}
           </div>
-          {/* Recommendation callout — three visual adjustments from the
-              original `mt-3` / `padding: 6px 8px` / `items-center`:
-              1) `marginTop: 20px` (was mt-3=12px): the callout sits on a
-                 different background layer (var(--bg2)) than the region list
-                 above, but only 12px of separation made the layered surfaces
-                 read as a single block — the user perception was the box was
-                 "touching" the last region row. 20px gives the callout its
-                 own visual section.
-              2) `padding: 12px 14px` (was 6px/8px): tighter values cramped
-                 the vertical rhythm when the text wrapped to 3 lines on
-                 narrow viewports, and made the link look hung from the top
-                 edge.
-              3) `items-start` (was items-center): aligns the Check API Guide
-                 link to the first line of the wrapped text rather than its
-                 vertical midpoint — the centered layout placed the link
-                 awkwardly low on mobile.
-              `gap-2` replaces `ml-2` so the gap survives any future wrap /
-              RTL layout change. */}
           {/* `recommendedRegion` is null for a region-AWARE but non-switchable service (#973,
               REGION_SWITCHABLE) — the per-region status list above still renders, but there is no
               region to recommend. Without this guard the callout would render with an empty region

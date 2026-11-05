@@ -314,7 +314,7 @@ All colors are CSS custom properties in `src/index.css`. **Never hardcode hex** 
 
 Theme: `data-theme="light"` on `<html>` remaps tokens. Default: dark.
 
-**Footgun — Tailwind margin/padding utilities silently compute to `0`.** `src/index.css` declares an *unlayered* `* { margin: 0; padding: 0 }` reset, and unlayered rules outrank **any** `@layer`ed rule — which is where Tailwind v4 emits its utilities. So `pt-[48px]`, `py-[7px]`, `mt-auto`, … apply to nothing, on every element (not just buttons). Only margin/padding are affected; `height`/`top`/`flex`/`gap`/`overflow` utilities work normally. Use an inline `style` for spacing, or express the layout with a non-reset property. Bitten twice: the sidebar's `navItemStyle`, and #978 (mobile drawer's dead `pt-[48px]` + inert `mt-auto`).
+**Never set margin/padding on `*` outside a `@layer`**: unlayered rules outrank every Tailwind utility, so such a reset zeroed them all (#978, #980). Pinned by `src/__tests__/css-layering.test.js`.
 
 ### i18n
 `src/locales/ko.js` and `en.js` export flat `{ 'dot.key': 'string' }` maps (default exports).

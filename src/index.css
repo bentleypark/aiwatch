@@ -95,12 +95,6 @@
   --green-glow: rgba(26, 127, 55, 0.08);
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
 body {
   font-family: var(--font-sans);
   font-size: 13px;
@@ -115,7 +109,7 @@ pre,
   font-family: var(--font-mono);
 }
 
-/* ─── Layout utilities (Tailwind v4 fails to generate some responsive arbitrary values) */
+/* ─── Layout utilities */
 .header-offset { padding-top: 48px; }     /* mobile: topbar only */
 @media (min-width: 768px) {
   .header-offset { padding-top: 82px; }   /* desktop: topbar 48 + ticker 34 */
@@ -189,9 +183,9 @@ pre,
 
 
 /* ─── Scrollbar ─────────────────────────────────────────── */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--bg4) var(--bg1);
+@layer base {
+  :root { scrollbar-color: var(--bg4) var(--bg1); }
+  * { scrollbar-width: thin; }
 }
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg1); }

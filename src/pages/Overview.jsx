@@ -503,8 +503,6 @@ function SupplyChainBanner({ banner, setPage, t }) {
       <span className="hover:underline cursor-pointer" onClick={() => setPage({ name: 'service', serviceId: s.id })}>{s.name}</span>
     </span>
   ))
-  // NOTE: spacing via inline style — this project's Tailwind build does NOT compile the p-/m-/gap-
-  // scale utilities (e.g. `.p-4` resolves to 0), so all padding/margins are inline (see StatCard).
   return (
     <div data-testid="supply-chain-banner" className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ borderLeft: `3px solid ${borderColor}`, padding: '14px 16px' }}>
       <div className="mono text-[12px] font-medium" style={{ color: borderColor }}>
