@@ -81,6 +81,8 @@ export interface MonthlyIncidentEntry {
   derivedDay?: string
   /** #1859 — the live `crossEventKey` (#1338), so an archived xAI event still joins across cards. */
   crossEventKey?: string
+  /** #1922 — sticky: this incident was kept on the card at least once by `keepCarriedOpenIncidents`. */
+  keptAfterComponentRecovery?: true
   // #975 — consecutive accumulation runs this UNRESOLVED entry has been confidently missing from the
   // upstream feed (see `prunePhantomIncidents`). Absent means zero: the field exists only while an
   // entry is in the missing state, so a resolved or currently-present entry serializes exactly as
@@ -841,6 +843,7 @@ export function accumulateMonthlyIncidents(
           if (inc.zeroLengthRecord) existingDetail.zeroLengthRecord = true
           else delete existingDetail.zeroLengthRecord
           if (inc.crossEventKey) existingDetail.crossEventKey = inc.crossEventKey // #1859
+          if (inc.keptAfterComponentRecovery) existingDetail.keptAfterComponentRecovery = true
           // KNOWN LIMIT, two parts. `data.dates` was banked from the FIRST shape's `incidentDay(inc)`
           // and is not revisited, so a flip crossing a UTC day leaves the banked date stale. And a flip
           // crossing a MONTH never reaches this block at all — the period filter above drops the
@@ -884,6 +887,7 @@ export function accumulateMonthlyIncidents(
         ...(inc.startUnknown ? { startUnknown: true } : {}), // #1390 — so the frozen row can still say "unknown", not "0 minutes"
         ...(inc.zeroLengthRecord ? { zeroLengthRecord: true } : {}), // #1480 — so it is not told the #1390 story on read
         ...(inc.crossEventKey ? { crossEventKey: inc.crossEventKey } : {}), // #1859
+        ...(inc.keptAfterComponentRecovery ? { keptAfterComponentRecovery: true as const } : {}),
       })
 
       const date = incidentDay(inc)
