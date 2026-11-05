@@ -260,7 +260,7 @@ describe('is-down-group.ts', () => {
     const html = await (await handler(makeReq('openai'))).text()
     expect(html).toContain('id="report-open"')
     expect(html).toContain('id="report-service"')
-    expect(html).toContain('<option value="openai">OpenAI API</option>')
+    expect(html).toContain('<option value="openai" selected>OpenAI API</option>')
     expect(html).toContain('<option value="chatgpt">ChatGPT</option>')
     expect(html).toContain('svcId: svcId')
     expect(html).toContain('aiwatch-reported-')
@@ -1869,13 +1869,13 @@ describe('is-down-group.ts - the AI card splits durable from perishable prose (#
 describe('is-down-group.ts — the report modal gates on the shared guard (#1369)', () => {
   let fetchMock: ReturnType<typeof vi.spyOn>
 
-  async function bootReportModal(stored: Record<string, string>) {
+  async function bootReportModal(stored: Record<string, string>, statuses: Record<string, string> = {}) {
     vi.stubGlobal('localStorage', makeLocalStorage())
     for (const [svc, day] of Object.entries(stored)) localStorage.setItem(`aiwatch-reported-${svc}`, day)
     fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
-      { id: 'claude', name: 'Claude API', status: 'operational' },
-      { id: 'claudeai', name: 'claude.ai', status: 'operational' },
-      { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+      { id: 'claude', name: 'Claude API', status: statuses.claude ?? 'operational' },
+      { id: 'claudeai', name: 'claude.ai', status: statuses.claudeai ?? 'operational' },
+      { id: 'claudecode', name: 'Claude Code', status: statuses.claudecode ?? 'operational' },
     ]))
     const html = await (await handler(makeReq('claude'))).text()
     const start = html.indexOf(`\n;(function(){\n${REPORT_GUARD_CLIENT_JS}`)
@@ -1942,6 +1942,19 @@ describe('is-down-group.ts — the report modal gates on the shared guard (#1369
     submit.click()
     await vi.waitFor(() => expect(localStorage.getItem('aiwatch-reported-claudecode')).toBe('2026-09-09'))
     expect(localStorage.getItem('aiwatch-reported-claude')).toBeNull()
+  })
+
+  // happy-dom reports the second option as selected when the third carries `selected`, so these read
+  // the attribute a browser applies rather than `select.value`.
+  const defaultReportMember = (service: HTMLSelectElement) => service.querySelector('option[selected]')?.getAttribute('value')
+
+  it('#1248 — defaults the picker to the member carrying the headline status, not the first member', async () => {
+    expect(defaultReportMember((await bootReportModal({}, { claudecode: 'degraded' })).service)).toBe('claudecode')
+    expect(defaultReportMember((await bootReportModal({}, { claudeai: 'down', claudecode: 'degraded' })).service)).toBe('claudeai')
+  })
+
+  it('#1248 — defaults to the first member when the whole family is operational', async () => {
+    expect(defaultReportMember((await bootReportModal({})).service)).toBe('claude')
   })
 
   it('leaves the member reportable when the POST fails', async () => {
@@ -2129,6 +2142,17 @@ describe('is-down-group.ts — reference components (#1669)', () => {
     expect(html).toContain(`<span class="member-name">${CONSOLE}</span>`)
     expect(html).toContain(`<span class="incident-service">${CONSOLE}</span>`)
     expect(html).toContain('Elevated errors on platform.claude.com')
+  })
+
+  it('lists a component two members share on one status page once, not once per member', async () => {
+    const compliance = { id: '01JNKS9D9S72PMP1938PVFFQN4', name: 'Compliance API', status: 'operational' }
+    spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
+      { id: 'openai', name: 'OpenAI API', status: 'operational', incidents: [], referenceComponents: [compliance] },
+      { id: 'chatgpt', name: 'ChatGPT', status: 'operational', incidents: [], referenceComponents: [compliance] },
+      { id: 'codex', name: 'Codex', status: 'operational', incidents: [] },
+    ] as never))
+    const html = await (await handler(makeReq('openai'))).text()
+    expect(html.split('<span class="member-name">Compliance API</span>').length - 1).toBe(1)
   })
 
   it('drops a reference incident older than the 7-day window', async () => {
