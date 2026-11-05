@@ -313,6 +313,9 @@ export interface ServiceStatus {
    *  deletion or a reason to send a false withdrawal. Runtime-only; absent when the source lists
    *  resolved incidents. */
   liveIncidentsActiveOnly?: true
+  /** #1920 — ids of UNRESOLVED incidents on the provider's own incident list this cycle that our filters kept off `incidents` and
+   *  `referenceIncidents`. `prunePhantomIncidents` counts them as still present upstream. Absent when none. */
+  upstreamOnlyIncidentIds?: string[]
   /** #689 — the status-page API returned a 4xx (the page is deactivated/gone). The service is shown
    *  unknown+stale unless a healthy direct probe independently confirms it operational;
    *  this flag lets the cron send a distinct "status source inactive" operator alert (not a misleading

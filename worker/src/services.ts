@@ -3368,10 +3368,14 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         ? parseIncidentIoScheduledMaintenances(uptimeHtml, summaryData.components ?? [], maintenanceScope)
         : parseScheduledMaintenances(summaryData, maintenanceScope), config, summaryData.components ?? [])
 
+      const carried = new Set([...filtered, ...referenceIncidents].map((i) => String(i.id)))
+      const upstreamOnlyIncidentIds = incidents.filter((i) => i.status !== 'resolved').map((i) => String(i.id)).filter((id) => id && !carried.has(id))
+
       return {
         ...base,
         status: svcStatus,
         incidents: filtered,
+        ...(upstreamOnlyIncidentIds.length > 0 ? { upstreamOnlyIncidentIds } : {}),
         ...(scheduledMaintenances.length > 0 ? { scheduledMaintenances } : {}),
         ...(referenceIncidents.length > 0 ? { referenceIncidents } : {}),
         ...(referenceCountable.length > 0 ? { referenceCountable } : {}),

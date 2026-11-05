@@ -493,7 +493,7 @@ export interface Guard3Hold { svcId: string; id: string; title: string; startedA
  * An entry is pruned only when ALL of these hold, re-checked every run:
  *   1. it is UNRESOLVED — a resolved entry is never touched. Resolved incidents legitimately age out
  *      of the upstream feed window, so their absence tells us nothing.
- *   2. its id is absent from the service's live incident list.
+ *   2. its id is absent from the service's live incident list and from `upstreamOnlyIncidentIds`.
  *   3. the live list still contains an incident that started STRICTLY EARLIER. This is the load-bearing
  *      guard, and it is stronger than "the service reported at least one incident this cycle": it
  *      proves the feed window has not truncated *past* our entry, so absence means deletion rather
@@ -564,6 +564,7 @@ export function prunePhantomIncidents(
 
   const liveBySvc = new Map<string, Incident[]>()
   const onPageBySvc = new Map<string, Incident[]>()
+  const upstreamOnlyBySvc = new Map<string, string[]>()
   // #1510 — services whose THIS-CYCLE live list only ever lists active incidents (`grep -n
   // liveIncidentsActiveOnly worker/src/types.ts` for why absence from a list like that is not
   // evidence of deletion).
@@ -571,6 +572,7 @@ export function prunePhantomIncidents(
   for (const svc of services) {
     liveBySvc.set(svc.id, svc.incidents ?? [])
     onPageBySvc.set(svc.id, pageIncidents(svc))
+    upstreamOnlyBySvc.set(svc.id, svc.upstreamOnlyIncidentIds ?? [])
     if (svc.liveIncidentsActiveOnly) activeOnlySvcIds.add(svc.id)
   }
 
@@ -601,7 +603,7 @@ export function prunePhantomIncidents(
     // a round-5 review found a resolved bridged row pushing the watermark back to a date the new
     // source's own (often shallow) feed never covered, satisfying guard 3 for an unrelated,
     // genuinely-unresolved incident that had simply fallen outside that shallow feed.
-    const liveIds = new Set((onPageBySvc.get(svcId) ?? []).map((i) => i?.id).filter(Boolean).map(String))
+    const liveIds = new Set([...(onPageBySvc.get(svcId) ?? []).map((i) => i?.id), ...(upstreamOnlyBySvc.get(svcId) ?? [])].filter(Boolean).map(String))
     // Earliest start among live incidents that are actual evidence about the CURRENT feed's reach —
     // excludes `retainedBridge` per the note above, in addition to `status_history` (already excluded
     // from `live` itself). Compared as ISO strings, which sort lexicographically. Non-ISO values are
