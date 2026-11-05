@@ -158,7 +158,7 @@ export default function Topbar({ onMenuToggle }) {
             style={{ padding: '8px 12px' }}
           >
             <div className="absolute -top-[5px] right-3.5 w-2 h-2 rotate-45 bg-[var(--bg2)] border-t border-l border-[var(--border-hi)]" />
-            <div className="mono text-[10px] text-[var(--blue)] tracking-wide flex items-center gap-1.5 mb-1">
+            <div className="mono text-[10px] text-[var(--blue)] tracking-wide flex items-center gap-1.5">
               <span className="w-[5px] h-[5px] rounded-full bg-[var(--blue)]" />
               {t('topbar.analyze.tooltip.title')}
             </div>

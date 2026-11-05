@@ -214,8 +214,8 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
   // h-full only from md up. Pinning the height at every breakpoint made the content exactly fill the
   // mobile drawer, so the drawer's own overflow-y-auto never engaged (#978). Below md the content
   // sizes itself and the drawer scrolls. (Don't reach for `min-h-full` here to bottom-pin the footer
-  // on a sparse list: the footer's `mt-auto` is inert — the unlayered `* { margin: 0 }` reset kills
-  // it — so that only adds dead space below the footer. Desktop pins it via the flex-1 list.)
+  // on a sparse list: the footer carries no auto margin, so that only adds dead space below the
+  // footer. Desktop pins it via the flex-1 list.)
   return (
     <div className="flex flex-col md:h-full" style={{ padding: '16px 0' }}>
 
@@ -375,7 +375,7 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
       </nav>
 
       {/* ── Footer ── */}
-      <div className="mt-auto">
+      <div>
         <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
         <div style={{ padding: '0 12px' }}>
           <div className="text-[var(--text2)] flex items-center" style={{ padding: '6px 8px', letterSpacing: '0.06em', fontSize: '9px', gap: '7px' }}>

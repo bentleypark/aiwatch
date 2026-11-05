@@ -31,12 +31,12 @@ function TimelineStep({ stage, text, at, isLast, t, lang }) {
   return (
     <div className="flex gap-[14px]">
       <div className="flex flex-col items-center w-[14px] shrink-0">
-        <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-[3px] ${STAGE_DOT[stage] ?? 'bg-[var(--text2)]'}`} />
-        {!isLast && <div className="w-px flex-1 bg-[var(--border)] my-[3px] min-h-[16px]" />}
+        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STAGE_DOT[stage] ?? 'bg-[var(--text2)]'}`} />
+        {!isLast && <div className="w-px flex-1 bg-[var(--border)] min-h-[16px]" />}
       </div>
-      <div className="pb-4">
-        <p className={`mono font-medium text-[10px] mb-[3px] ${STAGE_TEXT[stage] ?? 'text-[var(--text2)]'}`}>{t(`incidents.timeline.${stage}`)}</p>
-        {text && <p className="text-xs text-[var(--text1)] mb-[3px]" style={{ lineHeight: 1.6 }}>{text}</p>}
+      <div>
+        <p className={`mono font-medium text-[10px] ${STAGE_TEXT[stage] ?? 'text-[var(--text2)]'}`}>{t(`incidents.timeline.${stage}`)}</p>
+        {text && <p className="text-xs text-[var(--text1)]" style={{ lineHeight: 1.6 }}>{text}</p>}
         <p className="mono text-[10px] text-[var(--text2)]">{formatDate(at, lang)}</p>
       </div>
     </div>
@@ -53,11 +53,11 @@ export default function IncidentTimeline({ title, subtitle, timeline, note, onCl
   }, [title])
 
   return (
-    <div ref={panelRef} className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden mt-2">
+    <div ref={panelRef} data-testid="incident-timeline" className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
       {!hideHeader && (
         <div className="flex items-start justify-between border-b border-[var(--border)]" style={{ padding: '14px 16px' }}>
           <div>
-            <p className="text-sm font-medium text-[var(--text0)] mb-1">{title}</p>
+            <p className="text-sm font-medium text-[var(--text0)]">{title}</p>
             <p className="mono text-[10px] text-[var(--text2)]">{subtitle}</p>
           </div>
           <button

@@ -105,7 +105,7 @@ test.describe('Mobile viewport', () => {
 
     // Check DOM: timeline panel should exist and have no header border-b div
     const hasHeaderDivider = await page.evaluate(() => {
-      const panels = document.querySelectorAll('.rounded-lg.overflow-hidden.mt-2')
+      const panels = document.querySelectorAll('[data-testid="incident-timeline"]')
       for (const panel of panels) {
         if (panel.offsetParent !== null) { // visible panel
           const borderB = panel.querySelector('[class*="border-b"]')
@@ -123,7 +123,7 @@ test.describe('Mobile viewport', () => {
 
     // Timeline dots should exist
     const hasDots = await page.evaluate(() => {
-      const panels = document.querySelectorAll('.rounded-lg.overflow-hidden.mt-2')
+      const panels = document.querySelectorAll('[data-testid="incident-timeline"]')
       for (const panel of panels) {
         const dots = panel.querySelectorAll('.rounded-full')
         if (dots.length > 0) return true
@@ -136,7 +136,7 @@ test.describe('Mobile viewport', () => {
     const hasCloseBtn = await page.evaluate(() => {
       const mobileContainer = document.querySelector('.flex.flex-col.gap-2[class*="md:hidden"]')
       if (!mobileContainer) return false
-      const panels = mobileContainer.querySelectorAll('.rounded-lg.overflow-hidden.mt-2')
+      const panels = mobileContainer.querySelectorAll('[data-testid="incident-timeline"]')
       for (const panel of panels) {
         if (panel.querySelector('button')) return true
       }

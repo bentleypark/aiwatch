@@ -61,7 +61,7 @@ test.describe('Incidents filtering', () => {
     // Click first single incident row
     await rows.first().click()
     // Accordion detail should appear with header (desktop does not use hideHeader)
-    const timeline = main.locator('.rounded-lg.overflow-hidden.mt-2').first()
+    const timeline = main.getByTestId('incident-timeline').first()
     await expect(timeline).toBeVisible({ timeout: 3000 })
     // Header section with border-b should be present on desktop
     const header = timeline.locator('.border-b')

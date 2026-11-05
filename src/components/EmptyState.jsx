@@ -39,7 +39,7 @@ export default function EmptyState({ type = 'neutral', onAction }) {
   const cfg = CONFIG[type] ?? CONFIG.neutral
 
   return (
-    <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+    <div className="flex flex-col items-center justify-center gap-3 text-center">
       <span className={`text-4xl mono ${cfg.iconClass}`} aria-hidden="true">
         {cfg.icon}
       </span>
@@ -50,7 +50,7 @@ export default function EmptyState({ type = 'neutral', onAction }) {
       {cfg.actionKey && onAction && (
         <button
           onClick={onAction}
-          className="mt-2 mono rounded
+          className="mono rounded
                      border border-[var(--border-hi)] text-[var(--text1)]
                      hover:text-[var(--text0)] hover:border-[var(--text2)]
                      transition-colors"

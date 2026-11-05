@@ -198,7 +198,7 @@ export default function Statusline() {
       </Section>
 
       <Section title="Other presets">
-        <div className="space-y-4">
+        <div>
           <div>
             <h3 className="text-[var(--text0)] text-[13px] font-medium" style={{ marginBottom: '6px' }}>Compact badge</h3>
             <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>

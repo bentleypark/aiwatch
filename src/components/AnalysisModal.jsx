@@ -119,7 +119,7 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
       ref={dialogRef}
       closedby="any"
       aria-labelledby={titleId}
-      className="bg-[var(--bg1)] border border-[var(--border-hi)] rounded-lg p-0"
+      className="bg-[var(--bg1)] border border-[var(--border-hi)] rounded-lg"
       style={{ width: 'min(480px, calc(100vw - 32px))', maxHeight: '80dvh', overflow: 'auto', margin: 'auto' }}
     >
         {/* Header */}

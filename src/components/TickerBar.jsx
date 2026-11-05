@@ -83,7 +83,7 @@ export default function TickerBar() {
 
   if (services.length === 0) {
     return (
-      <div className="w-full overflow-hidden h-full flex items-center pl-5">
+      <div className="w-full overflow-hidden h-full flex items-center">
         <span className="mono text-[11px] text-[var(--text2)]">...</span>
       </div>
     )
@@ -99,7 +99,7 @@ export default function TickerBar() {
 
   return (
     <div className="w-full h-full flex items-center">
-      <div className="flex-1 min-w-0 overflow-hidden h-full flex items-center pl-5">
+      <div className="flex-1 min-w-0 overflow-hidden h-full flex items-center">
         <div className="ticker-track flex gap-5 will-change-transform" data-paused={paused}>
           {renderItems('a')}
           <div aria-hidden="true" className="flex gap-5">
