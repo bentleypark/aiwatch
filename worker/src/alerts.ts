@@ -683,7 +683,7 @@ export function buildIncidentAlerts(
       // the whole loop iteration: a RESOLVED bridged entry that WAS already alerted as new before the
       // migration (same id, `alertedNewMap.has(inc.id)` true) must still be able to fire its matching
       // "Resolved" alert below — closing that loop is the bridge working as intended, not a hazard.
-      if (inc.status !== 'resolved' && inc.status !== 'monitoring' && !inc.retainedBridge && !alertedNewMap.get(inc.id)?.has(svc.id)) {
+      if (inc.status !== 'resolved' && inc.status !== 'monitoring' && !inc.retainedBridge && !inc.keptAfterComponentRecovery && !alertedNewMap.get(inc.id)?.has(svc.id)) {
         const existing = newIncidents.get(inc.id)
         if (existing) {
           if (!existing.names.includes(svc.name)) existing.names.push(svc.name)

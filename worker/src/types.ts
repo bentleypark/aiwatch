@@ -36,6 +36,8 @@ export interface Incident {
   startedAt: string
   /** #1338 — one xAI event across the SpaceXSI API and Grok cards (`xaiCrossEventKey`). */
   crossEventKey?: string
+  /** #1922 — on the card only because this month's accumulator still holds it open (`keepCarriedOpenIncidents`). */
+  keptAfterComponentRecovery?: true
   resolvedAt?: string | null
   /** The start is not derivable from this record, so `duration` is null. Set by two paths. Every
    *  duration consumer (Score's recovery sample, the no-TTL corpus, the archive divisor, the group
@@ -316,6 +318,8 @@ export interface ServiceStatus {
   /** #1920 — ids of UNRESOLVED incidents on the provider's own incident list this cycle that our filters kept off `incidents` and
    *  `referenceIncidents`. `prunePhantomIncidents` counts them as still present upstream. Absent when none. */
   upstreamOnlyIncidentIds?: string[]
+  /** #1922 — active incidents the operational component gate dropped this cycle; `keepCarriedOpenIncidents` reads and deletes it. */
+  componentGateDropped?: Incident[]
   /** #689 — the status-page API returned a 4xx (the page is deactivated/gone). The service is shown
    *  unknown+stale unless a healthy direct probe independently confirms it operational;
    *  this flag lets the cron send a distinct "status source inactive" operator alert (not a misleading

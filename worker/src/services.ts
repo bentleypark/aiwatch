@@ -1758,7 +1758,7 @@ export function __resetMissingJoinWarnThrottle(): void { warnedMissingJoin.clear
  * (instatus/betterstack) also null out an UNMAPPED severity, where null means "unknown", not "none".
  * The sole call site is inside the statuspage `apiUrl` branch, so the invariant holds — keep it that way.
  *
- * Every drop here is a *silent* one (no alert, no dashboard row until it resolves) — that silence IS
+ * Every drop here is a *silent* one — that silence IS
  * bug #970. So the two cases where we cannot actually judge are made observable rather than quiet:
  *   - badge group unresolvable (`components` empty / every configured id missing from the page) → we
  *     have nothing to match against, so FAIL OPEN (keep + warn). Dropping a real alert is worse than a
@@ -1772,6 +1772,7 @@ export function filterByComponentStatus(
   componentStatus: NormalizedStatus,
   config: ServiceConfig,
   components: Array<{ id: string; name: string }>,
+  onGateDrop?: (incident: Incident) => void,
 ): Incident[] {
   if (!config.statusComponentId && !config.statusComponent) return incidents
   const ownComponent = config.statusComponent?.toLowerCase()
@@ -1899,10 +1900,10 @@ export function filterByComponentStatus(
         // per-component impact WINDOWS are the evidence the keep needs,
         // and only incident.io publishes them. But the failure #1104 filed (an incident we already
         // alerted on vanishing from the card while the alert's link reads Operational) is not
-        // openai-specific: for the other services reaching this gate, this `return false` is still
-        // silent. Widening the warn alone would emit a line on every ordinary #970 drop, which is the
-        // normal case for them and would bury the signal. Recorded so the uncovered span is a known
-        // limit rather than an undiscovered blind spot.
+        // openai-specific: for the other services reaching this gate, `keepCarriedOpenIncidents`
+        // (#1922) restores an incident we already carried. Widening the warn alone would emit a line on
+        // every ordinary #970 drop, which is the normal case for them and would bury the signal.
+        if (!canIdBypass(config) || !i.componentIds?.length) onGateDrop?.(i)
         return false
       }
       if (unjudgeable) {
@@ -2572,9 +2573,13 @@ export async function fetchService(config: ServiceConfig, prefetched: Prefetched
   // — the only ones that produce `uptime30d` for an Atlassian service — can fail on their own without
   // setting either. Whether an absence is worth reporting is `checkUptimeLiveness`'s call, at alert time.
   trackUptimeReading(trackingStore, config.id, svc.uptime30d != null)
-  const durationUnknown = markZeroLengthResolvedIncidentsUnknown(normalizeIncidentTimes(svc.incidents))
-  const tagged = tagAutoMonitorIncidents(durationUnknown, config)  // matches ORIGINAL (e.g. Chinese) titles
-  const incidents = applyTitleMap(tagged, config)                // THEN rewrite to English
+  const normalize = (list: Incident[]) => {
+    const durationUnknown = markZeroLengthResolvedIncidentsUnknown(normalizeIncidentTimes(list))
+    const tagged = tagAutoMonitorIncidents(durationUnknown, config)  // matches ORIGINAL (e.g. Chinese) titles
+    return applyTitleMap(tagged, config)                           // THEN rewrite to English
+  }
+  const incidents = normalize(svc.incidents)
+  if (svc.componentGateDropped) svc.componentGateDropped = normalize(svc.componentGateDropped)
   // #1268 — the unread-feed invariant rides the same choke point, for the same reason the tagging does:
   // it must hold on every one of this function's ~10 return paths, and a per-return copy is a rule
   // nothing enforces. See `withUnreadFeedFlag`.
@@ -3272,7 +3277,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // mirrors includeUntaggedIncidents above. For the #970 branch an empty list still means fail
       // OPEN + warn; #1090's scoping does NOT consult `unjudgeable`, so for an opting-in service the
       // prefix fallback keeps judging (and a sibling-tagged incident is still dropped) — see its doc.
-      filtered = filterByComponentStatus(filtered, svcStatus, config, breakdownComponents ?? [])
+      const gateDropped: Incident[] = []
+      filtered = filterByComponentStatus(filtered, svcStatus, config, breakdownComponents ?? [], (i) => gateDropped.push(i))
       const referenceIds = new Set(referenceIncidents.map((i) => i.id))
       const referenceCountable = filtered.filter((i) => referenceIds.has(i.id)).map((i) => i.id)
       filtered = filtered.filter((i) => !referenceIds.has(i.id))
@@ -3376,6 +3382,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         status: svcStatus,
         incidents: filtered,
         ...(upstreamOnlyIncidentIds.length > 0 ? { upstreamOnlyIncidentIds } : {}),
+        ...(gateDropped.some((i) => !referenceIds.has(i.id)) ? { componentGateDropped: gateDropped.filter((i) => !referenceIds.has(i.id)) } : {}),
         ...(scheduledMaintenances.length > 0 ? { scheduledMaintenances } : {}),
         ...(referenceIncidents.length > 0 ? { referenceIncidents } : {}),
         ...(referenceCountable.length > 0 ? { referenceCountable } : {}),
@@ -4458,6 +4465,7 @@ export function carriedIncidentTags(entry: MonthlyIncidentEntry): Partial<Incide
     ...(entry.startUnknown ? { startUnknown: true } : {}),
     ...(entry.zeroLengthRecord ? { zeroLengthRecord: true } : {}),
     ...(entry.crossEventKey ? { crossEventKey: entry.crossEventKey } : {}),
+    ...(entry.keptAfterComponentRecovery ? { keptAfterComponentRecovery: true as const } : {}),
   }
 }
 
@@ -4555,13 +4563,33 @@ function recordedFor(record: Awaited<ReturnType<typeof readRecordedIncidents>>, 
   ]
 }
 
+/** #1922 — an incident the operational component gate dropped this cycle goes back on the card when this
+ *  month's accumulator still holds it open. Clears `componentGateDropped` either way. */
+export function keepCarriedOpenIncidents(services: ServiceStatus[], recorded: (svcId: string) => MonthlyIncidentEntry[]): void {
+  for (const service of services) {
+    const dropped = service.componentGateDropped
+    delete service.componentGateDropped
+    if (!dropped?.length) continue
+    const open = new Set(recorded(service.id).filter((e) => e.finalStatus !== 'resolved').map((e) => String(e.id)))
+    const kept = dropped.filter((i) => open.has(String(i.id)))
+    if (kept.length === 0) continue
+    console.log(`[keepCarriedOpenIncidents] #1922 ${service.id}: keeping ${kept.map((i) => i.id).join(', ')} — carried while open, component now operational`)
+    service.incidents = [...service.incidents, ...kept.map((i) => ({ ...i, keptAfterComponentRecovery: true as const }))]
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+  }
+}
+
 /** #1384 — preserve a retiring source's recent AIWatch records until its last possible 30-day
  *  contribution has expired, by merging them into the live list (the migration bridge). #1614 — for
  *  every other service, attach the records older than its capped feed reaches as `incidentsBeyondFeed`,
  *  kept OUT of `incidents`. */
 export async function attachRecordedIncidentHistory(services: ServiceStatus[], kv: KVNamespace | undefined, now: Date): Promise<void> {
-  if (!kv) return
+  if (!kv) {
+    for (const service of services) delete service.componentGateDropped
+    return
+  }
   const record = await readRecordedIncidents(kv, now)
+  keepCarriedOpenIncidents(services, (id) => record.current?.services[id]?.incidents ?? [])
   const cutoffISO = new Date(now.getTime() - 30 * 86_400_000).toISOString()
   const bridged = new Set(SERVICES.filter((config) =>
     config.retainIncidentHistoryUntil != null && Date.parse(config.retainIncidentHistoryUntil) > now.getTime(),
