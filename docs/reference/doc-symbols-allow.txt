@@ -41,3 +41,14 @@ page_location       # GA4 auto-collected event parameter, not a symbol in this t
 PostToolUse         # Claude Code hook event name; no code cites it since the #1304 recorder was withdrawn (#1298)
 not_found_handling  # Cloudflare Workers Assets config key in wrangler.jsonc, which this lint does not scan (#1386)
 CONTEXT7_API_KEY    # env var read by the external context7 MCP server, expanded in .mcp.json which this lint does not scan (#1410)
+
+# — named only in a comment in this tree (#1173: comments no longer count as existence) —
+apiName                  # GA4 Data API dimension/metric field name, Google's own
+_includes                # Jekyll dir in the sibling aiwatch-reports repo, not this tree
+cacheTtl                 # Cloudflare KV `get` option, cited to say our KV wrapper exposes none
+patchBuild               # Vercel deploy error step name
+impact_override          # Atlassian Statuspage incident field
+active_maintenances      # Cloudflare Status v3 summary field we do not read
+LAZY_UPTIME_SHOWCASE     # Atlassian rollout name for the lazy uptime payload (#1389)
+uptimeSourceLabel        # reports-generator function in the sibling aiwatch-reports repo
+scopeResolvedToComponent # #934's name for what #1090 renamed scopeIncidentsToComponent; the doc cites it as history

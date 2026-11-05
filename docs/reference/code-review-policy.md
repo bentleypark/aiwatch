@@ -58,7 +58,7 @@ several agents are in flight, collect all reports before applying anything.
 ## Two claim shapes are linted; every other one is review's job
 
 `scripts/check-doc-symbols.mjs` runs two. #1100 reads `CLAUDE.md` and `docs/reference/*.md` and asks
-whether a backticked identifier exists somewhere in source. #1444 reads those **plus the comments of
+whether a backticked identifier exists somewhere in source; a comment in a JS/TS-family source file does not count (#1173). #1444 reads those **plus the comments of
 `worker/src/services.ts` and `worker/src/types.ts`**, and asks whether every service in a LIST written
 after a config field name actually sets that field. The list is the shape it can see: two or more ids
 joined by `/` or `,` is a lexical object, and a single id in a sentence is not — reading that needs the

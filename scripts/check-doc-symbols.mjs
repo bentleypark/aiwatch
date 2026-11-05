@@ -15,6 +15,9 @@
 //   - Only CODE-SHAPED tokens are checked: camelCase or containing `_`. A bare lowercase word in
 //     backticks (`services`, `path`) is too ambiguous to flag; the point is to catch invented symbols,
 //     not to police prose. This is what keeps the false-positive rate survivable.
+//   - Source corpus: comments in `SCRIPT_EXTS` files do not count as existence (#1173), so a symbol
+//     named only in a comment — typically the one noting its rename — fails. String literals still
+//     count: many cited GA4 event names and KV keys exist only as literals.
 //
 // The scan is ~20 lines; the real work (see the issue) is false-positive control — the allowlist for
 // deliberate mentions of absent symbols ("there is no `CACHE_NAME`") and external library symbols.
@@ -25,6 +28,7 @@
 // Run via `npm run test:scripts` (check-doc-symbols.test.mjs calls the pure fns) and directly as a CLI.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -40,6 +44,8 @@ export const SOURCE_DIRS = ['worker/src', 'src', 'api', 'scripts', '.claude/hook
 export const SOURCE_FILES = ['vercel.json', 'package.json', 'index.html', 'worker/wrangler.toml', 'playwright.config.js', 'vite.config.js']
 /** Extensions counted as source/config. */
 export const SOURCE_EXTS = /\.(ts|tsx|js|jsx|mjs|cjs|json|html|ya?ml|toml)$/
+/** #1173 — the files whose comments are removed before the existence check. */
+const SCRIPT_EXTS = /\.(ts|tsx|js|jsx|mjs|cjs)$/
 
 /** Docs scanned. CLAUDE.md + every docs/reference/*.md. */
 export function docFiles(root = ROOT) {
@@ -145,6 +151,21 @@ export function extractInlineTokens(prose) {
   return out
 }
 
+/** #1173 — `text` with its comments removed, by the TypeScript compiler. Loaded on first use, so a
+ *  caller that only needs `parseAllowlist` runs without `npm ci`. */
+export function stripScriptComments(path, text) {
+  const ts = createRequire(import.meta.url)('typescript')
+  const kind = /\.tsx$/.test(path) ? ts.ScriptKind.TSX : /\.jsx$/.test(path) ? ts.ScriptKind.JSX
+    : /\.ts$/.test(path) ? ts.ScriptKind.TS : ts.ScriptKind.JS
+  const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, kind)
+  return ts.createPrinter({ removeComments: true }).printFile(file)
+}
+
+function sourceText(path) {
+  const text = readFileSync(path, 'utf8')
+  return SCRIPT_EXTS.test(path) ? stripScriptComments(path, text) : text
+}
+
 /**
  * Concatenate all source into one blob for SUBSTRING existence checks. Substring, not exact-token,
  * because the rule this enforces is "grep the cited symbol" — and `grep` is substring. That is not a
@@ -170,11 +191,11 @@ export function collectSourceBlob(root = ROOT, dirs = SOURCE_DIRS, files = SOURC
       // string literals, so counting them would register those very names as "exists" and blind the
       // check to the #1076 case it was built to catch (found in review).
       if (SELF.has(e.name)) continue
-      parts.push(readFileSync(join(root, rel), 'utf8'))
+      parts.push(sourceText(join(root, rel)))
     }
   }
   for (const d of dirs) walk(d)
-  for (const f of files) { try { parts.push(readFileSync(join(root, f), 'utf8')) } catch { /* absent */ } }
+  for (const f of files) if (existsSync(join(root, f))) parts.push(sourceText(join(root, f)))
   return parts.join('\n')
 }
 

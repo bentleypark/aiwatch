@@ -137,6 +137,31 @@ test('a doc re-introducing the #1076 headline example IS flagged against the rea
   assert.deepEqual(findings.map((f) => f.token), ['violationsOf'])
 })
 
+// ── #1173: a comment is not evidence that a symbol exists ─────────────────────
+test('#1173 — a symbol named only in a code comment is flagged; one in code still passes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'doc-symbols-comment-'))
+  mkdirSync(join(root, 'worker/src'), { recursive: true })
+  writeFileSync(join(root, 'worker/src/a.ts'), [
+    '// zzOnlyInLineComment is only named here.',
+    '/* zzOnlyInBlockComment, likewise */',
+    "const url = 'https://example.com/x'; export const zzAfterUrl = url",
+    'export const zzRealSymbol = url',
+    "export const zzLiteralHolder = 'zz_literal_name'",
+  ].join('\n'))
+  writeFileSync(join(root, 'worker/src/b.jsx'), [
+    "export const A = () => <p>don't panic</p>",
+    "const u = 'https://example.com'; export const zzRealAfterJsxUrl = u",
+    'export const B = () => <div>{/* zzAfterJsxComment */}</div>',
+  ].join('\n'))
+  writeFileSync(join(root, 'vite.config.js'), '// zzConfigComment\nexport default {}\n')
+  const docs = [{ file: 'z.md', content: ['zzOnlyInLineComment', 'zzOnlyInBlockComment', 'zzAfterUrl',
+    'zzAfterJsxComment', 'zzRealAfterJsxUrl', 'zzRealSymbol', 'zz_literal_name', 'zzConfigComment'].map((t) => `\`${t}\``).join(' ') }]
+  const findings = auditDocSymbols({ docs, sourceBlob: collectSourceBlob(root, ['worker/src'], ['vite.config.js']), allow: new Map() })
+  assert.deepEqual(findings.map((f) => f.token).sort(),
+    ['zzAfterJsxComment', 'zzConfigComment', 'zzOnlyInBlockComment', 'zzOnlyInLineComment'])
+  rmSync(root, { recursive: true, force: true })
+})
+
 // ── #1312: the window, and the dead stem it was hiding ───────────────────────
 
 test('#1312: `delet` fires on its inflections — the trailing word-boundary made it match NOTHING', () => {
