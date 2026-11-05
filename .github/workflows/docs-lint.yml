@@ -134,7 +134,7 @@ jobs:
     # test:scripts) because the invented-symbol case is introduced by a DOCS edit, which test.yml
     # paths-ignores — the same gap #961 fixed for the OKF lint. The complementary case (a CODE rename
     # that orphans a doc ref) is caught by the real-repo assertion in check-doc-symbols.test.mjs,
-    # which runs under test:scripts on code PRs. Zero-dependency (node: builtins) → no `npm ci`.
+    # which runs under test:scripts on code PRs. #1173 — needs `typescript` to strip comments, hence `npm ci`.
     #
     # #1444 — the test file runs HERE too, which #1100 alone did not need. For an invented symbol the
     # CLI exits 1, so the CLI is the whole gate; for a membership claim the erosion shape is a doc edit
@@ -146,6 +146,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           check-latest: true
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+      # #1348 — a stalled install must fail as `npm ci`, not as an anonymous job kill at the cap.
+      - run: npm ci --no-audit --fund=false
+        timeout-minutes: 8
       - run: node scripts/check-doc-symbols.mjs
       - run: node --test scripts/check-doc-symbols.test.mjs
 

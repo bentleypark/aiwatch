@@ -536,7 +536,7 @@ test('every `npm ci` step is bounded (#1348)', () => {
   // The repo's actual count, not a slack floor. At `>= 6` the matcher could lose exactly one step
   // and still pass — which is how a false negative stayed invisible. Adding a step raises this; a
   // deliberate removal lowers it, in the same diff, where a reviewer sees it.
-  assert.equal(seen, 7, `expected the repo's 7 \`npm ci\` steps, found ${seen}`)
+  assert.equal(seen, 8, `expected the repo's 8 \`npm ci\` steps, found ${seen}`)
   assert.deepEqual(unbounded, [], `\`npm ci\` steps with no bound (a registry stall then spends the JOB budget and the cap kills whichever step is running):\n${unbounded.join('\n')}`)
 })
 
