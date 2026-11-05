@@ -46,7 +46,7 @@ describe('writeProbeSnapshot — fail closed on an unreadable window (#1256)', (
       const { writeProbeSnapshot } = await loadWriter()
       const kv = kvWith(stored)
 
-      await writeProbeSnapshot(kv as unknown as KVNamespace)
+      await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
       // Reaching the read is what makes this a guard assertion rather than a vacuous one: without
       // it, a writer that bailed before touching KV would satisfy every negative case here.
@@ -61,7 +61,7 @@ describe('writeProbeSnapshot — fail closed on an unreadable window (#1256)', (
     const { writeProbeSnapshot } = await loadWriter()
     const kv = kvWith(async () => '{"snapshots":[{"t":"2026-08-19T00:00')
 
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
     expect(kv.get).toHaveBeenCalledTimes(1)
     expect(kv.put).not.toHaveBeenCalled()
@@ -71,7 +71,7 @@ describe('writeProbeSnapshot — fail closed on an unreadable window (#1256)', (
     const { writeProbeSnapshot } = await loadWriter()
     const kv = kvWith(async () => null)
 
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
     expect(kv.put).toHaveBeenCalledTimes(1)
     expect(JSON.parse(kv.put.mock.calls[0][1]).snapshots).toHaveLength(1)
@@ -90,7 +90,7 @@ describe('writeProbeSnapshot — fail closed on an unreadable window (#1256)', (
     ]
     const kv = kvWith(async () => JSON.stringify({ snapshots: prior }))
 
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
     const written = JSON.parse(kv.put.mock.calls[0][1])
     expect(written.snapshots).toHaveLength(prior.length + 1)
@@ -102,7 +102,7 @@ describe('writeProbeSnapshot — fail closed on an unreadable window (#1256)', (
     const { writeProbeSnapshot } = await loadWriter()
     const kv = kvWith(async () => '{"snapshots":[]}')
 
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
     expect(kv.put).toHaveBeenCalledTimes(1)
   })
@@ -119,8 +119,8 @@ describe('the fail-closed skip is per-call, not sticky (#1256)', () => {
       return JSON.stringify({ snapshots: [{ t: '2026-08-19T00:00:00Z', data: {} }] })
     })
 
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
     expect(kv.put).toHaveBeenCalledTimes(1)
     expect(JSON.parse(kv.put.mock.calls[0][1]).snapshots).toHaveLength(2)
@@ -133,8 +133,8 @@ describe('the fail-closed skip is per-call, not sticky (#1256)', () => {
     const kv = kvWith(async () =>
       ++call === 1 ? '{"snapshots":null}' : JSON.stringify({ snapshots: [{ t: '2026-08-19T00:00:00Z', data: {} }] }))
 
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
     expect(kv.put).toHaveBeenCalledTimes(1)
     expect(JSON.parse(kv.put.mock.calls[0][1]).snapshots).toHaveLength(2)
@@ -151,7 +151,7 @@ describe('the retention the window is written with (#1256)', () => {
     const prior = Array.from({ length: 2100 }, (_, i) => ({ t: `prior-${i}`, data: {} }))
     const kv = kvWith(async () => JSON.stringify({ snapshots: prior }))
 
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
     const kept = JSON.parse(kv.put.mock.calls[0][1]).snapshots
     expect(kept).toHaveLength(2016)
@@ -170,7 +170,7 @@ describe('the in-window dedup does not lose the stored window (#1256)', () => {
     const slotTs = slotToTimestamp(computeProbeSlot(new Date()))
     const kv = kvWith(async () => JSON.stringify({ snapshots: [{ t: slotTs, data: {} }] }))
 
-    await writeProbeSnapshot(kv as unknown as KVNamespace)
+    await writeProbeSnapshot(kv as unknown as KVNamespace, undefined)
 
     expect(kv.put).not.toHaveBeenCalled()
   })

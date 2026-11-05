@@ -1,6 +1,7 @@
 // Changelog / News collection — detect new AI service updates
 // Pilot: OpenAI (blog RSS), Google (AI blog RSS), Anthropic (news page HTML)
 
+import { recordDrop } from './drop-log'
 import { unescapeJsString } from './parsers/js-string'
 import { kvPut } from './utils'
 
@@ -326,6 +327,7 @@ export interface StaleSourceInfo {
 export async function getStaleSources(
   kv: KVNamespace | null,
   staleAfterMs = 2 * 86_400_000,
+  onReadFailed?: (sourceId: string) => void,
 ): Promise<StaleSourceInfo[]> {
   if (!kv) return []
   const now = Date.now()
@@ -338,6 +340,7 @@ export async function getStaleSources(
       // Distinguish KV read failure from "no record" — log + skip so we don't
       // raise false alarms when KV is rate-limited or replicating.
       console.warn(`[changelog] stale check kv read failed for ${src.id}:`, err instanceof Error ? err.message : err)
+      onReadFailed?.(src.id)
       continue
     }
     if (!ts) {
@@ -357,6 +360,11 @@ export async function getStaleSources(
     }
   }
   return stale
+}
+
+/** #1257 — `getStaleSources` for the weekly briefing, with every source it could not read counted. */
+export async function readStaleSourcesCounted(kv: KVNamespace | null, analytics: AnalyticsEngineDataset | undefined): Promise<StaleSourceInfo[]> {
+  return getStaleSources(kv, undefined, (id) => recordDrop(analytics, 'stale-sources', 'source-read-failed', id))
 }
 
 /** Format stale-source warning for Discord briefing. Returns empty string when nothing is stale. */
