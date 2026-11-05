@@ -239,7 +239,7 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang, hideStatus
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
         onClick={expandable ? () => setExpanded((v) => !v) : undefined}
       >
-        <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
+        <span className={`shrink-0 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
@@ -247,7 +247,7 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang, hideStatus
               <span className="shrink-0 text-[9px] text-[var(--text2)]">▾</span>
             )}
           </div>
-          <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
+          <p className="text-[10px] text-[var(--text2)] mono">
             {formatDate(incident.startedAt, lang, { dayOnly: isDerived, day: incident.derivedDay })}
             {incident.duration ? ` · ${incidentDurationText(incident, t, '')}` : ''}
           </p>
@@ -263,7 +263,7 @@ export function IncidentRow({ incident, isRecentlyRecovered, t, lang, hideStatus
         )}
       </div>
       {expanded && (
-        <div className="ml-6">
+        <div>
           <IncidentTimeline
             title={incident.title}
             subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: isDerived, day: incident.derivedDay })}  ·  ${incidentDurationText(incident, t, t('incidents.duration.ongoing'))}`}
@@ -305,7 +305,7 @@ export function IncidentGroupRow({ group, t, lang }) {
         className="w-full text-left flex items-start gap-[10px] cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors"
         style={{ padding: '8px 4px', margin: '-2px -4px', minHeight: '44px' }}
       >
-        <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
+        <span className={`shrink-0 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-xs text-[var(--text1)] truncate">{group.normalizedTitle}</p>
@@ -317,7 +317,7 @@ export function IncidentGroupRow({ group, t, lang }) {
             </span>
             <span className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>
           </div>
-          <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
+          <p className="text-[10px] text-[var(--text2)] mono">
             {groupRangeText(group, lang, t)}{group.run ? '' : ` · ${statusLabel}`}
           </p>
         </div>
@@ -403,7 +403,7 @@ function ComponentRow({ c, t }) {
       <span className={`rounded-full shrink-0 ${COMPONENT_DOT_COLOR[c.status] ?? COMPONENT_DOT_COLOR.operational}`} style={{ width: '6px', height: '6px' }} />
       <span className="mono text-xs text-[var(--text1)]">{c.name}</span>
       {c.status !== 'operational'
-        ? <span className={`mono text-[10px] ml-auto ${COMPONENT_TEXT_COLOR[c.status]}`}>{label}</span>
+        ? <span className={`mono text-[10px] ${COMPONENT_TEXT_COLOR[c.status]}`}>{label}</span>
         : <span className="sr-only">{label}</span>}
     </div>
   )
@@ -430,7 +430,7 @@ function ComponentGroup({ name, members, t }) {
         {worst !== 'operational' && (
           <span className={`mono text-[10px] ${COMPONENT_TEXT_COLOR[worst]}`}>{t(`status.${worst}`)}</span>
         )}
-        <span aria-hidden="true" className="text-[9px] text-[var(--text2)] ml-auto">{open ? '▾' : '▸'}</span>
+        <span aria-hidden="true" className="text-[9px] text-[var(--text2)]">{open ? '▾' : '▸'}</span>
       </button>
       {open && (
         <div
@@ -536,7 +536,7 @@ function RegionalAvailability({ service, t }) {
                 <div key={region.key} className="flex items-center gap-2">
                   <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
                   <span className="mono text-xs text-[var(--text1)]">{region.label}</span>
-                  <span className={`mono text-[10px] ml-auto ${textCls}`}>{t(labelKey)}</span>
+                  <span className={`mono text-[10px] ${textCls}`}>{t(labelKey)}</span>
                 </div>
               )
             })}
@@ -632,7 +632,7 @@ function CalendarCell({ status, date, t, incidentTitles = [] }) {
         {incidentTitles.length > 0 && <NoDowntimeCorner size="7px" />}
       </div>
       {hovered && (
-        <div className="fixed z-50 bg-[var(--bg4)] border border-[var(--border)] rounded px-2 py-1
+        <div className="fixed z-50 bg-[var(--bg4)] border border-[var(--border)] rounded
                         text-[10px] mono text-[var(--text1)] whitespace-nowrap pointer-events-none"
              style={{ transform: 'translate(-50%, -100%)', marginTop: '-6px' }}
              ref={(el) => {
@@ -1183,12 +1183,12 @@ export default function ServiceDetails({ serviceId }) {
           </div>
           <div style={{ padding: '16px' }}>
             {incidentsBlanked || NO_INCIDENT_SUPPORT.has(service.id) ? (
-              <div className="flex items-center gap-2 py-4">
+              <div className="flex items-center gap-2">
                 <span className="text-[var(--text2)] text-sm" aria-hidden="true">—</span>
                 <span className="text-xs text-[var(--text2)]">{t('uptime.unavailable')}</span>
               </div>
             ) : incidentCount === 0 ? (
-              <div className="flex items-center gap-2 py-4">
+              <div className="flex items-center gap-2">
                 <span className="text-[var(--green)] text-sm" aria-hidden="true">✓</span>
                 <span className="text-xs text-[var(--text2)]">{t('svc.no.incidents')}</span>
               </div>

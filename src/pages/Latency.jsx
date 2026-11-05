@@ -185,7 +185,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
         <span className="md:hidden mono text-[9px] text-[var(--text2)]">{t('latency.top8')}</span>
       </div>
       {hasData ? (
-        <div className="p-2 md:p-4">
+        <div>
           <div className="h-[240px] md:h-[320px]">
             <canvas ref={canvasRef} />
           </div>

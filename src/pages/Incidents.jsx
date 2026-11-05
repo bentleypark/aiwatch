@@ -172,7 +172,7 @@ export function IncidentCard({ incident, isSelected, onClick, onClose, t, lang, 
     <div>
       <button
         onClick={onClick}
-        className={`w-full text-left rounded border transition-colors space-y-1
+        className={`w-full text-left rounded border transition-colors
           ${isSelected
             ? 'bg-[var(--bg2)] border-[var(--border-hi)]'
             : 'bg-[var(--bg1)] border-[var(--border)] hover:bg-[var(--bg2)]'}`}
@@ -281,7 +281,7 @@ export function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSel
         aria-expanded={expanded}
         aria-label={expanded ? t('incidents.group.collapse') : t('incidents.group.expand')}
         // minHeight: 44px ensures touch target meets WCAG / Apple HIG recommendation
-        className="w-full text-left rounded border border-[var(--border)] bg-[var(--bg1)] hover:bg-[var(--bg2)] transition-colors space-y-1"
+        className="w-full text-left rounded border border-[var(--border)] bg-[var(--bg1)] hover:bg-[var(--bg2)] transition-colors"
         style={{ padding: '10px', minHeight: '44px' }}
       >
         <div className="flex items-start justify-between gap-2">

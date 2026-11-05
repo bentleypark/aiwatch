@@ -32,7 +32,7 @@ export default function Modal({ isOpen, onClose, title, children }) {
       ref={dialogRef}
       closedby="any"
       aria-labelledby={titleId}
-      className="bg-[var(--bg1)] border border-[var(--border-hi)] overflow-y-auto p-0"
+      className="bg-[var(--bg1)] border border-[var(--border-hi)] overflow-y-auto"
       style={{ width: 'min(600px, 90vw)', maxHeight: '80dvh', borderRadius: '12px', margin: 'auto' }}
     >
       <div className="flex items-center justify-between sticky top-0 z-10 bg-[var(--bg1)]"

@@ -430,7 +430,7 @@ export function IncidentItem({ incident, lang, t, hideStatus = false, onInset = 
         </div>
       </div>
       {expanded && (
-        <div className="ml-[66px]">
+        <div>
           <IncidentTimeline
             title={`${incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName} — ${incident.title}`}
             subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}  ·  ${incidentDurationText(incident, t, incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}`}
@@ -746,7 +746,7 @@ export default function Overview() {
       <div>
         <EmptyState type="error" onAction={() => window.location.reload()} />
         {lastUpdated && (
-          <p className="mt-2 text-center text-xs text-[var(--text2)]">
+          <p className="text-center text-xs text-[var(--text2)]">
             {t('overview.last.updated')}: {formatTime(lastUpdated, lang)}
           </p>
         )}
