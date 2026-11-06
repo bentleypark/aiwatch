@@ -194,4 +194,37 @@ describe('atlassianRosterAuditServices (#1518 — the Atlassian-branch equivalen
     const findings = rosterAgedInFindings(atlassianRosterEntries(BFL_PAGE), ['ws9rrzk6n2j7', 'm991l9z7y6jj'], [], true, BFL_AGED)
     expect(findings.sort()).toEqual(['8jg9v8zhstys', 'cw5sckn8002d', 'wb9xb021290k', 'x16d9nh49hch'])
   })
+
+  // #1930 — www.devinstatus.com components.json as served 2026-11-06, every component.
+  const DEVIN_PAGE = [
+    { id: 'd87cp5jknh1c', name: 'Cloud Web Client', created_at: '2024-08-14T16:16:37.857Z', group_id: null },
+    { id: 'y4zznb49vqqy', name: 'Cloud Web Client (Enterprise)', created_at: '2025-07-10T01:41:49.061Z', group_id: '92j5h0ttqxfb' },
+    { id: 'dcwvkrgpzxkl', name: 'Desktop Agent (Fedstart)', created_at: '2026-10-07T02:04:45.752Z', group_id: '9ydbk2b55pk1' },
+    { id: 'q72cy1kjpk4r', name: 'Cloud Agent', created_at: '2024-08-14T16:17:20.197Z', group_id: null },
+    { id: 'c20stk646s0v', name: 'Cloud Agent (Enterprise)', created_at: '2025-07-10T01:43:34.167Z', group_id: '92j5h0ttqxfb' },
+    { id: '767fhhcg1xh6', name: 'Enterprise Portal (Fedstart)', created_at: '2026-10-07T02:06:01.786Z', group_id: '9ydbk2b55pk1' },
+    { id: 'h6z52njyz22z', name: 'Desktop Agent', created_at: '2026-06-21T18:19:30.120Z', group_id: null },
+    { id: 'n7v68h5h9010', name: 'Desktop Agent (Enterprise)', created_at: '2026-06-21T18:19:58.525Z', group_id: '92j5h0ttqxfb' },
+    { id: 'q604f8cp8q9q', name: 'Desktop Tab (Fedstart)', created_at: '2026-10-07T02:06:53.318Z', group_id: '9ydbk2b55pk1' },
+    { id: '170m7l75sh6m', name: 'Desktop Tab', created_at: '2026-06-21T18:20:21.337Z', group_id: null },
+    { id: 'jmr17mx1kt4c', name: 'Desktop Tab (Enterprise)', created_at: '2026-06-21T18:22:27.076Z', group_id: '92j5h0ttqxfb' },
+    { id: 'hgmbfbs72ryp', name: 'Integrations', created_at: '2025-02-26T22:18:16.378Z', group_id: null },
+    { id: '92j5h0ttqxfb', name: 'Enterprise', created_at: '2025-07-10T01:41:49.033Z', group_id: null },
+    { id: '9ydbk2b55pk1', name: 'Federal', created_at: '2026-10-07T02:04:45.695Z', group_id: null },
+  ]
+  // The day the audit reported the four Federal ids, 30 days after they were created.
+  const DEVIN_AGED = Date.parse('2026-11-06T06:00:00Z')
+
+  it('#1930 windsurf: the live page yields no aged-in finding under the real config', () => {
+    const windsurf = SERVICES.find((s) => s.id === 'windsurf')!
+    const findings = rosterAgedInFindings(atlassianRosterEntries(DEVIN_PAGE), uptimeScopeOf(windsurf), windsurf.rosterAuditExclude ?? [], windsurf.rosterAuditFixedScope ?? false, DEVIN_AGED)
+    expect(findings).toEqual([])
+  })
+
+  it('#1930 windsurf: the pre-#1930 exclude list reports exactly the Federal tier', () => {
+    const windsurf = SERVICES.find((s) => s.id === 'windsurf')!
+    const preExclude = ['d87cp5jknh1c', 'y4zznb49vqqy', 'q72cy1kjpk4r', 'c20stk646s0v', 'n7v68h5h9010', 'jmr17mx1kt4c', 'hgmbfbs72ryp', '92j5h0ttqxfb']
+    const findings = rosterAgedInFindings(atlassianRosterEntries(DEVIN_PAGE), uptimeScopeOf(windsurf), preExclude, false, DEVIN_AGED)
+    expect(findings.sort()).toEqual(['767fhhcg1xh6', '9ydbk2b55pk1', 'dcwvkrgpzxkl', 'q604f8cp8q9q'])
+  })
 })

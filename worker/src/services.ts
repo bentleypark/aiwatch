@@ -617,7 +617,8 @@ export const SERVICES: ServiceConfig[] = [
   // #1518 — the other 8 components: Devin Cloud (a different product, per the comment above) and the
   // Enterprise tier of every component (Desktop Agent/Tab included) — a different customer segment
   // AIWatch does not track for any service.
-  { id: 'windsurf', name: 'Windsurf (Devin Desktop)', provider: 'Cognition', category: 'agent', statusUrl: 'https://www.devinstatus.com', apiUrl: 'https://www.devinstatus.com/api/v2/summary.json', statusComponentId: 'h6z52njyz22z', statusComponentIds: ['h6z52njyz22z', '170m7l75sh6m'], incidentComponents: ['Desktop Agent', 'Desktop Tab'], retainIncidentHistoryUntil: '2026-10-23T00:00:00.000Z', rosterAuditExclude: ['d87cp5jknh1c', 'y4zznb49vqqy', 'q72cy1kjpk4r', 'c20stk646s0v', 'n7v68h5h9010', 'jmr17mx1kt4c', 'hgmbfbs72ryp', '92j5h0ttqxfb'] },
+  // #1930 — the Federal (Fedstart) tier is excluded for the same reason as the Enterprise tier.
+  { id: 'windsurf', name: 'Windsurf (Devin Desktop)', provider: 'Cognition', category: 'agent', statusUrl: 'https://www.devinstatus.com', apiUrl: 'https://www.devinstatus.com/api/v2/summary.json', statusComponentId: 'h6z52njyz22z', statusComponentIds: ['h6z52njyz22z', '170m7l75sh6m'], incidentComponents: ['Desktop Agent', 'Desktop Tab'], retainIncidentHistoryUntil: '2026-10-23T00:00:00.000Z', rosterAuditExclude: ['d87cp5jknh1c', 'y4zznb49vqqy', 'q72cy1kjpk4r', 'c20stk646s0v', 'n7v68h5h9010', 'jmr17mx1kt4c', 'hgmbfbs72ryp', '92j5h0ttqxfb', 'dcwvkrgpzxkl', '767fhhcg1xh6', 'q604f8cp8q9q', '9ydbk2b55pk1'] },
   // #1004 — JetBrains migrated this page Atlassian Statuspage (status.jetbrains.ai) → incident.io
   // (status.jetbrains.cloud) on 2026-07-09, then ~2026-07-15 REMOVED the standalone "Junie" component
   // the first migration adopted (→ #135 component-miss alert + null uptime/Score). Junie's status now
