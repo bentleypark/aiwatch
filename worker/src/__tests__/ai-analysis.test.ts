@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, ANALYSIS_SYSTEM_PROMPT, PROGRESS_EMBED_MAX, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, applyHoldEvent, timedOutAttribution, holdLedger, recordHoldEvent, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
+import { ENRICH_WINDOW_MS } from '../alert-enrich'
+import { findSimilarIncidents, buildAnalysisPrompt, ANALYSIS_SYSTEM_PROMPT, PROGRESS_EMBED_MAX, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, applyEnrichCounts, timedOutAttribution, enrichLedger, recordEnrichCounts, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
 import type { AiUsageCounters } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import { ANTHROPIC_TIMEOUT_MS } from '../anthropic'
@@ -757,7 +758,7 @@ describe('analyzeIncidentDetailed', () => {
 
 describe('reanalysisLockTtlSec', () => {
   // Only a permanent failure earns the long lock. A transient one used to get the same flat
-  // 30min ban, skipping six cron cycles and outliving the #882 AI-hold window.
+  // 30min ban, skipping six cron cycles.
   it('locks 30min for permanent failures only', () => {
     expect(reanalysisLockTtlSec('permanent')).toBe(1800)
   })
@@ -771,12 +772,10 @@ describe('reanalysisLockTtlSec', () => {
     expect(reanalysisLockTtlSec('unknown')).toBe(300)
   })
 
-  // The lock must never outlive the #882 AI_HOLD_MS (~10min) window for a retryable failure,
-  // or the alert is guaranteed to ship AI-less.
-  it('keeps every retryable lock inside the #882 AI-hold window', () => {
-    const AI_HOLD_SEC = 600
-    for (const failure of ['transient', 'aborted', 'unknown'] as const) {
-      expect(reanalysisLockTtlSec(failure)).toBeLessThanOrEqual(AI_HOLD_SEC)
+  // A lock past the #1152 edit window guarantees the alert it serves is never edited.
+  it('keeps every lock inside the #1152 edit window', () => {
+    for (const failure of ['permanent', 'transient', 'aborted', 'unknown'] as const) {
+      expect(reanalysisLockTtlSec(failure) * 1000).toBeLessThan(ENRICH_WINDOW_MS)
     }
   })
 })
@@ -878,63 +877,40 @@ describe('applyAttempt / parseUsage', () => {
     }
   })
 
-  // ── #1080 / #882 — the hold ledger ──
+  // ── #1152 — the enrich ledger ──
 
-  it('applyHoldEvent: counts each lifecycle event on its own axis', () => {
-    let usage = applyHoldEvent(emptyUsage(), 'held')
-    usage = applyHoldEvent(usage, 'held')
-    usage = applyHoldEvent(usage, 'releasedWithAi')
-    usage = applyHoldEvent(usage, 'releasedWithoutAi')
-    expect(usage).toMatchObject({ held: 2, heldReleasedWithAi: 1, heldReleasedWithoutAi: 1 })
+  it('applyEnrichCounts: counts each outcome on its own axis and adds across runs', () => {
+    let usage = applyEnrichCounts(emptyUsage(), { aiLessSent: 2, enriched: 1, failed: 0, expired: 0 })
+    usage = applyEnrichCounts(usage, { aiLessSent: 1, enriched: 1, failed: 1, expired: 1 })
+    expect(usage).toMatchObject({ aiLessSent: 3, enriched: 2, enrichFailed: 1, enrichExpired: 1 })
   })
 
-  it('applyHoldEvent: leaves the analysis counters untouched', () => {
-    const usage = applyHoldEvent(emptyUsage(), 'held')
-    expect(usage).toMatchObject({ calls: 0, success: 0, failed: 0 })
-    expect(usage.timedOut).toBeUndefined()
+  it('applyEnrichCounts: a zero writes no field and leaves the analysis counters untouched', () => {
+    const usage = applyEnrichCounts(emptyUsage(), { aiLessSent: 1, enriched: 0, failed: 0, expired: 0 })
+    expect(usage).toEqual({ calls: 0, success: 0, failed: 0, aiLessSent: 1 })
   })
 
-  it('holdLedger: a pre-#1080 record reads as null (unknown), not as zero holds', () => {
-    expect(holdLedger(emptyUsage())).toBeNull()
-    expect(holdLedger({ ...emptyUsage(), calls: 9, timedOut: 2 })).toBeNull()
+  it('enrichLedger: a record with none of its counters reads as null (unknown), not as zero', () => {
+    expect(enrichLedger(emptyUsage())).toBeNull()
+    expect(enrichLedger({ ...emptyUsage(), calls: 9, timedOut: 2 })).toBeNull()
   })
 
-  it('holdLedger: a held-then-released-with-AI day is the #882 fix working', () => {
-    const usage = applyHoldEvent(applyHoldEvent(emptyUsage(), 'held'), 'releasedWithAi')
-    expect(holdLedger(usage)).toEqual({ held: 1, releasedWithAi: 1, releasedWithoutAi: 0 })
-  })
-
-  // The signal that the hold bought nothing — this is what a rising count would look like.
-  it('holdLedger: a fail-open day shows the release carried no AI', () => {
-    const usage = applyHoldEvent(applyHoldEvent(emptyUsage(), 'held'), 'releasedWithoutAi')
-    expect(holdLedger(usage)).toMatchObject({ held: 1, releasedWithAi: 0, releasedWithoutAi: 1 })
-  })
-
-  // #1080 review — `held` and the releases are NOT a balanced pair, so the ledger deliberately does
-  // not publish a held-minus-released figure. Two independent reasons, both routine:
-  //   (a) the key is per-UTC-day but the ~10min hold window is not, so a 23:58 hold releases against
-  //       the NEXT day's key — that day would read as a negative "in flight";
-  //   (b) a held incident that RESOLVES inside the window emits no alert at all on the next cycle, so
-  //       it never reaches the release site and the marker just TTLs out. Correct, not a lost release.
-  it('holdLedger: exposes the raw counters only — no held-minus-released figure to misread', () => {
-    const open = holdLedger(applyHoldEvent(emptyUsage(), 'held'))
-    expect(open).toEqual({ held: 1, releasedWithAi: 0, releasedWithoutAi: 0 })
-    expect(open).not.toHaveProperty('inFlight')
-  })
-
-  it('holdLedger: a release landing on the next UTC day is readable, not negative', () => {
-    // The day-2 key legitimately carries a release with no matching `held`.
-    const dayTwo = applyHoldEvent(emptyUsage(), 'releasedWithAi')
-    expect(holdLedger(dayTwo)).toEqual({ held: 0, releasedWithAi: 1, releasedWithoutAi: 0 })
+  it.each([
+    [{ aiLessSent: 1 }, { aiLessSent: 1, enriched: 0, failed: 0, expired: 0 }],
+    [{ enriched: 1 }, { aiLessSent: 0, enriched: 1, failed: 0, expired: 0 }],
+    [{ enrichFailed: 1 }, { aiLessSent: 0, enriched: 0, failed: 1, expired: 0 }],
+    [{ enrichExpired: 1 }, { aiLessSent: 0, enriched: 0, failed: 0, expired: 1 }],
+  ] as const)('enrichLedger: %j alone is present', (counters, expected) => {
+    expect(enrichLedger({ ...emptyUsage(), ...counters })).toEqual(expected)
   })
 
   // ── #1080 review — scalar counters off the wire ──
 
   it('parseUsage: coerces a string counter instead of letting it concatenate', () => {
-    // `"3" + 1 === "31"` — applyHoldEvent would write a string straight back into the ledger.
-    const usage = parseUsage('{"calls":1,"success":0,"failed":0,"held":"3"}')
-    expect(usage.held).toBeUndefined()
-    expect(applyHoldEvent(usage, 'held').held).toBe(1)
+    // `"3" + 1 === "31"` — applyEnrichCounts would write a string straight back into the ledger.
+    const usage = parseUsage('{"calls":1,"success":0,"failed":0,"enriched":"3"}')
+    expect(usage.enriched).toBeUndefined()
+    expect(applyEnrichCounts(usage, { aiLessSent: 0, enriched: 1, failed: 0, expired: 0 }).enriched).toBe(1)
   })
 
   // `calls`/`success`/`failed` are required (they default to 0 rather than going absent), but they must
@@ -947,8 +923,8 @@ describe('applyAttempt / parseUsage', () => {
   })
 
   it('parseUsage: a null counter reads as ABSENT, not as a confident zero', () => {
-    const usage = parseUsage('{"calls":1,"success":0,"failed":0,"held":null,"heldReleasedWithAi":null,"heldReleasedWithoutAi":null}')
-    expect(holdLedger(usage), 'null must not satisfy the presence test').toBeNull()
+    const usage = parseUsage('{"calls":1,"success":0,"failed":0,"aiLessSent":null,"enriched":null,"enrichFailed":null,"enrichExpired":null}')
+    expect(enrichLedger(usage), 'null must not satisfy the presence test').toBeNull()
   })
 
   it('parseUsage: drops an empty-string key the writer could never have produced', () => {
@@ -956,19 +932,25 @@ describe('applyAttempt / parseUsage', () => {
     expect(usage.timedOutBy).toBeUndefined()
   })
 
-  it('recordHoldEvent: persists to the same daily key and survives a round-trip', async () => {
+  it('recordEnrichCounts: persists to the same daily key and survives a round-trip', async () => {
     const store: Record<string, string> = {}
-    await recordHoldEvent(mockKV(store), Date.parse('2026-07-20T04:00:00Z'), 'held')
-    await recordHoldEvent(mockKV(store), Date.parse('2026-07-20T04:05:00Z'), 'releasedWithAi')
-    expect(holdLedger(parseUsage(store['ai:usage:2026-07-20']))).toMatchObject({ held: 1, releasedWithAi: 1 })
+    await recordEnrichCounts(mockKV(store), Date.parse('2026-07-20T04:00:00Z'), { aiLessSent: 1, enriched: 0, failed: 0, expired: 0 })
+    await recordEnrichCounts(mockKV(store), Date.parse('2026-07-20T04:05:00Z'), { aiLessSent: 0, enriched: 1, failed: 0, expired: 0 })
+    expect(enrichLedger(parseUsage(store['ai:usage:2026-07-20']))).toEqual({ aiLessSent: 1, enriched: 1, failed: 0, expired: 0 })
   })
 
-  // Both writers share one key — a hold event must not clobber the analysis counters written that day.
-  it('recordHoldEvent: does not clobber the analysis counters already on the key', async () => {
+  it('recordEnrichCounts: an all-zero run writes nothing', async () => {
+    const store: Record<string, string> = {}
+    await recordEnrichCounts(mockKV(store), Date.parse('2026-07-20T04:00:00Z'), { aiLessSent: 0, enriched: 0, failed: 0, expired: 0 })
+    expect(store).toEqual({})
+  })
+
+  // Both writers share one key — an enrich count must not clobber the analysis counters written that day.
+  it('recordEnrichCounts: does not clobber the analysis counters already on the key', async () => {
     const store: Record<string, string> = { 'ai:usage:2026-07-20': JSON.stringify({ calls: 4, success: 3, failed: 0, timedOut: 1, timedOutBy: { mistral: 1 } }) }
-    await recordHoldEvent(mockKV(store), Date.parse('2026-07-20T04:00:00Z'), 'held')
+    await recordEnrichCounts(mockKV(store), Date.parse('2026-07-20T04:00:00Z'), { aiLessSent: 1, enriched: 0, failed: 0, expired: 0 })
     const usage = parseUsage(store['ai:usage:2026-07-20'])
-    expect(usage).toMatchObject({ calls: 4, success: 3, timedOut: 1, held: 1 })
+    expect(usage).toMatchObject({ calls: 4, success: 3, timedOut: 1, aiLessSent: 1 })
     expect(usage.timedOutBy).toEqual({ mistral: 1 })
   })
 
@@ -1038,55 +1020,41 @@ describe('summarizeAiUsageTrend / formatAiUsageTrendLine (#995)', () => {
     expect(formatAiUsageTrendLine(summarizeAiUsageTrend([{ calls: 0, success: 0, failed: 0 }]))).toBe('')
   })
 
-  describe('AI-hold ledger roll-up (#1262)', () => {
+  describe('enrich ledger roll-up (#1152)', () => {
     const day = { calls: 5, success: 5, failed: 0 }
     const trendLine = (days: AiUsageCounters[]) => formatAiUsageTrendLine(summarizeAiUsageTrend(days))
-    const holdPart = (line: string) => line.split(' · ').find((p) => p.startsWith('AI-hold'))
+    const enrichPart = (line: string) => line.split(' · ').find((p) => p.includes('sent without AI'))
 
     it.each([
       ['no day carries a counter', [day, day], null],
       ['a window with no days', [], null],
-      ['one day with only a held counter', [{ ...day, held: 1 }], { held: 1, releasedWithAi: 0, releasedWithoutAi: 0 }],
-      ['one day with only a release counter', [{ ...day, heldReleasedWithoutAi: 2 }], { held: 0, releasedWithAi: 0, releasedWithoutAi: 2 }],
+      ['one day with only a sent counter', [{ ...day, aiLessSent: 1 }], { aiLessSent: 1, enriched: 0, failed: 0, expired: 0 }],
       ['every counter nonzero on two days, so each is a sum', [
-        { ...day, held: 2, heldReleasedWithAi: 1, heldReleasedWithoutAi: 1 },
-        { ...day, held: 3, heldReleasedWithAi: 2, heldReleasedWithoutAi: 2 },
-      ], { held: 5, releasedWithAi: 3, releasedWithoutAi: 3 }],
-      ['a day that holds events but has no calls still counts', [
-        { calls: 0, success: 0, failed: 0, heldReleasedWithoutAi: 1 },
+        { ...day, aiLessSent: 2, enriched: 1, enrichFailed: 1, enrichExpired: 1 },
+        { ...day, aiLessSent: 3, enriched: 2, enrichFailed: 2, enrichExpired: 3 },
+      ], { aiLessSent: 5, enriched: 3, failed: 3, expired: 4 }],
+      ['a day with counters but no calls still counts', [
+        { calls: 0, success: 0, failed: 0, enriched: 1 },
         day,
-      ], { held: 0, releasedWithAi: 0, releasedWithoutAi: 1 }],
-      ['days summed, a day without counters adds nothing', [
-        { ...day, held: 2, heldReleasedWithAi: 1, heldReleasedWithoutAi: 1 },
-        day,
-        { ...day, held: 1, heldReleasedWithAi: 1 },
-      ], { held: 3, releasedWithAi: 2, releasedWithoutAi: 1 }],
-    ])('hold roll-up: %s', (_name, days, expected) => {
-      expect(summarizeAiUsageTrend(days).hold).toEqual(expected)
+      ], { aiLessSent: 0, enriched: 1, failed: 0, expired: 0 }],
+    ])('enrich roll-up: %s', (_name, days, expected) => {
+      expect(summarizeAiUsageTrend(days).enrich).toEqual(expected)
     })
 
     it.each([
       ['no ledger', [day], undefined],
-      ['held only, so no share', [{ ...day, held: 2 }], 'AI-hold 2 held, 0 released with AI, 0 released AI-less'],
-      ['all released with AI', [{ ...day, held: 2, heldReleasedWithAi: 2 }], 'AI-hold 2 held, 2 released with AI, 0 released AI-less (0% AI-less)'],
-      ['all released AI-less', [{ ...day, held: 1, heldReleasedWithoutAi: 1 }], 'AI-hold 1 held, 0 released with AI, 1 released AI-less (100% AI-less)'],
-      ['releases booked the day after their hold, so no held', [{ ...day, heldReleasedWithAi: 1, heldReleasedWithoutAi: 1 }], 'AI-hold 0 held, 1 released with AI, 1 released AI-less (50% AI-less)'],
-      ['a share that rounds down', [{ ...day, held: 3, heldReleasedWithAi: 2, heldReleasedWithoutAi: 1 }], 'AI-hold 3 held, 2 released with AI, 1 released AI-less (33% AI-less)'],
-      ['a share across days', [
-        { ...day, held: 5, heldReleasedWithAi: 5 },
-        { ...day, held: 3, heldReleasedWithoutAi: 2 },
-      ], 'AI-hold 8 held, 5 released with AI, 2 released AI-less (29% AI-less)'],
-    ])('hold part of the trend line: %s', (_name, days, expected) => {
-      expect(holdPart(trendLine(days))).toBe(expected)
+      ['one day', [{ ...day, aiLessSent: 2, enriched: 1, enrichExpired: 1 }], '2 sent without AI, 1 edited in, 0 not edited, 1 expired'],
+    ])('enrich part of the trend line: %s', (_name, days, expected) => {
+      expect(enrichPart(trendLine(days))).toBe(expected)
     })
 
-    it('puts the hold part after the failed count', () => {
-      const parts = trendLine([{ ...day, held: 1, heldReleasedWithAi: 1 }]).split(' · ')
-      expect(parts.findIndex((p) => p.endsWith('failed'))).toBeLessThan(parts.findIndex((p) => p.startsWith('AI-hold')))
+    it('puts the enrich part after the failed count', () => {
+      const parts = trendLine([{ ...day, aiLessSent: 1, enriched: 1 }]).split(' · ')
+      expect(parts.findIndex((p) => p.endsWith('failed'))).toBeLessThan(parts.findIndex((p) => p.includes('sent without AI')))
     })
 
     it('leaves the line empty when nothing was called, whatever the ledger says', () => {
-      expect(trendLine([{ calls: 0, success: 0, failed: 0, held: 1, heldReleasedWithAi: 1 }])).toBe('')
+      expect(trendLine([{ calls: 0, success: 0, failed: 0, aiLessSent: 1, enriched: 1 }])).toBe('')
     })
   })
 
@@ -1176,8 +1144,7 @@ describe('analyzeIncidentWithBudget', () => {
     spy.mockRestore()
   })
 
-  // The budget must be long enough for Gemma-fails → Sonnet-succeeds to complete inline: a
-  // NEVER_AI_HELD service is never held by #882, so the inline call is its only chance at an AI section.
+  // The budget must be long enough for Gemma-fails → Sonnet-succeeds to complete inline.
   it('gives the Sonnet fallback (10s cap) room to finish after a Gemma failure', () => {
     expect(INLINE_ANALYSIS_BUDGET_MS).toBeGreaterThan(ANTHROPIC_TIMEOUT_MS)
   })

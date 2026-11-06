@@ -258,6 +258,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   status-verdict.ts  # The one raw-status → affected/healthy/unreadable mapping (#1233) — `unknown` is neither an outage nor an all-clear
   score.ts           # AIWatch Score (Uptime 40 / Incidents 25 / Recovery 15 / Responsiveness 20)
   alerts.ts alerted-gone.ts # Incident + status-edge alert detection, holds, merges, tweet/reply drafts
+  alert-enrich.ts    # AI section edited into an operator alert sent without it (#1152)
   ai-analysis.ts     # Hybrid incident analysis — Gemma 4 26B primary, Claude Sonnet fallback
   anthropic.ts       # Anthropic Messages REST call — model id, request body, retry + status classification (#955)
   incident-history.ts # Durable resolved-incident corpus → prediction accuracy + RAG (#827)

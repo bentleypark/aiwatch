@@ -15,8 +15,8 @@ import { pageIncidents } from './incident-presence'
 import { markWithdrawalsAnnounced, markWithdrawalsClosedByResolved, readWithdrawalLog, withdrawalOutcome, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry, type WithdrawalOutcome } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
 import { fallbackEmbedSection } from './fallback'
-import { buildIncidentAlerts, buildWithdrawalAlerts, buildMaintenanceAlerts, sinkDeferrableAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, NEVER_AI_HELD, pendingAiKey, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
-import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
+import { buildIncidentAlerts, buildWithdrawalAlerts, buildMaintenanceAlerts, sinkDeferrableAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordEnrichCounts, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, settleWithin, omitsTimeSeries, isResolvedWithoutEnd } from './utils'
 import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
@@ -810,39 +810,52 @@ function computeUptime(history: Record<string, DailyCounters>): Record<string, n
 }
 
 import { sanitize, type KVLike } from './utils'
+import { ENRICH_WINDOW_MS, messageEditUrl, parseMessageId, runEnrichment, withWaitParam, type EnrichRecord } from './alert-enrich'
 
 // ── Discord Webhook Alerts (Cron-based, no isolate concurrency) ──
 
 let discordSendLogKv: KVLike | undefined
 
 async function sendDiscordAlert(webhookUrl: string, embed: { title: string; description: string; color: number }): Promise<boolean> {
-  const ok = await postDiscordEmbed(webhookUrl, embed)
-  await recordDiscordSend(discordSendLogKv, { title: embed.title, ok })
-  return ok
+  return (await sendDiscordAlertForEdit(webhookUrl, embed, false)).ok
 }
 
-async function postDiscordEmbed(webhookUrl: string, embed: { title: string; description: string; color: number }): Promise<boolean> {
+/** #1152 — with `wait`, Discord answers with the created message, whose id a later edit needs. */
+async function sendDiscordAlertForEdit(
+  webhookUrl: string,
+  embed: { title: string; description: string; color: number },
+  wait: boolean,
+): Promise<{ ok: boolean; messageId: string | null; sentAt: string }> {
+  const sentAt = new Date().toISOString()
+  const res = await postDiscordEmbed(webhookUrl, 'POST', { ...embed, timestamp: sentAt }, wait)
+  await recordDiscordSend(discordSendLogKv, { title: embed.title, ok: res.ok })
+  return { ...res, sentAt }
+}
+
+async function postDiscordEmbed(
+  url: string,
+  method: 'POST' | 'PATCH',
+  embed: { title: string; description: string; color: number; timestamp: string },
+  wait: boolean,
+): Promise<{ ok: boolean; messageId: string | null }> {
   try {
-    const resp = await fetch(webhookUrl, {
-      method: 'POST',
+    const resp = await fetch(wait ? withWaitParam(url) : url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        embeds: [{
-          ...embed,
-          timestamp: new Date().toISOString(),
-          footer: { text: 'AIWatch Worker' },
-        }],
-      }),
+      body: JSON.stringify({ embeds: [{ ...embed, footer: { text: 'AIWatch Worker' } }] }),
     })
     if (!resp.ok) {
-      console.error(`[discord] webhook returned ${resp.status}: ${await resp.text().catch(() => '')}`)
-      return false
+      console.error(`[discord] webhook ${method} returned ${resp.status}: ${await resp.text().catch(() => '')}`)
+      return { ok: false, messageId: null }
     }
-    resp.body?.cancel()
-    return true
+    if (!wait) {
+      resp.body?.cancel()
+      return { ok: true, messageId: null }
+    }
+    return { ok: true, messageId: parseMessageId(await resp.json().catch(() => null)) }
   } catch (err) {
-    console.error('[discord] webhook failed:', err instanceof Error ? err.message : err)
-    return false
+    console.error(`[discord] webhook ${method} failed:`, err instanceof Error ? err.message : err)
+    return { ok: false, messageId: null }
   }
 }
 
@@ -1502,9 +1515,10 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // truth; kills the browser/operator divergence that #473/#474 chased).
   const feedEntries: AlertFeedEntry[] = []
   let pushesSent = 0 // #815 — count delivered push-scope ntfy pushes for the daily-summary observability line
-  // #882 — new-incident alert keys HELD this cycle (out of NEVER_AI_HELD, AI not yet ready). They're in `sent`
-  // but were `continue`d before the roster write / send, so exclude them from the daily alert count.
-  const heldNewAlertKeys = new Set<string>()
+  // #1152 — operator alerts sent without their AI section, to be edited once it lands.
+  const enrichQueue: EnrichRecord[] = []
+  let aiLessSent = 0
+  let enrichNoId = 0
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
@@ -1517,16 +1531,11 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
     // Write dedup keys for all merged alerts (Together AI grouping)
     const keysToWrite = alert._mergedKeys ?? [alert.key]
-    // #882 — resolve the new-incident AI analysis BEFORE the alerted:new roster write / send, so an
-    // alert whose inline analysis overran can be HELD (not shipped AI-less) until a
-    // later cron cycle backfills ai:analysis, then released WITH the section. Prefer an EXISTING KV
-    // analysis (backfilled by a prior cycle's refreshOrReanalyze — no budget cap) over re-running the
-    // inline call, so the release is deterministic and no duplicate AI call fires. A NEVER_AI_HELD
-    // service (#1148) is never held (shouldHoldForAiAnalysis) so its alert — and, in push scope, its
-    // phone push — stays immediate. The operator embed AND the per-user relay share this single analysisSection.
+    // The new-incident AI section: an existing (non-empty) KV analysis first, else one inline call.
+    // When neither yields one, the alert ships without it and is edited later (#1152).
+    // The operator embed AND the per-user relay share this single analysisSection.
     let analysisSection = ''
-    let aiReady = false          // an AI section is available (KV or a successful inline call)
-    let analysisSkipped = false  // AI will never come for this incident (merged / no-model / generic)
+    let enrichTarget: { svcId: string; incId: string } | null = null
     if (alert.key.startsWith('alerted:new:')) {
       const incId = alert.key.replace('alerted:new:', '')
       // #545: scope AI analysis to the service this alert actually represents (alert.svcIds[0]) — for a
@@ -1535,19 +1544,8 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       const svc = (primaryId && scored.find(s => s.id === primaryId))
         || scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
       const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
-      const nowMs = Date.now()
-      // #882 — read the AI-hold marker FIRST: a genuine KV miss (null, no throw) = first sighting; a
-      // read error (.catch → '0') = fail-open (age huge → past window → not held). Knowing first-sight
-      // BEFORE the analysis lets the expensive inline call fire only on the FIRST cycle — a held
-      // incident on a later cycle relies on the KV-first read below (backfilled by refreshOrReanalyze),
-      // so it doesn't burn a second Gemma/Sonnet call every cycle (silent-failure-hunter #882).
-      const pendingAiRaw = await env.STATUS_CACHE.get(pendingAiKey(incId)).catch(() => '0')
-      const firstSeenMs = pendingAiRaw === null ? null : (Number.parseInt(pendingAiRaw, 10) || 0)
-      const firstSight = firstSeenMs === null
       if (svc && inc) {
-        // Prefer an existing (non-empty) KV analysis over a fresh inline call (#882). This is the
-        // release path: a held incident's analysis, backfilled by the previous cycle's
-        // refreshOrReanalyze, is read here so the alert deterministically ships WITH the AI section.
+        let analysisSkipped = false
         let existing: AIAnalysisResult | null = null
         const existingRaw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
         if (existingRaw) {
@@ -1560,9 +1558,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         const baseline = (await readRecoveryBaselines(env.STATUS_CACHE))[svc.id]
         if (existing) {
           analysisSection = formatAnalysisEmbedSection(existing, DIV, baseline)
-        } else if (firstSight) {
-          // Only run the inline call on the incident's FIRST sighting; on later held cycles the
-          // KV-first read above + refreshOrReanalyze's backfill supply the section (no duplicate spend).
+        } else {
           // AI analysis (INLINE_ANALYSIS_BUDGET_MS) — Gemma primary + Sonnet fallback. shouldSkipInitialAnalysis
           // centralizes the three skip reasons (merged / no-model / generic) so they can't drift
           // between here and the re-analysis path; log the reason so an empty section is explainable.
@@ -1606,77 +1602,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
             }
           }
         }
-        aiReady = analysisSection !== ''
-      }
-      // #882 — AI-hold gate: out of NEVER_AI_HELD + AI not ready + not skipped + within window → HOLD this cycle
-      // (`continue` skips the roster write / feed append / send / push below). The next cron cycle's
-      // refreshOrReanalyze backfills ai:analysis; a later cycle finds it via the KV-first read above
-      // and releases WITH the section. Bounded + fail-open: past AI_HOLD_MS the gate returns false so
-      // the alert ships AI-less and is never lost. A NEVER_AI_HELD service is never held (immediate, #1148).
-      const holdSvcId = svc?.id ?? primaryId ?? ''
-      // If the service/incident couldn't be resolved there's nothing to analyze → never hold (treat as
-      // skipped so a fail-open path can't wedge an un-analyzable alert). buildIncidentAlerts sources
-      // from `scored`, so this is a defensive belt, not an expected case.
-      const analysisUnavailable = analysisSkipped || !svc || !inc
-      if (shouldHoldForAiAnalysis({ svcId: holdSvcId, aiReady, analysisSkipped: analysisUnavailable, firstSeenMs, nowMs })) {
-        // The fail-open window can only elapse if the first-seen marker PERSISTS across cycles. On first
-        // sight, stamp it; if that write FAILS we can't bound the hold (next cycle re-sees first-sight →
-        // re-stamps → window never advances), so an unbounded hold could wedge the alert if AI also
-        // never lands. Fail-open NOW (fall through to send AI-less) rather than hold unboundedly — one
-        // early AI-less alert beats a lost one. On a later cycle the marker already exists (write-once),
-        // so we just hold within the window as normal (silent-failure-hunter #882).
-        if (firstSight) {
-          const ok = await kvPut(env.STATUS_CACHE, pendingAiKey(incId), String(nowMs), { expirationTtl: PENDING_NEW_TTL_S })
-          if (!ok) {
-            console.error('[cron] #882 pending:ai write failed — sending AI-less now (cannot bound the hold):', incId)
-          } else {
-            heldNewAlertKeys.add(alert.key)
-            // #1080 — book the hold ONLY here, on the first-sight stamp. The `else` branch below is a
-            // re-hold of an incident already counted, so bumping there too would inflate `held`
-            // against the release counters and make the two incomparable. Booked after the stamp
-            // succeeded, so a hold that never actually happened is never counted.
-            await recordHoldEvent(env.STATUS_CACHE, nowMs, 'held')
-            console.log('[cron] #882 holding hold-eligible new-incident alert until AI lands (or fail-open window):', holdSvcId, incId)
-            continue
-          }
-        } else {
-          heldNewAlertKeys.add(alert.key)
-          console.log('[cron] #882 holding hold-eligible new-incident alert until AI lands (or fail-open window):', holdSvcId, incId)
-          continue
-        }
-      }
-      // Released (AI ready / in NEVER_AI_HELD / skipped / past window / unbounded-hold fail-open) — clear the
-      // marker best-effort so a stale window value can't linger (harmless on failure; TTL bounds it).
-      // #1080 — `firstSeenMs` truthy means this incident HAD a marker and is being released now.
-      // A NEVER_AI_HELD service never STAMPS a marker, so it is not counted here for its own incidents. (Not an
-      // absolute: the marker is keyed per incident while `holdSvcId` comes from `alert.svcIds[0]`,
-      // so a #545 never-held late joiner on an incident a hold-eligible service already stamped will book
-      // the release. That is the correct behavior — the hold really is being released — it just
-      // means "a NEVER_AI_HELD service is never in the ledger" is too strong a reading.) Which
-      // release it was is the whole point of #882 — `aiReady` separates the hold working as designed
-      // from the alert shipping AI-less anyway. Booked before the delete so a failed delete (which is
-      // best-effort by design) cannot lose the release from the ledger. That ordering trades "lose a
-      // release" for "occasionally double-book one": `kvDel` swallows its failure and a late joiner
-      // re-emits the same `alerted:new:{incId}`, so a surviving marker books the release twice. The
-      // right trade, but it does NOT leave the ratio untouched: the re-booked release usually lands on
-      // `releasedWithAi` (the next cycle has normally backfilled the analysis), so the skew favours
-      // "the hold worked". Read the ledger as a trend, never as an exact tally — see `holdLedger`.
-      //
-      // NOT a complete set, and deliberately not pretending otherwise: the marker read above
-      // fail-opens to '0' on a KV error, which is indistinguishable from "no marker" at this point.
-      // A genuinely-held incident whose read errored is therefore released without being booked. We
-      // cannot recover the fact (we never learned it was held), so the honest handling is to make it
-      // NOISY rather than silent — a silent under-count is what #1080 exists to stop shipping.
-      if (firstSeenMs) {
-        await recordHoldEvent(env.STATUS_CACHE, nowMs, aiReady ? 'releasedWithAi' : 'releasedWithoutAi')
-        await kvDel(env.STATUS_CACHE, pendingAiKey(incId)).catch(() => {})
-      } else if (firstSeenMs === 0 && !NEVER_AI_HELD.has(holdSvcId)) {
-        // A NEVER_AI_HELD service does not stamp markers for its own incidents, so a missing release
-        // is not something this warning can meaningfully claim for it — and unfiltered it would fire
-        // once per alert per cycle during a KV read outage. Known limitation, widened by #1148 from 3
-        // ids to 9: a #545 never-held joiner releasing a marker a hold-eligible service stamped, on a
-        // cycle whose KV read errored, is silently un-booked here. The ledger is a trend, not a tally.
-        console.warn('[cron] #1080 pending:ai read fail-open — if this alert was held, its release is missing from the ledger:', holdSvcId, incId)
+        if (!analysisSection && !analysisSkipped) enrichTarget = { svcId: svc.id, incId: inc.id }
       }
     }
     if (alert.key.startsWith('alerted:new:')) {
@@ -1845,15 +1771,10 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       }
     }
 
-    // #882 — the new-incident AI analysis + AI-hold gate ran ABOVE (before the roster write), so
-    // `analysisSection` is already resolved here (from KV or the inline call) and a held alert has
-    // already `continue`d. The #679 detection-lead per-incident signal was removed (status-page
-    // polling is structurally later than the official publish, so the lead was always negative);
-    // `detected:{svcId}` is still written earlier for #677's AWS duration anchor.
-
     // Build sectioned description: incident → AI analysis → (recovery prediction) → fallback → link
     const parts = [alert.description]
     if (alert.impactText) parts.push(alert.impactText)
+    const aiAt = parts.join('\n').length
     if (analysisSection) parts.push(analysisSection)
     if (recoverySection) parts.push(recoverySection) // #827 F4 status-edge recovery + #846 alerted:res: prediction
     if (alert.fallbackText && alert.fallbackText.startsWith('👉')) {
@@ -1956,11 +1877,22 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     } catch (err) {
       console.error('[cron] #1548 engage reply draft build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
     }
-    const operatorSent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-      title: defuseAutolinkDomain(alert.title),
-      description: operatorDescription,
-      color: alert.color,
-    })
+    const operatorEmbed = { title: defuseAutolinkDomain(alert.title), description: operatorDescription, color: alert.color }
+    const operatorSend = await sendDiscordAlertForEdit(env.DISCORD_WEBHOOK_URL, operatorEmbed, enrichTarget !== null)
+    const operatorSent = operatorSend.ok
+    if (enrichTarget && operatorSent) {
+      aiLessSent++
+      if (operatorSend.messageId) {
+        enrichQueue.push({
+          ...enrichTarget, ...operatorEmbed, messageId: operatorSend.messageId, sentAt: operatorSend.sentAt,
+          full: operatorDescription, core: defuseAutolinkDomain(description), at: aiAt,
+          expiresAt: Date.now() + ENRICH_WINDOW_MS,
+        })
+      } else {
+        enrichNoId++
+        console.error('[cron] #1152 alert sent without a message id — its AI section cannot be edited in:', alert.key)
+      }
+    }
     // #1106 Part 5 — stamp the durable log's `announcedAt` HERE, after the send and gated on its
     // result. `sendDiscordAlert` never throws (it returns false on a non-2xx or a network error), and
     // the `alerted:wd:` dedup key was already written above — so a failed send is permanent: the
@@ -2106,7 +2038,6 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       const countRaw = await env.STATUS_CACHE.get(countKey).catch(() => null)
       const counts = countRaw ? JSON.parse(countRaw) : { incidents: 0, resolved: 0, down: 0, degraded: 0, recovered: 0 }
       for (const a of sent) {
-        if (heldNewAlertKeys.has(a.key)) continue // #882 — held this cycle, not actually sent
         const n = a._mergedKeys?.length ?? 1
         if (a.key.startsWith('alerted:new:')) counts.incidents += n
         else if (a.key.startsWith('alerted:res:')) counts.resolved += n
@@ -2203,6 +2134,23 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   )
   await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncidentDetailed, 2, Date.now(), env.AI, heldNewIncIds)
 
+  // #1152 — edit the AI section into operator alerts that went out without it.
+  const enrichCounts = await runEnrichment(
+    env.STATUS_CACHE,
+    enrichQueue,
+    async (rec) => {
+      const analysis = parseAnalysis(await env.STATUS_CACHE.get(analysisKey(rec.svcId, rec.incId)).catch(() => null))
+      if (typeof analysis?.summary !== 'string' || !analysis.summary) return null
+      return formatAnalysisEmbedSection(analysis, DIV, (await readRecoveryBaselines(env.STATUS_CACHE))[rec.svcId])
+    },
+    async (rec, description) => (await postDiscordEmbed(
+      messageEditUrl(env.DISCORD_WEBHOOK_URL ?? '', rec.messageId), 'PATCH',
+      { title: rec.title, description, color: rec.color, timestamp: rec.sentAt }, false,
+    )).ok,
+    Date.now(),
+  )
+  await recordEnrichCounts(env.STATUS_CACHE, Date.now(), { aiLessSent, enriched: enrichCounts.enriched, failed: enrichCounts.failed + enrichNoId, expired: enrichCounts.expired })
+
   // Component ID mismatch detection (#135) — alert when statusComponentId is not found
   const mismatches = await detectComponentMismatches(COMPONENT_ID_SERVICES, env.STATUS_CACHE)
   for (const svc of mismatches) {
@@ -2278,9 +2226,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     issues: scored.filter(s => isAffectedStatus(s.status)).length,
     unreadable,
     sent: sent.length,
-    // #882 — exclude alerts HELD this cycle (they weren't sent); matches the alert:count KV tally so
-    // the daily-summary `incidentCountToday` doesn't over-count a held incident that lands next cycle.
-    newCount: sent.filter(a => a.key.startsWith('alerted:new:') && !heldNewAlertKeys.has(a.key)).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
+    newCount: sent.filter(a => a.key.startsWith('alerted:new:')).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
     resolvedCount: sent.filter(a => a.key.startsWith('alerted:res:')).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
     downCount: sent.filter(a => a.key.startsWith('alerted:down:')).length,
     recoveredCount: sent.filter(a => a.key.startsWith('alerted:recovered:')).length,

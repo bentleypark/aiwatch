@@ -124,10 +124,10 @@ describe('#1003 — BOTH cron resolution paths mark the incident resolved', () =
   })
 
   it('the alerted:res: block — the one that fires for normal incidents — is one of them', () => {
-    // Bounded by the block's real end (the #882 comment that follows it), not an arbitrary char
+    // Bounded by the block's real end (the section assembly that follows it), not an arbitrary char
     // window — a window drifts out from under the assertion the moment a comment above it grows.
     const start = src.indexOf("if (alert.key.startsWith('alerted:res:'))")
-    const end = src.indexOf('// #882 —', start)
+    const end = src.indexOf('// Build sectioned description', start)
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(src.slice(start, end)).toMatch(/await markIncidentResolved\(/)

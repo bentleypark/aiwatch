@@ -5,13 +5,7 @@ import { join } from 'node:path'
 // #1080 — source-scan wiring guard, in the repo's sync-test idiom (first-estimate-write-paths /
 // feed-slug-sync).
 //
-// WHAT THIS IS NOT: proof that the #882 hold works. Nothing in this repo invokes the cron `scheduled`
-// handler, so the hold/release path has no behavioral harness — that absence is precisely why #882 is
-// production-gated in the first place, and this file does not change that. The pure folds
-// (`applyAttempt` / `applyHoldEvent` / `timedOutAttribution` / `holdLedger`) are behaviorally tested and
-// mutation-verified in `ai-analysis.test.ts`.
-//
-// WHAT THIS IS: a guard on the WIRING between those folds and the call sites, which is the half a pure-
+// WHAT THIS IS: a guard on the WIRING between `applyAttempt` and its call sites, which is the half a pure-
 // function test cannot see ("순수fn 초록 ≠ 배선 초록"). Two regressions are cheap to introduce and
 // invisible to every other test:
 //
@@ -28,7 +22,7 @@ import { join } from 'node:path'
 const SRC = join(__dirname, '..')
 const read = (f: string) => readFileSync(join(SRC, f), 'utf8')
 
-describe('#1080 — ai:usage attribution + #882 hold-ledger wiring', () => {
+describe('#1080 — ai:usage attribution wiring', () => {
   const index = read('index.ts')
 
   it('passes the service ID (not just the display name) into the budgeted inline analysis', () => {
@@ -59,51 +53,5 @@ describe('#1080 — ai:usage attribution + #882 hold-ledger wiring', () => {
           .toMatch(/,\s*(svcId|svc\.id|service\.id)\s*\)\s*$/)
       }
     }
-  })
-
-  it('books the hold exactly once, and only inside the first-sight branch', () => {
-    // Count is not enough: MOVING the single bump into the `} else {` re-hold branch keeps the count
-    // at 1 and breaks the invariant this test is named for (re-holds fire every cron cycle). So also
-    // anchor it — the bump must sit between the pending:ai stamp and the `} else {` that begins the
-    // re-hold branch.
-    const heldBumps = [...index.matchAll(/recordHoldEvent\([^)]*'held'\)/g)]
-    expect(heldBumps.length, "expected exactly one 'held' bump (first-sight only)").toBe(1)
-
-    const stamp = index.indexOf('kvPut(env.STATUS_CACHE, pendingAiKey(incId)')
-    const bump = index.indexOf("recordHoldEvent(env.STATUS_CACHE, nowMs, 'held')")
-    // NOT `indexOf('} else {')` — the first one after the stamp is the inner `if (!ok)` else, which is
-    // where the bump correctly lives. Anchor on the OUTER re-hold branch by its own shape instead.
-    const reHold = index.slice(stamp).search(/\n {8}\} else \{\n {10}heldNewAlertKeys\.add/)
-    expect(stamp, 'pending:ai stamp not found').toBeGreaterThan(-1)
-    expect(reHold, 're-hold else branch not found — has the hold block been restructured?').toBeGreaterThan(-1)
-    expect(bump, 'the held bump must follow the first-sight stamp').toBeGreaterThan(stamp)
-    expect(bump - stamp, 'the held bump must NOT live in the per-cycle re-hold branch').toBeLessThan(reHold)
-  })
-
-  // #1148 — the gate's exemption lives in `shouldHoldForAiAnalysis` (behaviourally tested), but it only
-  // takes effect if the call site passes the REAL service id. `svcId: ''` is in no set, so it silently
-  // restores the #1148 bug for every service while the pure-fn tests stay green.
-  it('passes the resolved service id into the AI-hold gate — not a placeholder', () => {
-    expect(index).toMatch(/shouldHoldForAiAnalysis\(\{\s*svcId:\s*holdSvcId,/)
-  })
-
-  // The other half of #1148: the fail-open warn must skip the same never-held set the gate exempts.
-  // Pointing it at TIER1_IDS/PUSH_SCOPE re-splits one diagnostic across two definitions of "never held".
-  it('filters the fail-open warn on the same set the gate exempts', () => {
-    expect(index).toMatch(/firstSeenMs === 0 && !NEVER_AI_HELD\.has\(holdSvcId\)/)
-  })
-
-  it('distinguishes a release WITH the AI section from one without', () => {
-    // This ternary IS #882's question. Collapsing it to a single constant would leave the ledger
-    // unable to tell the fix working from the alert shipping AI-less anyway.
-    expect(index).toMatch(/recordHoldEvent\([^)]*aiReady \? 'releasedWithAi' : 'releasedWithoutAi'\)/)
-  })
-
-  it('books the release before deleting the marker, so a failed delete cannot lose it', () => {
-    const release = index.indexOf("aiReady ? 'releasedWithAi'")
-    const del = index.indexOf('kvDel(env.STATUS_CACHE, pendingAiKey(incId))')
-    expect(release, 'release bump not found').toBeGreaterThan(-1)
-    expect(del, 'marker delete not found').toBeGreaterThan(-1)
-    expect(release, 'the ledger write must precede the best-effort delete').toBeLessThan(del)
   })
 })

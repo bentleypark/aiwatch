@@ -687,13 +687,13 @@ describe('#1106 Part 5 index.ts wiring', () => {
     // Round 2's finding: stamping in the dedup-key block recorded "the thread was closed" for a
     // notice Discord rejected — `sendDiscordAlert` returns false rather than throwing, and the
     // `alerted:wd:` key is already written, so that alert never retries.
-    const b = block('const operatorSent = await sendDiscordAlert', '#936 — send the tweet-reply draft')
+    const b = block('const operatorSend = await sendDiscordAlertForEdit', '#936 — send the tweet-reply draft')
     expect(b).toMatch(/const wdIds = withdrawalIdsFromAlertKeys\(/)
     expect(b).toMatch(/if \(!operatorSent\)/)
     expect(b).toMatch(/markWithdrawalsAnnounced\(env\.STATUS_CACHE/)
     // The send's result is actually CAPTURED, not discarded as it is for the other alert kinds.
     // (Asserted against the whole file — inside `b` the anchor makes it tautological.)
-    expect(src).toMatch(/const operatorSent = await sendDiscordAlert\(env\.DISCORD_WEBHOOK_URL/)
+    expect(src).toMatch(/const operatorSend = await sendDiscordAlertForEdit\(env\.DISCORD_WEBHOOK_URL/)
   })
 
   it('a REJECTED send leaves the row un-announced and says so — it will never retry', () => {
