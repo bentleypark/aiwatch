@@ -11,7 +11,7 @@ import type { AccuracyStats } from './incident-history'
 import { wholeShares } from './recovery-baseline-text'
 import type { SnapshotCoverage } from './prediction-snapshot'
 import type { SourceHealthRead } from './reddit'
-import { holdLedger, timedOutAttribution, type AiUsageCounters } from './ai-analysis'
+import { enrichLedger, formatEnrichLedger, timedOutAttribution, type AiUsageCounters } from './ai-analysis'
 import { formatDropLine, type DropCount } from './drop-log'
 import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth, type Guard3HoldRecord } from './monthly-archive'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
@@ -86,8 +86,8 @@ export function formatAiUsageSection(aiUsage: AiUsageCounters | null): string {
     const overruns = timedOutAttribution(aiUsage)
     lines.push(`   Overruns by service: ${overruns ? formatOverruns(overruns) : 'not recorded'}`)
   }
-  const hold = holdLedger(aiUsage)
-  if (hold) lines.push(`   AI-hold: ${hold.held} held, ${hold.releasedWithAi} released with AI, ${hold.releasedWithoutAi} released AI-less`)
+  const enrich = enrichLedger(aiUsage)
+  if (enrich) lines.push(`   Alerts without AI: ${formatEnrichLedger(enrich)}`)
   lines.push(`   Est. cost: $${cost} (Sonnet only)`)
   // A fallback that is always reached and never succeeds is a broken fallback, not bad luck.
   if (sonnetAttempts > 0 && sonnet === 0) {

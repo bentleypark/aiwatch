@@ -86,14 +86,14 @@ describe('weekly briefing window (the Sunday run)', () => {
     expect(next.description).not.toContain('in-window')
   })
 
-  it('reads the ai:usage keys of the same window, so a hold booked on that Sunday reaches the line', async () => {
-    const day = (held: number) => JSON.stringify({ calls: 4, success: 4, failed: 0, gemma: 4, gemmaAttempts: 4, held, heldReleasedWithAi: held })
+  it('reads the ai:usage keys of the same window, so an enrich count booked on that Sunday reaches the line', async () => {
+    const day = (n: number) => JSON.stringify({ calls: 4, success: 4, failed: 0, gemma: 4, gemmaAttempts: 4, aiLessSent: n, enriched: n })
     const { description } = await briefing({
       'ai:usage:2026-07-25': day(9),
       'ai:usage:2026-07-26': day(1),
       'ai:usage:2026-08-01': day(1),
       'ai:usage:2026-08-02': day(5),
     })
-    expect(description).toContain('AI-hold 2 held, 2 released with AI, 0 released AI-less')
+    expect(description).toContain('2 sent without AI, 2 edited in, 0 not edited, 0 expired')
   })
 })

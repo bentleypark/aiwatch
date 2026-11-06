@@ -24,7 +24,7 @@ const INDEX_SRC = readFileSync(join(__dirname, '..', 'index.ts'), 'utf8')
 /** The operator-alert assembly block, from the Reddit append to the send. */
 function assemblyBlock(): string {
   const start = INDEX_SRC.indexOf('let operatorDescription = withSearches')
-  const end = INDEX_SRC.indexOf('const operatorSent = await sendDiscordAlert', start)
+  const end = INDEX_SRC.indexOf('const operatorSend = await sendDiscordAlertForEdit', start)
   expect(start, 'operator assembly block not found — did the wiring move?').toBeGreaterThan(-1)
   expect(end, 'sendDiscordAlert not found after the assembly block').toBeGreaterThan(start)
   return INDEX_SRC.slice(start, end)
@@ -81,7 +81,7 @@ describe('reddit engage wiring (#1182)', () => {
 describe('bluesky engage wiring (#1417)', () => {
   function bskyBlock(): string {
     const start = INDEX_SRC.indexOf('const withReddit = operatorDescription')
-    const end = INDEX_SRC.indexOf('const operatorSent = await sendDiscordAlert', start)
+    const end = INDEX_SRC.indexOf('const operatorSend = await sendDiscordAlertForEdit', start)
     expect(start, 'bluesky assembly block not found — did the wiring move?').toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     return INDEX_SRC.slice(start, end)

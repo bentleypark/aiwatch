@@ -184,8 +184,7 @@ export interface GrowthDailyRow {
   // audience fields were queried over, so the two axes in a row describe the same span.
   //
   // It is a DIFFERENT QUANTITY from `alertedIncidents`, not a corrected version of it — do not expect
-  // the 23 above to reappear here. Alerts and incidents diverge in both directions: a #882 hold
-  // suppresses an alert for an incident that is still recorded, while one alert carrying merged
+  // the 23 above to reappear here. Alerts and incidents diverge: one alert carrying merged
   // incidents increments the alert counter once per merged incident (`_mergedKeys.length`). For the
   // same 07-21 window this axis counts 12. Do not re-point it at an alert source without renaming, or
   // a window spanning the change silently mixes two definitions (the #1055 `direct`-bucket lesson).

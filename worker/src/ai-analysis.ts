@@ -32,15 +32,11 @@ export const SONNET_MAX_TOKENS = 600
  * after a Gemma failure — Sonnet's own cap is 10s — and (b) cancelled nothing when it won, so a
  * Sonnet response arriving at 9s was paid for, thrown away, and booked as `failed`. It is now an
  * AbortController budget that reaches the Sonnet fetch, and it leaves room for a Gemma failure to
- * fall through to a Sonnet success inline. That matters most for a service #882 never holds
- * (`NEVER_AI_HELD`, alerts.ts): for those the inline call is the only chance to attach an AI
- * section before the alert ships.
+ * fall through to a Sonnet success inline.
  *
  * 15s is a judgement call, not a measurement. Gemma's own latency is wildly variable (0.3s to
  * >115s against the real binding on 2026-07-09), so some inline calls WILL overrun no matter what
- * this is set to. That is by design and now costs nothing: an overrun is booked as `timedOut`
- * (not `failed`), writes no re-analysis lock, and the next cron cycle retries — for a hold-eligible
- * service, inside the #882 hold window. The `timedOut` counter in the daily summary is what should drive
+ * this is set to. The `timedOut` counter in the daily summary is what should drive
  * any future change to this number; do not tune it on intuition.
  */
 export const INLINE_ANALYSIS_BUDGET_MS = 15_000
@@ -371,8 +367,8 @@ export const PROGRESS_EMBED_MAX = 200
 /**
  * #882 — render the Discord embed's 🤖 AI ANALYSIS section for one incident analysis. Pure so the two
  * cron paths that build it — the inline-success path and the KV-preferred path (an analysis backfilled
- * by a prior cycle's refreshOrReanalyze, used when releasing a held alert) — emit a byte-identical
- * section. `div` is the embed section divider. Both the operator embed and the per-user relay carry it.
+ * by a prior cycle's refreshOrReanalyze), plus the #1152 edit of an alert sent without it — emit a
+ * byte-identical section. `div` is the embed section divider. Both the operator embed and the per-user relay carry it.
  */
 export function formatAnalysisEmbedSection(analysis: AIAnalysisResult, div: string, baseline: RecoveryBaseline | undefined): string {
   const scope = analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''
@@ -827,41 +823,17 @@ export interface AiUsageCounters {
   /**
    * #1080 — which service each `timedOut` belongs to (`{svcId: count}`).
    *
-   * `timedOut` alone cannot answer #882's question: an overrun on a never-held service
-   * (`NEVER_AI_HELD`) is *correctly* never held, so "1 overrun happened" is only actionable once you
-   * know which service it was, i.e. whether that service is ever held at all. With
-   * the id, an overrun becomes findable after the fact — Discord messages are durable, so date +
-   * service is enough to open that alert and read whether it shipped with the AI section.
+   * With the id, an overrun becomes findable after the fact — Discord messages are durable, so
+   * date + service is enough to open that alert and read whether it shipped with the AI section.
    *
    * ABSENT ≠ zero: records written before #1080 have overruns but no attribution. Read this through
    * `timedOutAttribution()`, which distinguishes the two.
    */
   timedOutBy?: Record<string, number>
-  /**
-   * #1080 / #882 — the AI-hold ledger, bumped from the alert path (`index.ts`), not from an analysis.
-   *
-   * `held` is bumped once per held ALERT KEY, on the first-sight stamp only — never on the per-cycle
-   * re-holds, which would inflate it against the release counters. Note "alert key", not "incident":
-   * a merged alert (`_mergedKeys`, e.g. the Together AI grouping) spans several incidents and books
-   * one hold, because the hold gate itself is per-alert.
-   *
-   * `held` and the release counters are NOT a balanced pair — see `holdLedger()` for the two reasons
-   * (UTC-day boundary, and a held incident that resolves inside the window). Compare the two RELEASE
-   * counters against each other, not against `held`.
-   *
-   * ABSENT ≠ zero on pre-#1080 records — read via `holdLedger()`.
-   */
-  held?: number
-  /** Held, then released WITH the AI section — the #882 fix working as designed. */
-  heldReleasedWithAi?: number
-  /**
-   * Held, then released with NO AI section. Two causes it cannot tell apart at the release site: the
-   * `AI_HOLD_MS` window elapsed (fail-open), and the incident vanished from `scored` so there was
-   * nothing left to analyze (`!svc || !inc`). NOT the merged/no-model/generic skip — that is decided
-   * inside the first-sight branch, so a skipped incident is never held to begin with. A rising count
-   * is the signal that holding is not buying anything.
-   */
-  heldReleasedWithoutAi?: number
+  aiLessSent?: number
+  enriched?: number
+  enrichFailed?: number
+  enrichExpired?: number
 }
 
 export function emptyUsage(): AiUsageCounters {
@@ -890,8 +862,8 @@ function sanitizeTimedOutBy(value: unknown): Record<string, number> | undefined 
  * A counter field off the wire, or `undefined` when it is absent OR unusable.
  *
  * The scalars ride in through the `...parsed` spread, so without this a wire value of `"3"` would
- * make `applyHoldEvent` compute `"3" + 1 === "31"` and write the string straight back. `null` must
- * also collapse to `undefined`, or `holdLedger`'s presence test reads it as present and returns a
+ * make `applyEnrichCounts` compute `"3" + 1 === "31"` and write the string straight back. `null` must
+ * also collapse to `undefined`, or `enrichLedger`'s presence test reads it as present and returns a
  * confident `0` — the exact absence-is-not-zero failure this change exists to prevent.
  */
 function sanitizeCount(value: unknown): number | undefined {
@@ -917,12 +889,12 @@ export function parseUsage(raw: string | null): AiUsageCounters {
     // Spreading `parsed` copied whatever was on the wire — re-derive every optional counter through a
     // sanitizer, and DELETE rather than set-undefined so a round-trip through JSON.stringify does not
     // resurrect the key as `"timedOutBy": undefined`-shaped noise. Deleting also keeps `null` from
-    // masquerading as "present" to `holdLedger`'s absence test.
+    // masquerading as "present" to `enrichLedger`'s absence test.
     const by = sanitizeTimedOutBy(parsed.timedOutBy)
     if (by) usage.timedOutBy = by
     else delete usage.timedOutBy
 
-    for (const field of ['timedOut', 'gemma', 'sonnet', 'gemmaAttempts', 'sonnetAttempts', 'held', 'heldReleasedWithAi', 'heldReleasedWithoutAi'] as const) {
+    for (const field of ['timedOut', 'gemma', 'sonnet', 'gemmaAttempts', 'sonnetAttempts', 'aiLessSent', 'enriched', 'enrichFailed', 'enrichExpired'] as const) {
       const n = sanitizeCount(parsed[field])
       if (n === undefined) delete usage[field]
       else usage[field] = n
@@ -953,44 +925,18 @@ export function timedOutAttribution(
   return { by: { ...usage.timedOutBy }, unattributed: Math.max(0, total - attributed) }
 }
 
-/**
- * #1080 — read the #882 AI-hold ledger. Pure. Returns `null` when NONE of the three counters is
- * present (a pre-#1080 record), so a reader cannot mistake "not instrumented yet" for "zero holds".
- *
- * **Deliberately does NOT return a held-minus-released "in flight" figure.** That subtraction reads
- * like a leak detector and is not one — it is unbalanced by construction for two reasons, so a
- * nonzero value would be evidence of nothing:
- *
- *  1. **The counters are per-UTC-day, the hold window is not.** `AI_HOLD_MS` (~10min) against a
- *     five-minute cron means a hold stamped at 23:58 releases against the NEXT day's key. That day then
- *     carries a release with no matching `held`, and the previous day a `held` with no release.
- *  2. **A held incident that resolves inside the window never reaches the release site.** With the
- *     incident gone, `buildIncidentAlerts` emits no `alerted:new:` alert at all, so the loop never
- *     visits it and the marker just TTLs out. That is correct behavior, not a lost release.
- *
- * The useful comparison is the RATIO of `releasedWithAi` to `releasedWithoutAi` over a window — that
- * is the one #882 actually asks about: did holding buy an AI section, or did the alert ship AI-less
- * anyway.
- *
- * Read it as a TREND, not as an exact tally. These counters are near-exact, not exact, and the error
- * is not symmetric: `recordHoldEvent` is read-modify-write (concurrent crons can lose a bump), and a
- * marker that outlives its release — `kvDel` swallows failures, and KV reads are eventually consistent
- * — lets a #545 late joiner book a SECOND release for the same hold episode. That re-book skews toward
- * `releasedWithAi`, because by the next cycle `refreshOrReanalyze` has usually backfilled the analysis.
- * So the bias runs toward "the hold worked", which is exactly the direction that could make #882 look
- * answered when it is not. A single day's numbers prove nothing; a sustained `releasedWithoutAi` share
- * does.
- */
-export function holdLedger(
-  usage: AiUsageCounters,
-): { held: number; releasedWithAi: number; releasedWithoutAi: number } | null {
-  if (usage.held === undefined && usage.heldReleasedWithAi === undefined && usage.heldReleasedWithoutAi === undefined) {
+export interface EnrichLedger { aiLessSent: number; enriched: number; failed: number; expired: number }
+
+/** #1152 — the publish-then-enrich ledger, or null when a record carries none of its counters. Pure. */
+export function enrichLedger(usage: AiUsageCounters): EnrichLedger | null {
+  if (usage.aiLessSent === undefined && usage.enriched === undefined && usage.enrichFailed === undefined && usage.enrichExpired === undefined) {
     return null
   }
   return {
-    held: usage.held ?? 0,
-    releasedWithAi: usage.heldReleasedWithAi ?? 0,
-    releasedWithoutAi: usage.heldReleasedWithoutAi ?? 0,
+    aiLessSent: usage.aiLessSent ?? 0,
+    enriched: usage.enriched ?? 0,
+    failed: usage.enrichFailed ?? 0,
+    expired: usage.enrichExpired ?? 0,
   }
 }
 
@@ -1024,20 +970,13 @@ export function applyAttempt(usage: AiUsageCounters, attempt: AnalysisAttempt, s
   return next
 }
 
-/**
- * #1080 / #882 — one AI-hold lifecycle event.
- *
- * `held` is emitted ONLY on an incident's first hold; the per-cycle re-holds are deliberately silent
- * (see `AiUsageCounters.held`).
- */
-export type AiHoldEvent = 'held' | 'releasedWithAi' | 'releasedWithoutAi'
-
-/** Fold one hold event into the daily counters. Pure. */
-export function applyHoldEvent(usage: AiUsageCounters, event: AiHoldEvent): AiUsageCounters {
+/** Fold one cron run's enrichment counts into the daily counters. Pure. */
+export function applyEnrichCounts(usage: AiUsageCounters, counts: EnrichLedger): AiUsageCounters {
   const next: AiUsageCounters = { ...usage }
-  if (event === 'held') next.held = (next.held ?? 0) + 1
-  else if (event === 'releasedWithAi') next.heldReleasedWithAi = (next.heldReleasedWithAi ?? 0) + 1
-  else next.heldReleasedWithoutAi = (next.heldReleasedWithoutAi ?? 0) + 1
+  if (counts.aiLessSent) next.aiLessSent = (next.aiLessSent ?? 0) + counts.aiLessSent
+  if (counts.enriched) next.enriched = (next.enriched ?? 0) + counts.enriched
+  if (counts.failed) next.enrichFailed = (next.enrichFailed ?? 0) + counts.failed
+  if (counts.expired) next.enrichExpired = (next.enrichExpired ?? 0) + counts.expired
   return next
 }
 
@@ -1055,8 +994,8 @@ export interface AiUsageTrend {
   gemmaSuccessRate: number | null
   /** timedOut / calls — null when there were no calls. */
   timedOutRate: number | null
-  /** #1262 — the window's `holdLedger()` readings summed; null when no day carried a hold counter. */
-  hold: { held: number; releasedWithAi: number; releasedWithoutAi: number } | null
+  /** The window's `enrichLedger()` readings summed; null when no day carried one. */
+  enrich: EnrichLedger | null
 }
 
 /**
@@ -1077,17 +1016,17 @@ export function summarizeAiUsageTrend(entries: AiUsageCounters[]): AiUsageTrend 
     }),
     { calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0 },
   )
-  const ledgers = entries.flatMap((u) => holdLedger(u) ?? [])
+  const ledgers = entries.flatMap((u) => enrichLedger(u) ?? [])
   return {
     days: entries.length,
     ...s,
     gemmaSuccessRate: s.gemmaAttempts > 0 ? s.gemma / s.gemmaAttempts : null,
     timedOutRate: s.calls > 0 ? s.timedOut / s.calls : null,
-    hold: ledgers.length === 0
+    enrich: ledgers.length === 0
       ? null
       : ledgers.reduce(
-        (a, l) => ({ held: a.held + l.held, releasedWithAi: a.releasedWithAi + l.releasedWithAi, releasedWithoutAi: a.releasedWithoutAi + l.releasedWithoutAi }),
-        { held: 0, releasedWithAi: 0, releasedWithoutAi: 0 },
+        (a, l) => ({ aiLessSent: a.aiLessSent + l.aiLessSent, enriched: a.enriched + l.enriched, failed: a.failed + l.failed, expired: a.expired + l.expired }),
+        { aiLessSent: 0, enriched: 0, failed: 0, expired: 0 },
       ),
   }
 }
@@ -1105,13 +1044,12 @@ export function formatAiUsageTrendLine(trend: AiUsageTrend): string {
   if (trend.sonnet > 0) parts.push(`Sonnet ${trend.sonnet} fallback`)
   if (trend.timedOut > 0) parts.push(`${trend.timedOut} timed out`)
   parts.push(`${trend.failed} failed`)
-  if (trend.hold) {
-    const { held, releasedWithAi, releasedWithoutAi } = trend.hold
-    const released = releasedWithAi + releasedWithoutAi
-    const share = released > 0 ? ` (${Math.round((releasedWithoutAi / released) * 100)}% AI-less)` : ''
-    parts.push(`AI-hold ${held} held, ${releasedWithAi} released with AI, ${releasedWithoutAi} released AI-less${share}`)
-  }
+  if (trend.enrich) parts.push(formatEnrichLedger(trend.enrich))
   return `🤖 **AI Analysis** (${trend.days}d): ${parts.join(' · ')}`
+}
+
+export function formatEnrichLedger(l: EnrichLedger): string {
+  return `${l.aiLessSent} sent without AI, ${l.enriched} edited in, ${l.failed} not edited, ${l.expired} expired`
 }
 
 /**
@@ -1197,21 +1135,15 @@ export async function recordUsage(kv: KVLike, now: number, attempt: AnalysisAtte
   }
 }
 
-/**
- * #1080 / #882 — book one AI-hold lifecycle event into the same daily key.
- *
- * Shares `ai:usage:{date}` rather than opening a second key: it is the same daily question ("did the
- * AI path do its job today?"), and the KV write budget is per-key-per-day, so folding these in costs
- * no new keys. Best-effort and never throws, exactly like `recordUsage` — an alert must never be lost
- * to bookkeeping. Inherits the same read-modify-write raciness, so treat the counts as near-exact.
- */
-export async function recordHoldEvent(kv: KVLike, now: number, event: AiHoldEvent): Promise<void> {
+/** #1152 — book one cron run's enrichment counts into `ai:usage:{date}`. Best-effort, never throws. */
+export async function recordEnrichCounts(kv: KVLike, now: number, counts: EnrichLedger): Promise<void> {
+  if (!counts.aiLessSent && !counts.enriched && !counts.failed && !counts.expired) return
   try {
     const usageKey = `ai:usage:${new Date(now).toISOString().split('T')[0]}`
-    const usage = applyHoldEvent(parseUsage(await kv.get(usageKey).catch(() => null)), event)
+    const usage = applyEnrichCounts(parseUsage(await kv.get(usageKey).catch(() => null)), counts)
     await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: AI_USAGE_TTL_S })
   } catch (err) {
-    console.warn('[ai] ai:usage hold-event bump failed:', err instanceof Error ? err.message : err)
+    console.warn('[ai] ai:usage enrich bump failed:', err instanceof Error ? err.message : err)
   }
 }
 
@@ -1222,8 +1154,7 @@ export async function recordHoldEvent(kv: KVLike, now: number, event: AiHoldEven
  * `refreshOrReanalyze` on both the null and the throw path. With a five-minute cron that skips
  * the next six cycles — and because the lock is keyed per incident, not per model, a single
  * transient Gemma parse failure that fell through to a broken Sonnet froze the incident for
- * half an hour even though Gemma would have succeeded on the very next cycle. It also
- * out-lived the #882 `AI_HOLD_MS` (~10min) window, guaranteeing an AI-less alert.
+ * half an hour even though Gemma would have succeeded on the very next cycle.
  *
  * Only a `permanent` failure earns the long lock now.
  */
@@ -1478,8 +1409,7 @@ export async function refreshOrReanalyze(
         } else {
           const failure = attempt.failure ?? 'unknown'
           console.warn(`[ai] re-analysis produced nothing (${failure}) for ${svc.id}:${inc.id}`)
-          // A transient/aborted failure retries on the NEXT cron cycle, which lands inside the
-          // #882 AI-hold window — so the alert can still ship WITH its analysis (#955 Part 4).
+          // A transient/aborted failure retries on the NEXT cron cycle, inside the #1152 edit window.
           const ttl = reanalysisLockTtlSec(failure)
           if (ttl > 0) await kvPut(kv, skipKey, '1', { expirationTtl: ttl })
           result.skipped.push(svc.id)

@@ -220,7 +220,7 @@ describe('buildWeeklyBriefing', () => {
       changelog: [],
       incidents: [],
       stabilityChanges: [],
-      aiUsageTrend: { days: 7, calls: 12, gemma: 9, gemmaAttempts: 11, sonnet: 2, sonnetAttempts: 3, timedOut: 2, failed: 0, gemmaSuccessRate: 9 / 11, timedOutRate: 2 / 12, hold: null },
+      aiUsageTrend: { days: 7, calls: 12, gemma: 9, gemmaAttempts: 11, sonnet: 2, sonnetAttempts: 3, timedOut: 2, failed: 0, gemmaSuccessRate: 9 / 11, timedOutRate: 2 / 12, enrich: null },
     }
     const result = buildWeeklyBriefing(data)
     expect(result).toContain('AI Analysis')
@@ -228,22 +228,22 @@ describe('buildWeeklyBriefing', () => {
     expect(result).toContain('0 failed')
   })
 
-  it('#1262 — carries the AI-hold roll-up into the assembled briefing', () => {
+  it('#1152 — carries the enrich roll-up into the assembled briefing', () => {
     const result = buildWeeklyBriefing({
       weekStart: '2026-04-06',
       weekEnd: '2026-04-12',
       changelog: [],
       incidents: [],
       stabilityChanges: [],
-      aiUsageTrend: { days: 7, calls: 12, gemma: 9, gemmaAttempts: 11, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: 9 / 11, timedOutRate: 0, hold: { held: 7, releasedWithAi: 5, releasedWithoutAi: 2 } },
+      aiUsageTrend: { days: 7, calls: 12, gemma: 9, gemmaAttempts: 11, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: 9 / 11, timedOutRate: 0, enrich: { aiLessSent: 7, enriched: 5, failed: 1, expired: 1 } },
     })
-    expect(result).toContain('AI-hold 7 held, 5 released with AI, 2 released AI-less (29% AI-less)')
+    expect(result).toContain('7 sent without AI, 5 edited in, 1 not edited, 1 expired')
   })
 
   it('#995 — omits the AI-analysis line when aiUsageTrend is absent or had no calls', () => {
     const base = { weekStart: '2026-04-06', weekEnd: '2026-04-12', changelog: [], incidents: [], stabilityChanges: [] }
     expect(buildWeeklyBriefing(base)).not.toContain('AI Analysis')
-    expect(buildWeeklyBriefing({ ...base, aiUsageTrend: { days: 7, calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: null, timedOutRate: null, hold: null } })).not.toContain('AI Analysis')
+    expect(buildWeeklyBriefing({ ...base, aiUsageTrend: { days: 7, calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: null, timedOutRate: null, enrich: null } })).not.toContain('AI Analysis')
   })
 
   it('#1158 — renders the Badge Adopters section when badgeRepoDiscovery has new repos', () => {
