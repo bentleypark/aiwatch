@@ -6,7 +6,7 @@
 // hears about.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { availableShells, downList, httpError, httpStatus, runMonitor } from './plugin-monitor-harness.mjs'
+import { availableShells, curlTimeout, downList, httpError, httpStatus, runMonitor } from './plugin-monitor-harness.mjs'
 
 /** Guards that make an "emits nothing" assertion mean something:
  *  - `timedOut` — otherwise a monitor that never started satisfies every one of them.
@@ -464,7 +464,67 @@ for (const shell of shells) {
     assert.deepEqual(res.lines, ['🔴 Claude API is down (AIWatch)'])
     assert.deepEqual(res.leakedTempFiles, [])
   })
+
+  // ── #1242: silence must mean "nothing to report" ─────────────────────────────────────────────
+
+  test(`[${via}] a first poll that fails is said ONCE, with its cause, and later failures stay silent`, async () => {
+    const res = await run([null, null, CLAUDE_DOWN, null, null], opts)
+    assert.equal(res.lines.length, 2, `expected one warning then the outage, got ${JSON.stringify(res.lines)}`)
+    assert.match(res.lines[0], /^⚠️ AIWatch monitor: first check failed \(curl exit 7\)/)
+    assert.equal(res.lines[1], '🔴 Claude API is down (AIWatch)')
+  })
+
+  test(`[${via}] a first poll answered with an HTTP error names the status`, async () => {
+    const res = await run([httpError('no status snapshot available\n'), ALL_CLEAR], opts)
+    assert.equal(res.lines.length, 1)
+    assert.match(res.lines[0], /first check failed \(HTTP 503\)/)
+  })
+
+  test(`[${via}] a first poll that times out after the headers reports curl's exit, not the 200`, async () => {
+    const res = await run([curlTimeout(), ALL_CLEAR], opts)
+    assert.equal(res.lines.length, 1)
+    assert.match(res.lines[0], /first check failed \(curl exit 28\)/)
+  })
+
+  test(`[${via}] a first poll answered 204 names the status`, async () => {
+    const res = await run([httpStatus(204, ''), ALL_CLEAR], opts)
+    assert.equal(res.lines.length, 1)
+    assert.match(res.lines[0], /first check failed \(HTTP 204\)/)
+  })
+
+  test(`[${via}] a failure AFTER a good first poll is not announced`, async () => {
+    const res = await run([ALL_CLEAR, null, null], opts)
+    assert.deepEqual(res.lines, [])
+  })
+
+  // The host disappearing on a quiet board: no `printf` reaches the dead pipe, so the PIPE trap does
+  // not fire. Boards: all clear throughout, and one outage announced once and then unchanged.
+  for (const [board, fixture] of [['all clear', ALL_CLEAR], ['a steady, unchanged outage', CLAUDE_DOWN]]) {
+    test(`[${via}] the host going away on a quiet board (${board}) ends the monitor and cleans up`, async () => {
+      const res = await runMonitor(Array(30).fill(fixture), { ...opts, pollSeconds: '0.05', orphanAfter: 1 })
+      assert.ok(res.orphaned, 'the monitor ended before its first poll, so the host was never orphaned')
+      assert.ok(res.polls <= 3, `served ${res.polls} polls after its host was killed`)
+      assert.deepEqual(res.leakedTempFiles, [])
+    })
+  }
 }
+
+test('curl missing from PATH is said once and the monitor ends — it can never poll', async () => {
+  for (const shell of [undefined, ...shells]) {
+    const res = await runMonitor([], { shell, isolatedPath: { curl: false } })
+    assert.equal(res.exitCode, 127)
+    assert.equal(res.stderr, '')
+    assert.equal(res.lines.length, 1)
+    assert.match(res.lines[0], /^⚠️ AIWatch monitor cannot run: curl is not on PATH/)
+    assert.deepEqual(res.leakedTempFiles, [])
+  }
+})
+
+test('the curl-less PATH is otherwise complete — the same toolbox WITH curl polls normally', async () => {
+  // Positive control for the test above.
+  const res = await run([CLAUDE_DOWN], { isolatedPath: { curl: true } })
+  assert.deepEqual(res.lines, ['🔴 Claude API is down (AIWatch)'])
+})
 
 test('the monitor is executable — the plugin runner invokes the file directly', async () => {
   // No `shell` option: the harness spawns the path itself, so this fails if the exec bit or the

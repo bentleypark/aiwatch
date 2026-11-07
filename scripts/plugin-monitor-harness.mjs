@@ -6,7 +6,7 @@
 //
 // Shape: stub `curl` on PATH serving one fixture body per poll, run the REAL script, assert stdout.
 // Nothing inside the script is mocked, so what runs is what ships.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,7 +36,9 @@ const POLL_DEADLINE_MS = 20_000
 // fail-silent path. Fixture kinds:
 //   <body>            — a 200 carrying that body
 //   httpStatus(c, b)  — status `c` carrying body `b` (the >=400 ones are what `-f` must reject)
-//   (missing)         — the poll list is exhausted, or the test asked for a network failure; exit 22
+//   (missing)         — the poll list is exhausted, or the test asked for a network failure; prints
+//                       `000` and exits 7, as real curl does when it cannot connect
+// Real curl, probed (#1242): under `-sf -w '%{http_code}'` a 503 prints `503` and exits 22.
 const CURL_STUB = `#!/bin/sh
 root=$(dirname "$0")/..
 out=
@@ -59,16 +61,20 @@ n=$((n + 1))
 printf '%s' "$n" > "$root/count.tmp"
 mv "$root/count.tmp" "$root/count"
 bodyf="$root/polls/$n"
-[ -f "$bodyf" ] || exit 22
+[ -f "$bodyf" ] || { [ -n "$wants_code" ] && printf '000'; exit 7; }
 code=200
 [ -f "$bodyf.status" ] && code=$(cat "$bodyf.status")
+[ -f "$bodyf.rc" ] && { [ -n "$wants_code" ] && printf '%s' "$code"; exit "$(cat "$bodyf.rc")"; }
 case "$code" in
-  4*|5*) case " $* " in *\\ -sf\\ *|*\\ -f\\ *) exit 22 ;; esac ;;
+  4*|5*) case " $* " in *\\ -sf\\ *|*\\ -f\\ *) [ -n "$wants_code" ] && printf '%s' "$code"; exit 22 ;; esac ;;
 esac
 if [ -n "$out" ]; then cat "$bodyf" > "$out"; else cat "$bodyf"; fi
 [ -n "$wants_code" ] && printf '%s' "$code"
 exit 0
 `
+
+/** The external utilities `aiwatch-monitor.sh` and the curl stub call; `isolatedPath` links these. */
+const TOOLBOX = ['awk', 'sort', 'comm', 'mktemp', 'rm', 'mv', 'sleep', 'cat', 'dirname']
 
 /** Build a down-list body: rows of `[status, name]` → the `status<TAB>name` lines the endpoint
  *  serves (`renderStatuslineDownList`). `[]` is the all-clear (an empty 200 body). */
@@ -78,6 +84,8 @@ export function downList(rows) {
 
 /** A poll answering with an explicit HTTP status and body. See CURL_STUB. */
 export const httpStatus = (status, body) => ({ status, body })
+/** Headers arrived (`200`), then `--max-time` expired: curl prints the status and exits 28. */
+export const curlTimeout = () => ({ status: 200, body: '', rc: 28 })
 /** The #1227 shape: a 503 carrying `no status snapshot available`. */
 export const httpError = (body) => httpStatus(503, body)
 
@@ -142,7 +150,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  *                          been served, reproducing the plugin host going away while the monitor is
  *                          still running. The next `printf` then raises SIGPIPE. Nothing after this
  *                          point can be read from `stdout`/`lines`; read `leakedTempFiles` instead.
- * @param opts.backslashTmp  put a literal `\\` in the TMPDIR handed to the script. The script's temp
+ * @param opts.isolatedPath  `{ curl: boolean }` — run with a PATH holding only the utilities the script
+ *                          uses (symlinked), plus the curl stub when `curl` is true. `{ curl: false }`
+ *                          is a machine with no curl; `{ curl: true }` is its positive control.
+ *                          Not combinable with truncateSortAt/failCommAt.
+ * @param opts.orphanAfter  run the monitor under an intermediate shell and SIGKILL that shell once
+ *                          this many polls have been served. The monitor keeps the stdout pipe's
+ *                          write end, so no SIGPIPE is raised. `orphaned` says the kill happened;
+ *                          an orphan still running afterwards is killed by pid.
+ * @param opts.backslashTmp put a literal `\\` in the TMPDIR handed to the script. The script's temp
  *                          paths derive from it, so this is what makes an `awk -v path=…` mangle the
  *                          value — the reason those paths go through `ENVIRON` instead.
  * @param opts.truncateSortAt 1-based index of a `sort` call, across the whole run, that should
@@ -170,13 +186,26 @@ export async function runMonitor(polls, opts = {}) {
       else if (entry && typeof entry.status === 'number' && typeof entry.body === 'string') {
         writeFileSync(at, entry.body)
         writeFileSync(`${at}.status`, String(entry.status))
+        if (entry.rc !== undefined) writeFileSync(`${at}.rc`, String(entry.rc))
       } else if (entry !== null && entry !== undefined) {
         throw new TypeError(`poll ${i + 1}: expected a body string, httpStatus(...), or null — got ${JSON.stringify(entry)}`)
       }
     })
-    const curl = join(dir, 'bin', 'curl')
-    writeFileSync(curl, CURL_STUB)
-    chmodSync(curl, 0o755)
+    if (opts.isolatedPath && (opts.truncateSortAt || opts.failCommAt)) {
+      throw new TypeError('isolatedPath cannot be combined with truncateSortAt/failCommAt')
+    }
+    if (!opts.isolatedPath || opts.isolatedPath.curl) {
+      const curl = join(dir, 'bin', 'curl')
+      writeFileSync(curl, CURL_STUB)
+      chmodSync(curl, 0o755)
+    }
+    if (opts.isolatedPath) {
+      for (const tool of TOOLBOX) {
+        const found = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' })
+        if (found.status !== 0) throw new Error(`isolatedPath: ${tool} not found on this machine`)
+        symlinkSync(found.stdout.trim(), join(dir, 'bin', tool))
+      }
+    }
     // `failCommAt` shadows `comm` the same way `curl` is shadowed — the script calls both
     // unqualified and this dir is first on PATH. It is the only way to reach the `|| return 0` on
     // either `comm`, and those two branches decide whether a failure loses a debt or just skips a
@@ -213,11 +242,17 @@ exec /usr/bin/comm "$@"
       chmodSync(comm, 0o755)
     }
 
-    const argv = opts.shell ? [...opts.shell.slice(1), MONITOR_SH] : []
-    const child = spawn(opts.shell ? opts.shell[0] : MONITOR_SH, argv, {
+    // Resolved here because an isolated PATH cannot find a shell by name.
+    const shellBin = opts.shell && opts.isolatedPath
+      ? spawnSync('sh', ['-c', `command -v ${opts.shell[0]}`], { encoding: 'utf8' }).stdout.trim()
+      : opts.shell?.[0]
+    const monitorArgv = opts.shell ? [shellBin, ...opts.shell.slice(1), MONITOR_SH] : [MONITOR_SH]
+    const pidFile = join(dir, 'monitor.pid')
+    // The monitor is the intermediate's child, so killing the intermediate orphans it.
+    const spawnOptions = {
       env: {
         ...process.env,
-        PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+        PATH: opts.isolatedPath ? join(dir, 'bin') : `${join(dir, 'bin')}:${process.env.PATH}`,
         TMPDIR: scriptTmp,
         // Fractional so a multi-poll case costs milliseconds, not seconds.
         AIWATCH_POLL_SECONDS: opts.pollSeconds ?? '0.02',
@@ -231,7 +266,10 @@ exec /usr/bin/comm "$@"
         LANG: 'en_US.UTF-8',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    }
+    const child = opts.orphanAfter
+      ? spawn('/bin/sh', ['-c', `"$@" & echo $! > "${pidFile}"; wait`, 'sh', ...monitorArgv], spawnOptions)
+      : spawn(monitorArgv[0], monitorArgv.slice(1), spawnOptions)
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8')
@@ -255,6 +293,8 @@ exec /usr/bin/comm "$@"
     let deadline = Date.now() + STARTUP_DEADLINE_MS
     let pending = opts.midRunSignal ?? null
     let closeAt = opts.closeStdoutAfter ?? null
+    let orphanAt = opts.orphanAfter ?? null
+    let orphaned = false
     while (!dead && count() < polls.length + 1 && Date.now() < deadline) {
       if (count() > seen) {          // progress: from here on, silence is the monitor's, not the machine's
         seen = count()
@@ -270,10 +310,19 @@ exec /usr/bin/comm "$@"
         if (delayMs) await sleep(delayMs)
         child.kill(signal)
       }
+      if (orphanAt !== null && count() >= orphanAt) {
+        orphanAt = null
+        orphaned = true
+        child.kill('SIGKILL')          // the intermediate shell; `closed` now waits on the MONITOR
+      }
       await sleep(5)
     }
     const served = count()
 
+    // An orphan still running is killed by pid.
+    if (opts.orphanAfter && !dead) {
+      try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL') } catch { /* already gone */ }
+    }
     child.kill(opts.stopSignal ?? 'SIGKILL')
     const exit = await Promise.race([closed, sleep(400).then(() => null)])
     if (!exit) {
@@ -292,6 +341,8 @@ exec /usr/bin/comm "$@"
       // false = the process was still alive a grace period after `stopSignal` and had to be
       // SIGKILLed. `exitCode`/`exitSignal` say HOW it went, which is what pins the trap's own codes.
       stoppedCleanly: exit !== null,
+      // The intermediate shell was actually killed (false if the monitor ended before its first poll).
+      orphaned,
       exitCode: exit?.code ?? null,
       exitSignal: exit?.signal ?? null,
       // Temp files the SCRIPT created and did not clean up. Non-empty after a signalled stop means
