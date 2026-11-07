@@ -36,6 +36,7 @@ The background monitor requires Claude Code v2.1.105 or later and an interactive
 
 - The **monitor** starts automatically when the plugin is enabled — no action needed. When a provider goes down you'll see `🔴 Claude API is down (AIWatch)`, and on recovery `✅ Claude API has recovered (AIWatch)` — one line per service, only on a real state change (never on an unchanged poll).
 - Once AIWatch has **confirmed it cannot read** a provider's status source, the monitor stays quiet rather than guessing: it will not call that an outage, and — if the service was already down — it will not call it a recovery either. The `✅` still arrives once the source is readable again and the service is back. Run **`/aiwatch`** to see which sources are currently unreadable.
+- The monitor also says so when it **cannot do its job**: one `⚠️` line if `curl` is not on your `PATH` (it then stops), and one `⚠️` line if its first fetch fails (it keeps retrying; fetch failures after that stay silent). It ends by itself when the process that launched it exits.
 - Run **`/aiwatch`** any time for the current status.
 
 ## Configuration
