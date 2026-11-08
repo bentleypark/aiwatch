@@ -239,6 +239,21 @@ export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string):
  *  to CLAIM an outage and the bar to CLEAR one should not be the same number. */
 export const PROBE_FAILING_FLOOR_MS = 1000
 
+/** #576 — the service's results inside the window that bear on its health: a 429 is dropped, because
+ *  the service throttling our prober says nothing about the service either way (it is neither an
+ *  answer that confirms health nor an outage). Both verdicts below count what remains, so a window of
+ *  mostly 429s holds too few samples to decide and neither verdict is reached. */
+function recentInformativeProbes(snapshots: ProbeSnapshot[], serviceId: string, maxAgeMs: number): ProbeResult[] {
+  const now = Date.now()
+  return snapshots
+    .filter((s) => {
+      const age = now - new Date(s.t).getTime()
+      return age >= 0 && age < maxAgeMs && serviceId in s.data
+    })
+    .map((s) => s.data[serviceId])
+    .filter((probe) => probe.status !== 429)
+}
+
 /** #1004 — does our own probe INDEPENDENTLY corroborate an outage? A fetch-failure `degraded` renders as
  *  a neutral "unknown" badge ("we can't read the source") — but that would be a false reassurance when
  *  the service is probed and the probe is failing. #1233 — that correction is no longer applied by the
@@ -256,20 +271,13 @@ export function isProbeFailing(
   serviceId: string,
   maxAgeMs = 900_000,
 ): boolean {
-  const now = Date.now()
-  const recent = snapshots.filter((s) => {
-    const age = now - new Date(s.t).getTime()
-    return age >= 0 && age < maxAgeMs && serviceId in s.data
-  })
+  const recent = recentInformativeProbes(snapshots, serviceId, maxAgeMs)
   if (recent.length < 2) return false // not enough evidence to contradict anything
 
   const median = computeMedianRtt(snapshots, serviceId)
   // No usable median (every sample failed) → the probe is unambiguously failing.
   const threshold = median !== null && median > 0 ? Math.max(median * 3, PROBE_FAILING_FLOOR_MS) : Infinity
-  const failing = recent.filter((s) => {
-    const probe = s.data[serviceId]
-    return probe.rtt <= 0 || probe.rtt > threshold
-  }).length
+  const failing = recent.filter((probe) => probe.rtt <= 0 || probe.rtt > threshold).length
   return failing >= Math.ceil(recent.length * 2 / 3)
 }
 
@@ -287,7 +295,7 @@ export function isProbeFailing(
  * override), and the #689 `probeConfirmed` mark for dead-source services.
  *
  * Note the resulting third state, which the #1232 tests rest on: a fast 5xx is neither healthy here
- * nor failing per `isProbeFailing`, which reads RTT only.
+ * nor failing per `isProbeFailing`, which judges RTT and sets 429s aside.
  */
 export function isProbeHealthy(
   snapshots: ProbeSnapshot[],
@@ -296,12 +304,7 @@ export function isProbeHealthy(
 ): boolean {
   if (snapshots.length === 0) return false
 
-  const now = Date.now()
-  // Get recent snapshots with data for this service
-  const recent = snapshots.filter(s => {
-    const age = now - new Date(s.t).getTime()
-    return age >= 0 && age < maxAgeMs && serviceId in s.data
-  })
+  const recent = recentInformativeProbes(snapshots, serviceId, maxAgeMs)
 
   // Need at least 2 recent probes for confidence
   if (recent.length < 2) return false
@@ -322,10 +325,7 @@ export function isProbeHealthy(
   // prompt 5xx while its status page is unreadable was published green, backed by an error response.
   // The bar is `>= 500`, not non-2xx: most targets are hit WITHOUT credentials (see PROBE_TARGETS
   // above), so an unauthenticated 4xx is a healthy server and only a server error is unambiguous.
-  const healthyCount = recent.filter(s => {
-    const probe = s.data[serviceId]
-    return probe.rtt > 0 && probe.rtt <= threshold && probe.status < 500
-  }).length
+  const healthyCount = recent.filter(probe => probe.rtt > 0 && probe.rtt <= threshold && probe.status < 500).length
   return healthyCount >= Math.ceil(recent.length * 2 / 3)
 }
 

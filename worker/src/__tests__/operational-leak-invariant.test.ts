@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fetchAllServices } from '../services'
+import { platformStatusKey } from '../platform-monitor'
 import type { ServiceStatus } from '../types'
 import { TEST_TIMEOUT_MS, HEALTHY_SUMMARY, mockKV, seededTracking, decayedTracking, stubFetchFailingClaudePage, stubFetch5xxClaudePage, stubFetchDeadClaudePage, probeFixture } from './helpers/unreadable-source'
 
@@ -141,7 +142,7 @@ describe('#1232 Part 2 — a fast 5xx probe is not an all-clear', () => {
 
     const claude = await claudeAfterFetch(kv, fast5xx)
 
-    // Not amber either — `isProbeFailing` is untouched and reads RTT only, so 80ms sits under its
+    // Not amber either — `isProbeFailing` judges RTT and timeouts, so 80ms sits under its
     // floor. Whether an error response should instead raise the badge to amber is the open follow-up
     // on #1232; this change only stops it counting as an all-clear.
     expect({ status: claude?.status, sourceUnknown: claude?.sourceUnknown, probeContradicted: claude?.probeContradicted })
@@ -198,5 +199,78 @@ describe('#1232 Part 2 — a fast 5xx probe is not an all-clear', () => {
     expect(claude?.sourceDead).toBe(true)
     expect(claude?.status).toBe('operational')
     expect(claude?.probeConfirmed).toBe(true)
+  }, TEST_TIMEOUT_MS)
+})
+
+// #576 — a 429 answers our prober, not the service's health: it must not satisfy the operational
+// override, and must not read as an outage either. Asserted through the same real entry point.
+describe('#576 — a 429 probe is no information', () => {
+  it('does not force operational when the unreadable service answers our probes with 429', async () => {
+    stubFetchFailingClaudePage()
+    const kv = mockKV(seededTracking(['claude']))
+    const throttled = probeFixture([
+      { minAgo: 0, status: 429, rtt: 80 },
+      { minAgo: 5, status: 429, rtt: 80 },
+      { minAgo: 10, status: 200, rtt: 80 },
+    ])
+
+    const claude = await claudeAfterFetch(kv, throttled)
+
+    expect({ status: claude?.status, sourceUnknown: claude?.sourceUnknown, probeContradicted: claude?.probeContradicted })
+      .toEqual({ status: 'unknown', sourceUnknown: true, probeContradicted: undefined })
+  }, TEST_TIMEOUT_MS)
+
+  it('control: one 429 among two 200s still holds the service operational', async () => {
+    stubFetchFailingClaudePage()
+    const kv = mockKV(seededTracking(['claude']))
+    const oneThrottled = probeFixture([
+      { minAgo: 0, status: 429, rtt: 80 },
+      { minAgo: 5, status: 200, rtt: 80 },
+      { minAgo: 10, status: 200, rtt: 80 },
+    ])
+
+    const claude = await claudeAfterFetch(kv, oneThrottled)
+
+    expect(claude?.status).toBe('operational')
+  }, TEST_TIMEOUT_MS)
+
+  it('a slow 429 beside one timeout is not an outage claim — and the same window answered 200 is', async () => {
+    stubFetchFailingClaudePage()
+    const slow429 = await claudeAfterFetch(mockKV(seededTracking(['claude'])), probeFixture([
+      { minAgo: 10, status: 429, rtt: 5000 },
+      { minAgo: 5, status: 200, rtt: 80 },
+      { minAgo: 0, status: 0, rtt: -1 },
+    ]))
+    const slow200 = await claudeAfterFetch(mockKV(seededTracking(['claude'])), probeFixture([
+      { minAgo: 10, status: 200, rtt: 5000 },
+      { minAgo: 5, status: 200, rtt: 80 },
+      { minAgo: 0, status: 0, rtt: -1 },
+    ]))
+
+    expect({ status: slow429?.status, probeContradicted: slow429?.probeContradicted }).toEqual({ status: 'unknown', probeContradicted: undefined })
+    expect({ status: slow200?.status, probeContradicted: slow200?.probeContradicted }).toEqual({ status: 'degraded', probeContradicted: true })
+  }, TEST_TIMEOUT_MS)
+
+  it('a platform-incident hold is withheld when the probe answers 429', async () => {
+    stubFetchFailingClaudePage()
+    const platform = { [platformStatusKey('atlassian')]: JSON.stringify({ platform: 'atlassian', status: 'degraded', components: {}, checkedAt: new Date().toISOString() }) }
+    const throttled = await claudeAfterFetch(mockKV({ ...seededTracking(['claude']), ...platform }), probeFixture([
+      { minAgo: 5, status: 429, rtt: 80 },
+      { minAgo: 0, status: 429, rtt: 80 },
+    ]))
+
+    expect(throttled?.status).toBe('unknown')
+  }, TEST_TIMEOUT_MS)
+
+  it('withholds probeConfirmed on a dead source when the probe answers 429', async () => {
+    stubFetchDeadClaudePage()
+    const claude = await claudeAfterFetch(mockKV(), probeFixture([
+      { minAgo: 0, status: 429, rtt: 80 },
+      { minAgo: 5, status: 429, rtt: 80 },
+    ]))
+
+    expect(claude?.sourceDead).toBe(true)
+    expect(claude?.status).toBe('unknown')
+    expect(claude?.probeConfirmed).toBeFalsy()
   }, TEST_TIMEOUT_MS)
 })
