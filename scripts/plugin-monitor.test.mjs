@@ -6,6 +6,7 @@
 // hears about.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { availableShells, curlTimeout, downList, httpError, httpStatus, runMonitor } from './plugin-monitor-harness.mjs'
 
 /** Guards that make an "emits nothing" assertion mean something:
@@ -35,6 +36,8 @@ const CLAUDE_UNKNOWN = downList([['unknown', 'Claude API']])
 const ALL_CLEAR = downList([])
 
 const shells = availableShells()
+// Claude Code 2.1.319 on macOS starts a monitor under the user's shell, `zsh -c` there (#1242). zsh is added when installed.
+const wrapperShells = ['/bin/sh', ...(spawnSync('sh', ['-c', 'command -v zsh'], { encoding: 'utf8' }).status === 0 ? ['zsh'] : [])]
 
 // A guard whose default is passing has to be mutated against itself: if this ever returns [], the
 // whole per-shell suite below registers ZERO tests and `node --test` still exits 0, which is
@@ -505,6 +508,26 @@ for (const shell of shells) {
       assert.ok(res.orphaned, 'the monitor ended before its first poll, so the host was never orphaned')
       assert.ok(res.polls <= 3, `served ${res.polls} polls after its host was killed`)
       assert.deepEqual(res.leakedTempFiles, [])
+    })
+  }
+
+  // Host -> wrapper shell -> monitor, the chain observed under Claude Code 2.1.319 (#1242).
+  for (const wrapper of wrapperShells) {
+    test(`[${via}] the host being killed while its wrapper shell (${wrapper}) survives ends the monitor and cleans up`, async () => {
+      const res = await runMonitor(Array(30).fill(ALL_CLEAR), { ...opts, pollSeconds: '0.05', hostChain: { wrapper, killAfter: 1 } })
+      assert.ok(res.orphaned, 'the monitor ended before its first poll, so the host was never killed')
+      assert.ok(res.polls <= 3, `served ${res.polls} polls after its host was killed`)
+      assert.deepEqual(res.leakedTempFiles, [])
+    })
+
+    test(`[${via}] a wrapper shell (${wrapper}) between a LIVE host and the monitor does not end it`, async () => {
+      // Control for the test above: the same chain with the host left alone.
+      const res = await run([CLAUDE_DOWN, ALL_CLEAR, CLAUDE_DOWN], { ...opts, hostChain: { wrapper } })
+      assert.deepEqual(res.lines, [
+        '🔴 Claude API is down (AIWatch)',
+        '✅ Claude API has recovered (AIWatch)',
+        '🔴 Claude API is down (AIWatch)',
+      ])
     })
   }
 }

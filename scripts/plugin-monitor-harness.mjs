@@ -74,7 +74,15 @@ exit 0
 `
 
 /** The external utilities `aiwatch-monitor.sh` and the curl stub call; `isolatedPath` links these. */
-const TOOLBOX = ['awk', 'sort', 'comm', 'mktemp', 'rm', 'mv', 'sleep', 'cat', 'dirname']
+const TOOLBOX = ['awk', 'sort', 'comm', 'mktemp', 'rm', 'mv', 'sleep', 'cat', 'dirname', 'ps']
+
+/** The host in `hostChain`: a node process that starts the monitor under a wrapper shell and idles. */
+const HOST_JS = `
+const { spawn } = require('node:child_process')
+const [wrapper, pidFile, ...argv] = process.argv.slice(1)
+spawn(wrapper, ['-c', '"$@" & echo $! > "' + pidFile + '"; wait', 'sh', ...argv], { stdio: 'inherit' })
+setInterval(() => {}, 1000)
+`
 
 /** Build a down-list body: rows of `[status, name]` → the `status<TAB>name` lines the endpoint
  *  serves (`renderStatuslineDownList`). `[]` is the all-clear (an empty 200 body). */
@@ -158,6 +166,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  *                          this many polls have been served. The monitor keeps the stdout pipe's
  *                          write end, so no SIGPIPE is raised. `orphaned` says the kill happened;
  *                          an orphan still running afterwards is killed by pid.
+ * @param opts.hostChain    `{ wrapper?, killAfter? }` — host -> wrapper shell (`wrapper`, default
+ *                          `/bin/sh`) -> monitor. `killAfter` SIGKILLs the host after that many polls;
+ *                          the wrapper stays up. Without it the host lives for the whole run.
  * @param opts.backslashTmp put a literal `\\` in the TMPDIR handed to the script. The script's temp
  *                          paths derive from it, so this is what makes an `awk -v path=…` mangle the
  *                          value — the reason those paths go through `ENVIRON` instead.
@@ -267,9 +278,11 @@ exec /usr/bin/comm "$@"
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     }
-    const child = opts.orphanAfter
-      ? spawn('/bin/sh', ['-c', `"$@" & echo $! > "${pidFile}"; wait`, 'sh', ...monitorArgv], spawnOptions)
-      : spawn(monitorArgv[0], monitorArgv.slice(1), spawnOptions)
+    const child = opts.hostChain
+      ? spawn(process.execPath, ['-e', HOST_JS, opts.hostChain.wrapper ?? '/bin/sh', pidFile, ...monitorArgv], spawnOptions)
+      : opts.orphanAfter
+        ? spawn('/bin/sh', ['-c', `"$@" & echo $! > "${pidFile}"; wait`, 'sh', ...monitorArgv], spawnOptions)
+        : spawn(monitorArgv[0], monitorArgv.slice(1), spawnOptions)
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8')
@@ -293,7 +306,7 @@ exec /usr/bin/comm "$@"
     let deadline = Date.now() + STARTUP_DEADLINE_MS
     let pending = opts.midRunSignal ?? null
     let closeAt = opts.closeStdoutAfter ?? null
-    let orphanAt = opts.orphanAfter ?? null
+    let orphanAt = opts.orphanAfter ?? opts.hostChain?.killAfter ?? null
     let orphaned = false
     while (!dead && count() < polls.length + 1 && Date.now() < deadline) {
       if (count() > seen) {          // progress: from here on, silence is the monitor's, not the machine's
@@ -322,6 +335,17 @@ exec /usr/bin/comm "$@"
     // An orphan still running is killed by pid.
     if (opts.orphanAfter && !dead) {
       try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL') } catch { /* already gone */ }
+    }
+    // The monitor gets a grace period to end on its own once the host is gone.
+    if (opts.hostChain && !dead) {
+      child.kill('SIGKILL')
+      await Promise.race([closed, sleep(1000)])
+      // SIGTERM first: sh reports a SIGKILLed job on stderr (`Killed: 9`), which expectQuiet rejects.
+      for (const signal of ['SIGTERM', 'SIGKILL']) {
+        if (dead) break
+        try { process.kill(Number(readFileSync(pidFile, 'utf8')), signal) } catch { /* already gone */ }
+        await Promise.race([closed, sleep(500)])
+      }
     }
     child.kill(opts.stopSignal ?? 'SIGKILL')
     const exit = await Promise.race([closed, sleep(400).then(() => null)])
