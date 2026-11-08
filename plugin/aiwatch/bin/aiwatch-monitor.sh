@@ -8,7 +8,7 @@
 # unchanged set) — no spam, and each service is named explicitly. Fail-silent: a poll we cannot
 # fetch OR cannot fully parse is skipped, keeping the last known state, so a blip never fabricates a
 # recovery. The two exceptions say so once (#1242): no `curl` at all (then it exits), and a failed
-# FIRST fetch. The monitor also exits when the process that started it is gone. NOTE: transitions are by service NAME, so a severity shift within "affected"
+# FIRST fetch. The monitor also exits when its host, or a shell it was started under, is gone. NOTE: transitions are by service NAME, so a severity shift within "affected"
 # (degraded→down) is not re-alerted — run /aiwatch for current severity.
 #
 # #1238 — the state kept between polls is `owed`: the services we have announced 🔴 for and still
@@ -32,9 +32,27 @@ if ! command -v curl >/dev/null 2>&1; then
   printf '⚠️ AIWatch monitor cannot run: curl is not on PATH, so it cannot check for outages (AIWatch)\n'
   exit 127
 fi
-# The process that started us. The PIPE trap below fires only on a write, so this is the check that
-# works on a quiet board.
-parent=$PPID
+# The processes we must outlive. The PIPE trap below fires only on a write, so this is the check that
+# works on a quiet board. Under Claude Code 2.1.319 on macOS `$PPID` is the user's shell (`zsh -c` there), not
+# the host (#1242), so we follow it up through shells to the first process that is not one.
+ancestors=$PPID
+p=$PPID
+while :; do
+  name=$(ps -o comm= -p "$p" 2>/dev/null) || break
+  name=${name##*/}
+  case "$name" in
+    sh | bash | dash | zsh | ksh | fish) ;;
+    *) break ;;
+  esac
+  p=$(ps -o ppid= -p "$p" 2>/dev/null | awk '{ print $1 }')
+  case "$p" in '' | *[!0-9]* | 0 | 1) break ;; esac
+  ancestors="$ancestors $p"
+done
+host_alive() {
+  for pid in $ancestors; do
+    kill -0 "$pid" 2>/dev/null || return 1
+  done
+}
 first=1
 
 # A poll interval `sleep` rejects makes `wait` return instantly and the loop spin at full speed,
@@ -191,7 +209,7 @@ poll() {
 }
 
 while true; do
-  if ! kill -0 "$parent" 2>/dev/null; then exit 0; fi
+  if ! host_alive; then exit 0; fi
   poll
   # Backgrounded so a pending signal is acted on immediately. A FOREGROUND `sleep` defers the
   # pending handler until it finishes, so at the shipped 60s default a SIGTERM would be answered up
