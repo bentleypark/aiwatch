@@ -2,6 +2,14 @@
 // reported while the request is still running: one line at `afterMs` naming the stages that finished
 // (with the ms each took to settle) and the ones still pending.
 
+export interface StageWatchdogLine {
+  event: 'stage-watchdog'
+  route: string
+  afterMs: number
+  done: Record<string, number>
+  pending: string[]
+}
+
 export interface StageWatchdog {
   track<T>(stage: string, work: Promise<T>): Promise<T>
   stop(): void
@@ -10,7 +18,7 @@ export interface StageWatchdog {
 export function startStageWatchdog(
   route: string,
   afterMs: number,
-  log: (line: Record<string, unknown>) => void = (line) => console.warn(line),
+  log: (line: StageWatchdogLine) => void = (line) => console.warn(line),
 ): StageWatchdog {
   const t0 = Date.now()
   const done: Record<string, number> = {}
