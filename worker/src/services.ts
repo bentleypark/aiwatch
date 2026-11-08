@@ -4880,7 +4880,7 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
         } else if (svc.id in (probeSnapshots[probeSnapshots.length - 1]?.data ?? {})) {
           // #1232 — a probe answering 5xx fast is no longer healthy (it used to force `operational`
           // here, and logged that it had), but it is not `isProbeFailing` either, since that predicate
-          // reads only RTT. Without this the branch is silent. It records that a probed service landed
+          // judges RTT and sets 429s aside. Without this the branch is silent. It records that a probed service landed
           // in the middle verdict; WHICH reason (5xx, too few samples, jitter) is still not separated.
           console.log(`[cross-validation] ${svc.id}: probe neither healthy nor failing — keeping ${svc.status} (neutral badge)`)
         }

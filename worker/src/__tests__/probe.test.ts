@@ -457,6 +457,41 @@ describe('isProbeHealthy', () => {
   })
 })
 
+// #576 — a 429 says the service is throttling OUR prober; it is neither an answer that confirms the
+// service healthy nor evidence that it is down. Both verdicts count only the samples that remain.
+describe('#576 a 429 probe is no information', () => {
+  const now = Date.now()
+  const at = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString()
+  const window = (samples: Array<[number, number, number]>): ProbeSnapshot[] =>
+    samples.map(([minAgo, status, rtt]) => ({ t: at(minAgo), data: { claude: { status, rtt } } }))
+
+  it('two 429s and one 200 are not a healthy window — one informative sample cannot decide', () => {
+    expect(isProbeHealthy(window([[0, 429, 3], [5, 429, 4], [10, 200, 200]]), 'claude')).toBe(false)
+  })
+
+  it('a window of nothing but 429s is not healthy', () => {
+    expect(isProbeHealthy(window([[0, 429, 3], [5, 429, 3], [10, 429, 4]]), 'claude')).toBe(false)
+  })
+
+  it('a 429 does not lower the evidence bar: two 200s and a 429 are still healthy', () => {
+    expect(isProbeHealthy(window([[0, 429, 3], [5, 200, 200], [10, 200, 210]]), 'claude')).toBe(true)
+  })
+
+  it('a 429 does not rescue a failing window: one 200, one 503 and a 429 are not healthy', () => {
+    expect(isProbeHealthy(window([[0, 429, 3], [5, 200, 200], [10, 503, 90]]), 'claude')).toBe(false)
+  })
+
+  it('a slow 429 is not a failing sample: it no longer tips a window with one timeout into failing', () => {
+    // Probe slots are 5 minutes apart, so a 15-minute window holds three samples. 5000ms is past the
+    // 1000ms floor under the slow-sample bar, so a 429 this slow used to count as one of two failures.
+    const baseline = Array.from({ length: 20 }, (_, i) => ({ t: at(60 + i * 5), data: { claude: { status: 200, rtt: 100 } } }))
+    const slow429 = window([[0, 0, -1], [5, 200, 100], [10, 429, 5000]])
+    const slow200 = window([[0, 0, -1], [5, 200, 100], [10, 200, 5000]])
+    expect(isProbeFailing([...baseline, ...slow429], 'claude')).toBe(false)
+    expect(isProbeFailing([...baseline, ...slow200], 'claude')).toBe(true)
+  })
+})
+
 describe('isProbeFailing — the absolute floor under the slow-sample bar', () => {
   const now = Date.now()
   const at = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString()
