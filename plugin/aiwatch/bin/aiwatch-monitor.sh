@@ -7,7 +7,8 @@
 # Every printed line becomes a Claude notification, so we emit only real transitions (never the
 # unchanged set) — no spam, and each service is named explicitly. Fail-silent: a poll we cannot
 # fetch OR cannot fully parse is skipped, keeping the last known state, so a blip never fabricates a
-# recovery. NOTE: transitions are by service NAME, so a severity shift within "affected"
+# recovery. The two exceptions say so once (#1242): no `curl` at all (then it exits), and a failed
+# FIRST fetch. The monitor also exits when the process that started it is gone. NOTE: transitions are by service NAME, so a severity shift within "affected"
 # (degraded→down) is not re-alerted — run /aiwatch for current severity.
 #
 # #1238 — the state kept between polls is `owed`: the services we have announced 🔴 for and still
@@ -25,6 +26,16 @@
 BASE="${AIWATCH_BASE:-https://aiwatch-worker.p2c2kbf.workers.dev}"
 INTERVAL="${AIWATCH_POLL_SECONDS:-60}"
 URL="$BASE/api/statusline/down"
+
+# #1242 — without curl every poll takes the fail-silent path, so say so once and exit.
+if ! command -v curl >/dev/null 2>&1; then
+  printf '⚠️ AIWatch monitor cannot run: curl is not on PATH, so it cannot check for outages (AIWatch)\n'
+  exit 127
+fi
+# The process that started us. The PIPE trap below fires only on a write, so this is the check that
+# works on a quiet board.
+parent=$PPID
+first=1
 
 # A poll interval `sleep` rejects makes `wait` return instantly and the loop spin at full speed,
 # with the diagnostic invisible because the plugin host shows only stdout. This is a documented,
@@ -91,8 +102,21 @@ poll() {
   # it fails on ≥400 only, so a 204 from a proxy would arrive as a successful EMPTY body,
   # which on this wire means "everything is operational" and settles every owed outage. `-L` follows
   # a redirect.
-  code=$(curl -sf -L --max-time 2 -o "$body" -w '%{http_code}' "$URL" 2>/dev/null) || return 0
-  [ "$code" = 200 ] || return 0
+  code=$(curl -sf -L --max-time 2 -o "$body" -w '%{http_code}' "$URL" 2>/dev/null)
+  rc=$?
+  was_first=$first
+  first=
+  if [ "$rc" -ne 0 ] || [ "$code" != 200 ]; then
+    # Said on the first poll only (#1242); later failed polls stay silent.
+    if [ -n "$was_first" ]; then
+      case "$rc:$code" in
+        0:[1-5][0-9][0-9] | 22:[1-5][0-9][0-9]) why="HTTP $code" ;;
+        *) why="curl exit $rc" ;;
+      esac
+      printf '⚠️ AIWatch monitor: first check failed (%s) — still retrying; run /aiwatch for current status (AIWatch)\n' "$why"
+    fi
+    return 0
+  fi
   # A tmp reaper can delete state out from under a long-lived session. Recreating it re-announces the
   # outages currently on the wire; a debt held for an UNREADABLE source is lost with the file, so that
   # service gets neither the 🔴 again nor its ✅. Without this, every later poll fails at `comm` and
@@ -167,6 +191,7 @@ poll() {
 }
 
 while true; do
+  if ! kill -0 "$parent" 2>/dev/null; then exit 0; fi
   poll
   # Backgrounded so a pending signal is acted on immediately. A FOREGROUND `sleep` defers the
   # pending handler until it finishes, so at the shipped 60s default a SIGTERM would be answered up
