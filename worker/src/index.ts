@@ -2260,6 +2260,7 @@ import { recordDegradation } from './degradation-count'
 import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount, readGuard3Holds, officialUptimeSnapshot } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
+import { recordStageStall, stageStallContext } from './stage-stall-log'
 import { parseStatusView, buildStatusView, type LeanStatusPayload } from './status-view'
 import { checkInfraStatus, runInfraStatusCycle } from './infra-status'
 import { runGoneCheck } from './alerted-gone'
@@ -6159,7 +6160,11 @@ const workerExport = {
           })
         }
         const withSeries = !omitsTimeSeries(url.searchParams)
-        watchdog = startStageWatchdog('status-cached', CACHED_WATCHDOG_MS)
+        const stallContext = stageStallContext(request, url)
+        watchdog = startStageWatchdog('status-cached', CACHED_WATCHDOG_MS, (line) => {
+          console.warn(line)
+          recordStageStall(env.ANALYTICS, line, stallContext)
+        })
         // #1531 — the Edge is-down fetch sends no Origin; a browser request would need its own CORS headers.
         const leanCacheKey = !withSeries && !origin ? new Request(`${url.origin}${url.pathname}?series=0`) : null
         // #1831 — a view shares the lean cache entry and is cut from it on the way out.
