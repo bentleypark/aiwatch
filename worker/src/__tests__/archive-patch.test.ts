@@ -19,6 +19,7 @@ import type { RowReplacement } from '../archive-patch'
 import type { PatchableArchive } from '../archive-patch'
 import { applyCommands, monthWindow, NAMESPACE_ID } from '../archive-patch'
 import { buildMonthlyArchive, parseDurationMin } from '../monthly-archive'
+import { SERVICES } from '../services'
 import { formatDuration } from '../utils'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -752,5 +753,96 @@ describe('#1805 — planSecurityPatch', () => {
       expect(new Set(r.remove.map((x) => x.url)).size).toBe(r.remove.length)
       for (const x of r.remove) expect(Number.isFinite(Date.parse(x.publishedAt))).toBe(true)
     }
+  })
+})
+
+function correctionFixture(spec: RowReplacement) {
+  const window = monthWindow(spec.period)
+  const base = Date.parse(window.startISO)
+  const at = (hours: number) => new Date(base + hours * 3_600_000).toISOString()
+  const row = (id: string, hours: number, minutes: number): MonthlyIncidentEntry => ({
+    id, title: 'Degraded', startedAt: at(hours),
+    resolvedAt: new Date(Date.parse(at(hours)) + minutes * 60_000).toISOString(),
+    durationMin: minutes, finalStatus: 'resolved', impact: 'minor',
+  })
+  const dups = spec.remove.map((id, n) => row(id, 3 * n, 30))
+  const twins = spec.remove.map((_, n) => row(`twin-${n}`, 3 * n, 31))
+  const bystander = row('bystander', 3 * spec.remove.length + 5, 20)
+  const rows = [...dups, ...twins, bystander]
+  // `staleScore` moves the stored monthlyScore off what the current code computes, as an archive
+  // built before an aggregation change would.
+  const build = (list: MonthlyIncidentEntry[] = rows, staleScore = 0): PatchableArchive => {
+    const svc: Record<string, unknown> = { incidentList: list, officialUptime: 99.4, uptime: 99.4, p50LatencyMs: 240, cvCombined: 0.5 }
+    const figures = figuresFrom(spec.service, svc, list, window)
+    return { services: { [spec.service]: { ...svc, ...figures, monthlyScore: (figures.monthlyScore ?? 0) + staleScore } } }
+  }
+  return { window, twins, build }
+}
+
+describe('#1937 — remove-only corrections for an incident banked under two ids', () => {
+  it('every entry names its own month, a known service and a source, lists each removed id once, and a remove-only entry removes something', () => {
+    for (const [name, spec] of Object.entries(ROW_REPLACEMENTS)) {
+      expect(name.startsWith(spec.period), name).toBe(true)
+      expect(SERVICES.map((s) => s.id), name).toContain(spec.service)
+      expect(new Set(spec.remove).size, name).toBe(spec.remove.length)
+      expect(spec.source.length, name).toBeGreaterThan(0)
+      if (spec.add.length === 0) expect(spec.remove.length, name).toBeGreaterThan(0)
+    }
+  })
+
+  describe('a remove-only entry', () => {
+    const spec = ROW_REPLACEMENTS['2026-09-mistral-duplicates']
+    const { window, twins, build } = correctionFixture(spec)
+
+    it('removes exactly the named ids, keeps their twins and an unrelated row, adds nothing', () => {
+      const { changes, refusals } = planRowReplacement(build(), window, spec)
+      expect(refusals).toEqual([])
+      expect(spec.add).toEqual([])
+      expect([...changes[0].removed].sort()).toEqual([...spec.remove].sort())
+      expect(changes[0].keptList.map((e) => e.id).sort()).toEqual([...twins.map((e) => e.id), 'bystander'].sort())
+      expect(changes[0].before.incidents).toBe(2 * spec.remove.length + 1)
+      expect(changes[0].after.incidents).toBe(spec.remove.length + 1)
+    })
+
+    it('refuses when a named id is already gone, so a second apply cannot pass silently', () => {
+      const once = planRowReplacement(build(), window, spec).changes[0].keptList
+      const { changes, refusals } = planRowReplacement(build(once), window, spec)
+      expect(changes).toEqual([])
+      expect(refusals[0]).toContain('rows to remove are not in the archive')
+    })
+  })
+})
+
+// #1937 — a row correction on a month whose stored figures predate an aggregation change.
+describe('#1937 — planRowReplacement with --accept-drift', () => {
+  const spec = ROW_REPLACEMENTS['2026-09-mistral-duplicates']
+  const { window, build } = correctionFixture(spec)
+  const accept = (...ids: string[]) => new Set(ids)
+
+  it('refuses a service whose stored score does not reproduce, as before', () => {
+    const { changes, refusals } = planRowReplacement(build(undefined, 1), window, spec)
+    expect(changes).toEqual([])
+    expect(refusals[0]).toMatch(/stored figures do not reproduce from the stored list — monthlyScore \d+→\d+/)
+  })
+
+  it('patches it when the service is named, and records the drift it accepted', () => {
+    const { changes, refusals } = planRowReplacement(build(undefined, 1), window, spec, accept(spec.service))
+    expect(refusals).toEqual([])
+    expect(changes[0].acceptedDrift).toHaveLength(1)
+    expect(changes[0].acceptedDrift?.[0]).toMatch(/^monthlyScore /)
+    expect(changes[0].after.incidents).toBe(spec.remove.length + 1)
+    expect(changes[0].keptList.map((e) => e.id)).not.toContain(spec.remove[0])
+  })
+
+  it('refuses to accept drift for a service whose figures reproduce', () => {
+    const { changes, refusals } = planRowReplacement(build(), window, spec, accept(spec.service))
+    expect(changes).toEqual([])
+    expect(refusals).toEqual([`${spec.service}: named to accept drift, but its stored figures reproduce`])
+  })
+
+  it('refuses a name this correction does not touch, so one flag cannot widen to another service', () => {
+    const { changes, refusals } = planRowReplacement(build(undefined, 1), window, spec, accept(spec.service, 'openai'))
+    expect(changes).toEqual([])
+    expect(refusals[0]).toContain('openai, which this correction does not touch')
   })
 })

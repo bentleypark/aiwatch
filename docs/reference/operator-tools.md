@@ -122,7 +122,7 @@ month-end row that was still open sat in the divisor (2 / 254) while the publish
 **When the "archive row still open, resolved upstream" alert fires (#1797)**, add a `ROW_REPLACEMENTS` entry
 that removes the row and re-adds the same id with the provider's `startedAt` / `resolvedAt`, then run
 `npx tsx scripts/patch-archive-derived-dupes.ts --period YYYY-MM --correction <name>`. Review the printed figure
-diff before applying: it can move a published score and grade. The archive's `narrative` is not touched by the patch.
+diff before applying: it can move a published score and grade. A service whose stored figures predate a change to the aggregation code is patched with `--accept-drift <id>` here too (#1937). The archive's `narrative` is not touched by the patch.
 
 **To remove republished advisories from a stored month's security section (#1805)**, add a `SECURITY_REMOVALS`
 entry (each url with its advisory's own publication date) and run

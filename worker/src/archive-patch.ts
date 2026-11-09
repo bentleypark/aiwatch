@@ -328,6 +328,79 @@ export const ROW_REPLACEMENTS: Record<string, RowReplacement> = {
       impact: 'minor',
     }],
   },
+  '2026-09-mistral-duplicates': {
+    period: '2026-09',
+    service: 'mistral',
+    source: 'https://status.mistral.ai/incidents/{id} read in a browser on 2026-11-09 — the provider serves none of these ids; each has a served twin (same title, overlapping times) (#1937)',
+    remove: [
+      'a0f7135c-4b1e-451c-a6bd-14b4ec72b3c1',
+      '80a6b0ff-c56a-43ac-ad0e-dc9390eb9e54',
+      '29e6393b-76ff-4a67-aa2c-49e0836d5447',
+      'a4532d96-3ee5-4ce8-9820-a263efab951b',
+      'e987cf71-4736-421a-b0bd-148d46f92d98',
+      'f9d26cb7-11a5-49be-8baa-7a20da7aaa7c',
+      'fd3ff31a-6986-4c8f-b0b2-508b0f49cb26',
+      'e1494538-38fd-49be-8655-138b5a0fda05',
+      '45c88dc1-c248-4313-b23b-97656b573b74',
+      '0ef54c57-d861-4f60-81cd-b27cebabf7b4',
+      '4224a6a6-4a22-4a3e-86b8-33583c65a942',
+      '581ab454-42e9-476f-b5aa-67a28377dcc3',
+      '1874121f-9929-41a6-a6a5-44af41115d42',
+      'bac9427a-c64a-447d-8fae-de4b53bc1283',
+      'f0151c87-169e-4bbc-bf18-9020b1ceb07e',
+      'b822d6a1-968f-45b3-9686-5e5f3fc8646b',
+      '42d40d86-1afb-43ab-a24b-09658eae5953',
+      'f4a10a95-ae80-467f-bb10-ca9aa98652ae',
+      '04dbc8d6-bbd3-44fc-b236-371e1edeb00e',
+      '395324c5-09d0-4f54-b0b3-b90fcfd7b529',
+      'f6c48e28-38e2-464c-8669-024534972135',
+      'd0eca2ab-09b1-422c-95b9-d0307d90a6c6',
+      '7316f046-2ad5-442b-8c90-2bbc000201e1',
+      '01e4e59d-33cb-4b0d-b3e1-a30be943dd6c',
+      '08959438-23b5-4715-8ab7-c65b2e663e7b',
+      'f8f6252f-0feb-4139-8ba8-f660ce8e59f8',
+      '27d5ca10-a159-43c4-bc48-5fc73ccb85f4',
+      '8041e0d6-40c9-4e73-9d13-aa725e19b52b',
+      '5e6cdda0-0807-48d0-ada2-9acd2655e39f',
+    ],
+    add: [],
+  },
+  '2026-09-perplexity-duplicates': {
+    period: '2026-09',
+    service: 'perplexity',
+    source: 'https://status.perplexity.com/incidents/{id} serves 01M1Z156F1RJBNJ6JWZ8KHRS43 and 01M1Z156VYPETMR4QRNMQMF3AM; neither id below is served, and each has a served twin with the same title or the same resolvedAt (#1937)',
+    remove: [
+      'cmtlzck6l02ny0wo50uicmt68',
+      'cmtnypntq056g13qw1u9uixby',
+    ],
+    add: [],
+  },
+  '2026-10-elevenlabs-reissued': {
+    period: '2026-10',
+    service: 'elevenlabs',
+    source: 'https://status.elevenlabs.io/proxy/status.elevenlabs.io/incidents lists each of these events under a 01M5FR… id minted 2026-10-21; the ids below are not in that list (#1937)',
+    remove: [
+      '01M487JY3TE2QWKZRWB4W9ACVJ',
+      '01M48C36FW1EZ6FFQYEXJKMT2Y',
+      '01M4DB5S42EQR46XED1FGEZAG4',
+      '01M4E1HC38AYN544QVC704X0FS',
+      '01M4E4CWPTSJZ9QH0J35V2Q0W6',
+      '01M4RYERPK4YKY04WE4A2AZ8KW',
+      '01M4SSZATF0RG1536979BS4R63',
+      '01M4T91CTNSTQ93Q2Q31VQDBWH',
+    ],
+    add: [],
+  },
+  '2026-10-langsmith-duplicates': {
+    period: '2026-10',
+    service: 'langsmith',
+    source: 'https://global.status.smith.langchain.com/gcp-us/incidents/{id} serves 01M4DFKCK22TD3N84814NSJJ9W for the 2026-10-08 LLM Gateway interruption; the two ids below are not served (#1937)',
+    remove: [
+      '01M4DBWHC70F69E9T1TJ6QCWDX',
+      '01M4DCY41T6Y2Q4V9XEERXMX67',
+    ],
+    add: [],
+  },
 }
 
 const isCanonicalUtc = (s: string) => {
@@ -337,16 +410,20 @@ const isCanonicalUtc = (s: string) => {
 
 /**
  * Plan a row replacement. Pure, and behind the same reproduction gate as `planArchivePatch`: the
- * service's stored figures must come back identical from its stored list, or it is refused. Every id in
- * `remove` must be present, and no resulting id may repeat. An added event must be canonical UTC, end
+ * service's stored figures must come back identical from its stored list, or it is refused unless
+ * `acceptDrift` names the service. Every id in `remove` must be present, and no resulting id may repeat. An added event must be canonical UTC, end
  * after it starts, and start inside the month.
  */
 export function planRowReplacement(
   archive: PatchableArchive,
   window: { startISO: string; endISO: string },
   spec: RowReplacement,
+  acceptDrift: ReadonlySet<string> = new Set(),
 ): { changes: ArchivePatchChange[]; refusals: string[] } {
   const refuse = (why: string) => ({ changes: [], refusals: [`${spec.service}: ${why}`] })
+  for (const id of acceptDrift) {
+    if (id !== spec.service) return refuse(`--accept-drift names ${id}, which this correction does not touch`)
+  }
   const lo = Date.parse(window.startISO)
   const hi = Date.parse(window.endISO)
   for (const e of spec.add) {
@@ -366,7 +443,9 @@ export function planRowReplacement(
   if (missing.length) return refuse(`rows to remove are not in the archive — ${missing.join(', ')}`)
 
   const drift = figureDiff(storedFigures(svc), figuresFrom(spec.service, svc, entries, window))
-  if (drift.length) return refuse(`stored figures do not reproduce from the stored list — ${drift.join(', ')}`)
+  const accepted = acceptDrift.has(spec.service)
+  if (drift.length && !accepted) return refuse(`stored figures do not reproduce from the stored list — ${drift.join(', ')}`)
+  if (!drift.length && accepted) return refuse('named to accept drift, but its stored figures reproduce')
 
   const drop = new Set(spec.remove)
   const next = entries.filter((e) => !drop.has(e.id))
@@ -385,6 +464,7 @@ export function planRowReplacement(
       before: storedFigures(svc),
       after: figuresFrom(spec.service, svc, next, window),
       keptList: next,
+      ...(drift.length ? { acceptedDrift: drift } : {}),
     }],
     refusals: [],
   }
