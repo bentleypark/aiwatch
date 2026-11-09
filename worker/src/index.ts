@@ -936,17 +936,6 @@ async function maybeNotifyArchiveReady(env: Env, archiveKey: string, period: str
   const archiveRaw = await env.STATUS_CACHE.get(archiveKey).catch(() => null)
   if (!archiveRaw) return // archive not yet written this cycle; catch-up or next month handles it
 
-  let serviceCount: number
-  let daysCollected: number
-  try {
-    const parsed = JSON.parse(archiveRaw)
-    serviceCount = Object.keys(parsed.services ?? {}).length
-    daysCollected = typeof parsed.daysCollected === 'number' ? parsed.daysCollected : 0
-  } catch (err) {
-    console.error(`[monthly-archive] corrupt archive JSON for ${period} — skipping notification:`, err instanceof Error ? err.message : err)
-    return
-  }
-
   // #1355 — flag a short `daysCollected` unconditionally. An earlier version of this check tried to
   // suppress the warning for "this service's first month of archiving", using the PRIOR period's
   // archive existing as a proxy — but `daysCollected` counts DATES site-wide (each `history:`/
@@ -962,9 +951,13 @@ async function maybeNotifyArchiveReady(env: Env, archiveKey: string, period: str
   // question every day until the archive is repaired — see the short-archive block in the daily-summary
   // window below. `null` (not short, or an unevaluable period) leaves `expectedDays` at its default of
   // `daysCollected`, which `buildArchiveReadyEmbed` renders as no mismatch.
-  const short = shortArchiveOf(period, daysCollected)
+  const embed = archiveReadyEmbedFromRaw(archiveRaw, period)
+  if (!embed) {
+    console.error(`[monthly-archive] corrupt archive JSON for ${period} — skipping notification`)
+    return
+  }
 
-  const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildArchiveReadyEmbed(period, serviceCount, daysCollected, short?.expectedDays ?? daysCollected))
+  const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, embed)
   if (!sent) {
     console.warn(`[monthly-archive] notification send failed for ${period} — will retry next cron cycle`)
     return
@@ -2258,7 +2251,7 @@ import { recordDrop, queryDrops } from './drop-log'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import { recordDegradation } from './degradation-count'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount, readGuard3Holds, officialUptimeSnapshot } from './monthly-archive'
+import { buildMonthlyArchive, expiredDaysInMonth, MONTH_NOT_ENDED, archiveContentCensus, censusRegressions, mergeRebuiltArchive, attachMonthlyNarrative, type CarriedFieldGroup, type ArchiveCensus, type MonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, accumulateCurrentAndPreviousMonth, previousMonthArchivePending, buildPartialIncidentArchive, filterSuppressedFromMonthly, archiveReadyEmbedFromRaw, shortArchiveOf, type ArchiveHealth, archiveNotifiedKey, toArchiveScoreInput, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents, readGuardSkipCount, readGuard3Holds, officialUptimeSnapshot } from './monthly-archive'
 import { startStageWatchdog, type StageWatchdog } from './stage-watchdog'
 import { recordStageStall, stageStallContext } from './stage-stall-log'
 import { parseStatusView, buildStatusView, type LeanStatusPayload } from './status-view'

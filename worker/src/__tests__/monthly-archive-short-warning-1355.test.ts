@@ -28,6 +28,7 @@ const SERVICES_LATEST = JSON.stringify(OPERATIONAL)
 
 function makeKv(options: {
   historyDays?: number // how many of July's 31 days have a history:2026-07-DD entry
+  accumulated?: string // the stored incidents:monthly:2026-07 value
 } = {}) {
   // ARCHIVE_KEY starts absent — the normal 00:00 run builds and writes it fresh — so `put`/`get` need
   // to be a real round-trip: `maybeNotifyArchiveReady` reads back what the build just wrote.
@@ -35,7 +36,7 @@ function makeKv(options: {
   const kv = {
     get: async (key: string) => {
       if (key === 'services:latest') return SERVICES_LATEST
-      if (key.startsWith('incidents:monthly:')) return null
+      if (key.startsWith('incidents:monthly:')) return options.accumulated ?? null
       if (key.startsWith('history:2026-07-')) {
         const day = Number(key.slice('history:2026-07-'.length))
         const historyDays = options.historyDays ?? 31
@@ -93,5 +94,27 @@ describe('month-end short-archive Discord signal (#1355)', () => {
     const body = readyBody(fetchMock)
     expect(body).toBeDefined()
     expect(JSON.stringify(body)).not.toContain('⚠️ Short by')
+  })
+
+  it('names an incident the provider re-issued under a new ULID (#1938)', async () => {
+    const entry = (id: string, startedAt: string, resolvedAt: string) => (
+      { id, title: 'Ingestion is delayed', startedAt, resolvedAt, durationMin: 31, finalStatus: 'resolved', impact: 'major' }
+    )
+    const incidents = [
+      entry('01KXC3QFPZEJAFQ4TJGC94RNRD', '2026-07-12T21:28:58Z', '2026-07-12T21:59:18Z'),
+      entry('01KXKGA8JHKV6AH3FAA9SYBWDT', '2026-07-12T21:28:58.335Z', '2026-07-12T21:59:18.65Z'),
+    ]
+    const accumulated = JSON.stringify({
+      lastUpdated: '2026-08-01T00:00:00.000Z',
+      services: { langsmith: { count: 2, totalMinutes: 62, longestMinutes: 31, dates: ['2026-07-12'], incidentIds: incidents.map(i => i.id), durations: {}, incidents } },
+    })
+    const { kv } = makeKv({ historyDays: 31, accumulated })
+
+    const fetchMock = await runCron(NORMAL_EVENT, kv)
+
+    const description = readyBody(fetchMock).embeds[0].description as string
+    expect(description).toContain('01KXKGA8JHKV6AH3FAA9SYBWDT')
+    expect(description).toContain('01KXC3QFPZEJAFQ4TJGC94RNRD')
+    expect(description).not.toContain('⚠️ Short by')
   })
 })
