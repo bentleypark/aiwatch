@@ -10,6 +10,7 @@ import {
   recordCronHeartbeat,
   checkCronHeartbeat,
   createWatchdogThrottle,
+  isLoopbackHost,
   CRON_HEARTBEAT_KEY,
   CRON_STALE_MS,
   STALL_REALERT_MS,
@@ -233,6 +234,29 @@ describe('recordCronHeartbeat', () => {
   })
 })
 
+describe('isLoopbackHost', () => {
+  it.each([
+    'http://localhost:8788/api/status',
+    'http://127.0.0.1:8788/',
+    'http://127.8.8.8/',
+    'http://[::1]:8788/',
+    'http://worker.localhost:8788/',
+  ])('%s is local', (u) => {
+    expect(isLoopbackHost(new URL(u).hostname)).toBe(true)
+  })
+
+  it.each([
+    'https://aiwatch-worker.p2c2kbf.workers.dev/api/status',
+    'https://ai-watch.dev/',
+    'https://worker.invalid/',
+    'http://localhost.evil.example/',
+    'http://127.0.0.1.evil.example/',
+    'http://192.168.0.10:8788/',
+  ])('%s is not, so an unrecognised host still alerts', (u) => {
+    expect(isLoopbackHost(new URL(u).hostname)).toBe(false)
+  })
+})
+
 describe('createWatchdogThrottle', () => {
   it('admits one check per interval', () => {
     const t = createWatchdogThrottle(WATCHDOG_INTERVAL_MS)
@@ -291,6 +315,31 @@ describe('wiring — the real fetch handler notices a stopped cron', () => {
     await workerModule.fetch(req(), { STATUS_CACHE: kv } as never, c)
     await settle()
     expect(kv.get).not.toHaveBeenCalled()
+  })
+
+  it('stays out of a local worker, which has no schedule to watch, without spending the throttle slot', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(T0 + min(600))
+    const hookPosts: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === HOOK) hookPosts.push(JSON.parse(String(init?.body)).embeds[0].title)
+      return new Response('', { status: 200 })
+    }))
+    const kv = mockKV({ [CRON_HEARTBEAT_KEY]: JSON.stringify({ at: T0 }) })
+    const env = { STATUS_CACHE: kv, DISCORD_WEBHOOK_URL: HOOK } as never
+
+    const local = ctx()
+    await workerModule.fetch(new Request('http://localhost:8788/api/no-such-route'), env, local.ctx)
+    await local.settle()
+    expect(local.pending).toHaveLength(0)
+    expect(kv.get).not.toHaveBeenCalled()
+    expect(kv.put).not.toHaveBeenCalled()
+    expect(hookPosts).toEqual([])
+
+    const deployed = ctx()
+    await workerModule.fetch(req(), env, deployed.ctx)
+    await deployed.settle()
+    expect(hookPosts).toEqual(['🚨 Cron stalled'])
   })
 })
 

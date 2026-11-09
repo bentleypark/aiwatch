@@ -34,7 +34,7 @@ import { checkUptimeLiveness } from './uptime-liveness'
 import { checkLateResolutions } from './late-resolution'
 import { runMistralPublicApiProbe } from './mistral-public-api'
 import { handleMistralEmail } from './mistral-email'
-import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
+import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, isLoopbackHost, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp } from './detection'
 import { XREPLY_PATH, buildXReplyMarkMessage, handleXReplyMarkRequest, xReplyMarkTarget } from './x-reply-mark'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
@@ -4892,7 +4892,7 @@ const workerExport = {
 
     // #1501 — `fetch` is the path that stays alive when the cron stops, so it is where a stopped cron is noticed.
     try {
-      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && cronWatchdogThrottle.claim(Date.now())) {
+      if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && !isLoopbackHost(url.hostname) && cronWatchdogThrottle.claim(Date.now())) {
         ctx.waitUntil(checkCronHeartbeat(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, Date.now(), sendDiscordAlert))
       }
     } catch (err) {
