@@ -13,6 +13,7 @@ import { calculateAIWatchScore, classifyProbe, mergeImpactWindows } from './scor
 import type { AIWatchScore } from './score'
 import { resolveProbeId, PROBE_TARGETS, type ProbeSpike } from './probe'
 import { monthlyScoredImpact } from './parsers/rootly'
+import { findReissuedDuplicates, type ReissuedPair } from './reissued-duplicates'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
@@ -2686,6 +2687,7 @@ export function buildArchiveReadyEmbed(
   serviceCount: number,
   daysCollected: number,
   expectedDays: number = daysCollected,
+  reissued: ReissuedPair[] = [],
 ): { title: string; description: string; color: number } {
   let monthLabel = period
   const match = /^(\d{4})-(\d{2})$/.exec(period)
@@ -2711,6 +2713,7 @@ export function buildArchiveReadyEmbed(
     // source has since changed). Said explicitly rather than a bare pointer at the endpoint, so this
     // message does not read as contradicting those two warnings.
     ...(isShort ? [``, `⚠️ Short by ${expectedDays - daysCollected} day(s) — a day this month failed to archive. ${ARCHIVE_REBUILD_CAVEAT}`] : []),
+    ...(reissued.length > 0 ? [``, formatReissuedPairs(reissued, period)] : []),
     ``,
     `🚀 [**Generate report draft →**](${REPORTS_WORKFLOW_URL})`,
     ``,
@@ -2719,6 +2722,42 @@ export function buildArchiveReadyEmbed(
   return {
     title: `📦 Monthly Archive Ready — ${period}`,
     description,
-    color: isShort ? 0xd29922 : 0x9B59B6, // amber when short, purple otherwise (daily summary / monthly ops)
+    color: isShort || reissued.length > 0 ? 0xd29922 : 0x9B59B6, // amber when short or flagged, purple otherwise (daily summary / monthly ops)
   }
+}
+
+const REISSUED_LISTED = 5
+
+export function formatReissuedPairs(pairs: ReissuedPair[], period: string): string {
+  const lines = pairs.slice(0, REISSUED_LISTED).map((p) => `• ${p.svcId} — ${p.title.slice(0, 80)}: \`${p.reissuedId}\` replaces ${p.olderIds.map((id) => `\`${id}\``).join(', ')}`)
+  if (pairs.length > REISSUED_LISTED) lines.push(`• … and ${pairs.length - REISSUED_LISTED} more`)
+  return [
+    `⚠️ ${pairs.length} incident(s) banked under two ids — the newer id was minted after the incident resolved (looks like a provider re-issue):`,
+    ...lines,
+    `Check the provider's page, then correct the month with a \`ROW_REPLACEMENTS\` entry (\`npx tsx scripts/patch-archive-derived-dupes.ts --period ${period} --correction <name>\`).`,
+  ].join('\n')
+}
+
+/** The archive-ready notice for a stored archive, or null when the stored JSON does not parse. */
+export function archiveReadyEmbedFromRaw(
+  archiveRaw: string,
+  period: string,
+): { title: string; description: string; color: number } | null {
+  let parsed: { services?: Record<string, { incidentList?: MonthlyIncidentEntry[] }>; daysCollected?: unknown } | null
+  try {
+    parsed = JSON.parse(archiveRaw)
+  } catch {
+    return null
+  }
+  if (!parsed) return null
+  const services = parsed.services ?? {}
+  const daysCollected = typeof parsed.daysCollected === 'number' ? parsed.daysCollected : 0
+  const short = shortArchiveOf(period, daysCollected)
+  let reissued: ReissuedPair[] = []
+  try {
+    reissued = findReissuedDuplicates(services)
+  } catch (err) {
+    console.warn(`[monthly-archive] re-issued-id check failed for ${period} — sending the notice without it:`, err instanceof Error ? err.message : err)
+  }
+  return buildArchiveReadyEmbed(period, Object.keys(services).length, daysCollected, short?.expectedDays ?? daysCollected, reissued)
 }
