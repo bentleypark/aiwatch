@@ -157,8 +157,14 @@ function main(argv: string[]): void {
     console.error('--recompute is a separate run.')
     process.exit(2)
   }
-  if (argv.includes('--accept-drift') && !argv.includes('--apply-suppressions')) {
-    console.error('--accept-drift applies only to --apply-suppressions.')
+  if (argv.includes('--accept-drift') && !argv.includes('--apply-suppressions') && !correction) {
+    console.error('--accept-drift applies only to --apply-suppressions or --correction.')
+    process.exit(2)
+  }
+  const d = argv.indexOf('--accept-drift')
+  const accept = new Set(d >= 0 ? (argv[d + 1] ?? '').split(',').filter(Boolean) : [])
+  if (d >= 0 && accept.size === 0) {
+    console.error('--accept-drift needs one or more service ids.')
     process.exit(2)
   }
   if (r >= 0) {
@@ -179,16 +185,10 @@ function main(argv: string[]): void {
       console.error(`${archivePatch.SUPPRESSIONS_KEY}: ${list.length} usable row(s), ${dropped} unusable — refusing to plan against it. Nothing written.`)
       process.exit(1)
     }
-    const d = argv.indexOf('--accept-drift')
-    const accept = new Set(d >= 0 ? (argv[d + 1] ?? '').split(',').filter(Boolean) : [])
-    if (d >= 0 && accept.size === 0) {
-      console.error('--accept-drift needs one or more service ids.')
-      process.exit(2)
-    }
     plan = archivePatch.planSuppressionPatch(archive, window, list, accept)
   } else {
     plan = correction
-      ? archivePatch.planRowReplacement(archive, window, correction)
+      ? archivePatch.planRowReplacement(archive, window, correction, accept)
       : archivePatch.planArchivePatch(archive, window)
   }
   const { changes, refusals } = plan
