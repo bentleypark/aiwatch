@@ -608,6 +608,17 @@ describe('renderIncidents — 7-day window + grouping', () => {
     expect(html).not.toContain('Stale')
   })
 
+  it('heads a tagged group with the states seen (#1947)', () => {
+    const day = dayAgo(3)
+    const svc = mkService({
+      incidents: [
+        { ...mkInc({ id: '1', title: 'Partial outage: s.jina.ai', impact: 'minor', startedAt: day + '10:00:00Z' }), autoMonitor: true },
+        { ...mkInc({ id: '2', title: 'Degraded performance: s.jina.ai', impact: 'minor', startedAt: day + '11:00:00Z' }), autoMonitor: true },
+      ],
+    })
+    expect(renderIncidents(svc)).toContain('<span class="incident-group-title">Degraded performance / Partial outage: s.jina.ai ')
+  })
+
   it('emits <details open class="incident-group"> when 3+ same-day normalized-title entries exist', () => {
     const day = dayAgo(3)
     const svc = mkService({

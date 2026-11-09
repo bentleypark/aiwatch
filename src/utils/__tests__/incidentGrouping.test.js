@@ -838,15 +838,6 @@ describe('worker-tagged autoMonitor incidents (#983)', () => {
     expect(rows[0].count).toBe(2)
   })
 
-  it('archive-supplemented incidents (written before the tag shipped) stay individual — known gap', () => {
-    // The monthly accumulator is additive and does not self-heal (#934/#975), so rows backfilled from
-    // an archive carry no `autoMonitor`. Pinned so a future reader sees this is known, not a bug.
-    const archived = burst.map(({ autoMonitor, ...rest }) => rest)
-    const rows = groupIncidents([...archived], TZ)
-    expect(rows).toHaveLength(4)
-    expect(rows.every((r) => r.kind === 'single')).toBe(true)
-  })
-
   it('splits the burst across local-day boundaries like any other group', () => {
     const rows = groupIncidents(burst, { timeZone: 'Asia/Seoul' })
     // 08:24 PDT is 2026-07-10 00:24 KST; the other three are also 07-10 KST → still one group.
@@ -969,5 +960,87 @@ describe('#1292 — formatDate never throws on a malformed carried day', () => {
   it('still renders a valid carried day', () => {
     expect(formatDate('2026-07-23T23:00:00.000Z', 'en', { dayOnly: true, day: '2026-07-24' }))
       .toContain('24')
+  })
+})
+
+describe('auto-monitor state-prefix titles group by what follows the state (#1947)', () => {
+  // One real s.jina.ai episode from 2026-10-22: the title changes with the state.
+  const TZ = { timeZone: 'Asia/Seoul' }
+  const inc = (id, title, startedAt) => ({ id, title, status: 'resolved', impact: 'minor', autoMonitor: true, startedAt })
+  const burst = [
+    inc('a', 'Partial outage: s.jina.ai', '2026-10-22T04:45:00.000Z'),
+    inc('b', 'Service outage: s.jina.ai', '2026-10-22T04:50:00.000Z'),
+    inc('c', 'Degraded performance: s.jina.ai', '2026-10-22T05:15:00.000Z'),
+    inc('d', 'Degraded performance: multi-embeddings', '2026-10-22T10:50:00.000Z'),
+  ]
+
+  it('folds every state of one name into one row headed by the states seen, mildest first', () => {
+    const rows = groupIncidents(burst, TZ)
+    const group = rows.find((r) => r.kind === 'group')
+    expect(rows).toHaveLength(2)
+    expect(group.count).toBe(3)
+    expect(group.heading).toBe('Degraded performance / Partial outage / Service outage: s.jina.ai')
+  })
+
+  it('keeps each entry and a lone row under its original title', () => {
+    const rows = groupIncidents(burst, TZ)
+    expect(rows.find((r) => r.kind === 'group').entries.map((e) => e.title).sort()).toEqual([
+      'Degraded performance: s.jina.ai', 'Partial outage: s.jina.ai', 'Service outage: s.jina.ai',
+    ])
+    expect(rows.find((r) => r.kind === 'single').incident.title).toBe('Degraded performance: multi-embeddings')
+  })
+
+  it('leaves other tagged prefixes and a prefix that is not leading in the compared title', () => {
+    const rows = groupIncidents([
+      inc('a', 'Partial outage: s.jina.ai', '2026-10-22T04:45:00.000Z'),
+      inc('e', 'Maintenance: s.jina.ai', '2026-10-22T04:50:00.000Z'),
+      inc('f', 'Update: Partial outage: s.jina.ai', '2026-10-22T04:55:00.000Z'),
+      inc('g', 'Update: Partial outage: s.jina.ai', '2026-10-22T05:00:00.000Z'),
+    ], TZ)
+    expect(rows).toHaveLength(3)
+    expect(rows.find((r) => r.kind === 'group').heading).toBe('Update: Partial outage: s.jina.ai')
+  })
+
+  it('folds a state word written in another case', () => {
+    const rows = groupIncidents([
+      inc('a', 'Partial outage: s.jina.ai', '2026-10-22T04:45:00.000Z'),
+      inc('b', 'PARTIAL OUTAGE: s.jina.ai', '2026-10-22T04:50:00.000Z'),
+    ], TZ)
+    expect(rows).toHaveLength(1)
+    expect(rows.find((r) => r.kind === 'group').heading).toBe('Partial outage: s.jina.ai')
+  })
+
+  it('heads a group of one state with the original title', () => {
+    const rows = groupIncidents([
+      inc('a', 'Degraded performance: jina-clip-v2', '2026-10-28T04:45:00.000Z'),
+      inc('b', 'Degraded performance: jina-clip-v2', '2026-10-28T04:50:00.000Z'),
+    ], TZ)
+    expect(rows).toHaveLength(1)
+    expect(rows.find((r) => r.kind === 'group').heading).toBe('Degraded performance: jina-clip-v2')
+  })
+
+  it('keeps the row identity when another state joins the group', () => {
+    const before = groupIncidents(burst.slice(0, 2), TZ)
+    const after = groupIncidents(burst.slice(0, 3), TZ)
+    const [x, y] = [before, after].map((rows) => rows.find((r) => r.kind === 'group'))
+    expect(x.heading).not.toBe(y.heading)
+    expect(x.normalizedTitle).toBe('s.jina.ai')
+    expect(y.normalizedTitle).toBe('s.jina.ai')
+  })
+
+  it('names only the states that occurred', () => {
+    const rows = groupIncidents([
+      inc('a', 'Service outage: s.jina.ai', '2026-10-22T04:45:00.000Z'),
+      inc('b', 'Degraded performance: s.jina.ai', '2026-10-22T04:50:00.000Z'),
+      inc('c', 'Service outage: s.jina.ai', '2026-10-22T04:55:00.000Z'),
+    ], TZ)
+    expect(rows.find((r) => r.kind === 'group').heading).toBe('Degraded performance / Service outage: s.jina.ai')
+  })
+
+  it('does not strip the prefix from an untagged group', () => {
+    const generic = ['x', 'y'].map((id, i) => ({ id, title: 'Partial outage: maintenance', status: 'resolved', impact: null, startedAt: `2026-10-22T0${i}:00:00.000Z` }))
+    const [row] = groupIncidents(generic, TZ)
+    expect(row.kind).toBe('group')
+    expect(row.heading).toBe('Partial outage: maintenance')
   })
 })

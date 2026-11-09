@@ -73,6 +73,21 @@ export function normalizeTitle(title) {
   return String(title ?? '').replace(/\s*—\s*(recovered|down)\s*$/i, '').trim()
 }
 
+// #1947 — a worker-tagged title that leads with a state ("Partial outage: s.jina.ai"). The state
+// changes during one episode, so the group key is what follows it and the row names the states seen.
+// Lockstep with the SSR port.
+const AUTO_MONITOR_STATE_PREFIX_RE = /^(degraded performance|partial outage|service outage):\s*/i
+const AUTO_MONITOR_STATES = ['Degraded performance', 'Partial outage', 'Service outage']
+function groupTitle(inc) {
+  const title = normalizeTitle(inc.title)
+  return inc.autoMonitor ? title.replace(AUTO_MONITOR_STATE_PREFIX_RE, '') : title
+}
+function groupHeading(entries, key) {
+  const seen = new Set(entries.map((e) => (e.autoMonitor ? AUTO_MONITOR_STATE_PREFIX_RE.exec(e.title)?.[1].toLowerCase() : undefined)))
+  const states = AUTO_MONITOR_STATES.filter((s) => seen.has(s.toLowerCase()))
+  return states.length ? `${states.join(' / ')}: ${key}` : key
+}
+
 /**
  * BetterStack auto-recovery flap marker — "<model> — recovered" / "<model> — down".
  * BetterStack tags these transient model blips with a `minor` impact (not null), so
@@ -130,7 +145,8 @@ export function isAutoMonitorTitle(title) {
  * @typedef {Object} GroupRow
  * @property {'group'} kind
  * @property {string} dayKey - YYYY-MM-DD in viewer's local timezone (or supplied `timeZone`)
- * @property {string} normalizedTitle
+ * @property {string} normalizedTitle - the row's identity; stable while entries join
+ * @property {string} heading - the text a row shows
  * @property {number} count
  * @property {string} rangeStart - ISO 8601, earliest startedAt
  * @property {string} rangeEnd - ISO 8601, latest startedAt
@@ -193,9 +209,7 @@ export function groupIncidents(incidents, options = {}) {
   // verdict on /api/status. The other two must sniff titles because they predate the tag. It also
   // ignores `impact` entirely — a Twelve Labs auto-monitor blip carries `impact: 'major'` only
   // because one sub-component read `major_outage`, which is exactly the inference (a) and (b) get
-  // wrong. Incidents supplemented from a MONTHLY ARCHIVE written before the tag shipped carry no
-  // `autoMonitor` field and so still render individually; the archive accumulator is additive and
-  // does not self-heal (see #934/#975).
+  // wrong.
   const buckets = new Map()
   const ungroupable = []
   const runs = new Map()
@@ -223,10 +237,11 @@ export function groupIncidents(incidents, options = {}) {
       return
     }
     const dayKey = localDayKey(inc.startedAt, timeZone)
-    const key = `${dayKey}::${normalizeTitle(inc.title)}`
+    const nt = groupTitle(inc)
+    const key = `${dayKey}::${nt}`
     let bucket = buckets.get(key)
     if (!bucket) {
-      bucket = { dayKey, normalizedTitle: normalizeTitle(inc.title), entries: [], firstIdx: idx }
+      bucket = { dayKey, normalizedTitle: nt, entries: [], firstIdx: idx }
       buckets.set(key, bucket)
     }
     bucket.entries.push(inc)
@@ -252,6 +267,7 @@ export function groupIncidents(incidents, options = {}) {
           kind: 'group',
           dayKey,
           normalizedTitle: nt,
+          heading: groupHeading(entries, nt),
           count: entries.length,
           rangeStart,
           rangeEnd,
@@ -289,6 +305,7 @@ export function groupIncidents(incidents, options = {}) {
         ongoing: info.ongoing,
         downSec: info.downSec,
         normalizedTitle: `${normalizeTitle(entries[0].title)} — down`,
+        heading: `${normalizeTitle(entries[0].title)} — down`,
         count: info.days,
         rangeStart: newestFirst[newestFirst.length - 1].startedAt,
         rangeEnd: newestFirst[0].startedAt,

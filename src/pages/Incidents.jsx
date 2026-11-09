@@ -226,7 +226,7 @@ export function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSele
           {groupRangeText(group, lang, t)}
         </span>
         <div role="cell" className="flex items-center gap-2 min-w-0">
-          <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{group.normalizedTitle}</span>
+          <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="line-clamp-2">{group.heading}</span>
           <span
             className="shrink-0 mono text-[var(--text2)] bg-[var(--bg2)]"
             style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}
@@ -287,7 +287,7 @@ export function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSel
       >
         <div className="flex items-start justify-between gap-2">
           <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', flex: 1 }}>
-            {group.normalizedTitle}
+            {group.heading}
           </span>
           <span
             className="shrink-0 mono text-[var(--text2)] bg-[var(--bg2)]"

@@ -127,6 +127,7 @@ export interface GroupRow {
   kind: 'group'
   dayKey: string
   normalizedTitle: string
+  heading: string
   count: number
   rangeStart: string
   rangeEnd: string
@@ -150,6 +151,21 @@ export type GroupedRow = GroupRow | SingleRow
 
 export function normalizeTitle(title: string | null | undefined): string {
   return String(title ?? '').replace(/\s*—\s*(recovered|down)\s*$/i, '').trim()
+}
+
+// #1947 — a worker-tagged title that leads with a state ("Partial outage: s.jina.ai"). The state
+// changes during one episode, so the group key is what follows it and the row names the states seen.
+// Lockstep with the SPA.
+const AUTO_MONITOR_STATE_PREFIX_RE = /^(degraded performance|partial outage|service outage):\s*/i
+const AUTO_MONITOR_STATES = ['Degraded performance', 'Partial outage', 'Service outage']
+function groupTitle(inc: GroupingIncident): string {
+  const title = normalizeTitle(inc.title)
+  return inc.autoMonitor ? title.replace(AUTO_MONITOR_STATE_PREFIX_RE, '') : title
+}
+function groupHeading(entries: GroupingIncident[], key: string): string {
+  const seen = new Set(entries.map((e) => (e.autoMonitor ? AUTO_MONITOR_STATE_PREFIX_RE.exec(e.title)?.[1].toLowerCase() : undefined)))
+  const states = AUTO_MONITOR_STATES.filter((s) => seen.has(s.toLowerCase()))
+  return states.length ? `${states.join(' / ')}: ${key}` : key
 }
 
 // BetterStack auto-recovery flap marker — "<model> — recovered" / "<model> — down".
@@ -227,7 +243,7 @@ export function groupIncidents(
       return
     }
     const dayKey = localDayKey(inc.startedAt, timeZone)
-    const nt = normalizeTitle(inc.title)
+    const nt = groupTitle(inc)
     const key = `${dayKey}::${nt}`
     let bucket = buckets.get(key)
     if (!bucket) {
@@ -256,6 +272,7 @@ export function groupIncidents(
           kind: 'group',
           dayKey,
           normalizedTitle: nt,
+          heading: groupHeading(entries, nt),
           count: entries.length,
           rangeStart,
           rangeEnd,
@@ -291,6 +308,7 @@ export function groupIncidents(
         ongoing: info.ongoing,
         downSec: info.downSec,
         normalizedTitle: `${normalizeTitle(entries[0].title)} — down`,
+        heading: `${normalizeTitle(entries[0].title)} — down`,
         count: info.days,
         rangeStart: newestFirst[newestFirst.length - 1].startedAt,
         rangeEnd: newestFirst[0].startedAt,

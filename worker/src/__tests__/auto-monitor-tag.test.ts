@@ -191,3 +191,44 @@ describe('fetchService applies the tag on the real call path (#983)', () => {
     expect(svc.incidents.every((i) => i.autoMonitor === undefined)).toBe(true)
   })
 })
+
+describe('Jina AI machine-emitted titles (#1947)', () => {
+  const jina = SERVICES.find((s) => s.id === 'jina')!
+
+  it.each([
+    'Degraded performance: s.jina.ai',
+    'Partial outage: s.jina.ai',
+    'Service outage: s.jina.ai',
+    'partial OUTAGE: jina-clip-v2',
+  ])('tags %s', (title) => {
+    expect(isAutoMonitorIncident(mkInc({ title }), jina)).toBe(true)
+  })
+
+  it.each([
+    'Service outage',
+    'Service outage: ',
+    'Degraded performance on s.jina.ai',
+    'Update: Partial outage: s.jina.ai',
+    'Maintenance: s.jina.ai',
+    'Service outage: Reader API unavailable in all regions following a bad deploy',
+  ])('does not tag %s', (title) => {
+    expect(isAutoMonitorIncident(mkInc({ title }), jina)).toBe(false)
+  })
+})
+
+describe('Twelve Labs Jockey auto-monitor title (#1947)', () => {
+  const twelvelabs = SERVICES.find((s) => s.id === 'twelvelabs')!
+
+  it.each([
+    'Some Jockey API features are experiencing issues',
+  ])('tags %s', (title) => {
+    expect(isAutoMonitorIncident(mkInc({ title }), twelvelabs)).toBe(true)
+  })
+
+  it.each([
+    'Some Jockey features are experiencing issues',
+    'Some Marengo API features are experiencing issues',
+  ])('does not tag %s', (title) => {
+    expect(isAutoMonitorIncident(mkInc({ title }), twelvelabs)).toBe(false)
+  })
+})
