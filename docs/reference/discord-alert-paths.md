@@ -219,7 +219,7 @@ Fires when a live incident the provider has resolved is still a non-resolved row
 
 Fires when the `*/5` cron has not run for 20+ min. On 2026-09-23 Cloudflare stopped dispatching the schedule for ~3h with the trigger still registered and `fetch` serving normally; every cron-side check went silent with it, and it was noticed only because the daily summary never arrived. A cron cannot report its own absence, so the watch sits on the path that stayed alive.
 
-- **Source**: `worker/src/cron-heartbeat.ts`. `recordCronHeartbeat` is the first statement of `scheduled()`; `checkCronHeartbeat` runs from `fetch`, at most once per isolate per 3 min (`createWatchdogThrottle`), off the response via `ctx.waitUntil`. Both are inert without `STATUS_CACHE` and `DISCORD_WEBHOOK_URL`.
+- **Source**: `worker/src/cron-heartbeat.ts`. `recordCronHeartbeat` is the first statement of `scheduled()`; `checkCronHeartbeat` runs from `fetch`, at most once per isolate per 3 min (`createWatchdogThrottle`), off the response via `ctx.waitUntil`. Both are inert without `STATUS_CACHE` and `DISCORD_WEBHOOK_URL`, and `fetch` skips the check for a request to a loopback host (`isLoopbackHost`), because a local `wrangler dev` worker dispatches no schedule (#1944).
 - **State** is one key, `cron:heartbeat` (`{ at, alertedAt?, seeded? }`, [kv-schema.md](kv-schema.md)) — no marker key.
 - **Operator-only** — red for the stall, green for the recovery. Never builds a feed entry, never touches the #486 per-user relay.
 - **Dedup**: `alertedAt` is written only after a successful send, so a refused webhook retries at the next check; the alert repeats hourly while the stall lasts (`STALL_REALERT_MS`).

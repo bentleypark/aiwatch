@@ -55,6 +55,10 @@ export function parseHeartbeat(raw: string | null): CronHeartbeat | null {
   }
 }
 
+export function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '[::1]' || /^127(\.\d{1,3}){3}$/.test(hostname)
+}
+
 export type StallVerdict = 'fresh' | 'stalled' | 'already-alerted'
 
 export function stallVerdict(hb: CronHeartbeat, nowMs: number): StallVerdict {
