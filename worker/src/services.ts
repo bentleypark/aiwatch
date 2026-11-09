@@ -409,7 +409,7 @@ export const SERVICES: ServiceConfig[] = [
   // CLIP, VLM or Reader/Search (r.jina.ai, s.jina.ai) outage shows as an outage but recommends nothing.
   // rosterAuditExclude = the page's 3 group headers. Every incident on the page (50 read 2026-10-11) is
   // machine-emitted from a P99-latency monitor, all `minor`, mostly 5m — hence holdShortIncidents.
-  { id: 'jina', name: 'Jina AI', provider: 'Jina AI', category: 'api', statusUrl: 'https://status.jina.ai', apiUrl: 'https://status.jina.ai/api/v2/summary.json', statusComponentId: 'fc5zn3rkh5bd', statusComponentIds: ['fc5zn3rkh5bd', 'v6lh7spvvvf5', '7b9xrr2ksh44', '67hcttb83zzv', 'skb1snhyjd6h', 'phbgjfg719q6', 'd52c7tz1hnpd', 'b2tt4jb1x7pz', 'd7nnpf4sr394', 'dwcjc0rgg6hn', 'cm0h2r8mw593', '3f6qdtwq4yv6', 'lbtxhdqvr205', 'yxvtk6kpvycp', '895s37lq7d5q'], fallbackComponents: ['jina-embeddings-v4', 'jina-embeddings-v3', 'jina-embeddings-v5-text-small', 'jina-embeddings-v5-text-nano', 'Rest Embeddings', 'jina-reranker-v2-base-multilingual', 'jina-reranker-v3', 'jina-reranker-m0', 'Rest Rerankers'], displayAllComponents: true, holdShortIncidents: true, rosterAuditExclude: ['6d9w2f73tz7v', 'hq1bx2j16lhs', 'ftwn2h2xvr77'], addedAt: '2026-10-11' }, // #802
+  { id: 'jina', name: 'Jina AI', provider: 'Jina AI', category: 'api', statusUrl: 'https://status.jina.ai', apiUrl: 'https://status.jina.ai/api/v2/summary.json', statusComponentId: 'fc5zn3rkh5bd', statusComponentIds: ['fc5zn3rkh5bd', 'v6lh7spvvvf5', '7b9xrr2ksh44', '67hcttb83zzv', 'skb1snhyjd6h', 'phbgjfg719q6', 'd52c7tz1hnpd', 'b2tt4jb1x7pz', 'd7nnpf4sr394', 'dwcjc0rgg6hn', 'cm0h2r8mw593', '3f6qdtwq4yv6', 'lbtxhdqvr205', 'yxvtk6kpvycp', '895s37lq7d5q'], fallbackComponents: ['jina-embeddings-v4', 'jina-embeddings-v3', 'jina-embeddings-v5-text-small', 'jina-embeddings-v5-text-nano', 'Rest Embeddings', 'jina-reranker-v2-base-multilingual', 'jina-reranker-v3', 'jina-reranker-m0', 'Rest Rerankers'], displayAllComponents: true, holdShortIncidents: true, autoMonitorTitles: [/^(?:Degraded performance|Partial outage|Service outage):\s*\S+$/i], rosterAuditExclude: ['6d9w2f73tz7v', 'hq1bx2j16lhs', 'ftwn2h2xvr77'], addedAt: '2026-10-11' }, // #802
   // #1821/#1829 — Dashboard ("Dashboard functionality on modal.com", its own `Web services` section) is
   // Reference: Modal's docs list running Apps on the apps page and stop them "via the web UI". This path
   // shows no reference rows, so it is denied, like fal's Dashboard.
@@ -427,15 +427,15 @@ export const SERVICES: ServiceConfig[] = [
   // Embed API - Marengo3.5 Sync/Async added
   // 2026-08-31 (new-component alert); '2k0gnkk2kjmz' dropped in the
   // same pass — no longer present on the page (was silently logging a breakdown-drift warning).
-  // #983 — Twelve Labs' Statuspage auto-monitor opens a BRAND-NEW incident per component blip, all
-  // under one fixed title, and Statuspage stamps `impact: 'major'` on it whenever the affected
+  // #983 — Twelve Labs' Statuspage auto-monitor opens a BRAND-NEW incident per component blip,
+  // and Statuspage stamps `impact: 'major'` on it whenever the affected
   // sub-component reads `major_outage`. On 2026-07-09 that produced four 5–16m incidents with
   // identical titles + identical machine-emitted timeline text. `autoMonitorTitles` tags them so the
   // alert path may hold/dedup them (impact is component-derived, not editorial) and the UI groups
   // them into one ×N row; `flapSuppression` then dedups a repeat within the 60-min window (#283).
   // The provider's REAL, human-written incidents use distinct titles ("Search API failure", "API
   // server failure") and never match this anchored pattern.
-  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', statusComponentIds: ['mvv53x91b74m', '28vf3d4r3tjg'], referenceComponentIds: ['29c68cnyd14l', '20930d4nz774'], rosterAuditExclude: ['blny8xq0yq7p', '29c68cnyd14l', '20930d4nz774'], displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', 'j21c5rdfj8kf', '91lzwtn6071h', 'p1hx7t867896', '3ng4ddpvmv3r', '12vp1vm9smc2', 'qkmbnw1n5mgh', 'j86pqszy5w90', '27kd6568skjp', '3pksbw640gn9', 'rgbmm56z696d', 'sjbv0n38bs7n', 'cns848tdzn22', 'jzy4m39608m3'], componentGroups: { 'mrclkkqtj01j': 'APIs', '2zsl201s8df5': 'APIs', 'jnvb5r3v74q1': 'APIs', '751304vy1s9x': 'APIs', 'hr353rqqmwmk': 'APIs', 'yklrkrhkd1by': 'APIs', '3t1cjx55dyrf': 'APIs', 'j21c5rdfj8kf': 'APIs', '91lzwtn6071h': 'APIs', 'p1hx7t867896': 'APIs', '3ng4ddpvmv3r': 'APIs', '12vp1vm9smc2': 'APIs', 'qkmbnw1n5mgh': 'APIs', 'j86pqszy5w90': 'Jockey', '27kd6568skjp': 'Jockey', '3pksbw640gn9': 'Jockey', 'rgbmm56z696d': 'Jockey', 'sjbv0n38bs7n': 'Jockey', 'cns848tdzn22': 'Jockey', 'jzy4m39608m3': 'Jockey' }, autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
+  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', statusComponentIds: ['mvv53x91b74m', '28vf3d4r3tjg'], referenceComponentIds: ['29c68cnyd14l', '20930d4nz774'], rosterAuditExclude: ['blny8xq0yq7p', '29c68cnyd14l', '20930d4nz774'], displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', 'j21c5rdfj8kf', '91lzwtn6071h', 'p1hx7t867896', '3ng4ddpvmv3r', '12vp1vm9smc2', 'qkmbnw1n5mgh', 'j86pqszy5w90', '27kd6568skjp', '3pksbw640gn9', 'rgbmm56z696d', 'sjbv0n38bs7n', 'cns848tdzn22', 'jzy4m39608m3'], componentGroups: { 'mrclkkqtj01j': 'APIs', '2zsl201s8df5': 'APIs', 'jnvb5r3v74q1': 'APIs', '751304vy1s9x': 'APIs', 'hr353rqqmwmk': 'APIs', 'yklrkrhkd1by': 'APIs', '3t1cjx55dyrf': 'APIs', 'j21c5rdfj8kf': 'APIs', '91lzwtn6071h': 'APIs', 'p1hx7t867896': 'APIs', '3ng4ddpvmv3r': 'APIs', '12vp1vm9smc2': 'APIs', 'qkmbnw1n5mgh': 'APIs', 'j86pqszy5w90': 'Jockey', '27kd6568skjp': 'Jockey', '3pksbw640gn9': 'Jockey', 'rgbmm56z696d': 'Jockey', 'sjbv0n38bs7n': 'Jockey', 'cns848tdzn22': 'Jockey', 'jzy4m39608m3': 'Jockey' }, autoMonitorTitles: [/^Some (?:Jockey )?API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
   // LangSmith (#561) — LangChain's hosted observability/eval platform on an incident.io page. Since #1066
   // that page is a "global"/multi-region page whose Atlassian v2 compat API returns `components: []`, so
   // it is NO LONGER covered by statuspage.ts directly — `incidentIoGlobalPage` routes it through
@@ -4457,8 +4457,7 @@ function archivedDuration(durationMin: number): string | null {
  *  own field list, so a tag added to the type in the ordinary `foo?: T` form and not added here fails CI.
  *
  *  SCOPE, stated rather than implied: this covers the WORKER-side rehydration. `src/utils/archiveMerge.js`
- *  rebuilds the same stored type for the SPA and cannot import this — it lists its tags inline, and it
- *  does not carry `autoMonitor`. That drop predates this issue and is left alone here. */
+ *  rebuilds the same stored type for the SPA and cannot import this — it lists its tags inline. */
 export function carriedIncidentTags(entry: MonthlyIncidentEntry): Partial<Incident> {
   return {
     ...(entry.autoMonitor ? { autoMonitor: true } : {}),

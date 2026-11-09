@@ -52,6 +52,13 @@ describe('archiveMonthsForPeriod', () => {
 })
 
 describe('archiveIncidentToLive', () => {
+  it('carries the worker auto-monitor tag, and adds none to an untagged row (#1947)', () => {
+    const service = { id: 'jina', name: 'Jina AI' }
+    const row = { id: 'a', title: 'Partial outage: s.jina.ai', finalStatus: 'resolved', startedAt: '2026-10-22T04:45:00.000Z', resolvedAt: '2026-10-22T04:50:00.000Z', durationMin: 5 }
+    expect(archiveIncidentToLive({ ...row, autoMonitor: true }, service).autoMonitor).toBe(true)
+    expect(archiveIncidentToLive(row, service)).not.toHaveProperty('autoMonitor')
+  })
+
   const archIncident = {
     id: '01ABC',
     title: 'Mistral La Plateforme degraded',

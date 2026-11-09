@@ -308,7 +308,7 @@ export function IncidentGroupRow({ group, t, lang }) {
         <span className={`shrink-0 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-xs text-[var(--text1)] truncate">{group.normalizedTitle}</p>
+            <p className="text-xs text-[var(--text1)] line-clamp-2">{group.heading}</p>
             <span
               className="shrink-0 mono text-[9px] text-[var(--text2)] bg-[var(--bg2)] rounded"
               style={{ padding: '1px 5px' }}

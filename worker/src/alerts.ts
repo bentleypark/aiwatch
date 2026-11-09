@@ -96,9 +96,8 @@ export function flapSuppressionKey(svcId: string, inc: Incident): string {
 // sustained outage that happens to reuse the title. Before #983 the `impact !== 'major'` screen in
 // isFlapNotice was the de-facto guard; an `autoMonitor` incident bypasses that screen (its `major` is
 // component-derived), so a genuine Twelve Labs outage opened minutes after a blip could have been
-// suppressed for up to an hour. This is the replacement guard, and it generalizes: once an incident
-// has RUN longer than every auto-monitor blip we've observed (5–16m across BetterStack + Statuspage),
-// it is not a flap on any service — so it escapes suppression and alerts, tagged or not.
+// suppressed for up to an hour. This is the replacement guard, and it generalizes: an incident that
+// has RUN this long escapes suppression and alerts on any service, tagged or not.
 export const FLAP_SUPPRESSION_ESCAPE_MS = 30 * 60 * 1000
 
 /** How long the incident has RUN: to `resolvedAt` when resolved, else to `nowMs`.

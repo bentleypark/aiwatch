@@ -29,7 +29,7 @@ const flap = (startISO, durMin) => ({
 })
 
 const groupOf = (entries) => ({
-  kind: 'group', count: entries.length, normalizedTitle: 'GPT OSS 20B',
+  kind: 'group', count: entries.length, normalizedTitle: 'GPT OSS 20B', heading: 'GPT OSS 20B',
   rangeStart: entries[entries.length - 1].startedAt, rangeEnd: entries[0].startedAt,
   statusCounts: entries.reduce((m, e) => ({ ...m, [e.status]: (m[e.status] ?? 0) + 1 }), {}),
   uniformStatus: new Set(entries.map((e) => e.status)).size === 1, entries,
@@ -63,5 +63,22 @@ describe('GroupIncidentItem — summed group duration (Overview Recent Incidents
     const html = render(groupOf([active, flap('2026-07-08T06:30:38.000Z', 20)]))
     expect(html).toContain('20m total') // sum of the resolved entry
     expect(html).toContain('Ongoing')   // + ongoing marker
+  })
+})
+
+describe('group rows show the heading, not the row identity (#1947)', async () => {
+  const { IncidentGroupRow: IncidentsRow, IncidentGroupCard } = await import('../Incidents')
+  const { IncidentGroupRow: DetailsRow } = await import('../ServiceDetails')
+  const group = { ...groupOf([flap('2026-07-08T07:13:25.000Z', 5), flap('2026-07-08T06:30:38.000Z', 20)]), dayKey: '2026-07-08', normalizedTitle: 'ROW-KEY', heading: 'ROW-HEADING' }
+
+  it.each([
+    ['Overview', GroupIncidentItem],
+    ['Incidents row', IncidentsRow],
+    ['Incidents card', IncidentGroupCard],
+    ['ServiceDetails', DetailsRow],
+  ])('%s', (_name, Component) => {
+    const html = renderToStaticMarkup(createElement(Component, { group, lang: 'en', t, expanded: false, onToggle: () => {} }))
+    expect(html).toContain('ROW-HEADING')
+    expect(html).not.toContain('ROW-KEY')
   })
 })

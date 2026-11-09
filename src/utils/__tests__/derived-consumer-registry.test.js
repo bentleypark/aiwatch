@@ -318,7 +318,7 @@ const SU_APPLIERS = {
 const SU_FORWARDERS = {
   'worker/src/index.ts': 'the /api/v1/status/:id field allowlist emits it — the #1292 precedent verbatim: without it the one PUBLIC surface hands a consumer a synthetic start with no way to apply the rule the rest of the codebase applies',
   'worker/src/services.ts': 'calls the producer AND forwards: mergeRetainedIncidentHistory rebuilds an Incident from a stored MonthlyIncidentEntry via `carriedIncidentTags`, pinned by retained-tag-forwarding.test.ts against the stored type\'s own field list. It sat in SAFE as "the orchestrator, not a consumer" while that rebuild silently dropped the flag. Scope, stated: that pin covers THIS forwarder only — src/utils/archiveMerge.js rehydrates the same stored type in a bundle that cannot import the helper, and carries the tags inline',
-  'src/utils/archiveMerge.js': 'archive entry → live incident shape: forwards startUnknown and leaves duration undefined rather than re-stating the stored 0 as "0m". It carries its tags INLINE — the worker-side carriedIncidentTags cannot cross the bundle boundary — and it does not carry `autoMonitor`, a pre-existing drop this issue did not touch (its consequence is pinned by src/utils/__tests__/incidentGrouping.test.js)',
+  'src/utils/archiveMerge.js': 'archive entry → live incident shape: forwards startUnknown and leaves duration undefined rather than re-stating the stored 0 as "0m". It carries its tags INLINE — the worker-side carriedIncidentTags cannot cross the bundle boundary',
 }
 
 /** Cannot be reached by an anchored incident, or reads nothing it could get wrong. Each reason is a

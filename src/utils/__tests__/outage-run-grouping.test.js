@@ -29,7 +29,7 @@ describe.each([['SPA', groupIncidents], ['Edge', edgeGroupIncidents]])('%s group
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
       kind: 'group', run: true, startDay: '2026-10-02', endDay: '2026-10-05', ongoing: true, count: 4, downSec: 178_169,
-      normalizedTitle: 'api.hconeai.com — down', uniformStatus: true, statusCounts: { ongoing: 4 },
+      normalizedTitle: 'api.hconeai.com — down', heading: 'api.hconeai.com — down', uniformStatus: true, statusCounts: { ongoing: 4 },
     })
     expect(rows[0].entries.map((e) => e.derivedDay)).toEqual(['2026-10-05', '2026-10-04', '2026-10-03', '2026-10-02'])
   })

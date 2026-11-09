@@ -1620,7 +1620,7 @@ function runGroupMeta(g: GroupRow): string {
 function renderIncidentGroup(g: GroupRow): string {
   // <details open> so crawlers always read the full entries. CSS in renderPage
   // styles the expanded/collapsed state; noscript users retain full access.
-  const summary = `${esc(g.normalizedTitle)} <span class="mono" style="color:#8b949e">&middot; ${g.run ? `${g.count} days` : `${g.count}×`}</span>`
+  const summary = `${esc(g.heading)} <span class="mono" style="color:#8b949e">&middot; ${g.run ? `${g.count} days` : `${g.count}×`}</span>`
   const headMeta = g.run ? runGroupMeta(g)
     : g.uniformStatus
     ? `${esc(formatDate(g.rangeEnd))}`

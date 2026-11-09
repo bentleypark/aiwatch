@@ -558,7 +558,7 @@ export interface ServiceConfig {
   // #983 — EXACT-match patterns for this provider's machine-emitted incident titles. A matching
   // incident gets `Incident.autoMonitor = true` (see tagAutoMonitorIncidents in services.ts); what the
   // tag changes on the alert path is isShortIncidentHoldable / isFlapNotice in alerts.ts.
-  // Needed for a page whose auto-monitor opens a brand-new incident per blip under one fixed title
+  // Needed for a page whose auto-monitor opens a brand-new incident per blip
   // (Twelve Labs: "Some API features are experiencing issues" ×4 on 2026-07-09, 5–16m each, 3 of
   // them `impact: 'major'` purely because one sub-component read `major_outage`).
   // Anchor every pattern (`^…$`): a substring match would swallow the provider's real, human-written

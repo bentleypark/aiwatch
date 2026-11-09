@@ -352,8 +352,8 @@ export function GroupIncidentItem({ group, lang, t }) {
         <div className={`w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap" style={{ marginBottom: '2px' }}>
-            <div className="text-[12px] font-medium text-[var(--text0)] truncate">
-              {serviceName} — {group.normalizedTitle}
+            <div className="text-[12px] font-medium text-[var(--text0)] line-clamp-2">
+              {serviceName} — {group.heading}
             </div>
             <span
               className="shrink-0 mono bg-[var(--bg3)] text-[var(--text2)]"
