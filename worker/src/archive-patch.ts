@@ -401,6 +401,16 @@ export const ROW_REPLACEMENTS: Record<string, RowReplacement> = {
     ],
     add: [],
   },
+  '2026-07-langsmith-duplicates': {
+    period: '2026-07',
+    service: 'langsmith',
+    source: 'https://global.status.smith.langchain.com/gcp-us/incidents/{id} serves 01KXKGA4RTCXFYEN8GW6K569VJ (Elevated Errors in Fleet) and 01KXKGA8JHKV6AH3FAA9SYBWDT (Ingestion is delayed); the two ids below return the generic page a made-up id returns (#1937)',
+    remove: [
+      '01KX23AZC62RE7TRMYA4PV48V9',
+      '01KXC3QFPZEJAFQ4TJGC94RNRD',
+    ],
+    add: [],
+  },
 }
 
 const isCanonicalUtc = (s: string) => {
