@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SCORE_BADGE_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
-import { PILL_CLASS } from '../components/StatusPill'
+import { PILL_CLASS } from '../utils/statusDisplay'
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../index.css'), 'utf8')
 

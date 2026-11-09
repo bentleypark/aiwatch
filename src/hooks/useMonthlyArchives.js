@@ -56,23 +56,17 @@ export function fetchArchive(month) {
 
 /**
  * @param {string[]} months  e.g. ['2026-02', '2026-03', '2026-04']
- * @returns {{archives: Record<string, object>, loading: boolean}}
+ * @returns {{archives: Record<string, object>}}
  */
 export function useMonthlyArchives(months) {
   const [archives, setArchives] = useState({})
-  const [loading, setLoading] = useState(false)
   // Identity-stable key for the dependency — months array is recomputed on every render
   // by the consumer's useMemo, so a length+content fingerprint avoids spurious effect runs.
   const key = months.join(',')
 
   useEffect(() => {
-    if (!months.length) {
-      setArchives({})
-      setLoading(false)
-      return
-    }
+    if (!months.length) return
     let cancelled = false
-    setLoading(true)
     Promise.all(months.map(m => fetchArchive(m).then(a => [m, a])))
       .then(pairs => {
         if (cancelled) return
@@ -81,12 +75,11 @@ export function useMonthlyArchives(months) {
           if (a) obj[m] = a
         }
         setArchives(obj)
-        setLoading(false)
       })
     return () => { cancelled = true }
   // months.join already encodes the array; React doesn't need to inspect months itself.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
-  return { archives, loading }
+  return { archives }
 }

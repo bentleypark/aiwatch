@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { orderServicesForTicker, tickerClassesFor } from '../TickerBar'
+import { orderServicesForTicker, tickerClassesFor } from '../../utils/ticker'
 import { SERVICE_CATEGORIES } from '../../utils/constants'
 
 // #658 — the header ticker scrolls services in the dev-audience category order

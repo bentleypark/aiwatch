@@ -16,7 +16,7 @@ import { buildCalendarFromIncidents, calendarDaysOf, incidentsOnOperationalDays 
 import { groupIncidents } from '../utils/incidentGrouping'
 import { buildBadgeMarkdown } from '../utils/badge'
 import { compareGroupedRows, dominantGroupStatus, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
-import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
+import { SCORE_TEXT_CLASS, feedUrlOf, NO_SERVICES } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMinShown } from '../utils/recovery'
 import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
@@ -776,7 +776,7 @@ export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
   const { services: rawServices, loading, error, probe24h, probeServiceIds, refresh, recentlyRecovered, securityAlerts, reportFeed } = usePolling()
-  const services = rawServices ?? []
+  const services = rawServices ?? NO_SERVICES
   const [reportOpen, setReportOpen] = useState(false)
 
   // useMemo must be called before any early returns (Rules of Hooks)
@@ -788,15 +788,12 @@ export default function ServiceDetails({ serviceId }) {
   }, [services, serviceId])
 
   // Incident History preview/expand (#incident-history-collapse): show the first
-  // INCIDENT_HISTORY_PREVIEW grouped rows, reveal the rest behind a toggle. Reset when the
-  // viewed service changes (the component stays mounted across in-app service navigation).
+  // INCIDENT_HISTORY_PREVIEW grouped rows, reveal the rest behind a toggle.
   const [historyExpanded, setHistoryExpanded] = useState(false)
-  useEffect(() => { setHistoryExpanded(false) }, [serviceId])
 
   // Security Alerts preview/expand (#785): same first-SECURITY_PREVIEW + toggle pattern as the
   // incident history, so a service with many findings doesn't dump them all. Reset on service change.
   const [securityExpanded, setSecurityExpanded] = useState(false)
-  useEffect(() => { setSecurityExpanded(false) }, [serviceId])
 
   if (loading && services.length === 0) return <ServiceDetailsSkeleton />
   if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />

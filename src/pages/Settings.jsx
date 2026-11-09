@@ -160,7 +160,9 @@ export default function Settings({ focus } = {}) {
     didFocusScrollRef.current = true
     scrollToAlerts()
   }, [focus, rawServices, scrollToAlerts])
-  useEffect(() => {
+  const [prevSettings, setPrevSettings] = useState(settings)
+  if (settings !== prevSettings) {
+    setPrevSettings(settings)
     setPeriod(settings.period)
     setSla(settings.sla)
     setEnabledServices(settings.enabledServices)
@@ -170,7 +172,7 @@ export default function Settings({ focus } = {}) {
     setAlertServices(settings.alertServices)
     setAlertIncidents(settings.alertIncidents)
     setAlertMaintenance(settings.alertMaintenance)
-  }, [settings])
+  }
 
   // Auto-dismiss the subscription error so a stale failure message doesn't linger forever (the user
   // reported it staying on screen). Editing the URL clears it immediately too (input onChange below);

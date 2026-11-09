@@ -39,5 +39,5 @@ export function useModalDialog(dialogRef, isOpen, onClose) {
       dialog.removeEventListener('click', handleClick)
       document.body.style.overflow = ''
     }
-  }, [isOpen])
+  }, [isOpen, dialogRef])
 }

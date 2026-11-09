@@ -35,14 +35,18 @@ export default function ReportModal({ isOpen, onClose, services, presetServiceId
   const descRef = useRef(null)
 
   // Reset when (re)opened; honor a preset and reflect a prior report for it.
-  useEffect(() => {
-    if (!isOpen) return
-    const initial = presetServiceId ?? ''
-    setSvcId(initial)
-    setCategory('outage')
-    setDesc('')
-    setState(initial && hasReportedToday(initial) ? 'already' : 'idle')
-  }, [isOpen, presetServiceId])
+  const sessionKey = isOpen ? (presetServiceId ?? '') : null
+  const [prevSessionKey, setPrevSessionKey] = useState(null)
+  if (sessionKey !== prevSessionKey) {
+    setPrevSessionKey(sessionKey)
+    if (isOpen) {
+      const initial = presetServiceId ?? ''
+      setSvcId(initial)
+      setCategory('outage')
+      setDesc('')
+      setState(initial && hasReportedToday(initial) ? 'already' : 'idle')
+    }
+  }
 
   async function submit() {
     if (!svcId || state === 'sending') return

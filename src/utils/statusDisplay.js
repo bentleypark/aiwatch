@@ -65,3 +65,28 @@ export function isDisplayOperational(service) {
   const display = displayStatusOf(service)
   return display === 'operational' || display === 'partial'
 }
+
+/** #1233 — the worst DISPLAY state across a grouped incident's services.
+ *
+ *  Three outcomes, not two. The old form asked `some(s => s.status !== 'operational') ? 'degraded'`,
+ *  which labelled an unreadable source as an outage; replacing that test alone left an all-unreadable
+ *  group falling through to `'operational'` and rendering GREEN — trading a false outage for a false
+ *  all-clear. Every arm reads the DISPLAY state, so this cannot disagree with the pill beside it.
+ *
+ *  Exported because it was previously an inline ternary inside the render, which no test could reach. */
+export function groupWorstStatus(svcs) {
+  if (svcs.some(s => displayStatusOf(s) === 'down')) return 'down'
+  if (svcs.some(isDisplayAffected)) return 'degraded'
+  if (svcs.some(s => displayStatusOf(s) === 'unknown')) return 'unknown'
+  return 'operational'
+}
+
+export const PILL_CLASS = {
+  operational: 'bg-[var(--status-bg-green)]  text-[var(--green)]',
+  // #722 — intermediate "Partial" state (yellow), distinct from degraded (amber).
+  // 4-step gradient: operational(green) → partial(yellow) → degraded(amber) → down(red).
+  partial:     'bg-[var(--status-bg-yellow)] text-[var(--yellow-text)]',
+  degraded:    'bg-[var(--status-bg-amber)]  text-[var(--amber)]',
+  down:        'bg-[var(--status-bg-red)]    text-[var(--red)]',
+  unknown:     'bg-[var(--bg3)] text-[var(--text2)]', // #689 — status source inactive: can't confirm
+}
