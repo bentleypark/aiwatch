@@ -3,7 +3,7 @@
 import { useId, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useModalDialog } from '../hooks/useModalDialog'
-import { isDisplayAffected, displayStatusOf } from '../utils/statusDisplay'
+import { isDisplayAffected, displayStatusOf, groupWorstStatus } from '../utils/statusDisplay'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
 import { recoveryLine, scopeLine } from '../utils/predictionAccuracy'
 import { hasLiveIncident, readsResolved } from '../utils/liveIncident'
@@ -16,21 +16,6 @@ function timeAgo(date, lang) {
   if (mins < 60) return lang === 'ko' ? `${mins}분 전` : `${mins}m ago`
   const hrs = Math.floor(mins / 60)
   return lang === 'ko' ? `${hrs}시간 전` : `${hrs}h ago`
-}
-
-/** #1233 — the worst DISPLAY state across a grouped incident's services.
- *
- *  Three outcomes, not two. The old form asked `some(s => s.status !== 'operational') ? 'degraded'`,
- *  which labelled an unreadable source as an outage; replacing that test alone left an all-unreadable
- *  group falling through to `'operational'` and rendering GREEN — trading a false outage for a false
- *  all-clear. Every arm reads the DISPLAY state, so this cannot disagree with the pill beside it.
- *
- *  Exported because it was previously an inline ternary inside the render, which no test could reach. */
-export function groupWorstStatus(svcs) {
-  if (svcs.some(s => displayStatusOf(s) === 'down')) return 'down'
-  if (svcs.some(isDisplayAffected)) return 'degraded'
-  if (svcs.some(s => displayStatusOf(s) === 'unknown')) return 'unknown'
-  return 'operational'
 }
 
 export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAccuracy, services, onClose }) {

@@ -730,7 +730,11 @@ export default function Overview() {
   }, [reportFeed, allServices])
 
   // Reset status filter when category changes
-  useEffect(() => { setFilter('all') }, [categoryFilter])
+  const [prevCategoryFilter, setPrevCategoryFilter] = useState(categoryFilter)
+  if (categoryFilter !== prevCategoryFilter) {
+    setPrevCategoryFilter(categoryFilter)
+    setFilter('all')
+  }
 
   // Apply sidebar category filter
   const categoryIds = SERVICE_CATEGORIES[categoryFilter]?.ids

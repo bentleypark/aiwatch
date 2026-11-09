@@ -21,6 +21,7 @@ import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
 import { trackEvent } from '../utils/analytics'
 import { INCIDENT_PERIODS } from '../utils/hashRoute'
+import { NO_SERVICES } from '../utils/constants'
 import { rowHighlight } from '../utils/rowHighlight'
 
 const toReferenceRow = (r) => ({
@@ -336,7 +337,7 @@ export function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSel
 export default function Incidents({ filters } = {}) {
   const { t, lang } = useLang()
   const { services: rawServices, loading, error, refresh } = usePolling()
-  const services = rawServices ?? []
+  const services = rawServices ?? NO_SERVICES
 
   const [serviceFilter, setServiceFilter] = useState(filters?.service ?? 'all')
   const [statusFilter,  setStatusFilter]  = useState('all')

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PRESET_BRANDED, SLUG_BRANDED } from '../Statusline.jsx'
+import { PRESET_BRANDED, SLUG_BRANDED } from '../../utils/statuslinePresets'
 
 // #918 — server-side rendering: the presets are now thin `curl … || true` snippets
 // that hit `/api/statusline/<preset>` (the Worker renders the final string). This pins

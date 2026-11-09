@@ -753,6 +753,22 @@ test.describe('Incident History — preview + show-more (#incident-history-colla
     await expect(main.getByRole('button', { name: /Show 2 more|2개 더 보기/ })).toBeVisible()
   })
 
+  test('an expanded history collapses again after navigating to another service', async ({ page }) => {
+    const other = { ...svc(sevenIncidents.map((inc, i) => ({ ...inc, id: `o${i}`, title: `Other history item ${i}` }))), id: 'openai', name: 'OpenAI API', provider: 'OpenAI' }
+    const mock = { json: { services: [svc(sevenIncidents), other], lastUpdated: new Date().toISOString() } }
+    await page.route('**/api/status**', (route) => route.fulfill(mock))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mock))
+    await page.goto('/#claude')
+    const main = page.locator('main')
+    await expect(main.getByText('Unique history item 0')).toBeVisible({ timeout: 20000 })
+    await main.getByRole('button', { name: /Show 2 more|2개 더 보기/ }).click()
+    await expect(main.getByText('Unique history item 6')).toBeVisible()
+    await page.evaluate(() => { window.location.hash = '#openai' })
+    await expect(main.getByText('Other history item 0')).toBeVisible()
+    await expect(main.getByText('Other history item 5')).toHaveCount(0)
+    await expect(main.getByRole('button', { name: /Show 2 more|2개 더 보기/ })).toBeVisible()
+  })
+
   test('exactly 6 rows: "Show 1 more", and the toggle stays as "Show less" once expanded (hiddenCount→0 branch)', async ({ page }) => {
     await mount(page, sevenIncidents.slice(0, 6))
     const main = page.locator('main')

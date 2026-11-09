@@ -59,6 +59,8 @@ export const SERVICE_AND_APP_IDS = [
 // All service IDs
 export const ALL_SERVICE_IDS = [...SERVICE_AND_APP_IDS, ...AGENT_SERVICE_IDS]
 
+export const NO_SERVICES = Object.freeze([])
+
 // Sidebar category filters — splits Worker's 'api' into LLM vs Voice/Inference
 // Order is dev-audience-first (#658): LLM APIs → Coding Agents → Voice → Inference & Infra →
 // Video → AI Apps. The dashboard's primary audience is developers/infra, who check LLM-API and

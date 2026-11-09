@@ -6,17 +6,7 @@
 // take server-side, and the shape that made `unknown` render green in TickerBar.
 
 import { useLang } from '../hooks/useLang'
-import { resolveStatusDisplay } from '../utils/statusDisplay'
-
-export const PILL_CLASS = {
-  operational: 'bg-[var(--status-bg-green)]  text-[var(--green)]',
-  // #722 — intermediate "Partial" state (yellow), distinct from degraded (amber).
-  // 4-step gradient: operational(green) → partial(yellow) → degraded(amber) → down(red).
-  partial:     'bg-[var(--status-bg-yellow)] text-[var(--yellow-text)]',
-  degraded:    'bg-[var(--status-bg-amber)]  text-[var(--amber)]',
-  down:        'bg-[var(--status-bg-red)]    text-[var(--red)]',
-  unknown:     'bg-[var(--bg3)] text-[var(--text2)]', // #689 — status source inactive: can't confirm
-}
+import { resolveStatusDisplay, PILL_CLASS } from '../utils/statusDisplay'
 
 export default function StatusPill({ status = 'operational', partialCount = 0, sourceDead = false, sourceUnknown = false }) {
   const { t } = useLang()

@@ -173,7 +173,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
 
     }) // ensureChart
     return () => { cancelled = true; if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
-  }, [hasData, hourlyData])
+  }, [hasData, hourlyData, services])
 
   return (
     <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">

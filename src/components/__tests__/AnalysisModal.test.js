@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupWorstStatus } from '../AnalysisModal'
+import { groupWorstStatus } from '../../utils/statusDisplay'
 
 // #1233 — the modal's group header dot. The original expression was two-valued
 // (`some(s => s.status !== 'operational') ? 'degraded' : 'operational'`), so a service whose status
