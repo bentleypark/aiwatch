@@ -501,7 +501,7 @@ describe('#1104 filterByComponentStatus — an open incident tagged onto our bad
 
 // The pure-function block above cannot see whether `componentIds` ever REACH that gate in production,
 // nor whether an impact whose window has ENDED still yields one — and that second fact is the premise
-// the whole fix rests on (#1093 is queued to read more out of these very records). Both are
+// the whole fix rests on. Both are
 // invisible to it, so drive the real chain: HTML → attachIncidentIoComponentIds → filterIncidents →
 // filterByComponentStatus → ServiceStatus.incidents (the #966/#940 tested-twin rule).
 describe('#1104 fetchService — the REAL production call path, with a CLOSED impact window', () => {
@@ -551,7 +551,7 @@ describe('#1104 fetchService — the REAL production call path, with a CLOSED im
 
   it('an ENDED impact window still yields the component id — the premise the keep stands on', async () => {
     // Pins `parseIncidentIoIncidentComponentIds` ignoring `end_at`. If a future "only current impacts"
-    // refactor (#1093 reads these same records) starts filtering on it, componentIds goes empty, the
+    // refactor starts filtering on it, componentIds goes empty, the
     // keep silently stops firing, and #1104 returns — with every other test in this file still green.
     const svc = await fetchOpenai(html)
     expect(svc.incidents.find((i) => i.id === INC)?.componentIds).toContain(IMAGES)

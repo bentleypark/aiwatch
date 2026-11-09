@@ -2121,7 +2121,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   }
 
   // Refresh TTL on existing AI analyses / re-analyze missing ones (max 2 per cron)
-  // monitoring = "recovery confirmed, verifying" — treat as inactive (no TTL refresh)
+  // A service whose only open incidents are `monitoring` is skipped here: no TTL refresh, no first analysis.
   const activeServices = scored.filter(s =>
     (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
   )
