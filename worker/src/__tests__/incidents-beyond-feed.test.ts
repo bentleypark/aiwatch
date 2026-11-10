@@ -206,6 +206,7 @@ describe('fetchAllServices runs the record fill, before the operator layers', ()
       const { raw } = await fetchAllServices(kv as never, [])
       const cursor = raw.find((s) => s.id === 'cursor')!
       expect(cursor.feedDepthStart).toBe(ago(25))
+      expect(cursor.feedDepthGap).toEqual({ gapHoursInWindow: 0, oldestUpdatedAt: ago(25) })
       expect(cursor.incidentsBeyondFeed?.map((i) => i.id)).toEqual(['older'])
       expect(cursor.incidents.some((i) => i.id === 'older')).toBe(false)
     } finally {

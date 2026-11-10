@@ -133,6 +133,11 @@ export interface ServiceComponent {
 
 export type PlacementSource = 'page-structure' | 'models-fallback' | 'configured'
 
+export interface FeedDepthGap {
+  gapHoursInWindow: number
+  oldestUpdatedAt: string
+}
+
 export interface ServiceStatus {
   id: string
   name: string
@@ -179,6 +184,8 @@ export interface ServiceStatus {
   // #1614 — the oldest page-wide row of a capped Statuspage-compatible `incidents.json`
   // (`cappedFeedDepthStart`). Absent when the feed returned its whole history.
   feedDepthStart?: string
+  // #1618 — `cappedFeedDepthGap`.
+  feedDepthGap?: FeedDepthGap
   // #1406 — `aistudioHistoryStart`, then `carryForwardIncidentHistoryStart`.
   incidentHistoryStart?: string
   incidentHistoryCarriedFrom?: string

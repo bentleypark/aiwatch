@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
+import { fetchAllServices, recordFeedDepthGaps, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
 import { edgeFallbackLead } from './edge-fallback-text'
@@ -2207,6 +2207,8 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
       console.warn('[cron] #1118 announced-but-gone check did not run (key listing or evaluation failed)')
     }
   }
+
+  await recordFeedDepthGaps(env.STATUS_CACHE, scored, Date.now())
 
   const operational = scored.filter(s => s.status === 'operational').length
   // #1233 — `issues` used to be `total − operational`, which silently counted an unreadable source as
