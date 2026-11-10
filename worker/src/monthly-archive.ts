@@ -95,6 +95,8 @@ export interface MonthlyIncidentEntry {
   // Bounded and self-limiting — it stops once the incident resolves or reaches the prune threshold —
   // and only on services that are already the noisy ones. Accepted, not overlooked.
   missedRuns?: number
+  // #1951 — `incidentIds.length` when `missedRuns` went from absent to 1. Same lifetime as `missedRuns`.
+  idsBankedAtFirstMiss?: number
 }
 
 export interface MonthlyServiceData {
@@ -468,7 +470,7 @@ export const PHANTOM_PRUNE_AFTER_MISSED_RUNS = 3
  *  `archive:monthly:{YYYY-MM}` the reports site reads. A phantom sitting at `missedRuns: 2` at month
  *  rollover would otherwise freeze an internal counter into an immutable public snapshot forever. */
 export function stripInternalFields(e: MonthlyIncidentEntry): MonthlyIncidentEntry {
-  const { missedRuns: _missedRuns, ...rest } = e
+  const { missedRuns: _missedRuns, idsBankedAtFirstMiss: _idsBankedAtFirstMiss, ...rest } = e
   return rest
 }
 
@@ -640,7 +642,7 @@ export function prunePhantomIncidents(
       const orderable = isIsoish(e.startedAt)
 
       if (e.finalStatus === 'resolved' || seen || hidden || !orderable) {
-        if (e.missedRuns !== undefined) { delete e.missedRuns; svcTouched = true }
+        if (e.missedRuns !== undefined) { delete e.missedRuns; delete e.idsBankedAtFirstMiss; svcTouched = true }
         nextDetails.push(e)
         continue
       }
@@ -648,7 +650,7 @@ export function prunePhantomIncidents(
       // Reset the counter too: the threshold means N runs of CONFIDENT absence, and a hold is not
       // one. Without the reset a phantom whose older live sibling ages out freezes mid-count forever.
       if (oldestLiveStart === null || !(oldestLiveStart < e.startedAt)) {
-        if (e.missedRuns !== undefined) { delete e.missedRuns; svcTouched = true }
+        if (e.missedRuns !== undefined) { delete e.missedRuns; delete e.idsBankedAtFirstMiss; svcTouched = true }
         if (oldestLiveStart !== null) onHold?.({ svcId, id: String(e.id), title: e.title, startedAt: e.startedAt, oldestLiveStart })
         nextDetails.push(e)
         continue
@@ -666,6 +668,7 @@ export function prunePhantomIncidents(
       }
       console.log(`[monthly-archive] #975 phantom candidate ${svcId}/${e.id} missing ${misses}/${PHANTOM_PRUNE_AFTER_MISSED_RUNS} runs`)
       e.missedRuns = misses
+      if (misses === 1) e.idsBankedAtFirstMiss = svc.incidentIds.length
       svcTouched = true
       nextDetails.push(e)
     }

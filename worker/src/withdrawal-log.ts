@@ -52,6 +52,8 @@ export interface WithdrawalLogEntry {
   threadOpened?: boolean
   /** #1189 — a 🟢 resolved notice went out for this id. */
   closedByResolved?: true
+  /** #1951 — `WithdrawnIncident.republishedAs`. */
+  republishedAs?: string
 }
 
 /** Month-keyed so the value stays small and a month can be read without scanning the others.
@@ -122,7 +124,7 @@ export function upsertPrunedRows(
     if (seen.has(key)) continue
     seen.add(key)
     const opened = threadOpened.get(w.incId)
-    merged.push({ svcId: w.svcId, incId: w.incId, title: w.title, startedAt: w.startedAt, prunedAt: w.prunedAt, ...(opened === undefined ? {} : { threadOpened: opened }) })
+    merged.push({ svcId: w.svcId, incId: w.incId, title: w.title, startedAt: w.startedAt, prunedAt: w.prunedAt, ...(opened === undefined ? {} : { threadOpened: opened }), republishedAs: w.republishedAs })
   }
   if (merged.length > WITHDRAWAL_LOG_MAX) {
     // Name what is being erased, and single out the rows that were never announced: those are

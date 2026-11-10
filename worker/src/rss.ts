@@ -9,12 +9,12 @@ import type { ServiceStatus, Incident } from './types'
 import { isAffectedStatus } from './status-verdict'
 import { escapeXml } from './badge'
 import { getGroupedFallbacks, formatFallbackGroups } from './fallback'
-import { defuseAutolinkDomain, WITHDRAWN_NOTE, FAMILY_OF_SERVICE, OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S, mergedAlertName } from './alerts'
+import { defuseAutolinkDomain, WITHDRAWN_NOTE, REPUBLISHED_NOTE, FAMILY_OF_SERVICE, OWN_DETECTION_LAG_MS, ALERTED_NEW_TTL_S, mergedAlertName } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { recoveryBaselineText, type RecoveryBaseline } from './recovery-baseline-text'
 import { appendStatusHint, appendUtm, isNonReliabilityAdvisory, isResolvedWithoutEnd, formatDuration, severityEmoji, impactLabel } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
-import { withdrawalHold, liveIncidentIds, type WithdrawnIncident } from './withdrawn'
+import { withdrawalHold, liveIncidentIds, republishedIncidentIds, type WithdrawnIncident } from './withdrawn'
 import { pageIncidents } from './incident-presence'
 
 const SITE = 'https://ai-watch.dev'
@@ -411,7 +411,7 @@ export function feedAgeText(startedAt: string, firstSeen: string | undefined): s
 function descHtml(
   service: ServiceStatus,
   inc: Incident,
-  opts: { kind: ItemKind; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string },
+  opts: { kind: ItemKind; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string; republished?: boolean },
 ): string {
   const isResolved = opts.kind === 'resolved'
   const latest = inc.timeline.length > 0 ? inc.timeline[inc.timeline.length - 1] : null
@@ -425,7 +425,9 @@ function descHtml(
   // KEEP THIS RETURN FIRST — everything below reads fields the synthesized tombstone incident only
   // has placeholder values for. A new block added ABOVE it would silently render those placeholders.
   if (opts.kind === 'withdrawn') {
-    return `<p>⚪ <strong>Withdrawn by the provider</strong></p>\n<p>${escHtml(WITHDRAWN_NOTE)}</p>`
+    return opts.republished
+      ? `<p>⚪ <strong>Entry changed by the provider</strong></p>\n<p>${escHtml(REPUBLISHED_NOTE)}</p>`
+      : `<p>⚪ <strong>Withdrawn by the provider</strong></p>\n<p>${escHtml(WITHDRAWN_NOTE)}</p>`
   }
 
   if (isResolved) {
@@ -507,7 +509,7 @@ function itemXml(
   service: ServiceStatus,
   inc: Incident,
   incidentServices: Map<string, Array<{ id: string; name: string; provider: string }>>,
-  opts: { kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string },
+  opts: { kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string; republished?: boolean },
 ): string {
   const isResolved = opts.kind === 'resolved'
   const isWithdrawn = opts.kind === 'withdrawn'
@@ -529,7 +531,7 @@ function itemXml(
   // The Discord alert's title shapes (alerts.ts). #1106 — "Withdrawn" never "Resolved": the event word
   // is the whole point of the item.
   const isAdvisory = isNonReliabilityAdvisory(inc.title)
-  const event = isWithdrawn ? 'Incident Withdrawn'
+  const event = isWithdrawn ? (opts.republished ? 'Incident Entry Changed' : 'Incident Withdrawn')
     : isResolved ? (isAdvisory ? 'Advisory cleared' : `Incident Resolved${inc.duration ? ` (${inc.duration})` : ''}`)
     : isAdvisory ? 'Advisory' : 'New Incident'
   const title = defuseAutolinkDomain(`${emoji} ${lead} — ${event}`)
@@ -622,7 +624,7 @@ export function buildFeedWithMeta(
   // item (guid `aiwatch:svc:inc:resolved`, green). The guid flips on resolution, so RSS readers /
   // Slack /feed re-notify the recovery — without ever showing a contradictory "🔴 … resolved"
   // base row. Sort by each item's own pubDate (resolution time for resolved items).
-  type Entry = { svc: ServiceStatus; incident: Incident; kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string }
+  type Entry = { svc: ServiceStatus; incident: Incident; kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis; ageText?: string; republished?: boolean }
   const items: Entry[] = []
   const countedAnywhere = new Set(services.flatMap((s) => (s.incidents ?? []).map((i) => i.id)))
   for (const svc of sources) {
@@ -700,6 +702,7 @@ export function buildFeedWithMeta(
   // starvation the Discord half avoids by ordering withdrawals last. A retraction is never more
   // urgent than a live outage; the surplus stays in the roster and lands on a later poll.
   const liveIds = liveIncidentIds(services)
+  const republishedIds = republishedIncidentIds(withdrawn ?? [], liveIds)
   let withdrawalItems = 0
   for (const w of withdrawn ?? []) {
     const svc = sources.find((s) => s.id === w.svcId)
@@ -718,6 +721,7 @@ export function buildFeedWithMeta(
       incident: { id: w.incId, title: w.title, status: 'investigating', impact: null, startedAt: w.startedAt, duration: null, timeline: [] },
       kind: 'withdrawn',
       pubDate: w.prunedAt,
+      republished: republishedIds.has(w.incId),
     })
   }
   // All-services feed (#520): collapse a multi-surface incident (one incidentId across Claude API /
@@ -741,7 +745,7 @@ export function buildFeedWithMeta(
     opts.scope === 'service' ? `/feed/${feedSlug(opts.service.id)}` : '/feed.xml'
 
   const itemsXml = capped
-    .map((e) => itemXml(e.svc, e.incident, incidentServices, { kind: e.kind, pubDate: e.pubDate, fallbackText: e.fallbackText, analysis: e.analysis, ageText: e.ageText }))
+    .map((e) => itemXml(e.svc, e.incident, incidentServices, { kind: e.kind, pubDate: e.pubDate, fallbackText: e.fallbackText, analysis: e.analysis, ageText: e.ageText, republished: e.republished }))
     .join('\n')
 
   // #860 — content-derived feed timestamp. `capped` is sorted pubDate-DESC, so
