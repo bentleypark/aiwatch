@@ -2236,7 +2236,7 @@ import { generateOgSvg } from './og'
 import { detectRedditPosts, isRedditScanTick, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, promoteReason, promoteStatusGate, promoteJoinReading, promoteIncidentWindows, matchPromoteIncident, gatePromotes, buildPromoteRecord, PROMOTE_RECORD_TTL_SEC, readRedditSourceDead, type PromoteJoinReading, type PromoteIncidentWindow } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, appendSecurityMonthly, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
-import { buildDailySummary, isInSummaryWindow } from './daily-summary'
+import { buildDailySummary, isInSummaryWindow, readWithheldMonitoring } from './daily-summary'
 import { parseFailKey, parseParseFailDay, reasonsFor } from './parse-failure-log'
 import { collectChangelogs, readStaleSourcesCounted } from './changelog'
 import { runProviderChanges } from './provider-changes'
@@ -4613,6 +4613,8 @@ const workerExport = {
               console.warn(`[daily-summary] archive health check could not read archive:monthly:${shortArchivePeriod} — no verdict today:`, err instanceof Error ? err.message : err)
             }
 
+            const withheldMonitoring = await readWithheldMonitoring(env.STATUS_CACHE, dailyServices, now.getTime())
+
             const description = buildDailySummary({
               services: dailyServices,
               aiUsage,
@@ -4648,6 +4650,7 @@ const workerExport = {
               pluginTraffic,
               reportCounts,
               archiveHealth,
+              withheldMonitoring,
             })
 
             // #986 — mirror today's consent-free growth counters into the permanent monthly series.
