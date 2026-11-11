@@ -43,6 +43,30 @@ is the *procedure* — follow it top to bottom.
 ## Per-issue steps (follow in order)
 
 0. **Re-read this skill + the issue.** `gh issue view N` — note every checklist item.
+0.5. **Definition-change check (#1963).** Before branching, write one line to the user:
+   `정의 변경: 예|아니오 — "<quote from the issue body>"`.
+   - **예** = the issue changes the definition of a value AIWatch publishes: what a metric counts, what is
+     included or excluded, how a status is decided. Making a value faster, displaying it, refactoring or
+     observing it is **아니오**.
+   - **On 예, offer one design review of the issue body before coding; never run it unasked.** Offer it
+     as a statement, not a question: `EGM 설계 리뷰(약 $5)를 하려면 "설계 리뷰"라고 답해 주세요.`
+   - **On the user's yes, run it the way #1963 measured it**: headless through `claude -p` (the EGM skills
+     refuse model invocation), in a throwaway worktree of `origin/main` in the scratchpad, with the Bash
+     tool's `run_in_background` (one measured run took 11 min):
+     ```bash
+     git worktree add --detach <scratchpad>/egm-wt origin/main && cd <scratchpad>/egm-wt
+     git clone --depth 1 https://github.com/google/elephant-goldfish-model <scratchpad>/egm-plugin
+     gh issue view N --json body --jq .body > design_N.md
+     claude -p "/egm:egm-review design_N.md Step: uninterrupted. GoldfishContext: []. Headless run: never stop for input." \
+       --plugin-dir <scratchpad>/egm-plugin --add-dir <scratchpad>/egm-plugin \
+       --allowedTools "Read Grep Glob Write Agent Bash(ls:*) Bash(grep:*) Bash(wc:*) Bash(find:*)" \
+       --permission-mode acceptEdits --max-budget-usd 10 --output-format json > <scratchpad>/egm-run.json
+     ```
+     Copy the `*_report.md` files out, then `git worktree remove --force <scratchpad>/egm-wt`.
+   - **Act on the 🔴 Blocker items of `consolidated_review_report.md` only.**
+   - **Record the judgement now**, 예 or 아니오, as one line in the memory page
+     `project_egm_design_review_trial`; on 예, fill its Blocker field once the Blockers are acted on, or
+     with `미실행` if the user declined.
 1. **Branch** from main: `git checkout main && git pull && git checkout -b {type}/{N}-{desc}`
    (`type` ∈ fix/feat/refactor/docs/chore/test). Even issue-less free-form changes get a branch —
    never commit to main. Before committing, `git status` must show **only** the intended files
@@ -191,6 +215,8 @@ is the *procedure* — follow it top to bottom.
    - Avoid stray `close|fix|resolve #N` keywords for issues you don't mean to close (auto-close trigger).
 9. **Verify Vercel Preview** (frontend) from the PR.
 10. **Merge** (gate #3): `gh pr merge --squash --delete-branch`.
+    - **Fill this issue's line in `project_egm_design_review_trial` (#1963)**: the count of design-class
+      findings (a rule's semantics, or a missed consumer) in review rounds R3 and later.
     - Deploy: Vercel auto-deploys on main merge; **Worker is manual** — `npm run deploy:worker` (confirm
       output says `Uploaded aiwatch-worker`), once, after user approval. If several worker PRs are open,
       merge + resolve all THEN deploy once (no half-deploys).
