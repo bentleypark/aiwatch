@@ -81,6 +81,15 @@ for (const shell of shells) {
     ])
   })
 
+  test(`[${via}] a recovery is announced when sort leaves its -o target untouched on empty input`, async () => {
+    const res = await run([CLAUDE_DOWN, ALL_CLEAR], { ...opts, sortKeepsEmptyTarget: true })
+    assert.ok(res.sortSkippedWrites > 0, 'the sort shim never skipped a write, so this run did not reproduce the uutils behaviour')
+    assert.deepEqual(res.lines, [
+      '🔴 Claude API is down (AIWatch)',
+      '✅ Claude API has recovered (AIWatch)',
+    ])
+  })
+
   test(`[${via}] only the service that changed is named`, async () => {
     const res = await run([
       downList([['down', 'Claude API'], ['degraded', 'OpenAI API']]),

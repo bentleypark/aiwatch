@@ -175,6 +175,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  * @param opts.truncateSortAt 1-based index of a `sort` call, across the whole run, that should
  *                          truncate its `-o` target and THEN fail. Four `sort` calls per poll, in
  *                          order: `$aff`, `$unk`, `$listed`, and the `owed` commit.
+ * @param opts.sortKeepsEmptyTarget make `sort -o` leave its target untouched when every input is
+ *                          empty, as uutils `sort` 0.12 does.
  * @param opts.failCommAt   1-based index of a `comm` call that should fail (silently, exit 1) across
  *                          the whole run. Poll 1 calls `comm` three times in order: `-12` (carry),
  *                          `-13` (the 🔴 set), `-23` (the ✅ set).
@@ -202,8 +204,11 @@ export async function runMonitor(polls, opts = {}) {
         throw new TypeError(`poll ${i + 1}: expected a body string, httpStatus(...), or null — got ${JSON.stringify(entry)}`)
       }
     })
-    if (opts.isolatedPath && (opts.truncateSortAt || opts.failCommAt)) {
-      throw new TypeError('isolatedPath cannot be combined with truncateSortAt/failCommAt')
+    if (opts.isolatedPath && (opts.truncateSortAt || opts.failCommAt || opts.sortKeepsEmptyTarget)) {
+      throw new TypeError('isolatedPath cannot be combined with truncateSortAt/failCommAt/sortKeepsEmptyTarget')
+    }
+    if (opts.truncateSortAt && opts.sortKeepsEmptyTarget) {
+      throw new TypeError('truncateSortAt cannot be combined with sortKeepsEmptyTarget')
     }
     if (!opts.isolatedPath || opts.isolatedPath.curl) {
       const curl = join(dir, 'bin', 'curl')
@@ -237,6 +242,22 @@ if [ "$n" = "${opts.truncateSortAt}" ]; then
   exit 1
 fi
 exec /usr/bin/sort "$@"
+`)
+      chmodSync(sort, 0o755)
+    }
+    if (opts.sortKeepsEmptyTarget) {
+      const sort = join(dir, 'bin', 'sort')
+      writeFileSync(sort, `#!/bin/sh
+prev=
+out=
+for a in "$@"; do
+  case "$prev" in -o) out=$a; prev=; continue ;; esac
+  case "$a" in -*) prev=$a; continue ;; esac
+  [ -s "$a" ] && exec /usr/bin/sort "$@"
+  prev=
+done
+printf '%s\\n' "$out" >> "$(dirname "$0")/../sortskipped"
+exit 0
 `)
       chmodSync(sort, 0o755)
     }
@@ -372,6 +393,9 @@ exec /usr/bin/comm "$@"
       // Temp files the SCRIPT created and did not clean up. Non-empty after a signalled stop means
       // the EXIT trap did not run.
       leakedTempFiles: readdirSync(scriptTmp),
+      sortSkippedWrites: opts.sortKeepsEmptyTarget
+        ? readFileSync(join(dir, 'sortskipped'), { encoding: 'utf8', flag: 'a+' }).split('\n').filter((l) => l !== '').length
+        : 0,
       // One entry per curl invocation, each the argv it received.
       requests: readFileSync(join(dir, 'argv'), 'utf8')
         .split('--\n')
