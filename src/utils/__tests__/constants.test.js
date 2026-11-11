@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { API_TIER, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK, isSpecializedSubTier, CAPABILITY_TIER, COMPONENT_CAPABILITY, CAPABILITY_PROVIDERS } from '../constants'
+import { API_TIER, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, SERVICE_IDS_BY_CATEGORY, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK, isSpecializedSubTier, CAPABILITY_TIER, COMPONENT_CAPABILITY, CAPABILITY_PROVIDERS } from '../constants'
 
 // #646 — the Overview renders one section per SERVICE_CATEGORIES bucket (llm/agents/voice/inference/
 // video/apps, #658). Its render has a defensive "other" catch-all for any service no bucket claims,
@@ -36,6 +36,14 @@ describe('SERVICE_CATEGORIES partitions ALL_SERVICE_IDS (#646 Overview sections)
 
   it('the section buckets cover every service in ALL_SERVICE_IDS (no leftover, no extra)', () => {
     expect([...sectionIds].sort()).toEqual([...ALL_SERVICE_IDS].sort())
+  })
+})
+
+describe('SERVICE_IDS_BY_CATEGORY (Settings lists follow the category order)', () => {
+  it('is the category buckets flattened in section order', () => {
+    const expected = ['llm', 'agents', 'voice', 'inference', 'observability', 'video', 'image', 'apps']
+      .flatMap((key) => SERVICE_CATEGORIES[key].ids)
+    expect(SERVICE_IDS_BY_CATEGORY).toEqual(expected)
   })
 })
 

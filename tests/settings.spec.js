@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js'
-import { waitForDataLoad, navigateToSettings } from './helpers.js'
+import { waitForDataLoad, navigateToSettings, navigateVia } from './helpers.js'
 
 test.describe('Settings', () => {
   test.beforeEach(async ({ page }) => {
@@ -125,6 +125,65 @@ test.describe('Settings', () => {
     await expect(saveBtn).toBeDisabled()
     await page.locator('main button').filter({ hasText: '30' }).first().evaluate((el) => el.click())
     await expect(saveBtn).toBeEnabled()
+  })
+})
+
+test.describe('Settings — monitored services persistence', () => {
+  test('a service switched off and saved stays off after navigating away and back, and after a reload', async ({ page }) => {
+    await page.goto('/')
+    await page.evaluate(() => localStorage.clear())
+    await page.reload()
+    await waitForDataLoad(page)
+    const cards = page.getByTestId('service-card')
+    const claudeCard = cards.filter({ has: page.getByText('Claude API', { exact: true }) })
+    await expect(claudeCard).toHaveCount(1)
+
+    await navigateToSettings(page)
+    const main = page.locator('main')
+    await expect(main.getByText('General')).toBeVisible()
+    await main.getByRole('button', { name: /Monitored Services|모니터링/ }).click()
+    const row = main.locator('div', { has: page.getByText('Claude API', { exact: true }) }).filter({ has: page.getByRole('switch') }).last()
+    await row.getByRole('switch').click()
+    await main.locator('button').filter({ hasText: /저장|Save/ }).first().click()
+
+    await navigateVia(page, /Overview|개요/)
+    await expect(cards.first()).toBeVisible()
+    await expect(claudeCard).toHaveCount(0)
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('aiwatch-settings')).disabledServices)).toContain('claude')
+
+    await page.reload()
+    await expect(cards.first()).toBeVisible()
+    await expect(claudeCard).toHaveCount(0)
+  })
+})
+
+test.describe('Settings — monitored services order', () => {
+  test('Monitored Services lists LLM APIs first and AI Apps last, like the sidebar categories', async ({ page }) => {
+    await page.goto('/')
+    await page.evaluate(() => localStorage.clear())
+    await page.reload()
+    await waitForDataLoad(page)
+    await navigateToSettings(page)
+    const main = page.locator('main')
+    await main.getByRole('button', { name: /Monitored Services|모니터링/ }).click()
+    const names = main.getByRole('switch').locator('xpath=preceding-sibling::div[1]//span[2]')
+    await expect(names.first()).toHaveText('Claude API')
+    await expect(names.last()).toHaveText('Grok Bot')
+  })
+
+  test('Alert Targets "Custom" picker follows the same order: LLM, then agents, then voice', async ({ page }) => {
+    await page.goto('/')
+    await page.evaluate(() => localStorage.clear())
+    await page.reload()
+    await waitForDataLoad(page)
+    await navigateToSettings(page)
+    const main = page.locator('main')
+    await main.locator('button').filter({ hasText: /^Custom$/ }).evaluate((el) => el.click())
+    await expect(main.getByText(/Alert services \(\d+\/\d+\)/)).toBeVisible()
+    const y = async (name) => (await main.getByText(name, { exact: true }).boundingBox()).y
+    const [llm, agent, voice] = [await y('Claude API'), await y('Claude Code'), await y('ElevenLabs')]
+    expect(llm).toBeLessThan(agent)
+    expect(agent).toBeLessThan(voice)
   })
 })
 

@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
-import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS, ALL_SERVICES_FEED_URL } from '../utils/constants'
+import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, SERVICE_IDS_BY_CATEGORY, DEFAULT_SETTINGS, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { slackInstallUrl } from '../../api/_shared/slack-install'
@@ -15,6 +15,8 @@ import { subscribeWebhook, updateWebhookFilters, unsubscribeWebhook, getLocalSub
 // ── Styles matching design mockup ────────────────────────
 
 const sectionTitleStyle = { fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text2)', letterSpacing: '0.12em', textTransform: 'uppercase', paddingBottom: '8px', borderBottom: '1px solid var(--border)', marginBottom: '2px' }
+
+const MONITORED_IDS_BY_CATEGORY = SERVICE_IDS_BY_CATEGORY.filter((id) => !AGENT_SERVICE_IDS.includes(id))
 
 const STATUS_DOT_CLASS = {
   operational: 'bg-[var(--green)]',
@@ -420,7 +422,7 @@ export default function Settings({ focus } = {}) {
             <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
               {t('settings.monitoring.desc')}
             </div>
-            {SERVICE_AND_APP_IDS.map((id) => {
+            {MONITORED_IDS_BY_CATEGORY.map((id) => {
               const svc = svcMap[id]
               const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
               return (
@@ -750,7 +752,7 @@ export default function Settings({ focus } = {}) {
                 {alertServices.length === 0 && (
                   <div className="mono" style={{ fontSize: '10px', color: 'var(--amber)', padding: '0 0 8px' }}>{t('settings.alert.services.empty')}</div>
                 )}
-                {ALL_SERVICE_IDS.map((id) => {
+                {SERVICE_IDS_BY_CATEGORY.map((id) => {
                   const svc = svcMap[id]
                   const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
                   return (
