@@ -3,7 +3,7 @@
 // The fixtures run category order against start order, and include a pair that shares an incident id
 // outside any family (deepseek + deepseekapp) and a family pair with different ids (openai + chatgpt).
 import { describe, it, expect } from 'vitest'
-import { buildAffectedEntries, anchorIncidentOf, issueSort } from '../affectedServices'
+import { buildAffectedEntries, anchorIncidentOf, isEntryExpandable, issueSort } from '../affectedServices'
 
 const H = 3_600_000
 const NOW = Date.parse('2026-11-11T12:00:00Z')
@@ -173,5 +173,27 @@ describe('issueSort', () => {
       svc('c', 'C', 'degraded', [], { aiwatchScore: 40 }),
     ]
     expect([...list].sort(issueSort).map((s) => s.id)).toEqual(['b', 'c', 'a'])
+  })
+})
+
+describe('isEntryExpandable', () => {
+  const step = { stage: 'investigating', text: 'Looking into it', at: ago(2 * H) }
+  const entryOf = (incident) => buildAffectedEntries([svc('x', 'X', 'degraded', incident ? [incident] : [])])[0]
+
+  it('opens only an entry whose incident has timeline steps', () => {
+    expect(isEntryExpandable(entryOf({ ...inc('a', ago(1 * H)), timeline: [step] }))).toBe(true)
+    expect(isEntryExpandable(entryOf(inc('a', ago(1 * H))))).toBe(false)
+  })
+
+  it('does not open an entry that has no incident header', () => {
+    const entry = entryOf(null)
+    expect(entry.incident).toBeNull()
+    expect(isEntryExpandable(entry)).toBe(false)
+  })
+
+  it('does not open an entry whose incident has no timeline field', () => {
+    const { timeline, ...noTimeline } = inc('a', ago(1 * H))
+    expect(timeline).toEqual([])
+    expect(isEntryExpandable(entryOf(noTimeline))).toBe(false)
   })
 })

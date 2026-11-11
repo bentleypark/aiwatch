@@ -162,3 +162,83 @@ describe('#1959 the left stripe', () => {
   })
 })
 
+
+describe('#1959 the incident header opens the timeline', () => {
+  const STEP = { stage: 'identified', text: 'Root cause found in the gateway', at: new Date(Date.now() - 1_800_000).toISOString() }
+  const withTimeline = (id, title) => ({ ...inc(id, title), timeline: [STEP] })
+  const FIXTURE = [
+    svc('openai', 'OpenAI API', 'OpenAI', 'api', 'degraded', [withTimeline('o-1', 'OpenAI latency')]),
+    svc('claude', 'Claude API', 'Anthropic', 'api', 'down', [inc('a-1', 'Anthropic outage')]),
+  ]
+
+  async function mount() {
+    const Overview = await setup(['openai', 'claude'], FIXTURE, 'en')
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await act(async () => { root.render(createElement(Overview)) })
+    const entryOf = (title) => [...container.querySelectorAll('[data-testid="affected-entry"]')].find((e) => e.textContent.includes(title))
+    const cleanup = async () => { await act(async () => { root.unmount() }); container.remove() }
+    return { entryOf, cleanup }
+  }
+
+  it('toggles the timeline on a header click, and a second click closes it', async () => {
+    const { entryOf, cleanup } = await mount()
+    const header = entryOf('OpenAI latency').querySelector('[data-testid="affected-incident-header"]')
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(entryOf('OpenAI latency').querySelector('[data-testid="incident-timeline"]')).toBeNull()
+    await act(async () => { header.click() })
+    expect(header.getAttribute('aria-expanded')).toBe('true')
+    expect(entryOf('OpenAI latency').querySelector('[data-testid="incident-timeline"]').textContent).toContain('Root cause found in the gateway')
+    await act(async () => { header.click() })
+    expect(entryOf('OpenAI latency').querySelector('[data-testid="incident-timeline"]')).toBeNull()
+    await cleanup()
+  })
+
+  it('is a focusable button, and Enter and Space open it without scrolling the page', async () => {
+    const { entryOf, cleanup } = await mount()
+    const header = entryOf('OpenAI latency').querySelector('[data-testid="affected-incident-header"]')
+    expect(header.getAttribute('role')).toBe('button')
+    expect(header.getAttribute('tabindex')).toBe('0')
+    const press = (key) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      header.dispatchEvent(event)
+      return event
+    }
+    for (const key of ['Enter', ' ']) {
+      let event
+      await act(async () => { event = press(key) })
+      expect(event.defaultPrevented).toBe(true)
+      expect(header.getAttribute('aria-expanded')).toBe('true')
+      await act(async () => { press(key) })
+      expect(header.getAttribute('aria-expanded')).toBe('false')
+    }
+    let other
+    await act(async () => { other = press('a') })
+    expect(other.defaultPrevented).toBe(false)
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+    await cleanup()
+  })
+
+  it('leaves a header with no timeline steps inert', async () => {
+    const { entryOf, cleanup } = await mount()
+    const header = entryOf('Anthropic outage').querySelector('[data-testid="affected-incident-header"]')
+    expect(header.getAttribute('role')).toBeNull()
+    expect(header.hasAttribute('aria-expanded')).toBe(false)
+    await act(async () => { header.click() })
+    expect(entryOf('Anthropic outage').querySelector('[data-testid="incident-timeline"]')).toBeNull()
+    await cleanup()
+  })
+
+  it('keeps a member click on the service page, and opening the timeline does not fire it', async () => {
+    const { entryOf, cleanup } = await mount()
+    const entry = entryOf('OpenAI latency')
+    await act(async () => { entry.querySelector('[data-testid="affected-incident-header"]').click() })
+    expect(setPage).not.toHaveBeenCalled()
+    expect(trackEvent).not.toHaveBeenCalled()
+    await act(async () => { entry.querySelector('[data-testid="affected-member"]').click() })
+    expect(trackEvent).toHaveBeenCalledWith('select_service', { service_id: 'openai', location: 'affected_now' })
+    expect(setPage).toHaveBeenCalledWith({ name: 'service', serviceId: 'openai' })
+    await cleanup()
+  })
+})
