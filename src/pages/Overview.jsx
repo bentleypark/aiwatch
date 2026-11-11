@@ -30,7 +30,7 @@ import { showRecoveredChip } from '../utils/liveIncident'
 import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
 import { mergeReferenceRows } from '../utils/referenceIncidents'
-import { buildAffectedEntries, issueSort } from '../utils/affectedServices'
+import { buildAffectedEntries, isEntryExpandable, issueSort } from '../utils/affectedServices'
 import { rowHighlight } from '../utils/rowHighlight'
 import { formatMaintenanceRange, maintenancePhaseKey, maintenanceWindowsOf } from '../utils/maintenance'
 
@@ -451,8 +451,11 @@ export function IncidentItem({ incident, lang, t, hideStatus = false, onInset = 
 // #1959 — the services affected right now, across every category: one entry per shared live incident,
 // newest start first. The category grid below it is unchanged.
 function AffectedEntry({ entry, lang, t, onSelect }) {
+  const [expanded, setExpanded] = useState(false)
   const { incident, members } = entry
   const stateLabel = incident?.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing')
+  const expandable = isEntryExpandable(entry)
+  const toggle = () => setExpanded((v) => !v)
   return (
     <li
       data-testid="affected-entry"
@@ -460,13 +463,38 @@ function AffectedEntry({ entry, lang, t, onSelect }) {
       style={{ borderLeft: `3px solid ${entry.status === 'down' ? 'var(--red)' : 'var(--amber)'}`, padding: '10px 12px' }}
     >
       {incident && (
-        <div style={{ marginBottom: '6px' }}>
-          <div className="text-[12px] font-medium text-[var(--text0)]">{incident.title}</div>
+        <div
+          data-testid="affected-incident-header"
+          {...(expandable ? {
+            role: 'button',
+            tabIndex: 0,
+            'aria-expanded': expanded,
+            onClick: toggle,
+            onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } },
+          } : {})}
+          className={expandable ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]' : undefined}
+          style={expandable ? { padding: '2px 4px', margin: '-2px -4px 6px' } : { marginBottom: '6px' }}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-[12px] font-medium text-[var(--text0)]">{incident.title}</div>
+            {expandable && <span aria-hidden="true" className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>}
+          </div>
           <div className="mono text-[10px] text-[var(--text2)]">
             {t('incidents.time.started')} {formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}
             {' · '}{stateLabel}
             {members.length > 1 && <>{' · '}{t('overview.affected.members').replace('{n}', members.length)}</>}
           </div>
+        </div>
+      )}
+      {expandable && expanded && (
+        <div style={{ marginBottom: '6px' }}>
+          <IncidentTimeline
+            title={incident.title}
+            timeline={incident.timeline}
+            hideHeader
+            t={t}
+            lang={lang}
+          />
         </div>
       )}
       <ul role="list" className="flex flex-col" style={{ gap: '4px' }}>
