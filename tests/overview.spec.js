@@ -23,7 +23,7 @@ test.describe('Overview page', () => {
       'Claude Code', 'GitHub Copilot', 'Cursor', 'Windsurf',
     ]
     for (const name of serviceNames) {
-      await expect(page.locator('main button').filter({ hasText: name }).first()).toBeVisible()
+      await expect(page.getByTestId('service-card').filter({ hasText: name }).first()).toBeVisible()
     }
   })
 
@@ -135,15 +135,15 @@ test.describe('Overview page', () => {
     await tablist.getByRole('tab', { name: /LLM/ }).click()
     await page.locator('main').getByRole('button', { name: /Issues/ }).click()
     await page.waitForTimeout(200)
-    await expect(page.locator('main button').filter({ hasText: 'OpenAI API' }).first()).toBeVisible()
-    await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toHaveCount(0)
+    await expect(page.getByTestId('service-card').filter({ hasText: 'OpenAI API' }).first()).toBeVisible()
+    await expect(page.getByTestId('service-card').filter({ hasText: 'Claude API' })).toHaveCount(0)
 
     // Switching category resets the status filter to All (useEffect on categoryFilter) → the operational
     // agent (Cursor) is visible, which it would NOT be if the Issues filter had persisted.
     await tablist.getByRole('tab', { name: /Coding Agents|코딩 에이전트/ }).click()
     await page.waitForTimeout(200)
-    await expect(page.locator('main button').filter({ hasText: 'Cursor' }).first()).toBeVisible()
-    await expect(page.locator('main button').filter({ hasText: 'Claude Code' }).first()).toBeVisible()
+    await expect(page.getByTestId('service-card').filter({ hasText: 'Cursor' }).first()).toBeVisible()
+    await expect(page.getByTestId('service-card').filter({ hasText: 'Claude Code' }).first()).toBeVisible()
   })
 
   test('card shows latency only for a probed service — never a status-page value (#658, #1633)', async ({ page }) => {
@@ -203,7 +203,8 @@ test.describe('Overview page', () => {
     await page.route('**/api/status/cached', async (route) => { await route.fulfill(bulkLinkedMock) })
     await page.goto('/')
     await waitForDataLoad(page)
-    const entry = page.locator('main').getByText(/Claude Sonnet 4\.5 error spike/).first()
+    // The Recent Incidents row reads "<names> — <title>" (IncidentItem); the Affected now entry shows the bare title.
+    const entry = page.locator('main').getByText(/ — Claude Sonnet 4\.5 error spike/).first()
     await expect(entry).toBeVisible({ timeout: 10000 })
     const entryText = await entry.textContent()
     // All 3 affected service names must appear in the Recent Incidents entry
@@ -227,14 +228,14 @@ test.describe('Overview page', () => {
     await page.goto('/')
     await waitForDataLoad(page)
     // Under default 'all', the app incident shows in Recent Incidents.
-    await expect(page.locator('main').getByText(/ChatGPT app outage 676/).first()).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('main').getByText(/ — ChatGPT app outage 676/).first()).toBeVisible({ timeout: 10000 })
     // Filter to LLM → the ChatGPT card leaves the grid (it's an app)…
     const tablist = page.getByRole('tablist', { name: /Services|서비스/ })
     await tablist.getByRole('tab', { name: /LLM/ }).click()
     await page.waitForTimeout(200)
-    await expect(page.locator('main button').filter({ hasText: 'ChatGPT' })).toHaveCount(0)
+    await expect(page.getByTestId('service-card').filter({ hasText: 'ChatGPT' })).toHaveCount(0)
     // …but its incident is STILL listed in Recent Incidents (cross-category panel, #676).
-    await expect(page.locator('main').getByText(/ChatGPT app outage 676/).first()).toBeVisible()
+    await expect(page.locator('main').getByText(/ — ChatGPT app outage 676/).first()).toBeVisible()
   })
 
   test('Latency Rankings spans all categories — a category filter does not hide other-category latency (#798)', async ({ page }) => {

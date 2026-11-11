@@ -26,7 +26,7 @@ test.describe('Mobile viewport', () => {
 
   test('service cards use compact layout on mobile', async ({ page }) => {
     // Mobile compact: single row with name + metrics
-    const card = page.locator('main button').filter({ hasText: 'Claude API' }).first()
+    const card = page.getByTestId('service-card').filter({ hasText: 'Claude API' }).first()
     await expect(card).toBeVisible()
     // Desktop layout should be hidden at mobile viewport
     const desktopLayout = card.locator('.hidden.md\\:block')

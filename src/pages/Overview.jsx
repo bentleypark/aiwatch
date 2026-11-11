@@ -30,6 +30,7 @@ import { showRecoveredChip } from '../utils/liveIncident'
 import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
 import { mergeReferenceRows } from '../utils/referenceIncidents'
+import { buildAffectedEntries, issueSort } from '../utils/affectedServices'
 import { rowHighlight } from '../utils/rowHighlight'
 import { formatMaintenanceRange, maintenancePhaseKey, maintenanceWindowsOf } from '../utils/maintenance'
 
@@ -447,6 +448,53 @@ export function IncidentItem({ incident, lang, t, hideStatus = false, onInset = 
   )
 }
 
+// #1959 — the services affected right now, across every category: one entry per shared live incident,
+// newest start first. The category grid below it is unchanged.
+function AffectedEntry({ entry, lang, t, onSelect }) {
+  const { incident, members } = entry
+  const stateLabel = incident?.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing')
+  return (
+    <li
+      data-testid="affected-entry"
+      className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg"
+      style={{ borderLeft: `3px solid ${entry.status === 'down' ? 'var(--red)' : 'var(--amber)'}`, padding: '10px 12px' }}
+    >
+      {incident && (
+        <div style={{ marginBottom: '6px' }}>
+          <div className="text-[12px] font-medium text-[var(--text0)]">{incident.title}</div>
+          <div className="mono text-[10px] text-[var(--text2)]">
+            {t('incidents.time.started')} {formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}
+            {' · '}{stateLabel}
+            {members.length > 1 && <>{' · '}{t('overview.affected.members').replace('{n}', members.length)}</>}
+          </div>
+        </div>
+      )}
+      <ul role="list" className="flex flex-col" style={{ gap: '4px' }}>
+        {members.map((svc) => {
+          const [sourceDead, sourceUnknown] = sourceFlagsOf(svc)
+          return (
+            <li key={svc.id}>
+              <button
+                type="button"
+                data-testid="affected-member"
+                onClick={() => onSelect(svc)}
+                className="w-full text-left flex items-center justify-between gap-2 rounded hover:bg-[var(--bg2)] transition-colors"
+                style={{ padding: '6px 8px', minHeight: '32px' }}
+              >
+                <span className="text-[13px] font-medium text-[var(--text0)] truncate min-w-0">
+                  {svc.name}
+                  <span className="mono text-[10px] text-[var(--text2)]" style={{ marginLeft: '8px' }}>{svc.provider}</span>
+                </span>
+                <StatusPill status={svc.status} partialCount={svc.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </li>
+  )
+}
+
 // Latency bar with colored fill per speed tier
 function LatencyBar({ service, maxLatency }) {
   const widthPct = maxLatency > 0 ? Math.round((service.latency / maxLatency) * 100) : 0
@@ -523,7 +571,7 @@ function SupplyChainBanner({ banner, setPage, t }) {
   )
 }
 
-export function ActionBanner({ services, setPage, t }) {
+export function ActionBanner({ services, setPage, t, lang }) {
   // #1004 — filter on the DISPLAY state, not the raw status: an unreadable-source service renders a
   // neutral "Unknown" pill, so it must not also appear here as "Degraded — try X instead" (AIWatch
   // recommending users abandon a service it just admitted it cannot read).
@@ -533,10 +581,10 @@ export function ActionBanner({ services, setPage, t }) {
   const investigating = withActiveIncidents.filter(s => !monitoring.includes(s))
   if (affected.length === 0 && withActiveIncidents.length === 0) return null
 
+  const entries = buildAffectedEntries(services)
+  const selectService = (svc) => { trackEvent('select_service', { service_id: svc.id, location: 'affected_now' }); setPage({ name: 'service', serviceId: svc.id }) }
   const downList = affected.filter(s => displayStatusOf(s) === 'down')
   const degradedList = affected.filter(s => displayStatusOf(s) === 'degraded')
-  const hasDown = downList.length > 0
-  const borderColor = hasDown ? 'var(--red)' : affected.length > 0 ? 'var(--amber)' : 'var(--blue)'
 
   // Render clickable service names
   const renderNames = (list) => list.map((svc, i) => (
@@ -576,15 +624,23 @@ export function ActionBanner({ services, setPage, t }) {
   const categoryGroups = getGroupedFallbacksExcludingRegionSwitchable(affected, services)
 
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '10px 14px', lineHeight: 1.5, borderLeft: `3px solid ${borderColor}` }}>
-      {downList.length > 0 && (
-        <div className="text-[13px] font-medium text-[var(--text0)]">
-          🔴 <span className="text-[var(--red)]">{t('overview.banner.downCount').replace('{n}', downList.length)}</span> {renderNames(downList)}
-        </div>
+    <div
+      data-testid={entries.length > 0 ? 'affected-now' : undefined}
+      className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg"
+      style={{ padding: '10px 14px', lineHeight: 1.5, ...(entries.length === 0 && { borderLeft: '3px solid var(--blue)' }) }}
+    >
+      {entries.length > 0 && (
+        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em', marginBottom: '4px' }}>
+          <span className="text-[var(--red)] font-semibold">//</span>
+          {t('overview.affected.title')}
+          <span className="normal-case" style={{ letterSpacing: 0 }}>· {t('overview.affected.scope')}</span>
+        </h2>
       )}
-      {degradedList.length > 0 && (
-        <div className="text-[13px] font-medium text-[var(--text0)]">
-          ⚠️ <span className="text-[var(--amber)]">{t('overview.banner.degradedCount').replace('{n}', degradedList.length)}</span> {renderNames(degradedList)}
+      {(downList.length > 0 || degradedList.length > 0) && (
+        <div data-testid="affected-summary" className="text-[13px] font-medium text-[var(--text0)]">
+          {downList.length > 0 && <span>🔴 <span className="text-[var(--red)]">{t('overview.affected.down').replace('{n}', downList.length)}</span></span>}
+          {downList.length > 0 && degradedList.length > 0 && ' · '}
+          {degradedList.length > 0 && <span>⚠️ <span className="text-[var(--amber)]">{t('overview.affected.degraded').replace('{n}', degradedList.length)}</span></span>}
         </div>
       )}
       {investigating.length > 0 && (
@@ -702,6 +758,11 @@ export function ActionBanner({ services, setPage, t }) {
       {/* #641 — when there's no fallback recommendation we render nothing here (no
           "No direct fallback available" claim — that's a subjective statement from our
           own incomplete coverage). Region-switch above stays; it's a real alternative. */}
+      {entries.length > 0 && (
+        <ul role="list" className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '8px', marginTop: '10px' }}>
+          {entries.map((entry) => <AffectedEntry key={entry.key} entry={entry} lang={lang} t={t} onSelect={selectService} />)}
+        </ul>
+      )}
     </div>
   )
 }
@@ -774,9 +835,6 @@ export default function Overview() {
   // on the display state while the filter still keyed on the raw status made the Issues badge read 0
   // while the tab rendered 1 card. An unreadable-source service ('unknown') belongs to neither tab — it
   // is neither confirmed-healthy nor confirmed-affected — matching the stat cards.
-  const statusPriority = { down: 0, degraded: 1, partial: 2, operational: 3, unknown: 4 }
-  const issueSort = (a, b) =>
-    (statusPriority[displayStatusOf(a)] - statusPriority[displayStatusOf(b)]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
   const applyStatusFilter = (list) =>
     filter === 'operational' ? list.filter(isDisplayOperational)
     : filter === 'issues'    ? [...list.filter(isDisplayAffected)].sort(issueSort)
@@ -857,7 +915,7 @@ export default function Overview() {
       <ReportModal isOpen={reportOpen} onClose={() => setReportOpen(false)} services={services} />
 
       {/* ── Action Banner (outage fallback) ── */}
-      <ActionBanner services={services} setPage={setPage} t={t} />
+      <ActionBanner services={services} setPage={setPage} t={t} lang={lang} />
 
       {/* ── Recently Resolved Banner ── */}
       {recoveredRows.length > 0 && (
