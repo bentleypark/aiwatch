@@ -206,7 +206,7 @@ describe('buildIncidentAlerts', () => {
 
   // #1039 — the alert path was the ONLY consumer treating `monitoring` as a new outage. Other sites
   // (e.g. `liveAnalysisIncidents` in analysis-reads.ts) filter `!== 'resolved' && !== 'monitoring'`. The dissent shipped a real red
-  // `🔴 OpenAI API — New Incident` for an already-recovering incident on 2026-07-16.
+  // `🔴 OpenAI API — New Incident` for an incident already at `monitoring` on 2026-07-16.
   describe('#1039 — `monitoring` is not a NEW outage', () => {
     const sso = (status: Incident['status']) =>
       inc({ id: 'sso1', title: 'Elevated Error Rates For SSO Login', status, startedAt: recentDate, impact: 'minor' })

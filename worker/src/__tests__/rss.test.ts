@@ -608,8 +608,8 @@ describe('buildRssFeed — active item content is status-invariant (#768)', () =
   })
 
   it('monitoring is the documented exception — AI block dropped (#724), so it differs by design', () => {
-    // The #724 monitoring gate intentionally drops the AI block (recovery confirmed), so the
-    // identified→monitoring transition is a distinct (rare, near-recovery) update — acceptable.
+    // The #724 monitoring gate intentionally drops the AI block, so the
+    // identified→monitoring transition is a distinct update — acceptable.
     expect(descOf(buildAt('identified', 'x'))).toContain('🤖 AI analysis')
     expect(descOf(buildAt('monitoring', 'x'))).not.toContain('🤖 AI analysis')
   })
@@ -812,8 +812,8 @@ describe('buildRssFeed — AI analysis block (#724)', () => {
   })
 
   it('does not render the AI block for a `monitoring` incident even if the map has an entry (rss.ts self-consistent)', () => {
-    // The /feed handler excludes monitoring from the analysis map, but buildRssFeed must enforce it too
-    // (monitoring = recovery confirmed). Guard lives in the tested layer, not only the handler.
+    // The /feed handler excludes monitoring from the analysis map, but buildRssFeed must enforce it too.
+    // Guard lives in the tested layer, not only the handler.
     const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1', status: 'monitoring' })] })], { scope: 'all' }, NOW, analysisMap)
     expect(xml).not.toContain('🤖 AI analysis')
   })

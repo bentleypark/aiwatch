@@ -658,7 +658,7 @@ export function buildFeedWithMeta(
         // #1623 — a synthesized today-row is the one unresolved `status_history` entry; it is never
         // announced, like its resolved form above.
         if (incident.derived === 'status_history') continue
-        // #724 — no AI block for a `monitoring` incident (recovery already confirmed). Gating HERE
+        // #724 — no AI block for a `monitoring` incident. Gating HERE
         // (not only in the /feed handler) keeps rss.ts self-consistent regardless of the map passed.
         const analysis = incident.status === 'monitoring' ? undefined : analysisFor(aiAnalysis, svc.id, incident.id)
         const seen = firstSeen?.[incident.id]
@@ -683,8 +683,7 @@ export function buildFeedWithMeta(
   }
   // #1106 — withdrawal items, synthesized from the tombstone rather than from a live incident: the
   // incident is gone from every live list, which is the whole reason this kind exists.
-  //   - `status: 'investigating'` — NOT `monitoring`, which this file elsewhere reads as "recovery
-  //     already confirmed" (see the #724 gate on the AI block). A tombstone means we never learned an
+  //   - `status: 'investigating'` — a tombstone means we never learned an
   //     outcome, so if any future reader does look at this field, `investigating` is the reading that
   //     doesn't assert the one thing the module exists to refuse. No renderer reads it today.
   //   - `timeline: []` is LOAD-BEARING, not shape-filler: `descHtml` dereferences `inc.timeline`

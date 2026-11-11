@@ -10,8 +10,7 @@ import { hasLiveIncident as spaHasLive } from '../../../src/utils/liveIncident.j
 // mirrors ships a lockstep test, because "deliberate duplicate" and "silent drift" look identical in
 // a diff. This is that test.
 //
-// The specific drift to fear is `monitoring`. Both copies exclude it (provider says recovery is
-// confirmed — the same cut `/api/status/cached` makes when choosing which analyses to send), but
+// The specific drift to fear is `monitoring`. Both copies exclude it, but
 // `hasOngoingIncident` in `worker/src/alerts.ts` and the older SPA code define the opposite cut, so a
 // future edit "fixing" one copy to match those is the likely mistake. If it happens, the dashboard
 // modal and the is-down card give opposite answers about one incident — exactly what #1104 filed.

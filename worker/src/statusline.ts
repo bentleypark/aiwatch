@@ -314,7 +314,7 @@ export type BriefService = ServiceStatus & {
   scoreConfidence?: 'high' | 'medium' | 'low' | null
 }
 
-// The first ongoing incident (resolved/monitoring are done/recovering — excluded),
+// The first ongoing incident (resolved/monitoring — excluded),
 // matching the cached-endpoint active-incident filter.
 function firstActiveIncident(svc: ServiceStatus): Incident | undefined {
   // #1623 — a synthesized today-row's title is ours; it is never quoted as the provider's incident.

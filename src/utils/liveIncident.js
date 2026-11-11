@@ -7,8 +7,7 @@
 // what #1104 filed). This module is the SPA's copy; the Edge is-down template carries `hasLiveIncident`
 // with the same rule (the two surfaces share no module, so it is duplicated deliberately, not by drift).
 //
-// `monitoring` is NOT live: that is the provider confirming recovery, and it is the same cut the worker
-// makes when choosing which analyses to send ("monitoring = recovery confirmed").
+// `monitoring` is NOT live.
 //
 // Deliberately OUT of scope: Overview's "Recently Resolved" BANNER (`buildRecoveredRows`). That row is
 // per-incident and names the incident it resolved, so "this incident recovered" stays true while a

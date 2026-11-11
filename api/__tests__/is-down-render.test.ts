@@ -471,9 +471,7 @@ describe('the analysis card asks the INCIDENT, not the badge (#1104)', () => {
   })
 
   it('a RESOLVED analysis is not re-opened by an unrelated sibling incident', () => {
-    // A `monitoring` sibling is the provider confirming recovery, so it must NOT hold a resolved card
-    // open — `hasLiveIncident` excludes it for the same reason /api/status/cached does when picking
-    // which analyses to send. Pins the cut itself: count `monitoring` as live and this card wrongly
+    // A `monitoring` sibling must NOT hold a resolved card open. Pins the cut itself: count `monitoring` as live and this card wrongly
     // reads "ongoing", printing a live recovery estimate next to its own "✅ Recovered".
     const resolvedInsight = { ...insight, resolvedAt: new Date().toISOString(), startedAt: new Date(Date.now() - 4e6).toISOString() }
     const html = renderPage('junie', { ...base, status: 'operational', incidents: [done, { ...ongoing, id: 'i3', status: 'monitoring' }] } as never, seo, [] as never, resolvedInsight as never)

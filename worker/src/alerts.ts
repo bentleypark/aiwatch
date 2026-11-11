@@ -546,8 +546,7 @@ export function mergedAlertName(names: string[], providers: string[]): string {
  * Build incident alerts (new + resolved) from service data.
  * Does NOT check KV dedup — caller is responsible for filtering already-sent alerts.
  * A new-incident alert requires an ACTIVE incident: `investigating`/`identified`. `monitoring` is
- * excluded (#1039) — the provider has applied a fix, so it is not new; see the branch comment for why
- * silence (rather than a down-classed alert) is what matches every other consumer.
+ * excluded (#1039); see the branch comment.
  * @param alertedNewMap incidentId → set of service ids already alerted for that incident (#545).
  *                      A service is included in a new-incident alert only if it is NOT already in
  *                      its incident's set — so a service joining an already-alerted incident later
@@ -582,8 +581,8 @@ export function buildIncidentAlerts(
       // A service joining an already-alerted incident later still produces its own alert.
       //
       // #1039 — `monitoring` is excluded: Statuspage `monitoring` means the provider APPLIED a fix and
-      // is watching it, so the incident is not NEW. Gating on `!== 'resolved'` alone shipped a real
-      // `🔴 OpenAI API — New Incident` for an already-recovering incident (2026-07-16). Silence, not a
+      // is watching it. Gating on `!== 'resolved'` alone shipped a real
+      // `🔴 OpenAI API — New Incident` for an incident already at `monitoring` (2026-07-16). Silence, not a
       // down-classed alert: the normal path is ALREADY silent here (an incident alerted at
       // `investigating` is in the roster by the time it reaches `monitoring`), so emitting only on a
       // first-sight-at-`monitoring` would invent an alert type reachable solely from the edge case.

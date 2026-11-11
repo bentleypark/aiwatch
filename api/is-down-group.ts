@@ -919,7 +919,7 @@ export default async function handler(req: Request) {
             // display filters below so a long-running outage still gets one. Ranking by date rather
             // than by encounter order matters because this loop runs in `family.members` declaration
             // order while `filterByComponentStatus` keeps a `monitoring` incident after that member's
-            // badge recovers (worker/src/services.ts), so "first" would pick a recovering tail.
+            // badge recovers (worker/src/services.ts), so "first" would pick a `monitoring` tail.
             // An unparseable date never wins, so the token can only name an incident the page could
             // also display — same fail-closed posture as the filter below.
             if (inc.status !== 'resolved') {
