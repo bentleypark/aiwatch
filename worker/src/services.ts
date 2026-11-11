@@ -1,6 +1,6 @@
 // Service status fetching and parsing for all monitored AI services.
 
-import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
+import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel, FeedDepthGap } from './types'
 export type { ServiceStatus } from './types'
 import { recordParseFailure, type ScrapeLegParseFailure, type StatuspageParseFailure } from './parse-failure-log'
 import { fetchTracked, createFetchTracker, launchOrderOf, type FetchTracker, type FetchRunStats, formatDuration, markZeroLengthResolvedIncidentsUnknown, normalizeIncidentTimes, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, trackPartialResolve, trackUptimeReading, UPTIME_MISSING_ALERT_MS, kvPut, isNonReliabilityAdvisory, readTrackingState, writeTrackingStateIfChanged, worstUnresolvedImpact, type StatusSourceReadFailure, type TrackingStateBlob } from './utils'
@@ -2948,10 +2948,12 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       const liveIncidentsActiveOnly = rawIncData === null
       let incidents: Incident[] = []
       let feedDepthStart: string | undefined
+      let feedDepthGap: FeedDepthGap | undefined
       const pageUrls = new Map<string, string>()
       if (rawIncData) {
         incidents = parseIncidents(rawIncData)
         feedDepthStart = cappedFeedDepthStart(rawIncData.incidents ?? [])
+        feedDepthGap = cappedFeedDepthGap(rawIncData.incidents ?? [], Date.now())
         // Build shortlink map: incidentId → detail page URL (used by enrichIncidentIoText)
         for (const inc of rawIncData.incidents ?? []) {
           if (inc.shortlink) pageUrls.set(inc.id, inc.shortlink)
@@ -3390,6 +3392,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         ...(referenceComponents.length > 0 ? { referenceComponents } : {}),
         ...(liveIncidentsActiveOnly ? { liveIncidentsActiveOnly: true as const } : {}),
         ...(feedDepthStart ? { feedDepthStart } : {}),
+        ...(feedDepthGap ? { feedDepthGap } : {}),
         ...(components.length > 0 ? { components } : {}),
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact, dailyImpactComplete } : {}),
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
@@ -4506,6 +4509,49 @@ export function cappedFeedDepthStart(rows: ReadonlyArray<{ created_at?: string }
   if (rows.length < STATUSPAGE_INCIDENTS_MIN_CAP) return undefined
   const times = rows.map((r) => Date.parse(r.created_at ?? '')).filter((t) => Number.isFinite(t))
   return times.length > 0 ? new Date(Math.min(...times)).toISOString() : undefined
+}
+
+const FEED_DEPTH_GAP_WINDOW_MS = 30 * 86_400_000
+
+/** #1618 — the hours of the trailing 30 days between the feed's oldest `created_at` and its oldest
+ *  `updated_at`. */
+export function cappedFeedDepthGap(rows: ReadonlyArray<{ created_at?: string; updated_at?: string }>, nowMs: number): FeedDepthGap | undefined {
+  if (rows.length < STATUSPAGE_INCIDENTS_MIN_CAP) return undefined
+  const times = (field: 'created_at' | 'updated_at') => rows.map((r) => Date.parse(r[field] ?? '')).filter((t) => Number.isFinite(t))
+  const created = times('created_at')
+  const updated = times('updated_at')
+  if (created.length === 0 || updated.length === 0) return undefined
+  const oldestUpdated = Math.min(...updated)
+  return {
+    gapHoursInWindow: Math.round(Math.max(0, oldestUpdated - Math.max(Math.min(...created), nowMs - FEED_DEPTH_GAP_WINDOW_MS)) / 360_000) / 10,
+    oldestUpdatedAt: new Date(oldestUpdated).toISOString(),
+  }
+}
+
+const FEED_DEPTH_GAP_PREFIX = 'feed-depth-gap:'
+const FEED_DEPTH_GAP_TTL_S = 30 * 86_400
+
+/** #1618 — the day's record with any wider gap taken in, or null when no service widened it. */
+export function widerFeedDepthGaps(day: Record<string, FeedDepthGap>, services: ReadonlyArray<Pick<ServiceStatus, 'id' | 'feedDepthGap'>>): Record<string, FeedDepthGap> | null {
+  let next: Record<string, FeedDepthGap> | null = null
+  for (const { id, feedDepthGap } of services) {
+    if (feedDepthGap && (!day[id] || feedDepthGap.gapHoursInWindow > day[id].gapHoursInWindow)) (next ??= { ...day })[id] = feedDepthGap
+  }
+  return next
+}
+
+/** #1618 — keeps each feed's widest gap of the UTC day: a row can leave a capped feed within hours. */
+export async function recordFeedDepthGaps(kv: KVNamespace, services: ReadonlyArray<Pick<ServiceStatus, 'id' | 'feedDepthGap'>>, nowMs: number): Promise<void> {
+  const key = `${FEED_DEPTH_GAP_PREFIX}${new Date(nowMs).toISOString().slice(0, 10)}`
+  let day: Record<string, FeedDepthGap>
+  try {
+    day = JSON.parse((await kv.get(key)) ?? '{}')
+  } catch (err) {
+    console.warn('[cron] #1618 feed depth gap: day record unreadable, skipped:', err instanceof Error ? err.message : err)
+    return
+  }
+  const next = widerFeedDepthGaps(day, services)
+  if (next) await kvPut(kv, key, JSON.stringify(next), { expirationTtl: FEED_DEPTH_GAP_TTL_S })
 }
 
 /** #1614 — AIWatch's own resolved records older than the capped feed reaches, inside the 30-day window.
