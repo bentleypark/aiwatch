@@ -568,8 +568,7 @@ describe('the analysis card asks the INCIDENT, not the badge (#1104)', () => {
   })
 
   it('hasLiveIncident excludes monitoring — the same cut the worker makes for active analyses', () => {
-    // "monitoring = recovery confirmed" (worker index.ts). Counting it as live is what would let a
-    // sibling hold a genuinely resolved card open.
+    // Counting it as live is what would let a sibling hold a genuinely resolved card open.
     expect(hasLiveIncident({ incidents: [done] } as never)).toBe(false)
     expect(hasLiveIncident({ incidents: [{ ...ongoing, status: 'monitoring' }] } as never)).toBe(false)
     expect(hasLiveIncident({ incidents: [ongoing] } as never)).toBe(true)
