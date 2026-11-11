@@ -239,11 +239,12 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      followed by a provider incident is what aiwatch#1778 measures — cite that share only once the generated
      report shows it. Do not set a service's detection count against its status-page incident count as evidence
      the page under-reported.
-   - **Notation conventions — keep uniform report-wide.** Score is **bare `N`**, no `/100` suffix anywhere —
-     Summary, Recommendations, Key Insight, Notable Incidents, Observations all use the same plain form, and
-     a Score change is bare both ends (`86 → 79`, never `86/100 → 79/100`). When a grade rides with a score,
-     **write the grade first with a bare score after it** (e.g. `Good 76`, `Fair 72`) — not `76 (Good)` and
-     not `Good (76)`. A grade word alone is also fine as a tier reference with no number (`reached Excellent`,
+   - **Notation conventions — keep uniform report-wide.** A score carries **no `/100` suffix** anywhere —
+     Summary, Recommendations, Key Insight, Notable Incidents, Observations all use the same form, and a
+     Score change has none on either end (`Good 86 → Fair 74`, never `86/100 → 74/100`). **Every score in
+     prose carries its grade, written first with a bare score after it** (`Good 76`, `Fair 72`, `held
+     Excellent 100`, `the alternative at Good 87`) — never a bare `76`, `Modal (96)`, `76 (Good)` or
+     `Good (76)`. A grade word alone is also fine as a tier reference with no number (`reached Excellent`,
      `the only Degrading grade`). Keep one unit form per kind of quantity — durations (`45h 33m`). The rest of
      the form, in every hand-written section:
      - **Latency**: value, `ms`, then the percentile — `251 ms p50`, never `p50 (193 ms)` or a bare `247 ms`.
@@ -279,10 +280,10 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
    ```bash
    node scripts/lint-narrative-repeats.js NNNN-NN/index.md     # from the checkout holding the draft
    ```
-   It lists every figure (`45h 11m`, `99.97%`, `88 → 56`, `24 of 64`) that appears in 3 or more of
+   It lists every figure (`45h 11m`, `99.97%`, `88 → 56` with or without its grades, `24 of 64`) that appears in 3 or more of
    Summary / Key Insight / Notable Incidents / Observations. For each hit, keep the full telling in one
    section and make the others point at it. A legitimate contrast can stay. Only those four figure
-   shapes are counted — a story retold through a bare Score, a latency or no figure does not show up here.
+   shapes are counted — a story retold through a single score, a latency or no figure does not show up here.
 
 5. **Service-count / category lockstep.** The header line — **both** the count and the category
    breakdown (`Services monitored: 41 — 15 LLM APIs, 6 coding agents, …`) — is **generated**
