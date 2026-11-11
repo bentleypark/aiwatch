@@ -514,7 +514,7 @@ test('browserCacheSteps: a commented-out step or a prose mention is not a cache'
 // installs, never from where, so their parser can be over-broad in the safe direction.
 //
 // Scope, stated as a limit rather than left implicit: these assertions cover `npm ci` only.
-// `npm install --no-save playwright@1.58.2` in deepseek-feed.yml is the same registry-bound class —
+// `npm install --no-save playwright@1.65.0` in deepseek-feed.yml is the same registry-bound class —
 // it reifies the whole root tree, and its step ran 421s in the same window — but it is uncached,
 // unbounded, and sits under an 8m JOB cap that a 421s install nearly reaches on its own. Bounding it
 // without also caching it or raising that cap makes it MORE fragile, and it is a scheduled job that
