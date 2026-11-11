@@ -206,7 +206,7 @@ describe('mergeArchiveIntoMap (no service filter — raw-id dedup mode)', () => 
 
   it('#587 skips frozen investigating/identified archive entries but surfaces resolved + monitoring', () => {
     // investigating/identified have no STATUS_BADGE_CLASS → green-fallback "In Progress" phantom if a
-    // frozen archive-only entry rendered. resolved (green) + monitoring (amber, impact ended) have a
+    // frozen archive-only entry rendered. resolved (green) + monitoring (amber) have a
     // defined badge + real duration → surfaced. A truly-active incident is shown by live instead.
     const liveMap = new Map()
     const archives = { '2026-06': { services: { modal: { incidentList: [

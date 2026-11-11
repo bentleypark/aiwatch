@@ -28,9 +28,7 @@ describe('readsResolved / hasLiveIncident (#1104)', () => {
     expect(readsResolved([svc('operational', [inc('identified')])])).toBe(false)
   })
 
-  it('monitoring is not live — the provider is confirming recovery', () => {
-    // Same cut the worker makes when choosing which analyses to send; counting it as live would keep a
-    // genuinely resolved card open forever.
+  it('monitoring is not live', () => {
     expect(readsResolved([svc('operational', [inc('monitoring')])])).toBe(true)
   })
 

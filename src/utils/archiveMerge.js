@@ -153,7 +153,7 @@ export function mergeArchiveIntoMap(liveMap, archives, services) {
         // and `identified` have no STATUS_BADGE_CLASS entry (they fall back to the green "resolved"
         // style) so an archive-only entry frozen in those states renders a misleading "In Progress"
         // phantom (green badge + "Ongoing" duration); a truly-active incident is already shown by live
-        // /api/status. `resolved` (green) and `monitoring` (amber, impact ended, real duration) have a
+        // /api/status. `resolved` (green) and `monitoring` (amber, real duration) have a
         // defined badge → surfaced.
         if (arch.finalStatus === 'investigating' || arch.finalStatus === 'identified') continue
         const event = arch.crossEventKey ? byEvent.get(arch.crossEventKey) : undefined

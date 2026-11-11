@@ -1682,7 +1682,7 @@ describe('is-down-group.ts — delegated [data-ga] listener, executed (#1243)', 
 
 // #1243 round 2 — the token half of the share URL, executed against the render. Two agents reproduced
 // the same defect here independently: picking the FIRST unresolved incident in member-declaration order
-// hands the card identity to the ordinary post-recovery `monitoring` tail of an older incident on an
+// hands the card identity to the ordinary `monitoring` tail of an older incident on an
 // earlier-declared member (worker/src/services.ts keeps those on purpose), so two successive outages
 // under one tail emit the same `&i=` — the #804 collision the token exists to prevent.
 describe('is-down-group.ts — which incident becomes the card identity (#1243)', () => {
@@ -1693,7 +1693,7 @@ describe('is-down-group.ts — which incident becomes the card identity (#1243)'
 
   it('picks the NEWEST unresolved incident, not the first member that has one', async () => {
     fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
-      // openai is declared first in FAMILY_GROUPS and carries a recovering `monitoring` tail…
+      // openai is declared first in FAMILY_GROUPS and carries a `monitoring` tail…
       { id: 'openai', name: 'OpenAI API', status: 'operational', incidents: [
         { id: 'monitoring-tail', title: 'Elevated errors', status: 'monitoring', startedAt: iso(3 * 3_600_000), duration: null },
       ] },

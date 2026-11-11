@@ -6,7 +6,7 @@ import { analysisKey, type AIAnalysisResult } from './ai-analysis'
 // recovered: keys have 2h TTL, 3h cutoff for safety margin
 export const RECENT_RECOVERY_MS = 3 * 3600_000
 
-// monitoring = "recovery confirmed" — exclude from active analysis display
+// monitoring is excluded from the active analysis display
 export function liveAnalysisIncidents(incidents: Incident[] | undefined): Incident[] {
   return (incidents ?? []).filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
 }

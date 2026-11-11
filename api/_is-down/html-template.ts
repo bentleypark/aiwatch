@@ -905,11 +905,8 @@ type AIInsight = { summary: string; progress?: string; estimatedRecovery: string
 
 /** #1104 — does the service still carry a LIVE incident? NOT the same predicate as the identically
  *  shaped `hasOngoingIncident` in `worker/src/alerts.ts` / `src/pages/ServiceDetails.jsx`, which count
- *  `monitoring` as ongoing — hence the different name. Excludes `monitoring` on purpose: that is the
- *  provider saying recovery is confirmed, and it is the same cut `/api/status/cached` makes when it
- *  decides which analyses to send ("monitoring = recovery confirmed — exclude from active analysis
- *  display"). Matching it is what lets ONE signal answer the card, with no `resolvedAt` override to
- *  contradict it. Exported for the unit test. The worker's #1104 keep did not INVENT
+ *  `monitoring` as ongoing — hence the different name. Excludes `monitoring` on purpose, which is what
+ *  lets ONE signal answer the card with no `resolvedAt` override to contradict it. Exported for the unit test. The worker's #1104 keep did not INVENT
  *  "green badge + live incident" — #970's `impact: none` keep and the `unjudgeable` fail-open already
  *  produced it — it made it ordinary rather than rare, which is what forced every surface to ask the
  *  incident instead of the badge. */
@@ -938,9 +935,8 @@ function renderAIInsight(insight: AIInsight | AIInsight[] | null | undefined, se
   // this card headed "Post-Incident Analysis" a few hundred px above an incident row that its own
   // `inc.status` renders as "Investigating".
   //
-  // ONE signal, matching the worker's own reading. `hasLiveIncident` excludes `monitoring` for the
-  // same reason /api/status/cached does when it picks which analyses to send ("monitoring = recovery
-  // confirmed"), so a monitoring sibling cannot hold a genuinely resolved card open. Do NOT add "…or
+  // ONE signal. `hasLiveIncident` excludes `monitoring`, so a monitoring sibling cannot hold a
+  // genuinely resolved card open. Do NOT add "…or
   // every insight carries `resolvedAt`" as an override: the recovered-analysis branch fires whenever
   // the ACTIVE branch produced nothing (not when nothing is active), so a card can legitimately hold
   // only resolved analyses while a live incident is on the page — an analysis whose KV write lost the
@@ -1691,9 +1687,9 @@ export function renderIncidents(service: ServiceData | null): string {
   // — and this page's own header still cited it as "Last incident … (ongoing)" directly above "No
   // incidents in the last 7 days".
   //
-  // The QUALIFIER uses `isLive`, the cut `hasLiveIncident` and the AI card share. `monitoring` is the
-  // provider confirming recovery, so calling it "still open" in the heading would contradict the card
-  // above, which heads that same incident "Post-Incident Analysis".
+  // The QUALIFIER uses `isLive`, the cut `hasLiveIncident` and the AI card share: calling a `monitoring`
+  // incident "still open" in the heading would contradict the card above, which heads that same
+  // incident "Post-Incident Analysis".
   const isLive = (inc: { status?: string }) => inc.status !== 'resolved' && inc.status !== 'monitoring'
   const inWindow = (inc: { startedAt: string }) => new Date(inc.startedAt).getTime() >= cutoff
   const recent = incidents.filter((inc) => inc.status !== 'resolved' || inWindow(inc)) as GroupingIncident[]
