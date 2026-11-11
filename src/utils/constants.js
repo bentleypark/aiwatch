@@ -93,6 +93,9 @@ export function categoryRankOf(id) {
   return r === -1 ? Infinity : r
 }
 
+// Every monitored service in category order — for lists that show them flat (Settings).
+export const SERVICE_IDS_BY_CATEGORY = RANKABLE_CATEGORY_KEYS.flatMap((k) => SERVICE_CATEGORIES[k].ids)
+
 
 // #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a
 // fallback (Analyze modal / Overview ActionBanner), so an outage-moment visitor can ACT on the
