@@ -244,8 +244,22 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      a Score change is bare both ends (`86 → 79`, never `86/100 → 79/100`). When a grade rides with a score,
      **write the grade first with a bare score after it** (e.g. `Good 76`, `Fair 72`) — not `76 (Good)` and
      not `Good (76)`. A grade word alone is also fine as a tier reference with no number (`reached Excellent`,
-     `the only Degrading grade`). Keep one unit form per kind of quantity — durations, latencies (`45h 33m`,
-     `2030 ms p75`). Same value → identical notation in EN and the KO mirror. This has drifted before (an
+     `the only Degrading grade`). Keep one unit form per kind of quantity — durations (`45h 33m`). The rest of
+     the form, in every hand-written section:
+     - **Latency**: value, `ms`, then the percentile — `251 ms p50`, never `p50 (193 ms)` or a bare `247 ms`.
+     - **Counts**: digits for a nonzero count — `6 incidents`, `3 services`, not `six incidents`. A thousands
+       comma on a count (`1,958`); none on a latency (`2030 ms`), as the latency tables print it.
+     - **Service names**: never shortened from the name the report's tables print, in headings, possessives
+       and the KO mirror too — `Luma (Dream Machine)`, `Black Forest Labs (FLUX)`, `Fireworks AI's`.
+     - **Uptime source**: the column's value as printed — `Official`, `Platform`, `No uptime` (`the Official
+       alternative`, `99.97% uptime (Platform)`).
+     - **Cross-references**: `— see [Section](#anchor)` in EN, `(<a href="#anchor">Section</a> 참고)` in KO. A
+       Notable Incidents item is `item 4` / `4번`, never `#4`, which reads as an issue number.
+     - **KO mirror**: the same value in the same form, with only the units translated — `65h 32m` →
+       `65시간 32분`, a score `58` → `58점` (`Fair 58점`), incidents `N건`, services `N곳`. Grade words,
+       service names and section names stay in English.
+
+     This has drifted before (an
      older `N/100` form in Summary was dropped without this rule being updated at the time) — if a future
      report's notation looks like it no longer matches this bullet, that is a cue to update the rule, not to
      silently follow whichever form feels current.
