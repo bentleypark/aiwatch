@@ -9,7 +9,7 @@ const svc = (status, incidents = []) => ({ id: 'openai', status, incidents })
 const inc = (status, id) => ({ id: id ?? `i-${status}`, status })
 
 describe('readsResolved / hasLiveIncident (#1104)', () => {
-  it('hasLiveIncident: only an unclosed incident counts', () => {
+  it('hasLiveIncident: only a live incident counts', () => {
     expect(hasLiveIncident(svc('operational', [inc('identified')]))).toBe(true)
     expect(hasLiveIncident(svc('operational', [inc('monitoring')]))).toBe(false)
     expect(hasLiveIncident(svc('operational', [inc('resolved')]))).toBe(false)

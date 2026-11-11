@@ -9,7 +9,7 @@ import en from '../../locales/en'
 // The dashboard's dev fallback is THREE hand-maintained fixtures that reference each other by id:
 // `MOCK_SERVICES[].incidents[].id` ← `MOCK_AI_ANALYSIS[svc][].incidentId` and ← `MOCK_RECENTLY_RECOVERED[svc][]`.
 // Nothing checked those references, so a fixture could be internally impossible — an analysis for an
-// incident that does not exist, a recovery marker on an incident that is still open, two fixtures on
+// incident that does not exist, a recovery marker on an `investigating` incident, two fixtures on
 // two different clocks — and the only symptom was a WRONG-LOOKING SCREEN. That is the worst possible
 // failure mode for this file, because its entire job is to be the thing you look at when verifying a
 // UI change: you cannot tell a product bug from a fixture ghost, and the person doing the
@@ -24,9 +24,8 @@ const svcById = new Map(MOCK_SERVICES.map((s) => [s.id, s]))
 const incidentsOf = (svcId) => svcById.get(svcId)?.incidents ?? []
 const findIncident = (svcId, incId) => incidentsOf(svcId).find((i) => i.id === incId)
 const allAnalyses = Object.entries(MOCK_AI_ANALYSIS).flatMap(([svcId, arr]) => arr.map((a) => ({ svcId, a })))
-// `monitoring` counts as finished: AnalysisModal's own `hasActiveInc` excludes it alongside
-// `resolved`, so "mitigated, still monitoring, recovery marker written" is a state the UI supports.
-const FINISHED = ['resolved', 'monitoring']
+// AnalysisModal's own `hasActiveInc` excludes `monitoring` alongside `resolved`, so "mitigated, still monitoring, recovery marker written" is a state the UI supports.
+const RESOLVED_OR_MONITORING = ['resolved', 'monitoring']
 
 describe('the corpus these rules read is non-empty', () => {
   // Every rule below is a loop over the fixtures, so its PASSING STATE IS ITS DEFAULT: empty out the
@@ -40,7 +39,7 @@ describe('the corpus these rules read is non-empty', () => {
 
   it('MOCK_AI_ANALYSIS carries analyses, including a resolved one', () => {
     expect(allAnalyses.length).toBeGreaterThan(0)
-    // The `resolvedAt` rules — grading, baseline, and "incident must be finished" — need a resolved
+    // The `resolvedAt` rules — grading, baseline, and "incident must be `resolved` or `monitoring`" — need a resolved
     // analysis to have anything to read.
     expect(allAnalyses.filter(({ a }) => a.resolvedAt).length).toBeGreaterThan(0)
   })
@@ -143,17 +142,17 @@ describe('MOCK_AI_ANALYSIS references resolve', () => {
     }
   })
 
-  it('never marks an analysis resolved while its incident is still in progress', () => {
+  it('never marks an analysis resolved unless its incident is `resolved` or `monitoring`', () => {
     for (const { svcId, a } of allAnalyses.filter(({ a }) => a.resolvedAt)) {
       const inc = findIncident(svcId, a.incidentId)
-      expect({ svcId, incidentId: a.incidentId, found: !!inc, finished: FINISHED.includes(inc?.status) })
-        .toEqual({ svcId, incidentId: a.incidentId, found: true, finished: true })
+      expect({ svcId, incidentId: a.incidentId, found: !!inc, resolvedOrMonitoring: RESOLVED_OR_MONITORING.includes(inc?.status) })
+        .toEqual({ svcId, incidentId: a.incidentId, found: true, resolvedOrMonitoring: true })
     }
   })
 
   it('marks the analysis of a resolved incident as resolved too', () => {
     // The inverse, and a one-line edit away: flip an incident to `resolved` and forget its analysis,
-    // and AnalysisModal keeps rendering the LIVE `Est. Recovery` line on a finished incident — plus,
+    // and AnalysisModal keeps rendering the LIVE `Est. Recovery` line on a resolved incident — plus,
     // once the service itself reads operational, the amber "부분 이슈 / Isolated issue" badge, whose
     // `isolatedModelIssue` condition includes `analyses.some(a => !a.resolvedAt)`.
     for (const { svcId, a } of allAnalyses) {
@@ -244,13 +243,13 @@ describe('MOCK_RECENTLY_RECOVERED references resolve', () => {
     }
   })
 
-  it('never marks an incident recovered while it is still in progress', () => {
-    // An incident cannot be simultaneously in progress and recently recovered. Crafting that state
-    // puts a "Recently Resolved" banner above an "Investigating" row and reads as a product bug.
+  it('never marks an incident recovered unless it is `resolved` or `monitoring`', () => {
+    // Crafting an `investigating` incident with a recovered marker puts a "Recently Resolved" banner
+    // above an "Investigating" row and reads as a product bug.
     for (const [svcId, incIds] of Object.entries(MOCK_RECENTLY_RECOVERED)) {
       for (const incId of incIds) {
         const status = findIncident(svcId, incId)?.status
-        expect({ svcId, incId, status, finished: FINISHED.includes(status) }).toEqual({ svcId, incId, status, finished: true })
+        expect({ svcId, incId, status, resolvedOrMonitoring: RESOLVED_OR_MONITORING.includes(status) }).toEqual({ svcId, incId, status, resolvedOrMonitoring: true })
       }
     }
   })

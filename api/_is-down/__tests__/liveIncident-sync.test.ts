@@ -24,7 +24,7 @@ describe('hasLiveIncident Edge↔SPA parity (#1104)', () => {
     ['monitoring + resolved', svc(['monitoring', 'resolved'])],
     ['identified', svc(['identified'])],
     ['investigating among resolved', svc(['resolved', 'investigating'])],
-    ['the #1104 state — one live, the rest closed', svc(['identified', 'resolved', 'monitoring'])],
+    ['the #1104 state — one live, the rest not live', svc(['identified', 'resolved', 'monitoring'])],
     ['empty incident list', svc([])],
     ['undefined status', svc([undefined])],
     ['no incidents key', {}],

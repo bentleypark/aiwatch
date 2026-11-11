@@ -13,7 +13,7 @@
 // per-incident and names the incident it resolved, so "this incident recovered" stays true while a
 // sibling is open. Only the service-level chip and pill are claims this rule can falsify.
 
-/** Does this service still carry an incident the provider has not closed?
+/** Does this service still carry a live incident?
  *
  *  `Array.isArray`, not `?? []`: a malformed cached payload with a non-array truthy `incidents` would
  *  otherwise throw `.some is not a function` INSIDE a React render and take the page down. The Edge
