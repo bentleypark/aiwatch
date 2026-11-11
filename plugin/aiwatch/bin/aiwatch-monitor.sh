@@ -163,6 +163,7 @@ poll() {
   # `-o` rather than `>` so the shell does not truncate the file before `sort` has read it.
   sort -u -o "$aff" "$aff" || return 0
   sort -u -o "$unk" "$unk" || return 0
+  : > "$listed" || return 0
   sort -u -o "$listed" "$aff" "$unk" || return 0
   comm -12 "$owed" "$unk" > "$carry" || return 0
 

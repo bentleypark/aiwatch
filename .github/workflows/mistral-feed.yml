@@ -61,7 +61,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/pw"
           cd "$RUNNER_TEMP/pw"
           npm init -y > /dev/null
-          npm install --no-save playwright@1.58.2
+          npm install --no-save playwright@1.65.0
 
       - name: Scrape status.mistral.ai + push to Worker
         run: |
