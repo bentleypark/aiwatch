@@ -22,7 +22,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | Event | Parameters | Location | Purpose |
 |---|---|---|---|
 | `page_view` | `page_title`, `service_id?` | App.jsx | SPA page transition |
-| `select_service` | `service_id` | Overview (card click) | Service card click |
+| `select_service` | `service_id`, `location` (`affected_now`; absent on a card click) | Overview (card click · Affected now member click) | Service click from the Overview |
 | `view_service` | `service_id` | Sidebar (service list) | Sidebar service click |
 | `view_incident` | `incident_id` | Incidents page | Incident detail open |
 | `fallback_click` | `from_service`, `to_service`, `location` | ActionBanner, Is X Down | Fallback recommendation click (internal → the alternative's is-down/detail page) |

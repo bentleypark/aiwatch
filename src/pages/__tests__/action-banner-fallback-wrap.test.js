@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 // fallback-line structure under test.
 vi.mock('../../components/RssCopyIcon', () => ({ default: () => null }))
 vi.mock('../../components/SlackInstallLink', () => ({ default: () => null }))
+vi.mock('../../components/StatusPill', () => ({ default: () => null }))
 
 // #903 — the mobile ActionBanner "Suggested fallback" line clipped the trailing
 // "Open ↗" pill on narrow widths because the inter-item separator ", " was rendered

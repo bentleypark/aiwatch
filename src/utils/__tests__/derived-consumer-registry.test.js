@@ -79,6 +79,7 @@ const APPLIERS = {
   'src/utils/incidentSort.js': 'getContextualTime flags dayOnly so the anchor is never minute-precise',
   'src/utils/incidentGrouping.js': 'never flap-grouped (a group range carries no dayOnly)',
   'src/utils/incidentNote.js': 'a status_history row gets incidents.derived.note, tested ahead of both startUnknown populations',
+  'src/utils/affectedServices.js': 'anchorIncidentOf skips a status_history row: a still-open today-row (#1623) carries an estimated startedAt, so it never orders or dates an Affected now entry (#1959)',
   'api/_is-down/html-template.ts': 'date precision + excluded from the "average recovery time" line',
   'api/_is-down/incident-grouping.ts': 'never flap-grouped — SSR mirror of the SPA rule',
   'api/is-down-group.ts': 'says "down Xh that day", not "resolved after Xh"',
@@ -234,6 +235,7 @@ const RB_SAFE = {
   'worker/src/daily-summary.ts': 'reads the first non-resolved incident for DISPLAY in the daily Discord summary — showing it as ongoing is the accepted trade, not a freshness bug (verified live, round 7/8 sweeps)',
   'worker/src/statusline.ts': 'reads the first non-resolved incident for DISPLAY on the CLI status line — same accepted trade as daily-summary.ts',
   'src/utils/liveIncident.js': 'the shared SPA "still carrying a live incident?" display predicate — no push/alert capability lives in the frontend',
+  'src/utils/affectedServices.js': 'a display ordering over the open incidents on a card; it makes no freshness judgment, and no push/alert capability lives in the frontend (#1959)',
   'src/utils/regionStatus.js': 'active-incidents-only DISPLAY helper — matches the accepted KNOWN LIMIT 1 trade',
   'src/utils/constants.js': 'reads no incident field since #1191 — worker/src/fallback.ts hasActiveIncident (an RB applier) does. Matches only through JSDoc mentions',
   'api/_is-down/region-status.ts': 'Edge SSR mirror of regionStatus.js — same DISPLAY reasoning',
@@ -367,6 +369,7 @@ const SU_SAFE = {
   'worker/src/latest-report.ts': 'copies the archive\'s already-computed downtime total (#1711); it derives no elapsed time itself',
   'worker/src/report.ts': 'active incidents only',
   'src/utils/liveIncident.js': 'the shared "still carrying a live incident?" predicate — active only',
+  'src/utils/affectedServices.js': 'reads `startedAt` only to order open incidents and derives no elapsed time; a startUnknown row is resolved by construction, so it is never an anchor (#1959)',
   'src/utils/regionStatus.js': 'active incidents only',
   'src/utils/constants.js': 'reads no incident field since #1191; matches only through JSDoc mentions',
   'api/_is-down/region-status.ts': 'active incidents only',
@@ -457,7 +460,7 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 86 → 87: #1797 added worker/src/late-resolution.ts, which matches live resolved incidents to a past month's archive rows.
     // 87 → 88: #887 added worker/src/sitemap-feed.ts, which takes a service's latest incident instant as its sitemap lastmod.
     // 89 → 90: #1938 added worker/src/reissued-duplicates.ts, which names a possible duplicate pair in the archive-ready notice; SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(90)
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(91)
   })
 
   it('leaves none unclassified', () => {
@@ -511,7 +514,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(90)
+    expect(all.length).toBe(91)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -557,7 +560,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(90)
+    expect(all.length).toBe(91)
   })
 
   it('leaves none unclassified for startUnknown', () => {
