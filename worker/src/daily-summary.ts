@@ -1,7 +1,8 @@
 // Daily Summary — expanded Discord report at UTC 09:00 (KST 18:00)
 
-import type { ServiceStatus } from './types'
+import type { Incident, ServiceStatus } from './types'
 import { isAffectedStatus, isUnreadableStatus } from './status-verdict'
+import { sanitize } from './utils'
 import type { ProbeSnapshot } from './probe'
 import type { VitalsDaily } from './vitals'
 import { formatVitalsSection } from './vitals'
@@ -15,7 +16,7 @@ import { enrichLedger, formatEnrichLedger, timedOutAttribution, type AiUsageCoun
 import { formatDropLine, type DropCount } from './drop-log'
 import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth, type Guard3HoldRecord } from './monthly-archive'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
-import { FAMILY_OF_SERVICE } from './alerts'
+import { ALERTED_NEW_TTL_S, FAMILY_OF_SERVICE, parseAlertedRoster } from './alerts'
 import type { HistoryClickCounts } from './history-click'
 import { clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from './api-traffic'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts, FeedTrafficCounts, FeedPollsByTarget } from './api-traffic'
@@ -179,6 +180,101 @@ export interface DailySummaryData {
   // `null`/absent = no verdict — the archive is fine, OR it could not be read, which is logged rather
   // than rendered because an unread archive supports no claim in either direction.
   archiveHealth?: ArchiveHealth | null
+  /** #1091 — services with no New Incident alert for a `monitoring` incident. */
+  withheldMonitoring?: WithheldMonitoringItem[] | null
+}
+
+const WITHHELD_WINDOW_MS = 86_400_000
+const WITHHELD_MAX_LINES = 3
+const WITHHELD_NAMES_MAX = 48
+
+export interface MonitoringCandidate { incId: string; svcIds: string[]; names: string[]; inc: Incident }
+export interface WithheldMonitoringItem { incId: string; names: string[]; title: string; status: Incident['status']; startedAt: string; resolvedAt: string | null; duration: string | null }
+/** The `alerted:new:{incId}` roster as read: the service ids alerted for it, or `null` when the key is absent. */
+export type MonitoringRoster = ReadonlySet<string> | null
+
+function firstStageOf(inc: Incident): string | undefined {
+  let first: { stage: string; ms: number } | undefined
+  for (const t of inc.timeline ?? []) {
+    const ms = Date.parse(t.at)
+    if (Number.isFinite(ms) && (!first || ms < first.ms)) first = { stage: t.stage, ms }
+  }
+  return first?.stage
+}
+
+/**
+ * #1091 — `monitoring` incidents to check against the roster: first posted at `monitoring`, or `monitoring` now.
+ * Unresolved, or resolved inside the last 24h, and started within the roster's 7-day TTL.
+ * An unparseable `startedAt` is excluded — this makes a claim, unlike the alert path that fails open.
+ */
+export function monitoringCandidates(services: ServiceStatus[], nowMs: number): MonitoringCandidate[] {
+  const byInc = new Map<string, MonitoringCandidate>()
+  for (const svc of services) {
+    for (const inc of svc.incidents ?? []) {
+      if (inc.derived === 'status_history' || inc.retainedBridge) continue
+      const startedMs = Date.parse(inc.startedAt)
+      if (!Number.isFinite(startedMs) || nowMs - startedMs >= ALERTED_NEW_TTL_S * 1000) continue
+      if (inc.status === 'resolved') {
+        const endedMs = Date.parse(inc.resolvedAt ?? '')
+        if (!Number.isFinite(endedMs) || nowMs - endedMs > WITHHELD_WINDOW_MS) continue
+      }
+      if (inc.status !== 'monitoring' && firstStageOf(inc) !== 'monitoring') continue
+      const existing = byInc.get(inc.id)
+      if (existing) { existing.svcIds.push(svc.id); existing.names.push(svc.name) }
+      else byInc.set(inc.id, { incId: inc.id, svcIds: [svc.id], names: [svc.name], inc })
+    }
+  }
+  return [...byInc.values()]
+}
+
+/** Keeps the services the roster does not cover. A candidate whose roster was never read makes no claim. */
+export function withheldMonitoring(candidates: MonitoringCandidate[], rosters: ReadonlyMap<string, MonitoringRoster>): WithheldMonitoringItem[] {
+  const items: WithheldMonitoringItem[] = []
+  for (const c of candidates) {
+    if (!rosters.has(c.incId)) continue
+    const roster = rosters.get(c.incId)
+    const names = c.names.filter((_, i) => !roster?.has(c.svcIds[i]))
+    if (names.length === 0) continue
+    items.push({ incId: c.incId, names, title: c.inc.title, status: c.inc.status, startedAt: c.inc.startedAt, resolvedAt: c.inc.status === 'resolved' ? c.inc.resolvedAt ?? null : null, duration: c.inc.status === 'resolved' ? c.inc.duration ?? null : null })
+  }
+  return items.sort((a, b) => (a.resolvedAt === null ? 0 : 1) - (b.resolvedAt === null ? 0 : 1)
+    || Date.parse(b.resolvedAt ?? b.startedAt) - Date.parse(a.resolvedAt ?? a.startedAt))
+}
+
+/** Reads `alerted:new:` for the candidates only. A failed or unparseable read leaves that incident out rather than listing it. */
+export async function readWithheldMonitoring(kv: Pick<KVNamespace, 'get'>, services: ServiceStatus[], nowMs: number): Promise<WithheldMonitoringItem[]> {
+  try {
+    const candidates = monitoringCandidates(services, nowMs)
+    if (candidates.length === 0) return []
+    const reads = await Promise.allSettled(candidates.map(c => kv.get(`alerted:new:${c.incId}`)))
+    const rosters = new Map<string, MonitoringRoster>()
+    let unread = 0
+    reads.forEach((r, i) => {
+      const c = candidates[i]
+      if (r.status === 'rejected') { unread++; return }
+      if (r.value === null) { rosters.set(c.incId, null); return }
+      const parsed = parseAlertedRoster(r.value, c.svcIds[0])
+      if (parsed.corrupt) { unread++; return }
+      rosters.set(c.incId, new Set(parsed.ids))
+    })
+    if (unread > 0) console.warn(`[daily-summary] #1091 ${unread} of ${candidates.length} monitoring incident roster(s) unreadable — left out of the withheld line`)
+    return withheldMonitoring(candidates, rosters)
+  } catch (err) {
+    console.warn('[daily-summary] #1091 withheld-monitoring line skipped:', err instanceof Error ? err.message : err)
+    return []
+  }
+}
+
+export function formatWithheldMonitoringLine(items: WithheldMonitoringItem[] | null | undefined): string {
+  if (!items || items.length === 0) return ''
+  const rows = items.slice(0, WITHHELD_MAX_LINES).map((it) => {
+    const open = formatDurationFromStart(it.startedAt)
+    const state = it.resolvedAt ? `resolved${it.duration ? ` in ${it.duration}` : ''}` : open ? `${it.status} · open ${open}` : it.status
+    const who = it.names.join(', ')
+    return `   ${who.length > WITHHELD_NAMES_MAX ? `${who.slice(0, WITHHELD_NAMES_MAX - 1)}…` : who} — ${sanitize(it.title, 80)} · ${state}`
+  })
+  const more = items.length > WITHHELD_MAX_LINES ? `\n   +${items.length - WITHHELD_MAX_LINES} more` : ''
+  return `\n🔕 **Services with no New Incident alert for a monitoring incident**\n${rows.join('\n')}${more}`
 }
 
 const PROBE_FAILURE_RATIO_FLOOR = 0.05
@@ -246,6 +342,9 @@ export function buildDailySummary(data: DailySummaryData): string {
   // traffic / observability sections it would be read at the same glance-rate as a poll count.
   const archiveHealthLine = formatArchiveHealthLine(data.archiveHealth)
   if (archiveHealthLine) lines.push(archiveHealthLine)
+
+  const withheldLine = formatWithheldMonitoringLine(data.withheldMonitoring)
+  if (withheldLine) lines.push(withheldLine)
 
   // Section 3: AI Analysis usage
   const aiUsageLine = formatAiUsageSection(aiUsage)
