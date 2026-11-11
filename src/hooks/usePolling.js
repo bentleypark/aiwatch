@@ -702,7 +702,7 @@ export const MOCK_SERVICES = [
 
 // Mock AI analysis. API returns Record<svcId, AIAnalysisResult[]> — each service may have multiple
 // analyses. Every `incidentId` must name an incident that service actually carries in MOCK_SERVICES;
-// an entry with `resolvedAt` must name a FINISHED one (`resolved` or `monitoring`). Timestamps here
+// an entry with `resolvedAt` must name a `resolved` or `monitoring` one. Timestamps here
 // are on the LIVE clock, so every incident named below is written with `agoNow`.
 // Enforced by `src/hooks/__tests__/mock-fixture-consistency.test.js`.
 export const MOCK_AI_ANALYSIS = {

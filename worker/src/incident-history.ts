@@ -133,7 +133,7 @@ const MAX_SUMMARY = 500
  * the AI prediction (when an analysis existed at resolution) with the actual outcome.
  * Pure — so the gating + field mapping are unit-testable apart from the cron/KV.
  *
- * Returns null (skip) unless the incident is in a terminal/near-terminal state:
+ * Returns null (skip) unless the incident is `resolved` or `monitoring`:
  *   - `resolved`  — done.
  *   - `monitoring` — fix deployed, service already back to operational (#550 lets a
  *     service edge to operational while an incident is still `monitoring`; the

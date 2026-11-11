@@ -17,7 +17,7 @@ describe('isMarkableOnStatusEdge', () => {
     expect(isMarkableOnStatusEdge(base)).toBe(true)
   })
 
-  it('marks a monitoring incident (#1003 treats both as terminal)', () => {
+  it('marks a monitoring incident (#1003 marks both)', () => {
     expect(isMarkableOnStatusEdge({ ...base, status: 'monitoring' })).toBe(true)
   })
 

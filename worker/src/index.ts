@@ -1681,7 +1681,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
         // cron resolution paths call, so they can't drift again (see recovery-mark.ts).
         const analysis = await markIncidentResolved(env.STATUS_CACHE, svcId, inc, now)
         // #827 Phase 1 keystone — durable record joining the AI prediction (when an analysis
-        // existed) with the actual outcome. buildHistoryRecord gates terminal states + measures
+        // existed) with the actual outcome. buildHistoryRecord gates on status + measures
         // duration to inc.resolvedAt; null = skip. Collected here, written once below.
         if (svc) {
           const rec = await buildResolvedRecord(env.STATUS_CACHE, svc, inc, analysis, now)
