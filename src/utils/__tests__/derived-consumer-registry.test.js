@@ -59,6 +59,7 @@ const CONSUMER = /\.incidents\b|\bincidents\s*[.[]|\??\.(?:duration|durationMin|
 
 /** Applies the rule: reads `derived` and changes behaviour. */
 const APPLIERS = {
+  'worker/src/withdrawn.ts': 'republishedId will not name a synthesized row as the replacement (#1951)',
   'worker/src/late-resolution.ts': '#1797 resolvedUpstream refuses one, so a synthesized row is never reported as still open in a past month\'s archive',
   'worker/src/sitemap-feed.ts': '#887 lastChangedAt skips its startedAt/resolvedAt — an anchor inside the day, at noon for the accruing day, so it would date the sitemap lastmod hours ahead',
   'worker/src/analysis-reads.ts': 'recentlyResolvedIncidents skips a derived incident (it can never have a recovered: marker or an analysis)',
@@ -135,7 +136,6 @@ const SAFE = {
 
   // Read a count, an id or a title — never a duration-as-recovery or a minute-precise timestamp.
   'worker/src/suppression.ts': 'matches by id/title to hide an entry',
-  'worker/src/withdrawn.ts': 'tombstones keyed on the alerted:new marker, which synthesis never writes — so it can never be tombstoned',
   'worker/src/overrides.ts': 'operator-pinned durations keyed on an explicit incident id an operator typed; it corrects a duration, never reads one as a recovery time',
   'worker/src/alert-feed.ts': 'membership test by incident id against the alerted set; synthesis never alerts',
   'worker/src/upstream-feed.ts': 'non-carded upstream feeds; never sees a service incident list',

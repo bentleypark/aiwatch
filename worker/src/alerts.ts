@@ -33,7 +33,7 @@ import { SERVICE_ID_TO_SLUG, FAMILY_GROUPS } from '../../api/_is-down/slug-map'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
 import { pageIncidents } from './incident-presence'
-import { withdrawalHold, liveIncidentIds, type WithdrawalHold, type WithdrawnIncident } from './withdrawn'
+import { withdrawalHold, liveIncidentIds, republishedIncidentIds, type WithdrawalHold, type WithdrawnIncident } from './withdrawn'
 
 // #283: Discord alert flap suppression for BetterStack auto-recovery noise.
 // BetterStack-backed feeds emit paired "<model> — down" / "<model> — recovered" incidents
@@ -738,6 +738,9 @@ export function buildIncidentAlerts(
 export const WITHDRAWN_NOTE =
   'The provider removed this incident from its status page without ever posting a resolution we could record. AIWatch has no recovery record — the report was withdrawn at the source, not confirmed fixed.'
 
+export const REPUBLISHED_NOTE =
+  'The provider removed this entry from its status page, and a new entry with the same title appeared around the same time. Check the new entry for its status.'
+
 /**
  * #1106 — build "incident withdrawn" alerts from the prune tombstones (`withdrawn.ts`).
  *
@@ -768,6 +771,7 @@ export function buildWithdrawalAlerts(
   onHold: (w: WithdrawnIncident, reason: NonNullable<WithdrawalHold>) => void,
 ): AlertCandidate[] {
   const liveIds = liveIncidentIds(services)
+  const republishedIds = republishedIncidentIds(withdrawn, liveIds)
   const grouped = new Map<string, { names: string[]; ids: string[]; title: string; providers: string[] }>()
   for (const w of withdrawn) {
     if (!announcedIncIds.has(w.incId)) continue
@@ -797,11 +801,12 @@ export function buildWithdrawalAlerts(
 
   const alerts: AlertCandidate[] = []
   for (const [incId, { names, ids, title, providers }] of grouped) {
+    const republished = republishedIds.has(incId)
     const displayName = mergedAlertName(names, providers)
     alerts.push({
       key: `alerted:wd:${incId}`,
-      title: `⚪ ${displayName} — Incident Withdrawn`,
-      description: `${sanitize(title)}\n${WITHDRAWN_NOTE}`,
+      title: `⚪ ${displayName} — ${republished ? 'Incident Entry Changed' : 'Incident Withdrawn'}`,
+      description: `${sanitize(title)}\n${republished ? REPUBLISHED_NOTE : WITHDRAWN_NOTE}`,
       // Neutral grey: this is neither the red of an outage nor the green of a recovery. Reusing
       // either colour is what would make a subscriber read it as the wrong event at a glance.
       color: 0x9CA3AF,

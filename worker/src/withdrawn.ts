@@ -17,7 +17,7 @@
 // adds a round trip to a request-path handler. The roster is tiny (a withdrawal is rare), self-prunes
 // by age on every write, and is hard-capped.
 
-import type { MonthlyIncidents } from './monthly-archive'
+import type { MonthlyIncidentEntry, MonthlyIncidents } from './monthly-archive'
 import type { ServiceStatus } from './types'
 import { pageIncidents, type PageCarrier } from './incident-presence'
 import { kvPut } from './utils'
@@ -35,6 +35,7 @@ export interface WithdrawnIncident {
   startedAt: string
   /** ISO — when the prune removed the accumulator row, i.e. when AIWatch learned of the withdrawal. */
   prunedAt: string
+  republishedAs?: string
 }
 
 export const WITHDRAWN_KEY = 'incidents:withdrawn'
@@ -74,6 +75,15 @@ const WITHDRAWN_KEY_TTL_S = WITHDRAWN_TTL_S + 86400
  *  month); this only bounds a pathological provider that mass-deletes its incident history. */
 const WITHDRAWN_MAX = 50
 
+const titleKey = (title: string) => title.replace(/\s+/g, ' ').trim().toLowerCase()
+
+function republishedId(deleted: MonthlyIncidentEntry, ids: string[], survivors: MonthlyIncidentEntry[]): string | undefined {
+  if (deleted.idsBankedAtFirstMiss === undefined) return undefined
+  const banked = new Set(ids.slice(0, deleted.idsBankedAtFirstMiss))
+  const title = titleKey(deleted.title)
+  return survivors.find((r) => !banked.has(r.id) && r.derived !== 'status_history' && !r.missedRuns && titleKey(r.title) === title)?.id
+}
+
 /**
  * Which incident ids disappeared from the accumulator between `existing` and `updated`.
  *
@@ -105,14 +115,16 @@ export function diffPrunedIncidents(
       continue
     }
     const survivors = new Set(after.incidentIds ?? [])
-    for (const id of before.incidentIds ?? []) {
+    const ids = before.incidentIds ?? []
+    for (const id of ids) {
       if (survivors.has(id)) continue
       const detail = (before.incidents ?? []).find((e) => e.id === id)
       if (!detail) {
         console.warn('[withdrawn] pruned id has no detail row — nothing to render a notice from:', `${svcId}/${id}`)
         continue
       }
-      out.push({ svcId, incId: id, title: detail.title, startedAt: detail.startedAt, prunedAt })
+      const republishedAs = republishedId(detail, ids, after.incidents ?? [])
+      out.push({ svcId, incId: id, title: detail.title, startedAt: detail.startedAt, prunedAt, ...(republishedAs ? { republishedAs } : {}) })
     }
   }
   return out
@@ -199,6 +211,13 @@ export function withdrawalHold(
   if (live.some((i) => i.status !== 'resolved' && !i.retainedBridge)) return 'incident-running'
   if (svc.status !== 'operational') return 'incident-running'
   return null
+}
+
+/** #1951 — ids whose every tombstone names a replacement that is still on a provider page. */
+export function republishedIncidentIds(withdrawn: ReadonlyArray<WithdrawnIncident>, liveIds: ReadonlySet<string>): Set<string> {
+  const ids = new Set(withdrawn.map((w) => w.incId))
+  for (const w of withdrawn) if (!w.republishedAs || !liveIds.has(w.republishedAs)) ids.delete(w.incId)
+  return ids
 }
 
 /** The `liveIncidentIdsAnywhere` argument above, built once per cycle from the full service list. */
