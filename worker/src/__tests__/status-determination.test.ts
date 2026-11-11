@@ -834,7 +834,7 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
   // single statusComponentId badge (so the badge is unchanged; statusComponentIds plural absent).
-  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 3, characterai: 5 }
+  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, characterai: 5 }
 
   it('single-owner services carry the curated displayComponentIds count, keep their badge statusComponentId, and have no worst-of statusComponentIds', () => {
     for (const [id, count] of Object.entries(SINGLE_OWNER_COUNT)) {
@@ -858,7 +858,7 @@ describe('displayComponentIds config sanity (#606)', () => {
   })
 
   it.each([
-    ['assemblyai', ['kygwc83t1rfg', '20vm7q71wjcn', 'psxcg5mfhznq']],
+    ['assemblyai', ['kygwc83t1rfg', '20vm7q71wjcn', 'psxcg5mfhznq', 'wf7qfdqlvv62', '6kk0sgv9xwt0', 'lw1c968zgtg6']],
     ['deepgram', ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'vsnk4gb1bb47', 'vm1x1v101qtn']],
   ])('#1821 — %s shows only the counted API surfaces as breakdown rows', (id, rows) => {
     expect(SERVICES.find((s) => s.id === id)!.displayComponentIds).toEqual(rows)
