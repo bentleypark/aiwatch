@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsS
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { addedIds, branchIssue, step0Blocks, decide, denyMessage, SERVICES_FILE_RE } from '../.claude/hooks/service-add-gate.mjs'
+import { addedIds, branchIssue, step0Blocks, decide, denyMessage, SERVICES_FILE_RE, GH_TIMEOUT_MS, GIT_TIMEOUT_MS, GIT_CALLS } from '../.claude/hooks/service-add-gate.mjs'
 import { parseStep0, checkStep0 } from './service-step0.mjs'
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '.claude', 'hooks', 'service-add-gate.mjs')
@@ -45,6 +45,13 @@ describe('addedIds (an id is new when the file as it stands does not have it)', 
   })
   test('a renamed id counts as new', () => {
     assert.deepEqual(addedIds('Edit', { old_string: line('a'), new_string: line('c') }, FILE), ['c'])
+  })
+  test('pasting an entry that an earlier Edit cut is not new when the baseline file has it', () => {
+    const afterCut = FILE.replace(`${line('gemini')}\n`, '')
+    const paste = { old_string: '  // anchor\n', new_string: `  // anchor\n${line('gemini')}\n` }
+    assert.deepEqual(addedIds('Edit', paste, afterCut), ['gemini'])
+    assert.deepEqual(addedIds('Edit', paste, afterCut, FILE), [])
+    assert.deepEqual(addedIds('Edit', { old_string: 'x', new_string: line('brandnew') }, afterCut, FILE), ['brandnew'])
   })
   test('moving an existing entry (delete here, insert there) adds nothing', () => {
     const edits = [{ old_string: `${line('gemini')}\n`, new_string: '' }, { old_string: '  // anchor\n', new_string: `  // anchor\n${line('gemini')}\n` }]
@@ -114,6 +121,40 @@ describe('decide', () => {
     assert.match(decide({ ids, issue: '5', texts: [UNMEASURED], step0 }).reason, /^check-failed:.*row-unmeasured:probe/)
     assert.equal(decide({ ids, issue: '5', texts: [HOLD], step0 }).reason, 'verdict-not-add')
   })
+  describe('the flip rule: each block is checked against the last block that was recorded', () => {
+    const HOLD_THIN = HOLD.replace('n=12', 'n=3')
+    const FLIPPED = GOOD.replace('verdict: add', 'verdict: add\nverdict-change: history')
+    const BACK = HOLD_THIN.replace('verdict: hold', 'verdict: hold\nverdict-change: history')
+    const DRAFT = GOOD.replace(/- probe: .*\n/, '- probe: unmeasured | status=unmeasured\n')
+    const reason = (texts) => decide({ ids, issue: '5', texts, step0 }).reason
+    test('the deny names what is wrong with the block, since a plain `check` of it passes', () => {
+      const d = decide({ ids, issue: '5', texts: [HOLD_THIN, GOOD, GOOD], step0 })
+      assert.equal(checkStep0(GOOD).ok, true)
+      const m = denyMessage(d.reason, ['x'], '5', d.detail)
+      assert.match(m, /the verdict changed: list the rows that moved/)
+      assert.doesNotMatch(m, /passes `node scripts\/service-step0\.mjs check`/)
+    })
+    test('a flip that lists what moved passes, and an unlisted one is denied', () => {
+      assert.equal(reason([HOLD_THIN, FLIPPED]), 'pass')
+      assert.match(reason([HOLD_THIN, GOOD]), /verdict-change-missing/)
+    })
+    test('re-posting a refused block does not make it the predecessor', () => {
+      assert.match(reason([HOLD_THIN, GOOD, GOOD]), /verdict-change-missing/)
+      assert.match(reason([HOLD_THIN, DRAFT, GOOD]), /verdict-change-missing/)
+    })
+    test('a re-measurement after a recorded flip is add to add', () => {
+      assert.equal(reason([HOLD_THIN, FLIPPED, GOOD.replace('n=12', 'n=13')]), 'pass')
+    })
+    test('flipping back and forth needs a listing at every flip', () => {
+      assert.equal(reason([GOOD, BACK, FLIPPED]), 'pass')
+      assert.match(reason([GOOD, BACK, GOOD]), /verdict-change-missing/)
+      assert.match(reason([GOOD, HOLD_THIN]), /verdict-change-missing/)
+    })
+    test('a first block has no predecessor, and an earlier block with no verdict is never recorded', () => {
+      assert.equal(reason([GOOD]), 'pass')
+      assert.equal(reason([GOOD.replace('verdict: add\n', ''), GOOD]), 'pass')
+    })
+  })
   test('a block quoted in a later comment does not replace the block it quotes', () => {
     assert.deepEqual(decide({ ids, issue: '5', texts: [GOOD, `old record:\n\`\`\`\n${HOLD}\`\`\``], step0 }), { allow: true, reason: 'pass' })
     assert.equal(decide({ ids, issue: '5', texts: [HOLD, `old record:\n\`\`\`\n${GOOD}\`\`\``], step0 }).reason, 'verdict-not-add')
@@ -121,11 +162,26 @@ describe('decide', () => {
   test('a later unmeasured block overrides an earlier passing one', () => {
     assert.equal(decide({ ids, issue: '5', texts: [GOOD, UNMEASURED], step0 }).allow, false)
   })
-  test('the deny message names the id, the issue and the way to lift it', () => {
+  test('no deny text states a condition that lifts the deny: the rule lives in one place and the message points to it', () => {
+    const HOLD_THIN = HOLD.replace('n=12', 'n=3')
+    const cases = [
+      decide({ ids: ['x'], issue: '5', texts: [HOLD], step0 }),
+      decide({ ids: ['x'], issue: '5', texts: [HOLD_THIN, GOOD], step0 }),
+      decide({ ids: ['x'], issue: '5', texts: ['prose'], step0 }),
+      decide({ ids: ['x'], issue: null, texts: [], step0 }),
+    ]
+    assert.deepEqual(cases.map((d) => d.reason.split(':')[0]), ['verdict-not-add', 'check-failed', 'no-block', 'no-issue'])
+    for (const d of cases) {
+      const m = denyMessage(d.reason, ['x'], '5', d.detail)
+      assert.match(m, /workflow-hooks\.md/)
+      assert.doesNotMatch(m, /passes `|then retry/)
+    }
+  })
+  test('the deny message names the id and the issue', () => {
     const m = denyMessage('no-block', ['x'], '5')
     assert.match(m, /"x"/)
     assert.match(m, /issue #5 has no/)
-    assert.match(m, /service-step0\.mjs check/)
+    assert.match(m, /workflow-hooks\.md/)
     assert.match(m, /code fence/)
   })
 })
@@ -181,6 +237,12 @@ describe('the hook as Claude Code runs it', () => {
     assert.ok(run({ dir: repo('chore/9-add'), input: ADD, issue: { body: GOOD, comments: [{ body: UNMEASURED }] } }).deny)
   })
 
+  test('a refused flip is denied through the hook with the reason a plain check would not show', () => {
+    const HOLD_THIN = HOLD.replace('n=12', 'n=3')
+    const r = run({ dir: repo('chore/9-add'), input: ADD, issue: { body: HOLD_THIN, comments: [{ body: GOOD }, { body: GOOD }] } })
+    assert.match(r.deny.permissionDecisionReason, /the verdict changed: list the rows that moved/)
+  })
+
   test('a branch with no issue number is denied; a detached head is skipped, not denied', () => {
     assert.match(run({ dir: repo('scratch'), input: ADD }).deny.permissionDecisionReason, /no issue number/)
     const r = run({ dir: repo(null), input: ADD })
@@ -217,6 +279,72 @@ describe('the hook as Claude Code runs it', () => {
     assert.match(r.deny.permissionDecisionReason, /"fresh"/)
   })
 
+  const commitAll = (dir, msg) => {
+    execFileSync('git', ['-C', dir, 'add', '-A'])
+    execFileSync('git', ['-C', dir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', msg])
+  }
+  const PASTE = { old_string: "  { id: 'a', name: 'A' },\n", new_string: "  { id: 'a', name: 'A' },\n  { id: 'moved', name: 'M' },\n" }
+
+  test('the second half of a cut-and-paste move is not a new service when HEAD has the entry', () => {
+    const dir = repo('chore/9-add')
+    commitAll(dir, 'services')
+    writeFileSync(join(dir, 'worker/src/services.ts'), "  { id: 'a', name: 'A' },\n")
+    const r = run({ dir, input: PASTE, issue: { body: 'prose', comments: [] } })
+    assert.deepEqual([r.out, r.audit], ['', []])
+  })
+
+  test('origin/main is read before HEAD: an entry only main has is not new either', () => {
+    const dir = repo('chore/9-add')
+    const bare = mkdtempSync(join(root, 'origin-'))
+    execFileSync('git', ['init', '-q', '--bare', bare])
+    commitAll(dir, 'services')
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', bare])
+    execFileSync('git', ['-C', dir, 'push', '-q', 'origin', 'HEAD:main'])
+    execFileSync('git', ['-C', dir, 'fetch', '-q', 'origin'])
+    writeFileSync(join(dir, 'worker/src/services.ts'), "  { id: 'a', name: 'A' },\n")
+    commitAll(dir, 'drop moved on the branch')
+    const r = run({ dir, input: PASTE, issue: { body: 'prose', comments: [] } })
+    assert.deepEqual([r.out, r.audit], ['', []])
+  })
+
+  test('an entry neither the file nor the baseline has is still new', () => {
+    const dir = repo('chore/9-add')
+    commitAll(dir, 'services')
+    const r = run({ dir, input: ADD, issue: { body: 'prose', comments: [] } })
+    assert.match(r.deny.permissionDecisionReason, /"newsvc"/)
+  })
+
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim()
+  const withGitStub = (script) => {
+    const stubBin = mkdtempSync(join(root, 'gitstub-'))
+    writeFileSync(join(stubBin, 'git'), script)
+    chmodSync(join(stubBin, 'git'), 0o755)
+    return stubBin
+  }
+  const runWithGit = (stubBin, args) => {
+    const prev = process.env.PATH
+    process.env.PATH = `${stubBin}:${prev}`
+    try { return run(args) } finally { process.env.PATH = prev }
+  }
+
+  test('the hook makes no more git calls than GIT_CALLS, even when neither baseline ref exists', () => {
+    const dir = repo('chore/9-add')
+    const log = join(root, `gitcalls-${Math.random().toString(36).slice(2)}`)
+    const stub = withGitStub(`#!/bin/sh\necho x >> "${log}"\nexec ${realGit} "$@"\n`)
+    const r = runWithGit(stub, { dir, input: ADD, issue: { body: 'prose', comments: [] } })
+    assert.ok(r.deny)
+    assert.equal(readFileSync(log, 'utf8').trim().split('\n').length, GIT_CALLS)
+  })
+
+  test('a git call that hangs is cut at GIT_TIMEOUT_MS and the gate fails open', () => {
+    const dir = repo('chore/9-add')
+    const stub = withGitStub('#!/bin/sh\nsleep 8\n')
+    const started = Date.now()
+    const r = runWithGit(stub, { dir, input: ADD, issue: { body: 'prose', comments: [] } })
+    assert.ok(Date.now() - started < GIT_CALLS * GIT_TIMEOUT_MS + 2500, 'the hook waited past its git limit')
+    assert.deepEqual(r.audit.map((x) => [x.decision, x.note]), [['skip', 'git-failed']])
+  })
+
   test('moving an existing entry in the file as it stands is not a new service, even on a branch with no block', () => {
     const dir = repo('chore/9-add')
     const edits = [{ old_string: "  { id: 'moved', name: 'M' },\n", new_string: '' }, { old_string: "  { id: 'a', name: 'A' },\n", new_string: "  { id: 'a', name: 'A' },\n  { id: 'moved', name: 'M' },\n" }]
@@ -240,6 +368,7 @@ describe('wiring', () => {
     const group = settings.hooks.PreToolUse.find((g) => g.matcher === 'Edit|Write|MultiEdit')
     const hook = group.hooks.find((h) => h.command.includes('service-add-gate.mjs'))
     assert.ok(hook)
-    assert.ok(hook.timeout >= 12 + 1, `timeout ${hook.timeout} must exceed the 8s gh + 4s git limits in the hook`)
+    const worstCaseMs = GH_TIMEOUT_MS + GIT_CALLS * GIT_TIMEOUT_MS
+    assert.ok(hook.timeout * 1000 > worstCaseMs, `timeout ${hook.timeout}s must exceed the hook's own worst case ${worstCaseMs}ms`)
   })
 })

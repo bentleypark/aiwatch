@@ -30,7 +30,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 - Measure the rows with `node scripts/service-step0.mjs measure` (the card's own component ids, every number
   labelled by its scope) and attach its block to the issue; `check` refuses a block with an unmeasured row.
   Whether each badge component is the card's product, and the category gap, stay manual rows (#1974).
-  A new `id:` in `worker/src/services.ts` is denied until the issue's latest block passes `check` with `verdict: add` (`service-add-gate`).
+  A new `id:` in `worker/src/services.ts` is denied until the issue carries a Step-0 block the gate accepts (`service-add-gate`, [workflow-hooks.md](workflow-hooks.md)).
 
 ## Worker (backend)
 1. `worker/src/services.ts` — add `ServiceConfig` entry at correct position in `SERVICES` array (determines API response order: LLM → voice → infra → apps → agents). If the status page hosts unrelated components (multi-tenant Atlassian / incident.io / metastatuspage feeds — e.g. `githubstatus.com`, `status.openai.com`, `status.claude.com`), set `incidentKeywords` to scope the visible incident list — otherwise the service card will surface every incident on the page (#397)
