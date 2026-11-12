@@ -30,7 +30,7 @@ import { showRecoveredChip } from '../utils/liveIncident'
 import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
 import { mergeReferenceRows } from '../utils/referenceIncidents'
-import { buildAffectedEntries, isEntryExpandable, issueSort } from '../utils/affectedServices'
+import { buildAffectedEntries, isEntryExpandable, issueSort, otherOpenIncidentsOf } from '../utils/affectedServices'
 import { rowHighlight } from '../utils/rowHighlight'
 import { formatMaintenanceRange, maintenancePhaseKey, maintenanceWindowsOf } from '../utils/maintenance'
 
@@ -500,20 +500,29 @@ function AffectedEntry({ entry, lang, t, onSelect }) {
       <ul role="list" className="flex flex-col" style={{ gap: '4px' }}>
         {members.map((svc) => {
           const [sourceDead, sourceUnknown] = sourceFlagsOf(svc)
+          const others = otherOpenIncidentsOf(svc)
           return (
             <li key={svc.id}>
               <button
                 type="button"
                 data-testid="affected-member"
                 onClick={() => onSelect(svc)}
-                className="w-full text-left flex items-center justify-between gap-2 rounded hover:bg-[var(--bg2)] transition-colors"
-                style={{ padding: '6px 8px', minHeight: '32px' }}
+                className="w-full text-left flex flex-col rounded hover:bg-[var(--bg2)] transition-colors"
+                style={{ padding: '6px 8px', minHeight: '32px', gap: '2px' }}
               >
-                <span className="text-[13px] font-medium text-[var(--text0)] truncate min-w-0">
-                  {svc.name}
-                  <span className="mono text-[10px] text-[var(--text2)]" style={{ marginLeft: '8px' }}>{svc.provider}</span>
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-[13px] font-medium text-[var(--text0)] truncate min-w-0">
+                    {svc.name}
+                    <span className="mono text-[10px] text-[var(--text2)]" style={{ marginLeft: '8px' }}>{svc.provider}</span>
+                  </span>
+                  <StatusPill status={svc.status} partialCount={svc.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
                 </span>
-                <StatusPill status={svc.status} partialCount={svc.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
+                {others.map((i) => (
+                  <span key={i.id} data-testid="affected-other-incident" className="mono text-[10px] text-[var(--text2)]">
+                    {t('overview.affected.alsoOpen')} · {i.title}
+                    {i.status === 'monitoring' && <> · {t('overview.incidents.monitoring')}</>}
+                  </span>
+                ))}
               </button>
             </li>
           )
