@@ -236,3 +236,31 @@ test('a pass via override is surfaced as the false-positive proxy; a confirmed p
   const cleanOnly = runSummary([line('step35-verify-gate', 'pass', 'commit:confirmed')])
   assert.doesNotMatch(cleanOnly, /override=/)
 })
+
+test('a service-add-gate deny is an intercepted violation by its reason; pass and skip are not (#1974)', () => {
+  const out = runSummary([
+    line('service-add-gate', 'deny', 'no-block:newsvc'),
+    line('service-add-gate', 'deny', 'check-failed:row-unmeasured:probe,verdict-missing:newsvc'),
+    line('service-add-gate', 'pass', 'pass:newsvc'),
+    line('service-add-gate', 'skip', 'gh-failed:#9'),
+  ])
+  assert.match(out, /Violations intercepted[\s\S]*?\n\s+2 total/)
+  assert.match(out, /service-add:no-block=1/)
+  assert.match(out, /service-add:check-failed=1/)
+  assert.match(out, /Step-0 service-add gate \(#1974\)/)
+  assert.match(out, /2 deny · 1 pass · 1 skip/)
+})
+
+test('a gate that skipped is reported as blind, not as clean (#1974)', () => {
+  const out = runSummary([line('service-add-gate', 'skip', 'gh-failed:#9'), line('service-add-gate', 'skip', 'step0-module-missing')])
+  assert.match(out, /skip=2/)
+  assert.match(out, /could not check/)
+})
+
+test('a Step-0 re-prompt is not counted as a missing-근거-line re-prompt (#1974)', () => {
+  const out = runSummary([
+    line('evidence-line-gate', 'warn', 'trigger=1 lines=1 ops=0 official=0 code=0 unverified=1 untyped=0 stepzero=1'),
+    line('evidence-line-gate', 'clean', 'trigger=1 lines=1 ops=1 official=0 code=0 unverified=0 untyped=0 stepzero=0'),
+  ])
+  assert.match(out, /0 re-prompted for a missing 근거: line/)
+})

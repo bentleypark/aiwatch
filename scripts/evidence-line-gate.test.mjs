@@ -55,7 +55,7 @@ test('each 근거: line is counted by the kind it starts with', () => {
   assert.deepEqual(c.counts, { '운영 데이터': 1, '공식 기록': 1, '코드 읽기만': 1, '미확인': 1 })
   assert.equal(c.lines, 5)
   assert.equal(c.untyped, 1)
-  assert.equal(auditNote(c), 'trigger=1 lines=5 ops=1 official=1 code=1 unverified=1 untyped=1')
+  assert.equal(auditNote(c), 'trigger=1 lines=5 ops=1 official=1 code=1 unverified=1 untyped=1 stepzero=0')
 })
 
 test('the hook re-prompts through Stop additionalContext, never decision:block', () => {
@@ -65,6 +65,7 @@ test('the hook re-prompts through Stop additionalContext, never decision:block',
   assert.deepEqual(Object.keys(out), ['hookSpecificOutput'])
   assert.equal(out.hookSpecificOutput.hookEventName, 'Stop')
   assert.match(out.hookSpecificOutput.additionalContext, /근거:/)
+  assert.match(out.hookSpecificOutput.additionalContext, /carries no `근거:` line/)
   assert.deepEqual(r.audit.map((e) => [e.hook, e.decision]), [['evidence-line-gate', 'warn']])
 })
 
@@ -112,4 +113,49 @@ test('npm run hook-audit sums the evidence-line notes', () => {
   })
   assert.match(out, /3 final message\(s\) checked · 2 had a proposal\/decision\/remaining-work cue · 1 re-prompted for a missing 근거: line/)
   assert.match(out, /근거: lines=3 — 운영 데이터 1 · 공식 기록 0 · 코드 읽기만 1 · 미확인 1 · untyped 0/)
+})
+
+const ADD_UNMEASURED = '서비스 추가를 권합니다. 카테고리 공백이 없어도 카드는 만들 수 있습니다.\n근거: 미확인 — probe 측정 안 함, 이슈 본문에만 있음'
+
+test('a gated message whose 미확인 line names a Step-0 row is flagged, however it is worded (#1974)', () => {
+  for (const text of [
+    ADD_UNMEASURED,
+    'Qdrant Cloud 추가를 권합니다.\n근거: 미확인 — probe 측정 안 함',
+    '보류를 권합니다.\n근거: 미확인 — 업타임 필드를 못 읽음',
+    'Vercel AI Gateway — decline for now 권장.\n근거: 미확인 — history window not measured',
+    'Luma 카드 추가를 권장합니다.\n근거: 미확인 — Step-0 audit not run',
+  ]) assert.equal(classify(text).stepZero, true, text)
+})
+
+test('every Step-0 row is recognised in the 미확인 clause, in English and in Korean (#1974)', () => {
+  for (const row of ['uptime', '업타임', 'probe', '프로브', 'history', '히스토리', '인시던트 이력', '장애 이력', 'gap', '카테고리 공백', 'boundary', '제품 경계', 'Step-0']) {
+    assert.equal(classify(`이 방식을 권합니다.\n근거: 미확인 — ${row} 측정 안 함`).stepZero, true, row)
+  }
+})
+
+test('nothing is flagged without a gate trigger, a 미확인 kind, or a named row (#1974)', () => {
+  for (const text of [
+    '서비스 추가는 끝났습니다.\n근거: 미확인 — probe 간격',
+    '빌드가 통과했습니다. probe 확인은 아직입니다.\n근거: 미확인 — probe',
+    '서비스 추가를 권합니다.\n근거: 코드 읽기만 — probe row is recorded unmeasured in the issue',
+    '서비스 추가를 권합니다.\n근거: 운영 데이터 — probe 5회, control과 다름',
+    '서비스 추가를 권합니다.\n근거: 미확인 — 가격 정책',
+    '카드 추가 문구 정리를 권합니다.\n근거: 미확인 — 이력 미확인',
+  ]) assert.equal(classify(text).stepZero, false, text)
+})
+
+test('the hook re-prompts once with the Step-0 text, and the audit note counts it', () => {
+  const r = runHook({ last_assistant_message: ADD_UNMEASURED })
+  const out = JSON.parse(r.stdout)
+  assert.match(out.hookSpecificOutput.additionalContext, /service-step0\.mjs measure/)
+  assert.doesNotMatch(out.hookSpecificOutput.additionalContext, /carries no `근거:` line/)
+  assert.deepEqual(r.audit.map((e) => e.decision), ['warn'])
+  assert.match(r.audit[0].note, /stepzero=1/)
+  assert.equal(runHook({ stop_hook_active: true, last_assistant_message: ADD_UNMEASURED }).stdout, '')
+})
+
+test('a gated message resting on a measured row passes clean', () => {
+  const r = runHook({ last_assistant_message: '서비스 추가를 권합니다.\n근거: 운영 데이터 — probe 5회, history n=12' })
+  assert.equal(r.stdout, '')
+  assert.equal(r.audit[0].decision, 'clean')
 })

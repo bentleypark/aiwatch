@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Stop hook, soft — a final message that proposes an issue, asks for a decision, recommends an option
 // or lists remaining work must carry a `근거:` line naming the kind of record behind it. The check is
-// mechanical: it never judges whether the evidence is good, only whether the line is there.
+// mechanical: it never judges whether the evidence is good.
 //
-// Never blocks: a missing line returns Stop `hookSpecificOutput.additionalContext`, so the model gets one
-// continuation to add it, and `stop_hook_active` keeps that to one. Hook bugs exit 0 silently.
+// Never blocks: a re-prompt returns Stop `hookSpecificOutput.additionalContext`, so the model gets one
+// continuation, and `stop_hook_active` keeps that to one. Hook bugs exit 0 silently.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -18,6 +18,10 @@ export const TRIGGER_RE = /이슈\s*(후보|제안|생성|로\s*(분리|다루|�
 
 export const EVIDENCE_KINDS = ['운영 데이터', '공식 기록', '코드 읽기만', '미확인']
 
+// #1974 — a gated message whose own 미확인 line names a Step-0 row is the proposal the `미확인` rule says
+// not to make; this only asks for the measurement.
+const STEP0_ROW_RE = /\buptime\b|업타임|\bprobe\b|프로브|\bhistory\b|히스토리|(?:인시던트|장애)\s*이력|\bgap\b|카테고리 공백|\bboundary\b|제품 경계|step-?0/i
+
 const EVIDENCE_LINE_RE = /^\s*(?:[-*]\s*)?\**근거\**\s*:\s*\**\s*(.*)$/gm
 
 export function classify(text) {
@@ -25,18 +29,21 @@ export function classify(text) {
   const counts = Object.fromEntries(EVIDENCE_KINDS.map((k) => [k, 0]))
   let lines = 0
   let untyped = 0
+  let unmeasuredRows = 0
   for (const m of text.matchAll(EVIDENCE_LINE_RE)) {
     lines++
     const kind = EVIDENCE_KINDS.find((k) => m[1].startsWith(k))
     if (kind) counts[kind]++
     else untyped++
+    if (kind === '미확인' && STEP0_ROW_RE.test(m[1])) unmeasuredRows++
   }
-  return { trigger, lines, untyped, counts, missing: trigger && lines === 0 }
+  const stepZero = trigger && unmeasuredRows > 0
+  return { trigger, lines, untyped, counts, missing: trigger && lines === 0, stepZero }
 }
 
 export function auditNote(c) {
   const [ops, official, code, unverified] = EVIDENCE_KINDS.map((k) => c.counts[k])
-  return `trigger=${c.trigger ? 1 : 0} lines=${c.lines} ops=${ops} official=${official} code=${code} unverified=${unverified} untyped=${c.untyped}`
+  return `trigger=${c.trigger ? 1 : 0} lines=${c.lines} ops=${ops} official=${official} code=${code} unverified=${unverified} untyped=${c.untyped} stepzero=${c.stepZero ? 1 : 0}`
 }
 
 export const FEEDBACK =
@@ -45,6 +52,12 @@ export const FEEDBACK =
   `record it rests on — ${EVIDENCE_KINDS.map((k) => `\`${k}\``).join(' / ')} — then the count, quote or command. ` +
   'If the only basis is reading code or issue text, write `코드 읽기만`; if nothing was checked, write `미확인` and do not propose it. ' +
   'If the message has no such item, re-send it unchanged.'
+
+export const STEP0_FEEDBACK =
+  'This message\'s `근거:` line says a Step-0 row ' +
+  '(uptime / history / probe / gap / boundary) is `미확인`. If it concerns adding or holding a service, an unmeasured ' +
+  'row means measuring it, not recommending: run `node scripts/service-step0.mjs measure …`, then re-send with the ' +
+  'measured numbers, or withdraw the recommendation (#1974). Otherwise this note does not apply.'
 
 function audit(decision, note) {
   try {
@@ -69,10 +82,11 @@ function main() {
     return
   }
   const c = classify(text)
-  audit(c.missing ? 'warn' : 'clean', auditNote(c))
-  if (c.missing) {
+  const reprompt = c.missing || c.stepZero
+  audit(reprompt ? 'warn' : 'clean', auditNote(c))
+  if (reprompt) {
     process.stdout.write(
-      JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: FEEDBACK } }),
+      JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: c.missing ? FEEDBACK : STEP0_FEEDBACK } }),
     )
   }
 }
