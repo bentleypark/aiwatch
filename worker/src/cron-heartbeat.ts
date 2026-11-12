@@ -33,11 +33,11 @@ export const STALL_REALERT_MS = 60 * 60_000
 export const WATCHDOG_INTERVAL_MS = 3 * 60_000
 
 export interface CronHeartbeat {
-  /** Wall-clock ms of the last cron run — or, when `seeded`, of the fetch check that started watching. */
+  /** Wall-clock ms of the last cron run, unless `seeded`. */
   at: number
   /** Wall-clock ms of the last stall alert; present only between an alert and the cron's recovery. */
   alertedAt?: number
-  /** Written by `fetch` when the key was absent: `at` is then not a cron run. The cron's overwrite clears it. */
+  /** Written by earlier `fetch` checks when the key was absent: `at` is then not a cron run. The cron's overwrite clears it. */
   seeded?: true
 }
 
@@ -55,13 +55,10 @@ export function parseHeartbeat(raw: string | null): CronHeartbeat | null {
   }
 }
 
-export function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '[::1]' || /^127(\.\d{1,3}){3}$/.test(hostname)
-}
-
-export type StallVerdict = 'fresh' | 'stalled' | 'already-alerted'
+export type StallVerdict = 'never-ran' | 'fresh' | 'stalled' | 'already-alerted'
 
 export function stallVerdict(hb: CronHeartbeat, nowMs: number): StallVerdict {
+  if (hb.seeded) return 'never-ran'
   // A heartbeat written by a clock ahead of ours has a negative age; that is fresh, not stalled.
   if (nowMs - hb.at < CRON_STALE_MS) return 'fresh'
   if (hb.alertedAt !== undefined && nowMs - hb.alertedAt < STALL_REALERT_MS) return 'already-alerted'
@@ -73,7 +70,7 @@ const minutes = (ms: number) => Math.round(ms / 60_000)
 export function formatStallAlert(hb: CronHeartbeat, nowMs: number): string {
   const age = nowMs - hb.at
   return [
-    `The \`*/5\` cron has not run for **${minutes(age)} min** (~${Math.floor(age / 300_000) - 1} missed slots). ${hb.seeded ? 'No cron run has been recorded since the watchdog started watching at' : 'Last run:'} ${new Date(hb.at).toISOString()}.`,
+    `The \`*/5\` cron has not run for **${minutes(age)} min** (~${Math.floor(age / 300_000) - 1} missed slots). Last run: ${new Date(hb.at).toISOString()}.`,
     '',
     'While it is down there are **no incident alerts, no AI analysis, no probing, and no daily summary**. `fetch` (dashboard, is-down pages) is still serving.',
     '',
@@ -82,7 +79,7 @@ export function formatStallAlert(hb: CronHeartbeat, nowMs: number): string {
 }
 
 export function formatRecoveryAlert(hb: CronHeartbeat, nowMs: number): string {
-  return `The \`*/5\` cron is running again after **${minutes(nowMs - hb.at)} min** without a run (${hb.seeded ? 'no cron run had been recorded since the watchdog started watching at' : 'last run before the stall:'} ${new Date(hb.at).toISOString()}).`
+  return `The \`*/5\` cron is running again after **${minutes(nowMs - hb.at)} min** without a run (last run before the stall: ${new Date(hb.at).toISOString()}).`
 }
 
 /** Called by the cron, first thing each cycle: stamp the run, then report a recovery if one is owed.
@@ -115,13 +112,10 @@ export async function recordCronHeartbeat(
   }
 }
 
-export type WatchdogResult = 'skipped' | 'seeded' | 'fresh' | 'alerted' | 'deduped' | 'send-failed' | 'unreadable'
+export type WatchdogResult = 'skipped' | 'never-ran' | 'fresh' | 'alerted' | 'deduped' | 'send-failed' | 'unreadable'
 
-/** Called from `fetch`: alert when the heartbeat is stale. Never throws.
- *
- *  An absent key is seeded rather than ignored — otherwise a stall that begins before the first cron run
- *  after this ships would leave no key for the check to age, which is the exact case it exists for. An
- *  unreadable read or value alerts nobody: the input is gone, and the cron's next run rewrites it. */
+/** Called from `fetch`: alert when the heartbeat a cron run wrote is stale. Never throws.
+ *  An unreadable read or value alerts nobody: the input is gone, and the cron's next run rewrites it. */
 export async function checkCronHeartbeat(
   kv: KVLike | undefined,
   discordUrl: string | undefined,
@@ -131,17 +125,14 @@ export async function checkCronHeartbeat(
   if (!kv || !discordUrl) return 'skipped'
   try {
     const raw = await kv.get(CRON_HEARTBEAT_KEY)
-    if (raw === null) {
-      await kvPut(kv, CRON_HEARTBEAT_KEY, JSON.stringify({ at: nowMs, seeded: true } satisfies CronHeartbeat))
-      return 'seeded'
-    }
+    if (raw === null) return 'never-ran'
     const hb = parseHeartbeat(raw)
     if (!hb) {
       console.warn('[watchdog] #1501 heartbeat value is unparseable — waiting for the cron to rewrite it')
       return 'unreadable'
     }
     const verdict = stallVerdict(hb, nowMs)
-    if (verdict === 'fresh') return 'fresh'
+    if (verdict === 'never-ran' || verdict === 'fresh') return verdict
     if (verdict === 'already-alerted') return 'deduped'
     const ok = await send(discordUrl, {
       title: '🚨 Cron stalled',
