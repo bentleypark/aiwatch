@@ -356,7 +356,7 @@ Every monitored service — the same ids `/api/v1/status` returns.
 | `junie` | Junie | `deepseekapp` | DeepSeek App |
 | `grok` | Grok | `fishaudio` | Fish Audio |
 | `jina` | Jina AI | `kimiapp` | Kimi App |
-| `grokbot` | Grok Bot | | |
+| `grokbot` | Grok Bot | `speechmatics` | Speechmatics |
 
 ## Claude Code Statusline Integration
 

@@ -355,7 +355,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `junie` | Junie | `deepseekapp` | DeepSeek App |
 | `grok` | Grok | `fishaudio` | Fish Audio |
 | `jina` | Jina AI | `kimiapp` | Kimi App |
-| `grokbot` | Grok Bot | | |
+| `grokbot` | Grok Bot | `speechmatics` | Speechmatics |
 
 ## Claude Code Statusline 통합
 
