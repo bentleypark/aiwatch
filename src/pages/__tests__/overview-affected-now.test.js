@@ -242,3 +242,41 @@ describe('#1959 the incident header opens the timeline', () => {
     await cleanup()
   })
 })
+
+describe('#1978 a member row shows the service\'s other open incidents', () => {
+  const hr = (h) => new Date(Date.now() - h * 3_600_000).toISOString()
+  const replicate = svc('replicate', 'Replicate', 'Replicate', 'api', 'degraded', [
+    inc('r-registry', 'Replicate Model Registry Unavailable', 'identified', hr(30)),
+    inc('r-issue', 'Replicate Issue', 'investigating', hr(1)),
+    inc('r-mon', 'Replicate webhook delays', 'monitoring', hr(2)),
+  ])
+
+  it('lists them inside the member button under the anchor incident, newest first, with a monitoring label', async () => {
+    const root = await rootOf(['replicate'], [replicate])
+    const entry = root.querySelector('[data-testid="affected-entry"]')
+    expect(entry.querySelector('[data-testid="affected-incident-header"]').textContent).toContain('Replicate Issue')
+    const lines = [...entry.querySelectorAll('[data-testid="affected-member"] [data-testid="affected-other-incident"]')]
+      .map((n) => n.textContent.replace(/\s+/g, ' ').trim())
+    expect(lines).toEqual([
+      `${en['overview.affected.alsoOpen']} · Replicate webhook delays · ${en['overview.incidents.monitoring']}`,
+      `${en['overview.affected.alsoOpen']} · Replicate Model Registry Unavailable`,
+    ])
+  })
+
+  it('heads the entry with the higher-impact incident and lists the newer, lower-impact one under the row', async () => {
+    const fireworks = svc('fireworks', 'Fireworks AI', 'Fireworks', 'api', 'down', [
+      { ...inc('f-bc', 'Outage in BC Clusters', 'identified', hr(5)), impact: 'major' },
+      { ...inc('f-kimi', 'Service Degradation for Kimi K3 Fast', 'investigating', hr(1)), impact: 'minor' },
+    ])
+    const root = await rootOf(['fireworks'], [fireworks])
+    const entry = root.querySelector('[data-testid="affected-entry"]')
+    expect(entry.querySelector('[data-testid="affected-incident-header"]').textContent).toContain('Outage in BC Clusters')
+    expect([...entry.querySelectorAll('[data-testid="affected-other-incident"]')].map((n) => n.textContent.replace(/\s+/g, ' ').trim()))
+      .toEqual([`${en['overview.affected.alsoOpen']} · Service Degradation for Kimi K3 Fast`])
+  })
+
+  it('shows nothing extra for a service with one open incident', async () => {
+    const root = await rootOf(ALL)
+    expect(root.querySelectorAll('[data-testid="affected-other-incident"]').length).toBe(0)
+  })
+})

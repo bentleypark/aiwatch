@@ -85,6 +85,7 @@ const en = {
   'overview.affected.title': 'Affected now',
   'overview.affected.scope': 'all categories',
   'overview.affected.members': '{n} services',
+  'overview.affected.alsoOpen': 'Also open',
   'overview.affected.down': 'Down {n}',
   'overview.affected.degraded': 'Degraded {n}',
   'overview.banner.degraded': 'Partially Degraded',

@@ -9,18 +9,33 @@ export function issueSort(a, b) {
   return (STATUS_PRIORITY[displayStatusOf(a)] - STATUS_PRIORITY[displayStatusOf(b)]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
 }
 
-/** The open incident a service is listed under: the one with the latest `startedAt`. null for a stale source or
- *  when no open incident has a start. */
-export function anchorIncidentOf(service) {
-  if (service.incidentSourceStale) return null
-  const open = (Array.isArray(service.incidents) ? service.incidents : [])
+function openIncidentsOf(service) {
+  if (service.incidentSourceStale) return []
+  return (Array.isArray(service.incidents) ? service.incidents : [])
     .filter((i) => i.status !== 'resolved' && i.derived !== 'status_history' && Number.isFinite(Date.parse(i.startedAt)))
+}
+
+const IMPACT_RANK = { critical: 3, major: 2, minor: 1 }
+const impactRankOf = (i) => IMPACT_RANK[i.impact] ?? 0
+
+/** The open incident a service is listed under: a live one before a `monitoring` one, then the highest `impact`,
+ *  then the latest `startedAt`. null for a stale source or when no open incident has a start. */
+export function anchorIncidentOf(service) {
+  const open = openIncidentsOf(service)
   if (open.length === 0) return null
   const live = open.filter((i) => i.status !== 'monitoring')
   return (live.length > 0 ? live : open).reduce((best, i) => {
-    const d = Date.parse(i.startedAt) - Date.parse(best.startedAt)
+    const d = (impactRankOf(i) - impactRankOf(best)) || (Date.parse(i.startedAt) - Date.parse(best.startedAt))
     return d > 0 || (d === 0 && String(i.id) > String(best.id)) ? i : best
   })
+}
+
+/** #1978 — the service's open incidents other than its anchor, newest start first. */
+export function otherOpenIncidentsOf(service) {
+  const anchor = anchorIncidentOf(service)
+  return openIncidentsOf(service)
+    .filter((i) => i !== anchor)
+    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
 }
 
 export function isEntryExpandable(entry) {

@@ -3,7 +3,7 @@
 // The fixtures run category order against start order, and include a pair that shares an incident id
 // outside any family (deepseek + deepseekapp) and a family pair with different ids (openai + chatgpt).
 import { describe, it, expect } from 'vitest'
-import { buildAffectedEntries, anchorIncidentOf, isEntryExpandable, issueSort } from '../affectedServices'
+import { buildAffectedEntries, anchorIncidentOf, isEntryExpandable, issueSort, otherOpenIncidentsOf } from '../affectedServices'
 
 const H = 3_600_000
 const NOW = Date.parse('2026-11-11T12:00:00Z')
@@ -56,7 +56,7 @@ describe('buildAffectedEntries', () => {
     expect(keysOf(entries)).toEqual(['incident:ds-1 [deepseek,deepseekapp]'])
   })
 
-  it('lists a service under its newest open incident, so a service sits in one entry only', () => {
+  it('lists a service under its anchor incident (newest start at equal impact), so a service sits in one entry only', () => {
     const older = inc('shared-old', ago(6 * H))
     const newer = inc('claude-only-new', ago(1 * H))
     const entries = buildAffectedEntries([
@@ -159,9 +159,21 @@ describe('buildAffectedEntries', () => {
 })
 
 describe('anchorIncidentOf', () => {
-  it('picks the open incident that started last, and the larger id on a tie', () => {
+  it('at equal impact, picks the open incident that started last, and the larger id on a tie', () => {
     const t = ago(1 * H)
     expect(anchorIncidentOf(svc('x', 'X', 'degraded', [inc('a', ago(3 * H)), inc('b', t), inc('c', t)])).id).toBe('c')
+  })
+
+  it('picks a higher impact over a later start; a null impact ranks below minor', () => {
+    const at = (id, h, impact) => ({ ...inc(id, ago(h * H)), impact })
+    expect(anchorIncidentOf(svc('x', 'X', 'degraded', [at('outage', 30, 'major'), at('slow', 1, 'minor')])).id).toBe('outage')
+    expect(anchorIncidentOf(svc('x', 'X', 'degraded', [at('crit', 30, 'critical'), at('maj', 1, 'major')])).id).toBe('crit')
+    expect(anchorIncidentOf(svc('x', 'X', 'degraded', [at('minor', 30, 'minor'), at('none', 1, null)])).id).toBe('minor')
+  })
+
+  it('keeps a live incident over a higher-impact monitoring one', () => {
+    const s = svc('x', 'X', 'degraded', [{ ...inc('mon', ago(1 * H), 'monitoring'), impact: 'critical' }, { ...inc('live', ago(4 * H)), impact: 'minor' }])
+    expect(anchorIncidentOf(s).id).toBe('live')
   })
 })
 
@@ -195,5 +207,42 @@ describe('isEntryExpandable', () => {
     const { timeline, ...noTimeline } = inc('a', ago(1 * H))
     expect(timeline).toEqual([])
     expect(isEntryExpandable(entryOf(noTimeline))).toBe(false)
+  })
+})
+
+describe('otherOpenIncidentsOf (#1978)', () => {
+  const idsOf = (list) => list.map((i) => i.id)
+
+  it('returns every open incident but the anchor, newest start first', () => {
+    const s = svc('replicate', 'Replicate', 'degraded', [
+      inc('registry', ago(30 * H), 'identified'),
+      inc('issue', ago(1 * H), 'investigating'),
+      inc('mid', ago(5 * H), 'investigating'),
+    ])
+    expect(anchorIncidentOf(s).id).toBe('issue')
+    expect(idsOf(otherOpenIncidentsOf(s))).toEqual(['mid', 'registry'])
+  })
+
+  it('keeps a newer monitoring incident when a live one is the anchor', () => {
+    const s = svc('x', 'X', 'degraded', [inc('live', ago(4 * H)), inc('mon', ago(1 * H), 'monitoring')])
+    expect(anchorIncidentOf(s).id).toBe('live')
+    expect(idsOf(otherOpenIncidentsOf(s))).toEqual(['mon'])
+  })
+
+  it('applies the anchor filters: no resolved, no status_history row, no unparseable start', () => {
+    const s = svc('x', 'X', 'degraded', [
+      inc('anchor', ago(1 * H)),
+      { ...inc('done', ago(2 * H)), status: 'resolved' },
+      { ...inc('synth', ago(3 * H)), derived: 'status_history' },
+      inc('nodate', 'not a date'),
+      inc('kept', ago(4 * H)),
+    ])
+    expect(idsOf(otherOpenIncidentsOf(s))).toEqual(['kept'])
+  })
+
+  it('is empty for a single open incident, a stale source, or no incidents', () => {
+    expect(otherOpenIncidentsOf(svc('a', 'A', 'degraded', [inc('only', ago(H))]))).toEqual([])
+    expect(otherOpenIncidentsOf(svc('b', 'B', 'degraded', [inc('1', ago(H)), inc('2', ago(2 * H))], { incidentSourceStale: true }))).toEqual([])
+    expect(otherOpenIncidentsOf(svc('c', 'C', 'degraded'))).toEqual([])
   })
 })
