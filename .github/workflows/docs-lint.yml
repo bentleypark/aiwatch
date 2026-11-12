@@ -92,8 +92,8 @@ jobs:
     name: Service Count Lockstep
     runs-on: ubuntu-latest
     timeout-minutes: 10   # #1253 — never inherit the 6h default
-    # #1081 — #1074's guard pins the service count / category breakdown / probe count / OSV package
-    # count across six files, THREE of which are README.md, README.ko.md and CLAUDE.md. It only ran
+    # #1081 — #1074's guard pins the service counts, the README service tables and the OSV package
+    # count, including in README.md, README.ko.md and CLAUDE.md. It only ran
     # inside test.yml's `Frontend Unit Tests` job, and test.yml paths-ignores exactly those files at
     # the WORKFLOW level — so a README-only edit started no jobs and a wrong count merged green.
     # Verified before the fix: breaking README.md's count left `lint-okf-bundle.mjs` PASSING (it reads

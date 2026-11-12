@@ -1,12 +1,12 @@
-// #1074 — the monitored-service COUNT and its 8-bucket category BREAKDOWN are hardcoded prose on five
-// public surfaces (two Edge SSR templates, the SPA's static index.html, and both READMEs). Nothing
+// #1074 — the monitored-service COUNT and its 8-bucket category BREAKDOWN are hardcoded prose on
+// public surfaces (two Edge SSR templates and the SPA's static index.html; the READMEs state no count). Nothing
 // pinned them, so adding a service meant hand-editing ~29 occurrences off a checklist: miss one and a
 // wrong number ships to an indexed page — including JSON-LD structured data — with CI green.
 //
 // Source of truth is GROUP_MEMBERS (worker/src/service-groups.ts): it carries BOTH the total and the
 // per-bucket split that `s1.lead` states, and is itself pinned to the frontend SERVICE_CATEGORIES by
 // service-groups-sync.test.ts, so it cannot drift from the dashboard. It has zero imports, so pulling
-// it into this surface drags in nothing. (SERVICES from services.ts would drag ~12 modules — don't.)
+// it into this surface drags in nothing.
 //
 // WHY ANCHORED PATTERNS, NOT A BARE NUMBER SEARCH: `/methodology` states TWO different service counts
 // — the monitored count and the probed count (PROBE_TARGETS, pinned separately by the #678 test). A generic
@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { GROUP_MEMBERS } from '../../worker/src/service-groups'
-import { servicesByStatusSource } from '../../worker/src/services'
+import { SERVICES, servicesByStatusSource } from '../../worker/src/services'
 import { PROBE_TARGETS } from '../../worker/src/probe'
 import { OSV_PACKAGES } from '../../worker/src/security-monitor'
 import { renderMethodologyPage } from '../_methodology/html-template'
@@ -147,66 +147,24 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     ])
   })
 
-  it('both READMEs state the total, and neither has an anchor the other lacks', () => {
-    // The label sets are asserted equal below. That structural check is the point: the ONE anchor that
-    // existed on only one side ('statusline', KO-only) is where the last live-stale number hid — the EN
-    // twin read "and 36 more" (i.e. a total of 40) through four service additions. A per-file list that
-    // a human eyeballs for symmetry is exactly what failed; assert the symmetry instead.
-    const EN: Anchor[] = [
-      ['intro line', /Real-time monitoring dashboard for \*\*(\d+) AI services\*\*/],
-      ['features', /Operational \/ Degraded \/ Down for (\d+) AI services/],
-      ['taxonomy', /\((\d+) total — sidebar filters/],
-      ['api diagram', /parallel fetch \((\d+) services\)/],
-    ]
-    const KO: Anchor[] = [
-      ['intro line', /\*\*(\d+)개 AI 서비스\*\*의 상태/],
-      ['features', /(\d+)개 AI 서비스의 정상 \/ 성능 저하/],
-      ['taxonomy', /\(총 (\d+)개 — 사이드바 필터/],
-      ['api diagram', /병렬 fetch \((\d+)개 서비스\)/],
-    ]
-    expect(EN.map(a => a[0]).sort(), 'README.md and README.ko.md must anchor the SAME set of sentences — an anchor on one side only means the other side is unguarded').toEqual(KO.map(a => a[0]).sort())
-    expectCount(read('README.md'), 'README.md', TOTAL, EN)
-    expectCount(read('README.ko.md'), 'README.ko.md', TOTAL, KO)
-    // The social-share badges pre-fill the text a visitor posts to X / Reddit / HN, so a stale number
-    // here gets published OFF-site. They are URL-ENCODED (`%20N%20`, `N%EA%B0%9C`), so a
-    // decoded-form search never sees them — that is how they sat at 39 while every other count read 44.
-    expectCount(read('README.md'), 'README.md badges', TOTAL, [
-      ['share badge EN', /monitoring%20for%20(\d+)%20AI/, 3],
-    ])
-    expectCount(read('README.ko.md'), 'README.ko.md badges', TOTAL, [
-      ['share badge KO', /%E2%80%94%20(\d+)%EA%B0%9C%20AI/, 2],
-      ['share badge EN', /monitoring%20for%20(\d+)%20AI/],
-    ])
-
-    // The statusline sentence states the count DIFFERENTLY per locale — KO gives the total, EN gives a
-    // remainder after naming examples — so it cannot join the symmetric lists above. Derive EN's
-    // expectation from the names actually rendered, so renaming an example can't silently re-break it.
-    const enLine = read('README.md').match(/Surface AI service outages — (.+?), and (\d+) more —/)!
-    expect(enLine, 'the statusline sentence must exist to be guarded').toBeTruthy()
-    const named = enLine[1].split(',').length
-    expectCount(read('README.md'), 'README.md statusline', TOTAL - named, [['statusline EN', /and (\d+) more —/]])
-    expectCount(read('README.ko.md'), 'README.ko.md statusline', TOTAL, [['statusline KO', /등 (\d+)개 AI 서비스의 장애 여부를/]])
-  })
-
-  it('both READMEs spell out the same 8-bucket split, per bucket', () => {
-    // Adding a service moves exactly ONE bucket, and that is the scenario this whole suite exists for:
-    // without this, the half-fix the /methodology bucket test catches was still available one file over.
-    const en: [keyof typeof BUCKETS, RegExp][] = [
-      ['llm', /^### LLM APIs \((\d+)\)/m], ['agents', /^### Coding Agents \((\d+)\)/m],
-      ['voice', /^### Voice \((\d+)\)/m], ['inference', /^### Inference & Infra \((\d+)\)/m],
-      ['observability', /^### Observability \((\d+)\)/m], ['video', /^### Video \((\d+)\)/m],
-      ['image', /^### Image \((\d+)\)/m], ['apps', /^### AI Apps \((\d+)\)/m],
-    ]
-    const ko: [keyof typeof BUCKETS, RegExp][] = [
-      ['llm', /^### LLM API \((\d+)개\)/m], ['agents', /^### 코딩 에이전트 \((\d+)개\)/m],
-      ['voice', /^### 음성 \((\d+)개\)/m], ['inference', /^### 추론 & 인프라 \((\d+)개\)/m],
-      ['observability', /^### 관측 \((\d+)개\)/m], ['video', /^### 영상 \((\d+)개\)/m],
-      ['image', /^### 이미지 \((\d+)개\)/m], ['apps', /^### AI 앱 \((\d+)개\)/m],
-    ]
-    for (const [file, anchors] of [['README.md', en], ['README.ko.md', ko]] as const) {
-      for (const [bucket, re] of anchors) {
-        expectCount(read(file), `${file} [${bucket}]`, BUCKETS[bucket], [[bucket, re]])
+  it('both READMEs list each category\'s services, and only those, under its heading', () => {
+    const nameOf = new Map(SERVICES.map((svc) => [svc.id, svc.name]))
+    const headings: Record<string, Record<keyof typeof GROUP_MEMBERS, string>> = {
+      'README.md': { llm: 'LLM APIs', agents: 'Coding Agents', voice: 'Voice', inference: 'Inference & Infra', observability: 'Observability', video: 'Video', image: 'Image', apps: 'AI Apps' },
+      'README.ko.md': { llm: 'LLM API', agents: '코딩 에이전트', voice: '음성', inference: '추론 & 인프라', observability: '관측', video: '영상', image: '이미지', apps: 'AI 앱' },
+    }
+    for (const [file, byBucket] of Object.entries(headings)) {
+      const tables = new Map(read(file).split(/^### /m).slice(1).map((sec) => [sec.slice(0, sec.indexOf('\n')).trim(), sec.split(/^## /m)[0]]))
+      for (const [bucket, ids] of Object.entries(GROUP_MEMBERS) as [keyof typeof GROUP_MEMBERS, readonly string[]][]) {
+        const table = tables.get(byBucket[bucket])
+        expect(table, `${file}: no "### ${byBucket[bucket]}" table`).toBeTruthy()
+        const rows = [...table!.matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((n) => !['Service', '서비스'].includes(n))
+        expect(rows.sort(), `${file} [${bucket}]`).toEqual(ids.map((id) => nameOf.get(id)).sort())
       }
+      const idTable = [...tables.entries()].find(([h]) => h === 'Available Service IDs' || h === '사용 가능한 서비스 ID')
+      expect(idTable, `${file}: no service-id table`).toBeTruthy()
+      const listed = [...idTable![1].matchAll(/^\|.*$/gm)].flatMap((row) => [...row[0].matchAll(/`([a-z0-9]+)`/g)].map((m) => m[1]))
+      expect(listed.sort(), `${file} service-id table`).toEqual(SERVICES.map((svc) => svc.id).sort())
     }
   })
 
@@ -224,8 +182,7 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     const md = read('CLAUDE.md')
     expectCount(md, 'CLAUDE.md', TOTAL, [
       ['intro line', /monitors (\d+) AI services in real time/],
-      // Same sentence as the READMEs' api diagram — but phrased `N-service fetch`,
-      // so their anchor never matched it and this copy sat at 39 across five service additions.
+      // Phrased `N-service fetch`; this copy sat at 39 across five service additions.
       ['data-flow sentence', /parallel (\d+)-service fetch/],
     ])
     expectCount(md, 'CLAUDE.md', coarse.api, [['API services', /\*\*(\d+) API services\*\*/]])
@@ -237,13 +194,8 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
   it('every surface states the PROBE count, pinned to PROBE_TARGETS', () => {
     // A SECOND count, and the one that actually drifted: kimi (#1067) moved it 32→33 and CLAUDE.md,
     // directory-map.md and adding-a-service.md all went stale (fixed in this PR). #678 pins it on
-    // /methodology only, so the READMEs were the surviving unguarded copy.
+    // /methodology only.
     const n = PROBE_TARGETS.length
-    expectCount(read('README.md'), 'README.md', n, [
-      ['latency feature', /RTT\) for (\d+) probe-capable services/],
-      ['probing feature', /to service endpoints \((\d+) probe targets\)/],
-      ['kv schema', /TTL 7d, (\d+) probe targets\)/],
-    ])
     // CLAUDE.md carries it too — this is the copy that was actually found stale (it said 32).
     expectCount(read('CLAUDE.md'), 'CLAUDE.md', n, [['directory map', /Direct RTT probing \((\d+) targets\)/]])
 
@@ -267,11 +219,6 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
       ['probe-set KO', /probe 세트\((\d+)개\)/, 2],
       ['probe-set EN', /outside the (\d+)-service probe set/],
     ])
-    expectCount(read('README.ko.md'), 'README.ko.md', n, [
-      ['latency feature', /(\d+)개 probe 대상 서비스의 엔드포인트/],
-      ['probing feature', /RTT 측정 \((\d+)개 probe 대상\)/],
-      ['kv schema', /TTL 7일, (\d+)개 probe 대상\)/],
-    ])
     expect(n).not.toBe(TOTAL) // if these ever coincide the anchors still hold; this documents that they differ today
   })
 
@@ -281,10 +228,9 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     // entry is invisible on inspection — assert the pairing instead of re-checking it.
     //
     // CAVEAT, because this guard reads broader than it is: it can only see labels that CARRY a `KO`/`EN`
-    // suffix. ~20 anchors are unsuffixed (`intro line`, `taxonomy`, `api diagram`, `kv schema`, …) and
-    // are invisible to it — which is exactly how the KO-only `statusline` anchor survived four rounds
-    // while its EN twin read a stale 36. The README pair is now covered structurally by the label-set
-    // equality assertion in the READMEs test; this one covers the Edge templates' locale pairs.
+    // suffix. unsuffixed anchors (`intro line`, `directory map`, …) are
+    // invisible to it — which is exactly how a KO-only `statusline` anchor survived four rounds while its
+    // EN twin read a stale 36. It covers the Edge templates' locale pairs.
     const labels = readFileSync(join(__dirname, 'service-count-lockstep.test.ts'), 'utf-8')
       .match(/\['[^']+ (KO|EN)'/g)!.map(l => l.slice(2, -1))
     const ko = labels.filter(l => l.endsWith(' KO')).map(l => l.slice(0, -3))
@@ -301,14 +247,6 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
     // in docs/reference that had already gone stale at 42, rather than re-arming them.
     const isDown = TOTAL - 2
     expectCount(read('CLAUDE.md'), 'CLAUDE.md', isDown, [['directory map', /"Is X Down\?" SEO pages \((\d+) services/]])
-    expectCount(read('README.md'), 'README.md', isDown, [
-      ['feature line', /\*\*Is X Down SEO pages\*\* — (\d+) services/],
-      ['directory map', /"Is X Down\?" SSR pages \((\d+) services\)/],
-    ])
-    expectCount(read('README.ko.md'), 'README.ko.md', isDown, [
-      ['feature line', /\*\*Is X Down SEO 페이지\*\* — (\d+)개 서비스/],
-      ['directory map', /"Is X Down\?" SSR 페이지 \((\d+)개 서비스\)/],
-    ])
   })
 
   it('the /intro dashboard mock is internally consistent with its own "All N" tab', () => {
@@ -380,8 +318,8 @@ describe('service-count lockstep across public surfaces (#1074)', () => {
   })
 
   it("docs/reference and public/llms.txt state the total where they state one", () => {
-    // #1184 — data-flow.md carries the SAME `parallel fetch (N services)` sentence as README.md, and
-    // the README copy is anchored above. This one was not: docs/reference was outside this suite's
+    // #1184 — data-flow.md carries the SAME `parallel fetch (N services)` sentence README.md once
+    // carried. This one was not anchored: docs/reference was outside this suite's
     // surface list, so it sat at 44 while every guarded surface read 45. Being a reference doc rather
     // than an indexed page is not a reason to leave it unpinned — it is what the next change reads.
     expectCount(read('docs/reference/data-flow.md'), 'data-flow.md', TOTAL, [
