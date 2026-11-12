@@ -72,7 +72,7 @@ const isViolation = (e) => {
   // caught violation. NOTE a step35 commit-deny is ALSO where false-positives live (a real user
   // confirmation the parser missed); see the dedicated step35 section below for the caveat.
   if (e.hook === 'step35-verify-gate' && e.decision === 'deny' && e.note !== 'fail-closed') return true
-  // #1974 service-add-gate: a `deny` stopped a new service id going in without a passing Step-0 block.
+  // #1974 service-add-gate: a `deny` stopped a new service id going in.
   if (e.hook === 'service-add-gate' && e.decision === 'deny') return true
   // NOTE `review-loop-gate` (#1150) never emits a `deny` — it is telemetry, not a gate, for the reasons
   // recorded in its own header. It contributes nothing to this tally; its output is read by the 🔁 section.

@@ -52,7 +52,7 @@ is the *procedure* — follow it top to bottom.
      word cues in the issue. An **애매** is a judgement you write with its reason, and an **아니오** it prints
      is still yours to confirm.
    - **A new service or card also needs a Step-0 block in the issue before any design or code (#1974):**
-     `node scripts/service-step0.mjs measure …`, then `gap` and `boundary` by hand, then `check` (re-checking a changed verdict: `check <file> --previous <earlier block file>`). An
+     `node scripts/service-step0.mjs measure …`, then `gap` and `boundary` by hand, then `check` (re-checking a changed verdict: `check <file> --previous <the block the gate compares with>`; which block that is: workflow-hooks.md, service-add-gate). An
      unmeasured row means measuring it, not proposing.
    - **On 예, offer one design review of the issue body before coding; never run it unasked.** Offer it
      as a statement, not a question: `EGM 설계 리뷰(약 10분, 사용량 소모)를 하려면 "설계 리뷰"라고 답해 주세요.`
