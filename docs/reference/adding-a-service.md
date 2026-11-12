@@ -91,28 +91,24 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 
 > **The count + category breakdown are CI-gated (#1074).** `api/__tests__/service-count-lockstep.test.ts`
 > derives the total + per-bucket counts from `GROUP_MEMBERS` (`worker/src/service-groups.ts`), and the
-> PROBE count from `PROBE_TARGETS`, then fails if `CLAUDE.md`, `README.md`, `README.ko.md`,
+> PROBE count from `PROBE_TARGETS`, then fails if `CLAUDE.md`,
 > `index.html`, `api/_intro/html-template.ts` or `api/_methodology/html-template.ts` disagrees — per
 > locale, and per bucket on `/methodology`. Run `npm run test:src` after the steps below: a miss is a
 > red test, not a wrong number in production.
 >
-> **The probe count is covered here too** — every phrasing of it on `/methodology` plus the READMEs and
+> **The probe count is covered here too** — every phrasing of it on `/methodology` plus
 > `CLAUDE.md`. The #678 test in `api/_methodology/__tests__/html-template.test.ts` checks it with two
 > `toContain` EXISTENCE assertions, so it alone would pass with nearly all of them wrong; it keeps
 > ownership of the non-probed service LIST (Azure OpenAI / Modal).
 >
-> **Also pinned:** the README **per-bucket headings** (`### Voice (3)` / `### 음성 (3개)`); the
-> URL-ENCODED **social-share badges** (`monitoring%20for%20N%20AI`); the **is-down count** (`TOTAL − 2`
-> — every service except Bedrock / Azure OpenAI, 5 copies); CLAUDE.md's **Status-Data-Flow** sentence
+> **Also pinned:** the **is-down count** (`TOTAL − 2`
+> — every service except Bedrock / Azure OpenAI) in CLAUDE.md; CLAUDE.md's **Status-Data-Flow** sentence
 > (`parallel N-service fetch`); the **`/intro` dashboard mock**'s `+ N more services`, which must
 > equal `TOTAL −` the cards it actually renders; **`docs/reference/data-flow.md`**'s api-diagram
 > `parallel fetch (N services)`; and **`public/llms.txt`**'s lead + dashboard-link counts (#1184).
 >
 > **Enumerate count occurrences by PHRASING, never by grepping the current value** — that search cannot
-> see a stale copy, by construction. Every number in the list above was found that way, and four of them
-> were already wrong when the guard was written: the badges read **39**, `/methodology`'s EN probe-set
-> read **32**, CLAUDE.md's data-flow sentence read **39** (stale across five service additions), and the
-> mock said `+ 34` beside its own `All 44` and 3 cards. Value-grepping had missed all four.
+> see a stale copy, by construction.
 >
 > It checks **every** occurrence of each anchored sentence, not just the first — the Edge templates
 > carry each KO string twice (inline default + `ko` i18n map) and the map copy is what renders after a
@@ -136,18 +132,15 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 > static array, so that number is a config fact.
 >
 > **Not covered — still hand-checked:** the prose service LISTS themselves (the service NAMES in
-> CLAUDE.md's architecture section and the README category tables — the counts beside them are pinned,
-> the rows are not); the mock's `Issues N` tab (fabricated demo state — `Operational`
+> CLAUDE.md's architecture section); the mock's `Issues N` tab (fabricated demo state — `Operational`
 > and the stat card are pinned to `TOTAL − Issues`, so they DO sum to `All N`);
 > `CONTRIBUTING.md`; and `docs/reference/*` prose counts OTHER than the `data-flow.md` sentence now
 > pinned above — including the two probe-count copies (`data-flow.md`'s overlay line and
 > `directory-map.md`'s probe.ts line), which `PROBE_TARGETS` determines and which are therefore
-> pinnable, just not pinned yet. Also note a **docs-only PR runs none of this** — `test.yml` `paths-ignore`s
-> `*.md`, so a later edit touching only `README*.md`/`CLAUDE.md` starts no jobs (same shape as the
-> #877/#961 gaps). The add-a-service PR itself touches code, so the primary flow IS gated.
+> pinnable, just not pinned yet.
 
 11. `CLAUDE.md` — architecture section: service count, service list, category breakdown, probe count. NOTE: the KV schema (`docs/reference/kv-schema.md`) and fallback tier list (`docs/reference/fallback-tiers.md`) moved out of CLAUDE.md — update those files too if affected
-12. `README.md` — service count, service table (add row), API Services header count, feature description, API endpoint comment
+12. `README.md` — add the service's row to its category table (pinned per category to `GROUP_MEMBERS`) and its id to `### Available Service IDs` (pinned to `SERVICES`). The README states no service count; its badge reads the live total
 13. `README.ko.md` — same as README.md (Korean)
 14. `CONTRIBUTING.md` — if Project Structure section exists
 
@@ -165,7 +158,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 17. `api/_methodology/html-template.ts` — self-contained Edge SSR, **KO + EN i18n duplicated TWICE** (inline `data-i18n` defaults AND the `i18n` JS maps), so each count appears ~4×. Update ALL:
     - `hero.meta` service count ("N services · polled every 5 min") + the `<meta name="description">` count
     - **`s1.lead` category breakdown** — "N AI services — X LLM APIs, Y coding agents, Z voice, … inference & infra, … observability, … video, … AI apps" (KO `…개` + EN). The sub-counts MUST sum to the total; update the right bucket(s) for the new service's category.
-    - **probe count** (only if the new service is probed — search the page for the probe phrasings: "directly-probed" / "are probed" / `probe 세트(N개)` / "N AI services … health-check probes"; currently 33) — kept in **LOCKSTEP with `PROBE_TARGETS.length`** — every occurrence, on this page and in the READMEs/CLAUDE.md, by `api/__tests__/service-count-lockstep.test.ts` (#1074). (`html-template.test.ts`'s #678 check is existence-only and would pass with most of them wrong.)
+    - **probe count** (only if the new service is probed — search the page for the probe phrasings: "directly-probed" / "are probed" / `probe 세트(N개)` / "N AI services … health-check probes") — kept in **LOCKSTEP with `PROBE_TARGETS.length`** — every occurrence, on this page and in CLAUDE.md, by `api/__tests__/service-count-lockstep.test.ts` (#1074). (`html-template.test.ts`'s #678 check is existence-only and would pass with most of them wrong.)
     - **GOTCHA — quote escaping**: the page is `return \`…\``; a literal apostrophe in an i18n string must be `\\'` (NOT `\'`, which the template literal collapses to `'` → breaks the served inline `<script>` → the lang toggle silently dies). A test asserts every inline `<script>` parses (`new Function`).
 
 ## Is X Down (if adding a dedicated page)
