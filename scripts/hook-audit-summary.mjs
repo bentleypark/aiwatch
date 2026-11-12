@@ -62,10 +62,7 @@ if (entries.length === 0) {
 //   - warn (git-mutation): a step-3.5 REMINDER fires on every git mutation — not a violation,
 //     count scales with workload, so its trend is meaningless as an effectiveness signal.
 //   - inject/clean/pass/skip: pure telemetry (gate is on / turn ended cleanly).
-// Only two signals mean a real workflow violation was intercepted:
-//   - block (stop-nag): the assistant tried to end on an auto-proceed nag → blocked.
-//   - any entry whose note carries `no_verify=1` (git-mutation): --no-verify/--no-gpg-sign
-//     was on a commit/push, which CLAUDE.md forbids unless the user asked.
+// `isViolation` below is the one list of what counts as an intercepted violation.
 // This count is a floor, not a total: see the step-3.5 section below for what it still cannot see.
 const isViolation = (e) => {
   if (e.decision === 'block') return true
@@ -75,6 +72,8 @@ const isViolation = (e) => {
   // caught violation. NOTE a step35 commit-deny is ALSO where false-positives live (a real user
   // confirmation the parser missed); see the dedicated step35 section below for the caveat.
   if (e.hook === 'step35-verify-gate' && e.decision === 'deny' && e.note !== 'fail-closed') return true
+  // #1974 service-add-gate: a `deny` stopped a new service id going in without a passing Step-0 block.
+  if (e.hook === 'service-add-gate' && e.decision === 'deny') return true
   // NOTE `review-loop-gate` (#1150) never emits a `deny` — it is telemetry, not a gate, for the reasons
   // recorded in its own header. It contributes nothing to this tally; its output is read by the 🔁 section.
   return false
@@ -137,6 +136,8 @@ for (const e of violations) {
     const n = String(e.note ?? '')
     // commit:<reason> kept whole (no-confirmation vs no-edit-event matter); others by their prefix.
     kind = 'step35:' + (n.startsWith('commit:') ? n.slice('commit:'.length) : n.split(':')[0])
+  } else if (e.hook === 'service-add-gate') {
+    kind = 'service-add:' + String(e.note ?? '').split(':')[0]
   } else {
     kind = e.decision === 'block' ? 'nag-blocked' : 'no-verify-attempt'
   }
@@ -242,7 +243,7 @@ out.push(`  ${dprint.length ? dprint.join('  ') : '(none)'}`)
 out.push('')
 // The effectiveness signal (#415): real violations intercepted, separated from preventive
 // telemetry. A LOW/declining violation count is the goal — telemetry (warn/inject) is not.
-out.push('⚖️  Violations intercepted (real signal — nag block + --no-verify + step-3.5 deny; still UNDERCOUNTS — a step-3.5 skip the gate misses is invisible):')
+out.push('⚖️  Violations intercepted (real signal; still UNDERCOUNTS — a step-3.5 skip the gate misses is invisible):')
 const vkind = Object.entries(violByKind).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`)
 out.push(`  ${violations.length} total · ${violationsLast7.length} in last 7d${vkind.length ? '  (' + vkind.join(', ') + ')' : ''}`)
 out.push('')
@@ -303,13 +304,21 @@ if (revloop.length) {
   }
   out.push('')
 }
+const svcGate = entries.filter((e) => e.hook === 'service-add-gate')
+if (svcGate.length) {
+  const n = (d) => svcGate.filter((e) => e.decision === d).length
+  out.push('🧱 Step-0 service-add gate (#1974):')
+  out.push(`  ${n('deny')} deny · ${n('pass')} pass · ${n('skip')} skip`)
+  if (n('skip')) out.push(`  ❗ skip=${n('skip')} — the gate could not check and let the edit through: instrument health, not a clean pass.`)
+  out.push('')
+}
 const evidence = entries.filter((e) => e.hook === 'evidence-line-gate' && e.decision !== 'skip')
 if (evidence.length) {
   const sum = { trigger: 0, lines: 0, ops: 0, official: 0, code: 0, unverified: 0, untyped: 0 }
   for (const e of evidence) {
     for (const m of String(e.note ?? '').matchAll(/(\w+)=(\d+)/g)) if (m[1] in sum) sum[m[1]] += Number(m[2])
   }
-  const warned = evidence.filter((e) => e.decision === 'warn').length
+  const warned = evidence.filter((e) => e.decision === 'warn' && !/\bstepzero=1\b/.test(String(e.note ?? ''))).length
   out.push('🧾 evidence lines (gate 5):')
   out.push(`  ${evidence.length} final message(s) checked · ${sum.trigger} had a proposal/decision/remaining-work cue · ${warned} re-prompted for a missing 근거: line`)
   out.push(`  근거: lines=${sum.lines} — 운영 데이터 ${sum.ops} · 공식 기록 ${sum.official} · 코드 읽기만 ${sum.code} · 미확인 ${sum.unverified} · untyped ${sum.untyped}`)

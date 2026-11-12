@@ -111,8 +111,10 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  46_749 → 46_759 (#1837): the architecture list names Grok Bot among the AI apps.
  *  46_759 → 47_157: workflow-gates.txt gate 5 (the `근거:` line format, +254) and the CLAUDE.md hook-table
  *  row for evidence-line-gate.mjs (+144). The gate text is what the model reads before it writes; the
- *  Stop hook only checks the line exists. */
-export const BUDGET_CHARS = 46_813
+ *  Stop hook only checks the line exists.
+ *  46_813 → 47_061 (#1974): the hook table gains a row for service-add-gate.mjs and the evidence-line row names
+ *  its Step-0 clause. */
+export const BUDGET_CHARS = 47_061
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

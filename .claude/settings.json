@@ -64,6 +64,12 @@
           },
           {
             "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/service-add-gate.mjs\"",
+            "timeout": 15,
+            "statusMessage": "Checking the Step-0 audit before a new service id (#1974)..."
+          },
+          {
+            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/step35-verify-gate.mjs\"",
             "timeout": 10,
             "statusMessage": "Protecting workflow-gate files (#657)..."
