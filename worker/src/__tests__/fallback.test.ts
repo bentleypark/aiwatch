@@ -390,6 +390,31 @@ describe('#1062 facet A — Voice tier STT/TTS capability gating', () => {
     ]
     expect(getFallbacks('fishaudio', 'api', services)).toEqual([{ name: 'Deepgram', score: 85 }, { name: 'ElevenLabs', score: 80 }])
   })
+
+  describe('Speechmatics (STT, #1973)', () => {
+    const board = [
+      ...voice,
+      { id: 'fishaudio', category: 'api', name: 'Fish Audio', status: 'operational', aiwatchScore: 99 },
+      { id: 'speechmatics', category: 'api', name: 'Speechmatics', status: 'operational', aiwatchScore: 60 },
+      { id: 'openai', category: 'api', name: 'OpenAI API', status: 'operational', aiwatchScore: 95 },
+    ]
+    const namesFor = (id: string) => getFallbacks(id, 'api', board.map(s => s.id === id ? { ...s, status: 'down' } : s)).map(f => f.name).sort()
+
+    it('recommends the STT siblings, never a TTS-only service', () => {
+      expect(namesFor('speechmatics')).toEqual(['AssemblyAI', 'Deepgram'])
+    })
+
+    it('fills AssemblyAI\'s two slots with the dedicated STT services, so the multimodal OpenAI drops out', () => {
+      expect(namesFor('assemblyai')).toEqual(['Deepgram', 'Speechmatics'])
+      expect(getFallbacks('assemblyai', 'api', board.filter(s => s.id !== 'speechmatics').map(s => s.id === 'assemblyai' ? { ...s, status: 'down' } : s)).map(f => f.name).sort())
+        .toEqual(['Deepgram', 'OpenAI API'])
+    })
+
+    it('is not offered for a TTS-only outage', () => {
+      expect(namesFor('elevenlabs')).not.toContain('Speechmatics')
+      expect(namesFor('fishaudio')).not.toContain('Speechmatics')
+    })
+  })
 })
 
 describe('buildFallbackText', () => {

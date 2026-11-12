@@ -30,6 +30,7 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'assemblyai', url: 'https://api.assemblyai.com/v2/transcript' },
   { id: 'deepgram', url: 'https://api.deepgram.com/v1/models' },
   { id: 'fishaudio', url: 'https://api.fish.audio/wallet/self/api-credit' },       // #1549 — app 401 (root 404s like any garbage path)
+  { id: 'speechmatics', url: 'https://asr.api.speechmatics.com/v2/jobs' },         // #1973 — app 401 (root 200, unknown /v2 path 404)
   { id: 'voyageai', url: 'https://api.voyageai.com/v1/embeddings' },
   { id: 'jina', url: 'https://api.jina.ai/v1/embeddings' },                       // #880 — app 401 (unknown /v1 path 404s), same path as voyageai
   { id: 'twelvelabs', url: 'https://api.twelvelabs.io/v1.3/indexes' },             // control-plane, 401

@@ -359,7 +359,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is AssemblyAI down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors AssemblyAI every 5 minutes and shows real-time operational status.' },
       { q: 'Why is AssemblyAI transcription failing?', a: 'AssemblyAI may be experiencing asynchronous or streaming API issues. Check this page for active incidents and the official status page for component-level detail.' },
-      { q: 'What are alternatives to AssemblyAI?', a: 'For speech-to-text, Deepgram is an alternative AIWatch also tracks. AIWatch shows current availability for each speech service.' },
+      { q: 'What are alternatives to AssemblyAI?', a: 'For speech-to-text, Deepgram and Speechmatics are alternatives AIWatch also tracks. AIWatch shows current availability for each speech service.' },
       { q: 'How do I check AssemblyAI status?', a: 'You can check AssemblyAI status on this page, on the official AssemblyAI status page at status.assemblyai.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -371,7 +371,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     faqs: [
       { q: 'Is Deepgram down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Deepgram every 5 minutes and shows real-time operational status.' },
       { q: 'Why is Deepgram streaming not working?', a: 'Deepgram streaming may be affected by regional network issues or capacity constraints. Check this page for active incidents.' },
-      { q: 'What are alternatives to Deepgram?', a: 'For speech-to-text, AssemblyAI is an alternative; for text-to-speech, ElevenLabs and Fish Audio. AIWatch shows current availability for each.' },
+      { q: 'What are alternatives to Deepgram?', a: 'For speech-to-text, AssemblyAI and Speechmatics are alternatives; for text-to-speech, ElevenLabs and Fish Audio. AIWatch shows current availability for each.' },
       { q: 'How do I check Deepgram status?', a: 'You can check Deepgram status on this page, on the official Deepgram status page at status.deepgram.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
@@ -384,6 +384,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Why is Fish Audio text-to-speech failing?', a: 'Fish Audio lists each TTS model separately on its status page, so one model can be down while others work. Check this page for active incidents, then try another model or verify your API key and credit balance.' },
       { q: 'What are alternatives to Fish Audio?', a: 'For text-to-speech, ElevenLabs and Deepgram are alternatives AIWatch also tracks. AIWatch shows current availability for each voice service.' },
       { q: 'How do I check Fish Audio status?', a: 'You can check Fish Audio status on this page, on the official Fish Audio status page at status.fish.audio, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
+  speechmatics: {
+    displayName: 'Speechmatics',
+    description: 'Speechmatics provides speech-to-text through realtime and batch transcription APIs, with a text-to-speech API in preview, and also ships its engine for on-premises deployment.',
+    insight: 'AIWatch tracks Speechmatics through its official status page, plus a probe of the batch jobs API.',
+    whenDown: 'When Speechmatics is down, realtime transcription sessions and batch transcription jobs fail, so live captioning, voice agents, and transcription pipelines that depend on it stop producing text.',
+    faqs: [
+      { q: 'Is Speechmatics down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Speechmatics every 5 minutes and shows real-time operational status.' },
+      { q: 'Why is Speechmatics transcription failing?', a: 'Speechmatics lists each batch region (EU, US, AU) and each realtime region (US, EU) separately on its status page, so one region can be affected while others work. Check this page for active incidents and the regional breakdown.' },
+      { q: 'What are alternatives to Speechmatics?', a: 'For speech-to-text, AssemblyAI and Deepgram are alternatives AIWatch also tracks. AIWatch shows current availability for each speech service.' },
+      { q: 'How do I check Speechmatics status?', a: 'You can check Speechmatics status on this page, on the official Speechmatics status page at status.speechmatics.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
   // Inference & infrastructure (#263)
