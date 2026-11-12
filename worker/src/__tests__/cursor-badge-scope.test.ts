@@ -9,7 +9,7 @@ const cfg = (id: string): ServiceConfig => {
   return c
 }
 
-// #1814 — components as status.x.ai/api/compat/summary.json served them on 2026-11-05 (Cursor page).
+// #1814 — components as status.x.ai/api/compat/summary.json served them on 2026-11-13 (Cursor page).
 const liveComponent = (id: string, name: string, status: string, position: number) => ({
   id, name, status, created_at: '2026-11-04T22:49:35.603Z', updated_at: '2026-11-04T22:49:35.603Z', position,
   description: null, showcase: true, start_date: null, group_id: null, page_id: '0tp9ssgtptvs', group: false,
@@ -17,7 +17,7 @@ const liveComponent = (id: string, name: string, status: string, position: numbe
 })
 const LIVE = (statuses: Record<string, string> = {}) => [
   ['rflc60xp5jp2', 'IDE', 1], ['cursor-ios', 'Cursor IDE (iOS)', 2], ['vsny1qv7v86c', 'CLI', 3], ['jh0714rgjgt4', 'cursor.com', 4],
-  ['mwv1g9sc7kdh', 'Cloud Agents', 5], ['k0trcq273dr6', 'Automations', 6], ['bugbot', 'Bugbot', 7], ['sm5wkcnqkvr9', 'Grok Bot', 8],
+  ['mwv1g9sc7kdh', 'Cloud Agents', 5], ['k0trcq273dr6', 'Automations', 6], ['2x2chyqwmkzl', 'Review Agents', 7], ['sm5wkcnqkvr9', 'Grok Bot', 8],
   ['third-party-models', 'Third-party models', 9], ['xwjpvdf81qh9', 'Origin', 10], ['enterprise-dashboard', 'Enterprise Dashboard', 11],
 ].map(([id, name, pos]) => liveComponent(id as string, name as string, statuses[id as string] ?? 'operational', pos as number))
 
@@ -52,7 +52,7 @@ describe('#1814 Cursor components added after the move to status.x.ai', () => {
     } as never, undefined, {})
   }
 
-  it.each([['bugbot', 'BugBot'], ['cursor-ios', 'Cursor IDE (iOS)']])('an open incident on %s alone keeps the badge non-operational and stays on the card', async (id) => {
+  it.each([['2x2chyqwmkzl', 'Review Agents'], ['cursor-ios', 'Cursor IDE (iOS)']])('an open incident on %s alone keeps the badge non-operational and stays on the card', async (id) => {
     const inc = xaiIncident(`ps_${id}`, 'Elevated errors', 'investigating', [id], { [id]: 'degraded_performance' })
     const svc = await fetchCursor({ [id]: 'degraded_performance' }, [inc])
     expect(svc.status).not.toBe('operational')
