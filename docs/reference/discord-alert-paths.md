@@ -219,14 +219,14 @@ Fires when a live incident the provider has resolved is still a non-resolved row
 
 Fires when the `*/5` cron has not run for 20+ min. On 2026-09-23 Cloudflare stopped dispatching the schedule for ~3h with the trigger still registered and `fetch` serving normally; every cron-side check went silent with it, and it was noticed only because the daily summary never arrived. A cron cannot report its own absence, so the watch sits on the path that stayed alive.
 
-- **Source**: `worker/src/cron-heartbeat.ts`. `recordCronHeartbeat` is the first statement of `scheduled()`; `checkCronHeartbeat` runs from `fetch`, at most once per isolate per 3 min (`createWatchdogThrottle`), off the response via `ctx.waitUntil`. Both are inert without `STATUS_CACHE` and `DISCORD_WEBHOOK_URL`, and `fetch` skips the check for a request to a loopback host (`isLoopbackHost`), because a local `wrangler dev` worker dispatches no schedule (#1944).
+- **Source**: `worker/src/cron-heartbeat.ts`. `recordCronHeartbeat` is the first statement of `scheduled()`; `checkCronHeartbeat` runs from `fetch`, at most once per isolate per 3 min (`createWatchdogThrottle`), off the response via `ctx.waitUntil`. Both are inert without `STATUS_CACHE` and `DISCORD_WEBHOOK_URL`. Only a heartbeat a cron run wrote can alert, so a local `wrangler dev` worker, which dispatches no schedule, stays quiet (#1944).
 - **State** is one key, `cron:heartbeat` (`{ at, alertedAt?, seeded? }`, [kv-schema.md](kv-schema.md)) — no marker key.
 - **Operator-only** — red for the stall, green for the recovery. Never builds a feed entry, never touches the #486 per-user relay.
 - **Dedup**: `alertedAt` is written only after a successful send, so a refused webhook retries at the next check; the alert repeats hourly while the stall lasts (`STALL_REALERT_MS`).
 - **Recovery notice** is sent by the cron once its stamp has been written; the stamp clears the state.
-- **Silences that remain, by design**: an unreadable value or failed KV read alerts nobody (the cron's next run rewrites it); if `fetch` stops too, nothing here fires — that is visible on the dashboard.
+- **Silences that remain, by design**: an absent key, a `seeded` value, an unreadable value or a failed KV read alerts nobody (the cron's next run rewrites it); if `fetch` stops too, nothing here fires — that is visible on the dashboard.
 - **Recovery procedure**: `npx wrangler triggers deploy --config worker/wrangler.toml`, then confirm the next slot ran with `workersInvocationsScheduled` (Cloudflare GraphQL) or the heartbeat below.
-- **Post-deploy check** (after every `npm run deploy:worker`): read the heartbeat once the next `*/5` slot has passed — `npx wrangler kv key get cron:heartbeat --namespace-id e49508d80bb144e9a7ff872f2be771a4 --remote` — and confirm `at` (ms) is newer than the deploy **and the value has no `seeded` field** — the first `fetch` after a deploy that finds the key absent seeds it, which says nothing about the cron.
+- **Post-deploy check** (after every `npm run deploy:worker`): read the heartbeat once the next `*/5` slot has passed — `npx wrangler kv key get cron:heartbeat --namespace-id e49508d80bb144e9a7ff872f2be771a4 --remote` — and confirm `at` (ms) is newer than the deploy and the value has no `seeded` field.
 
 ### Persistent status-source failure (#500/#1391) — operator ops alert
 

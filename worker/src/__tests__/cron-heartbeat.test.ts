@@ -10,7 +10,6 @@ import {
   recordCronHeartbeat,
   checkCronHeartbeat,
   createWatchdogThrottle,
-  isLoopbackHost,
   CRON_HEARTBEAT_KEY,
   CRON_STALE_MS,
   STALL_REALERT_MS,
@@ -84,31 +83,16 @@ describe('checkCronHeartbeat', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('seeds an absent key instead of ignoring it, so a stall before the first run is still caught', async () => {
-    const kv = mockKV()
+  it('never alerts on an absent key or one no cron run wrote, and writes nothing (#1944)', async () => {
     const send = okSend()
-    expect(await checkCronHeartbeat(kv, HOOK, T0, send)).toBe('seeded')
-    expect(stored(kv)).toEqual({ at: T0, seeded: true })
+    const absent = mockKV()
+    expect(await checkCronHeartbeat(absent, HOOK, T0 + min(600), send)).toBe('never-ran')
+    expect(absent.put).not.toHaveBeenCalled()
+
+    const seeded = mockKV({ [CRON_HEARTBEAT_KEY]: JSON.stringify({ at: T0, seeded: true, alertedAt: T0 + min(30) }) })
+    expect(await checkCronHeartbeat(seeded, HOOK, T0 + min(600), send)).toBe('never-ran')
+    expect(seeded.put).not.toHaveBeenCalled()
     expect(send).not.toHaveBeenCalled()
-
-    expect(await checkCronHeartbeat(kv, HOOK, T0 + CRON_STALE_MS, send)).toBe('alerted')
-  })
-
-  it('never reports a seeded time as a cron run, and the cron clears the mark on its first run', async () => {
-    const kv = mockKV()
-    const send = okSend()
-    await checkCronHeartbeat(kv, HOOK, T0, send)
-    await checkCronHeartbeat(kv, HOOK, T0 + min(30), send)
-    const [, stall] = send.mock.calls[0] as unknown as [string, { description: string }]
-    expect(stall.description).not.toContain('Last run')
-    expect(stall.description).toContain('No cron run has been recorded')
-    expect(stored(kv)).toEqual({ at: T0, seeded: true, alertedAt: T0 + min(30) })
-
-    await recordCronHeartbeat(kv, HOOK, T0 + min(60), send)
-    const [, recovery] = send.mock.calls[1] as unknown as [string, { description: string }]
-    expect(recovery.description).not.toContain('last run')
-    expect(recovery.description).toContain('no cron run had been recorded')
-    expect(stored(kv)).toEqual({ at: T0 + min(60) })
   })
 
   it('reads a value with a non-true seeded field as an ordinary heartbeat', () => {
@@ -234,29 +218,6 @@ describe('recordCronHeartbeat', () => {
   })
 })
 
-describe('isLoopbackHost', () => {
-  it.each([
-    'http://localhost:8788/api/status',
-    'http://127.0.0.1:8788/',
-    'http://127.8.8.8/',
-    'http://[::1]:8788/',
-    'http://worker.localhost:8788/',
-  ])('%s is local', (u) => {
-    expect(isLoopbackHost(new URL(u).hostname)).toBe(true)
-  })
-
-  it.each([
-    'https://aiwatch-worker.p2c2kbf.workers.dev/api/status',
-    'https://ai-watch.dev/',
-    'https://worker.invalid/',
-    'http://localhost.evil.example/',
-    'http://127.0.0.1.evil.example/',
-    'http://192.168.0.10:8788/',
-  ])('%s is not, so an unrecognised host still alerts', (u) => {
-    expect(isLoopbackHost(new URL(u).hostname)).toBe(false)
-  })
-})
-
 describe('createWatchdogThrottle', () => {
   it('admits one check per interval', () => {
     const t = createWatchdogThrottle(WATCHDOG_INTERVAL_MS)
@@ -317,28 +278,33 @@ describe('wiring — the real fetch handler notices a stopped cron', () => {
     expect(kv.get).not.toHaveBeenCalled()
   })
 
-  it('stays out of a local worker, which has no schedule to watch, without spending the throttle slot', async () => {
+  it.each([
+    ['http://0.0.0.0:8788/api/no-such-route', 0],
+    ['http://localhost.:8788/api/no-such-route', 1],
+    ['http://localhost:8788/api/no-such-route', 2],
+  ])('never alerts on a heartbeat no cron run wrote, whatever the host (%s), and alerts once one did (#1944)', async (u, slot) => {
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(T0 + min(600))
+    vi.setSystemTime(T0 + min(600) + slot * 2 * WATCHDOG_INTERVAL_MS)
     const hookPosts: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url === HOOK) hookPosts.push(JSON.parse(String(init?.body)).embeds[0].title)
       return new Response('', { status: 200 })
     }))
-    const kv = mockKV({ [CRON_HEARTBEAT_KEY]: JSON.stringify({ at: T0 }) })
-    const env = { STATUS_CACHE: kv, DISCORD_WEBHOOK_URL: HOOK } as never
+    const kv = mockKV({ [CRON_HEARTBEAT_KEY]: JSON.stringify({ at: T0, seeded: true, alertedAt: T0 + min(30) }) })
+    const env = { STATUS_CACHE: kv, DISCORD_WEBHOOK_URL: HOOK }
 
-    const local = ctx()
-    await workerModule.fetch(new Request('http://localhost:8788/api/no-such-route'), env, local.ctx)
-    await local.settle()
-    expect(local.pending).toHaveLength(0)
-    expect(kv.get).not.toHaveBeenCalled()
+    const seeded = ctx()
+    await workerModule.fetch(new Request(u), env as never, seeded.ctx)
+    await seeded.settle()
+    expect(kv.get).toHaveBeenCalledWith(CRON_HEARTBEAT_KEY)
     expect(kv.put).not.toHaveBeenCalled()
     expect(hookPosts).toEqual([])
 
-    const deployed = ctx()
-    await workerModule.fetch(req(), env, deployed.ctx)
-    await deployed.settle()
+    kv.store[CRON_HEARTBEAT_KEY] = JSON.stringify({ at: T0 })
+    vi.setSystemTime(Date.now() + WATCHDOG_INTERVAL_MS)
+    const stamped = ctx()
+    await workerModule.fetch(new Request(u), env as never, stamped.ctx)
+    await stamped.settle()
     expect(hookPosts).toEqual(['🚨 Cron stalled'])
   })
 })
