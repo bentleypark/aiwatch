@@ -48,8 +48,14 @@ is the *procedure* — follow it top to bottom.
    - **예** = the issue changes the definition of a value AIWatch publishes: what a metric counts, what is
      included or excluded, how a status is decided. Making a value faster, displaying it, refactoring or
      observing it is **아니오**.
+   - **Run `node scripts/classify-start.mjs N` first (#1974).** It prints this line for the clear cases from
+     word cues in the issue. An **애매** is a judgement you write with its reason, and an **아니오** it prints
+     is still yours to confirm.
+   - **A new service or card also needs a Step-0 block in the issue before any design or code (#1974):**
+     `node scripts/service-step0.mjs measure …`, then `gap` and `boundary` by hand, then `check` (re-checking a changed verdict: `check <file> --previous <earlier block file>`). An
+     unmeasured row means measuring it, not proposing.
    - **On 예, offer one design review of the issue body before coding; never run it unasked.** Offer it
-     as a statement, not a question: `EGM 설계 리뷰(약 $5)를 하려면 "설계 리뷰"라고 답해 주세요.`
+     as a statement, not a question: `EGM 설계 리뷰(약 10분, 사용량 소모)를 하려면 "설계 리뷰"라고 답해 주세요.`
    - **On the user's yes, run it the way #1963 measured it**: headless through `claude -p` (the EGM skills
      refuse model invocation), in a throwaway worktree of `origin/main` in the scratchpad, with the Bash
      tool's `run_in_background` (one measured run took 11 min):

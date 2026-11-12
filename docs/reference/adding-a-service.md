@@ -27,6 +27,9 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 - **Thin sources → the service renders like Azure OpenAI** (operational, "No official uptime", `score` withheld at low confidence, ~never an incident) — a near-empty card that lowers dashboard quality. **gcloud-`incidents.json`-only services are thin** (Veo/Imagen/STT/Vertex Vector — #680 held for this reason). Gemini looks rich only because it ALSO merges the AI Studio source (`aistudioStatus`).
 - **Prefer candidates that are BOTH data-rich AND fill a single-service category gap** (#601). If a thin category (video/image/vector/observability/embeddings) needs a sibling, pick a Better Stack / Atlassian / incident.io competitor over a gcloud product. The per-category shortlists — and the sources already declined — are in **[service-candidates.md](service-candidates.md)**; a row there means "the page is parseable", NOT that it passes this audit.
 - Record the audit verdict (and the source URLs you checked) in the issue before implementing.
+- Measure the rows with `node scripts/service-step0.mjs measure` (the card's own component ids, every number
+  labelled by its scope) and attach its block to the issue; `check` refuses a block with an unmeasured row.
+  Whether each badge component is the card's product, and the category gap, stay manual rows (#1974).
 
 ## Worker (backend)
 1. `worker/src/services.ts` — add `ServiceConfig` entry at correct position in `SERVICES` array (determines API response order: LLM → voice → infra → apps → agents). If the status page hosts unrelated components (multi-tenant Atlassian / incident.io / metastatuspage feeds — e.g. `githubstatus.com`, `status.openai.com`, `status.claude.com`), set `incidentKeywords` to scope the visible incident list — otherwise the service card will surface every incident on the page (#397)

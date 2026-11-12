@@ -209,6 +209,9 @@ Before recommending ANY issue as do-next, verify it the **same way** you'd verif
    a Tier-A `assert:` line under its `verify-after` (#873, [docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md))
    so the daily job **auto-drains** it — the fastest way to shrink the verify-blocked pile. GA4/GSC-CTR
    /behavioral checks aren't assertable; leave those as a human ping.
+5. **A new-service issue is not eligible for the pick** until its body or a comment carries a Step-0
+   block that passes `node scripts/service-step0.mjs check` (#1974): a row left unmeasured means the
+   next action is to measure it.
 
 Only issues that survive this gate (real remaining code work) are eligible for the recommended pick.
 
