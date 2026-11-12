@@ -332,6 +332,11 @@ export const SERVICES: ServiceConfig[] = [
   // Fish Audio (#1549) — TTS / voice cloning. Better Stack page (mirror helicone/luma); its per-model
   // resources sit in their own page section, which parseBetterStackComponents already groups.
   { id: 'fishaudio', name: 'Fish Audio', provider: 'Fish Audio', category: 'api', statusUrl: 'https://status.fish.audio', apiUrl: null, rssFeedUrl: 'https://status.fish.audio/feed', betterStackUrl: 'https://status.fish.audio', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-09-30' }, // #802
+  // Speechmatics (#1973) — speech-to-text. Counted: the Batch SaaS region leaves (EU1, EU2, US1, US2, AU),
+  // Realtime SaaS US/EU, and the Management Platform, which serves the temporary-key API clients call. Reference:
+  // Portal (account screens). Excluded: Docs, and the on-prem Docker/Helm registry, appliance licensing and usage reporting.
+  { id: 'speechmatics', name: 'Speechmatics', provider: 'Speechmatics', category: 'api', statusUrl: 'https://status.speechmatics.com', apiUrl: 'https://status.speechmatics.com/api/v2/summary.json', statusComponentId: '0xl0llrch7gp', statusComponentIds: ['0xl0llrch7gp', '522jbljg5r9x', '0htcxsthlztx', 'w9x6rlqxp72k', 'xm7gcqj0ydlp', '60dg26p5lbgx', 'nw5l21ppzds8', 'gwpxr8wqn4ks'], referenceComponentIds: ['tp2rwd3tfqh5'],
+    rosterAuditExclude: ['97t96hn8yhhh', 'qt6472p3hlz3', 'yj6jx8y7xlkk', 'hdcysbmzk9ys', 'tp2rwd3tfqh5', 'czxs20tbdw2h', 'bn0xvr6wk6ry', 'pcqv82k77r5v'], addedAt: '2026-11-12' }, // #802
   // Inference / Infrastructure
   // #1821/#1829 — Inference Endpoints UI is Reference: the provider's quick start has users "log in the
   // Inference Endpoints UI" to create and configure an endpoint. This path shows no reference rows, so it

@@ -41,6 +41,7 @@ export const STATUS_URL = {
   assemblyai:  'https://status.assemblyai.com',
   deepgram:    'https://status.deepgram.com',
   fishaudio:   'https://status.fish.audio',
+  speechmatics: 'https://status.speechmatics.com',
   azureopenai: 'https://azure.status.microsoft/en-us/status',
   characterai: 'https://status.character.ai',
   claudeai:    'https://status.claude.com',

@@ -130,6 +130,18 @@ The last of the five single-service-category gaps, closed by #880 (Jina AI added
 | **Nomic AI** | status.nomic.ai | incident.io ✅ | Yes — optional 3rd |
 | Mixedbread | mixedbread-ai.openstatus.dev | OpenStatus + RSS | Likely (RSS path only; no Atlassian/Instatus JSON) |
 
+## Voice / speech-to-text — Speechmatics added (#1973)
+
+The Voice tier gates STT and TTS apart (#1062 facet A), so speech-to-text had one dedicated sibling
+(Deepgram) before #1973. Measured 2026-11-12, in #1973.
+
+| Candidate | Status page | Platform | Monitorable |
+|---|---|---|---|
+| **Speechmatics** | status.speechmatics.com | Atlassian ✅ | Added in #1973 |
+| Gladia | status.gladia.io | incident.io ✅ | Yes — optional 3rd. 13 incidents in 90 days, newest 35 days old; probe 401 in 2.55 s |
+| Rev.ai | status.rev.ai | Atlassian ✅ | Thin — 0 incidents in 90 days, newest 182 days old |
+| Soniox | status.soniox.com | Instatus | Thin — newest RSS item 2026-09-08 |
+
 ## Search / RAG — NEW category, not yet seeded
 
 No AI search provider is monitored today. Execution issue: **#392** (Tavily). A dedicated `search`

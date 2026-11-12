@@ -14,7 +14,7 @@ Browser (React SPA, 60s polling — every poll reads /api/status/cached first, /
     run and the daily counters at most every 5 min (`status-refresh.ts`). A poll that received such a snapshot
     polls once more 20 s later to pick up that run (`followUpPollDelay`, `src/utils/dataTimestamp.js`)
   → Cloudflare Worker (/api/status, and the StatusRefresher run)
-    → parallel fetch (49 services) through one per-invocation `createFetchTracker` (#1489). It never delays a
+    → parallel fetch (50 services) through one per-invocation `createFetchTracker` (#1489). It never delays a
       fetch, and each `fetchWithTimeout` timeout starts at the `fetch()` call. It records, per run, how many other
       fetches were waiting for headers when each one started, for the timeouts and the answers apart.
       Half the runs (a coin per run) launch the page prefetch in a shuffled order, the other half in `SERVICES`

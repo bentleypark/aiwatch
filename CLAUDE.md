@@ -209,8 +209,8 @@ When adding a new monitored service, files across worker, frontend, docs, SEO me
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 49 AI services in real time:
-- **36 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, fal.ai, ElevenLabs, AssemblyAI, Deepgram, Fish Audio, SpaceXSI, DeepSeek, Kimi, OpenRouter, Bedrock, Azure OpenAI, Pinecone, turbopuffer, Stability AI, Black Forest Labs (FLUX), Voyage AI, Jina AI, Modal, Twelve Labs, LangChain (LangSmith), Helicone, Langfuse, Runway, Luma (Dream Machine)
+**AIWatch** is a React SPA that monitors 50 AI services in real time:
+- **37 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, fal.ai, ElevenLabs, AssemblyAI, Deepgram, Fish Audio, Speechmatics, SpaceXSI, DeepSeek, Kimi, OpenRouter, Bedrock, Azure OpenAI, Pinecone, turbopuffer, Stability AI, Black Forest Labs (FLUX), Voyage AI, Jina AI, Modal, Twelve Labs, LangChain (LangSmith), Helicone, Langfuse, Runway, Luma (Dream Machine)
 - **7 AI apps**: claude.ai, ChatGPT, Character.AI, DeepSeek App, Grok, Kimi App, Grok Bot
 - **6 coding agents**: Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Junie
 
@@ -234,7 +234,7 @@ The full KV reference (40+ keys: pattern, value, TTL, writes/day, purpose) and t
 ```
 api/                 # Vercel Edge Functions (SSR pages + proxies). `_`-prefixed dirs = helpers, not Functions (#867)
   intro.ts           # Landing page (/intro); ?banner=<key> announcement slot
-  is-down.ts         # "Is X Down?" SEO pages (47 services; excl. bedrock/azureopenai)
+  is-down.ts         # "Is X Down?" SEO pages (48 services; excl. bedrock/azureopenai)
   reports.ts         # /reports/* proxy → aiwatch-reports Jekyll site (#264)
   methodology.ts     # Public "How AIWatch Works" page (/methodology, #673)
   plugin.ts          # Claude Code plugin landing (/plugin, #920)
@@ -281,7 +281,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   uptime-liveness.ts late-resolution.ts reissued-duplicates.ts # Alerts: uptime stopped publishing (#1389/#957); archive row left open (#1797); re-issued id banked twice (#1938)
   suppression.ts     # Operator incident-suppression layer (#904)
   overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident
-  probe.ts probe-archival.ts degradation-count.ts # Direct RTT probing (36 targets) + daily archival + degradation count
+  probe.ts probe-archival.ts degradation-count.ts # Direct RTT probing (37 targets) + daily archival + degradation count
   daily-summary.ts weekly-briefing.ts monthly-archive.ts monthly-narrative.ts  # Discord reports + archives
   api-traffic.ts outage-audience.ts history-click.ts x-reply-mark.ts referral.ts vitals.ts mistral-feed-observation.ts mistral-public-api.ts status-fetch-run.ts drop-log.ts   # WAE/KV instrumentation
   mistral-email.ts   # email() handler — Mistral notification mail triggers a scrape (#1510)
@@ -331,7 +331,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`; GA4 activates only 
 Per-service status is resolved in `worker/src/services.ts` with a layered priority chain (multi-component worst-of → component match → overall-indicator fallback → `incidentExclude` bypass → component-status filter → fetch-failure cross-validation). The full ordered rules and their #-issue rationale are in **[docs/reference/status-determination.md](docs/reference/status-determination.md)** — read it before changing status resolution.
 
 ### Status Data Flow
-Browser (60s polling) → `/api/status/cached` (stale → `StatusRefresher` DO: parallel 49-service fetch, KV write) → React state. Cron (`*/5`) handles probing, incident detection + Discord alerts, AI analysis, daily/monthly aggregation, changelog/security/weekly briefing. Full flow (cron, Web Vitals) **[docs/reference/data-flow.md](docs/reference/data-flow.md)**.
+Browser (60s polling) → `/api/status/cached` (stale → `StatusRefresher` DO: parallel 50-service fetch, KV write) → React state. Cron (`*/5`) handles probing, incident detection + Discord alerts, AI analysis, daily/monthly aggregation, changelog/security/weekly briefing. Full flow (cron, Web Vitals) **[docs/reference/data-flow.md](docs/reference/data-flow.md)**.
 
 ### SPA Navigation
 No React Router. Hash-based routing in `App.jsx` — `#claude` for service details, `#latency` for pages. `PageContext` shares current page state. Browser back/forward supported via `popstate` listener.

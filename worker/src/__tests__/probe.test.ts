@@ -78,10 +78,11 @@ describe('PROBE_TARGETS', () => {
     'characterai', // #921 — app whose Statuspage died (#689/#800); neo.character.ai/health backend probe
     'fishaudio', // #1549
     'jina', // #880
+    'speechmatics', // #1973
   ]
 
-  it('has all 36 probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(36)
+  it('has all 37 probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(37)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)

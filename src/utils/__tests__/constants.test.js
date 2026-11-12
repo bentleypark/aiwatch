@@ -292,6 +292,16 @@ describe('#1062 facet A — frontend getFallbacks Voice STT/TTS capability gate'
     ]
     expect(getFallbacks(services[0], services)).toEqual([])
   })
+
+  it('Speechmatics (STT, #1973) recommends the STT siblings, not ElevenLabs (TTS)', () => {
+    const services = [
+      v('speechmatics', 'Speechmatics', 'down', 60),
+      v('elevenlabs', 'ElevenLabs', 'operational', 99),
+      v('assemblyai', 'AssemblyAI', 'operational', 90),
+      v('deepgram', 'Deepgram', 'operational', 85),
+    ]
+    expect(getFallbacks(services[0], services).map(f => f.id).sort()).toEqual(['assemblyai', 'deepgram'])
+  })
 })
 
 // #1186 — the frontend getFallbacks through worker/src/fallback.ts's proportional-interleave fix: a

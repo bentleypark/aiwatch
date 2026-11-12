@@ -49,6 +49,14 @@ describe('is-down.ts — Voice-tier capability gate (#1698)', () => {
     expect(alt).not.toContain('AssemblyAI')
   })
 
+  it('Speechmatics (STT, #1973) recommends AssemblyAI, never a TTS-only service', async () => {
+    fetchMock.mockResolvedValueOnce(payload(svc('speechmatics', 'Speechmatics', 'down', 60)))
+    const alt = alternatives(await (await handler(req('speechmatics'))).text())
+    expect(alt).toContain('AssemblyAI')
+    expect(alt).not.toContain('ElevenLabs')
+    expect(alt).not.toContain('Fish Audio')
+  })
+
   it('a tagged voice service uses its own tag, not its component names (Deepgram)', async () => {
     const deepgram = svc('deepgram', 'Deepgram', 'degraded', 85, { components: [{ name: 'Batch API', status: 'operational' }, { name: 'Streaming Transcription', status: 'degraded' }] })
     fetchMock.mockResolvedValueOnce(payload(deepgram))

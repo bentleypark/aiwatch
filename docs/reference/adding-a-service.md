@@ -180,11 +180,8 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
     - **A frequency, comparative or market sentence stays only if** AIWatch's own record shows it, the vendor's own page says it, or it states a first-party-backed causal structure (then as "can"). Otherwise delete it, do not reword it weaker. `npm run lint:seo-copy` fails on the listed words unless the whole sentence is in its `BACKED` list with a source, for that page; it does not see claims built from ordinary words ("share infrastructure", "same backend"), so read for those too.
 
 ## Reports site (aiwatch-reports) — commit + push to deploy (GitHub Pages auto-build)
-22. `README.md` — service count, category breakdown (e.g., "N LLM APIs, N voice & inference")
-23. `_config.yml` — description
-24. `_templates/monthly-report.md` — service count, category breakdown
-25. Current month report (e.g., `2026-03/index.md`) — service count, category breakdown
-26. `index.md` — top-level index page
+No service count is written by hand: a report's count and category breakdown, and each `index.md` row, are generated from the month's archive, and the README carries a live badge.
+
 27. `scripts/generate-charts.js` — chart names come from `/api/v1/status` (aiwatch-reports#146). Edit only when the service adds a dashboard section (a new `SECTION_KEYS` entry): add that key to `GROUP_ORDER` at the same position
 
 ## Assets (after deploy)
