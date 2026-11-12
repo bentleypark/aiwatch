@@ -19,6 +19,10 @@ describe('normalizeStatus', () => {
     expect(normalizeStatus('major_outage')).toBe('down')
   })
 
+  it('maps full_outage to down (#1970 — incident.io vocabulary served by components.json)', () => {
+    expect(normalizeStatus('full_outage')).toBe('down')
+  })
+
   it('defaults unknown to operational', () => {
     expect(normalizeStatus('unknown')).toBe('operational')
   })

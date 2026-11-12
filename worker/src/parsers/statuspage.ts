@@ -92,6 +92,7 @@ export function normalizeStatus(indicator: string): 'operational' | 'degraded' |
     case 'major':
     case 'critical':
     case 'major_outage':
+    case 'full_outage':
       return 'down'
     default:
       return 'operational'

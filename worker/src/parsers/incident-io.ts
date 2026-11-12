@@ -375,8 +375,7 @@ export function computeIncidentIoUptime(
 //
 // Component statuses in the RSC use incident.io's vocabulary (operational / degraded_performance /
 // partial_outage / full_outage / under_maintenance). We EMIT the Atlassian vocabulary the rest of the
-// pipeline (normalizeStatus, parseIncidents) expects — full_outage → major_outage is the one that
-// matters: normalizeStatus has no `full_outage` case and would silently read it as operational.
+// pipeline (normalizeStatus, parseIncidents) expects.
 
 /** Rank incident.io component statuses so a worst-of can pick the most severe. Higher = worse. */
 const IO_STATUS_RANK: Record<string, number> = {
@@ -387,8 +386,7 @@ const IO_STATUS_RANK: Record<string, number> = {
   full_outage: 3,
 }
 
-/** incident.io component status → the Atlassian component-status string the pipeline normalizes.
- *  full_outage → major_outage is load-bearing (normalizeStatus has no full_outage case). */
+/** incident.io component status → the Atlassian component-status string the pipeline normalizes. */
 function ioComponentStatusToAtlassian(io: string | undefined): string {
   switch (io) {
     case 'degraded_performance': return 'degraded_performance'

@@ -309,7 +309,7 @@ describe('normalizeStatus drift guard (#1072)', () => {
     // updating KNOWN_NORMALIZE_STATUS_INPUTS, that status silently falls to the default `operational`
     // arm AND the unrecognized-status warn stays quiet — the guard disables itself in exactly the
     // scenario it exists for. Prose cannot enforce that; this can.
-    for (const s of ['minor', 'degraded_performance', 'partial_outage', 'major', 'critical', 'major_outage']) {
+    for (const s of ['minor', 'degraded_performance', 'partial_outage', 'major', 'critical', 'major_outage', 'full_outage']) {
       expect(normalizeStatus(s), s).not.toBe('operational')
     }
     // `none`/`operational` are behaviourally indistinguishable from the default arm, so they are not

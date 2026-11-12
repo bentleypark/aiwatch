@@ -245,6 +245,24 @@ describe('svcStatus determination', () => {
     })
   })
 
+  describe('chatgpt badge with a full_outage component from components.json (#1970)', () => {
+    const chatgpt = SERVICES.find((s) => s.id === 'chatgpt')!
+    const AGENT = '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'
+    const summary: SummaryData = {
+      status: { indicator: 'critical' },
+      components: chatgpt.statusComponentIds!.map((id) => ({ id, name: id === AGENT ? 'Agent' : id, status: id === AGENT ? 'full_outage' : 'operational' })),
+    }
+
+    it('resolves the badge to down', () => {
+      expect(chatgpt.statusComponentIds).toContain(AGENT)
+      expect(determineSvcStatus(chatgpt, summary, [{ status: 'investigating' }])).toBe('down')
+    })
+
+    it('shows the Agent component as down in the breakdown', () => {
+      expect(resolveSvcComponents(chatgpt, summary).find((c) => c.id === AGENT)?.status).toBe('down')
+    })
+  })
+
   describe('"Codex in ChatGPT Desktop" is a ChatGPT component, not a Codex one (#1008)', () => {
     // 01KMKFAMWKQ81YWSE1Z18R6VHR "Codex in ChatGPT Desktop" is officially in the ChatGPT group
     // (Codex surfaced inside the ChatGPT desktop app). It was mis-attributed to codex, so a
