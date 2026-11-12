@@ -105,7 +105,7 @@ export const UPSTREAM_FEEDS: UpstreamFeedConfig[] = [
 const KNOWN_NORMALIZE_STATUS_INPUTS = new Set([
   'none', 'operational',
   'minor', 'degraded_performance', 'partial_outage',
-  'major', 'critical', 'major_outage',
+  'major', 'critical', 'major_outage', 'full_outage',
 ])
 
 /**
