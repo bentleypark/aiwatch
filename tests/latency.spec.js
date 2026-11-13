@@ -3,6 +3,7 @@ import { waitForDataLoad, navigateVia } from './helpers.js'
 
 test.describe('Latency page', () => {
   test.beforeEach(async ({ page }) => {
+    await page.route('**/api/status**', (route) => route.abort())
     await page.goto('/')
     await waitForDataLoad(page)
     await navigateVia(page, 'Latency')

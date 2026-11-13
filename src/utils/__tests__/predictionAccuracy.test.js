@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { predictedHoursFrom, baselineHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, estimateExceeded, exceededRecoveryText, approxElapsedText, FAR_EXCEEDED_FACTOR } from '../predictionAccuracy'
+import { predictedHoursFrom, baselineHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, recoveryLine, estimateExceeded, exceededRecoveryText, approxElapsedText, FAR_EXCEEDED_FACTOR } from '../predictionAccuracy'
 
 describe('#1003 — the modal scores against the FIRST estimate, live text against the current one', () => {
   // Pinecone: first estimate 1–4h, re-analysis inflated it to ~15h at the 4h mark, actual 4h 55m.
@@ -231,5 +231,27 @@ describe('exceededRecoveryText (elapsed vs estimate — the user-chosen wording)
     expect(exceededRecoveryText(a, { startedAt: atThreshold }, 'en', now)).toBe('Ongoing ~12h · exceeded ~2–4h est.')
     const justPast = new Date(now - (4 * FAR_EXCEEDED_FACTOR + 1) * 3_600_000).toISOString() // 13h > 12h → far
     expect(exceededRecoveryText(a, { startedAt: justPast }, 'en', now)).toBe('Ongoing ~13h · far exceeded est.')
+  })
+})
+
+describe('#1993 recoveryLine — a resolved analysis with no numeric estimate', () => {
+  // Hugging Face 1124142, 2026-11-13: analysed with "N/A", resolved 2h 16m after it started.
+  const inc = { startedAt: '2026-11-13T06:30:00.000Z' }
+  const na = { estimatedRecovery: 'N/A', resolvedAt: '2026-11-13T08:46:00.000Z' }
+  it.each([
+    ['en', na, inc, { icon: '⏱', label: 'Lasted', value: '2h 16m' }],
+    ['ko', na, inc, { icon: '⏱', label: '지속 시간', value: '2h 16m' }],
+    ['en', na, { startedAt: null }, null],
+    ['en', na, { startedAt: '2026-11-13T09:00:00.000Z' }, null],
+  ])('%s %j %j → %j', (lang, analysis, incident, want) => {
+    expect(recoveryLine(analysis, incident, lang)).toEqual(want)
+  })
+
+  it('a live N/A analysis keeps its estimate line', () => {
+    expect(recoveryLine({ estimatedRecovery: 'N/A' }, inc, 'en').label).toBe('Est. Recovery')
+  })
+
+  it('a numeric estimate still scores predicted vs actual', () => {
+    expect(recoveryLine({ ...na, estimatedRecovery: '1–2h', estimatedRecoveryHours: 2 }, inc, 'en').label).toBe('Predicted vs actual')
   })
 })

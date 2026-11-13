@@ -223,7 +223,7 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
                         {[analysis.summary, !isRecovered && analysis.progress].filter(Boolean).join(' ').slice(0, 500)}
                       </p>
                       <div className="mono text-[10px] text-[var(--text2)]" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        {/* #827 F4 — resolved: our estimate vs what actually happened; live: the estimate */}
+                        {/* #827 F4 — resolved: our estimate vs what actually happened, or how long it lasted; live: the estimate */}
                         {[recoveryLine(analysis, inc, lang), scopeLine(analysis, lang)].filter(Boolean).map(line => (
                           <span key={line.icon}>{line.icon} <strong style={{ color: 'var(--text1)' }}>{line.label}:</strong> {line.value}</span>
                         ))}

@@ -166,8 +166,8 @@ describe('MOCK_AI_ANALYSIS references resolve', () => {
     // Asks the REAL `baselineHoursFrom`, which falls back to parsing the `estimatedRecovery` display
     // string — so `'30m–1h'` with no numeric field is legitimately gradeable. A stricter local copy
     // (`firstEstimatedRecoveryHours ?? estimatedRecoveryHours`) would false-fail those. What it still
-    // catches is the real defect: `estimatedRecovery: 'Resolved'` parses to 0 hours → null baseline →
-    // `computePredictionOutcome` bails and the card degrades to the raw string.
+    // catches is a resolved fixture with no gradeable estimate (`estimatedRecovery: 'Resolved'` parses to
+    // 0 hours → null baseline), which renders only how long it lasted, never predicted vs actual.
     for (const { svcId, a } of allAnalyses.filter(({ a }) => a.resolvedAt)) {
       expect({ svcId, incidentId: a.incidentId, baseline: baselineHoursFrom(a) != null })
         .toEqual({ svcId, incidentId: a.incidentId, baseline: true })

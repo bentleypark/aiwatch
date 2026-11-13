@@ -195,20 +195,24 @@ export function exceededRecoveryText(analysis: PredictionAnalysis | null | undef
     : `Ongoing ~${approx} · exceeded ~${range} est.`
 }
 
+/** Minutes from the incident's start to the analysis' resolution; null when either is missing or out of order. */
+export function resolvedDurationMin(analysis: PredictionAnalysis | null | undefined, incident: PredictionIncident | null | undefined): number | null {
+  if (!analysis?.resolvedAt || !incident?.startedAt) return null
+  const min = Math.round((new Date(analysis.resolvedAt).getTime() - new Date(incident.startedAt).getTime()) / 60000)
+  return Number.isFinite(min) && min >= 0 ? min : null
+}
+
 /**
  * Predicted-vs-actual outcome for a RESOLVED incident, for modal display.
  * @returns null when the incident isn't resolved, has no usable prediction, or the actual duration
  *          can't be derived (missing/!startedAt, missing resolvedAt, out-of-order timestamps).
  */
 export function computePredictionOutcome(analysis: PredictionAnalysis | null | undefined, incident: PredictionIncident | null | undefined): PredictionOutcome | null {
-  if (!analysis?.resolvedAt) return null
   // #1003 — scored against the first estimate, not the re-analysis-inflated current one.
   const predictedHours = baselineHoursFrom(analysis)
   if (predictedHours == null) return null
-  const startedAt = incident?.startedAt
-  if (!startedAt) return null
-  const actualMin = Math.round((new Date(analysis.resolvedAt).getTime() - new Date(startedAt).getTime()) / 60000)
-  if (!Number.isFinite(actualMin) || actualMin < 0) return null
+  const actualMin = resolvedDurationMin(analysis, incident)
+  if (actualMin == null) return null
   return {
     predictedHours,
     predictedText: predictedHoursText(predictedHours),
@@ -220,8 +224,14 @@ export function computePredictionOutcome(analysis: PredictionAnalysis | null | u
 
 export interface AnalysisLine { icon: string; label: string; value: string }
 
-/** #1772 — the modal's recovery line: predicted vs actual once resolved, else the live estimate. */
-export function recoveryLine(analysis: PredictionAnalysis, incident: PredictionIncident | null | undefined, lang: Lang, nowMs = Date.now()): AnalysisLine {
+/** #1993 — a resolved analysis with no outcome to score: how long the incident lasted, or no line. */
+export function lastedLine(analysis: PredictionAnalysis, incident: PredictionIncident | null | undefined, lang: Lang): AnalysisLine | null {
+  const min = resolvedDurationMin(analysis, incident)
+  return min == null ? null : { icon: '⏱', label: lang === 'ko' ? '지속 시간' : 'Lasted', value: fmtMin(min) }
+}
+
+/** #1772 — the modal's recovery line; null when there is none to show. */
+export function recoveryLine(analysis: PredictionAnalysis, incident: PredictionIncident | null | undefined, lang: Lang, nowMs = Date.now()): AnalysisLine | null {
   const outcome = computePredictionOutcome(analysis, incident)
   if (outcome) {
     const verdict = verdictLabel(outcome.verdict, lang)
@@ -231,6 +241,7 @@ export function recoveryLine(analysis: PredictionAnalysis, incident: PredictionI
       value: `${lang === 'ko' ? '예측' : 'est'} ~${outcome.predictedText} · ${lang === 'ko' ? '실제' : 'actual'} ${outcome.actualText}${verdict ? ` (${verdict})` : ''}`,
     }
   }
+  if (analysis.resolvedAt) return lastedLine(analysis, incident, lang)
   const est = analysis.estimatedRecovery
   const value = est === 'No historical data for estimation'
     ? (lang === 'ko' ? '복구 신호 모니터링 중...' : 'Monitoring recovery signals...')
