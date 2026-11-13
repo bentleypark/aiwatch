@@ -5,7 +5,7 @@ import {
   EXCLUDE_FALLBACK, ROUTE_SUPPRESS, tierFor, tierLabelFor, isSpecializedSubTier, sharesCapability,
   CAPABILITY_LABEL, CAPABILITY_TAG_LABEL, isCapabilityProvider, REQUIRED_CAPABILITY, REQUIRED_CAPABILITY_LABEL,
   meetsRequiredCapability, routingTier, routedCapability, capabilityTagsOf, effectiveTierFor, hasActiveIncident,
-  orderForFallback,
+  orderForFallback, mergeGroupsShowingSameItems,
 } from '../../worker/src/fallback'
 
 export {
@@ -291,7 +291,8 @@ const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
  * was redundant there and harmful in the operational-sibling case.
  *
  * When the affected services span a single group, each group shows up to 2
- * alternatives; with multiple groups, 1 each (to bound banner width).
+ * alternatives; with multiple groups, 1 each (to bound banner width), counted before
+ * groups showing the same items merge.
  *
  * @param {object[]} affected - Affected services (need .id, .category)
  * @param {object[]} allServices - All services (need .id, .category, .status, .incidents, .aiwatchScore)
@@ -364,7 +365,8 @@ export function getGroupedFallbacks(affected, allServices) {
   const idsOf = g => g.candidates.map(c => c.id).join('\n')
   const distinct = resolved.filter((g, i) => !resolved.slice(0, i).some(h => h.label === g.label && idsOf(h) === idsOf(g)))
   const perGroup = distinct.length === 1 ? 2 : 1
-  return distinct.map(g =>({ category: g.category, label: g.label, ...(g.capability ? { capability: g.capability } : {}), items: g.candidates.slice(0, perGroup) }))
+  const shown = mergeGroupsShowingSameItems(distinct, g => g.candidates.slice(0, perGroup).map(c => c.id).join('\n'))
+  return shown.map(g =>({ category: g.category, label: g.label, ...(g.capability ? { capability: g.capability } : {}), items: g.candidates.slice(0, perGroup) }))
 }
 
 /**

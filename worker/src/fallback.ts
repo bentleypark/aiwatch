@@ -636,6 +636,22 @@ export function tierLabelFor(tier: number): string | undefined {
   return undefined
 }
 
+// #1987 — joins the labels of groups merged below; no group label may contain it (pinned in fallback.test.ts).
+export const GROUP_LABEL_JOIN = ' + '
+
+// #1987 — separate pools can still SHOW the same items after the cut: those groups render as one line
+// under all their labels, sorted, so the result does not depend on input order. Shared with the frontend.
+export function mergeGroupsShowingSameItems<G extends { label: string; capability?: string }>(groups: G[], shownKey: (g: G) => string): G[] {
+  const merged: Array<{ group: G; labels: string[] }> = []
+  for (const g of groups) {
+    const same = merged.find(m => shownKey(m.group) === shownKey(g))
+    if (!same) { merged.push({ group: { ...g }, labels: [g.label] }); continue }
+    if (!same.labels.includes(g.label)) same.labels.push(g.label)
+    same.group.capability ??= g.capability
+  }
+  return merged.map(m => ({ ...m.group, label: [...m.labels].sort().join(GROUP_LABEL_JOIN) }))
+}
+
 /**
  * #781 — structured per-category grouped fallbacks for a (possibly multi-surface) incident. ONE group
  * per distinct `category:tierLabel` — or, at a SPECIALIZED tier, per `tier:<n>` with no category
@@ -646,7 +662,7 @@ export function tierLabelFor(tier: number): string | undefined {
  *
  * perGroup mirrors the frontend `getGroupedFallbacks` (src/utils/constants.js) for dashboard parity:
  * **2 when there is a single group** (a same-category incident → top-2 alternatives, the old flat
- * behavior), **1 when there are multiple groups** (a multi-category incident → one alternative per
+ * behavior), **1 when there are multiple groups**, counted before groups showing the same items merge (a multi-category incident → one alternative per
  * category, so the line stays scannable). Free of I/O and of any dependence on call order, though
  * `getFallbacks` beneath it may emit a throttled #1119 warn; the worker surfaces (Discord alert via
  * buildGroupedFallbackText, RSS feed via fallbackLine) render this structure through formatFallbackGroups.
@@ -752,7 +768,8 @@ export function getGroupedFallbacks(
   const namesOf = (g: typeof resolved[number]) => g.fallbacks.map(f => f.name).join('\n')
   const distinct = resolved.filter((g, i) => !resolved.slice(0, i).some(h => h.label === g.label && namesOf(h) === namesOf(g)))
   const perGroup = distinct.length <= 1 ? 2 : 1
-  return distinct.map(g => ({ label: g.label, ...(g.capability ? { capability: g.capability } : {}), fallbacks: g.fallbacks.slice(0, perGroup) }))
+  const shown = mergeGroupsShowingSameItems(distinct, g => g.fallbacks.slice(0, perGroup).map(f => f.name).join('\n'))
+  return shown.map(g => ({ label: g.label, ...(g.capability ? { capability: g.capability } : {}), fallbacks: g.fallbacks.slice(0, perGroup) }))
 }
 
 export function buildGroupedFallbackText(

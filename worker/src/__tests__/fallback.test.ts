@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SERVICES } from '../services'
 import { COMPONENT_CAPABILITY, getFallbacks, buildFallbackText, buildGroupedFallbackText, fallbackEmbedSection, getGroupedFallbacks, orderForFallback, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier, routingTier, capabilityOfComponent, effectiveTierFor, CAPABILITY_TIER, isCapabilityProvider, CAPABILITY_PROVIDERS } from '../fallback'
 import { REQUIRED_CAPABILITY, REQUIRED_CAPABILITY_PROVIDERS, meetsRequiredCapability } from '../fallback'
-import { TIER_LABEL, SERVICE_CAPABILITY, sharesCapability, CAPABILITY_LABEL, CAPABILITY_TAG_LABEL, routedCapability, REQUIRED_CAPABILITY_LABEL } from '../fallback'
+import { TIER_LABEL, SERVICE_CAPABILITY, sharesCapability, CAPABILITY_LABEL, CAPABILITY_TAG_LABEL, routedCapability, REQUIRED_CAPABILITY_LABEL, GROUP_LABEL_JOIN } from '../fallback'
+import { SUBSTITUTES, COMPONENT_SUBSTITUTES } from '../../../api/_shared/substitutes'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -1414,7 +1415,7 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
       .toBe('👉 Suggested fallback:\nImage generation: Stability AI (Score 70) · Black Forest Labs (FLUX) (Score 65)')
   })
 
-  it('a routed anchor and a PLAIN outage of the same tier stay SEPARATE — their pools differ', () => {
+  it('a routed anchor and a PLAIN outage of the same tier keep SEPARATE pools', () => {
     // Deliberate, and it cost three review rounds to get right. Merging them (by capability, or by
     // specialized tier) looks tidier and saves a perGroup slot, but the two pools are NOT the same:
     // facet C admits `openai` for a plain Stability outage while the routed branch excludes it. A
@@ -1426,15 +1427,28 @@ describe('#1119 — a ROUTED outage crosses the category boundary; a non-routed 
     const services = [cg, stabilityDown, op('bfl', 'api', 'Black Forest Labs (FLUX)', 65), op('openai', 'api', 'OpenAI API', 99), ...pool.filter(s => s.id !== 'stability' && s.id !== 'bfl')]
     for (const order of [['chatgpt', 'stability'], ['stability', 'chatgpt']]) {
       const groups = getGroupedFallbacks(order, services)
-      expect(groups).toHaveLength(2)
-      const routedGroup = groups.find(g => g.capability === 'image')!
-      const plainGroup = groups.find(g => g.capability === undefined)!
-      expect(routedGroup.fallbacks.map(f => f.name)).toEqual(['Black Forest Labs (FLUX)'])
-      expect(plainGroup.fallbacks.map(f => f.name)).toEqual(['Black Forest Labs (FLUX)'])
+      // #1987 — both pools put FLUX first, so the cut shows the same item twice: one line, both labels.
+      expect(groups).toEqual([expect.objectContaining({ label: 'Image + Image generation', capability: 'image' })])
+      expect(groups[0].fallbacks.map(f => f.name)).toEqual(['Black Forest Labs (FLUX)'])
       // The plain group is the one facet C widens; the routed one must never reach OpenAI.
       expect(getFallbacks('stability', 'api', services).map(f => f.name)).toContain('OpenAI API')
       expect(getFallbacks('chatgpt', 'app', services).map(f => f.name)).not.toContain('OpenAI API')
     }
+  })
+
+  it('#1987 — the 2026-11-12 alert: routed OpenAI Images + plain Image outages show Stability AI once, not under two labels', () => {
+    const oa = {
+      id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 75,
+      components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'degraded' }],
+    }
+    const replicate = { id: 'replicate', category: 'api', name: 'Replicate', status: 'degraded', aiwatchScore: 60 }
+    const bflDown = { id: 'bfl', category: 'api', name: 'Black Forest Labs (FLUX)', status: 'degraded', aiwatchScore: 65 }
+    const services = [oa, replicate, bflDown, ...pool.filter(s => s.id !== 'bfl')]
+    const groups = getGroupedFallbacks(['openai', 'replicate', 'bfl'], services)
+    const shown = groups.flatMap(g => g.fallbacks.map(f => f.name))
+    expect(shown.filter(n => n === 'Stability AI')).toHaveLength(1)
+    expect(new Set(shown).size).toBe(shown.length)
+    expect(groups.find(g => g.fallbacks.some(f => f.name === 'Stability AI'))!.label).toBe('Image + Image generation')
   })
 
   it('#1129 — a tagged and an untagged routed Voice anchor split into two groups, answer is order-independent', () => {
@@ -1723,13 +1737,13 @@ describe('#1725 — a source that requires a capability admits only that capabil
     expect(getGroupedFallbacks(['perplexity'], services).map((g) => g.label)).toEqual(['Embeddings'])
   })
 
-  it('grouped: Perplexity and Cohere down together get separate pools, whichever is listed first', () => {
+  it('grouped: Perplexity and Cohere down together show OpenAI API once, under both labels, whichever is listed first (#1987)', () => {
+    // Cohere's substitute list and the search providers are the same five ids, so both groups show the same item.
     const services = board.map((s) => (s.id === 'cohere' ? { ...s, status: 'down' } : s))
     const forward = getGroupedFallbacks(['perplexity', 'cohere'], services)
     const reverse = getGroupedFallbacks(['cohere', 'perplexity'], services)
     const byLabel = (groups: typeof forward) => Object.fromEntries(groups.map((g) => [g.label, g.fallbacks.map((f) => f.name)]))
-    expect(Object.keys(byLabel(forward)).sort()).toEqual(['LLM', 'LLM (web search)'])
-    expect(byLabel(forward)['LLM (web search)']).toEqual(['OpenAI API'])
+    expect(byLabel(forward)).toEqual({ 'LLM + LLM (web search)': ['OpenAI API'] })
     expect(byLabel(reverse)).toEqual(byLabel(forward))
   })
 })
@@ -1747,6 +1761,14 @@ describe('#1753 — listed services recommend their substitute lists', () => {
 
   it('DeepSeek recommends a host serving its models and a general LLM API, not the higher-scored hosts or vendors', () => {
     expect(getFallbacks('deepseek', 'api', [down('deepseek', 'DeepSeek API'), ...board]).map((f) => f.name)).toEqual(['Fireworks AI', 'Claude API'])
+  })
+
+  it('#1987 — DeepSeek and Kimi down together keep both host labels on one line, whichever is listed first', () => {
+    const services = [down('deepseek', 'DeepSeek API'), ...withDown('kimi')]
+    const byLabel = (groups: ReturnType<typeof getGroupedFallbacks>) => Object.fromEntries(groups.map((g) => [g.label, g.fallbacks.map((f) => f.name)]))
+    const forward = byLabel(getGroupedFallbacks(['deepseek', 'kimi'], services))
+    expect(forward['DeepSeek models + Kimi models']).toEqual(['Fireworks AI'])
+    expect(byLabel(getGroupedFallbacks(['kimi', 'deepseek'], services))).toEqual(forward)
   })
 
   it('OpenRouter\'s flat list keeps one candidate from each use', () => {
@@ -1946,5 +1968,18 @@ describe('fallback config invariants (#403 / #859 / #1062 / #1129 / #1725)', () 
       expect(cap in REQUIRED_CAPABILITY_PROVIDERS, `REQUIRED_CAPABILITY needs '${cap}' in REQUIRED_CAPABILITY_PROVIDERS`).toBe(true)
       expect(cap in REQUIRED_CAPABILITY_LABEL, `REQUIRED_CAPABILITY needs '${cap}' in REQUIRED_CAPABILITY_LABEL`).toBe(true)
     }
+  })
+})
+
+describe('#1987 — merged group labels stay readable', () => {
+  it('no group label contains the join, so a merged label splits back into its parts', () => {
+    const labels = [
+      ...Object.values(TIER_LABEL), ...Object.values(CAPABILITY_LABEL), ...Object.values(CAPABILITY_TAG_LABEL),
+      ...Object.values(REQUIRED_CAPABILITY_LABEL), 'API', 'AI Apps', 'Coding Agent', 'Coding',
+      ...Object.values(SUBSTITUTES).flat().map(g => g.label),
+      ...Object.values(COMPONENT_SUBSTITUTES).flatMap(c => c.groups.map(g => g.label)),
+    ]
+    expect(labels.length).toBeGreaterThan(20)
+    expect(labels.filter(l => l.includes(GROUP_LABEL_JOIN.trim()))).toEqual([])
   })
 })
